@@ -33,6 +33,7 @@ The bounded review covered the Worker router, C# endpoint, final Docker image, p
 - The final Linux x64 Native AOT Docker image passed C# native gRPC, TypeScript gRPC-Web and published Kotlin gRPC-Web checks, including container restart. Image evidence is recorded under `artifacts/` and not committed.
 - Published Kotlin `1.0.0-ci.36.1` called the actual `https://arcforges.com/api` deployment at `07d0fe05c48f1276f6c1b851143811c8cec8f877`. All six success/application-error calls, binary status checks, and duplicate-prefix HTTP 404 mapping passed. This is evidence for that deployed revision only.
 - Linux CI must additionally run the real local Worker/Container gate. Main's post-deployment verification gates release on the new revision. No Android device, browser UI, or deployment of this PR has been claimed.
+- Initial clean CI identified one missing Kotlin plugin BOM checksum (`kotlinx-coroutines-bom:1.8.0`). Regeneration with an empty Gradle cache added only that record; its SHA-256 was independently matched against Maven Central. Dependency versions and strict verification remain unchanged.
 
 ## Protocol references
 
