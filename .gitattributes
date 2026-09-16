@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.cs text diff=csharp
+*.slnx text
+*.json text
+*.yml text
+*.md text
+*.png binary
+*.ico binary
+*.gz binary
+*.tar binary

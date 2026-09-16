@@ -1,0 +1,53 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      grpc:
+        patterns: ["Grpc.*", "Google.Protobuf"]
+      tests:
+        patterns: ["xunit*", "Microsoft.Testing.*"]
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    groups:
+      cloudflare:
+        patterns: ["wrangler", "@cloudflare/*"]
+      contracts:
+        patterns: ["@arcforges/*", "@connectrpc/*", "@bufbuild/*"]
+      tooling:
+        patterns: ["*"]
+        exclude-patterns:
+          ["wrangler", "@cloudflare/*", "@arcforges/*", "@connectrpc/*", "@bufbuild/*"]
+    ignore:
+      - dependency-name: "@types/node"
+        versions: [">=25"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      dotnet:
+        patterns: ["mcr.microsoft.com/dotnet/*"]
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]

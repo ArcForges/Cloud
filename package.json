@@ -1,0 +1,47 @@
+{
+  "name": "@arcforges/cloud-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "Native AOT C# Hello API on Cloudflare Containers",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ArcForges/Cloud.git"
+  },
+  "engines": {
+    "node": ">=24.21.0 <25",
+    "npm": ">=11.19.0 <12"
+  },
+  "packageManager": "npm@11.19.0",
+  "scripts": {
+    "hooks": "node tooling/project.ts hooks",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "biome lint --error-on-warnings .",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
+    "test": "node --test tests/worker/*.test.ts",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "check:dotnet": "dotnet restore Cloud.slnx --locked-mode && dotnet build Cloud.slnx -c Release --no-restore && dotnet test --solution Cloud.slnx -c Release --no-build && dotnet format Cloud.slnx --no-restore --verify-no-changes",
+    "candidate": "node tooling/project.ts candidate",
+    "verify:candidate": "node tooling/project.ts verify",
+    "test:container": "node tooling/project.ts container",
+    "test:worker": "node tooling/project.ts worker",
+    "dev": "wrangler dev",
+    "deploy": "node tooling/cloudflare.ts deploy",
+    "test:live": "node tooling/cloudflare.ts smoke"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "@arcforges/api-client": "1.0.0-ci.25.1",
+    "@biomejs/biome": "2.5.13",
+    "@cloudflare/workers-types": "5.20260915.1",
+    "@connectrpc/connect": "2.2.0",
+    "@types/node": "24.13.5",
+    "prettier": "3.9.6",
+    "typescript": "7.0.2",
+    "wrangler": "4.132.0"
+  }
+}

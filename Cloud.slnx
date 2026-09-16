@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ArcForges.Cloud/ArcForges.Cloud.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj" />
+    <Project Path="tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj" />
+  </Folder>
+</Solution>

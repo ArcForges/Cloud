@@ -1,0 +1,14 @@
+**
+!Dockerfile
+!LICENSE
+!global.json
+!Directory.Build.props
+!Directory.Packages.props
+!NuGet.Config
+!src/
+!src/ArcForges.Cloud/
+!src/ArcForges.Cloud/*.cs
+!src/ArcForges.Cloud/*.csproj
+!src/ArcForges.Cloud/packages.lock.json
+**/bin/
+**/obj/

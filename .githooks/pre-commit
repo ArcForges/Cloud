@@ -1,0 +1,4 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+npm run check || exit $?
+dotnet format Cloud.slnx --no-restore --verify-no-changes

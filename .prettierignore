@@ -1,0 +1,13 @@
+node_modules/
+artifacts/
+.wrangler/
+.worktree/
+**/bin/
+**/obj/
+**/packages.lock.json
+LICENSE
+*.slnx
+*.csproj
+*.props
+NuGet.Config
+*.cs

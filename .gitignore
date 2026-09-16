@@ -1,0 +1,25 @@
+# Build and local workspace state
+.worktree/
+.vs/
+.vscode/*
+!.vscode/extensions.json
+**/bin/
+**/obj/
+artifacts/
+node_modules/
+.wrangler/
+coverage/
+TestResults/
+*.user
+*.suo
+*.log
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+*.pfx
+*.p12
+*.key
+.DS_Store
+Thumbs.db

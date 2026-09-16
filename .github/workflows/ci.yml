@@ -1,0 +1,235 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "43 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CI: "true"
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  source:
+    name: Source (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: ${{ matrix.os == 'ubuntu-latest' && 'npm' || '' }}
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm run check:dotnet
+
+  quality:
+    name: Dependency audit and repository checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=high
+      - name: Check workflow syntax
+        run: |
+          curl --fail --silent --show-error --location https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz --output "$RUNNER_TEMP/actionlint.tar.gz"
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+      - name: Scan Git history for secrets
+        run: docker run --rm --network none -v "$PWD:/repo:ro" zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact=100 --no-banner
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: csharp
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        if: matrix.language == 'csharp'
+        with:
+          global-json-file: global.json
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: Build C# for analysis
+        if: matrix.language == 'csharp'
+        run: |
+          dotnet restore src/ArcForges.Cloud --locked-mode
+          dotnet build src/ArcForges.Cloud -c Release --no-restore
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
+        with:
+          category: /language:${{ matrix.language }}
+
+  candidate:
+    name: Native AOT image and real protocol integration
+    needs: [source, quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: dotnet restore tests/ArcForges.Cloud.Consumer --locked-mode
+      - run: dotnet build tests/ArcForges.Cloud.Consumer -c Release --no-restore
+      - run: npm run candidate
+      - run: npm run test:worker
+      - run: npm run verify:candidate
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cloud-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/candidate
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 1
+      - name: Preserve integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cloud-integration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/container-evidence.json
+            artifacts/worker-evidence.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  verify:
+    name: Verify
+    if: always()
+    needs: [source, quality, dependency-review, codeql, candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require all applicable checks
+        env:
+          SOURCE: ${{ needs.source.result }}
+          QUALITY: ${{ needs.quality.result }}
+          REVIEW: ${{ needs.dependency-review.result }}
+          CODEQL: ${{ needs.codeql.result }}
+          CANDIDATE: ${{ needs.candidate.result }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          test "$SOURCE" = success
+          test "$QUALITY" = success
+          test "$CODEQL" = success
+          test "$CANDIDATE" = success
+          if [ "$EVENT" = pull_request ]; then test "$REVIEW" = success; else test "$REVIEW" = skipped; fi
+
+  deploy:
+    name: Deploy and verify Cloudflare
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.verify.result == 'success' && needs.candidate.result == 'success'
+    needs: [verify, candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: cloudflare
+    concurrency:
+      group: cloudflare-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          artifact-ids: ${{ needs.candidate.outputs.artifact-id }}
+          path: artifacts/candidate
+          merge-multiple: true
+      - run: npm run verify:candidate
+      - run: npm run deploy
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+      - run: npm run test:live
+      - name: Publish verified prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node --input-type=module -e 'import fs from "node:fs"; console.log(JSON.parse(fs.readFileSync("artifacts/candidate/manifest.json")).version)')
+          tar -czf "artifacts/cloud-${VERSION}.tar.gz" -C artifacts/candidate .
+          gh release create "cloud-${VERSION}" "artifacts/cloud-${VERSION}.tar.gz" artifacts/deployment.json --target "$GITHUB_SHA" --title "Cloud ${VERSION}" --prerelease --generate-notes
+      - name: Preserve deployment evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cloudflare-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/deployment.json
+          if-no-files-found: warn
+          retention-days: 90

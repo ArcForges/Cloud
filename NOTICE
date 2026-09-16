@@ -1,0 +1,13 @@
+ArcForges Cloud
+Copyright ArcForges contributors
+
+Original Cloud application and tooling: AGPL-3.0-only; see LICENSE.
+Contracts APIs are consumed as published Apache-2.0 packages from
+https://github.com/ArcForges/Contracts (version 1.0.0-ci.25.1).
+
+The previous ArcForges repository was consulted for C# build conventions.
+No old implementation or generated contract source is incorporated.
+
+.NET/ASP.NET Core, gRPC, Protocol Buffers, Cloudflare Containers and
+build/test tools retain their respective licenses. See the locked package
+metadata and the official .NET container base images for third-party notices.
