@@ -111,7 +111,9 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
       - name: Build C# for analysis
         if: matrix.language == 'csharp'
-        run: dotnet build src/ArcForges.Cloud -c Release --locked-mode
+        run: |
+          dotnet restore src/ArcForges.Cloud --locked-mode
+          dotnet build src/ArcForges.Cloud -c Release --no-restore
       - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
         with:
           category: /language:${{ matrix.language }}
@@ -135,7 +137,8 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: dotnet build tests/ArcForges.Cloud.Consumer -c Release --locked-mode
+      - run: dotnet restore tests/ArcForges.Cloud.Consumer --locked-mode
+      - run: dotnet build tests/ArcForges.Cloud.Consumer -c Release --no-restore
       - run: npm run candidate
       - run: npm run test:worker
       - run: npm run verify:candidate
