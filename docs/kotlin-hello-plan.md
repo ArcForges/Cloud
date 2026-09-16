@@ -27,8 +27,6 @@ The bounded review covered the Worker router, C# endpoint, final Docker image, p
 - Evidence distinguishes local fault injection, actual Docker, local Worker runtime, and actual Cloudflare. No Android device or new deployment is claimed from JVM tests.
 - A reviewed PR contains the implementation and reproducible commands. Validation findings lead only to corrections within this scope.
 
-## Protocol references
-
 ## Validation record
 
 - Local Windows: strict NuGet/npm/Gradle restore, warning-free C# build, five C# tests, TypeScript lint/type checks, fifteen router tests, and two Kotlin deadline fault scenarios passed. Gradle wrapper JAR matched the official SHA-256; dependency audit and actionlint passed.
