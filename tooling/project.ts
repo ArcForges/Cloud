@@ -212,6 +212,7 @@ async function buildCandidate() {
     "build",
     "--platform",
     "linux/amd64",
+    "--provenance=false",
     "--build-arg",
     `SOURCE_REVISION=${revision}`,
     "--tag",

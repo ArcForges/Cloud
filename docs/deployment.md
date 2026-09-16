@@ -16,6 +16,8 @@ The agent can create the environment and set the already known Account ID. The a
 
 PR checks use no cloud credentials. A push to main builds `0.1.0-ci.<run-number>.<attempt>`, tests a real Linux AOT image, then uploads the immutable candidate artifact. Publication downloads that artifact by ID, checks hashes and source identity, loads the image archive, verifies its Docker image ID and pushes to `registry.cloudflare.com`. Deployment uses a registry **digest**, not a floating tag, and the previously bundled Worker.
 
+The Docker build uses the same single-platform `--provenance=false` setting as the pinned Wrangler container builder. BuildKit does not add a separate attestation manifest to the image; source identity, artifact hashes, Docker image identity and the remote registry digest remain independently checked.
+
 Deployments are serialized and check current main before upload. A stale run fails rather than replacing a newer commit. Rerunning all jobs creates a new attempt version; rerunning only failed deployment jobs reuses the already verified candidate. Tests and smoke never silently rebuild or redeploy.
 
 Initial Container provisioning may take several minutes. Smoke polls readiness for up to ten minutes and requires both the Worker header and the compiled C# health revision to match the candidate. A healthy old container is not accepted. After readiness, the published TypeScript SDK verifies successful/Unicode greetings and gRPC `INVALID_ARGUMENT`/`RESOURCE_EXHAUSTED`; additional requests check route/size/type rejection. It also checks that the Web homepage still serves HTML.
