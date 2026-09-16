@@ -4,9 +4,9 @@
     "net10.0": {
       "ArcForges.Contracts.PublicApi": {
         "type": "Direct",
-        "requested": "[1.0.0-ci.25.1, )",
-        "resolved": "1.0.0-ci.25.1",
-        "contentHash": "g8XeoqJ/25nsVwqxYXxc7998fo1OqP4sC5kP3jNcZbNfSlg/cSLcXIhoBOLEXISNgAGMiAAwMRi0VYfJALl4XA==",
+        "requested": "[1.0.0-ci.36.1, )",
+        "resolved": "1.0.0-ci.36.1",
+        "contentHash": "4+pUDeDcOScTV5rEei5yri8CLvVb9309Zdl5TBcVKXBvFrowcOoPx5pkZmpqzcLQZAZ2LH6LVv8JCGURpf42zQ==",
         "dependencies": {
           "Google.Protobuf": "3.36.1",
           "Grpc.Core.Api": "2.83.0"

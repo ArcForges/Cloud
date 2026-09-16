@@ -1,5 +1,14 @@
 version: 2
 updates:
+  - package-ecosystem: gradle
+    directory: /tests/kotlin-consumer
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      kotlin-consumer:
+        patterns: ["*"]
   - package-ecosystem: nuget
     directory: /
     schedule:

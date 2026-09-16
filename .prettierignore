@@ -11,3 +11,7 @@ LICENSE
 *.props
 NuGet.Config
 *.cs
+.gradle/
+.kotlin/
+**/build/
+**/gradle/verification-metadata.xml

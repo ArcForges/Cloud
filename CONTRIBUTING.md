@@ -2,7 +2,7 @@
 
 Use an isolated branch/worktree and describe the intended behavior and acceptance checks before changing code. Keep changes scoped to Cloud. See [the bootstrap plan](docs/bootstrap-plan.md) and [development](docs/development.md).
 
-Install the pinned .NET SDK and Node release, then run:
+Install the pinned .NET SDK and Node release plus JDK 17 (`JAVA_HOME`), then run:
 
 ```sh
 npm ci --ignore-scripts
@@ -10,6 +10,7 @@ dotnet restore Cloud.slnx --locked-mode
 npm run hooks
 npm run check
 npm run check:dotnet
+npm run check:kotlin
 npm run candidate
 npm run test:worker
 ```

@@ -67,8 +67,46 @@ export async function verifyProtocol(baseUrl: string, worker: boolean) {
   );
 
   if (worker) {
+    // Exercise real router normalization using the published serializer, not handmade protobuf.
+    for (const contentType of [
+      "application/grpc-web",
+      "Application/GRPC-Web+Proto; charset=utf-8",
+    ]) {
+      const normalized = createHelloClient({
+        baseUrl,
+        useBinaryFormat: true,
+        fetch: (input, init) => {
+          const headers = new Headers(init?.headers);
+          headers.set("content-type", contentType);
+          return fetch(input, { ...init, headers, redirect: "error" });
+        },
+      });
+      assert.equal(
+        (await normalized.sayHello({ name: "Content-Type" }, { timeoutMs: 5000 })).message,
+        "Hello, Content-Type!",
+      );
+    }
+    for (const [deadline, code] of [
+      ["0m", Code.DeadlineExceeded],
+      ["invalid", Code.InvalidArgument],
+    ] as const) {
+      const expired = createHelloClient({
+        baseUrl,
+        useBinaryFormat: true,
+        fetch: (input, init) => {
+          const headers = new Headers(init?.headers);
+          headers.set("grpc-timeout", deadline);
+          return fetch(input, { ...init, headers, redirect: "error" });
+        },
+      });
+      await assert.rejects(
+        expired.sayHello({ name: "Deadline" }, { timeoutMs: 5000 }),
+        (error: unknown) => error instanceof ConnectError && error.code === code,
+      );
+    }
     for (const [endpoint, method, expected] of [
       ["/unknown", "GET", 404],
+      ["/api/arcforges.hello.v1.HelloService/SayHello", "POST", 404],
       ["/arcforges.hello.v1.HelloService/SayHello", "GET", 405],
     ] as const) {
       const response = await fetch(baseUrl + endpoint, {

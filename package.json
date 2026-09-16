@@ -26,6 +26,8 @@
     "candidate": "node tooling/project.ts candidate",
     "verify:candidate": "node tooling/project.ts verify",
     "test:container": "node tooling/project.ts container",
+    "check:kotlin": "node tooling/kotlin.ts build",
+    "test:kotlin:live": "node tooling/kotlin.ts live",
     "test:worker": "node tooling/project.ts worker",
     "dev": "wrangler dev",
     "deploy": "node tooling/cloudflare.ts deploy",
@@ -35,7 +37,7 @@
     "@cloudflare/containers": "0.3.7"
   },
   "devDependencies": {
-    "@arcforges/api-client": "1.0.0-ci.25.1",
+    "@arcforges/api-client": "1.0.0-ci.36.1",
     "@biomejs/biome": "2.5.13",
     "@cloudflare/workers-types": "5.20260915.1",
     "@connectrpc/connect": "2.2.0",
