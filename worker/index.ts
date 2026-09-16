@@ -9,7 +9,7 @@ export class CloudContainer extends Container {
 }
 
 export default {
-  fetch(request: Request, env: CloudBindings): Promise<Response> {
-    return routeRequest(request, env);
+  fetch(request: Request, env: CloudBindings, context: ExecutionContext): Promise<Response> {
+    return routeRequest(request, env, context);
   },
 };

@@ -58,6 +58,8 @@ Wrangler currently rejects local Containers development on Windows. Run `npm run
 
 The schema remains authoritative for the Hello example. Limits are explicit hosting constraints, not new product business rules. Do not use this anonymous diagnostic as an authenticated client/session template. Application/deadline errors use HTTP 200 with a gRPC-Web status frame. Boundary HTTP errors (404/405/413/415/429/503) are transport failures; clients must not treat them as protobuf success. ASP.NET can return the default protobuf media type `application/grpc-web`. Compression, JSON, base64 text and public native gRPC remain unsupported; port 8081 still provides native gRPC for direct integration.
 
+Early rejection disposes any unread upload through `waitUntil`, capped at 4097 bytes and one second, then cancels it. This cleanup does not delay the error response, extend the RPC budget, or call a container. The immutable bundle is tested with `no_bundle`: source-mode Wrangler injects its own request-body draining middleware and can otherwise hide connection reuse failures.
+
 ## Kotlin and current live verification
 
 Use Maven dependency `io.github.arcforges:contracts-connect-client:1.0.0-ci.36.1`, Connect-Kotlin OkHttp and Java-lite serialization 0.9.0, and explicitly select `NetworkProtocol.GRPC_WEB`. The production base URL is `https://arcforges.com/api`; direct local container tests use `http://127.0.0.1:<port>` without `/api`. Do not use the default Connect protocol against this ASP.NET gRPC service.

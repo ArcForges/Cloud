@@ -104,7 +104,7 @@ async function readBytes(
   return result;
 }
 
-export async function routeRequest(request: Request, env: CloudBindings): Promise<Response> {
+async function handleRequest(request: Request, env: CloudBindings): Promise<Response> {
   const started = performance.now();
   const url = new URL(request.url);
   const health = url.pathname === healthPath;
@@ -208,5 +208,29 @@ export async function routeRequest(request: Request, env: CloudBindings): Promis
   } finally {
     clearTimeout(timer);
     request.signal.removeEventListener("abort", cancel);
+  }
+}
+
+export async function routeRequest(
+  request: Request,
+  env: CloudBindings,
+  context?: { waitUntil(promise: Promise<unknown>): void },
+): Promise<Response> {
+  try {
+    return await handleRequest(request, env);
+  } finally {
+    if (request.body && !request.bodyUsed) {
+      // Early rejection can leave an HTTP connection with unread upload bytes. Wrangler's
+      // source-mode middleware hides this; the immutable no_bundle artifact has no middleware.
+      // Dispose a small upload in the background without extending the RPC deadline or
+      // accepting an unlimited body. A stalled/large upload is canceled instead.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(bodyTimeoutError), 1000);
+      const cleanup = readBytes(request.body, maxBodyBytes + 1, controller.signal)
+        .then(() => {})
+        .catch(() => {})
+        .finally(() => clearTimeout(timer));
+      context?.waitUntil(cleanup);
+    }
   }
 }

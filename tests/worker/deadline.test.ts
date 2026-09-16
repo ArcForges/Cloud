@@ -57,6 +57,54 @@ test("malformed and expired budgets never wake a container", async () => {
   }
 });
 
+test("early rejection drains the upload through the request lifetime", async () => {
+  const env = fixture(async () => {
+    assert.fail("Rejected requests must not wake a container");
+  });
+  const pending: Promise<unknown>[] = [];
+  const incoming = request({ "grpc-timeout": "invalid" });
+  await status(await routeRequest(incoming, env, { waitUntil: (work) => pending.push(work) }), 3);
+  assert.equal(pending.length, 1);
+  await Promise.all(pending);
+  assert.equal(incoming.bodyUsed, true);
+  assert.equal((await incoming.body?.getReader().read())?.done, true);
+});
+
+test(
+  "rejected upload cleanup is bounded without delaying the deadline response",
+  { timeout: 2500 },
+  async () => {
+    const env = fixture(async () => {
+      assert.fail("Rejected requests must not wake a container");
+    });
+    for (const oversized of [false, true]) {
+      let canceled = false;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (oversized) controller.enqueue(new Uint8Array(4098));
+        },
+        cancel() {
+          canceled = true;
+          // A sender ignoring cancellation cannot extend cleanup either.
+          return new Promise<void>(() => {});
+        },
+      });
+      const pending: Promise<unknown>[] = [];
+      const incoming = request({ "grpc-timeout": "0m" }, {
+        body: stream,
+        duplex: "half",
+      } as RequestInit);
+      await status(
+        await routeRequest(incoming, env, { waitUntil: (work) => pending.push(work) }),
+        4,
+      );
+      if (!oversized) assert.equal(canceled, false, "Response must precede upload timeout");
+      await Promise.all(pending);
+      assert.equal(canceled, true);
+    }
+  },
+);
+
 test("caps long budgets and deducts request-body time from a shorter one", async () => {
   const forwarded: number[] = [];
   const env = fixture(async (incoming) => {
