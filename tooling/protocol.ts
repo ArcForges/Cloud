@@ -77,7 +77,7 @@ export async function verifyProtocol(baseUrl: string, worker: boolean) {
         signal: AbortSignal.timeout(10000),
       });
       assert.equal(response.status, expected);
-      await response.body?.cancel();
+      await response.arrayBuffer();
     }
     const unsupported = await fetch(`${baseUrl}/arcforges.hello.v1.HelloService/SayHello`, {
       method: "POST",
@@ -87,7 +87,7 @@ export async function verifyProtocol(baseUrl: string, worker: boolean) {
       redirect: "error",
     });
     assert.equal(unsupported.status, 415);
-    await unsupported.body?.cancel();
+    await unsupported.arrayBuffer();
     const oversized = await fetch(`${baseUrl}/arcforges.hello.v1.HelloService/SayHello`, {
       method: "POST",
       headers: { "content-type": "application/grpc-web+proto" },
@@ -96,7 +96,7 @@ export async function verifyProtocol(baseUrl: string, worker: boolean) {
       redirect: "error",
     });
     assert.equal(oversized.status, 413);
-    await oversized.body?.cancel();
+    await oversized.arrayBuffer();
   }
   return {
     transport: "binary gRPC-Web",
