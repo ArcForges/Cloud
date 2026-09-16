@@ -104,6 +104,10 @@ export async function routeRequest(request: Request, env: CloudBindings): Promis
         signal: AbortSignal.any([request.signal, AbortSignal.timeout(15000)]),
       }),
     );
+    if (response.status >= 500) {
+      await response.body?.cancel();
+      return reject(503, "Cloud container is temporarily unavailable.");
+    }
     const resultHeaders = new Headers(response.headers);
     resultHeaders.set("cache-control", "no-store");
     resultHeaders.set("x-content-type-options", "nosniff");

@@ -119,3 +119,13 @@ test("unavailable container returns 503 without retrying the call", async () => 
   assert.equal(result.status, 503);
   assert.equal(attempts, 1);
 });
+
+test("container startup error responses do not expose internal diagnostics", async () => {
+  const { env } = fixture();
+  env.CLOUD_CONTAINER.getByName = () => ({
+    fetch: async () => new Response("Internal deployment details", { status: 500 }),
+  });
+  const response = await routeRequest(new Request(`https://arcforges.com${healthPath}`), env);
+  assert.equal(response.status, 503);
+  assert.equal(await response.text(), "Cloud container is temporarily unavailable.");
+});

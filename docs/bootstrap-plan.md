@@ -1,6 +1,6 @@
 # Cloud bootstrap plan
 
-Status: implementation planned; live deployment requires the repository's Cloudflare credentials.
+Status: implementation delivered in Cloud PR #1. The workflow records source, real image and Worker runtime checks separately from production acceptance. Live deployment requires the repository's Cloudflare credentials and a merge to main.
 
 ## Scope and evidence
 
@@ -44,6 +44,12 @@ This is a public, stateless transport demonstration. It does not implement accou
 - Unknown routes and unsupported methods/content types fail before waking a container. Valid and invalid Hello calls preserve protobuf and gRPC status semantics.
 - CI cannot publish ahead of required tests. PR code has no deployment secrets. Production only owns the API route.
 - Public deployment evidence includes the deployed source identity and successful/invalid Hello requests. If credentials or merge are pending, report this as pending instead of completed.
+
+## Implementation review
+
+The bootstrap includes all scoped repository controls, the published-contract service, immutable candidate promotion, main-only deployment and recovery instructions. Local validation exercised the real Native AOT image with C# and TypeScript consumers, error statuses and restart recovery. Verification corrected cross-platform NuGet restore targets and Docker's ephemeral port reassignment on restart. Deployment readiness compares the compiled container revision with the Worker revision, and startup failures return a generic unavailable response.
+
+GitHub's repository-scoped `cloudflare` environment and Account ID are configured, with only main allowed to deploy. Secret scanning, push protection, private vulnerability reporting and Dependabot security updates are enabled. Main requires the Actions `Verify` check and resolved conversations; no human approval count was added. The owner must still enter the scoped deployment token before main deployment. No live Cloudflare or browser success is inferred from local validation.
 
 ## Primary references
 

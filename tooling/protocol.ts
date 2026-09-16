@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHelloClient } from "@arcforges/api-client";
 import { Code, ConnectError } from "@connectrpc/connect";
+import { readJson, root } from "./process.ts";
 
 export async function waitForHealth(
   baseUrl: string,
@@ -98,7 +100,11 @@ export async function verifyProtocol(baseUrl: string, worker: boolean) {
   }
   return {
     transport: "binary gRPC-Web",
-    publishedClient: "1.0.0-ci.25.1",
+    publishedClient: (
+      await readJson<{ version: string }>(
+        path.join(root, "node_modules/@arcforges/api-client/package.json"),
+      )
+    ).version,
     greeting: true,
     unicode: true,
     invalidArgument: true,
