@@ -3,7 +3,11 @@ Copyright ArcForges contributors
 
 Original Cloud application and tooling: AGPL-3.0-only; see LICENSE.
 Contracts APIs are consumed as published Apache-2.0 packages from
-https://github.com/ArcForges/Contracts (version 1.0.0-ci.25.1).
+https://github.com/ArcForges/Contracts (version 1.0.0-ci.36.1).
+
+The standard generated Gradle wrapper scripts and JAR are distributed under
+Apache-2.0 by the Gradle contributors; their original notices are retained.
+Connect-Kotlin, OkHttp and Kotlin retain their upstream package licenses.
 
 The previous ArcForges repository was consulted for C# build conventions.
 No old implementation or generated contract source is incorporated.

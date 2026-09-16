@@ -10,6 +10,9 @@ node_modules/
 .wrangler/
 coverage/
 TestResults/
+.gradle/
+.kotlin/
+**/build/
 *.user
 *.suo
 *.log

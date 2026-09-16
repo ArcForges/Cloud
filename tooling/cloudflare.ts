@@ -4,6 +4,7 @@ import path from "node:path";
 import { candidateDir, readJson, root, run, wrangler, writeJson } from "./process.ts";
 import { verifyCandidate, type WorkerConfig } from "./project.ts";
 import { verifyProtocol, waitForHealth } from "./protocol.ts";
+import { verifyKotlin } from "./kotlin.ts";
 
 const productionBase = "https://arcforges.com/api";
 const deploymentFile = path.join(root, "artifacts", "deployment.json");
@@ -107,6 +108,7 @@ async function smoke() {
   );
   const health = await waitForHealth(productionBase, candidate.revision, true, 600000);
   const protocol = await verifyProtocol(productionBase, true);
+  const kotlin = await verifyKotlin(productionBase, candidate.revision, true, "deployed");
   // The Cloud API route must not replace the already deployed static Web origin.
   const home = await fetch("https://arcforges.com/", {
     redirect: "error",
@@ -115,7 +117,7 @@ async function smoke() {
   assert.equal(home.status, 200);
   assert.match(home.headers.get("content-type") ?? "", /text\/html/);
   await home.body?.cancel();
-  deployment.verified = { at: new Date().toISOString(), health, protocol, webHome: true };
+  deployment.verified = { at: new Date().toISOString(), health, protocol, kotlin, webHome: true };
   await writeJson(deploymentFile, deployment);
   console.log("Production Native AOT gRPC-Web and Web home verified.");
 }

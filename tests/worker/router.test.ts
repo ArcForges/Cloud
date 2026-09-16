@@ -59,7 +59,8 @@ test("preserves binary payload and uses one fixed container, stripping only /api
   assert.equal(new URL(forwarded.url).pathname, helloPath.slice(4));
   assert.equal(forwarded.headers.get("cookie"), null);
   assert.equal(forwarded.headers.get("authorization"), null);
-  assert.equal(forwarded.headers.get("grpc-timeout"), "10S");
+  assert.match(forwarded.headers.get("grpc-timeout") ?? "", /^\d+m$/);
+  assert.ok(Number.parseInt(forwarded.headers.get("grpc-timeout") ?? "", 10) <= 10000);
   assert.deepEqual(new Uint8Array(await forwarded.arrayBuffer()), payload);
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), new Uint8Array([0, 0, 0, 0, 0]));
 });
@@ -68,9 +69,14 @@ test("unknown paths, verbs and content types never wake a container", async () =
   const { env, received } = fixture();
   for (const [path, method, contentType, expected] of [
     ["/api/admin", "POST", "application/grpc-web+proto", 404],
+    [helloPath.slice(4), "POST", "application/grpc-web+proto", 404],
+    [`/api${helloPath}`, "POST", "application/grpc-web+proto", 404],
     [helloPath, "GET", "application/grpc-web+proto", 405],
     [healthPath, "POST", "application/grpc-web+proto", 405],
     [helloPath, "POST", "application/json", 415],
+    [helloPath, "POST", "application/grpc", 415],
+    [helloPath, "POST", "application/grpc-web-text+proto", 415],
+    [helloPath, "POST", "application/grpc-web+json", 415],
     [`${helloPath}?admin=1`, "POST", "application/grpc-web+proto", 400],
   ] as const) {
     const result = await routeRequest(
