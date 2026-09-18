@@ -98,7 +98,7 @@ function checkPackage(name: string) {
       `Unknown first-party package owner: ${name}`,
     );
 }
-const xml = (text: string) => text.replace(/<!--[\s\S]*?-->/gu, "");
+const xml = (text: string) => text.replace(/<!--[\s\S]*?-->/gu, " ");
 const values = (text: string, key: string) =>
   [...xml(text).matchAll(new RegExp(`<${key}(?:\\s[^>]*)?>([^<]*)</${key}>`, "gu"))].map(
     (match) => match[1],

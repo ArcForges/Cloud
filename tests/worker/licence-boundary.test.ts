@@ -134,3 +134,18 @@ test("Gradle declarations and unpublished source inputs are checked", () => {
     f.cleanup();
   }
 });
+
+test("comments cannot join fragments into a licence declaration", () => {
+  const f = fixture();
+  try {
+    f.policy.projects.push({ path: "app.csproj", kind: "msbuild" });
+    f.write("eng/policy/licence-boundary.json", f.policy);
+    f.write(
+      "app.csproj",
+      "<Project><PropertyGroup><PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression><LicenceB<!-- split -->oundary>AGPL</LicenceBoundary></PropertyGroup></Project>",
+    );
+    assert.throws(() => auditLicences(f.root), /Incorrect boundary/u);
+  } finally {
+    f.cleanup();
+  }
+});
