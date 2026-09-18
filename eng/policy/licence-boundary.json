@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "repository": "Cloud",
+  "spdxLicense": "AGPL-3.0-only",
+  "licenceBoundary": "AGPL",
+  "projects": [
+    {
+      "path": "package.json",
+      "kind": "npm"
+    },
+    {
+      "path": "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "tests/kotlin-consumer/build.gradle.kts",
+      "kind": "gradle"
+    }
+  ]
+}

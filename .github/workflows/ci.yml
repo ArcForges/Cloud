@@ -42,11 +42,22 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run check:dotnet
+      - run: node tooling/project.ts licence-evaluated
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "17"
       - run: npm run check:kotlin
+      - name: Retain evaluated licence declarations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: licence-evidence-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/evidence/licence-*.json
+            tests/kotlin-consumer/build/reports/licence-boundary.json
+          if-no-files-found: error
+          retention-days: 30
 
   quality:
     name: Dependency audit and repository checks

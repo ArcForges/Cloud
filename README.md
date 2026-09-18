@@ -33,6 +33,9 @@ On Linux/WSL, also run `npm run test:worker` to verify the bundled Worker, Durab
 
 ## Delivery
 
+The existing checks enforce [project licence declarations](docs/licence-boundary.md)
+across managed, npm and Gradle scopes, including the final Docker build.
+
 PRs run locked restores, C#/TS/Kotlin tests, formatting, dependency audit/review, CodeQL, secret scanning, real AOT image build, native gRPC and gRPC-Web consumers, restart recovery and local Worker/Container integration. No PR deploys to Cloudflare.
 
 After merge, main builds and verifies a versioned candidate before deployment. CI loads that exact image, pushes it to Cloudflare's registry, pins the remote digest and uploads the already bundled Worker. Deployment succeeds only after the public API reports matching Worker/container source identities and the published client verifies success and error statuses. A GitHub prerelease then records the candidate and live evidence.

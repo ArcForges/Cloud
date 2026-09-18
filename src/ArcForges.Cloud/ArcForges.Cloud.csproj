@@ -13,4 +13,8 @@
     <PackageReference Include="Grpc.AspNetCore.Web" />
     <AssemblyMetadata Include="SourceRevision" Value="$(SourceRevisionId)" />
   </ItemGroup>
+  <PropertyGroup>
+    <LicenceBoundary>AGPL</LicenceBoundary>
+    <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
+  </PropertyGroup>
 </Project>

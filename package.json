@@ -21,7 +21,7 @@
     "lint": "biome lint --error-on-warnings .",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "test": "node --test tests/worker/*.test.ts",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "check": "node tooling/project.ts licence && npm run format:check && npm run lint && npm run typecheck && npm test",
     "check:dotnet": "dotnet restore Cloud.slnx --locked-mode && dotnet build Cloud.slnx -c Release --no-restore && dotnet test --solution Cloud.slnx -c Release --no-build && dotnet format Cloud.slnx --no-restore --verify-no-changes",
     "candidate": "node tooling/project.ts candidate",
     "verify:candidate": "node tooling/project.ts verify",
@@ -45,5 +45,8 @@
     "prettier": "3.9.6",
     "typescript": "7.0.2",
     "wrangler": "4.132.0"
+  },
+  "arcforges": {
+    "licenceBoundary": "AGPL"
   }
 }

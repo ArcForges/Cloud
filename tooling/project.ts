@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
 import { verifyProtocol, waitForHealth } from "./protocol.ts";
 import { verifyKotlin } from "./kotlin.ts";
+import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
 
 const payloadFiles = ["docker-image.tar", "worker.js", "wrangler.json"] as const;
 export interface Candidate {
@@ -210,6 +211,7 @@ async function testWorker(candidate: Candidate) {
 }
 
 async function buildCandidate() {
+  await writeJson(path.join(root, "artifacts/evidence/licence-boundary.json"), auditLicences(root));
   const head = await run("git", ["rev-parse", "HEAD"], true);
   const dirty = (await run("git", ["status", "--porcelain"], true)).length > 0;
   if (process.env.CI === "true") assert.equal(dirty, false, "CI must build a clean checkout.");
@@ -269,6 +271,20 @@ async function buildCandidate() {
 }
 
 async function main() {
+  if (process.argv[2] === "licence") {
+    await writeJson(
+      path.join(root, "artifacts/evidence/licence-boundary.json"),
+      auditLicences(root),
+    );
+    return;
+  }
+  if (process.argv[2] === "licence-evaluated") {
+    await writeJson(
+      path.join(root, "artifacts/evidence/licence-evaluated.json"),
+      evaluatedManagedLicences(root),
+    );
+    return;
+  }
   switch (process.argv[2]) {
     case "hooks":
       // Worktree-specific settings keep the primary checkout and other tasks untouched.

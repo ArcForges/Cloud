@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 FROM mcr.microsoft.com/dotnet/sdk:10.0.401-noble-aot@sha256:1a069a730888d278b5ac00e3e238707387d20d2b65f0fc6866b6180df0a767e0 AS build
 WORKDIR /source
-COPY global.json Directory.Build.props Directory.Packages.props NuGet.Config ./
+COPY global.json Directory.Build.props Directory.Build.targets Directory.Packages.props NuGet.Config ./
 COPY src/ArcForges.Cloud/ArcForges.Cloud.csproj src/ArcForges.Cloud/packages.lock.json ./src/ArcForges.Cloud/
 RUN dotnet restore src/ArcForges.Cloud --locked-mode
 COPY src/ArcForges.Cloud/ ./src/ArcForges.Cloud/
