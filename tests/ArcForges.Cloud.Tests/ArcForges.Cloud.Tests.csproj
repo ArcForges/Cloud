@@ -7,4 +7,8 @@
     <PackageReference Include="xunit.v3.mtp-v2" />
     <ProjectReference Include="../../src/ArcForges.Cloud/ArcForges.Cloud.csproj" />
   </ItemGroup>
+  <PropertyGroup>
+    <LicenceBoundary>AGPL</LicenceBoundary>
+    <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
+  </PropertyGroup>
 </Project>

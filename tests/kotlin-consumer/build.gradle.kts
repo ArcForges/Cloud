@@ -37,3 +37,33 @@ tasks.check { dependsOn("deadlineTest") }
 tasks.register("resolveDependencies") {
     doLast { configurations.filter { it.isCanBeResolved }.forEach { it.resolve() } }
 }
+
+// Project licence metadata is verified independently of the root LICENSE.
+extra["spdxLicense"] = "AGPL-3.0-only"
+extra["licenceBoundary"] = "AGPL"
+
+gradle.projectsEvaluated {
+    val declarations = rootProject.allprojects.sortedBy { it.path }.map { owned ->
+        require(owned.projectDir.canonicalFile.toPath().startsWith(rootDir.canonicalFile.toPath())) {
+            "AFL002: Project escapes this build: ${owned.path}"
+        }
+        require(owned.extra.has("spdxLicense") && owned.extra["spdxLicense"] == "AGPL-3.0-only" &&
+                owned.extra.has("licenceBoundary") && owned.extra["licenceBoundary"] == "AGPL") {
+            "AFL001: Missing or incorrect AGPL licence declaration: ${owned.path}"
+        }
+        val references = owned.configurations.flatMap { configuration ->
+            configuration.dependencies.withType<org.gradle.api.artifacts.ProjectDependency>().map { it.path }
+        }.distinct().sorted()
+        references.forEach { reference ->
+            val target = rootProject.project(reference)
+            require(target.extra.has("licenceBoundary") && target.extra["licenceBoundary"] == "AGPL") {
+                "AFL003: Undeclared project reference: ${owned.path} -> ${target.path}"
+            }
+        }
+        mapOf("project" to owned.path, "spdxLicense" to owned.extra["spdxLicense"],
+              "licenceBoundary" to owned.extra["licenceBoundary"], "projectReferences" to references)
+    }
+    val report = rootProject.layout.buildDirectory.file("reports/licence-boundary.json").get().asFile
+    report.parentFile.mkdirs()
+    report.writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(declarations)) + "\n")
+}

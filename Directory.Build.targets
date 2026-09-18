@@ -1,0 +1,23 @@
+<Project>
+  <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+  <Target Name="ArcForgesGetLicenceBoundary" Returns="@(_ArcForgesLicenceDeclaration)">
+    <ItemGroup>
+      <_ArcForgesLicenceDeclaration Include="$(MSBuildProjectFullPath)">
+        <SpdxLicense>$(PackageLicenseExpression)</SpdxLicense>
+        <Boundary>$(LicenceBoundary)</Boundary>
+      </_ArcForgesLicenceDeclaration>
+    </ItemGroup>
+  </Target>
+  <Target Name="ArcForgesVerifyLicenceBoundary" BeforeTargets="PrepareForBuild;Pack">
+    <Error Condition="'$(PackageLicenseExpression)' != 'AGPL-3.0-only' Or '$(LicenceBoundary)' != 'AGPL'"
+           Text="AFL001: This repository requires AGPL-3.0-only / AGPL project metadata." />
+    <Error Condition="'%(ProjectReference.Identity)' != '' And !$([System.String]::Copy('%(ProjectReference.FullPath)').StartsWith('$(MSBuildThisFileDirectory)'))"
+           Text="AFL002: Project references must remain inside the owning repository." />
+    <MSBuild Projects="@(ProjectReference)" Targets="ArcForgesGetLicenceBoundary"
+             RemoveProperties="LicenceBoundary;PackageLicenseExpression" Condition="'@(ProjectReference)' != ''">
+      <Output TaskParameter="TargetOutputs" ItemName="_ArcForgesReferencedLicence" />
+    </MSBuild>
+    <Error Condition="'$(LicenceBoundary)' == 'Apache' And '%(_ArcForgesReferencedLicence.Identity)' != '' And '%(_ArcForgesReferencedLicence.Boundary)' != 'Apache'"
+           Text="AFL003: Apache projects may reference only Apache first-party projects." />
+  </Target>
+</Project>
