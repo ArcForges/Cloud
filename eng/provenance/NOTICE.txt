@@ -1,0 +1,63 @@
+Cloud source provenance
+
+Original material retains its recorded licence and full legal text.
+
+canonical-agpl-legal-r1
+https://github.com/github/choosealicense.com @ 58267f8f2c5c0099810849cfd7677f52ae0c0eb3
+AGPL-3.0-only
+GNU Affero General Public License version 3; Copyright Free Software Foundation, Inc. Complete original licence and its verbatim-copying permission are retained.
+
+cloud-runtime-notices-r3
+https://github.com/ArcForges/Cloud @ 2cf5a58633a7e09db05ebc1741f1cab83547a832
+AGPL-3.0-only
+ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files.
+
+cloud-worker-bundle-r2
+https://github.com/ArcForges/Cloud @ 2cf5a58633a7e09db05ebc1741f1cab83547a832
+AGPL-3.0-only
+Cloud routing: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. Complete respective terms accompany the actual Worker bundle.
+
+containers-mit-legal-r1
+https://github.com/cloudflare/containers @ 298169f4aaba82e7b712458b7c6b14fc3e40ad78
+MIT
+Copyright 2020 Cloudflare, Inc. Complete selected MIT notice for Containers 0.3.7 Worker code.
+
+dotnet-aspnetcore-legal-r1
+https://github.com/dotnet/dotnet @ 95017c711e6afc1085133d440e42b4bd78155701
+MIT
+Microsoft and .NET Foundation copyright and all separately named upstream notices are retained verbatim. The MIT declaration describes the notice compilation/source grant; each listed component retains its own terms.
+
+dotnet-license-legal-r1
+https://github.com/dotnet/dotnet @ 95017c711e6afc1085133d440e42b4bd78155701
+MIT
+Microsoft and .NET Foundation copyright and all separately named upstream notices are retained verbatim. The MIT declaration describes the notice compilation/source grant; each listed component retains its own terms.
+
+dotnet-runtime-legal-r1
+https://github.com/dotnet/dotnet @ 95017c711e6afc1085133d440e42b4bd78155701
+MIT
+Microsoft and .NET Foundation copyright and all separately named upstream notices are retained verbatim. The MIT declaration describes the notice compilation/source grant; each listed component retains its own terms.
+
+esbuild-mit-legal-r1
+https://github.com/evanw/esbuild @ bb9db84c02433fbe37b3509f53f9f3e3cc48725e
+MIT
+Copyright 2020 Evan Wallace. Complete MIT notice for inserted esbuild runtime helper.
+
+gradle-legal-r1
+https://github.com/gradle/gradle @ 92f0512e7f06d84621afba191f75e265363890cf
+Apache-2.0
+Full Apache terms for the source-only wrapper.
+
+gradle-wrapper-9-7-1-r1
+https://github.com/gradle/gradle @ 92f0512e7f06d84621afba191f75e265363890cf
+Apache-2.0
+Copyright 2015 the original Gradle authors. Apache-2.0; full terms in third-party/Gradle.LICENSE.txt.
+
+grpc-apache-legal-r1
+https://github.com/grpc/grpc-dotnet @ 4301104498e53898a452e8fb2fea6c0b1492b755
+Apache-2.0
+Copyright the gRPC Authors. Apache-2.0 for the locked compiled gRPC library scope.
+
+protobuf-bsd-legal-r1
+https://github.com/protocolbuffers/protobuf @ f377bfefc5e2cfab68b816903c25b23e091c439d
+BSD-3-Clause
+Copyright Google Inc. Complete BSD-3-Clause terms for Protocol Buffers.

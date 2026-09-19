@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "id": "gradle-wrapper-9-7-1-r1",
+  "kind": "generated",
+  "sourceRepository": "https://github.com/gradle/gradle",
+  "sourceCommit": "92f0512e7f06d84621afba191f75e265363890cf",
+  "sourcePaths": [
+    "platforms/software/build-init/src/main/java/org/gradle/api/tasks/wrapper/internal/WrapperGenerator.java",
+    "platforms/jvm/plugins-application/src/main/resources/org/gradle/api/internal/plugins/unixStartScript.txt",
+    "platforms/jvm/plugins-application/src/main/resources/org/gradle/api/internal/plugins/windowsStartScript.txt",
+    "platforms/core-runtime/wrapper-main/src/main/java/org/gradle/wrapper/GradleWrapperMain.java"
+  ],
+  "licence": {
+    "spdx": "Apache-2.0",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "finding": "Wrapper generator/templates and launcher retain their Apache-2.0 file headers; no unrelated Gradle distribution implementation is copied."
+      }
+    ],
+    "scope": "Existing Gradle 9.7.1 Kotlin-test wrapper; generation reproduced from the exact distribution with SHA256 acd53f1edaf02f1a8ff99879f8a34b302661a057d9b063ae9e35b552f804d20a. Build/test-only; not in the Cloud runtime image or Worker.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Copyright 2015 the original Gradle authors. Apache-2.0; full terms in third-party/Gradle.LICENSE.txt."
+  ],
+  "targets": [
+    {
+      "path": "tests/kotlin-consumer/gradlew",
+      "sha256": "a5a5c199ba02189ae8c46a334223371a20599d9c298ef65e7540ede4a3f72d59",
+      "normalization": "lf"
+    },
+    {
+      "path": "tests/kotlin-consumer/gradlew.bat",
+      "sha256": "59328c7a17f673b1a63040bfb380a0c749e5d6df3406f7f18641060314cd9aa1",
+      "normalization": "lf"
+    },
+    {
+      "path": "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.jar",
+      "sha256": "7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d",
+      "normalization": "raw"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "regeneration",
+    "command": "Use the SHA256-verified Gradle 9.7.1 distribution to generate standard wrapper scripts/JAR in an empty project; compare all three targets exactly after declared text normalization. Authored distribution properties remain owner inputs.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Copyright 2015 the original Gradle authors. Apache-2.0; full terms in third-party/Gradle.LICENSE.txt.",
+    "files": [
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Existing Gradle 9.7.1 Kotlin-test wrapper; generation reproduced from the exact distribution with SHA256 acd53f1edaf02f1a8ff99879f8a34b302661a057d9b063ae9e35b552f804d20a. Build/test-only; not in the Cloud runtime image or Worker."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": {
+    "generators": [
+      {
+        "repository": "https://github.com/gradle/gradle",
+        "commit": "92f0512e7f06d84621afba191f75e265363890cf",
+        "paths": [
+          "platforms/software/build-init/src/main/java/org/gradle/api/tasks/wrapper/internal/WrapperGenerator.java",
+          "platforms/jvm/plugins-application/src/main/resources/org/gradle/api/internal/plugins/unixStartScript.txt",
+          "platforms/jvm/plugins-application/src/main/resources/org/gradle/api/internal/plugins/windowsStartScript.txt",
+          "platforms/core-runtime/wrapper-main/src/main/java/org/gradle/wrapper/GradleWrapperMain.java"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+            "finding": "Wrapper generator/templates and launcher retain their Apache-2.0 file headers; no unrelated Gradle distribution implementation is copied."
+          }
+        ]
+      }
+    ],
+    "inputs": [
+      {
+        "repository": "https://github.com/ArcForges/Cloud",
+        "commit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+        "paths": [
+          "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Authored wrapper configuration controls exact distribution identity; no AGPL implementation is inserted into the Apache wrapper."
+          }
+        ]
+      }
+    ],
+    "command": "Use the SHA256-verified Gradle 9.7.1 distribution to generate standard wrapper scripts/JAR in an empty project; compare all three targets exactly after declared text normalization. Authored distribution properties remain owner inputs.",
+    "outputSpdx": "Apache-2.0"
+  },
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-19",
+    "decision": "approved",
+    "rationale": "Existing Gradle 9.7.1 Kotlin-test wrapper; generation reproduced from the exact distribution with SHA256 acd53f1edaf02f1a8ff99879f8a34b302661a057d9b063ae9e35b552f804d20a. Build/test-only; not in the Cloud runtime image or Worker.",
+    "baselineCommit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+    "reconciliation": true
+  },
+  "supersedes": null
+}

@@ -8,8 +8,22 @@ import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "
 import { verifyProtocol, waitForHealth } from "./protocol.ts";
 import { verifyKotlin } from "./kotlin.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
+import { auditProvenance } from "./provenance.ts";
+import {
+  legalBundle,
+  stageImageNotices,
+  verifyImageProvenance,
+  verifyReleaseFiles,
+} from "./release-provenance.ts";
 
-const payloadFiles = ["docker-image.tar", "worker.js", "wrangler.json"] as const;
+const payloadFiles = [
+  "docker-image.tar",
+  "worker.js",
+  "wrangler.json",
+  "legal-notices.json",
+  "worker-meta.json",
+  "image-provenance.json",
+] as const;
 export interface Candidate {
   schema: 1;
   revision: string;
@@ -71,6 +85,7 @@ export async function verifyCandidate(): Promise<Candidate> {
   assert.equal(config.containers[0]?.image, candidate.image);
   assert.equal(config.containers[0]?.max_instances, 1);
   assert.equal(config.no_bundle, true);
+  verifyReleaseFiles(root, candidateDir, candidate.revision, candidate.imageId);
   return candidate;
 }
 
@@ -109,6 +124,8 @@ export async function testContainer(image: string, revision: string) {
     true,
   );
   try {
+    const provenance = await verifyImageProvenance(id, revision, imageInfo.Id);
+    await writeJson(path.join(candidateDir, "image-provenance.json"), provenance);
     const binding = async (port: string) => {
       const output = await run("docker", ["port", id, port], true);
       const match = /^127\.0\.0\.1:(\d+)$/.exec(output);
@@ -222,6 +239,12 @@ async function buildCandidate() {
   const version = `0.1.0-${suffix}`;
   const image = `arcforges-cloud:${suffix}`;
   await mkdir(candidateDir, { recursive: true });
+  await writeJson(
+    path.join(root, "artifacts/evidence/source-provenance.json"),
+    auditProvenance(root),
+  );
+  stageImageNotices(root, revision);
+  await writeJson(path.join(candidateDir, "legal-notices.json"), legalBundle(root, revision));
   await run("docker", [
     "build",
     "--platform",
@@ -242,7 +265,13 @@ async function buildCandidate() {
     "none",
     "--outdir",
     "artifacts/worker-bundle",
+    "--metafile",
+    "artifacts/worker-bundle/bundle-meta.json",
   ]);
+  await copyFile(
+    path.join(root, "artifacts/worker-bundle/bundle-meta.json"),
+    path.join(candidateDir, "worker-meta.json"),
+  );
   await copyFile(
     path.join(root, "artifacts/worker-bundle/index.js"),
     path.join(candidateDir, "worker.js"),
@@ -271,6 +300,13 @@ async function buildCandidate() {
 }
 
 async function main() {
+  if (process.argv[2] === "provenance" || process.argv[2] === "provenance-notice") {
+    await writeJson(
+      path.join(root, "artifacts/evidence/source-provenance.json"),
+      auditProvenance(root, { writeNotice: process.argv[2] === "provenance-notice" }),
+    );
+    return;
+  }
   if (process.argv[2] === "licence") {
     await writeJson(
       path.join(root, "artifacts/evidence/licence-boundary.json"),
@@ -286,6 +322,13 @@ async function main() {
     return;
   }
   switch (process.argv[2]) {
+    case "dev": {
+      const head = await run("git", ["rev-parse", "HEAD"], true);
+      const dirty = (await run("git", ["status", "--porcelain"], true)).length > 0;
+      stageImageNotices(root, head + (dirty ? "-dirty" : ""));
+      await run(process.execPath, [wrangler, "dev"]);
+      break;
+    }
     case "hooks":
       // Worktree-specific settings keep the primary checkout and other tasks untouched.
       await run("git", ["config", "extensions.worktreeConfig", "true"]);

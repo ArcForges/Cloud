@@ -6,10 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { auditLicences } from "../../tooling/licence-boundary.ts";
+import { gitEnvironment } from "../../tooling/process.ts";
 
 function fixture() {
   const root = mkdtempSync(path.join(os.tmpdir(), "licence-inventory-"));
-  execFileSync("git", ["init", "-q"], { cwd: root, windowsHide: true });
+  execFileSync("git", ["init", "-q"], { cwd: root, windowsHide: true, env: gitEnvironment() });
   execFileSync(
     "git",
     [
@@ -24,7 +25,7 @@ function fixture() {
       "-qm",
       "fixture",
     ],
-    { cwd: root, windowsHide: true },
+    { cwd: root, windowsHide: true, env: gitEnvironment() },
   );
   const write = (file: string, value: unknown) => {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });

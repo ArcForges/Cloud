@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "containers-mit-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/cloudflare/containers",
+  "sourceCommit": "298169f4aaba82e7b712458b7c6b14fc3e40ad78",
+  "sourcePaths": [
+    "LICENSE-MIT"
+  ],
+  "licence": {
+    "spdx": "MIT",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE-MIT",
+        "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+        "finding": "The exact src/lib scope has no subordinate licence override; package grants MIT OR Apache-2.0, and MIT is selected."
+      }
+    ],
+    "scope": "Copyright 2020 Cloudflare, Inc. Complete selected MIT notice for Containers 0.3.7 Worker code.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "Copyright 2020 Cloudflare, Inc. Complete selected MIT notice for Containers 0.3.7 Worker code."
+  ],
+  "targets": [
+    {
+      "path": "third-party/Containers.LICENSE.txt",
+      "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Copyright 2020 Cloudflare, Inc. Complete selected MIT notice for Containers 0.3.7 Worker code.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/Containers.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Copyright 2020 Cloudflare, Inc. Complete selected MIT notice for Containers 0.3.7 Worker code."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-19",
+    "decision": "approved",
+    "rationale": "Copyright 2020 Cloudflare, Inc. Complete selected MIT notice for Containers 0.3.7 Worker code.",
+    "baselineCommit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

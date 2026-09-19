@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { gitEnvironment } from "./process.ts";
 
 const owner = "Cloud";
 
@@ -106,7 +107,12 @@ const values = (text: string, key: string) =>
 export function auditLicences(root: string) {
   root = realpathSync(root);
   const git = (...args: string[]) =>
-    execFileSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true }).trim();
+    execFileSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+      env: gitEnvironment(),
+    }).trim();
   const files = [
     ...new Set(
       git("ls-files", "-z", "--cached", "--others", "--exclude-standard")

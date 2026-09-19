@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "cloud-release-r1",
+  "ownerCommit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+  "worker": {
+    "sha256": "37d36ff37803fd4dfc5fef623ddc4a1b5e607d50782c3bf7c949b1dbb4e8fa9c",
+    "inputs": {
+      "node_modules/@cloudflare/containers/dist/lib/helpers.js": "320eae245a1d05a64c8348652f6808fa54c776340bd7c24391c19fe3b9e0f05f",
+      "node_modules/@cloudflare/containers/dist/lib/container.js": "9dfc5feaa43b2bdec08863c85eb94731237aeb9f19c7b7e58ff426776ec8863c",
+      "node_modules/@cloudflare/containers/dist/lib/utils.js": "22f96e63b873b10081fc15216bffc8d23a4614516efcb64be99db87372d4011c",
+      "node_modules/@cloudflare/containers/dist/index.js": "4788f78cbab43389d23feb71c8ef4e6657c01f9eeffe962650310784390bd486",
+      "worker/router.ts": "2c65b0ee958694860c9f360fdaa1522f6d8b4d4d5198280ea13f9af992d2ebe4",
+      "worker/index.ts": "5317c8257a4ffcd4e023b08981cf8861d10092984a2664852b0eb55d2f34e50d"
+    },
+    "outputInputs": [
+      "node_modules/@cloudflare/containers/dist/index.js",
+      "node_modules/@cloudflare/containers/dist/lib/container.js",
+      "node_modules/@cloudflare/containers/dist/lib/helpers.js",
+      "worker/index.ts",
+      "worker/router.ts"
+    ],
+    "externalImports": [
+      "cloudflare:workers"
+    ],
+    "exports": [
+      "CloudContainer",
+      "default"
+    ],
+    "packages": {
+      "@cloudflare/containers": {
+        "version": "0.3.7",
+        "integrity": "sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw=="
+      },
+      "wrangler": {
+        "version": "4.132.0",
+        "integrity": "sha512-61HD7Unw3g7h9zSQoqldzfL3MEbCKUVfwtlMgfSQtjYwMjBD8z83K/EXnYGv75R5hczx3grFfjYH+tdmJm5PHg=="
+      },
+      "esbuild": {
+        "version": "0.28.1",
+        "integrity": "sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw=="
+      }
+    },
+    "legalFiles": [
+      "LICENSE",
+      "NOTICE",
+      "eng/provenance/NOTICE.txt",
+      "third-party/Containers.LICENSE.txt",
+      "third-party/Esbuild.LICENSE.txt"
+    ]
+  },
+  "image": {
+    "baseImage": "mcr.microsoft.com/dotnet/runtime-deps:10.0.12-noble-chiseled@sha256:18d4848091a40d13dbfdd6a8340c1657dc3e2f2d7fa2f042e9d162e68669dbc9",
+    "baseLegal": {
+      "/usr/share/doc/base-files/copyright": "fd7e4aae7e7b05f217bcf2d02322825c360e66c52c4c2f1b28d784d6297a1c23",
+      "/usr/share/doc/ca-certificates/copyright": "e85e1bcad3a915dc7e6f41412bc5bdeba275cadd817896ea0451f2140a93967c",
+      "/usr/share/doc/gcc-14-base/copyright": "20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79",
+      "/usr/share/doc/libc6/copyright": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265",
+      "/usr/share/doc/libssl3t64/copyright": "6a7da622fe0637a334d2a8fc470852d2ffb77d9a2b2f930f854e32a41ad6ef35",
+      "/usr/share/doc/openssl/copyright": "6a7da622fe0637a334d2a8fc470852d2ffb77d9a2b2f930f854e32a41ad6ef35"
+    },
+    "legalFiles": [
+      "LICENSE",
+      "NOTICE",
+      "eng/provenance/NOTICE.txt",
+      "third-party/DotNet.AspNetCore.NOTICES.txt",
+      "third-party/DotNet.LICENSE.txt",
+      "third-party/DotNet.Runtime.NOTICES.txt",
+      "third-party/Grpc.LICENSE.txt",
+      "third-party/Protobuf.LICENSE.txt"
+    ]
+  }
+}

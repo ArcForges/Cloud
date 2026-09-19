@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "id": "cloud-runtime-notices-r2",
+  "kind": "generated",
+  "sourceRepository": "https://github.com/ArcForges/Cloud",
+  "sourceCommit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+  "sourcePaths": [
+    "Dockerfile",
+    "src/ArcForges.Cloud/Program.cs",
+    "src/ArcForges.Cloud/packages.lock.json"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+      }
+    ],
+    "scope": "Current Native AOT image preserves the immutable official base and its six full Ubuntu copyright files. Full .NET runtime/ASP.NET, gRPC, Protobuf and Apache Contracts legal texts accompany the owned application. Base/system components retain their original licences. No build-only wrapper/tool implementation is introduced into the runtime image.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files."
+  ],
+  "targets": [],
+  "artifactTargets": [
+    {
+      "project": "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+      "package": "arcforges-cloud-container",
+      "kind": "native-image-notices",
+      "profile": "eng/provenance/artifact-profiles/cloud-release-r2.json",
+      "sha256": "bd6882a1b8a9895917cdd44e4a44fc0c75c8e41370b97cce56473d0dcac4a0d2"
+    }
+  ],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "actual-image",
+    "command": "Build the locked Dockerfile Native AOT application; preserve its exact upstream base identity and legal files, install the full source/runtime legal bundle and clean source receipt under /app/notices, then inspect the real final image and run all existing native protocols/restart tests.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files.",
+    "files": [
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Current Native AOT image preserves the immutable official base and its six full Ubuntu copyright files. Full .NET runtime/ASP.NET, gRPC, Protobuf and Apache Contracts legal texts accompany the owned application. Base/system components retain their original licences. No build-only wrapper/tool implementation is introduced into the runtime image."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": {
+    "generators": [
+      {
+        "repository": "https://github.com/dotnet/dotnet",
+        "commit": "95017c711e6afc1085133d440e42b4bd78155701",
+        "paths": [
+          "LICENSE.TXT"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.TXT",
+            "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+            "finding": "Locked .NET 10.0.12 runtime/compiler and ASP.NET Core packages identify this source commit. Their subordinate full notice documents retain every original term."
+          }
+        ]
+      }
+    ],
+    "inputs": [
+      {
+        "repository": "https://github.com/ArcForges/Cloud",
+        "commit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+        "paths": [
+          "Dockerfile",
+          "src/ArcForges.Cloud/Program.cs",
+          "src/ArcForges.Cloud/packages.lock.json"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/grpc/grpc-dotnet",
+        "commit": "4301104498e53898a452e8fb2fea6c0b1492b755",
+        "paths": [
+          "LICENSE"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "Exact source commit is recorded by the locked Grpc 2.83.0 NuGet packages."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/protocolbuffers/protobuf",
+        "commit": "f377bfefc5e2cfab68b816903c25b23e091c439d",
+        "paths": [
+          "LICENSE"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+            "finding": "Exact source commit is recorded by Google.Protobuf 3.36.1; this is the full upstream licence."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/ArcForges/Contracts",
+        "commit": "d77aefabe0676dbe32845cbcf50aee361eb3fe7e",
+        "paths": [
+          "LICENSE"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "NuGet 1.0.0-ci.36.1 binds this producer source; standard Apache legal text is identical and retained in full."
+          }
+        ]
+      }
+    ],
+    "command": "Build the locked Dockerfile Native AOT application; preserve its exact upstream base identity and legal files, install the full source/runtime legal bundle and clean source receipt under /app/notices, then inspect the real final image and run all existing native protocols/restart tests.",
+    "outputSpdx": "AGPL-3.0-only"
+  },
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-19",
+    "decision": "approved",
+    "rationale": "Current Native AOT image preserves the immutable official base and its six full Ubuntu copyright files. Full .NET runtime/ASP.NET, gRPC, Protobuf and Apache Contracts legal texts accompany the owned application. Base/system components retain their original licences. No build-only wrapper/tool implementation is introduced into the runtime image. Revision 2 also closes the exact Native AOT source/lock/configuration inputs and SDK image. Changes to those inputs require a newly reviewed profile; no dependency or runtime behavior is changed.",
+    "baselineCommit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+    "reconciliation": false
+  },
+  "supersedes": "cloud-runtime-notices-r1"
+}

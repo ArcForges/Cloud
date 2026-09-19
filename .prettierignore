@@ -15,3 +15,6 @@ NuGet.Config
 .kotlin/
 **/build/
 **/gradle/verification-metadata.xml
+third-party/
+eng/provenance/records/
+eng/provenance/artifact-profiles/

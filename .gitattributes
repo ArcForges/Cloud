@@ -11,3 +11,5 @@
 *.jar binary
 gradlew text eol=lf
 *.bat text eol=crlf
+# Preserve exact upstream legal whitespace; provenance hashes verify these bytes.
+third-party/** whitespace=-blank-at-eol,-blank-at-eof

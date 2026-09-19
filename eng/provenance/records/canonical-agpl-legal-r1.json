@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "canonical-agpl-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/github/choosealicense.com",
+  "sourceCommit": "58267f8f2c5c0099810849cfd7677f52ae0c0eb3",
+  "sourcePaths": [
+    "_licenses/agpl-3.0.txt"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "_licenses/agpl-3.0.txt",
+        "sha256": "2a1fda78234b71502e2cf8035021b5592f5eba7e8107228aca4d95bba645e397",
+        "finding": "Canonical AGPL v3 body grants verbatim copying of the licence document; site front matter is excluded."
+      }
+    ],
+    "scope": "Reconciliation of the already retained canonical licence body, independently matched to the pinned authoritative template. This does not assert an unknown historic acquisition path.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "GNU Affero General Public License version 3; Copyright Free Software Foundation, Inc. Complete original licence and its verbatim-copying permission are retained."
+  ],
+  "targets": [
+    {
+      "path": "LICENSE",
+      "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "GNU Affero General Public License version 3; Copyright Free Software Foundation, Inc. Complete original licence and its verbatim-copying permission are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "LICENSE"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Reconciliation of the already retained canonical licence body, independently matched to the pinned authoritative template. This does not assert an unknown historic acquisition path."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-19",
+    "decision": "approved",
+    "rationale": "Reconciliation of the already retained canonical licence body, independently matched to the pinned authoritative template. This does not assert an unknown historic acquisition path.",
+    "baselineCommit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+    "reconciliation": true
+  },
+  "supersedes": null
+}

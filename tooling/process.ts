@@ -9,6 +9,10 @@ export const root = path.resolve(import.meta.dirname, "..");
 export const candidateDir = path.join(root, "artifacts", "candidate");
 export const wrangler = path.join(root, "node_modules", "wrangler", "bin", "wrangler.js");
 
+export function gitEnvironment(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
+}
+
 export async function run(command: string, args: string[], capture = false): Promise<string> {
   // Some Windows machines expose Docker only through a WSL wrapper. No shell interpolation.
   if (
@@ -24,7 +28,10 @@ export async function run(command: string, args: string[], capture = false): Pro
       cwd: root,
       windowsHide: true,
       stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit",
-      env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
+      env: {
+        ...(command === "git" ? gitEnvironment() : process.env),
+        WRANGLER_SEND_METRICS: "false",
+      },
     });
     let output = "";
     child.stdout?.on("data", (chunk: Buffer) => {

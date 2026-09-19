@@ -21,7 +21,7 @@
     "lint": "biome lint --error-on-warnings .",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "test": "node --test tests/worker/*.test.ts",
-    "check": "node tooling/project.ts licence && npm run format:check && npm run lint && npm run typecheck && npm test",
+    "check": "node tooling/project.ts licence && node tooling/project.ts provenance && npm run format:check && npm run lint && npm run typecheck && npm test",
     "check:dotnet": "dotnet restore Cloud.slnx --locked-mode && dotnet build Cloud.slnx -c Release --no-restore && dotnet test --solution Cloud.slnx -c Release --no-build && dotnet format Cloud.slnx --no-restore --verify-no-changes",
     "candidate": "node tooling/project.ts candidate",
     "verify:candidate": "node tooling/project.ts verify",
@@ -29,7 +29,7 @@
     "check:kotlin": "node tooling/kotlin.ts build",
     "test:kotlin:live": "node tooling/kotlin.ts live",
     "test:worker": "node tooling/project.ts worker",
-    "dev": "wrangler dev",
+    "dev": "node tooling/project.ts dev",
     "deploy": "node tooling/cloudflare.ts deploy",
     "test:live": "node tooling/cloudflare.ts smoke"
   },

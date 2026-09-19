@@ -16,6 +16,7 @@ LABEL org.opencontainers.image.source="https://github.com/ArcForges/Cloud" \
 WORKDIR /app
 COPY --from=build /out/ArcForges.Cloud ./
 COPY LICENSE ./LICENSE
+COPY artifacts/image-notices/ ./notices/
 ENV ASPNETCORE_ENVIRONMENT=Production \
     DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 USER $APP_UID
