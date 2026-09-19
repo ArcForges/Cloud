@@ -12,27 +12,13 @@ import {
   verifyReleaseFiles,
   verifyWorker,
 } from "../../tooling/release-provenance.ts";
-import { root, run, wrangler } from "../../tooling/process.ts";
+import { root } from "../../tooling/process.ts";
 
 let worker: Buffer;
 let metadata: Record<string, unknown>;
 let revision: string;
-before(async () => {
-  await run(
-    process.execPath,
-    [
-      wrangler,
-      "deploy",
-      "--dry-run",
-      "--containers-rollout",
-      "none",
-      "--outdir",
-      "artifacts/provenance-test-worker",
-      "--metafile",
-      "artifacts/provenance-test-worker/meta.json",
-    ],
-    true,
-  );
+before(() => {
+  // npm's pretest builds these actual inputs once, outside the test runner's process context.
   worker = readFileSync(path.join(root, "artifacts/provenance-test-worker/index.js"));
   metadata = object(
     parseDocument(readFileSync(path.join(root, "artifacts/provenance-test-worker/meta.json"))),

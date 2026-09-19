@@ -358,6 +358,20 @@ async function main() {
     return;
   }
   switch (process.argv[2]) {
+    case "prepare-provenance-test":
+      // Generate real inputs outside node:test's child-process context.
+      await run(process.execPath, [
+        wrangler,
+        "deploy",
+        "--dry-run",
+        "--containers-rollout",
+        "none",
+        "--outdir",
+        "artifacts/provenance-test-worker",
+        "--metafile",
+        "artifacts/provenance-test-worker/meta.json",
+      ]);
+      break;
     case "dev": {
       const head = await run("git", ["rev-parse", "HEAD"], true);
       const dirty = (await run("git", ["status", "--porcelain"], true)).length > 0;
