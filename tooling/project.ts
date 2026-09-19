@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -180,6 +181,8 @@ async function testWorker(candidate: Candidate) {
   // A FROM-only test wrapper reuses the tested binary/image; it does not restore or compile source.
   await writeFile(path.join(testDir, "Dockerfile"), `FROM ${candidate.image}\n`);
   const config = await readJson<WorkerConfig>(path.join(candidateDir, "wrangler.json"));
+  const workerName = `arcforges-cloud-test-${candidate.revision.slice(0, 12)}-${randomUUID().slice(0, 8)}`;
+  config.name = workerName;
   config.main = "../candidate/worker.js";
   config.routes = [];
   config.containers[0].image = "./Dockerfile";
@@ -194,9 +197,14 @@ async function testWorker(candidate: Candidate) {
       "--config",
       path.join(testDir, "wrangler.json"),
       "--persist-to",
-      path.join(testDir, "state"),
+      path.join(testDir, "state", workerName),
     ],
-    { cwd: root, stdio: "inherit", env: { ...process.env, WRANGLER_SEND_METRICS: "false" } },
+    {
+      cwd: root,
+      detached: true,
+      stdio: "inherit",
+      env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
+    },
   );
   try {
     await waitForHealth("http://127.0.0.1:18787/api", candidate.revision, true, 180000);
@@ -208,22 +216,50 @@ async function testWorker(candidate: Candidate) {
       "worker",
     );
     await writeJson(path.join(root, "artifacts", "worker-evidence.json"), {
+      workerName,
       revision: candidate.revision,
       ...result,
       kotlin,
     });
   } finally {
-    child.kill("SIGTERM");
+    // Own the process group; Wrangler and its runtime children cannot signal the test runner.
+    const stop = (signal: NodeJS.Signals) => {
+      if (child.pid && child.exitCode === null && child.signalCode === null) {
+        try {
+          process.kill(-child.pid, signal);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      }
+    };
+    stop("SIGTERM");
     await new Promise<void>((resolve) => {
-      if (child.exitCode !== null) resolve();
+      if (child.exitCode !== null || child.signalCode !== null) resolve();
       else {
         child.once("exit", () => resolve());
         const timer = setTimeout(() => {
-          child.kill("SIGKILL");
+          stop("SIGKILL");
         }, 10000);
         timer.unref();
       }
     });
+    // Miniflare retains Docker containers after exit. Remove only this unique invocation's pair.
+    const prefix = `/workerd-${workerName}-CloudContainer-`;
+    const ids = (
+      await run(
+        "docker",
+        ["ps", "--all", "--quiet", "--no-trunc", "--filter", `name=${prefix}`],
+        true,
+      )
+    )
+      .split(/\s+/u)
+      .filter(Boolean);
+    for (const id of ids) {
+      assert.match(id, /^[a-f0-9]{64}$/u);
+      const name = await run("docker", ["inspect", id, "--format", "{{.Name}}"], true);
+      assert(name.startsWith(prefix), "Refusing to remove a container outside this test");
+      await run("docker", ["rm", "--force", id]);
+    }
   }
 }
 
