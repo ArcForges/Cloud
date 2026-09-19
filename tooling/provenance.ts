@@ -548,7 +548,7 @@ export function auditProvenance(
   }
   const notice = renderNotice(records, active);
   if (options.writeNotice) writeFileSync(path.join(root, noticePath), notice);
-  else assert.deepEqual(readOwned(root, noticePath), notice, "Provenance NOTICE drift");
+  else assert(readOwned(root, noticePath).equals(notice), "Provenance NOTICE drift");
   assert.equal(git(root, "rev-parse", "HEAD"), head, "Source changed during audit");
   if (!options.writeNotice)
     assert.equal(git(root, "status", "--porcelain"), state, "Worktree changed during audit");

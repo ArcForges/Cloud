@@ -85,7 +85,13 @@ test("complete image legal fixture validates and binds source and concrete membe
     f.cleanup();
   }
 });
-for (const change of ["missing licence", "changed notice", "extra resource", "wrong source"])
+for (const change of [
+  "missing licence",
+  "changed notice",
+  "extra resource",
+  "wrong source",
+  "same-length changed source",
+])
   test(`reject image with ${change}`, () => {
     const f = imageFixture();
     try {
@@ -100,6 +106,13 @@ for (const change of ["missing licence", "changed notice", "extra resource", "wr
         writeFileSync(path.join(f.directory, "unreviewed.js"), "extra");
       if (change === "wrong source")
         writeFileSync(path.join(f.directory, "notices/provenance.json"), "{}\n");
+      if (change === "same-length changed source") {
+        const file = path.join(f.directory, "notices/provenance.json");
+        const bytes = readFileSync(file);
+        const offset = bytes.length - 2;
+        bytes.writeUInt8(bytes.readUInt8(offset) ^ 1, offset);
+        writeFileSync(file, bytes);
+      }
       assert.throws(() => verifyImageFiles(root, revision, f.directory));
     } finally {
       f.cleanup();

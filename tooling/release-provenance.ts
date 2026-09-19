@@ -261,9 +261,9 @@ export function verifyImageFiles(owner: string, revision: string, directory: str
   ].sort();
   assert.deepEqual(fileTree(directory), expected, "Unclassified or missing image member");
   const receipt = imageReceipt(owner, revision);
-  assert.deepEqual(
-    readOwned(directory, "notices/provenance.json"),
-    json(receipt),
+  // Compare bytes directly: formatting a large Buffer assertion diff can exhaust the runner.
+  assert(
+    readOwned(directory, "notices/provenance.json").equals(json(receipt)),
     "Changed image source receipt",
   );
   assert.equal(
