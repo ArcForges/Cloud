@@ -22,3 +22,7 @@ Update central NuGet versions and regenerate the per-project locks with `dotnet 
 Write meaningful tests for protocol, failure or security behavior changed. Local mocks are unit evidence only. A dependency PR must also pass AOT compilation and real container/client integration.
 
 All original source and tooling in this repository use AGPL-3.0-only. Preserve third-party licenses and record any copied code with its source and license. Report vulnerabilities privately as described in SECURITY.md.
+
+Follow [the provenance process](docs/provenance.md) before introducing reused material.
+The source gate includes immutable records, complete inventory and deterministic NOTICE;
+the candidate gate also verifies the actual Worker and image legal contents.

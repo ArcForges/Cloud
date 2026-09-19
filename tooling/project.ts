@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,8 +9,22 @@ import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "
 import { verifyProtocol, waitForHealth } from "./protocol.ts";
 import { verifyKotlin } from "./kotlin.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
+import { auditProvenance } from "./provenance.ts";
+import {
+  legalBundle,
+  stageImageNotices,
+  verifyImageProvenance,
+  verifyReleaseFiles,
+} from "./release-provenance.ts";
 
-const payloadFiles = ["docker-image.tar", "worker.js", "wrangler.json"] as const;
+const payloadFiles = [
+  "docker-image.tar",
+  "worker.js",
+  "wrangler.json",
+  "legal-notices.json",
+  "worker-meta.json",
+  "image-provenance.json",
+] as const;
 export interface Candidate {
   schema: 1;
   revision: string;
@@ -71,6 +86,7 @@ export async function verifyCandidate(): Promise<Candidate> {
   assert.equal(config.containers[0]?.image, candidate.image);
   assert.equal(config.containers[0]?.max_instances, 1);
   assert.equal(config.no_bundle, true);
+  verifyReleaseFiles(root, candidateDir, candidate.revision, candidate.imageId);
   return candidate;
 }
 
@@ -109,6 +125,8 @@ export async function testContainer(image: string, revision: string) {
     true,
   );
   try {
+    const provenance = await verifyImageProvenance(id, revision, imageInfo.Id);
+    await writeJson(path.join(candidateDir, "image-provenance.json"), provenance);
     const binding = async (port: string) => {
       const output = await run("docker", ["port", id, port], true);
       const match = /^127\.0\.0\.1:(\d+)$/.exec(output);
@@ -163,6 +181,8 @@ async function testWorker(candidate: Candidate) {
   // A FROM-only test wrapper reuses the tested binary/image; it does not restore or compile source.
   await writeFile(path.join(testDir, "Dockerfile"), `FROM ${candidate.image}\n`);
   const config = await readJson<WorkerConfig>(path.join(candidateDir, "wrangler.json"));
+  const workerName = `arcforges-cloud-test-${candidate.revision.slice(0, 12)}-${randomUUID().slice(0, 8)}`;
+  config.name = workerName;
   config.main = "../candidate/worker.js";
   config.routes = [];
   config.containers[0].image = "./Dockerfile";
@@ -177,9 +197,14 @@ async function testWorker(candidate: Candidate) {
       "--config",
       path.join(testDir, "wrangler.json"),
       "--persist-to",
-      path.join(testDir, "state"),
+      path.join(testDir, "state", workerName),
     ],
-    { cwd: root, stdio: "inherit", env: { ...process.env, WRANGLER_SEND_METRICS: "false" } },
+    {
+      cwd: root,
+      detached: true,
+      stdio: "inherit",
+      env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
+    },
   );
   try {
     await waitForHealth("http://127.0.0.1:18787/api", candidate.revision, true, 180000);
@@ -191,22 +216,50 @@ async function testWorker(candidate: Candidate) {
       "worker",
     );
     await writeJson(path.join(root, "artifacts", "worker-evidence.json"), {
+      workerName,
       revision: candidate.revision,
       ...result,
       kotlin,
     });
   } finally {
-    child.kill("SIGTERM");
+    // Own the process group; Wrangler and its runtime children cannot signal the test runner.
+    const stop = (signal: NodeJS.Signals) => {
+      if (child.pid && child.exitCode === null && child.signalCode === null) {
+        try {
+          process.kill(-child.pid, signal);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      }
+    };
+    stop("SIGTERM");
     await new Promise<void>((resolve) => {
-      if (child.exitCode !== null) resolve();
+      if (child.exitCode !== null || child.signalCode !== null) resolve();
       else {
         child.once("exit", () => resolve());
         const timer = setTimeout(() => {
-          child.kill("SIGKILL");
+          stop("SIGKILL");
         }, 10000);
         timer.unref();
       }
     });
+    // Miniflare retains Docker containers after exit. Remove only this unique invocation's pair.
+    const prefix = `/workerd-${workerName}-CloudContainer-`;
+    const ids = (
+      await run(
+        "docker",
+        ["ps", "--all", "--quiet", "--no-trunc", "--filter", `name=${prefix}`],
+        true,
+      )
+    )
+      .split(/\s+/u)
+      .filter(Boolean);
+    for (const id of ids) {
+      assert.match(id, /^[a-f0-9]{64}$/u);
+      const name = await run("docker", ["inspect", id, "--format", "{{.Name}}"], true);
+      assert(name.startsWith(prefix), "Refusing to remove a container outside this test");
+      await run("docker", ["rm", "--force", id]);
+    }
   }
 }
 
@@ -222,6 +275,12 @@ async function buildCandidate() {
   const version = `0.1.0-${suffix}`;
   const image = `arcforges-cloud:${suffix}`;
   await mkdir(candidateDir, { recursive: true });
+  await writeJson(
+    path.join(root, "artifacts/evidence/source-provenance.json"),
+    auditProvenance(root),
+  );
+  stageImageNotices(root, revision);
+  await writeJson(path.join(candidateDir, "legal-notices.json"), legalBundle(root, revision));
   await run("docker", [
     "build",
     "--platform",
@@ -242,7 +301,13 @@ async function buildCandidate() {
     "none",
     "--outdir",
     "artifacts/worker-bundle",
+    "--metafile",
+    "artifacts/worker-bundle/bundle-meta.json",
   ]);
+  await copyFile(
+    path.join(root, "artifacts/worker-bundle/bundle-meta.json"),
+    path.join(candidateDir, "worker-meta.json"),
+  );
   await copyFile(
     path.join(root, "artifacts/worker-bundle/index.js"),
     path.join(candidateDir, "worker.js"),
@@ -271,6 +336,13 @@ async function buildCandidate() {
 }
 
 async function main() {
+  if (process.argv[2] === "provenance" || process.argv[2] === "provenance-notice") {
+    await writeJson(
+      path.join(root, "artifacts/evidence/source-provenance.json"),
+      auditProvenance(root, { writeNotice: process.argv[2] === "provenance-notice" }),
+    );
+    return;
+  }
   if (process.argv[2] === "licence") {
     await writeJson(
       path.join(root, "artifacts/evidence/licence-boundary.json"),
@@ -286,6 +358,27 @@ async function main() {
     return;
   }
   switch (process.argv[2]) {
+    case "prepare-provenance-test":
+      // Generate real inputs outside node:test's child-process context.
+      await run(process.execPath, [
+        wrangler,
+        "deploy",
+        "--dry-run",
+        "--containers-rollout",
+        "none",
+        "--outdir",
+        "artifacts/provenance-test-worker",
+        "--metafile",
+        "artifacts/provenance-test-worker/meta.json",
+      ]);
+      break;
+    case "dev": {
+      const head = await run("git", ["rev-parse", "HEAD"], true);
+      const dirty = (await run("git", ["status", "--porcelain"], true)).length > 0;
+      stageImageNotices(root, head + (dirty ? "-dirty" : ""));
+      await run(process.execPath, [wrangler, "dev"]);
+      break;
+    }
     case "hooks":
       // Worktree-specific settings keep the primary checkout and other tasks untouched.
       await run("git", ["config", "extensions.worktreeConfig", "true"]);

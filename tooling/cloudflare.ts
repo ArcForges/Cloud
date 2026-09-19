@@ -5,6 +5,7 @@ import { candidateDir, readJson, root, run, wrangler, writeJson } from "./proces
 import { verifyCandidate, type WorkerConfig } from "./project.ts";
 import { verifyProtocol, waitForHealth } from "./protocol.ts";
 import { verifyKotlin } from "./kotlin.ts";
+import { verifyStoredImage } from "./release-provenance.ts";
 
 const productionBase = "https://arcforges.com/api";
 const deploymentFile = path.join(root, "artifacts", "deployment.json");
@@ -56,6 +57,16 @@ async function deploy() {
     true,
   );
   assert.equal(imageId, candidate.imageId, "Loaded image is not the tested image.");
+  const actualImageProvenance = await verifyStoredImage(
+    candidate.image,
+    imageId,
+    candidate.revision,
+  );
+  assert.deepEqual(
+    actualImageProvenance,
+    await readJson(path.join(candidateDir, "image-provenance.json")),
+    "Promoted image provenance changed",
+  );
   await run(process.execPath, [wrangler, "containers", "push", candidate.image]);
   const registryTag = `registry.cloudflare.com/${account}/${candidate.image}`;
   const digests = JSON.parse(

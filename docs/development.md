@@ -31,6 +31,11 @@ The host binds HTTP/1.1 gRPC-Web/health to 8080 and native HTTP/2 gRPC to 8081. 
 
 `test:worker` runs Wrangler locally with the candidate bundle and a FROM-only image wrapper around the tested image. It does not compile source again. TypeScript and Kotlin verify real Worker → Durable Object → Docker → gRPC-Web behavior through `/api`. Cloudflare's Linux CI runner supports this without an account/token. The bundled Worker and image remain the publication inputs; the local wrapper is test-only.
 
+Each invocation has a unique local Worker name and state directory. This prevents an
+older Docker container from satisfying a new candidate's health requests. The gate
+requires the exact candidate revision and removes only the containers created for
+that invocation when it exits.
+
 ## Windows and WSL
 
 Source checks work in Windows PowerShell. If Docker is exposed only through `wsl -e docker`, set `$env:CLOUD_DOCKER_WSL = '1'` before `npm run candidate`. This affects the tooling's Docker invocation only; a native Docker Desktop CLI does not need it.

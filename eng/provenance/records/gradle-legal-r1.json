@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "gradle-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/gradle/gradle",
+  "sourceCommit": "92f0512e7f06d84621afba191f75e265363890cf",
+  "sourcePaths": [
+    "platforms/software/build-init/src/main/java/org/gradle/api/tasks/wrapper/internal/WrapperGenerator.java",
+    "platforms/jvm/plugins-application/src/main/resources/org/gradle/api/internal/plugins/unixStartScript.txt",
+    "platforms/jvm/plugins-application/src/main/resources/org/gradle/api/internal/plugins/windowsStartScript.txt",
+    "platforms/core-runtime/wrapper-main/src/main/java/org/gradle/wrapper/GradleWrapperMain.java"
+  ],
+  "licence": {
+    "spdx": "Apache-2.0",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "finding": "Wrapper generator/templates and launcher retain their Apache-2.0 file headers; no unrelated Gradle distribution implementation is copied."
+      }
+    ],
+    "scope": "Full Apache terms for the source-only wrapper.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "Full Apache terms for the source-only wrapper."
+  ],
+  "targets": [
+    {
+      "path": "third-party/Gradle.LICENSE.txt",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Full Apache terms for the source-only wrapper.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/Gradle.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Full Apache terms for the source-only wrapper."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-19",
+    "decision": "approved",
+    "rationale": "Full Apache terms for the source-only wrapper.",
+    "baselineCommit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

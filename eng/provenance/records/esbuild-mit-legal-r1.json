@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "esbuild-mit-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/evanw/esbuild",
+  "sourceCommit": "bb9db84c02433fbe37b3509f53f9f3e3cc48725e",
+  "sourcePaths": [
+    "LICENSE.md"
+  ],
+  "licence": {
+    "spdx": "MIT",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE.md",
+        "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
+        "finding": "The inserted name helper is from internal/runtime/runtime.go under this MIT grant."
+      }
+    ],
+    "scope": "Copyright 2020 Evan Wallace. Complete MIT notice for inserted esbuild runtime helper.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "Copyright 2020 Evan Wallace. Complete MIT notice for inserted esbuild runtime helper."
+  ],
+  "targets": [
+    {
+      "path": "third-party/Esbuild.LICENSE.txt",
+      "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Copyright 2020 Evan Wallace. Complete MIT notice for inserted esbuild runtime helper.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/Esbuild.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Copyright 2020 Evan Wallace. Complete MIT notice for inserted esbuild runtime helper."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-19",
+    "decision": "approved",
+    "rationale": "Copyright 2020 Evan Wallace. Complete MIT notice for inserted esbuild runtime helper.",
+    "baselineCommit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

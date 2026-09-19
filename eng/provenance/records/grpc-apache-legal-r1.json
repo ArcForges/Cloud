@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "grpc-apache-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/grpc/grpc-dotnet",
+  "sourceCommit": "4301104498e53898a452e8fb2fea6c0b1492b755",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "Apache-2.0",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "finding": "Exact source commit is recorded by the locked Grpc 2.83.0 NuGet packages."
+      }
+    ],
+    "scope": "Copyright the gRPC Authors. Apache-2.0 for the locked compiled gRPC library scope.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "Copyright the gRPC Authors. Apache-2.0 for the locked compiled gRPC library scope."
+  ],
+  "targets": [
+    {
+      "path": "third-party/Grpc.LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Copyright the gRPC Authors. Apache-2.0 for the locked compiled gRPC library scope.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/Grpc.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Copyright the gRPC Authors. Apache-2.0 for the locked compiled gRPC library scope."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-19",
+    "decision": "approved",
+    "rationale": "Copyright the gRPC Authors. Apache-2.0 for the locked compiled gRPC library scope.",
+    "baselineCommit": "2cf5a58633a7e09db05ebc1741f1cab83547a832",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

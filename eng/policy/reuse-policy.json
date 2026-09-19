@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "repository": "Cloud",
+  "licenceBoundary": "AGPL",
+  "authority": {
+    "repository": "https://github.com/ArcForges/ArcForges-Design",
+    "commit": "5322d698a1b650a52a5a139d986dd85b00b48581",
+    "path": "docs/assurance/reference-coverage-and-provenance.md"
+  },
+  "decisions": {
+    "permissive": {
+      "AGPL": "audit",
+      "Apache": "audit"
+    },
+    "agpl-compatible": {
+      "AGPL": "exact-review",
+      "Apache": "prohibited"
+    },
+    "gpl-only": {
+      "AGPL": "prohibited",
+      "Apache": "prohibited"
+    },
+    "unclear": {
+      "AGPL": "prohibited",
+      "Apache": "prohibited"
+    },
+    "incompatible": {
+      "AGPL": "prohibited",
+      "Apache": "prohibited"
+    }
+  },
+  "licences": {
+    "Apache-2.0": "permissive",
+    "MIT": "permissive",
+    "BSD-2-Clause": "permissive",
+    "BSD-3-Clause": "permissive",
+    "ISC": "permissive",
+    "AGPL-3.0-only": "agpl-compatible",
+    "GPL-2.0-only": "gpl-only",
+    "GPL-3.0-only": "gpl-only",
+    "NOASSERTION": "unclear",
+    "EPL-1.0": "incompatible"
+  }
+}

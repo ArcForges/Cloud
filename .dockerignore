@@ -11,5 +11,8 @@
 !src/ArcForges.Cloud/*.cs
 !src/ArcForges.Cloud/*.csproj
 !src/ArcForges.Cloud/packages.lock.json
+!artifacts/
+!artifacts/image-notices/
+!artifacts/image-notices/**
 **/bin/
 **/obj/
