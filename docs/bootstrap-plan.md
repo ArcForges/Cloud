@@ -6,7 +6,7 @@ Status: implementation delivered in Cloud PR #1. The workflow records source, re
 
 Build an independently reproducible Hello service in C# 14 / .NET 10, publish a real Linux x64 Native AOT executable in a non-root Docker image, and run that image in Cloudflare Containers behind a small TypeScript Worker. Consume the already published `ArcForges.Contracts.PublicApi` package; never copy generated contracts or depend on adjacent source repositories. Keep the repository's AGPL-3.0-only license.
 
-This is a public, stateless transport demonstration. It does not implement accounts, authentication, billing, PostgreSQL, AI, or the full Cloud product. No model calls or application secrets are needed. Deployment credentials are still required. Docker, CI, and production Cloudflare evidence must be reported separately.
+This is a public, stateless transport demonstration. It does not implement accounts, authentication, billing, D1 business transactions, AI integration, or the full Cloud product. No model calls or application secrets are needed. Deployment credentials are still required. Docker, CI, and production Cloudflare evidence must be reported separately.
 
 ## Collected inputs
 
