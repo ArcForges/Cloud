@@ -10,7 +10,7 @@ Web / published TypeScript or Kotlin gRPC-Web client
         → generated gRPC service → Hello, ArcForges!
 ```
 
-The separate `arcforges-web` Worker continues serving the website. This repository implements a bounded, anonymous Hello diagnostic. Accounts, PostgreSQL, AI and commercial APIs are future work; the previous monorepo is not a runtime/build dependency.
+The separate `arcforges-web` Worker continues serving the website. This repository implements a bounded, anonymous Hello diagnostic. Accounts, D1 business transactions, AI integration and commercial APIs are future work; the previous monorepo is not a runtime/build dependency.
 
 - [Development and local validation](docs/development.md)
 - [Cloudflare setup, deployment and recovery](docs/deployment.md)
