@@ -149,7 +149,7 @@ jobs:
         run: |
           curl --fail --silent --show-error --location https://github.com/dsp-testing/codeql-cli-nightlies/releases/download/codeql-bundle-20260913/codeql-bundle-java-linux64.tar.zst --output "$RUNNER_TEMP/codeql-kotlin.tar.zst"
           echo '2f7435b506f062753a55e91e428df33bd0d9dfc8fed196114844f611334255de  '"$RUNNER_TEMP/codeql-kotlin.tar.zst" | sha256sum --check --strict
-      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
+      - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -162,7 +162,7 @@ jobs:
       - name: Compile Kotlin for analysis
         if: matrix.language == 'java-kotlin'
         run: tests/kotlin-consumer/gradlew -p tests/kotlin-consumer --no-daemon --console=plain --no-build-cache --dependency-verification=strict clean classes
-      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
+      - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           category: /language:${{ matrix.language }}
 
