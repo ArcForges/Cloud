@@ -11,6 +11,7 @@ indent_size = 2
 [*.cs]
 indent_size = 4
 csharp_style_namespace_declarations = file_scoped:warning
+dotnet_diagnostic.IDE0161.severity = error
 dotnet_sort_system_directives_first = true
 
 [*.{csproj,props,slnx}]
