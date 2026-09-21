@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-FROM mcr.microsoft.com/dotnet/sdk:10.0.401-noble-aot@sha256:1a069a730888d278b5ac00e3e238707387d20d2b65f0fc6866b6180df0a767e0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401-noble-aot@sha256:96f3b7d45f53eb05990f05b89ce61c4e23d07a5098521c2f20b018630e34f298 AS build
 WORKDIR /source
 COPY global.json Directory.Build.props Directory.Build.targets Directory.Packages.props NuGet.Config ./
 COPY src/ArcForges.Cloud/ArcForges.Cloud.csproj src/ArcForges.Cloud/packages.lock.json ./src/ArcForges.Cloud/
