@@ -450,13 +450,10 @@ async function main() {
       config.main = path.join(root, "worker/index.ts");
       config.containers[0].image = path.join(root, "Dockerfile");
       config.containers[0].image_build_context = root;
-      config.containers[0].image_vars = imageBuildVariables(
-        expectedIdentity(`0.1.0-local.${Date.now()}`),
-      );
+      const identity = expectedIdentity(`0.1.0-local.${Date.now()}`);
+      config.containers[0].image_vars = imageBuildVariables(identity);
       config.vars.SOURCE_REVISION = head + (dirty ? "-dirty" : "");
-      config.vars.BUILD_IDENTITY = JSON.stringify(
-        expectedIdentity(config.containers[0].image_vars.APP_VERSION!).build,
-      );
+      config.vars.BUILD_IDENTITY = JSON.stringify(identity.build);
       await writeJson(path.join(root, "artifacts/dev.wrangler.json"), config);
       await run(process.execPath, [wrangler, "dev", "--config", "artifacts/dev.wrangler.json"]);
       break;

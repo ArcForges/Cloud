@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "id": "cloud-worker-bundle-r5",
+  "kind": "generated",
+  "sourceRepository": "https://github.com/ArcForges/Cloud",
+  "sourceCommit": "5eb1999d14807acbddb7cc6ecf308d58b99b5fa9",
+  "sourcePaths": [
+    "worker/index.ts",
+    "worker/router.ts"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+      }
+    ],
+    "scope": "Current Worker bundle includes reviewed Cloudflare Containers and an esbuild helper under MIT alongside AGPL-owned routing. Exact locks, all source inputs, closed output membership and full legal texts are required. Browser/client UI is not introduced.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Cloud routing: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. Complete respective terms accompany the actual Worker bundle."
+  ],
+  "targets": [],
+  "artifactTargets": [
+    {
+      "project": "package.json",
+      "package": "arcforges-cloud-worker",
+      "kind": "worker-bundle",
+      "profile": "eng/provenance/artifact-profiles/cloud-release-r5.json",
+      "sha256": "598b40099f69cf75bd467dbf7809076ee07c1f9b046a6bb96363639aebc0e65c"
+    }
+  ],
+  "disposition": "Rewrite",
+  "verification": {
+    "kind": "regeneration",
+    "command": "Locked npm restore; independently reproduce the four upstream compiled Containers inputs with its locked TypeScript 6.0.3; wrangler deploy --dry-run --containers-rollout none --outdir artifacts/worker-bundle --metafile artifacts/worker-bundle/bundle-meta.json. Match all declared source and output inputs and exact Worker bytes; preserve full MIT and AGPL texts.",
+    "expected": "Exact reviewed input hashes and unchanged full upstream legal texts; actual compiled identity independently checked against Git/run/release/locks. Worker bytes match the independently transformed baseline, not an allowlist learned from a candidate.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Cloud routing: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. Complete respective terms accompany the actual Worker bundle.",
+    "files": [
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Current Worker bundle includes reviewed Cloudflare Containers and an esbuild helper under MIT alongside AGPL-owned routing. Exact locks, all source inputs, closed output membership and full legal texts are required. Browser/client UI is not introduced."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": {
+    "generators": [
+      {
+        "repository": "https://github.com/cloudflare/workers-sdk",
+        "commit": "bbf2f794365bcce20131aa05f6a11f2ed0f18463",
+        "paths": [
+          "packages/wrangler/src/deployment-bundle/bundle.ts"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE-MIT",
+            "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+            "finding": "Wrangler MIT choice is compatible; its implementation is a build tool, not bundled Worker code."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/evanw/esbuild",
+        "commit": "bb9db84c02433fbe37b3509f53f9f3e3cc48725e",
+        "paths": [
+          "internal/runtime/runtime.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.md",
+            "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
+            "finding": "Only the actual generated __defProp/__name helper is inserted; its MIT licence accompanies the Worker."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/microsoft/TypeScript",
+        "commit": "050880ce59e30b356b686bd3144efe24f875ebc8",
+        "paths": [
+          "src/compiler/transformers/ts.ts"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE.txt",
+            "sha256": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47",
+            "finding": "Upstream exact lock selects 6.0.3. Independent transpilation reproduced all four Containers JavaScript files byte-for-byte; compiler implementation is not bundled."
+          }
+        ]
+      }
+    ],
+    "inputs": [
+      {
+        "repository": "https://github.com/ArcForges/Cloud",
+        "commit": "5eb1999d14807acbddb7cc6ecf308d58b99b5fa9",
+        "paths": [
+          "worker/index.ts",
+          "worker/router.ts"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/cloudflare/containers",
+        "commit": "298169f4aaba82e7b712458b7c6b14fc3e40ad78",
+        "paths": [
+          "src/lib/helpers.ts",
+          "src/lib/container.ts",
+          "src/lib/utils.ts",
+          "src/index.ts"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE-MIT",
+            "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+            "finding": "Exact source files and generated npm package bytes reviewed; no subordinate licence override; MIT alternative selected, full copyright/terms retained."
+          }
+        ]
+      }
+    ],
+    "command": "Locked npm restore; independently reproduce the four upstream compiled Containers inputs with its locked TypeScript 6.0.3; wrangler deploy --dry-run --containers-rollout none --outdir artifacts/worker-bundle --metafile artifacts/worker-bundle/bundle-meta.json. Match all declared source and output inputs and exact Worker bytes; preserve full MIT and AGPL texts.",
+    "outputSpdx": "AGPL-3.0-only"
+  },
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-21",
+    "decision": "approved",
+    "rationale": "WP02.04 reviews the authored source/input changes at 5eb1999d14807acbddb7cc6ecf308d58b99b5fa9. Full .NET/base/upstream licence identities stay pinned. The Worker expected bytes are independently obtained by adding one reviewed build-header assignment to the retained prior exact bundle (old SHA 37d36ff37803fd4dfc5fef623ddc4a1b5e607d50782c3bf7c949b1dbb4e8fa9c, new SHA a386a9f90d50f2b297f22e78c460f47e29f4005ec4313980348e4c53b82764e4); regenerated bytes matched exactly before this profile was admitted. The image source closure adds the catalog, npm lock and reviewed support resolver. Source-only Build.Policy stays private; original AGPL source adaptation is declared by arcnotes-build-identity-r1. Actual image, Worker and deployment gates remain mandatory.",
+    "baselineCommit": "8942437a5e42c01ae7595b64a220efd60f33b4f0",
+    "reconciliation": false
+  },
+  "supersedes": "cloud-worker-bundle-r4"
+}
