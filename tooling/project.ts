@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
@@ -335,7 +335,23 @@ async function buildCandidate() {
   console.log(`Verified candidate ${version}: ${imageId}`);
 }
 
+export async function verifyToolchain(nodeVersion: string, npmVersion: string) {
+  const expectedNode = (await readFile(path.join(root, ".node-version"), "utf8")).trim();
+  const manifest = await readJson<{ packageManager: string }>(path.join(root, "package.json"));
+  assert.equal(nodeVersion, `v${expectedNode}`, "Select the pinned Node version.");
+  assert.equal(`npm@${npmVersion}`, manifest.packageManager, "Select the pinned npm version.");
+}
+
 async function main() {
+  if (process.argv[2] === "toolchain") {
+    assert(process.env.npm_execpath, "Run this check through npm run check.");
+    await verifyToolchain(
+      process.version,
+      await run(process.execPath, [process.env.npm_execpath, "--version"], true),
+    );
+    console.log("Pinned Node/npm toolchain verified.");
+    return;
+  }
   if (process.argv[2] === "provenance" || process.argv[2] === "provenance-notice") {
     await writeJson(
       path.join(root, "artifacts/evidence/source-provenance.json"),

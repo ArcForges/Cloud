@@ -76,3 +76,7 @@ This JVM client proves the same published transport works with Cloud. Android de
 ## Tool updates
 
 Central package versions and project locks must move together. Keep SDK/base-image patches aligned deliberately; a Dependabot SDK PR alone does not automatically update Docker. Review exact Contracts versions across C#, TypeScript and Kotlin together. After a deliberate Kotlin dependency change, run `tests/kotlin-consumer/gradlew -p tests/kotlin-consumer --write-locks --write-verification-metadata sha256 resolveDependencies check installDist` with an empty `GRADLE_USER_HOME` under ignored `artifacts/`. A warm cache can omit plugin BOM metadata needed on fresh CI runners. Review the new coordinates/hashes, then rerun `npm run check:kotlin` with strict verification. Never disable locks or add broad checksum trust rules to fix CI. CI blocks compatibility or AOT regressions.
+
+## Reproducible Java selection
+
+CI selects the reviewed Temurin patch from `.java-version`, rather than a moving major-version selector. Keep the existing JVM bytecode target and strict Gradle locks/checksum verification. Local checks record the actual installed JDK; only the matching pinned hosted producer run establishes the candidate toolchain identity. Dependency resolution can be repeated with `--offline` after fetching the complete locked cache. An unavailable cache entry fails instead of silently downloading during that repeat.
