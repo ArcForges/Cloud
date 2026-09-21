@@ -51,10 +51,12 @@
     "eng/provenance/artifact-profiles/cloud-release-r6.json",
     "eng/provenance/artifact-profiles/cloud-release-r7.json",
     "eng/provenance/artifact-profiles/cloud-release-r8.json",
+    "eng/provenance/artifact-profiles/cloud-release-r9.json",
     "eng/provenance/files.json",
     "eng/provenance/records/arcnotes-build-identity-r1.json",
     "eng/provenance/records/canonical-agpl-legal-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r1.json",
+    "eng/provenance/records/cloud-runtime-notices-r10.json",
     "eng/provenance/records/cloud-runtime-notices-r2.json",
     "eng/provenance/records/cloud-runtime-notices-r3.json",
     "eng/provenance/records/cloud-runtime-notices-r4.json",
@@ -71,6 +73,7 @@
     "eng/provenance/records/cloud-worker-bundle-r6.json",
     "eng/provenance/records/cloud-worker-bundle-r7.json",
     "eng/provenance/records/cloud-worker-bundle-r8.json",
+    "eng/provenance/records/cloud-worker-bundle-r9.json",
     "eng/provenance/records/containers-mit-legal-r1.json",
     "eng/provenance/records/dotnet-aspnetcore-legal-r1.json",
     "eng/provenance/records/dotnet-license-legal-r1.json",
@@ -143,5 +146,5 @@
     "eng/version-sources.json": "arcnotes-build-identity-r1",
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r1"
   },
-  "artifacts": ["cloud-runtime-notices-r9", "cloud-worker-bundle-r8"]
+  "artifacts": ["cloud-runtime-notices-r10", "cloud-worker-bundle-r9"]
 }
