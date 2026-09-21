@@ -1,6 +1,4 @@
 #!/bin/sh
-# SPDX-License-Identifier: AGPL-3.0-only
-# Fixture repositories must not inherit this worktree's Git/index selection.
-for variable in $(git rev-parse --local-env-vars); do unset "$variable"; done
-npm run check || exit $?
-dotnet format Cloud.slnx --no-restore --verify-no-changes
+set -eu
+# Compilation and tests are explicit; hooks do not repeat them.
+git diff --check

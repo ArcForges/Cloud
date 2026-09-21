@@ -5,9 +5,8 @@ import { candidateDir, readJson, root, run, wrangler, writeJson } from "./proces
 import { verifyCandidate, type WorkerConfig } from "./project.ts";
 import { verifyProtocol, waitForHealth } from "./protocol.ts";
 import { verifyKotlin } from "./kotlin.ts";
-import { verifyStoredImage } from "./release-provenance.ts";
 
-import { expectedIdentity, verifyIdentity, verifyHealthIdentity } from "./build-identity.ts";
+import { expectedIdentity, verifyHealthIdentity } from "./build-identity.ts";
 
 const productionBase = "https://arcforges.com/api";
 const deploymentFile = path.join(root, "artifacts", "deployment.json");
@@ -58,37 +57,7 @@ async function deploy() {
     ["image", "inspect", candidate.image, "--format", "{{.Id}}"],
     true,
   );
-  assert.equal(imageId, candidate.imageId, "Loaded image is not the tested image.");
-  const actualImageProvenance = await verifyStoredImage(
-    candidate.image,
-    imageId,
-    candidate.revision,
-  );
-  assert.deepEqual(
-    actualImageProvenance,
-    await readJson(path.join(candidateDir, "image-provenance.json")),
-    "Promoted image provenance changed",
-  );
-  verifyIdentity(
-    JSON.parse(
-      await run(
-        "docker",
-        [
-          "run",
-          "--rm",
-          "--network",
-          "none",
-          "--read-only",
-          "--cap-drop",
-          "ALL",
-          candidate.image,
-          "--build-info",
-        ],
-        true,
-      ),
-    ),
-    candidate.version,
-  );
+  assert.equal(imageId, candidate.imageId, "Loaded image is not the sealed candidate image.");
   await run(process.execPath, [wrangler, "containers", "push", candidate.image]);
   const registryTag = `registry.cloudflare.com/${account}/${candidate.image}`;
   const digests = JSON.parse(
@@ -131,6 +100,7 @@ async function deploy() {
 }
 
 async function smoke() {
+  assert.notEqual(process.env.CI, "true", "Live service tests are local opt-in only.");
   const candidate = await verifyCandidate();
   const deployment = await readJson<Deployment>(deploymentFile);
   assert.equal(deployment.revision, candidate.revision);

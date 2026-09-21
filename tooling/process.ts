@@ -14,15 +14,6 @@ export function gitEnvironment(): NodeJS.ProcessEnv {
 }
 
 export async function run(command: string, args: string[], capture = false): Promise<string> {
-  // Some Windows machines expose Docker only through a WSL wrapper. No shell interpolation.
-  if (
-    command === "docker" &&
-    process.platform === "win32" &&
-    process.env.CLOUD_DOCKER_WSL === "1"
-  ) {
-    args = ["-e", "docker", ...args];
-    command = "wsl.exe";
-  }
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: root,

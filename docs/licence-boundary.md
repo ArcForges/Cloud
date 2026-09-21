@@ -20,7 +20,7 @@ targets reject wrong effective values before build/pack. Source and evaluated
 reports include the exact commit, dirty state, inventory and findings under
 `artifacts/evidence/licence-*.json`; CI uploads the reports.
 
-The npm scope, three managed projects and independent Kotlin consumer are covered. Gradle checks its actual evaluated declaration and graph and writes `tests/kotlin-consumer/build/reports/licence-boundary.json`. The Docker build includes the same MSBuild guard; the AOT image cannot omit the declaration check. Existing image, three-client protocol, restart, local Worker/Container and post-merge live Cloudflare verification remain required.
+The npm scope, three managed projects and independent Kotlin consumer are covered. Gradle checks its actual evaluated declaration and graph and writes `tests/kotlin-consumer/build/reports/licence-boundary.json`. The Docker build includes the same MSBuild guard; the AOT image cannot omit the declaration check. Image construction and legal inspection remain required; runtime/client/restart and post-merge live checks are removed under [validation policy](validation-policy.md).
 
 These source/build-policy results do not establish product functionality or close
 later commercial gates. Local candidate identity and fixture/runtime evidence are

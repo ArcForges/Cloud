@@ -64,29 +64,25 @@ legal documents, and inspects `/app` in the real final Native AOT image. The ima
 must contain only the application, retained root licence and the declared notice
 tree. Each full notice, its source receipt and all six base copyright paths are
 verified. The existing immutable base preserves its own original terms. The
-native binary's concrete hash is recorded along with the image identity. The
-existing C#/TypeScript/Kotlin, restart and local Worker/Container tests remain
-required; provenance checks do not replace runtime evidence.
+native binary's concrete hash is recorded along with the image identity. Runtime checks are explicit local opt-in under [validation policy](validation-policy.md); provenance inspection does not launch the application or establish runtime evidence.
 
 The candidate's `legal-notices.json` contains the full relevant licence texts,
 active source records and source/profile identities. `worker-meta.json` describes
 the actual bundle; `image-provenance.json` records the inspected image closure.
 Every payload is covered by the candidate manifest. Verification independently
 compares Worker bytes and legal contents with the approved source profile, so
-forging a new outer payload hash does not admit changed content. After loading the
-tested image, deployment inspects it again and compares the complete image receipt
-before promotion. Publishing never rebuilds the Worker or application.
+forging a new outer payload hash does not admit changed content. The promotion entry point validates the sealed candidate and loaded image ID without repeating extraction or executing the application. Publishing never rebuilds the Worker or application.
 
 The image has readable full legal files and `provenance.json` under `/app/notices`;
 the Worker release archive has its applicable full texts in `legal-notices.json`.
 The source summary also describes source-only Gradle material and does not claim
 it is shipped in either runtime. No browser UI is added to native applications.
 
-Windows/Linux source CI runs positive and failure tests and retains the source
-receipt. Candidate/deployment jobs retain actual image and protocol evidence.
+Linux source CI runs positive and failure tests and retains the source
+receipt. Candidate/deployment jobs retain legal image metadata and the provider deployment record.
 These gates cover the current scaffold and provenance obligations; they do not
 establish completed business features or commercial readiness.
 
 ## WP02.04 support identity
 
-`cloud-release-r5` and successors `cloud-runtime-notices-r6` / `cloud-worker-bundle-r5` retain every predecessor. They bind the reviewed source commit, embedded version inputs and exact Worker build-header change. Its expected bundle was derived from the retained r4 bundle plus that single reviewed assignment before regeneration; full byte equality was then verified. `arcnotes-build-identity-r1` records the resolver/catalog/test/PE-inspection adaptation under the same AGPL boundary. Full corresponding source and original terms remain in the distributed legal bundle. Actual image support identity, three compiled assemblies and Worker/Container deployment identity are additional gates; none replaces existing protocol or legal checks.
+`cloud-release-r5` and successors `cloud-runtime-notices-r6` / `cloud-worker-bundle-r5` retain every predecessor. They bind the reviewed source commit, embedded version inputs and exact Worker build-header change. Its expected bundle was derived from the retained r4 bundle plus that single reviewed assignment before regeneration; full byte equality was then verified. `arcnotes-build-identity-r1` records the resolver/catalog/test/PE-inspection adaptation under the same AGPL boundary. Full corresponding source and original terms remain in the distributed legal bundle. Compiled assembly identity and legal checks remain; runtime identity/RPC comparisons are optional local diagnostics, not CI gates.

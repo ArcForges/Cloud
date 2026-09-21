@@ -8,33 +8,21 @@ The user already has the paid Workers plan. Use the same account that owns `arcf
 2. In [Cloud repository environments](https://github.com/ArcForges/Cloud/settings/environments), use the repository's **cloudflare** environment. Environments and their secrets are not automatically shared from Web/AI.
 3. Add environment variable `CLOUDFLARE_ACCOUNT_ID` with the real 32-character account ID. Add environment secret `CLOUDFLARE_API_TOKEN` with the token from step 1. Never place the token in Variables, source, a browser client or chat.
 4. Restrict the environment to deployments from branch `main`. No manual reviewer is required for the requested automatic pipeline.
-5. Merge the verified PR. `CI / Deploy and verify Cloudflare` will run after all required checks. There is no deploy-enable variable, runtime API key or database secret in this Hello increment.
+5. Merge the verified PR. `CI / Deploy Cloudflare` will run after all required checks. There is no deploy-enable variable, runtime API key or database secret in this Hello increment.
 
 The agent can create the environment and set the already known Account ID. The account owner enters the secret in GitHub. Placeholder names in this guide are not working credentials and must not be installed as fake secrets.
 
 ## Pipeline and evidence
 
-PR checks use no cloud credentials. A push to main builds `0.1.0-ci.<run-number>.<attempt>`, tests a real Linux AOT image, then uploads the immutable candidate artifact. Publication downloads that artifact by ID, checks hashes and source identity, loads the image archive, verifies its Docker image ID and pushes to `registry.cloudflare.com`. Deployment uses a registry **digest**, not a floating tag, and the previously bundled Worker.
+PR checks use no cloud credentials. Main builds a versioned Linux Native AOT image and Worker candidate, with static/offline checks and legal/provenance inspection. The application is not executed by CI.
 
-The Docker build uses the same single-platform `--provenance=false` setting as the pinned Wrangler container builder. BuildKit does not add a separate attestation manifest to the image; source identity, artifact hashes, Docker image identity and the remote registry digest remain independently checked.
+Publication consumes the candidate by its workflow artifact ID. Its deployment entry point performs one promotion identity/integrity check, loads the image and checks the Docker image ID. It pushes that image and deploys the same bundled Worker using the returned registry digest. Publication does not rebuild or repeat image extraction/application execution. Deployments serialize and reject superseded main commits.
 
-Deployments are serialized and check current main before upload. A stale run fails rather than replacing a newer commit. Rerunning all jobs creates a new attempt version; rerunning only failed deployment jobs reuses the already verified candidate. Tests and smoke never silently rebuild or redeploy.
+`artifacts/deployment.json` records the source, version and image/digest after the provider operation succeeds. A prerelease preserves the candidate and deployment record. There is no automatic health/RPC/readiness polling, browser test or public archive download. A successful deployment is reported as deployment completion, not live runtime acceptance.
 
-Initial Container provisioning may take several minutes. Smoke polls readiness for up to ten minutes and requires both the Worker header and the compiled C# health revision to match the candidate. A healthy old container is not accepted. After readiness, the published TypeScript and Kotlin SDKs verify successful/Unicode greetings and gRPC `INVALID_ARGUMENT`/`RESOURCE_EXHAUSTED`. Kotlin additionally checks whitespace, the name-size boundary and terminal status frames. Additional requests check route/size/type rejection, protobuf media-type normalization and invalid/expired deadlines. It also checks that the Web homepage still serves HTML. Kotlin requires JDK 17 in CI; no additional Cloudflare secret, binding or deployment variable is needed.
+Existing `test:live` and `test:kotlin:live` commands remain explicit local diagnostics for a concrete affected behavior. They are not merge/publication gates. The Web page may be exercised locally when needed; no mandatory cross-owner test is implied. Preserve the API route and Web's apex binding.
 
-`artifacts/deployment.json` records source revision, exact image identity/digest and live evidence. A GitHub prerelease is created only after these checks pass. A successful Docker build or Wrangler upload alone is not successful production verification.
-
-## Public verification and Web
-
-```sh
-curl --fail https://arcforges.com/api/healthz
-```
-
-The response must identify `arcforges-cloud`, the expected source revision and `nativeAot: true`. A health response is necessary but does not replace the SDK tests.
-
-Web PR #5 adds `https://arcforges.com/cloud-hello/`. Once that page is merged/deployed and Cloud is healthy, click **Check connection** and verify **Hello, ArcForges!** with a real successful network request to the protobuf method. No change to Web's domain, CSP or CORS is required. Until Web PR #5 is deployed, API smoke can pass while that page is unavailable; report those as separate milestones.
-
-Keep `workers_dev` and preview URLs disabled. No Cloud custom domain is needed: the route takes precedence for `/api/*`, and the existing Web Worker continues serving everything else.
+See [validation policy](validation-policy.md) for the retained checks and post-merge stopping boundary.
 
 ## Runtime configuration and cost
 
@@ -44,9 +32,9 @@ Anyone can construct a valid Hello request. Rate limiting is per Cloudflare loca
 
 ## Recovery
 
-- A failed upload/provisioning/smoke does not necessarily mean nothing changed. Inspect the recorded workflow logs and Cloudflare Worker/Container state before retrying.
-- For a transient first provisioning delay, wait for the platform status, then rerun failed jobs. Smoke does not automatically issue another deployment.
-- For a source regression, revert the offending main commit with a PR. The normal pipeline builds, tests and deploys the reverted behavior under a new identity/version.
+- A failed upload/provisioning does not necessarily mean nothing changed. Inspect the recorded workflow logs and Cloudflare Worker/Container state before retrying.
+- Diagnose an actual provider failure before a scoped retry. On a network failure, report the exact operation and stop; do not change proxy settings or blindly rerun.
+- For a source regression, revert the offending main commit with a PR. The normal pipeline builds, checks and deploys the reverted behavior under a new identity/version.
 - For urgent containment, remove only `arcforges.com/api/*` from `arcforges-cloud` routes or disable this Worker. Preserve `arcforges-web` and the apex Custom Domain. The Web connection page will show unavailable instead of fabricated success.
 - Retain candidate release archives and referenced registry images. Do not delete an image still used by a current/previous deployment. This stateless Hello has no database migration or persistent application data to roll back.
 - If a deployment token is exposed, revoke it at Cloudflare, replace the GitHub secret, inspect deployments and then redeploy verified main.

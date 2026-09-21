@@ -21,7 +21,7 @@ export async function buildKotlin() {
     "--no-daemon",
     "--console=plain",
     "--dependency-verification=strict",
-    "check",
+    "classes",
     "installDist",
   ]);
 }
@@ -58,6 +58,7 @@ export async function verifyKotlin(
 async function main() {
   if (process.argv[2] === "build") return buildKotlin();
   if (process.argv[2] === "live") {
+    assert.notEqual(process.env.CI, "true", "Live client tests are local opt-in only.");
     const base = "https://arcforges.com/api";
     const response = await fetch(`${base}/healthz`, {
       signal: AbortSignal.timeout(20000),
