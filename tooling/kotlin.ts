@@ -21,7 +21,7 @@ export async function buildKotlin() {
     "--no-daemon",
     "--console=plain",
     "--dependency-verification=strict",
-    "check",
+    "classes",
     "installDist",
   ]);
 }

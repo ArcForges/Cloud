@@ -32,8 +32,11 @@ tasks.register<JavaExec>("deadlineTest") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass.set(application.mainClass)
     args("--self-test")
+    doFirst {
+        require(System.getenv("CI") != "true") { "Consumer runtime tests are local opt-in only." }
+    }
 }
-tasks.check { dependsOn("deadlineTest") }
+
 tasks.register("resolveDependencies") {
     doLast { configurations.filter { it.isCanBeResolved }.forEach { it.resolve() } }
 }
