@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "cloud-release-r3",
+  "ownerCommit": "4cc06003db40f6cf3e33a00253632ff914ecc2ba",
+  "worker": {
+    "sha256": "37d36ff37803fd4dfc5fef623ddc4a1b5e607d50782c3bf7c949b1dbb4e8fa9c",
+    "inputs": {
+      "node_modules/@cloudflare/containers/dist/lib/helpers.js": "320eae245a1d05a64c8348652f6808fa54c776340bd7c24391c19fe3b9e0f05f",
+      "node_modules/@cloudflare/containers/dist/lib/container.js": "9dfc5feaa43b2bdec08863c85eb94731237aeb9f19c7b7e58ff426776ec8863c",
+      "node_modules/@cloudflare/containers/dist/lib/utils.js": "22f96e63b873b10081fc15216bffc8d23a4614516efcb64be99db87372d4011c",
+      "node_modules/@cloudflare/containers/dist/index.js": "4788f78cbab43389d23feb71c8ef4e6657c01f9eeffe962650310784390bd486",
+      "worker/router.ts": "2c65b0ee958694860c9f360fdaa1522f6d8b4d4d5198280ea13f9af992d2ebe4",
+      "worker/index.ts": "5317c8257a4ffcd4e023b08981cf8861d10092984a2664852b0eb55d2f34e50d"
+    },
+    "outputInputs": [
+      "node_modules/@cloudflare/containers/dist/index.js",
+      "node_modules/@cloudflare/containers/dist/lib/container.js",
+      "node_modules/@cloudflare/containers/dist/lib/helpers.js",
+      "worker/index.ts",
+      "worker/router.ts"
+    ],
+    "externalImports": [
+      "cloudflare:workers"
+    ],
+    "exports": [
+      "CloudContainer",
+      "default"
+    ],
+    "packages": {
+      "@cloudflare/containers": {
+        "version": "0.3.7",
+        "integrity": "sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw=="
+      },
+      "wrangler": {
+        "version": "4.132.0",
+        "integrity": "sha512-61HD7Unw3g7h9zSQoqldzfL3MEbCKUVfwtlMgfSQtjYwMjBD8z83K/EXnYGv75R5hczx3grFfjYH+tdmJm5PHg=="
+      },
+      "esbuild": {
+        "version": "0.28.1",
+        "integrity": "sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw=="
+      }
+    },
+    "legalFiles": [
+      "LICENSE",
+      "NOTICE",
+      "eng/provenance/NOTICE.txt",
+      "third-party/Containers.LICENSE.txt",
+      "third-party/Esbuild.LICENSE.txt"
+    ]
+  },
+  "image": {
+    "baseImage": "mcr.microsoft.com/dotnet/runtime-deps:10.0.12-noble-chiseled@sha256:18d4848091a40d13dbfdd6a8340c1657dc3e2f2d7fa2f042e9d162e68669dbc9",
+    "baseLegal": {
+      "/usr/share/doc/base-files/copyright": "fd7e4aae7e7b05f217bcf2d02322825c360e66c52c4c2f1b28d784d6297a1c23",
+      "/usr/share/doc/ca-certificates/copyright": "e85e1bcad3a915dc7e6f41412bc5bdeba275cadd817896ea0451f2140a93967c",
+      "/usr/share/doc/gcc-14-base/copyright": "20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79",
+      "/usr/share/doc/libc6/copyright": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265",
+      "/usr/share/doc/libssl3t64/copyright": "6a7da622fe0637a334d2a8fc470852d2ffb77d9a2b2f930f854e32a41ad6ef35",
+      "/usr/share/doc/openssl/copyright": "6a7da622fe0637a334d2a8fc470852d2ffb77d9a2b2f930f854e32a41ad6ef35"
+    },
+    "legalFiles": [
+      "LICENSE",
+      "NOTICE",
+      "eng/provenance/NOTICE.txt",
+      "third-party/DotNet.AspNetCore.NOTICES.txt",
+      "third-party/DotNet.LICENSE.txt",
+      "third-party/DotNet.Runtime.NOTICES.txt",
+      "third-party/Grpc.LICENSE.txt",
+      "third-party/Protobuf.LICENSE.txt"
+    ],
+    "inputs": {
+      "Directory.Build.props": "b5e4bbd4c1cd7fcecc4ce90ae670c33656ea50ff2f4b7f912056ceb894781173",
+      "Directory.Build.targets": "67b9cdad3f49c561efd2a2952ef81aa77f3415d403ed00c347852055b3d88deb",
+      "Directory.Packages.props": "182fde4a1df023616fae0e4ecf173bca52f3d964da1043bca9b1a706f9a586d0",
+      "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
+      "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
+      "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "907da00923ac8be952d8f319194baa262409c7fd4e2890076ae7964f0054c388",
+      "src/ArcForges.Cloud/HealthStatus.cs": "8bf9f118829b0010db4f30525dc487843289f046aa6e40affa20fd7e1becbd29",
+      "src/ArcForges.Cloud/HelloEndpoint.cs": "15ed003e7867e8131a8fa32ae74ffe2b6347f970d8ca679e0e538409aeb76598",
+      "src/ArcForges.Cloud/Program.cs": "42d9f8a61348083a403445f4de39741c6db69ae0e87acc7b085a9cb7800728e9",
+      "src/ArcForges.Cloud/packages.lock.json": "188c3c6a14c52c5bf473fb06a8e28816492b551cdcebe0c3f4539b7bf2378de6"
+    },
+    "buildImage": "mcr.microsoft.com/dotnet/sdk:10.0.401-noble-aot@sha256:1a069a730888d278b5ac00e3e238707387d20d2b65f0fc6866b6180df0a767e0"
+  }
+}

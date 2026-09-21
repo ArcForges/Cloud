@@ -47,7 +47,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "17"
+          java-version-file: .java-version
       - run: npm run check:kotlin
       - name: Retain evaluated licence and source provenance
         if: always()
@@ -132,7 +132,7 @@ jobs:
         if: matrix.language == 'java-kotlin'
         with:
           distribution: temurin
-          java-version: "17"
+          java-version-file: .java-version
       # Same verified Kotlin 2.4.20-compatible bundle as Contracts; stable 2.27.0 cannot extract it.
       # https://github.com/github/codeql/issues/22381#issuecomment-5620711447
       - name: Download verified Kotlin-compatible CodeQL
@@ -182,7 +182,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "17"
+          java-version-file: .java-version
       - run: npm run check:kotlin
       - run: npm run candidate
       - run: npm run test:worker
@@ -264,7 +264,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "17"
+          java-version-file: .java-version
       - run: npm run check:kotlin
       - run: npm run deploy
         env:

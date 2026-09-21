@@ -22,7 +22,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "pretest": "node tooling/project.ts prepare-provenance-test",
     "test": "node --test tests/worker/*.test.ts",
-    "check": "node tooling/project.ts licence && node tooling/project.ts provenance && npm run format:check && npm run lint && npm run typecheck && npm test",
+    "check": "node tooling/project.ts toolchain && node tooling/project.ts licence && node tooling/project.ts provenance && npm run format:check && npm run lint && npm run typecheck && npm test",
     "check:dotnet": "dotnet restore Cloud.slnx --locked-mode && dotnet build Cloud.slnx -c Release --no-restore && dotnet test --solution Cloud.slnx -c Release --no-build && dotnet format Cloud.slnx --no-restore --verify-no-changes",
     "candidate": "node tooling/project.ts candidate",
     "verify:candidate": "node tooling/project.ts verify",
