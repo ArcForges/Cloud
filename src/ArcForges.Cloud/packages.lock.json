@@ -31,9 +31,9 @@
       },
       "Grpc.AspNetCore.Web": {
         "type": "Direct",
-        "requested": "[2.83.0, )",
-        "resolved": "2.83.0",
-        "contentHash": "0fQlnmUorVo7SCghly5MQ5IhOn+w+Z9PYQOibdnYVUPJOhzW3iVwr5HYMVC5PnsTUfwpyZWIOfrAnwPa51k5Qw=="
+        "requested": "[2.84.0, )",
+        "resolved": "2.84.0",
+        "contentHash": "xhpKA/nWQbgFLT0Z9sANWU2n9qMcb7l5Sfo7Z7f+7JZxGxGMEKe9kbGn9K8TxJmsDJ9wlxJKp+b40HsQfuMFEQ=="
       },
       "Microsoft.DotNet.ILCompiler": {
         "type": "Direct",
