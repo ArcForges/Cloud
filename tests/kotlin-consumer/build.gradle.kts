@@ -6,7 +6,7 @@ plugins {
     application
 }
 
-val contractsVersion = "1.0.0-ci.36.1"
+val contractsVersion = "1.0.0-ci.42.1"
 kotlin { jvmToolchain(17) }
 application { mainClass.set("io.github.arcforges.cloud.verification.MainKt") }
 tasks.processResources {
