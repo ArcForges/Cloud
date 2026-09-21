@@ -4,6 +4,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHelloClient } from "@arcforges/api-client";
 import { Code, ConnectError } from "@connectrpc/connect";
+import type { Identity } from "./build-identity.ts";
 import { readJson, root } from "./process.ts";
 
 export async function waitForHealth(
@@ -11,6 +12,7 @@ export async function waitForHealth(
   revision: string,
   worker: boolean,
   timeoutMs: number,
+  expectedWorkerBuild?: Identity["build"],
 ) {
   const deadline = Date.now() + timeoutMs;
   let last = "no response";
@@ -27,6 +29,7 @@ export async function waitForHealth(
           service: string;
           revision: string;
           nativeAot: boolean;
+          workerBuild?: unknown;
         };
         last = JSON.stringify(health);
         if (
@@ -35,6 +38,16 @@ export async function waitForHealth(
           health.nativeAot === true &&
           (!worker || response.headers.get("x-arcforges-worker-revision") === revision)
         ) {
+          if (expectedWorkerBuild) {
+            health.workerBuild = JSON.parse(
+              response.headers.get("x-arcforges-worker-build") ?? "null",
+            ) as unknown;
+            assert.deepEqual(
+              health.workerBuild,
+              expectedWorkerBuild,
+              "Worker build identity differs",
+            );
+          }
           return health;
         }
       }

@@ -7,6 +7,8 @@ import { verifyProtocol, waitForHealth } from "./protocol.ts";
 import { verifyKotlin } from "./kotlin.ts";
 import { verifyStoredImage } from "./release-provenance.ts";
 
+import { expectedIdentity, verifyIdentity, verifyHealthIdentity } from "./build-identity.ts";
+
 const productionBase = "https://arcforges.com/api";
 const deploymentFile = path.join(root, "artifacts", "deployment.json");
 
@@ -67,6 +69,26 @@ async function deploy() {
     await readJson(path.join(candidateDir, "image-provenance.json")),
     "Promoted image provenance changed",
   );
+  verifyIdentity(
+    JSON.parse(
+      await run(
+        "docker",
+        [
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--read-only",
+          "--cap-drop",
+          "ALL",
+          candidate.image,
+          "--build-info",
+        ],
+        true,
+      ),
+    ),
+    candidate.version,
+  );
   await run(process.execPath, [wrangler, "containers", "push", candidate.image]);
   const registryTag = `registry.cloudflare.com/${account}/${candidate.image}`;
   const digests = JSON.parse(
@@ -117,7 +139,14 @@ async function smoke() {
   console.log(
     "Waiting for both Worker and Native AOT container identities; no redeploy or application replay.",
   );
-  const health = await waitForHealth(productionBase, candidate.revision, true, 600000);
+  const health = await waitForHealth(
+    productionBase,
+    candidate.revision,
+    true,
+    600000,
+    expectedIdentity(candidate.version).build,
+  );
+  verifyHealthIdentity(health, expectedIdentity(candidate.version));
   const protocol = await verifyProtocol(productionBase, true);
   const kotlin = await verifyKotlin(productionBase, candidate.revision, true, "deployed");
   // The Cloud API route must not replace the already deployed static Web origin.

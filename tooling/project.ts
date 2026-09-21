@@ -17,7 +17,16 @@ import {
   verifyReleaseFiles,
 } from "./release-provenance.ts";
 
+import {
+  expectedIdentity,
+  imageBuildVariables,
+  verifyIdentity,
+  verifyHealthIdentity,
+  type Identity,
+} from "./build-identity.ts";
+
 const payloadFiles = [
+  "build-identity.json",
   "docker-image.tar",
   "worker.js",
   "wrangler.json",
@@ -44,8 +53,16 @@ export type WorkerConfig = {
   name: string;
   main: string;
   no_bundle?: boolean;
-  vars: { SOURCE_REVISION: string };
-  containers: [{ image: string; class_name: string; max_instances: number }];
+  vars: { SOURCE_REVISION: string; BUILD_IDENTITY?: string };
+  containers: [
+    {
+      image: string;
+      class_name: string;
+      max_instances: number;
+      image_vars?: Record<string, string>;
+      image_build_context?: string;
+    },
+  ];
   account_id?: string;
   routes?: unknown[];
   dev?: { ip: string; port: number };
@@ -87,10 +104,34 @@ export async function verifyCandidate(): Promise<Candidate> {
   assert.equal(config.containers[0]?.max_instances, 1);
   assert.equal(config.no_bundle, true);
   verifyReleaseFiles(root, candidateDir, candidate.revision, candidate.imageId);
+  verifyIdentity(await readJson(path.join(candidateDir, "build-identity.json")), candidate.version);
+  assert.equal(
+    config.vars.BUILD_IDENTITY,
+    JSON.stringify(expectedIdentity(candidate.version).build),
+  );
   return candidate;
 }
 
-export async function testContainer(image: string, revision: string) {
+export async function testContainer(image: string, revision: string, identity: Identity) {
+  const compiled = JSON.parse(
+    await run(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        image,
+        "--build-info",
+      ],
+      true,
+    ),
+  ) as unknown;
+  assert.deepEqual(compiled, identity, "Actual Native AOT binary identity differs");
+  await writeJson(path.join(candidateDir, "build-identity.json"), compiled);
   const imageInfo = await inspectImage(image);
   assert.equal(imageInfo.Os, "linux");
   assert.equal(imageInfo.Architecture, "amd64");
@@ -136,6 +177,7 @@ export async function testContainer(image: string, revision: string) {
     const web = await binding("8080/tcp");
     const native = await binding("8081/tcp");
     const health = await waitForHealth(web, revision, false, 60000);
+    verifyHealthIdentity(health, identity);
     const grpcWeb = await verifyProtocol(web, false);
     const kotlin = await verifyKotlin(web, revision, false, "container");
     await run("dotnet", [
@@ -150,7 +192,7 @@ export async function testContainer(image: string, revision: string) {
     ]);
     await run("docker", ["restart", id]);
     const restartedWeb = await binding("8080/tcp");
-    await waitForHealth(restartedWeb, revision, false, 60000);
+    verifyHealthIdentity(await waitForHealth(restartedWeb, revision, false, 60000), identity);
     await verifyProtocol(restartedWeb, false);
     const kotlinRestart = await verifyKotlin(restartedWeb, revision, false, "restart");
     await writeJson(path.join(root, "artifacts", "container-evidence.json"), {
@@ -207,7 +249,14 @@ async function testWorker(candidate: Candidate) {
     },
   );
   try {
-    await waitForHealth("http://127.0.0.1:18787/api", candidate.revision, true, 180000);
+    const health = await waitForHealth(
+      "http://127.0.0.1:18787/api",
+      candidate.revision,
+      true,
+      180000,
+      expectedIdentity(candidate.version).build,
+    );
+    verifyHealthIdentity(health, expectedIdentity(candidate.version));
     const result = await verifyProtocol("http://127.0.0.1:18787/api", true);
     const kotlin = await verifyKotlin(
       "http://127.0.0.1:18787/api",
@@ -218,6 +267,7 @@ async function testWorker(candidate: Candidate) {
     await writeJson(path.join(root, "artifacts", "worker-evidence.json"), {
       workerName,
       revision: candidate.revision,
+      health,
       ...result,
       kotlin,
     });
@@ -273,6 +323,7 @@ async function buildCandidate() {
     ? `ci.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT ?? "1"}`
     : `local.${Date.now()}`;
   const version = `0.1.0-${suffix}`;
+  const identity = expectedIdentity(version);
   const image = `arcforges-cloud:${suffix}`;
   await mkdir(candidateDir, { recursive: true });
   await writeJson(
@@ -286,13 +337,15 @@ async function buildCandidate() {
     "--platform",
     "linux/amd64",
     "--provenance=false",
-    "--build-arg",
-    `SOURCE_REVISION=${revision}`,
+    ...Object.entries(imageBuildVariables(identity)).flatMap(([key, value]) => [
+      "--build-arg",
+      `${key}=${value}`,
+    ]),
     "--tag",
     image,
     ".",
   ]);
-  const imageId = await testContainer(image, revision);
+  const imageId = await testContainer(image, revision, identity);
   await run(process.execPath, [
     wrangler,
     "deploy",
@@ -317,6 +370,7 @@ async function buildCandidate() {
   config.main = "./worker.js";
   config.no_bundle = true;
   config.vars.SOURCE_REVISION = revision;
+  config.vars.BUILD_IDENTITY = JSON.stringify(identity.build);
   config.containers[0].image = image;
   await writeJson(path.join(candidateDir, "wrangler.json"), config);
   await run("docker", ["save", "--output", "artifacts/candidate/docker-image.tar", image]);
@@ -392,7 +446,16 @@ async function main() {
       const head = await run("git", ["rev-parse", "HEAD"], true);
       const dirty = (await run("git", ["status", "--porcelain"], true)).length > 0;
       stageImageNotices(root, head + (dirty ? "-dirty" : ""));
-      await run(process.execPath, [wrangler, "dev"]);
+      const config = await readJson<WorkerConfig>(path.join(root, "wrangler.json"));
+      config.main = path.join(root, "worker/index.ts");
+      config.containers[0].image = path.join(root, "Dockerfile");
+      config.containers[0].image_build_context = root;
+      const identity = expectedIdentity(`0.1.0-local.${Date.now()}`);
+      config.containers[0].image_vars = imageBuildVariables(identity);
+      config.vars.SOURCE_REVISION = head + (dirty ? "-dirty" : "");
+      config.vars.BUILD_IDENTITY = JSON.stringify(identity.build);
+      await writeJson(path.join(root, "artifacts/dev.wrangler.json"), config);
+      await run(process.execPath, [wrangler, "dev", "--config", "artifacts/dev.wrangler.json"]);
       break;
     }
     case "hooks":
@@ -411,7 +474,7 @@ async function main() {
       break;
     case "container": {
       const candidate = await verifyCandidate();
-      await testContainer(candidate.image, candidate.revision);
+      await testContainer(candidate.image, candidate.revision, expectedIdentity(candidate.version));
       break;
     }
     default:

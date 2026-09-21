@@ -21,3 +21,8 @@ legal-notices.json. The Native AOT image carries its relevant texts and source
 receipt under /app/notices; the immutable base retains /usr/share/doc notices.
 eng/provenance/NOTICE.txt records source provenance, including build-only
 material that is not part of the runtime image. See docs/provenance.md.
+
+Cloud support identity adapts ArcNotes source at
+https://github.com/ArcForges/ArcNotes/tree/0c797e30690a10d8798ddca19ca7f37b16cecf01
+Copyright ArcForges contributors; AGPL-3.0-only. Complete corresponding Cloud
+source is available at the exact release commit in https://github.com/ArcForges/Cloud.

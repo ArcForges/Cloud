@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace ArcForges.Cloud;
 
-public sealed record HealthStatus(string Service, string Revision, bool NativeAot);
+public sealed record HealthStatus(string Service, string Revision, bool NativeAot, JsonObject Artifact, JsonObject Build);
 
 [JsonSerializable(typeof(HealthStatus))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

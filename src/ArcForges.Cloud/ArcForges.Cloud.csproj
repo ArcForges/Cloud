@@ -8,10 +8,13 @@
     <ILLinkTreatWarningsAsErrors>true</ILLinkTreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="ArcForges.Contracts.PublicApi" />
+    <PackageReference Include="ArcForges.Contracts.PublicApi" GeneratePathProperty="true" />
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Grpc.AspNetCore.Web" />
-    <AssemblyMetadata Include="SourceRevision" Value="$(SourceRevisionId)" />
+    <EmbeddedResource Include="../../eng/version-sources.json" LogicalName="Cloud.VersionSources" />
+    <EmbeddedResource Include="packages.lock.json" LogicalName="Cloud.PackageLock" />
+    <EmbeddedResource Include="../../package-lock.json" LogicalName="Cloud.NpmLock" />
+    <EmbeddedResource Include="$(PkgArcForges_Contracts_PublicApi)/source.json" LogicalName="Cloud.ContractsSource" />
   </ItemGroup>
   <PropertyGroup>
     <LicenceBoundary>AGPL</LicenceBoundary>

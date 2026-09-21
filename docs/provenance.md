@@ -86,3 +86,7 @@ Windows/Linux source CI runs positive and failure tests and retains the source
 receipt. Candidate/deployment jobs retain actual image and protocol evidence.
 These gates cover the current scaffold and provenance obligations; they do not
 establish completed business features or commercial readiness.
+
+## WP02.04 support identity
+
+`cloud-release-r5` and successors `cloud-runtime-notices-r6` / `cloud-worker-bundle-r5` retain every predecessor. They bind the reviewed source commit, embedded version inputs and exact Worker build-header change. Its expected bundle was derived from the retained r4 bundle plus that single reviewed assignment before regeneration; full byte equality was then verified. `arcnotes-build-identity-r1` records the resolver/catalog/test/PE-inspection adaptation under the same AGPL boundary. Full corresponding source and original terms remain in the distributed legal bundle. Actual image support identity, three compiled assemblies and Worker/Container deployment identity are additional gates; none replaces existing protocol or legal checks.

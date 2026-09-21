@@ -2,18 +2,23 @@ Cloud source provenance
 
 Original material retains its recorded licence and full legal text.
 
+arcnotes-build-identity-r1
+https://github.com/ArcForges/ArcNotes @ 0c797e30690a10d8798ddca19ca7f37b16cecf01
+AGPL-3.0-only
+Copyright ArcForges contributors. Cloud adapts ArcNotes build identity under AGPL-3.0-only; full licence and corresponding source remain available.
+
 canonical-agpl-legal-r1
 https://github.com/github/choosealicense.com @ 58267f8f2c5c0099810849cfd7677f52ae0c0eb3
 AGPL-3.0-only
 GNU Affero General Public License version 3; Copyright Free Software Foundation, Inc. Complete original licence and its verbatim-copying permission are retained.
 
-cloud-runtime-notices-r5
-https://github.com/ArcForges/Cloud @ 2cf5a58633a7e09db05ebc1741f1cab83547a832
+cloud-runtime-notices-r6
+https://github.com/ArcForges/Cloud @ 5eb1999d14807acbddb7cc6ecf308d58b99b5fa9
 AGPL-3.0-only
 ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files.
 
-cloud-worker-bundle-r4
-https://github.com/ArcForges/Cloud @ 2cf5a58633a7e09db05ebc1741f1cab83547a832
+cloud-worker-bundle-r5
+https://github.com/ArcForges/Cloud @ 5eb1999d14807acbddb7cc6ecf308d58b99b5fa9
 AGPL-3.0-only
 Cloud routing: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. Complete respective terms accompany the actual Worker bundle.
 

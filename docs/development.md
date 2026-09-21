@@ -42,7 +42,7 @@ Source checks work in Windows PowerShell. If Docker is exposed only through `wsl
 
 Wrangler currently rejects local Containers development on Windows. Run `npm run test:worker` in a Linux/WSL checkout with Linux Node and Docker, or use the mandatory Linux CI job. Do not reuse Windows `node_modules` in Linux; restore dependencies with `npm ci --ignore-scripts` in that checkout. Do not claim Windows router unit tests are Container binding verification.
 
-`npm run dev` uses the source Worker and Dockerfile on Linux/WSL. The Dockerfile defaults to the development revision `local`; normal candidates inject the Git revision automatically. This development default is not accepted for deployment.
+`npm run dev` uses the source Worker and Dockerfile on Linux/WSL. The Dockerfile requires complete source/build identity inputs. Both `npm run dev` and normal candidates derive and supply them from the actual Git checkout; see [build identity](build-identity.md). Direct Docker invocations must supply the same declared arguments.
 
 ## Protocol and limits
 

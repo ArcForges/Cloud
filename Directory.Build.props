@@ -20,6 +20,8 @@
     <Authors>ArcForges</Authors>
     <RepositoryUrl>https://github.com/ArcForges/Cloud</RepositoryUrl>
     <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
-    <SourceRevisionId Condition="'$(SourceRevisionId)' == ''">local</SourceRevisionId>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ArcForges.Build.Policy" PrivateAssets="all" />
+  </ItemGroup>
 </Project>

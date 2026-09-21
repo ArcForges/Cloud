@@ -16,3 +16,6 @@
 !artifacts/image-notices/**
 **/bin/
 **/obj/
+!package-lock.json
+!eng/
+!eng/version-sources.json
