@@ -14,6 +14,7 @@ import {
   legalBundle,
   stageImageNotices,
   verifyImageProvenance,
+  verifyStoredImage,
   verifyReleaseFiles,
 } from "./release-provenance.ts";
 
@@ -113,6 +114,7 @@ export async function verifyCandidate(): Promise<Candidate> {
 }
 
 export async function testContainer(image: string, revision: string, identity: Identity) {
+  assert.notEqual(process.env.CI, "true", "Container runtime tests are local opt-in only.");
   const compiled = JSON.parse(
     await run(
       "docker",
@@ -213,6 +215,7 @@ export async function testContainer(image: string, revision: string, identity: I
 }
 
 async function testWorker(candidate: Candidate) {
+  assert.notEqual(process.env.CI, "true", "Worker runtime tests are local opt-in only.");
   assert.equal(
     process.platform,
     "linux",
@@ -345,7 +348,17 @@ async function buildCandidate() {
     image,
     ".",
   ]);
-  const imageId = await testContainer(image, revision, identity);
+  const imageInfo = await inspectImage(image);
+  assert.equal(imageInfo.Os, "linux");
+  assert.equal(imageInfo.Architecture, "amd64");
+  assert.ok(imageInfo.Config.User && !["0", "root"].includes(imageInfo.Config.User));
+  assert.deepEqual(imageInfo.Config.Entrypoint, ["/app/ArcForges.Cloud"]);
+  assert.equal(imageInfo.Config.Labels["org.opencontainers.image.revision"], revision);
+  const imageId = imageInfo.Id;
+  // Inspect legal contents through a stopped container; never execute the application in CI.
+  const provenance = await verifyStoredImage(image, imageId, revision);
+  await writeJson(path.join(candidateDir, "image-provenance.json"), provenance);
+  await writeJson(path.join(candidateDir, "build-identity.json"), identity);
   await run(process.execPath, [
     wrangler,
     "deploy",

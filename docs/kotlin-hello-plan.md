@@ -1,5 +1,7 @@
 # Published Kotlin client integration
 
+Historical implementation plan. Its former CI/runtime acceptance requirements are superseded by [the current validation policy](validation-policy.md). Retained results are historical, not instructions to repeat them.
+
 ## Scope and findings
 
 Review base: `07d0fe05c48f1276f6c1b851143811c8cec8f877`. This increment verifies the existing anonymous unary Hello service, not Android UI, authentication, streaming, or additional product APIs. Contracts and other repositories remain unchanged.

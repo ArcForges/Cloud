@@ -1,5 +1,7 @@
 # Cloud bootstrap plan
 
+Historical implementation plan. Its former CI/runtime acceptance requirements are superseded by [the current validation policy](validation-policy.md). Retained results are historical, not instructions to repeat them.
+
 Status: implementation delivered in Cloud PR #1. The workflow records source, real image and Worker runtime checks separately from production acceptance. Live deployment requires the repository's Cloudflare credentials and a merge to main.
 
 ## Scope and evidence

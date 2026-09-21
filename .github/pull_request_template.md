@@ -4,7 +4,7 @@ Describe the problem and resulting behavior.
 
 ## Validation
 
-List source, Native AOT image and protocol checks actually run. Distinguish local/CI evidence from live Cloudflare verification.
+List relevant static/offline checks and image builds actually run. Runtime diagnostics are local opt-in only; describe untested coverage without adding live or download gates.
 
 ## Deployment impact
 

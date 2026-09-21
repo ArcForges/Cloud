@@ -42,13 +42,22 @@ jobs:
           package-manager-cache: false
       - run: npm ci --ignore-scripts
       - run: npm run check
+        if: runner.os == 'Linux'
       - run: npm run check:dotnet
+        if: runner.os == 'Linux'
+      - name: Compile managed solution on Windows
+        if: runner.os == 'Windows'
+        run: |
+          dotnet restore Cloud.slnx --locked-mode
+          dotnet build Cloud.slnx -c Release --no-restore
       - run: node tooling/project.ts licence-evaluated
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        if: runner.os == 'Linux'
         with:
           distribution: temurin
           java-version-file: .java-version
       - run: npm run check:kotlin
+        if: runner.os == 'Linux'
       - name: Retain evaluated licence and source provenance
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -138,7 +147,7 @@ jobs:
       - name: Download verified Kotlin-compatible CodeQL
         if: matrix.language == 'java-kotlin'
         run: |
-          curl --fail --silent --show-error --location --retry 3 https://github.com/dsp-testing/codeql-cli-nightlies/releases/download/codeql-bundle-20260913/codeql-bundle-java-linux64.tar.zst --output "$RUNNER_TEMP/codeql-kotlin.tar.zst"
+          curl --fail --silent --show-error --location https://github.com/dsp-testing/codeql-cli-nightlies/releases/download/codeql-bundle-20260913/codeql-bundle-java-linux64.tar.zst --output "$RUNNER_TEMP/codeql-kotlin.tar.zst"
           echo '2f7435b506f062753a55e91e428df33bd0d9dfc8fed196114844f611334255de  '"$RUNNER_TEMP/codeql-kotlin.tar.zst" | sha256sum --check --strict
       - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
         with:
@@ -158,7 +167,7 @@ jobs:
           category: /language:${{ matrix.language }}
 
   candidate:
-    name: Native AOT image and real protocol integration
+    name: Native AOT image and Worker build
     needs: [source, quality]
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -169,24 +178,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
-        with:
-          global-json-file: global.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: dotnet restore tests/ArcForges.Cloud.Consumer --locked-mode
-      - run: dotnet build tests/ArcForges.Cloud.Consumer -c Release --no-restore
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        with:
-          distribution: temurin
-          java-version-file: .java-version
-      - run: npm run check:kotlin
       - run: npm run candidate
-      - run: npm run test:worker
-      - run: npm run verify:candidate
       - id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -195,19 +192,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 1
-      - name: Preserve integration evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: cloud-integration-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            artifacts/evidence/source-provenance.json
-            artifacts/evidence/image-provenance.json
-            artifacts/container-evidence.json
-            artifacts/worker-evidence.json
-            artifacts/kotlin-*-evidence.json
-          if-no-files-found: warn
-          retention-days: 30
 
   verify:
     name: Verify
@@ -232,7 +216,7 @@ jobs:
           if [ "$EVENT" = pull_request ]; then test "$REVIEW" = success; else test "$REVIEW" = skipped; fi
 
   deploy:
-    name: Deploy and verify Cloudflare
+    name: Deploy Cloudflare
     if: >-
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && needs.verify.result == 'success' && needs.candidate.result == 'success'
@@ -260,19 +244,12 @@ jobs:
           artifact-ids: ${{ needs.candidate.outputs.artifact-id }}
           path: artifacts/candidate
           merge-multiple: true
-      - run: npm run verify:candidate
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        with:
-          distribution: temurin
-          java-version-file: .java-version
-      - run: npm run check:kotlin
       - run: npm run deploy
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GH_TOKEN: ${{ github.token }}
-      - run: npm run test:live
-      - name: Publish verified prerelease
+      - name: Publish deployed prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -286,6 +263,5 @@ jobs:
           name: cloudflare-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             artifacts/deployment.json
-            artifacts/kotlin-deployed-evidence.json
           if-no-files-found: warn
           retention-days: 90

@@ -20,29 +20,19 @@ npm run check
 npm run check:dotnet
 npm run check:kotlin
 npm run candidate
-npm run test:worker
 ```
 
 Install JDK 17 and set `JAVA_HOME` before `check:kotlin`. The verification project uses Kotlin 2.4.20, JVM 17 bytecode and the checksum-pinned Gradle 9.7.1 wrapper. This does not change Mobile's toolchain. Maven Central is the only dependency repository for the application; strict locks and verification metadata are committed. C#, TypeScript and Kotlin consume Contracts `1.0.0-ci.36.1`.
 
-`check:kotlin` builds the consumer and runs a local fault fixture for deadlines before response headers and during a stalled body. The fixture is not server evidence. `candidate` builds Linux x64 Native AOT, runs the final image with a read-only filesystem and dropped capabilities, validates all three published clients, checks `nativeAot: true`, restarts the container and retests, including Kotlin. Docker allocates ephemeral localhost ports. The evidence is written to `artifacts/container-evidence.json` and `artifacts/kotlin-*-evidence.json`; candidate bytes and hashes are in `artifacts/candidate`.
+`check:kotlin` builds the consumer and runs an offline deadline fault fixture. `candidate` builds the Linux Native AOT image, inspects its declared user/entry point/source label and extracts licence/provenance files from a stopped container. It never launches the application, restarts a service or runs RPC consumers. The build identity companion comes from the same independently resolved inputs supplied to compilation; it is not claimed as a runtime observation.
 
-The host binds HTTP/1.1 gRPC-Web/health to 8080 and native HTTP/2 gRPC to 8081. Only 8080 is forwarded through the public Worker. A direct development run with `dotnet run --project src/ArcForges.Cloud` is JIT and reports `nativeAot: false`; it does not satisfy the image acceptance gate.
-
-`test:worker` runs Wrangler locally with the candidate bundle and a FROM-only image wrapper around the tested image. It does not compile source again. TypeScript and Kotlin verify real Worker → Durable Object → Docker → gRPC-Web behavior through `/api`. Cloudflare's Linux CI runner supports this without an account/token. The bundled Worker and image remain the publication inputs; the local wrapper is test-only.
-
-Each invocation has a unique local Worker name and state directory. This prevents an
-older Docker container from satisfying a new candidate's health requests. The gate
-requires the exact candidate revision and removes only the containers created for
-that invocation when it exits.
+`test:container` and `test:worker` remain explicit local diagnostics for affected behavior when an existing native Docker/Linux environment is available. They reject CI execution. `test:artifact` is a separate local packaging investigation; normal source checks do not rebuild candidates for adversarial archive tests. Do not run these commands as routine PR or post-merge gates.
 
 ## Windows and WSL
 
-Source checks work in Windows PowerShell. If Docker is exposed only through `wsl -e docker`, set `$env:CLOUD_DOCKER_WSL = '1'` before `npm run candidate`. This affects the tooling's Docker invocation only; a native Docker Desktop CLI does not need it.
+Source checks work in Windows PowerShell. Use a native Docker CLI where available. No automatic WSL wrapper is supported. If a Linux environment is required, use a directly available WSL terminal; do not invoke wsl.exe, reinstall tools or introduce a proxy for validation. Hosted Linux compilation remains available without local Docker.
 
-Wrangler currently rejects local Containers development on Windows. Run `npm run test:worker` in a Linux/WSL checkout with Linux Node and Docker, or use the mandatory Linux CI job. Do not reuse Windows `node_modules` in Linux; restore dependencies with `npm ci --ignore-scripts` in that checkout. Do not claim Windows router unit tests are Container binding verification.
-
-`npm run dev` uses the source Worker and Dockerfile on Linux/WSL. The Dockerfile requires complete source/build identity inputs. Both `npm run dev` and normal candidates derive and supply them from the actual Git checkout; see [build identity](build-identity.md). Direct Docker invocations must supply the same declared arguments.
+`npm run dev` uses source and the Dockerfile in an existing suitable local environment. It supplies complete source/build arguments from the checkout. It is an explicit development command, not a CI validation step. See [validation policy](validation-policy.md).
 
 ## Protocol and limits
 
@@ -65,11 +55,11 @@ The schema remains authoritative for the Hello example. Limits are explicit host
 
 Early rejection disposes any unread upload through `waitUntil`, capped at 4097 bytes and one second, then cancels it. This cleanup does not delay the error response, extend the RPC budget, or call a container. The immutable bundle is tested with `no_bundle`: source-mode Wrangler injects its own request-body draining middleware and can otherwise hide connection reuse failures.
 
-## Kotlin and current live verification
+## Optional local Kotlin runtime diagnostics
 
 Use Maven dependency `io.github.arcforges:contracts-connect-client:1.0.0-ci.36.1`, Connect-Kotlin OkHttp and Java-lite serialization 0.9.0, and explicitly select `NetworkProtocol.GRPC_WEB`. The production base URL is `https://arcforges.com/api`; direct local container tests use `http://127.0.0.1:<port>` without `/api`. Do not use the default Connect protocol against this ASP.NET gRPC service.
 
-After `npm run check:kotlin`, run `npm run test:kotlin:live` to call the current deployed Hello without a deployment token. It records the observed deployed revision, checks Native AOT and Worker identity, then checks six real SDK calls: success, Unicode, whitespace, 256-character boundary, empty-name `INVALID_ARGUMENT`, and 257-character `RESOURCE_EXHAUSTED`. It also verifies request path, binary Content-Type, emitted timeout, response media type, and terminal statuses. There is no automatic RPC retry. `artifacts/kotlin-current-live-evidence.json` describes the running deployment, not unmerged changes. Main's separate `test:live` requires the newly deployed candidate revision and also tests normalized media types and deadline rejection.
+Only when the changed behavior needs a live local diagnostic, after `npm run check:kotlin`, explicitly run `npm run test:kotlin:live` to call the current deployed Hello without a deployment token. It records the observed deployed revision, checks Native AOT and Worker identity, then checks six real SDK calls: success, Unicode, whitespace, 256-character boundary, empty-name `INVALID_ARGUMENT`, and 257-character `RESOURCE_EXHAUSTED`. It also verifies request path, binary Content-Type, emitted timeout, response media type, and terminal statuses. There is no automatic RPC retry. `artifacts/kotlin-current-live-evidence.json` describes the running deployment, not unmerged changes. `test:live` is also local opt-in and never a CI or publication requirement.
 
 This JVM client proves the same published transport works with Cloud. Android device, UI, lifecycle and network-security configuration remain Mobile acceptance work.
 

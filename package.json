@@ -20,8 +20,7 @@
     "format:check": "prettier --check .",
     "lint": "biome lint --error-on-warnings .",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
-    "pretest": "node tooling/project.ts prepare-provenance-test",
-    "test": "node --test tests/worker/*.test.ts",
+    "test": "node --test tests/worker/build-identity.test.ts tests/worker/deadline.test.ts tests/worker/licence-boundary.test.ts tests/worker/provenance.test.ts tests/worker/router.test.ts tests/worker/toolchain.test.ts",
     "check": "node tooling/project.ts toolchain && node tooling/project.ts licence && node tooling/project.ts provenance && npm run format:check && npm run lint && npm run typecheck && npm test",
     "check:dotnet": "dotnet restore Cloud.slnx --locked-mode && dotnet build Cloud.slnx -c Release --no-restore && dotnet test --solution Cloud.slnx -c Release --no-build && dotnet format Cloud.slnx --no-restore --verify-no-changes",
     "candidate": "node tooling/project.ts candidate",
@@ -32,7 +31,8 @@
     "test:worker": "node tooling/project.ts worker",
     "dev": "node tooling/project.ts dev",
     "deploy": "node tooling/cloudflare.ts deploy",
-    "test:live": "node tooling/cloudflare.ts smoke"
+    "test:live": "node tooling/cloudflare.ts smoke",
+    "test:artifact": "node tooling/project.ts prepare-provenance-test && node --test tests/worker/release-provenance.test.ts"
   },
   "dependencies": {
     "@cloudflare/containers": "0.3.7"

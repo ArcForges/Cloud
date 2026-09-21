@@ -39,6 +39,7 @@
     "docs/kotlin-hello-plan.md",
     "docs/licence-boundary.md",
     "docs/provenance.md",
+    "docs/validation-policy.md",
     "eng/policy/licence-boundary.json",
     "eng/policy/reuse-policy.json",
     "eng/provenance/NOTICE.txt",

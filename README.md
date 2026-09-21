@@ -29,19 +29,19 @@ npm run check:kotlin
 npm run candidate
 ```
 
-On Linux/WSL, also run `npm run test:worker` to verify the bundled Worker, Durable Object/Container binding and actual AOT service together. See the development guide for Windows/WSL setup.
+Runtime checks such as `npm run test:container` and `npm run test:worker` are explicit local opt-in using existing tools, never CI or routine post-merge gates. See [validation policy](docs/validation-policy.md).
 
 ## Delivery
 
 The existing checks enforce [project licence declarations](docs/licence-boundary.md)
 across managed, npm and Gradle scopes, including the final Docker build.
 
-PRs run locked restores, C#/TS/Kotlin tests, formatting, dependency audit/review, CodeQL, secret scanning, real AOT image build, native gRPC and gRPC-Web consumers, restart recovery and local Worker/Container integration. No PR deploys to Cloudflare.
+PRs run locked restores, relevant offline units, C#/TS/Kotlin compilation, formatting, dependency audit/review, CodeQL, secret scanning and a Linux Native AOT image build. Candidate construction inspects image metadata and legal contents without launching the application. No PR deploys to Cloudflare.
 
-After merge, main builds and verifies a versioned candidate before deployment. CI loads that exact image, pushes it to Cloudflare's registry, pins the remote digest and uploads the already bundled Worker. Deployment succeeds only after the public API reports matching Worker/container source identities and the published client verifies success and error statuses. A GitHub prerelease then records the candidate and live evidence.
+Main promotes the same sealed image and Worker after successful checks. CI loads that image, checks its identity, pushes it to the registry, pins the remote digest and deploys the Worker. Provider completion creates a prerelease with the candidate and deployment record. No live RPC, health polling or public download verification runs automatically.
 
 The `cloudflare` repository environment needs one account variable and one deployment secret. There is no extra enable switch and no application secret in this Hello increment. A missing credential fails main deployment explicitly; configure it before merging.
 
 License: [AGPL-3.0-only](LICENSE). Third-party dependencies retain their own licenses; see [NOTICE](NOTICE).
 
-[Build identity](docs/build-identity.md) describes compiled support metadata, independent version axes and actual image/runtime verification.
+[Build identity](docs/build-identity.md) describes compiled support metadata, independent version axes and the candidate metadata boundary.
