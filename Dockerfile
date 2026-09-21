@@ -5,8 +5,21 @@ COPY global.json Directory.Build.props Directory.Build.targets Directory.Package
 COPY src/ArcForges.Cloud/ArcForges.Cloud.csproj src/ArcForges.Cloud/packages.lock.json ./src/ArcForges.Cloud/
 RUN dotnet restore src/ArcForges.Cloud --locked-mode
 COPY src/ArcForges.Cloud/ ./src/ArcForges.Cloud/
-ARG SOURCE_REVISION=local
-RUN test -n "$SOURCE_REVISION" && dotnet publish src/ArcForges.Cloud -c Release -r linux-x64 --no-restore -p:SourceRevisionId="$SOURCE_REVISION" -o /out && test -x /out/ArcForges.Cloud
+COPY package-lock.json ./
+COPY eng/version-sources.json ./eng/version-sources.json
+ARG SOURCE_REVISION
+ARG SOURCE_COMMIT
+ARG SOURCE_DIRTY
+ARG APP_VERSION
+ARG BUILD_KIND
+ARG BUILD_ID
+ARG PIPELINE_RUN
+ARG SOURCE_EPOCH
+RUN test -n "$SOURCE_REVISION" && dotnet publish src/ArcForges.Cloud -c Release -r linux-x64 --no-restore \
+    -p:CloudSourceArchive=true -p:SourceRevisionId="$SOURCE_COMMIT" -p:ArcForgesSourceCommit="$SOURCE_COMMIT" \
+    -p:CloudSourceDirty="$SOURCE_DIRTY" -p:Version="$APP_VERSION" -p:ArcForgesBuildKind="$BUILD_KIND" \
+    -p:ArcForgesBuildId="$BUILD_ID" -p:ArcForgesPipelineRun="$PIPELINE_RUN" -p:ArcForgesSourceDateEpoch="$SOURCE_EPOCH" \
+    -o /out && test -x /out/ArcForges.Cloud
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0.12-noble-chiseled@sha256:18d4848091a40d13dbfdd6a8340c1657dc3e2f2d7fa2f042e9d162e68669dbc9
 ARG SOURCE_REVISION=local

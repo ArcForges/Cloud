@@ -1,5 +1,26 @@
 <Project>
   <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+  <Target Name="CloudSourceIdentity" BeforeTargets="ArcForgesStampBuildIdentity">
+    <Exec Command="git rev-parse HEAD" WorkingDirectory="$(MSBuildThisFileDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low" Condition="'$(CloudSourceArchive)' != 'true'">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_CloudHead" />
+    </Exec>
+    <Exec Command="git status --porcelain" WorkingDirectory="$(MSBuildThisFileDirectory)" ConsoleToMSBuild="true" StandardOutputImportance="Low" Condition="'$(CloudSourceArchive)' != 'true'">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_CloudChanges" />
+    </Exec>
+    <Error Condition="'$(CloudSourceArchive)' != 'true' and '$(SourceRevisionId)' != '' and '$(SourceRevisionId)' != '$(_CloudHead)'" Code="AFB001" Text="Source identity differs from the actual Cloud checkout." />
+    <PropertyGroup Condition="'$(CloudSourceArchive)' != 'true'">
+      <SourceRevisionId>$(_CloudHead)</SourceRevisionId>
+      <ArcForgesSourceCommit>$(_CloudHead)</ArcForgesSourceCommit>
+      <CloudSourceDirty>false</CloudSourceDirty>
+      <CloudSourceDirty Condition="'$(_CloudChanges)' != ''">true</CloudSourceDirty>
+    </PropertyGroup>
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(ArcForgesSourceCommit)', '^[a-f0-9]{40}$')) or ('$(CloudSourceDirty)' != 'true' and '$(CloudSourceDirty)' != 'false')" Code="AFB001" Text="Cloud requires an actual source commit and explicit dirty state." />
+    <Error Condition="'$(CloudSourceArchive)' == 'true' and ('$(SourceRevisionId)' != '$(ArcForgesSourceCommit)' or !$([System.Text.RegularExpressions.Regex]::IsMatch('$(ArcForgesSourceDateEpoch)', '^[1-9][0-9]*$')) or '$(ArcForgesBuildId)' == '' or '$(ArcForgesBuildKind)' == '' or '$(ArcForgesPipelineRun)' == '')" Code="AFB001" Text="Source archives require complete declared build inputs." />
+    <Error Condition="('$(GITHUB_ACTIONS)' == 'true' or '$(ArcForgesBuildKind)' == 'ci') and '$(CloudSourceDirty)' != 'false'" Code="AFB001" Text="A CI build cannot use dirty Cloud source." />
+    <ItemGroup>
+      <AssemblyMetadata Include="ArcForges.Dirty" Value="$(CloudSourceDirty)" />
+    </ItemGroup>
+  </Target>
   <Target Name="ArcForgesGetLicenceBoundary" Returns="@(_ArcForgesLicenceDeclaration)">
     <ItemGroup>
       <_ArcForgesLicenceDeclaration Include="$(MSBuildProjectFullPath)">

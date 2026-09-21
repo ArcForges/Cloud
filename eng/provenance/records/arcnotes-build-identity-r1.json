@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "id": "arcnotes-build-identity-r1",
+  "kind": "source",
+  "sourceRepository": "https://github.com/ArcForges/ArcNotes",
+  "sourceCommit": "0c797e30690a10d8798ddca19ca7f37b16cecf01",
+  "sourcePaths": [
+    "src/ArcForges.ArcNotes.Core/BuildIdentity.cs",
+    "tests/ArcForges.ArcNotes.Tests/BuildIdentityTests.cs",
+    "eng/version-sources.json",
+    "eng/ArcForges.Repository/IdentityEvidence.cs"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "6f1e622c82a380075843bb084a7ec3b1f1d12a4a02526d75e78b0924a860aa75",
+        "finding": "Pinned ArcNotes and Cloud retain the identical complete AGPL-3.0-only licence."
+      },
+      {
+        "path": "src/ArcForges.ArcNotes.Core/BuildIdentity.cs",
+        "sha256": "2a1c184214d4b5c49e4f1affa96cc5741d1c1b34b3892477e0c97d31eccb5bc5",
+        "finding": "Own AGPL-3.0-only header retained. No third-party implementation imported."
+      },
+      {
+        "path": "tests/ArcForges.ArcNotes.Tests/BuildIdentityTests.cs",
+        "sha256": "ae11ceb972227aa8e0cc810852e42ffdeebc71493cd07546a59d752ceeb0c444",
+        "finding": "Own AGPL-3.0-only header retained. No third-party implementation imported."
+      },
+      {
+        "path": "eng/version-sources.json",
+        "sha256": "381adf427140f65717901bb81dff340511831e7414a31eec897e4eb6ef9535f5",
+        "finding": "AGPL repository-owned catalog; adapt service applicability and package inputs."
+      },
+      {
+        "path": "eng/ArcForges.Repository/IdentityEvidence.cs",
+        "sha256": "73510ff86c7b6e5b86baeebd95a7df2c7cb355531a265e2a20b67bdcf39e3215",
+        "finding": "The AGPL PE AssemblyMetadata inspection algorithm is adapted into an owner-specific xUnit test."
+      }
+    ],
+    "scope": "Offline source/build identity resolver, source catalog, mechanism tests and actual PE inspection, adapted to Cloud and its npm inventory.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Copyright ArcForges contributors. Adapted from ArcNotes support identity under AGPL-3.0-only."
+  ],
+  "targets": [
+    {
+      "path": "src/ArcForges.Cloud/BuildIdentity.cs",
+      "sha256": "203f8d8fd30df0cfd1bf9ea68fb38ffa48403aa5c653bb09db29e5d752976e85",
+      "normalization": "lf"
+    },
+    {
+      "path": "tests/ArcForges.Cloud.Tests/BuildIdentityTests.cs",
+      "sha256": "d0a94011646c1c7c407da09932fb898bf9bdb674c058f02baaf5a4544176c1d2",
+      "normalization": "lf"
+    },
+    {
+      "path": "eng/version-sources.json",
+      "sha256": "9a848f211b5b64ce5b75ff398e991e16adc5f20fa716c5b46ccc71ddab210766",
+      "normalization": "lf"
+    },
+    {
+      "path": "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs",
+      "sha256": "db07c8f9eab9e0ad03d1fd6b6d1e80da0cf54c8b163cb7db9b5f919eda57a14f",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Rewrite",
+  "verification": {
+    "kind": "transformation",
+    "command": "Read the pinned ArcNotes files. Replace ArcForges.ArcNotes.Core with ArcForges.Cloud and ArcNotes with Cloud. In BuildIdentity add the embedded package-lock.json input and resolve npm lockfileVersion packages using pkg:npm/<lock-path>, excluding the root entry. In tests remove unused Text/Repository imports and the RehashedSupportReportsCannotChangeSourceOrRun test, which depends on desktop tooling. Compare expected target hashes; independently test Cloud report/assembly/image/candidate tampering in this owner. For the catalog substitute ArcNotes with Cloud, declare NativeFormatVersion not-applicable because this service owns no portable product format, name WP07 and the Cloud persistence owner for storage, and append package-lock.json to PackageVersion sources. Write two-space JSON and final LF. Format the catalog using this owner pinned Prettier 3.9.6 and .prettierrc.json; independent formatting of the transformed original must match exactly. Re-express IdentityEvidence.VerifyAssemblies as BuildMetadataTests: select the three Cloud app/consumer/test paths, assert actual Git source/epoch/dirty and expected CI/local metadata via xUnit, use bounded Git execution, and validate the app compiled report. This owner-specific rewrite is reviewed against the original PE traversal and independently exercised on all three real Cloud assemblies.",
+    "expected": "Reviewed source transformations, exact target hashes, independent Cloud resolver and three actual assembly checks; no inheritance of ArcNotes runtime acceptance.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Copyright ArcForges contributors. Cloud adapts ArcNotes build identity under AGPL-3.0-only; full licence and corresponding source remain available.",
+    "files": [
+      "LICENSE",
+      "NOTICE",
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "The complete AGPL licence and source attribution ship in existing image and Worker legal bundles."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-21",
+    "decision": "approved",
+    "rationale": "Reviewed the exact source and existing Cloud AGPL boundary, full terms, source oracle and application-specific adaptations before introduction. Actual Cloud native image and deployment validation remain required.",
+    "baselineCommit": "8942437a5e42c01ae7595b64a220efd60f33b4f0",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

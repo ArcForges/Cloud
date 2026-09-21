@@ -5,6 +5,7 @@ export const maxBodyBytes = 4096;
 
 export interface CloudBindings {
   SOURCE_REVISION: string;
+  BUILD_IDENTITY?: string;
   CLOUD_CONTAINER: {
     getByName(name: string): { fetch(request: Request): Promise<Response> };
   };
@@ -195,6 +196,7 @@ async function handleRequest(request: Request, env: CloudBindings): Promise<Resp
     resultHeaders.set("cache-control", "no-store");
     resultHeaders.set("x-content-type-options", "nosniff");
     resultHeaders.set("x-arcforges-worker-revision", env.SOURCE_REVISION);
+    resultHeaders.set("x-arcforges-worker-build", env.BUILD_IDENTITY ?? "{}");
     return new Response(payload, { status: response.status, headers: resultHeaders });
   } catch (error) {
     if (error === deadlineError)

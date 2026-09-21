@@ -33,6 +33,7 @@
     "SECURITY.md",
     "biome.json",
     "docs/bootstrap-plan.md",
+    "docs/build-identity.md",
     "docs/deployment.md",
     "docs/development.md",
     "docs/kotlin-hello-plan.md",
@@ -46,6 +47,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r3.json",
     "eng/provenance/artifact-profiles/cloud-release-r4.json",
     "eng/provenance/files.json",
+    "eng/provenance/records/arcnotes-build-identity-r1.json",
     "eng/provenance/records/canonical-agpl-legal-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r2.json",
@@ -88,12 +90,14 @@
     "tests/kotlin-consumer/settings.gradle.kts",
     "tests/kotlin-consumer/src/main/kotlin/io/github/arcforges/cloud/verification/Main.kt",
     "tests/kotlin-consumer/src/main/resources/verification.properties",
+    "tests/worker/build-identity.test.ts",
     "tests/worker/deadline.test.ts",
     "tests/worker/licence-boundary.test.ts",
     "tests/worker/provenance.test.ts",
     "tests/worker/release-provenance.test.ts",
     "tests/worker/router.test.ts",
     "tests/worker/toolchain.test.ts",
+    "tooling/build-identity.ts",
     "tooling/cloudflare.ts",
     "tooling/kotlin.ts",
     "tooling/licence-boundary.ts",
@@ -120,7 +124,11 @@
     "third-party/Esbuild.LICENSE.txt": "esbuild-mit-legal-r1",
     "third-party/Gradle.LICENSE.txt": "gradle-legal-r1",
     "third-party/Grpc.LICENSE.txt": "grpc-apache-legal-r1",
-    "third-party/Protobuf.LICENSE.txt": "protobuf-bsd-legal-r1"
+    "third-party/Protobuf.LICENSE.txt": "protobuf-bsd-legal-r1",
+    "src/ArcForges.Cloud/BuildIdentity.cs": "arcnotes-build-identity-r1",
+    "tests/ArcForges.Cloud.Tests/BuildIdentityTests.cs": "arcnotes-build-identity-r1",
+    "eng/version-sources.json": "arcnotes-build-identity-r1",
+    "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r1"
   },
   "artifacts": ["cloud-runtime-notices-r5", "cloud-worker-bundle-r4"]
 }

@@ -2,6 +2,11 @@ Cloud source provenance
 
 Original material retains its recorded licence and full legal text.
 
+arcnotes-build-identity-r1
+https://github.com/ArcForges/ArcNotes @ 0c797e30690a10d8798ddca19ca7f37b16cecf01
+AGPL-3.0-only
+Copyright ArcForges contributors. Cloud adapts ArcNotes build identity under AGPL-3.0-only; full licence and corresponding source remain available.
+
 canonical-agpl-legal-r1
 https://github.com/github/choosealicense.com @ 58267f8f2c5c0099810849cfd7677f52ae0c0eb3
 AGPL-3.0-only

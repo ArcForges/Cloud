@@ -43,3 +43,5 @@ After merge, main builds and verifies a versioned candidate before deployment. C
 The `cloudflare` repository environment needs one account variable and one deployment secret. There is no extra enable switch and no application secret in this Hello increment. A missing credential fails main deployment explicitly; configure it before merging.
 
 License: [AGPL-3.0-only](LICENSE). Third-party dependencies retain their own licenses; see [NOTICE](NOTICE).
+
+[Build identity](docs/build-identity.md) describes compiled support metadata, independent version axes and actual image/runtime verification.

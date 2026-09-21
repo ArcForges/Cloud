@@ -14,6 +14,7 @@ function fixture(allowed = true) {
   const names: string[] = [];
   const env: CloudBindings = {
     SOURCE_REVISION: "candidate",
+    BUILD_IDENTITY: '{"buildId":"fixture.1"}',
     CLOUD_CONTAINER: {
       getByName(name) {
         names.push(name);
@@ -53,6 +54,7 @@ test("preserves binary payload and uses one fixed container, stripping only /api
   );
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("x-arcforges-worker-revision"), "candidate");
+  assert.equal(response.headers.get("x-arcforges-worker-build"), env.BUILD_IDENTITY);
   assert.deepEqual(names, ["hello"]);
   const forwarded = received[0];
   assert.ok(forwarded);
