@@ -44,15 +44,18 @@
     "eng/provenance/artifact-profiles/cloud-release-r1.json",
     "eng/provenance/artifact-profiles/cloud-release-r2.json",
     "eng/provenance/artifact-profiles/cloud-release-r3.json",
+    "eng/provenance/artifact-profiles/cloud-release-r4.json",
     "eng/provenance/files.json",
     "eng/provenance/records/canonical-agpl-legal-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r2.json",
     "eng/provenance/records/cloud-runtime-notices-r3.json",
     "eng/provenance/records/cloud-runtime-notices-r4.json",
+    "eng/provenance/records/cloud-runtime-notices-r5.json",
     "eng/provenance/records/cloud-worker-bundle-r1.json",
     "eng/provenance/records/cloud-worker-bundle-r2.json",
     "eng/provenance/records/cloud-worker-bundle-r3.json",
+    "eng/provenance/records/cloud-worker-bundle-r4.json",
     "eng/provenance/records/containers-mit-legal-r1.json",
     "eng/provenance/records/dotnet-aspnetcore-legal-r1.json",
     "eng/provenance/records/dotnet-license-legal-r1.json",
@@ -119,5 +122,5 @@
     "third-party/Grpc.LICENSE.txt": "grpc-apache-legal-r1",
     "third-party/Protobuf.LICENSE.txt": "protobuf-bsd-legal-r1"
   },
-  "artifacts": ["cloud-runtime-notices-r4", "cloud-worker-bundle-r3"]
+  "artifacts": ["cloud-runtime-notices-r5", "cloud-worker-bundle-r4"]
 }
