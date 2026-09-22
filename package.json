@@ -40,12 +40,12 @@
   "devDependencies": {
     "@arcforges/api-client": "1.0.0-ci.36.1",
     "@biomejs/biome": "2.5.14",
-    "@cloudflare/workers-types": "5.20260915.1",
+    "@cloudflare/workers-types": "5.20260918.1",
     "@connectrpc/connect": "2.2.0",
     "@types/node": "24.13.5",
     "prettier": "3.9.8",
     "typescript": "7.0.2",
-    "wrangler": "4.132.0"
+    "wrangler": "4.135.0"
   },
   "arcforges": {
     "licenceBoundary": "AGPL"

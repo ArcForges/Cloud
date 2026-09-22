@@ -53,7 +53,7 @@ exports, exact bundle hash, installed package versions/integrities, both Docker
 image pins, Native AOT source/configuration/lock inputs and applicable full legal
 texts. Unknown or changed material requires a newly reviewed profile and record.
 
-Cloud's own type checker is **TypeScript 7.0.2**, with **Wrangler 4.132.0**.
+Cloud's own type checker is **TypeScript 7.0.2**, with **Wrangler 4.135.0**.
 The historical **TypeScript 6.0.3** identity in the Containers provenance record
 describes the compiler used by upstream `@cloudflare/containers@0.3.7`. It was used
 only to reproduce that package's four published JavaScript files exactly. It is
