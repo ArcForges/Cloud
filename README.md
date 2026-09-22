@@ -19,7 +19,7 @@ The separate `arcforges-web` Worker continues serving the website. This reposito
 
 ## Quick start
 
-Prerequisites: .NET SDK **10.0.401**, Node **24.21.0**, npm **11.19.0**, **JDK 17** (`JAVA_HOME`), and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The Kotlin verification client uses published Contracts **1.0.0-ci.36.1**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
+Prerequisites: .NET SDK **10.0.401**, Node **24.21.0**, npm **11.19.0**, **JDK 17** (`JAVA_HOME`), and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The Kotlin verification client uses published Contracts **1.0.0-ci.42.1**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
 
 ```sh
 npm ci --ignore-scripts

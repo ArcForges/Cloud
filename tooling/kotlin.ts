@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { readJson, root, run } from "./process.ts";
@@ -44,13 +45,10 @@ export async function verifyKotlin(
     output,
   ]);
   const evidence = await readJson<{ client: string; revision: string }>(output);
-  const packages = await readJson<{ devDependencies: Record<string, string> }>(
-    path.join(root, "package.json"),
-  );
-  assert.equal(
-    evidence.client,
-    `io.github.arcforges:contracts-connect-client:${packages.devDependencies["@arcforges/api-client"]}`,
-  );
+  const gradle = await readFile(path.join(project, "build.gradle.kts"), "utf8");
+  const version = /^val contractsVersion = "([^"]+)"$/mu.exec(gradle)?.[1];
+  assert(version, "Kotlin Contracts version must be declared in its Gradle build.");
+  assert.equal(evidence.client, `io.github.arcforges:contracts-connect-client:${version}`);
   assert.equal(evidence.revision, revision);
   return evidence;
 }
