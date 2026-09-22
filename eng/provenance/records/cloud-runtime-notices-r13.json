@@ -1,0 +1,221 @@
+{
+  "schemaVersion": 1,
+  "id": "cloud-runtime-notices-r13",
+  "kind": "generated",
+  "sourceRepository": "https://github.com/ArcForges/Cloud",
+  "sourceCommit": "944f54c52953952c434585c6d7cae9772f1d3010",
+  "sourcePaths": [
+    "Directory.Build.props",
+    "Directory.Build.targets",
+    "Directory.Packages.props",
+    "NuGet.Config",
+    "global.json",
+    "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+    "src/ArcForges.Cloud/HealthStatus.cs",
+    "src/ArcForges.Cloud/HelloEndpoint.cs",
+    "src/ArcForges.Cloud/Program.cs",
+    "src/ArcForges.Cloud/packages.lock.json",
+    "Dockerfile",
+    ".dockerignore",
+    "eng/version-sources.json",
+    "package-lock.json",
+    "src/ArcForges.Cloud/BuildIdentity.cs"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+      }
+    ],
+    "scope": "Current Native AOT image preserves the immutable official base and its six full Ubuntu copyright files. Full .NET runtime/ASP.NET, gRPC, Protobuf and Apache Contracts legal texts accompany the owned application. Base/system components retain their original licences. No build-only wrapper/tool implementation is introduced into the runtime image. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped."
+  ],
+  "targets": [],
+  "artifactTargets": [
+    {
+      "project": "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+      "package": "arcforges-cloud-container",
+      "kind": "native-image-notices",
+      "profile": "eng/provenance/artifact-profiles/cloud-release-r12.json",
+      "sha256": "2240b17719fa5131582045b6164735ae79c2880fd79c6c0c4e6479e0d4626321"
+    }
+  ],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "actual-image",
+    "command": "Build the locked Dockerfile Native AOT application with the reviewed SDK image digest; preserve the pinned runtime base and its full legal files. Inspect the stopped final image and source receipt under /app/notices. Promote the sealed candidate by its recorded identity without executing the application.",
+    "expected": "Declared build inputs and the complete legal files, including the published Contracts NOTICE, match the reviewed profile. Worker inputs, generator versions and expected bytes are unchanged. The sealed candidate preserves the inspected image and Worker identities.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped.",
+    "files": [
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Current Native AOT image preserves the immutable official base and its six full Ubuntu copyright files. Full .NET runtime/ASP.NET, gRPC, Protobuf and Apache Contracts legal texts accompany the owned application. Base/system components retain their original licences. No build-only wrapper/tool implementation is introduced into the runtime image. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": {
+    "generators": [
+      {
+        "repository": "https://github.com/dotnet/dotnet",
+        "commit": "95017c711e6afc1085133d440e42b4bd78155701",
+        "paths": [
+          "src/runtime/src/coreclr/tools/aot/ILCompiler/Program.cs"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.TXT",
+            "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+            "finding": "Locked .NET 10.0.12 runtime/compiler and ASP.NET Core packages identify this source commit. Their subordinate full notice documents retain every original term."
+          },
+          {
+            "path": "src/runtime/src/coreclr/tools/aot/ILCompiler/Program.cs",
+            "sha256": "fdd1e2c6cb47d67b7f920a449d155434f8ad07a5779a574e9fcb1f52a5db37b6",
+            "finding": "Exact ILCompiler entry point independently fetched at the locked .NET commit. Its own file header explicitly grants MIT. Compiler implementation is a generator, not copied runtime application source."
+          }
+        ]
+      }
+    ],
+    "inputs": [
+      {
+        "repository": "https://github.com/ArcForges/Cloud",
+        "commit": "944f54c52953952c434585c6d7cae9772f1d3010",
+        "paths": [
+          "Directory.Build.props",
+          "Directory.Build.targets",
+          "Directory.Packages.props",
+          "NuGet.Config",
+          "global.json",
+          "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+          "src/ArcForges.Cloud/HealthStatus.cs",
+          "src/ArcForges.Cloud/HelloEndpoint.cs",
+          "src/ArcForges.Cloud/Program.cs",
+          "src/ArcForges.Cloud/packages.lock.json",
+          "Dockerfile",
+          ".dockerignore",
+          "eng/version-sources.json",
+          "package-lock.json",
+          "src/ArcForges.Cloud/BuildIdentity.cs"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/grpc/grpc-dotnet",
+        "commit": "4c6997a214601422dd66c5c74c1969db749479e9",
+        "paths": [
+          "LICENSE"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "The restored Grpc 2.84.0 NuGet packages identify this official release source commit. Its complete Apache-2.0 LICENSE matches the retained full legal text."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/protocolbuffers/protobuf",
+        "commit": "f377bfefc5e2cfab68b816903c25b23e091c439d",
+        "paths": [
+          "LICENSE"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+            "finding": "Exact source commit is recorded by Google.Protobuf 3.36.1; this is the full upstream licence."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/ArcForges/Contracts",
+        "commit": "9f0e90f65d57f405fcee311d467a57a255dfd644",
+        "paths": [
+          "LICENSE"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "Normally restored NuGet and npm Contracts 1.0.0-ci.74.1 contain matching clean producer receipts at this source commit. The Hello v1 descriptor is unchanged, and the full published Apache-2.0 licence matches the retained legal text. The additional published NOTICE is independently admitted by contracts-notice-legal-r1 and shipped in full."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/dotnet/dotnet",
+        "commit": "95017c711e6afc1085133d440e42b4bd78155701",
+        "paths": [
+          "LICENSE.TXT",
+          "src/runtime/THIRD-PARTY-NOTICES.TXT",
+          "src/aspnetcore/THIRD-PARTY-NOTICES.txt"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.TXT",
+            "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+            "finding": "Locked .NET 10.0.12 runtime/compiler and ASP.NET Core packages identify this source commit. Their subordinate full notice documents retain every original term."
+          },
+          {
+            "path": "src/runtime/THIRD-PARTY-NOTICES.TXT",
+            "sha256": "66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54",
+            "finding": "Full original legal document. This record permits required unmodified notice reproduction only; it does not relicense listed components or admit their implementation."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/ArcForges/ArcNotes",
+        "commit": "0c797e30690a10d8798ddca19ca7f37b16cecf01",
+        "paths": [
+          "src/ArcForges.ArcNotes.Core/BuildIdentity.cs",
+          "eng/version-sources.json"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Complete AGPL terms retained; owner-specific adaptation and exact targets are reviewed in arcnotes-build-identity-r1."
+          }
+        ]
+      }
+    ],
+    "command": "Build the locked Dockerfile Native AOT application with the reviewed SDK image digest; preserve the pinned runtime base and its full legal files. Inspect the stopped final image and source receipt under /app/notices. Promote the sealed candidate by its recorded identity without executing the application.",
+    "outputSpdx": "AGPL-3.0-only"
+  },
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, acting under the maintainer's implementation/review authorization",
+    "reviewedOn": "2026-09-21",
+    "decision": "approved",
+    "rationale": "The independent review found newly added attributions and protobuf-generator BSD terms in the normally restored Contracts 74.1 NuGet NOTICE. The narrow contracts-notice-legal-r1 record retains that complete published document. This successor adds only third-party/Contracts.NOTICE.txt to the image legal-file list; the existing legalBundle and stageImageNotices paths package it without any validator or runtime changes. All image build inputs, dependency locks, Docker pins, Worker inputs, generator versions and expected Worker bytes remain identical to cloud-release-r11. Worker-specific legal files are unchanged because Contracts is development-only in that dependency graph. Previous immutable profiles and records are retained.",
+    "baselineCommit": "4c430f1a170725685c3864c9493e64888b905ebc",
+    "reconciliation": false
+  },
+  "supersedes": "cloud-runtime-notices-r12"
+}

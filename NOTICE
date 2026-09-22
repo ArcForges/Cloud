@@ -3,8 +3,10 @@ Copyright ArcForges contributors
 
 Original Cloud application and tooling: AGPL-3.0-only; see LICENSE.
 Contracts APIs are consumed as published Apache-2.0 packages from
-https://github.com/ArcForges/Contracts (C#/TypeScript version 1.0.0-ci.36.1;
-Kotlin verification client version 1.0.0-ci.42.1).
+https://github.com/ArcForges/Contracts (C#/TypeScript version 1.0.0-ci.74.1;
+Kotlin verification client version 1.0.0-ci.42.1). The complete published
+NuGet NOTICE, including generator attributions and protobuf BSD terms, is
+retained in third-party/Contracts.NOTICE.txt and the Native AOT image notices.
 
 The standard generated Gradle wrapper scripts and JAR are distributed under
 Apache-2.0 by the Gradle contributors; their original notices are retained.
