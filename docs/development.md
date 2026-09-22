@@ -22,7 +22,7 @@ npm run check:kotlin
 npm run candidate
 ```
 
-Install JDK 17 and set `JAVA_HOME` before `check:kotlin`. The verification project uses Kotlin 2.4.20, JVM 17 bytecode and the checksum-pinned Gradle 9.7.1 wrapper. This does not change Mobile's toolchain. Maven Central is the only dependency repository for the application; strict locks and verification metadata are committed. C#, TypeScript and Kotlin consume Contracts `1.0.0-ci.36.1`.
+Install JDK 17 and set `JAVA_HOME` before `check:kotlin`. The verification project uses Kotlin 2.4.20, JVM 17 bytecode and the checksum-pinned Gradle 9.7.1 wrapper. This does not change Mobile's toolchain. Maven Central is the only dependency repository for the application; strict locks and verification metadata are committed. C# and TypeScript consume Contracts `1.0.0-ci.36.1`; the Kotlin verification client independently pins `1.0.0-ci.42.1`. Package build numbers may differ while the declared Hello v1 schema and descriptor remain compatible.
 
 `check:kotlin` compiles the consumer and prepares its distribution without executing it. The loopback deadline fixture is available only as an explicit local `deadlineTest` Gradle task and rejects CI. `candidate` builds the Linux Native AOT image, inspects its declared user/entry point/source label and extracts licence/provenance files from a stopped container. It never launches the application, restarts a service or runs RPC consumers. The build identity companion comes from the same independently resolved inputs supplied to compilation; it is not claimed as a runtime observation.
 
@@ -57,7 +57,7 @@ Early rejection disposes any unread upload through `waitUntil`, capped at 4097 b
 
 ## Optional local Kotlin runtime diagnostics
 
-Use Maven dependency `io.github.arcforges:contracts-connect-client:1.0.0-ci.36.1`, Connect-Kotlin OkHttp and Java-lite serialization 0.9.0, and explicitly select `NetworkProtocol.GRPC_WEB`. The production base URL is `https://arcforges.com/api`; direct local container tests use `http://127.0.0.1:<port>` without `/api`. Do not use the default Connect protocol against this ASP.NET gRPC service.
+Use Maven dependency `io.github.arcforges:contracts-connect-client:1.0.0-ci.42.1`, Connect-Kotlin OkHttp and Java-lite serialization 0.9.0, and explicitly select `NetworkProtocol.GRPC_WEB`. The production base URL is `https://arcforges.com/api`; direct local container tests use `http://127.0.0.1:<port>` without `/api`. Do not use the default Connect protocol against this ASP.NET gRPC service.
 
 Only when the changed behavior needs a live local diagnostic, after `npm run check:kotlin`, explicitly run `npm run test:kotlin:live` to call the current deployed Hello without a deployment token. It records the observed deployed revision, checks Native AOT and Worker identity, then checks six real SDK calls: success, Unicode, whitespace, 256-character boundary, empty-name `INVALID_ARGUMENT`, and 257-character `RESOURCE_EXHAUSTED`. It also verifies request path, binary Content-Type, emitted timeout, response media type, and terminal statuses. There is no automatic RPC retry. `artifacts/kotlin-current-live-evidence.json` describes the running deployment, not unmerged changes. `test:live` is also local opt-in and never a CI or publication requirement.
 
