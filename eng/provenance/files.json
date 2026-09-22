@@ -81,6 +81,7 @@
     "eng/provenance/records/cloud-worker-bundle-r8.json",
     "eng/provenance/records/cloud-worker-bundle-r9.json",
     "eng/provenance/records/containers-mit-legal-r1.json",
+    "eng/provenance/records/contracts-notice-legal-r1.json",
     "eng/provenance/records/dotnet-aspnetcore-legal-r1.json",
     "eng/provenance/records/dotnet-license-legal-r1.json",
     "eng/provenance/records/dotnet-runtime-legal-r1.json",
@@ -150,7 +151,8 @@
     "src/ArcForges.Cloud/BuildIdentity.cs": "arcnotes-build-identity-r1",
     "tests/ArcForges.Cloud.Tests/BuildIdentityTests.cs": "arcnotes-build-identity-r1",
     "eng/version-sources.json": "arcnotes-build-identity-r1",
-    "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r1"
+    "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r1",
+    "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r1"
   },
   "artifacts": ["cloud-runtime-notices-r12", "cloud-worker-bundle-r11"]
 }
