@@ -38,7 +38,7 @@
     "@cloudflare/containers": "0.3.7"
   },
   "devDependencies": {
-    "@arcforges/api-client": "1.0.0-ci.44.1",
+    "@arcforges/api-client": "1.0.0-ci.74.1",
     "@biomejs/biome": "2.5.14",
     "@cloudflare/workers-types": "5.20260918.1",
     "@connectrpc/connect": "2.2.0",

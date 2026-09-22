@@ -293,16 +293,16 @@
       "arcforges.cloud": {
         "type": "Project",
         "dependencies": {
-          "ArcForges.Contracts.PublicApi": "[1.0.0-ci.36.1, )",
+          "ArcForges.Contracts.PublicApi": "[1.0.0-ci.74.1, )",
           "Grpc.AspNetCore": "[2.84.0, )",
           "Grpc.AspNetCore.Web": "[2.84.0, )"
         }
       },
       "ArcForges.Contracts.PublicApi": {
         "type": "CentralTransitive",
-        "requested": "[1.0.0-ci.36.1, )",
-        "resolved": "1.0.0-ci.36.1",
-        "contentHash": "4+pUDeDcOScTV5rEei5yri8CLvVb9309Zdl5TBcVKXBvFrowcOoPx5pkZmpqzcLQZAZ2LH6LVv8JCGURpf42zQ==",
+        "requested": "[1.0.0-ci.74.1, )",
+        "resolved": "1.0.0-ci.74.1",
+        "contentHash": "36NPDQqRDJLAMDF8alGsztpcEWyMcW+omWMZ05Vt3GsdhdkxgCCyxTWNOYCdmK8s5KGVhD9PiMBYX9XE+USwsA==",
         "dependencies": {
           "Google.Protobuf": "3.36.1",
           "Grpc.Core.Api": "2.83.0"

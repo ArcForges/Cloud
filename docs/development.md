@@ -22,7 +22,7 @@ npm run check:kotlin
 npm run candidate
 ```
 
-Install JDK 17 and set `JAVA_HOME` before `check:kotlin`. The verification project uses Kotlin 2.4.20, JVM 17 bytecode and the checksum-pinned Gradle 9.7.1 wrapper. This does not change Mobile's toolchain. Maven Central is the only dependency repository for the application; strict locks and verification metadata are committed. C# and TypeScript consume Contracts `1.0.0-ci.36.1`; the Kotlin verification client independently pins `1.0.0-ci.42.1`. Package build numbers may differ while the declared Hello v1 schema and descriptor remain compatible.
+Install JDK 17 and set `JAVA_HOME` before `check:kotlin`. The verification project uses Kotlin 2.4.20, JVM 17 bytecode and the checksum-pinned Gradle 9.7.1 wrapper. This does not change Mobile's toolchain. Maven Central is the only dependency repository for the application; strict locks and verification metadata are committed. C# and TypeScript consume Contracts `1.0.0-ci.74.1`; the Kotlin verification client independently pins `1.0.0-ci.42.1`. Package build numbers may differ while the declared Hello v1 schema and descriptor remain compatible.
 
 `check:kotlin` compiles the consumer and prepares its distribution without executing it. The loopback deadline fixture is available only as an explicit local `deadlineTest` Gradle task and rejects CI. `candidate` builds the Linux Native AOT image, inspects its declared user/entry point/source label and extracts licence/provenance files from a stopped container. It never launches the application, restarts a service or runs RPC consumers. The build identity companion comes from the same independently resolved inputs supplied to compilation; it is not claimed as a runtime observation.
 
