@@ -45,6 +45,7 @@
     "eng/provenance/NOTICE.txt",
     "eng/provenance/artifact-profiles/cloud-release-r1.json",
     "eng/provenance/artifact-profiles/cloud-release-r10.json",
+    "eng/provenance/artifact-profiles/cloud-release-r11.json",
     "eng/provenance/artifact-profiles/cloud-release-r2.json",
     "eng/provenance/artifact-profiles/cloud-release-r3.json",
     "eng/provenance/artifact-profiles/cloud-release-r4.json",
@@ -59,6 +60,7 @@
     "eng/provenance/records/cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r10.json",
     "eng/provenance/records/cloud-runtime-notices-r11.json",
+    "eng/provenance/records/cloud-runtime-notices-r12.json",
     "eng/provenance/records/cloud-runtime-notices-r2.json",
     "eng/provenance/records/cloud-runtime-notices-r3.json",
     "eng/provenance/records/cloud-runtime-notices-r4.json",
@@ -69,6 +71,7 @@
     "eng/provenance/records/cloud-runtime-notices-r9.json",
     "eng/provenance/records/cloud-worker-bundle-r1.json",
     "eng/provenance/records/cloud-worker-bundle-r10.json",
+    "eng/provenance/records/cloud-worker-bundle-r11.json",
     "eng/provenance/records/cloud-worker-bundle-r2.json",
     "eng/provenance/records/cloud-worker-bundle-r3.json",
     "eng/provenance/records/cloud-worker-bundle-r4.json",
@@ -149,5 +152,5 @@
     "eng/version-sources.json": "arcnotes-build-identity-r1",
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r1"
   },
-  "artifacts": ["cloud-runtime-notices-r11", "cloud-worker-bundle-r10"]
+  "artifacts": ["cloud-runtime-notices-r12", "cloud-worker-bundle-r11"]
 }
