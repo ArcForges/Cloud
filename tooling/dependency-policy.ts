@@ -145,7 +145,8 @@ export function validateClosure(policy: Policy, packages: Record<string, Entry>)
       `Forbidden licence: ${key}`,
     );
     assert(entry.version && exact.test(entry.version), `Floating version: ${key}`);
-    const name = entry.name ?? key.split("node_modules/").at(-1)!;
+    const name = entry.name ?? key.split("node_modules/").at(-1);
+    assert(name, `Missing dependency identity: ${key}`);
     if (name.startsWith("@arcforges/"))
       assert(policy.firstParty[name], `Unadmitted publisher/internal package: ${name}`);
     if (entry.version.includes("-")) {
@@ -231,7 +232,7 @@ export function validateImports(root: string, file: string, source: string, poli
   for (const match of source.matchAll(lexical)) {
     const raw = match[0];
     if (raw.startsWith("//") || raw.startsWith("/*")) continue;
-    const literal = ['"', "'", "`"].includes(raw[0]!);
+    const literal = ['"', "'", "`"].includes(raw.charAt(0));
     const value = literal
       ? raw
           .slice(1, -1)
@@ -246,7 +247,8 @@ export function validateImports(root: string, file: string, source: string, poli
     tokens.push({ value, literal });
   }
   for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index]!;
+    const token = tokens[index];
+    assert(token, "Missing import token");
     if (token.literal) continue;
     const next = tokens[index + 1];
     if (["import", "require"].includes(token.value) && next?.value === "(") {
@@ -305,7 +307,8 @@ export function auditDependencies(root: string) {
   for (const file of historical) {
     const introduced = git("log", "HEAD", "--diff-filter=A", "--format=%H", "--", file)
       .split("\n")
-      .at(-1)!;
+      .at(-1);
+    assert(introduced, `Missing original review commit: ${file}`);
     const original = git("show", `${introduced}:${file}`);
     assert.equal(read(file).trim(), original, `Immutable review modified: ${file}`);
     const admitted = JSON.parse(original) as { packages: Record<string, string> };

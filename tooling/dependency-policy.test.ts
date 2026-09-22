@@ -17,23 +17,24 @@ import {
 const root = process.cwd();
 const baseline = JSON.parse(readFileSync("eng/policy/dependency-policy.json", "utf8")) as Policy;
 const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+const firstDependency = Object.keys(baseline.closure)[0];
+assert(firstDependency, "Fixture requires an admitted dependency");
 test("actual repository admission", () => {
   assert.equal(auditDependencies(root).result, "passed");
 });
 test("forbidden licence", () => {
   const packages = structuredClone(lock.packages);
-  packages[Object.keys(baseline.closure)[0]!].license = "GPL-3.0-only";
+  packages[firstDependency].license = "GPL-3.0-only";
   assert.throws(() => validateClosure(baseline, packages), /Forbidden licence/u);
 });
 test("floating tag", () => {
   const packages = structuredClone(lock.packages);
-  packages[Object.keys(baseline.closure)[0]!].version = "latest";
+  packages[firstDependency].version = "latest";
   assert.throws(() => validateClosure(baseline, packages), /Floating version/u);
 });
 test("same version with altered bytes", () => {
   const packages = structuredClone(lock.packages);
-  packages[Object.keys(baseline.closure)[0]!].integrity =
-    `sha512-${Buffer.alloc(64).toString("base64")}`;
+  packages[firstDependency].integrity = `sha512-${Buffer.alloc(64).toString("base64")}`;
   assert.throws(() => validateClosure(baseline, packages), /mutable-version/u);
 });
 test("wrong publisher", () => {
@@ -43,8 +44,7 @@ test("wrong publisher", () => {
 });
 test("untrusted registry", () => {
   const packages = structuredClone(lock.packages);
-  packages[Object.keys(baseline.closure)[0]!].resolved =
-    "https://registry.npmjs.org.evil.invalid/p.tgz";
+  packages[firstDependency].resolved = "https://registry.npmjs.org.evil.invalid/p.tgz";
   assert.throws(
     () => validateClosure(baseline, packages),
     /Untrusted feed|Wrong publisher artifact/u,
@@ -116,7 +116,8 @@ test("comments and escaped module names do not bypass public import scope", () =
     /internal/u,
   );
   assert.throws(
-    () => validateImports(root, "src/example.ts", "void import(`@arcforges/${kind}`);", baseline),
+    () =>
+      validateImports(root, "src/example.ts", `void import(\`@arcforges/\${kind}\`);`, baseline),
     /Computed import/u,
   );
 });
