@@ -24,3 +24,5 @@ All original source and tooling in this repository use AGPL-3.0-only. Preserve t
 Follow [the provenance process](docs/provenance.md) before introducing reused material.
 The source gate includes immutable records, complete inventory and deterministic NOTICE;
 the candidate gate also verifies the actual Worker and image legal contents.
+
+Dependency additions and upgrades follow [the enforced admission policy](docs/dependency-policy.md); update its input-bound review and retain the existing class and provenance gates.
