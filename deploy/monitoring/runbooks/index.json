@@ -1,0 +1,16 @@
+{
+  "schema": "arcforges.cloud.monitoring-runbook-index.v1",
+  "files": [
+    "runbooks/cloud-api-unavailable.md",
+    "runbooks/server-error-rate-spike.md",
+    "runbooks/database-unavailable.md",
+    "runbooks/oldest-message-age-critical.md",
+    "runbooks/dead-letter-growth.md",
+    "runbooks/one-time-code-delivery-failure-spike.md",
+    "runbooks/remote-connection-collapse.md",
+    "runbooks/backup-lag-beyond-objective.md",
+    "runbooks/payment-provider-webhook-backlog.md",
+    "runbooks/managed-ai-routes-unavailable.md",
+    "runbooks/data-integrity-alarm.md"
+  ]
+}

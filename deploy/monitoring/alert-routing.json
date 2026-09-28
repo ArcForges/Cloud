@@ -1,0 +1,8 @@
+{
+  "schema": "arcforges.cloud.alert-routing.v1",
+  "destinations": {
+    "page": "primary-on-call",
+    "ticket": "operations-ticket-queue",
+    "dashboard": "slo-dashboard"
+  }
+}

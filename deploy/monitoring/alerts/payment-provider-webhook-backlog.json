@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "payment-provider-webhook-backlog",
+  "dependencyId": "payment-provider",
+  "condition": {
+    "signal": "dependency.payment-provider.webhook-oldest-age-seconds",
+    "operator": "gt",
+    "threshold": 300,
+    "windowSeconds": 300,
+    "minimumSamples": 1
+  },
+  "severity": "SEV1",
+  "routeClass": "page",
+  "runbook": "runbooks/payment-provider-webhook-backlog.md"
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "one-time-code-delivery-failure-spike",
+  "dependencyId": "identity-delivery",
+  "condition": {
+    "signal": "dependency.identity-delivery.failure-rate-bp",
+    "operator": "gt",
+    "threshold": 2000,
+    "windowSeconds": 600,
+    "minimumSamples": 20
+  },
+  "severity": "SEV2",
+  "routeClass": "page",
+  "runbook": "runbooks/one-time-code-delivery-failure-spike.md"
+}

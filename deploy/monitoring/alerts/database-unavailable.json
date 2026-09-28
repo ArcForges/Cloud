@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "database-unavailable",
+  "dependencyId": "primary-database",
+  "condition": {
+    "signal": "dependency.primary-database.consecutive-failures",
+    "operator": "gte",
+    "threshold": 3,
+    "windowSeconds": 180,
+    "minimumSamples": 3
+  },
+  "severity": "SEV1",
+  "routeClass": "page",
+  "runbook": "runbooks/database-unavailable.md"
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "data-integrity-alarm",
+  "dependencyId": "primary-database",
+  "condition": {
+    "signal": "dependency.primary-database.integrity-alarm-count",
+    "operator": "gte",
+    "threshold": 1,
+    "windowSeconds": 60,
+    "minimumSamples": 1
+  },
+  "severity": "SEV0",
+  "routeClass": "page",
+  "runbook": "runbooks/data-integrity-alarm.md"
+}

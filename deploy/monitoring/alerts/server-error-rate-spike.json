@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "server-error-rate-spike",
+  "capabilityGroup": "cloud-api",
+  "condition": {
+    "signal": "capability.cloud-api.server-error-rate-bp",
+    "operator": "gt",
+    "threshold": 500,
+    "windowSeconds": 300,
+    "minimumSamples": 100
+  },
+  "severity": "SEV1",
+  "routeClass": "page",
+  "runbook": "runbooks/server-error-rate-spike.md"
+}

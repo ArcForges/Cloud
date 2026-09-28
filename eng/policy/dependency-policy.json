@@ -12,7 +12,7 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "ffc439bd73191160b61b7f660690291799bad6f7d247d51593114707a25adbbe",
-    "package.json": "48f40f2eaed6e329a4282cc3f7ee39d58e767984fd4c8000f36315744cf3a6a2",
+    "package.json": "71123bf5303ff94c57a4bda6bd36f65f7e0dcf2d0498cf9fde5053f894932d30",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "d2b84581970f81643c43207cb1e24557cd44abb7867e2ddfca6c18b6ed5c7851",
     "src/ArcForges.Cloud/packages.lock.json": "cbd7175143f33615d861ed2dc65e7b8cb30671a0e0ce62b81781943df6b2520c",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -35,8 +35,8 @@
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "Codex, maintainer-authorized implementation review",
-    "date": "2026-09-21",
-    "rationale": "WP02.05 reconciles the unchanged current lock closure. Registry integrity and declared licence expressions identify build inputs; exact existing artifact profiles, file-level records and complete legal notices remain the redistribution authority. This admission creates no new native capability or broader source reuse permission.",
+    "date": "2026-09-28",
+    "rationale": "WP02.05 reconciles the unchanged current npm lock closure. This successor records only the OPS.01 ADP-07 addition of deploy/monitoring/monitoring.test.mjs to the existing explicit npm test list; that package.json source digest changes, while package-lock.json, all dependency coordinates and integrity values, shipped artifact authority, native/runtime posture, and workflows remain unchanged. Registry integrity and declared licence expressions identify build inputs; exact existing artifact profiles, file-level records and complete legal notices remain the redistribution authority. This admission creates no new native capability or broader source reuse permission.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -46,7 +46,7 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "ffc439bd73191160b61b7f660690291799bad6f7d247d51593114707a25adbbe",
-      "package.json": "48f40f2eaed6e329a4282cc3f7ee39d58e767984fd4c8000f36315744cf3a6a2",
+      "package.json": "71123bf5303ff94c57a4bda6bd36f65f7e0dcf2d0498cf9fde5053f894932d30",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "d2b84581970f81643c43207cb1e24557cd44abb7867e2ddfca6c18b6ed5c7851",
       "src/ArcForges.Cloud/packages.lock.json": "cbd7175143f33615d861ed2dc65e7b8cb30671a0e0ce62b81781943df6b2520c",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -898,7 +898,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/admission-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/ops-01-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

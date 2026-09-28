@@ -1,0 +1,16 @@
+{
+  "schema": "arcforges.cloud.alert-index.v1",
+  "files": [
+    "alerts/cloud-api-unavailable.json",
+    "alerts/server-error-rate-spike.json",
+    "alerts/database-unavailable.json",
+    "alerts/oldest-message-age-critical.json",
+    "alerts/dead-letter-growth.json",
+    "alerts/one-time-code-delivery-failure-spike.json",
+    "alerts/remote-connection-collapse.json",
+    "alerts/backup-lag-beyond-objective.json",
+    "alerts/payment-provider-webhook-backlog.json",
+    "alerts/managed-ai-routes-unavailable.json",
+    "alerts/data-integrity-alarm.json"
+  ]
+}

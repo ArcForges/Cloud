@@ -1,0 +1,43 @@
+{
+  "schema": "arcforges.cloud.sli-objectives.v1",
+  "scope": "internal-engineering-objectives",
+  "windowSeconds": 2592000,
+  "aggregation": "capability-and-dependency-only-no-cross-capability-platform-total",
+  "capabilities": [
+    {
+      "id": "cloud-api",
+      "success": "A user API request returns its contract-valid result within the request deadline.",
+      "targetBasisPoints": 9990
+    },
+    {
+      "id": "identity",
+      "success": "A user-visible identity operation completes with its expected typed result.",
+      "targetBasisPoints": 9990
+    },
+    {
+      "id": "sync-control-plane",
+      "success": "An authoritative sync control-plane operation completes and returns the committed state.",
+      "targetBasisPoints": 9990
+    },
+    {
+      "id": "realtime",
+      "success": "A user realtime negotiation or reconnect completes and remains usable for its bounded attempt.",
+      "targetBasisPoints": 9950
+    },
+    {
+      "id": "managed-ai",
+      "success": "A managed-AI user request completes with its contract-valid response or declared typed outcome.",
+      "targetBasisPoints": 9900
+    }
+  ],
+  "dependencies": [
+    { "id": "edge-ingress", "targetBasisPoints": 9990 },
+    { "id": "primary-database", "targetBasisPoints": 9990 },
+    { "id": "object-storage", "targetBasisPoints": 9990 },
+    { "id": "message-queue", "targetBasisPoints": 9990 },
+    { "id": "identity-delivery", "targetBasisPoints": 9950 },
+    { "id": "payment-provider", "targetBasisPoints": 9950 },
+    { "id": "realtime-transport", "targetBasisPoints": 9950 },
+    { "id": "managed-ai-provider", "targetBasisPoints": 9900 }
+  ]
+}

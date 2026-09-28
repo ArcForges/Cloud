@@ -1,0 +1,27 @@
+{
+  "schema": "arcforges.cloud.error-budget-view.v1",
+  "scope": "internal-engineering-only",
+  "source": "../sli-objectives.json",
+  "windowSeconds": 2592000,
+  "capabilityGroups": ["cloud-api", "identity", "sync-control-plane", "realtime", "managed-ai"],
+  "dependencyGroups": [
+    "edge-ingress",
+    "primary-database",
+    "object-storage",
+    "message-queue",
+    "identity-delivery",
+    "payment-provider",
+    "realtime-transport",
+    "managed-ai-provider"
+  ],
+  "visibleFields": [
+    "user-visible-success-rate-basis-points",
+    "internal-objective-basis-points",
+    "error-budget-consumed-basis-points",
+    "error-budget-remaining-basis-points",
+    "sample-count",
+    "dependency-attribution"
+  ],
+  "aggregateAcrossCapabilities": false,
+  "emptyWindowState": "insufficient-data"
+}
