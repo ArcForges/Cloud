@@ -4,9 +4,9 @@
     "net10.0": {
       "ArcForges.Build.Policy": {
         "type": "Direct",
-        "requested": "[1.0.0-ci.21.1, )",
-        "resolved": "1.0.0-ci.21.1",
-        "contentHash": "NoCPqli7D8QwuhcyCzlAbQIMfTbh6nHOnjQam5vGN7KH+kAqtehE+ZZ7oK4sE21whqnujCxYsAl9vjKKE0j6fQ=="
+        "requested": "[1.0.0-ci.52.1, )",
+        "resolved": "1.0.0-ci.52.1",
+        "contentHash": "Vc86+2OMapBaDLBo3e/WfA5foHhvcsJ0npE2xfaTPCBD46gQ/syiJV+UwrNSzAhMX83RbTz2nUjCwJTcJNaHCQ=="
       },
       "xunit.v3.mtp-v2": {
         "type": "Direct",
