@@ -1,0 +1,13 @@
+# Cloud service levels and alert routing
+
+This directory is the OPS.01 monitoring artifact. It is an internal engineering objective set, not an external SLA, availability promise, or claim that live telemetry has already been collected. Targets are initial reviewed baselines because the adopted Cloud bootstrap had no operational history; changing them requires code review and an explicit history-based rationale.
+
+`sli-objectives.json` defines a rolling 30-day user-visible success objective for each capability group and separate objectives for bounded dependencies. The five capability groups are Cloud API, identity, sync control plane, realtime and managed AI. Realtime and managed AI have independent denominators and error budgets. There is no cross-capability total that could make one dependency outage appear to be full-platform downtime. A user-visible failure remains a failure in its capability group; when it is dependency-attributed, the same outcome also appears in that dependency's separate objective.
+
+`sli.mjs` accepts only the closed capability/dependency identifiers, a `good`/`bad` outcome and an optional dependency identifier. It accepts no user, tenant, route, prompt, payload, URL, exception or provider-supplied dimension. Empty windows are `insufficient-data`, not fabricated success. Error-budget consumption and remaining budget are returned with each objective.
+
+Each page-worthy alert from AL-02 has one version-controlled file under `alerts/`. The append-only alert index identifies deployed monitor files. `alert-routing.json` binds page, ticket and dashboard routes to stable logical destinations; provider credentials and delivery integrations are intentionally not part of this task. `dashboard/error-budget.json` exposes per-capability and per-dependency success, objective, sample count and budget fields without a platform-wide roll-up.
+
+Each page alert points to an existing OPS.01 alert-response runbook under `runbooks/`; the append-only runbook index is the completeness authority. This actual layout is bound to the permitted `deploy/monitoring/**` scope and RES-cloud-runbooks-and-fixtures (owner: Operations Owner; one file per monitor/runbook). It avoids claiming or writing OPS.03's separate `docs/runbooks/**` scope. These initial alert-response procedures are not represented as rehearsed; OPS.03 retains the broader required-runbook and rehearsal obligations under WP-45.02.
+
+The Cloud repository's root `package.json` has an explicit, not auto-discovered, test list. Its only OPS.01 support change appends `deploy/monitoring/monitoring.test.mjs` to that existing list so `npm run check` executes the offline suite; dependencies, lockfiles, workflows and test semantics are unchanged.

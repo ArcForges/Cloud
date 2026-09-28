@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "oldest-message-age-critical",
+  "dependencyId": "message-queue",
+  "condition": {
+    "signal": "dependency.message-queue.oldest-message-age-seconds",
+    "operator": "gt",
+    "threshold": 300,
+    "windowSeconds": 300,
+    "minimumSamples": 1
+  },
+  "severity": "SEV2",
+  "routeClass": "page",
+  "runbook": "runbooks/oldest-message-age-critical.md"
+}

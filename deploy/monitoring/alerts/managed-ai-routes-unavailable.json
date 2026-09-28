@@ -1,0 +1,16 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "managed-ai-routes-unavailable",
+  "capabilityGroup": "managed-ai",
+  "dependencyId": "managed-ai-provider",
+  "condition": {
+    "signal": "capability.managed-ai.route-availability-bp",
+    "operator": "lt",
+    "threshold": 1,
+    "windowSeconds": 300,
+    "minimumSamples": 1
+  },
+  "severity": "SEV2",
+  "routeClass": "page",
+  "runbook": "runbooks/managed-ai-routes-unavailable.md"
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "dead-letter-growth",
+  "dependencyId": "message-queue",
+  "condition": {
+    "signal": "dependency.message-queue.dead-letter-growth-count",
+    "operator": "gt",
+    "threshold": 10,
+    "windowSeconds": 900,
+    "minimumSamples": 1
+  },
+  "severity": "SEV2",
+  "routeClass": "page",
+  "runbook": "runbooks/dead-letter-growth.md"
+}

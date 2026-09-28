@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "dependencyId": "object-storage",
+  "id": "backup-lag-beyond-objective",
+  "condition": {
+    "signal": "dependency.object-storage.backup-lag-seconds",
+    "operator": "gt",
+    "threshold": 3600,
+    "windowSeconds": 300,
+    "minimumSamples": 1
+  },
+  "severity": "SEV2",
+  "routeClass": "page",
+  "runbook": "runbooks/backup-lag-beyond-objective.md"
+}

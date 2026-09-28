@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "cloud-api-unavailable",
+  "capabilityGroup": "cloud-api",
+  "condition": {
+    "signal": "capability.cloud-api.success-rate-bp",
+    "operator": "lt",
+    "threshold": 9500,
+    "windowSeconds": 300,
+    "minimumSamples": 20
+  },
+  "severity": "SEV1",
+  "routeClass": "page",
+  "runbook": "runbooks/cloud-api-unavailable.md"
+}

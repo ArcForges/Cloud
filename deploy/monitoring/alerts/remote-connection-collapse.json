@@ -1,0 +1,16 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "remote-connection-collapse",
+  "capabilityGroup": "realtime",
+  "dependencyId": "realtime-transport",
+  "condition": {
+    "signal": "capability.realtime.connection-loss-rate-bp",
+    "operator": "gt",
+    "threshold": 5000,
+    "windowSeconds": 300,
+    "minimumSamples": 20
+  },
+  "severity": "SEV2",
+  "routeClass": "page",
+  "runbook": "runbooks/remote-connection-collapse.md"
+}
