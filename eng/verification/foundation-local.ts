@@ -14,7 +14,7 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { Miniflare, Response as MiniflareResponse } from "miniflare";
+import { Miniflare, Response as MiniflareResponse, convertV4MiniflareOptions } from "miniflare";
 import { manifestHash } from "../../worker/storage/plans.generated.ts";
 import { runAll } from "./foundation-scenarios.ts";
 
@@ -144,38 +144,40 @@ export async function main() {
     }) as unknown as Response;
   };
 
-  const mf = new Miniflare({
-    modules: [{ type: "ESModule", path: scriptPath }],
-    compatibilityDate: "2026-09-15",
-    host: "127.0.0.1",
-    port: 0,
-    d1Databases: { DB: "proof-db" },
-    r2Buckets: { OBJECTS: "proof-objects" },
-    durableObjects: { JOB_COORDINATOR: "FoundationJobCoordinator" },
-    queueProducers: { WAKE_QUEUE: "proof-wake" },
-    queueConsumers: {
-      "proof-wake": {
-        maxBatchSize: 1,
-        maxBatchTimeout: 1,
-        maxRetries: 6,
-        deadLetterQueue: "proof-wake-dlq",
+  const mf = new Miniflare(
+    convertV4MiniflareOptions({
+      modules: [{ type: "ESModule", path: scriptPath }],
+      compatibilityDate: "2026-09-15",
+      host: "127.0.0.1",
+      port: 0,
+      d1Databases: { DB: "proof-db" },
+      r2Buckets: { OBJECTS: "proof-objects" },
+      durableObjects: { JOB_COORDINATOR: "FoundationJobCoordinator" },
+      queueProducers: { WAKE_QUEUE: "proof-wake" },
+      queueConsumers: {
+        "proof-wake": {
+          maxBatchSize: 1,
+          maxBatchTimeout: 1,
+          maxRetries: 6,
+          deadLetterQueue: "proof-wake-dlq",
+        },
       },
-    },
-    serviceBindings: { CONTAINER_SERVICE: proxy as never },
-    bindings: {
-      FOUNDATION_PROOF: "enabled",
-      REALM_ID: "proof",
-      RECOVERY_GENERATION: "0",
-      ALLOWED_ORIGIN: origin,
-      HMAC_C2W_KEY_ID: "c2w-1",
-      HMAC_C2W_SECRET: keys.c2w,
-      HMAC_W2C_KEY_ID: "w2c-1",
-      HMAC_W2C_SECRET: keys.w2c,
-      CSRF_SECRET: keys.csrf,
-      PROOF_OPERATOR_TOKEN: keys.operator,
-      SOURCE_REVISION: "local",
-    },
-  });
+      serviceBindings: { CONTAINER_SERVICE: proxy as never },
+      bindings: {
+        FOUNDATION_PROOF: "enabled",
+        REALM_ID: "proof",
+        RECOVERY_GENERATION: "0",
+        ALLOWED_ORIGIN: origin,
+        HMAC_C2W_KEY_ID: "c2w-1",
+        HMAC_C2W_SECRET: keys.c2w,
+        HMAC_W2C_KEY_ID: "w2c-1",
+        HMAC_W2C_SECRET: keys.w2c,
+        CSRF_SECRET: keys.csrf,
+        PROOF_OPERATOR_TOKEN: keys.operator,
+        SOURCE_REVISION: "local",
+      },
+    }),
+  );
   try {
     const url = await mf.ready;
     storageBase = url.origin;

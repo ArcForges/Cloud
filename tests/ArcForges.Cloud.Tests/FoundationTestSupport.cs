@@ -321,7 +321,7 @@ internal sealed class FakeStorage : IPlanExecutor
                 CheckOutbox(a[4]);
                 foreach (var item in items) Items[(key.Item1, key.Item2, item.N)] = item.Amount;
                 D1Values.TryGetUint64(a[2][1], out var checksum);
-                Jobs[key] = job with { Cursor = newCursor, Checksum = checksum.ToString(System.Globalization.CultureInfo.InvariantCulture), State = newCursor >= job.Total ? "complete" : "running", Revision = job.Revision + 1 };
+                Jobs[key] = job with { Cursor = newCursor, Checksum = checksum.ToString(System.Globalization.CultureInfo.InvariantCulture), State = newCursor >= job.Total ? "complete" : "running", Revision = job.Revision + 1, Owner = null, Until = null };
                 Inbox.Add(inbox);
                 AddOutbox(a[4]);
                 return Changed((ulong)(items.Count + 5));

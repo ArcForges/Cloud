@@ -102,6 +102,75 @@ has exactly one owner, this task, and later module tasks use their own names.
 | Durable Objects | `CloudContainer` (Container controller) and `FoundationJobCoordinator`; no alarm namespace is used                            |
 | Virtual hosts   | `storage.internal`, `objects.internal`                                                                                        |
 
+## Behavior
+
+### Sessions, CSRF and revocation
+
+`GET /session/v1/bootstrap` and `POST /session/v1/logout` are the two routes of the Contracts browser-session
+exception schema (`BrowserBootstrapResponse`, `BrowserSessionProjection`, `BrowserReceipt`, all generated).
+
+- The cookie is `__Host-af_session`, holding a random 256-bit handle. Only its SHA-256 is stored.
+- A session ends at twelve hours absolute, thirty minutes idle (renewed only by the explicit bootstrap, never
+  past the absolute limit), on revocation, or when its recovery generation differs from the configured one.
+- The CSRF token is the HMAC of the session's handle hash under a deployment secret, so it needs no storage.
+  The anonymous bootstrap token is a different value that never verifies on the unsafe route.
+- Logout needs the exact configured `Origin`, a valid session cookie and `X-AF-CSRF`, all checked before any
+  write. A safe GET may omit `Origin`, but a present one must match exactly.
+- Revocation is one guarded batch (session row, outbox row). Any Container reads the primary through the same
+  plans, so a revoked session is refused everywhere on the next read. A second logout is `unauthenticated`.
+- Session issue exists only as the proof route `session/issue` because the WP-22 ceremonies are not part of
+  this task; it returns the only copy of the handle.
+
+### Bounded checkpoint and restart
+
+A job has at most 1,000 items. One slice handles at most 100 items or 20 seconds (always at least one item),
+claims a 60-second D1 lease with a monotonic fence, and commits items, cursor, running sum, inbox row and
+outbox row in one guarded batch that also releases the lease. A stale holder fails the fence guard, a repeated
+event id fails the inbox key, and a restarted Container resumes from the stored cursor. Item amounts are
+exact checked int64 values above 2^53 and the stored sum is compared with a sum computed independently.
+
+The Queue message carries only the job id, scope and a fresh event id. The Durable Object admits an event once and
+allows one slice in flight per job; it is a disposable projection, so losing it can only cause a safe re-check.
+
+## Running the checks
+
+| Check                                                                                    | Command                                                               | Where it runs                                                                            |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Plan manifest, Worker vectors and tests                                                  | `npm run check`                                                       | hosted CI and locally                                                                    |
+| C# build, tests, format                                                                  | `npm run check:dotnet`                                                | hosted CI and locally                                                                    |
+| Linux Native AOT image and sealed Worker candidate                                       | `npm run candidate`                                                   | hosted CI (needs Docker)                                                                 |
+| Local cross-process integration (real host, workerd with local D1/R2/DO/Queue emulation) | `FOUNDATION_HOST_EXE=<host executable> npm run test:foundation:local` | explicit local opt-in only                                                               |
+| Deployed proof environment                                                               | `npm run deploy:proof`, then `npm run test:foundation:live`           | explicit local opt-in only, needs Cloudflare access and the lease `RES-cloud-deployment` |
+
+### Deploying and exercising the proof environment
+
+This is the live part. It was not run by the author of this change because it needs interactive Cloudflare
+account access that does not exist in the authoring environment.
+
+1. One-time account setup by the account owner: create the D1 database `arcforges-proof-business`, the R2 bucket
+   `arcforges-proof-objects` and the queues `arcforges-proof-wake` and `arcforges-proof-wake-dlq`, and an API token
+   with Workers Scripts, Containers, D1, R2 and Queues edit rights for that account.
+2. Export `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` for the local session, and the secrets
+   `PROOF_OPERATOR_TOKEN`, `PROOF_HMAC_C2W_SECRET`, `PROOF_HMAC_W2C_SECRET` and `PROOF_CSRF_SECRET` (each at least 32
+   random bytes encoded as unpadded base64url, the operator token any 32 to 256 URL-safe characters). Optionally set
+   `PROOF_D1_DATABASE_ID`.
+3. Build the sealed candidate (`npm run candidate`, needs Docker), then hold the lease
+   `python tools/delivery.py claim RES-cloud-deployment --worker W --task PRF.07` for the live run only.
+4. `npm run deploy:proof` pushes the sealed image, applies the proof migration, sets the four Worker secrets and deploys
+   `--env proof`. Set `PROOF_BASE_URL` to the resulting `workers.dev` origin and run `npm run test:foundation:live`.
+5. Release the lease immediately. The run writes `artifacts/foundation-live-evidence.json`; it never records a secret.
+
+## Not claimed
+
+- No live Cloudflare result of any kind: no deployed D1, R2, Queue, Durable Object or Container behavior, no outbound
+  handler interception, no blocked-egress or public-denial proof on a real deployment, no provider limits.
+- The outbound handlers use plain HTTP to the two virtual hosts inside the platform; HTTPS interception (HP-01) needs the
+  Cloudflare CA to be installed in the image and is not configured here.
+- No nonce replay ledger, passkey ceremony, WP-22 identity flow, object grants of contracts 05 section 9, EventFeed or
+  RunStream Durable Object, Cron, Workflow or alarm.
+- SQLite is not D1: the offline plan vectors prove the SQL, constraints and batch rollback, not Cloudflare's network
+  path or primary-read behavior.
+
 ## Validation actually performed
 
 This section is completed with exact commands, commits, run identifiers and results when the

@@ -285,7 +285,7 @@ export async function checkpointRestart(
 ): Promise<Evidence> {
   const scope = `proof/job-${randomUUID()}`;
   const total = 250;
-  const started = await operator(target, "job/start", { scope, total: String(total) });
+  const started = await operator(target, "job/start", { scope, total });
   assert.equal(started.status, 200, JSON.stringify(started.json));
   const jobId = String(started.json.jobId);
   let stopped = false;

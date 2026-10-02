@@ -504,7 +504,10 @@ test("a job slice is claimed under a lease, fenced and committed once with exact
     changes: "0",
   });
   // Delivering the same event again (after a fresh claim) is stopped by the inbox row and undoes the whole slice.
-  assert.equal((await run(db, "foundation.job-claim", jobClaim(job, "worker-a", 2_000n, lease))).ok, true);
+  assert.equal(
+    (await run(db, "foundation.job-claim", jobClaim(job, "worker-a", 2_000n, lease))).ok,
+    true,
+  );
   const duplicate = jobCommit({
     job,
     fence: "2",
