@@ -399,3 +399,55 @@ test("the entry sends only proof paths to the proof surface and only when it is 
   );
   assert.deepEqual(retried, [60]);
 });
+
+test("a job can be started without its automatic wake, and autoWake never reaches the host", async () => {
+  const { env, sent, recorded } = environment({
+    body: JSON.stringify({ jobId: job, scope: "proof/run-1", total: 5 }),
+  });
+  const response = await handleProof(
+    operator("/proof/v1/job/start", { scope: "proof/run-1", total: 5, autoWake: false }),
+    env,
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    jobId: job,
+    scope: "proof/run-1",
+    total: 5,
+    wakeEnqueued: false,
+  });
+  assert.equal(sent.length, 0);
+  assert.deepEqual(JSON.parse(new TextDecoder().decode((recorded[0] as Recorded).body)), {
+    scope: "proof/run-1",
+    total: 5,
+  });
+  const explicit = environment({
+    body: JSON.stringify({ jobId: job, scope: "proof/run-1", total: 5 }),
+  });
+  const queued = await handleProof(
+    operator("/proof/v1/job/start", { scope: "proof/run-1", total: 5, autoWake: true }),
+    explicit.env,
+  );
+  assert.equal(((await queued.json()) as { wakeEnqueued: boolean }).wakeEnqueued, true);
+  assert.equal(explicit.sent.length, 1);
+  for (const bad of ["yes", 1, null])
+    assert.equal(
+      (
+        await handleProof(
+          operator("/proof/v1/job/start", { scope: "proof/r", total: 1, autoWake: bad }),
+          env,
+        )
+      ).status,
+      400,
+    );
+  assert.equal(sent.length, 0);
+});
+
+test("a single slice can be driven by the operator through the signed path", async () => {
+  const { env, recorded } = environment({ body: '{"state":"running"}' });
+  const response = await handleProof(operator("/proof/v1/job/slice", { scope: "proof/r" }), env);
+  assert.equal(response.status, 200);
+  assert.equal(
+    new URL((recorded[0] as Recorded).request.url).pathname,
+    "/internal/foundation/v1/job/slice",
+  );
+});

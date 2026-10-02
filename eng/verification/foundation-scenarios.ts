@@ -285,23 +285,36 @@ export async function checkpointRestart(
 ): Promise<Evidence> {
   const scope = `proof/job-${randomUUID()}`;
   const total = 250;
-  const started = await operator(target, "job/start", { scope, total });
+  // Start without the automatic wake so the first slice and the restart happen at known points.
+  const started = await operator(target, "job/start", { scope, total, autoWake: false });
   assert.equal(started.status, 200, JSON.stringify(started.json));
+  assert.equal(started.json.wakeEnqueued, false);
   const jobId = String(started.json.jobId);
-  let stopped = false;
+  const first = await operator(target, "job/slice", {
+    scope,
+    jobId,
+    eventId: randomUUID(),
+    maxItems: 100,
+    maxMilliseconds: 20_000,
+  });
+  assert.equal(first.status, 200, JSON.stringify(first.json));
+  assert.equal(first.json.state, "running");
+  assert.equal(first.json.cursor, "100", "the first slice must stop at its item bound");
+  let status: Json = (await operator(target, "job/status", { scope, jobId })).json;
+  assert.equal(status.cursor, "100");
+  assert.equal(status.itemCount, "100");
+  if (options.stopContainer) {
+    // The Container may sleep or be replaced at any time: the rest must resume from the D1 checkpoint.
+    const stop = await operator(target, "container/stop", {});
+    assert.equal(stop.status, 200, JSON.stringify(stop.json));
+  }
+  // The remaining slices run through the Queue wake, Durable Object admission and the (restarted) Container.
+  const wake = await operator(target, "job/wake", { scope, jobId });
+  assert.equal(wake.status, 200, JSON.stringify(wake.json));
   const deadline = Date.now() + (target.jobTimeoutMs ?? 180_000);
-  let status: Json = {};
-  let progressSeen = false;
   while (Date.now() < deadline) {
     await sleep(target.pollIntervalMs ?? 2_000);
     status = (await operator(target, "job/status", { scope, jobId })).json;
-    const cursor = BigInt(String(status.cursor ?? "0"));
-    if (cursor > 0n && cursor < BigInt(total)) progressSeen = true;
-    if (options.stopContainer && !stopped && progressSeen) {
-      // The Container may sleep or be replaced at any time: the next slice must resume from D1.
-      await operator(target, "container/stop", {});
-      stopped = true;
-    }
     if (status.state === "complete") break;
   }
   assert.equal(status.state, "complete", "the job did not finish within the time limit");
@@ -316,8 +329,8 @@ export async function checkpointRestart(
     ok: true,
     detail: {
       total,
-      intermediateProgressObserved: progressSeen,
-      containerStopped: stopped,
+      firstSliceCursor: first.json.cursor,
+      containerStopped: options.stopContainer,
       fence: status.fence,
     },
   };

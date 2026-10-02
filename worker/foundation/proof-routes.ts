@@ -22,6 +22,7 @@ const operations = new Set([
   "session/issue",
   "objects/roundtrip",
   "job/start",
+  "job/slice",
   "job/status",
 ]);
 
@@ -145,12 +146,35 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
     await env.WAKE_QUEUE.send(newWake(parsed.jobId, parsed.scope, crypto.randomUUID()));
     return jsonResponse(200, { wakeEnqueued: true });
   }
+  // Only the Worker interprets autoWake (a job start normally queues its first wake); it never reaches the host.
+  let autoWake = true;
+  if (operation === "job/start") {
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
+      if ("autoWake" in parsed) {
+        if (typeof parsed.autoWake !== "boolean") return refusal(400);
+        autoWake = parsed.autoWake;
+        delete parsed.autoWake;
+        body = new TextEncoder().encode(JSON.stringify(parsed));
+      }
+    } catch {
+      return refusal(400);
+    }
+  }
   let reply: { status: number; body: Uint8Array };
   try {
     reply = await postSigned(env, operation, body, { requestId: crypto.randomUUID() });
   } catch (error) {
     if (error instanceof ContainerCallError) return jsonResponse(502, { error: "unavailable" });
     return jsonResponse(503, { error: "unavailable" });
+  }
+  if (operation === "job/start" && reply.status === 200 && !autoWake) {
+    try {
+      const started = JSON.parse(new TextDecoder().decode(reply.body)) as Record<string, unknown>;
+      return jsonResponse(200, { ...started, wakeEnqueued: false });
+    } catch {
+      return jsonResponse(502, { error: "unavailable" });
+    }
   }
   if (operation === "job/start" && reply.status === 200) {
     try {
