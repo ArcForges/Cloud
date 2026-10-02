@@ -60,7 +60,7 @@ public sealed class WorkerPlanExecutorTests
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("http://storage.test/internal/storage/v1/execute-plan", request.RequestUri!.ToString());
         Assert.Equal("application/json", request.Content!.Headers.ContentType!.MediaType);
-        var body = await request.Content.ReadAsByteArrayAsync(T.Ct);
+        var body = handler.Bodies[0];
         var parsed = Parse(body);
         Assert.Equal("foundation.account-load", parsed.PlanId);
         Assert.Equal(1, parsed.PlanVersion);
@@ -76,18 +76,18 @@ public sealed class WorkerPlanExecutorTests
     }
 
     [Theory]
-    [InlineData("invalidPlan", PlanFailureKind.InvalidPlan)]
-    [InlineData("staleGeneration", PlanFailureKind.StaleGeneration)]
-    [InlineData("precondition", PlanFailureKind.Precondition)]
-    [InlineData("constraint", PlanFailureKind.Constraint)]
-    [InlineData("overloaded", PlanFailureKind.Overloaded)]
-    [InlineData("unavailable", PlanFailureKind.Unavailable)]
-    [InlineData("unknownOutcome", PlanFailureKind.UnknownOutcome)]
-    public async Task EveryTypedFailureMapsToItsKindWithoutRetry(string wire, PlanFailureKind expected)
+    [InlineData("invalidPlan", "InvalidPlan")]
+    [InlineData("staleGeneration", "StaleGeneration")]
+    [InlineData("precondition", "Precondition")]
+    [InlineData("constraint", "Constraint")]
+    [InlineData("overloaded", "Overloaded")]
+    [InlineData("unavailable", "Unavailable")]
+    [InlineData("unknownOutcome", "UnknownOutcome")]
+    public async Task EveryTypedFailureMapsToItsKindWithoutRetry(string wire, string expected)
     {
         var (executor, handler, _) = Create((_, body) => Task.FromResult(Json(Failure(body, wire))));
         var failure = await Assert.ThrowsAsync<PlanFailureException>(() => executor.ExecuteAsync(Write(), T.Ct));
-        Assert.Equal(expected, failure.Kind);
+        Assert.Equal(Enum.Parse<PlanFailureKind>(expected), failure.Kind);
         Assert.Equal(1, handler.Count);
         Assert.DoesNotContain("SELECT", failure.Message, StringComparison.Ordinal);
     }
@@ -209,10 +209,10 @@ public sealed class WorkerPlanExecutorTests
         var (executor, handler, _) = Create((_, body) => Task.FromResult(Json(Success(body, changes: "18446744073709551615"))));
         Assert.Equal(ulong.MaxValue, (await executor.ExecuteAsync(Write(), T.Ct)).Changes);
         await executor.ExecuteAsync(Write() with { Timeout = TimeSpan.FromMinutes(5) }, T.Ct);
-        var body = await handler.Requests[1].Content!.ReadAsByteArrayAsync(T.Ct);
+        var body = handler.Bodies[1];
         Assert.Equal(Start.AddSeconds(10), DateTimeOffset.Parse(Parse(body).DeadlineUtc, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal));
         await Assert.ThrowsAsync<PlanFailureException>(() => executor.ExecuteAsync(Write() with { Timeout = TimeSpan.Zero }, T.Ct));
-        var (bad, _, _) = Create((_, body2) => Task.FromResult(Json(Success(body2, changes: "01"))));
+        var (bad, _, _) = Create((_, body2) => Task.FromResult(Json(System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.UTF8.GetString(Success(body2)).Replace("\"changes\":\"0\"", "\"changes\":\"01\"", StringComparison.Ordinal)))));
         Assert.Equal(PlanFailureKind.UnknownOutcome, (await Assert.ThrowsAsync<PlanFailureException>(() => bad.ExecuteAsync(Write(), T.Ct))).Kind);
     }
 }

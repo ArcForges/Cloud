@@ -53,9 +53,10 @@ public sealed class FoundationOptionsTests
         environment[variable] = null;
         var failure = Assert.Throws<FoundationConfigurationException>(() => Parse(environment));
         Assert.Contains("AF_", failure.Message, StringComparison.Ordinal);
-        environment[variable] = "x";
+        var bad = variable.EndsWith("KEY_ID", StringComparison.Ordinal) ? "-bad-id" : "x";
+        environment[variable] = bad;
         var malformed = Assert.Throws<FoundationConfigurationException>(() => Parse(environment));
-        Assert.DoesNotContain("x\"", malformed.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(bad, malformed.Message, StringComparison.Ordinal);
     }
 
     [Fact]

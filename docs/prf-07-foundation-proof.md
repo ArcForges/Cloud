@@ -132,6 +132,17 @@ exact checked int64 values above 2^53 and the stored sum is compared with a sum 
 The Queue message carries only the job id, scope and a fresh event id. The Durable Object admits an event once and
 allows one slice in flight per job; it is a disposable projection, so losing it can only cause a safe re-check.
 
+## Pipeline order (BR-06 item 9)
+
+The existing workflow runs this proof on every pull request and every main build, not once. Its order is unchanged:
+`Source` (Linux and Windows: locked restores, `npm run check` including the plan-manifest check, the Worker vectors,
+the dependency, licence and provenance gates, format, lint and typecheck; the Linux job also runs `npm run check:dotnet`
+with the C# tests and the format check) and `Dependency audit and repository checks` (including the secret scan), then
+`Native AOT image and Worker build` (the Linux Native AOT image with `IlcTreatWarningsAsErrors` and
+`ILLinkTreatWarningsAsErrors`, so any trim or AOT diagnostic fails the build, plus the sealed Worker bundle and its legal
+inspection), then `Verify`. Only a successful main build deploys, and it deploys the production Hello Worker exactly as
+before: the proof environment is never deployed by CI and CI never connects to a live service.
+
 ## Running the checks
 
 | Check                                                                                    | Command                                                               | Where it runs                                                                            |

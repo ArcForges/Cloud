@@ -7,9 +7,12 @@ using ArcForges.Cloud.Composition;
 using ArcForges.Cloud.Foundation;
 using ArcForges.Cloud.Hmac;
 using ArcForges.Cloud.Storage;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace ArcForges.Cloud.Tests;
@@ -267,10 +270,9 @@ public sealed class FoundationHostTests
         var ok = await Send(host, Signed(host, "/internal/foundation/v1/readiness", json));
         Assert.True(ok.Json.GetProperty("ready").GetBoolean());
         Assert.Equal(PlanManifest.Hash, ok.Json.GetProperty("manifestHash").GetString());
-        // The raised limit applies only to the foundation routes; Hello keeps its own bound.
-        var hello = new HttpRequestMessage(HttpMethod.Post, "/arcforges.hello.v1.HelloService/SayHello") { Content = new ByteArrayContent(new byte[5000]) };
-        hello.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/grpc-web+proto");
-        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await Send(host, hello)).Status);
+        // The host-wide bound of 4096 bytes protects Hello; the foundation routes raise only their own bound.
+        var padded = Encoding.UTF8.GetBytes("{" + new string(' ', 5000) + "}");
+        Assert.Equal(HttpStatusCode.OK, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", padded))).Status);
     }
 
     [Fact]

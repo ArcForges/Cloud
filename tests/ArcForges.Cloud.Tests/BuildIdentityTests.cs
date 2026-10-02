@@ -65,9 +65,7 @@ public sealed class BuildIdentityTests
             {
                 "contracts" => "{}",
                 "packages" => "{\"dependencies\":{\"net10.0\":{\"fixture.package\":{\"type\":\"Direct\",\"resolved\":\"1.0\"}}}}",
-                "native-abi" => "#define ARC_ABI_MAJOR 1
-#define ARC_ABI_MINOR 0
-",
+                "native-abi" => "#define ARC_ABI_MAJOR 1\n#define ARC_ABI_MINOR 0\n",
                 "migrations" => "{\"migrations\":[{\"subject\":\"fixture.store\",\"version\":\"1.0\"}]}",
                 _ => "{\"versions\":[{\"subject\":\"fixture.owned\",\"version\":\"1.0\"}]}"
             };

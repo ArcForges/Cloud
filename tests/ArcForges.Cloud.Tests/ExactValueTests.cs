@@ -154,7 +154,7 @@ public sealed partial class ExactValueTests
         }
 
         var joined = string.Join('\n', lines.OrderBy(l => l.Id, StringComparer.Ordinal).ThenBy(l => l.Version).Select(l => l.Line)) + "\n";
-        Assert.Equal(T.Sha256Hex(joined), PlanManifest.Hash);
+        Assert.Equal(PlanManifest.Hash, T.Sha256Hex(joined));
         Assert.Equal(lines.Count, PlanManifest.All.Count);
         Assert.Equal(lines.Select(l => l.Id).Order(StringComparer.Ordinal), PlanManifest.All.Select(p => p.Id).Order(StringComparer.Ordinal));
     }

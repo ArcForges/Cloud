@@ -47,14 +47,14 @@ public sealed class ObjectsClientTests
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.UnprocessableEntity, ObjectOutcome.Rejected)]
-    [InlineData(HttpStatusCode.Unauthorized, ObjectOutcome.Rejected)]
-    [InlineData(HttpStatusCode.OK, ObjectOutcome.Invalid)]
-    [InlineData(HttpStatusCode.InternalServerError, ObjectOutcome.Invalid)]
-    public async Task PutMapsStatusesWithoutTransportText(HttpStatusCode status, ObjectOutcome expected)
+    [InlineData(HttpStatusCode.UnprocessableEntity, "Rejected")]
+    [InlineData(HttpStatusCode.Unauthorized, "Rejected")]
+    [InlineData(HttpStatusCode.OK, "Invalid")]
+    [InlineData(HttpStatusCode.InternalServerError, "Invalid")]
+    public async Task PutMapsStatusesWithoutTransportText(HttpStatusCode status, string expected)
     {
         var (client, _, _) = Create((_, _) => Task.FromResult(Reply(status)));
-        Assert.Equal(expected, (await client.PutAsync(Workspace, Resource, Payload, PayloadHash, T.Ct)).Outcome);
+        Assert.Equal(Enum.Parse<ObjectOutcome>(expected), (await client.PutAsync(Workspace, Resource, Payload, PayloadHash, T.Ct)).Outcome);
     }
 
     [Fact]
