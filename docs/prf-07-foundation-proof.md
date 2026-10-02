@@ -10,17 +10,17 @@ claim any live Cloudflare result.
 The proof exercises the selected Cloudflare mechanisms end to end with the existing Native AOT host,
 without introducing product behavior:
 
-| Mechanism                       | What the proof implements                                                                                                                                                                                                                                                             | Where                                                         |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Private D1 named-plan binding   | `POST /internal/storage/v1/execute-plan` on the virtual host `storage.internal`: the generated Contracts `ExecutePlan` request and reply, a reviewed plan dictionary with one SHA-256 manifest identity, typed bind and result kinds, one atomic `D1Database.batch()` per plan        | `worker/storage/**`, `src/ArcForges.Cloud/Storage/**`         |
-| Rollback on guard failure       | the guard row pattern of the D1 profile: a false precondition violates a named `CHECK` and the whole batch rolls back; the failure is reported as `precondition`                                                                                                                      | plan SQL, `worker/proof-migrations/0001_foundation_probe.sql` |
-| Exact 64-bit and decimal values | int64 and uint64 travel as canonical decimal strings, are bound with `CAST(? AS INTEGER)` and returned with `CAST(column AS TEXT)`; decimals are canonical text; no JavaScript `Number` conversion exists on the path                                                                 | generator rules, `worker/storage/**`, `Storage/D1Values.cs`   |
-| Session, CSRF and revoke        | opaque 256-bit session handle stored only as a SHA-256 hash, twelve-hour absolute and thirty-minute idle expiry, CSRF token derived from the session, exact Origin and `X-AF-CSRF` checks on the unsafe route, guarded revocation that every Container observes through primary reads | `src/ArcForges.Cloud/Foundation/**`                           |
-| Bounded checkpoint and restart  | a finite job of at most 100 items or 20 seconds per slice, claimed under a D1 lease with a monotonic fence, committed in one guarded batch with an inbox row, resumable after the Container is stopped                                                                                | `src/ArcForges.Cloud/Foundation/**`, `worker/foundation/**`   |
-| Durable Object                  | one `FoundationJobCoordinator` per job: duplicate-delivery admission by event id and single-flight slices                                                                                                                                                                             | `worker/foundation/**`                                        |
-| Queue                           | wake hints that reference a job id only; D1 stays the authority; retries and a dead-letter queue                                                                                                                                                                                      | `worker/foundation/**`, `wrangler.json`                       |
-| R2                              | private bucket facade on `objects.internal`: bounded signed PUT with server-verified SHA-256 and signed range GET                                                                                                                                                                     | `worker/foundation/**`                                        |
-| Private ingress                 | the Container reaches bindings only through outbound handlers on exact virtual hosts; ordinary Internet egress stays disabled                                                                                                                                                         | `worker/index.ts`, `worker/foundation/outbound.ts`            |
+| Mechanism                       | What the proof implements                                                                                                                                                                                                                                                             | Where                                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Private D1 named-plan binding   | `POST /internal/storage/v1/execute-plan` on the virtual host `storage.internal`: the generated Contracts `ExecutePlan` request and reply, a reviewed plan dictionary with one SHA-256 manifest identity, typed bind and result kinds, one atomic `D1Database.batch()` per plan        | `worker/storage/**`, `src/ArcForges.Cloud/Storage/**`                          |
+| Rollback on guard failure       | the guard row pattern of the D1 profile: a false precondition violates a named `CHECK` and the whole batch rolls back; the failure is reported as `precondition`                                                                                                                      | plan SQL, `worker/proof-migrations/0001_foundation_probe.sql`                  |
+| Exact 64-bit and decimal values | int64 and uint64 travel as canonical decimal strings, are bound with `CAST(? AS INTEGER)` and returned with `CAST(column AS TEXT)`; decimals are canonical text; no JavaScript `Number` conversion exists on the path                                                                 | generator rules, `worker/storage/**`, `Storage/D1Values.cs`                    |
+| Session, CSRF and revoke        | opaque 256-bit session handle stored only as a SHA-256 hash, twelve-hour absolute and thirty-minute idle expiry, CSRF token derived from the session, exact Origin and `X-AF-CSRF` checks on the unsafe route, guarded revocation that every Container observes through primary reads | `src/ArcForges.Cloud/Foundation/**`                                            |
+| Bounded checkpoint and restart  | a finite job of at most 100 items or 20 seconds per slice, claimed under a D1 lease with a monotonic fence, committed in one guarded batch with an inbox row, resumable after the Container is stopped                                                                                | `src/ArcForges.Cloud/Foundation/**`, `worker/foundation/**`                    |
+| Durable Object                  | one `FoundationJobCoordinator` per job: duplicate-delivery admission by event id and single-flight slices                                                                                                                                                                             | `worker/foundation/**`                                                         |
+| Queue                           | wake hints that reference a job id only; D1 stays the authority; retries and a dead-letter queue                                                                                                                                                                                      | `worker/foundation/**`, `wrangler.json`                                        |
+| R2                              | private bucket facade on `objects.internal`: bounded signed PUT with server-verified SHA-256 and signed range GET                                                                                                                                                                     | `worker/foundation/**`                                                         |
+| Private ingress                 | the Container reaches bindings only through outbound handlers on exact virtual hosts; ordinary Internet egress stays disabled                                                                                                                                                         | `worker/index.ts`, `worker/storage/handler.ts`, `worker/foundation/objects.ts` |
 
 The proof is deployed only by the explicit `proof` Wrangler environment (Worker
 `arcforges-cloud-proof`, its own D1 database, R2 bucket, queue and Container). The production
@@ -93,14 +93,14 @@ other argument that is.
 Names reserved for the proof environment (RES-cloud-deployment and RES-cloud-leased-singletons). Each
 has exactly one owner, this task, and later module tasks use their own names.
 
-| Kind            | Name                                                                                                                          |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Worker          | `arcforges-cloud-proof` (Wrangler environment `proof`)                                                                        |
-| D1              | binding `DB`, database `arcforges-proof-business`                                                                             |
-| R2              | binding `OBJECTS`, bucket `arcforges-proof-objects`, key `realm/<realm>/workspace/<workspace>/diagnostic/<resource>/<sha256>` |
-| Queue           | binding `WAKE_QUEUE`, queue `arcforges-proof-wake`, dead-letter queue `arcforges-proof-wake-dlq`                              |
-| Durable Objects | `CloudContainer` (Container controller) and `FoundationJobCoordinator`; no alarm namespace is used                            |
-| Virtual hosts   | `storage.internal`, `objects.internal`                                                                                        |
+| Kind            | Name                                                                                                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Worker          | `arcforges-cloud-proof` (Wrangler environment `proof`)                                                                                                                                                                                                 |
+| D1              | binding `DB`, database `arcforges-proof-business`                                                                                                                                                                                                      |
+| R2              | binding `OBJECTS`, bucket `arcforges-proof-objects`, key `realm/<realm>/workspace/<workspace>/diagnostic/<resource>/<sha256>`                                                                                                                          |
+| Queue           | binding `WAKE_QUEUE`, queue `arcforges-proof-wake`, dead-letter queue `arcforges-proof-wake-dlq`                                                                                                                                                       |
+| Durable Objects | `CloudContainer` (the unchanged production Container controller), `FoundationContainer` (its proof-environment subclass, which alone registers the outbound hosts and the environment hook) and `FoundationJobCoordinator`; no alarm namespace is used |
+| Virtual hosts   | `storage.internal`, `objects.internal`                                                                                                                                                                                                                 |
 
 ## Behavior
 
@@ -127,21 +127,30 @@ A job has at most 1,000 items. One slice handles at most 100 items or 20 seconds
 claims a 60-second D1 lease with a monotonic fence, and commits items, cursor, running sum, inbox row and
 outbox row in one guarded batch that also releases the lease. A stale holder fails the fence guard, a repeated
 event id fails the inbox key, and a restarted Container resumes from the stored cursor. Item amounts are
-exact checked int64 values above 2^53 and the stored sum is compared with a sum computed independently.
+exact checked int64 values (`(n + 1) * 4611686018427`, each below 2^53 within the 1,000-item limit); the running
+sum passes 2^53 from the 63rd item on, so the stored uint64 sum and checksum are exact only if the whole path is
+exact, and they are compared with a sum computed independently. The `exact` route covers single values above 2^53.
 
 The Queue message carries only the job id, scope and a fresh event id. The Durable Object admits an event once and
 allows one slice in flight per job; it is a disposable projection, so losing it can only cause a safe re-check.
 
 ## Pipeline order (BR-06 item 9)
 
-The existing workflow runs this proof on every pull request and every main build, not once. Its order is unchanged:
+The existing workflow runs the offline and build parts of this task on every pull request and every main build, not
+once: the plan and Worker tests, the C# tests, the dependency, licence and provenance gates, and the Native AOT image
+and Worker bundle build. The foundation scenarios against a running host and Worker, and the live proof, are local
+opt-in and never run in CI. Its order is unchanged:
 `Source` (Linux and Windows: locked restores, `npm run check` including the plan-manifest check, the Worker vectors,
 the dependency, licence and provenance gates, format, lint and typecheck; the Linux job also runs `npm run check:dotnet`
 with the C# tests and the format check) and `Dependency audit and repository checks` (including the secret scan), then
 `Native AOT image and Worker build` (the Linux Native AOT image with `IlcTreatWarningsAsErrors` and
 `ILLinkTreatWarningsAsErrors`, so any trim or AOT diagnostic fails the build, plus the sealed Worker bundle and its legal
-inspection), then `Verify`. Only a successful main build deploys, and it deploys the production Hello Worker exactly as
-before: the proof environment is never deployed by CI and CI never connects to a live service.
+inspection), then `Verify`. Only a successful main build deploys. It deploys the default Worker and the production Hello container: the
+default Container class is unchanged (no outbound interception, no environment hook, pinned by
+`tests/worker/container-classes.test.ts`), the default configuration is unchanged, and the Worker bundle is larger
+(61,990 to 165,123 bytes) because it now contains the dormant foundation modules, which answer nothing without
+`FOUNDATION_PROOF=enabled`. The image likewise contains the dormant host module. The proof environment is never
+deployed by CI and CI never connects to a live service.
 
 ## Running the checks
 
@@ -181,8 +190,48 @@ account access that does not exist in the authoring environment.
   RunStream Durable Object, Cron, Workflow or alarm.
 - SQLite is not D1: the offline plan vectors prove the SQL, constraints and batch rollback, not Cloudflare's network
   path or primary-read behavior.
+- Replay protection is partial. Signature, a 60 second skew window, key selection and the exact route check exist;
+  the 120 second nonce store with exact-retry replay, the route-audience allowlist and the key-overlap purge of
+  contracts 05 section 2 do not.
+- The R2 facade (`/internal/objects/v1/probe/...`) and `worker/proof-migrations/0001_foundation_probe.sql` are
+  proof-only. They are not the CON.15 job-object ports and are not part of the global D1 migration sequence.
+- `npm run deploy:proof` (secret creation before the first deploy, `d1 migrations apply` without a database id,
+  `PROOF_D1_DATABASE_ID`) has never run and its step ordering may need adjustment on the first live attempt.
+- The proof environment binds `FoundationContainer`; its container start path with outbound interception has not been
+  observed on Cloudflare. The production class does not register any.
 
 ## Validation actually performed
 
-This section is completed with exact commands, commits, run identifiers and results when the
-evidence exists. Until then nothing in it is claimed.
+All results below were observed on the claimant's Windows 11 machine (ArcForges delivery worker w-c20261002-prf07) and
+are claimant-reported until the independent review and hosted CI confirm them. Nothing here is a live Cloudflare result.
+
+| Check                                   | Command                                                                                                      | Observed                                                                                                                                     |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker and tooling tests                | `npm test`                                                                                                   | 176 tests passed, 0 failed                                                                                                                   |
+| Dependency policy                       | `npm run test:dependencies`, `node tooling/dependency-policy.ts`                                             | 18 passed; policy and receipt `prf-07-r1` verify                                                                                             |
+| Licence, provenance                     | `node tooling/project.ts licence`, `node tooling/project.ts provenance`                                      | pass                                                                                                                                         |
+| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 165267 bytes)                                                                                                        |
+| Plan generator drift                    | `npm run check:plans`                                                                                        | 19 plans, manifest hash matches the generated TS and C#                                                                                      |
+| Formatting, lint, types                 | `prettier --check .`, `biome lint`, `tsc` for both projects                                                  | clean                                                                                                                                        |
+| C# build and tests                      | `dotnet build` and `dotnet test` of `Cloud.slnx`, Release, under the build slot                              | 0 warnings, 159 tests passed                                                                                                                 |
+| Cross-process local integration         | `npm run test:foundation:local`                                                                              | readiness, exact values, guard rollback, session/CSRF/revoke, R2 objects, checkpoint restart (one host restart) and public denial all passed |
+| Native AOT                              | local `dotnet publish` for win-x64                                                                           | linked and ran in the local integration run above                                                                                            |
+| Mutation checks                         | 13 deliberate mutations of the C# host                                                                       | 13 of 13 caught by the tests                                                                                                                 |
+
+Local integration uses the real Native AOT host process and workerd (Miniflare) with local D1, R2, Durable Object and
+Queue emulation, and a Node SQLite bridge standing in for D1.
+
+### Unobserved
+
+- Any deployed Cloudflare behavior: D1, R2, Queue, Durable Object, Container, outbound handlers, blocked egress,
+  public-surface denial, provider limits. `npm run deploy:proof` and `npm run test:foundation:live` have never been run.
+- The Linux Native AOT image and the Docker build (no Docker here); they are exercised only by hosted CI.
+- The local Node and npm are newer than the pinned toolchain; the pinned toolchain check runs only in hosted CI.
+- SQLite and workerd are emulation, not the provider.
+
+### What the live evidence needs
+
+Cloudflare account id and an API token with Workers Scripts, Containers, D1, R2 and Queues edit rights; the D1 database
+`arcforges-proof-business`, the R2 bucket `arcforges-proof-objects` and the queues `arcforges-proof-wake` and
+`arcforges-proof-wake-dlq`; the four proof secrets; a built candidate (`npm run candidate`, needs Docker); the
+`RES-cloud-deployment` lease. Until then PRF.07 cannot be complete.

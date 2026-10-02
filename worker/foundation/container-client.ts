@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Signed Worker-to-Container calls (the w2c direction) to the private foundation routes.
 import { sha256Hex } from "../private/encoding.ts";
-import { loadKeys, type PrivateKeyEnv } from "../private/keys.ts";
+import { loadKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import { newNonce, sign } from "../private/signing.ts";
 import type { ContainerNamespaceLike } from "./types.ts";
 import { foundationContainerName } from "./types.ts";

@@ -61,7 +61,7 @@
       "routes": [],
       "containers": [
         {
-          "class_name": "CloudContainer",
+          "class_name": "FoundationContainer",
           "image": "./Dockerfile",
           "max_instances": 1,
           "instance_type": "lite"
@@ -71,7 +71,7 @@
         "bindings": [
           {
             "name": "CLOUD_CONTAINER",
-            "class_name": "CloudContainer"
+            "class_name": "FoundationContainer"
           },
           {
             "name": "JOB_COORDINATOR",
@@ -82,7 +82,7 @@
       "migrations": [
         {
           "tag": "v1",
-          "new_sqlite_classes": ["CloudContainer", "FoundationJobCoordinator"]
+          "new_sqlite_classes": ["FoundationContainer", "FoundationJobCoordinator"]
         }
       ],
       "d1_databases": [

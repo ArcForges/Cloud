@@ -84,6 +84,10 @@ async function deploy() {
     "--config",
     "artifacts/deploy.wrangler.json",
     "--no-bundle",
+    // An explicit empty environment selects the top-level (production) Worker and keeps Wrangler from
+    // warning that the proof environment exists in the same file.
+    "--env",
+    "",
     "--containers-rollout",
     "immediate",
     "--tag",

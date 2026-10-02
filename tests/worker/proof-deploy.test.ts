@@ -34,6 +34,18 @@ test("the checked-in proof environment is isolated from the production Worker", 
   for (const key of ["d1_databases", "r2_buckets", "queues"])
     assert.equal(top[key], undefined, key);
   assert.equal((top.vars as Record<string, string>).FOUNDATION_PROOF, undefined);
+  // Production binds the unchanged Hello Container class; only the proof environment binds the
+  // subclass that registers outbound interception.
+  const classes = (value: unknown) => JSON.stringify(value).match(/"class_name":"[^"]+"/gu);
+  assert.deepEqual(classes(top.containers), ['"class_name":"CloudContainer"']);
+  assert.deepEqual(classes(top.durable_objects), ['"class_name":"CloudContainer"']);
+  assert.deepEqual(top.migrations, [{ tag: "v1", new_sqlite_classes: ["CloudContainer"] }]);
+  assert.deepEqual(classes(proof.containers), ['"class_name":"FoundationContainer"']);
+  assert.deepEqual(
+    JSON.stringify(proof.migrations).includes('"CloudContainer"'),
+    false,
+    "the proof environment never references the production class",
+  );
   // No resource name is shared with another environment.
   const names = JSON.stringify(proof);
   assert(!names.includes('"arcforges-cloud"'));

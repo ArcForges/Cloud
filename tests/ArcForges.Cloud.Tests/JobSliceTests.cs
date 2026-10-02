@@ -23,10 +23,13 @@ public sealed class JobSliceTests
         jobs.SliceAsync(Scope, job, eventId ?? T.Uuid(), items, milliseconds, T.Ct);
 
     [Fact]
-    public void ItemAmountsAreExactCheckedInt64AboveTwoToTheFiftyThree()
+    public void ItemAmountsAreExactCheckedInt64AndTheRunningSumPassesTwoToTheFiftyThree()
     {
         Assert.Equal(4_611_686_018_427, JobSliceService.ItemAmount(0));
-        Assert.True(JobSliceService.ItemAmount(1953) > 9_007_199_254_740_992L);
+        // Within the 1000-item job limit every item stays below 2^53; only the running sum crosses it.
+        Assert.True(JobSliceService.ItemAmount(JobSliceService.MaxTotal - 1) < 9_007_199_254_740_992L);
+        Assert.True(JobSliceService.ExpectedChecksum(62) <= 9_007_199_254_740_992UL);
+        Assert.True(JobSliceService.ExpectedChecksum(63) > 9_007_199_254_740_992UL);
         Assert.Equal(4_611_686_018_427UL * 3UL, JobSliceService.ExpectedChecksum(2));
         Assert.Throws<OverflowException>(() => JobSliceService.ItemAmount(2_000_000_000));
         Assert.Equal(0UL, JobSliceService.ExpectedChecksum(0));

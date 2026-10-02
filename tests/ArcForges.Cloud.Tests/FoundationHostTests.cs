@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -273,6 +274,84 @@ public sealed class FoundationHostTests
         // The host-wide bound of 4096 bytes protects Hello; the foundation routes raise only their own bound.
         var padded = Encoding.UTF8.GetBytes("{" + new string(' ', 5000) + "}");
         Assert.Equal(HttpStatusCode.OK, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", padded))).Status);
+    }
+
+    /// <summary>A body with no known length, so the client sends it chunked and no Content-Length header exists.</summary>
+    private sealed class ForwardOnlyStream(byte[] data) : Stream
+    {
+        private int position;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => position; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = Math.Min(count, data.Length - position);
+            Array.Copy(data, position, buffer, offset, read);
+            position += read;
+            return read;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private static HttpRequestMessage Chunked(Running host, byte[] body)
+    {
+        var request = Signed(host, "/internal/foundation/v1/readiness", body);
+        request.Content = new StreamContent(new ForwardOnlyStream(body), 4096);
+        request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+        Assert.Null(request.Content.Headers.ContentLength);
+        return request;
+    }
+
+    [Fact]
+    public async Task ABodyWithoutAContentLengthIsBoundedWhileItIsRead()
+    {
+        await using var host = await StartAsync();
+        // Above the host-wide 4096 bytes that protect Hello, but within the route's own bound. (Kestrel counts the
+        // chunk framing against the limit, so a chunked body exactly at the bound is not asserted either way.)
+        var within = Encoding.UTF8.GetBytes("{" + new string(' ', 8190) + "}");
+        Assert.Equal(HttpStatusCode.OK, (await Send(host, Chunked(host, within))).Status);
+        var over = Encoding.UTF8.GetBytes("{" + new string(' ', FoundationEndpoints.MaxBodyBytes - 1) + "}");
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await Send(host, Chunked(host, over))).Status);
+        // A far larger chunked body is refused without being buffered whole: either the 413 arrives or the server
+        // closes the connection while the client is still sending, which is also a bounded outcome.
+        try
+        {
+            Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await Send(host, Chunked(host, new byte[1 << 20]))).Status);
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    [Fact]
+    public async Task SignedClientsNeverFollowARedirect()
+    {
+        var targetHits = 0;
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http1));
+        var server = builder.Build();
+        server.MapGet("/start", () => Results.Redirect("/target"));
+        server.MapGet("/target", () => { targetHits++; return Results.Ok(); });
+        await server.StartAsync(T.Ct);
+        try
+        {
+            var address = server.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+            using var client = FoundationModule.NewClient();
+            using var response = await client.GetAsync(new Uri(new Uri(address), "/start"), T.Ct);
+            Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+            Assert.Equal(0, targetHits);
+        }
+        finally
+        {
+            await server.StopAsync(T.Ct);
+            await server.DisposeAsync();
+        }
     }
 
     [Fact]

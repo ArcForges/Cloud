@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { DurableObject } from "cloudflare:workers";
+import { Container } from "@cloudflare/containers";
+import type { DurableObject } from "cloudflare:workers";
 import {
   admitEvent,
   completeEvent,
@@ -12,11 +13,15 @@ import type { AdmitResult } from "./types.ts";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const stateKey = "state";
 
+// Container extends DurableObject (its documented base). Deriving the base from it keeps the emitted
+// bundle's external `cloudflare:workers` import to the single statement the release profile can bind.
+const DurableObjectBase = Object.getPrototypeOf(Container) as typeof DurableObject;
+
 /**
  * One instance per job (addressed by job id). It owns only coordination state: which wake events were
  * processed and whether a slice is in flight. It has no alarm, no customer data and no authority.
  */
-export class FoundationJobCoordinator extends DurableObject {
+export class FoundationJobCoordinator extends DurableObjectBase {
   private async load(): Promise<CoordinatorState> {
     return (await this.ctx.storage.get<CoordinatorState>(stateKey)) ?? emptyState();
   }

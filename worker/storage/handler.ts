@@ -9,7 +9,7 @@ import {
 } from "@arcforges/ai-internal";
 import { BodyTooLarge, readBounded, refusal } from "../private/bounded-body.ts";
 import { sha256Hex } from "../private/encoding.ts";
-import { loadKeys, verificationKeys, type PrivateKeyEnv } from "../private/keys.ts";
+import { loadKeys, verificationKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import { verify } from "../private/signing.ts";
 import type { D1Like } from "./d1.ts";
 import { executePlan, planKey } from "./execute-plan.ts";

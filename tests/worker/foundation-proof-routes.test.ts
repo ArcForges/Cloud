@@ -15,7 +15,7 @@ import type {
   WakeMessage,
 } from "../../worker/foundation/types.ts";
 import { base64UrlEncode, sha256Hex } from "../../worker/private/encoding.ts";
-import { loadKeys, verificationKeys } from "../../worker/private/keys.ts";
+import { loadKeys, verificationKeys } from "../../worker/private/hmac-settings.ts";
 import { verify } from "../../worker/private/signing.ts";
 import { createFakeR2 } from "./support/fake-r2.ts";
 

@@ -45,7 +45,7 @@ internal sealed class JobSliceService(IPlanExecutor executor, TimeProvider time,
 
     private readonly string owner = Guid.NewGuid().ToString("D");
 
-    /// <summary>Item n (0-based) is (n + 1) * 4611686018427, above 2^53 from n = 1953 on, as an exact checked int64.</summary>
+    /// <summary>Item n (0-based) is (n + 1) * 4611686018427 as an exact checked int64. With at most 1000 items no single item reaches 2^53; the running sum passes it from the 63rd item on.</summary>
     public static long ItemAmount(long n) => checked((n + 1) * ItemUnit);
 
     /// <summary>The checked uint64 sum of the first <paramref name="count"/> items, independent of storage.</summary>

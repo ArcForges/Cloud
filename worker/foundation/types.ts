@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Narrow structural views of the Cloudflare bindings used by the foundation proof. The real bindings
 // satisfy them and the offline tests fake them, so the logic modules never import Worker types.
-import type { PrivateKeyEnv } from "../private/keys.ts";
+import type { PrivateKeyEnv } from "../private/hmac-settings.ts";
 import type { StorageEnv } from "../storage/handler.ts";
 
 export interface R2ObjectLike {

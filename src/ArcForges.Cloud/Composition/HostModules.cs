@@ -87,6 +87,6 @@ internal sealed class FoundationModule : IHostModule
     }
 
     /// <summary>No redirects (a signed request must never follow one), no automatic decompression; time limits are applied per call.</summary>
-    private static HttpClient NewClient() =>
+    internal static HttpClient NewClient() =>
         new(new SocketsHttpHandler { AllowAutoRedirect = false, AutomaticDecompression = System.Net.DecompressionMethods.None }) { Timeout = Timeout.InfiniteTimeSpan };
 }

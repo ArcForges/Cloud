@@ -3,7 +3,7 @@
 // probe): bounded signed PUT with a server-verified SHA-256 and signed range GET. There is no public
 // URL, no presigned URL and the raw R2 key never leaves the Worker.
 import { jsonResponse, refusal } from "../private/bounded-body.ts";
-import { loadKeys, verificationKeys, type PrivateKeyEnv } from "../private/keys.ts";
+import { loadKeys, verificationKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import { verify } from "../private/signing.ts";
 import type { R2Like } from "./types.ts";
 

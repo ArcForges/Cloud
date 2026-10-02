@@ -12,7 +12,7 @@ import {
   hexEncode,
   sha256Hex,
 } from "../../worker/private/encoding.ts";
-import { loadKeys } from "../../worker/private/keys.ts";
+import { loadKeys } from "../../worker/private/hmac-settings.ts";
 import {
   newNonce,
   parseSecret,
