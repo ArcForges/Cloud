@@ -9,6 +9,14 @@
 !src/
 !src/ArcForges.Cloud/
 !src/ArcForges.Cloud/*.cs
+!src/ArcForges.Cloud/Composition/
+!src/ArcForges.Cloud/Composition/*.cs
+!src/ArcForges.Cloud/Foundation/
+!src/ArcForges.Cloud/Foundation/*.cs
+!src/ArcForges.Cloud/Hmac/
+!src/ArcForges.Cloud/Hmac/*.cs
+!src/ArcForges.Cloud/Storage/
+!src/ArcForges.Cloud/Storage/*.cs
 !src/ArcForges.Cloud/*.csproj
 !src/ArcForges.Cloud/packages.lock.json
 !artifacts/

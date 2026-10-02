@@ -20,8 +20,8 @@
     "format:check": "prettier --check .",
     "lint": "biome lint --error-on-warnings .",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
-    "test": "node --test tests/worker/build-identity.test.ts tests/worker/deadline.test.ts tests/worker/licence-boundary.test.ts tests/worker/provenance.test.ts tests/worker/router.test.ts tests/worker/toolchain.test.ts deploy/monitoring/monitoring.test.mjs",
-    "check": "npm run test:dependencies && node tooling/project.ts toolchain && node tooling/project.ts licence && node tooling/project.ts provenance && npm run format:check && npm run lint && npm run typecheck && npm test",
+    "test": "node --test tests/worker/build-identity.test.ts tests/worker/deadline.test.ts tests/worker/docker-context.test.ts tests/worker/foundation-jobs.test.ts tests/worker/foundation-objects.test.ts tests/worker/foundation-proof-routes.test.ts tests/worker/licence-boundary.test.ts tests/worker/private-signing.test.ts tests/worker/proof-deploy.test.ts tests/worker/provenance.test.ts tests/worker/router.test.ts tests/worker/storage-executor.test.ts tests/worker/storage-handler.test.ts tests/worker/storage-plan-vectors.test.ts tests/worker/storage-plans-generator.test.ts tests/worker/toolchain.test.ts deploy/monitoring/monitoring.test.mjs",
+    "check": "npm run test:dependencies && npm run check:plans && node tooling/project.ts toolchain && node tooling/project.ts licence && node tooling/project.ts provenance && npm run format:check && npm run lint && npm run typecheck && npm test",
     "check:dotnet": "dotnet restore Cloud.slnx --locked-mode && dotnet build Cloud.slnx -c Release --no-restore && dotnet test --solution Cloud.slnx -c Release --no-build && dotnet format Cloud.slnx --no-restore --verify-no-changes",
     "candidate": "node tooling/project.ts candidate",
     "verify:candidate": "node tooling/project.ts verify",
@@ -33,14 +33,19 @@
     "deploy": "node tooling/cloudflare.ts deploy",
     "test:live": "node tooling/cloudflare.ts smoke",
     "test:artifact": "node tooling/project.ts prepare-provenance-test && node --test tests/worker/release-provenance.test.ts",
+    "deploy:proof": "node eng/verification/proof-deploy.ts deploy",
+    "test:foundation:local": "node eng/verification/foundation-local.ts",
+    "test:foundation:live": "node eng/verification/foundation-live.ts",
     "check:dependencies": "node tooling/dependency-policy.ts",
+    "check:plans": "node eng/verification/storage-plans.ts --check",
     "test:dependencies": "node --test tooling/dependency-policy.test.ts"
   },
   "dependencies": {
+    "@arcforges/ai-internal": "1.0.0-ci.287.1",
     "@cloudflare/containers": "0.3.7"
   },
   "devDependencies": {
-    "@arcforges/api-client": "1.0.0-ci.74.1",
+    "@arcforges/api-client": "1.0.0-ci.287.1",
     "@biomejs/biome": "2.5.14",
     "@cloudflare/workers-types": "5.20260926.1",
     "@connectrpc/connect": "2.2.0",

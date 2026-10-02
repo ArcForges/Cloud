@@ -52,5 +52,88 @@
   },
   "vars": {
     "SOURCE_REVISION": "local"
+  },
+  "env": {
+    "proof": {
+      "name": "arcforges-cloud-proof",
+      "workers_dev": true,
+      "preview_urls": false,
+      "routes": [],
+      "containers": [
+        {
+          "class_name": "CloudContainer",
+          "image": "./Dockerfile",
+          "max_instances": 1,
+          "instance_type": "lite"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CLOUD_CONTAINER",
+            "class_name": "CloudContainer"
+          },
+          {
+            "name": "JOB_COORDINATOR",
+            "class_name": "FoundationJobCoordinator"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["CloudContainer", "FoundationJobCoordinator"]
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "arcforges-proof-business",
+          "migrations_dir": "worker/proof-migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "OBJECTS",
+          "bucket_name": "arcforges-proof-objects"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "WAKE_QUEUE",
+            "queue": "arcforges-proof-wake"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "arcforges-proof-wake",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            "max_retries": 6,
+            "dead_letter_queue": "arcforges-proof-wake-dlq"
+          }
+        ]
+      },
+      "ratelimits": [
+        {
+          "name": "HELLO_RATE_LIMITER",
+          "namespace_id": "1002",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
+        }
+      ],
+      "vars": {
+        "SOURCE_REVISION": "local",
+        "FOUNDATION_PROOF": "enabled",
+        "REALM_ID": "proof",
+        "RECOVERY_GENERATION": "0",
+        "ALLOWED_ORIGIN": "https://account.proof.arcforges.test",
+        "HMAC_C2W_KEY_ID": "c2w-1",
+        "HMAC_W2C_KEY_ID": "w2c-1"
+      }
+    }
   }
 }

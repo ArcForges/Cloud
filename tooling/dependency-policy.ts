@@ -48,6 +48,13 @@ const gitEnvironment = () =>
   );
 const sections = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
 const exact = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+// Public client packages and the one private generated package the Cloud Worker may import.
+const publicPackages = ["@arcforges/proto", "@arcforges/api-client"];
+const internalPackages = ["@arcforges/ai-internal"];
+// Only the production Worker runtime imports the private generated records (exact package root).
+const internalImportRoots = ["worker/"];
+// The private generated C# records are used by the Cloud host and its tests only.
+const privateCsharpRoots = ["src/ArcForges.Cloud/", "tests/ArcForges.Cloud.Tests/"];
 const requiredChecks = [
   "locked-restore",
   "licence-provenance",
@@ -91,12 +98,18 @@ export function validatePolicy(policy: Policy) {
   );
   assert(policy.native.evidence.length > 0, "Missing native closure evidence");
   for (const [name, entry] of Object.entries(policy.firstParty)) {
+    const internal = internalPackages.includes(name);
     assert(
-      ["@arcforges/proto", "@arcforges/api-client"].includes(name),
+      internal || publicPackages.includes(name),
       `Unadmitted internal/first-party package: ${name}`,
     );
     assert.equal(entry.publisher, "ArcForges/Contracts", `Wrong publisher: ${name}`);
-    assert.equal(entry.visibility, "public", `Internal package: ${name}`);
+    // A private generated package is admitted only by explicit name, never by publisher alone.
+    assert.equal(entry.visibility, internal ? "internal" : "public", `Internal package: ${name}`);
+    assert(
+      !internal || policy.repository === "Cloud",
+      `Internal package outside its owner: ${name}`,
+    );
   }
 }
 export function immutableCoordinates(closure: Record<string, Entry>) {
@@ -200,14 +213,28 @@ function registry(entry: Entry, name: string) {
     `Missing lock integrity: ${name}`,
   );
 }
+export function validateCsharpImports(file: string, text: string) {
+  assert(
+    !/\b(?:using|global::)\s*ArcForges\.Contracts\.(?:Internal|Storage|AIInternal)\b/u.test(text),
+    `Unadmitted private generated C# import: ${file}`,
+  );
+  assert(
+    !/\b(?:using|global::)\s*ArcForges\.Contracts\.CloudInternal\b/u.test(text) ||
+      privateCsharpRoots.some((root) => file.startsWith(root)),
+    `Unadmitted private generated C# import: ${file}`,
+  );
+}
 export function validateImports(root: string, file: string, source: string, policy: Policy) {
   const check = (value: string) => {
     if (value.startsWith("@arcforges/")) {
       const name = value.split("/").slice(0, 2).join("/");
       const workspace =
         ["@arcforges/web-ui", "@arcforges/web-site"].includes(name) && policy.repository === "Web";
+      const visibility = policy.firstParty[name]?.visibility;
       assert(
-        workspace || policy.firstParty[name]?.visibility === "public",
+        workspace ||
+          visibility === "public" ||
+          (visibility === "internal" && internalImportRoots.some((root) => file.startsWith(root))),
         `Forbidden internal import: ${file}: ${value}`,
       );
       assert(workspace || value === name, `Internal or unadmitted package subpath: ${value}`);
@@ -362,12 +389,7 @@ export function auditDependencies(root: string) {
         `New dependency input requires admission: ${file}`,
       );
     if (/^(?:src|tests)\//u.test(file) && file.endsWith(".cs"))
-      assert(
-        !/\b(?:using|global::)\s*ArcForges\.Contracts\.(?:Internal|Storage|AIInternal)\b/u.test(
-          read(file),
-        ),
-        `Unadmitted private generated C# import: ${file}`,
-      );
+      validateCsharpImports(file, read(file));
   }
   const lock = JSON.parse(read("package-lock.json")) as {
     packages: Record<string, Entry & Record<string, unknown>>;

@@ -51,6 +51,51 @@ public sealed class BuildIdentityTests
         Assert.Equal(first.ToJsonString(), BuildIdentity.Resolve(catalog, path => sources[path]).ToJsonString());
     }
 
+    [Fact]
+    public void CurrentContractsReceiptShapeResolvesThroughTheHelloSchemaSource()
+    {
+        const string Hello = "public/proto/arcforges/hello/v1/hello.proto";
+        var catalog = JsonNode.Parse(File.ReadAllText(Path.Combine(Root(), "eng/version-sources.json")))!.AsObject();
+        var sources = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in BuildIdentity.AxisNames)
+        {
+            var kind = catalog["axes"]![name]!["kind"]!.GetValue<string>();
+            catalog["axes"]![name] = new JsonObject { ["kind"] = kind, ["sources"] = new JsonArray(name + ".json") };
+            sources[name + ".json"] = kind switch
+            {
+                "contracts" => "{}",
+                "packages" => "{\"dependencies\":{\"net10.0\":{\"fixture.package\":{\"type\":\"Direct\",\"resolved\":\"1.0\"}}}}",
+                "native-abi" => "#define ARC_ABI_MAJOR 1
+#define ARC_ABI_MINOR 0
+",
+                "migrations" => "{\"migrations\":[{\"subject\":\"fixture.store\",\"version\":\"1.0\"}]}",
+                _ => "{\"versions\":[{\"subject\":\"fixture.owned\",\"version\":\"1.0\"}]}"
+            };
+        }
+        static string Receipt(string sources, string descriptor = "b", string dirty = "false")
+            => "{\"dirty\":" + dirty + ",\"descriptorSha256\":\"" + new string(descriptor[0], 64) + "\",\"schemaSources\":" + sources + "}";
+        var good = "{\"" + Hello + "\":\"" + new string('c', 64) + "\",\"other.proto\":\"" + new string('d', 64) + "\"}";
+        sources["ContractSet.json"] = Receipt(good);
+        var resolved = BuildIdentity.Resolve(catalog, path => sources[path]);
+        var value = resolved["ContractSet"]!["values"]![0]!;
+        Assert.Equal("arcforges.hello", value["subject"]!.GetValue<string>());
+        Assert.Equal("1", value["version"]!.GetValue<string>());
+        Assert.Equal(new string('b', 64), value["descriptorSha256"]!.GetValue<string>());
+        sources["ContractSet.json"] = Receipt(good, "e");
+        Assert.False(JsonNode.DeepEquals(resolved["ContractSet"], BuildIdentity.Resolve(catalog, path => sources[path])["ContractSet"]));
+        foreach (var bad in new[]
+        {
+            Receipt("{\"other.proto\":\"" + new string('d', 64) + "\"}"),
+            Receipt("{\"" + Hello + "\":\"not-a-hash\"}"),
+            Receipt(good, dirty: "true"),
+            "{\"dirty\":false,\"descriptorSha256\":\"" + new string('b', 64) + "\"}"
+        })
+        {
+            sources["ContractSet.json"] = bad;
+            Assert.ThrowsAny<Exception>(() => BuildIdentity.Resolve(catalog, path => sources[path]));
+        }
+    }
+
     [Theory]
     [InlineData("missing")]
     [InlineData("unknown")]

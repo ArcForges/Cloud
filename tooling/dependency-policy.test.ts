@@ -9,6 +9,7 @@ import {
   immutableCoordinates,
   validateHistoricalCoordinates,
   validateClosure,
+  validateCsharpImports,
   validateImports,
   validatePolicy,
   type Policy,
@@ -133,5 +134,79 @@ test("duplicate nested coordinates cannot hide different package bytes", () => {
         },
       }),
     /Conflicting integrity/u,
+  );
+});
+
+const withInternalPackage = () => {
+  const policy = structuredClone(baseline);
+  policy.firstParty["@arcforges/ai-internal"] = {
+    publisher: "ArcForges/Contracts",
+    visibility: "internal",
+  };
+  return policy;
+};
+test("only the explicitly named private generated package is admitted, and only for Cloud", () => {
+  validatePolicy(withInternalPackage());
+  const unnamed = structuredClone(baseline);
+  unnamed.firstParty["@arcforges/storage-internal"] = {
+    publisher: "ArcForges/Contracts",
+    visibility: "internal",
+  };
+  assert.throws(() => validatePolicy(unnamed), /Unadmitted internal/u);
+  const exposed = withInternalPackage();
+  exposed.firstParty["@arcforges/ai-internal"] = {
+    publisher: "ArcForges/Contracts",
+    visibility: "public",
+  };
+  assert.throws(() => validatePolicy(exposed), /Internal package/u);
+  const publicClient = withInternalPackage();
+  publicClient.firstParty["@arcforges/proto"] = {
+    publisher: "ArcForges/Contracts",
+    visibility: "internal",
+  };
+  assert.throws(() => validatePolicy(publicClient), /Internal package/u);
+  const other = withInternalPackage();
+  other.repository = "Web";
+  assert.throws(() => validatePolicy(other), /outside its owner/u);
+  const foreign = withInternalPackage();
+  foreign.firstParty["@arcforges/ai-internal"] = {
+    publisher: "other/Contracts",
+    visibility: "internal",
+  };
+  assert.throws(() => validatePolicy(foreign), /Wrong publisher/u);
+});
+test("the private generated package is importable only by Worker sources at its exact root", () => {
+  const policy = withInternalPackage();
+  validateImports(root, "worker/storage.ts", 'import { x } from "@arcforges/ai-internal";', policy);
+  for (const [file, source] of [
+    ["src/example.ts", 'import { x } from "@arcforges/ai-internal";'],
+    ["packages/example.ts", 'export * from "@arcforges/ai-internal";'],
+    ["worker/storage.ts", 'import { x } from "@arcforges/ai-internal/dist/index.js";'],
+    ["worker/storage.ts", 'import { x } from "@arcforges/storage-internal";'],
+    ["worker/storage.ts", 'void import("@arcforges/ai-internal/gen");'],
+  ] as const)
+    assert.throws(() => validateImports(root, file, source, policy), /[Ii]nternal/u);
+});
+test("private generated C# records are importable only by the Cloud host and its tests", () => {
+  const source = "using ArcForges.Contracts.CloudInternal.Storage.V1;\n";
+  validateCsharpImports("src/ArcForges.Cloud/Storage/Example.cs", source);
+  validateCsharpImports("tests/ArcForges.Cloud.Tests/Example.cs", source);
+  for (const file of ["tests/ArcForges.Cloud.Consumer/Program.cs", "src/Other/Example.cs"])
+    assert.throws(() => validateCsharpImports(file, source), /Unadmitted private/u);
+  assert.throws(
+    () =>
+      validateCsharpImports(
+        "src/ArcForges.Cloud/Example.cs",
+        "using ArcForges.Contracts.Internal.Storage;\n",
+      ),
+    /Unadmitted private/u,
+  );
+  assert.throws(
+    () =>
+      validateCsharpImports(
+        "tests/ArcForges.Cloud.Consumer/Program.cs",
+        "var x = global::ArcForges.Contracts.CloudInternal.Storage.V1.ExecutePlanRequest.Default;\n",
+      ),
+    /Unadmitted private/u,
   );
 });
