@@ -1,21 +1,23 @@
 ArcForges Contracts
 Copyright 2026 ArcForges contributors
 
-ArcForges.Contracts.PublicApi 1.0.0-ci.74.1 (Apache-2.0)
+ArcForges.Contracts.CloudInternal 1.0.0-ci.287.1 (Apache-2.0)
 
 Resolved runtime dependency inventory (dependencies retain their own licences):
+- ArcForges.Contracts.Events 1.0.0-ci.287.1: Apache-2.0 (pkg:nuget/ArcForges.Contracts.Events@1.0.0-ci.287.1)
+- ArcForges.Contracts.Foundation 1.0.0-ci.287.1: Apache-2.0 (pkg:nuget/ArcForges.Contracts.Foundation@1.0.0-ci.287.1)
 - Google.Protobuf 3.36.1: BSD-3-Clause (pkg:nuget/Google.Protobuf@3.36.1)
-- Grpc.Core.Api 2.83.0: Apache-2.0 (pkg:nuget/Grpc.Core.Api@2.83.0)
+- ArcForges.Contracts.PublicApi 1.0.0-ci.287.1: Apache-2.0 (pkg:nuget/ArcForges.Contracts.PublicApi@1.0.0-ci.287.1)
+- Grpc.Core.Api 2.84.0: Apache-2.0 (pkg:nuget/Grpc.Core.Api@2.84.0)
 
-Third-party dependencies are referenced, not vendored into this package.
-The installed dependency packages supply their original licence and notice files.
+Third-party dependencies are referenced, not vendored into this package. Installed dependencies supply their original licence and notice files.
 
 ArcForges source provenance notices
 
 Generated from reviewed active records. Original licence files and dependency notices remain authoritative.
 
-hello-bindings-r1
-Source: https://github.com/ArcForges/Contracts @ 76a3e0d39e61c7868b497ae7e059e29ac69f44de
+contract-bindings-con-07-r1
+Source: https://github.com/ArcForges/Contracts @ 079696509223946a9c06b7a3382ec14136c144bb
 Material licence: Apache-2.0
 Notice scope: packages
 Copyright 2026 ArcForges contributors.
@@ -23,7 +25,7 @@ Copyright 2008 Google Inc. All rights reserved.
 Copyright 2015, 2019, 2020 gRPC authors.
 Copyright 2021-2026 Buf Technologies, Inc.
 Copyright 2022-2026 The Connect Authors.
-Hello bindings are generated from the Apache-2.0 ArcForges proto using Grpc.Tools 2.84.0, protoc-gen-es 2.15.0, grpc-java 1.84.0, grpc-kotlin 1.5.0 and Connect-Kotlin 0.9.0. Grpc.Tools provenance binds protobuf submodule 35cd01f9fe9afbeea38cc7b979a3b6bfcde82c03. Generator implementations are build tools and are not bundled in the client packages. Preserve these attributions, Apache-2.0 terms and the protobuf BSD terms below.
+Generated Contracts source remains Apache-2.0. CON.07 adds only the authorized public identity, workspace and device contracts, the closed authentication HTTP exception schemas and generated C#, TypeScript, Kotlin and JSON-shape bindings; it adds no runtime authorization or handler behavior and no new generator or third-party package.
 
 protobuf-generator-licence-r1
 Source: https://github.com/protocolbuffers/protobuf @ 35cd01f9fe9afbeea38cc7b979a3b6bfcde82c03

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-using System.Runtime.CompilerServices;
 using ArcForges.Cloud;
+using ArcForges.Cloud.Composition;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 var identity = BuildIdentity.FromAssembly(typeof(HelloEndpoint).Assembly);
@@ -19,20 +19,10 @@ builder.WebHost.ConfigureKestrel(options =>
     options.ListenAnyIP(8080, listen => listen.Protocols = HttpProtocols.Http1);
     options.ListenAnyIP(8081, listen => listen.Protocols = HttpProtocols.Http2);
 });
-builder.Services.AddGrpc(options =>
-{
-    options.EnableDetailedErrors = false;
-    options.MaxReceiveMessageSize = 4091;
-    options.MaxSendMessageSize = 4091;
-});
+
+var modules = HostModules.All(identity);
+foreach (var module in modules) module.Register(builder);
 
 var app = builder.Build();
-app.UseGrpcWeb();
-app.MapGrpcService<HelloEndpoint>().EnableGrpcWeb();
-
-var build = identity["build"]!.AsObject();
-var revision = build["sourceCommit"]!.GetValue<string>() + (build["dirty"]!.GetValue<bool>() ? "-dirty" : "");
-var health = new HealthStatus("arcforges-cloud", revision, !RuntimeFeature.IsDynamicCodeSupported,
-    identity["artifact"]!.AsObject(), build);
-app.MapGet("/healthz", () => Results.Json(health, HealthJsonContext.Default.HealthStatus));
+foreach (var module in modules) module.Map(app);
 app.Run();

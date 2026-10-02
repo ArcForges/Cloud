@@ -10,7 +10,8 @@ INSERT INTO probe_job_item (scope, job_id, item_no, amount)
 SELECT ?, ?, CAST(json_extract(value, '$.n') AS INTEGER), CAST(json_extract(value, '$.a') AS INTEGER) FROM json_each(?);
 -- statement: params=int64,uint64,int64,scope,text,int64
 UPDATE probe_job SET cursor = CAST(? AS INTEGER), checksum = ?,
-  state = CASE WHEN CAST(? AS INTEGER) >= total THEN 'complete' ELSE 'running' END, revision = revision + 1
+  state = CASE WHEN CAST(? AS INTEGER) >= total THEN 'complete' ELSE 'running' END, revision = revision + 1,
+  lease_owner = NULL, lease_until = NULL
 WHERE scope = ? AND job_id = ? AND fence = CAST(? AS INTEGER);
 -- statement: params=scope,text,int64
 INSERT INTO probe_inbox (scope, consumer, event_id, generation) VALUES (?, 'job-slice', ?, CAST(? AS INTEGER));

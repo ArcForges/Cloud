@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,6 +90,8 @@ export async function main() {
   };
   let child: ChildProcess | undefined;
   let storageBase = "";
+  let bridgeBase = "";
+  let bridge: Server | undefined;
   const startHost = async () => {
     child = spawn(hostExe, [], {
       stdio: ["ignore", "ignore", "inherit"],
@@ -96,8 +99,8 @@ export async function main() {
       env: {
         ...process.env,
         ARCFORGES_FOUNDATION_PROOF: "enabled",
-        ARCFORGES_STORAGE_BASE_URL: `${storageBase}/__storage`,
-        ARCFORGES_OBJECTS_BASE_URL: `${storageBase}/__objects`,
+        ARCFORGES_STORAGE_BASE_URL: bridgeBase,
+        ARCFORGES_OBJECTS_BASE_URL: bridgeBase,
         AF_HMAC_C2W_KEY_ID: "c2w-1",
         AF_HMAC_C2W_SECRET: keys.c2w,
         AF_HMAC_W2C_KEY_ID: "w2c-1",
@@ -176,6 +179,43 @@ export async function main() {
   try {
     const url = await mf.ready;
     storageBase = url.origin;
+    // The host talks to the virtual hosts storage.internal and objects.internal in production; the
+    // local bridge stands in for the outbound interception and only forwards those two route groups.
+    bridge = createServer((incoming, outgoing) => {
+      const target = incoming.url?.startsWith("/internal/storage/")
+        ? `/__storage${incoming.url}`
+        : incoming.url?.startsWith("/internal/objects/")
+          ? `/__objects${incoming.url}`
+          : undefined;
+      if (!target) {
+        outgoing.writeHead(404).end();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+      incoming.on("end", async () => {
+        try {
+          const reply = await fetch(`${storageBase}${target}`, {
+            method: incoming.method,
+            headers: Object.fromEntries(
+              Object.entries(incoming.headers).filter(([, value]) => typeof value === "string") as [
+                string,
+                string,
+              ][],
+            ),
+            body: ["GET", "HEAD"].includes(incoming.method ?? "GET")
+              ? undefined
+              : Buffer.concat(chunks),
+          });
+          outgoing.writeHead(reply.status, Object.fromEntries(reply.headers));
+          outgoing.end(Buffer.from(await reply.arrayBuffer()));
+        } catch {
+          outgoing.writeHead(502).end();
+        }
+      });
+    });
+    await new Promise<void>((resolve) => bridge?.listen(0, "127.0.0.1", resolve));
+    bridgeBase = `http://127.0.0.1:${(bridge.address() as net.AddressInfo).port}`;
     const database = await mf.getD1Database("DB");
     const migration = await readFile(
       path.join(root, "worker/proof-migrations/0001_foundation_probe.sql"),
@@ -229,6 +269,7 @@ export async function main() {
     );
   } finally {
     await stopHost();
+    bridge?.close();
     await mf.dispose();
   }
 }

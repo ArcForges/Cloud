@@ -496,15 +496,18 @@ test("a job slice is claimed under a lease, fenced and committed once with exact
   });
   assert.equal((await run(db, "foundation.job-commit", good)).ok, true);
   assert.deepEqual((await jobLoad(db, job))?.slice(1, 2), ["4"]);
+  // A committed slice releases its lease, so the next holder (even a restarted process) can claim at once.
+  assert.deepEqual((await jobLoad(db, job))?.slice(3, 5), ["null", "null"]);
   assert.deepEqual(await run(db, "foundation.job-items", [[sc(), txt(job)]]), {
     ok: true,
     rows: [["4", String(sum(0, 4))]],
     changes: "0",
   });
-  // Delivering the same event again is stopped by the inbox row and undoes the whole slice.
+  // Delivering the same event again (after a fresh claim) is stopped by the inbox row and undoes the whole slice.
+  assert.equal((await run(db, "foundation.job-claim", jobClaim(job, "worker-a", 2_000n, lease))).ok, true);
   const duplicate = jobCommit({
     job,
-    fence: "1",
+    fence: "2",
     owner: "worker-a",
     cursor: "4",
     now: 2_001n,
