@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Pins that the production Container class is the unchanged Hello class and that the outbound
+// interception, the environment hook and the foundation handlers belong only to the proof class.
+import assert from "node:assert/strict";
+import { register } from "node:module";
+import test from "node:test";
+
+// `cloudflare:workers` only exists inside workerd; a minimal stand-in lets the real Worker module
+// and the real @cloudflare/containers registry run under Node.
+const stub = [
+  "export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
+  "export class WorkerEntrypoint { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
+  "export const env = {};",
+].join("\n");
+const hooks = `
+export async function resolve(specifier, context, next) {
+  if (specifier === "cloudflare:workers")
+    return { url: "data:text/javascript,${encodeURIComponent(stub)}", shortCircuit: true };
+  try {
+    return await next(specifier, context);
+  } catch (error) {
+    // The package is authored for bundlers and imports its own files without an extension.
+    if (specifier.startsWith(".") && !/[.][cm]?[jt]s$/u.test(specifier))
+      return next(specifier + ".js", context);
+    throw error;
+  }
+}`;
+register(`data:text/javascript,${encodeURIComponent(hooks)}`);
+
+type Statics = { outboundByHost?: Record<string, unknown>; outboundHandlers?: unknown };
+type Constructable = (new (ctx: object, env: object) => Record<string, unknown>) & Statics;
+// Imported through a variable so the Node-side project does not type-check the workerd-only module.
+const workerModule = "../../worker/index.ts";
+const worker = (await import(workerModule)) as unknown as {
+  CloudContainer: Constructable;
+  FoundationContainer: Constructable;
+  ContainerProxy: unknown;
+};
+const { CloudContainer, FoundationContainer } = worker;
+
+// Only what the constructor touches; the deferred start-up callback is deliberately not run.
+const containerContext = {
+  container: { running: false },
+  storage: {
+    kv: { get: () => undefined, put: () => undefined },
+    sql: { exec: () => [] },
+  },
+  blockConcurrencyWhile: () => Promise.resolve(),
+};
+
+test("the production Container class registers no outbound interception", () => {
+  assert.equal(CloudContainer.outboundByHost, undefined);
+  assert.equal(CloudContainer.outboundHandlers, undefined);
+  assert.deepEqual(
+    Object.getOwnPropertyNames(CloudContainer).filter((name) => /outbound/iu.test(name)),
+    [],
+  );
+});
+
+test("the production Container class has no constructor, environment hook or foundation import", () => {
+  assert.deepEqual(Object.getOwnPropertyNames(CloudContainer.prototype), ["constructor"]);
+  const source = CloudContainer.toString();
+  assert.doesNotMatch(source, /constructor|envVars|containerEnvironment|outbound|Foundation/u);
+});
+
+test("the production Container keeps the Hello settings and no environment variables", () => {
+  const instance = new CloudContainer(containerContext, {
+    FOUNDATION_PROOF: "enabled",
+    HMAC_C2W_SECRET: "x",
+  });
+  assert.equal(instance.defaultPort, 8080);
+  assert.equal(instance.sleepAfter, "60s");
+  assert.equal(instance.enableInternet, false);
+  assert.deepEqual(instance.envVars, {}, "no foundation variable reaches the production class");
+});
+
+test("only the proof class carries the two exact outbound hosts and the environment hook", () => {
+  assert.deepEqual(Object.keys(FoundationContainer.outboundByHost ?? {}).sort(), [
+    "objects.internal",
+    "storage.internal",
+  ]);
+  assert.equal(Object.getPrototypeOf(FoundationContainer), CloudContainer);
+  assert.equal(
+    CloudContainer.outboundByHost,
+    undefined,
+    "registering the proof hosts leaves production alone",
+  );
+
+  const disabled = new FoundationContainer(containerContext, {});
+  assert.deepEqual(disabled.envVars, {}, "without the proof flag the proof class passes nothing");
+  assert.equal(disabled.enableInternet, false);
+  const enabled = new FoundationContainer(containerContext, { FOUNDATION_PROOF: "enabled" });
+  assert.equal((enabled.envVars as Record<string, string>).ARCFORGES_FOUNDATION_PROOF, "enabled");
+});

@@ -179,3 +179,50 @@ test("deployment retry retains the original candidate attempt without accepting 
   assert.throws(() => candidateEnvironment("0.1.0-local.1", env));
   assert.equal(env.GITHUB_RUN_ATTEMPT, "2");
 });
+
+test("the current Contracts receipt shape resolves through the Hello schema source entry", () => {
+  const f = fixture();
+  const hello = "public/proto/arcforges/hello/v1/hello.proto";
+  const receipt = (sources: Record<string, string>, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      dirty: false,
+      descriptorSha256: "b".repeat(64),
+      schemaSources: sources,
+      ...extra,
+    });
+  f.sources["ContractSet.json"] = receipt({
+    [hello]: "c".repeat(64),
+    "other.proto": "d".repeat(64),
+  });
+  const resolved = resolveAxes(f.catalog, f.read);
+  const contract = resolved.ContractSet as {
+    values: {
+      subject: string;
+      version: string;
+      descriptorSha256: string;
+      source: { path: string };
+    }[];
+  };
+  const [value] = contract.values;
+  assert.equal(contract.values.length, 1);
+  assert.equal(value?.subject, "arcforges.hello");
+  assert.equal(value?.version, "1");
+  assert.equal(value?.descriptorSha256, "b".repeat(64));
+  assert.equal(value?.source.path, "ContractSet.json");
+  // The descriptor still moves the axis, so a changed contract set cannot hide.
+  f.sources["ContractSet.json"] = receipt(
+    { [hello]: "c".repeat(64) },
+    { descriptorSha256: "e".repeat(64) },
+  );
+  assert.notDeepEqual(resolveAxes(f.catalog, f.read).ContractSet, resolved.ContractSet);
+  for (const bad of [
+    receipt({ "other.proto": "d".repeat(64) }),
+    receipt({ [hello]: "not-a-hash" }),
+    receipt({ [hello]: "c".repeat(64) }, { dirty: true }),
+    receipt({ [hello]: "c".repeat(64) }, { descriptorSha256: "short" }),
+    JSON.stringify({ dirty: false, descriptorSha256: "b".repeat(64) }),
+  ]) {
+    f.sources["ContractSet.json"] = bad;
+    assert.throws(() => resolveAxes(f.catalog, f.read));
+  }
+});

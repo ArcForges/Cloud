@@ -9,8 +9,10 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="ArcForges.Contracts.PublicApi" GeneratePathProperty="true" />
+    <PackageReference Include="ArcForges.Contracts.CloudInternal" GeneratePathProperty="true" />
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Grpc.AspNetCore.Web" />
+    <InternalsVisibleTo Include="ArcForges.Cloud.Tests" />
     <EmbeddedResource Include="../../eng/version-sources.json" LogicalName="Cloud.VersionSources" />
     <EmbeddedResource Include="packages.lock.json" LogicalName="Cloud.PackageLock" />
     <EmbeddedResource Include="../../package-lock.json" LogicalName="Cloud.NpmLock" />

@@ -88,7 +88,13 @@ function checkPackage(name: string) {
     assert(npmOwners.has(name), `Unknown first-party package owner: ${name}`);
   if (name.toLowerCase().startsWith("arcforges."))
     assert(
-      ["arcforges.contracts.publicapi", "arcforges.build.policy"].includes(name.toLowerCase()),
+      [
+        "arcforges.contracts.publicapi",
+        "arcforges.contracts.cloudinternal",
+        "arcforges.contracts.events",
+        "arcforges.contracts.foundation",
+        "arcforges.build.policy",
+      ].includes(name.toLowerCase()),
       `Unknown first-party package owner: ${name}`,
     );
   if (name.toLowerCase().startsWith("io.github.arcforges:"))

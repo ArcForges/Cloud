@@ -30,10 +30,10 @@ before(() => {
 
 test("real locked Wrangler output matches the approved exact Worker closure", () => {
   const result = verifyWorker(root, worker, metadata);
-  assert.equal(result.sha256, "a386a9f90d50f2b297f22e78c460f47e29f4005ec4313980348e4c53b82764e4");
-  assert.equal(result.bytes, 61990);
-  assert.equal(Object.keys(result.inputs).length, 6);
-  assert.equal(result.outputInputs.length, 5);
+  assert.equal(result.sha256, "77f3155933be1aa1c1177c81bef4e413238b657756880b540a6d7cc331ef2765");
+  assert.equal(result.bytes, 165267);
+  assert.equal(Object.keys(result.inputs).length, 93);
+  assert.equal(result.outputInputs.length, 24);
 });
 test("reject changed Worker bytes independently of any supplied outer hash", () => {
   const changed = Buffer.concat([worker, Buffer.from("\nexport const injected = true;\n")]);
@@ -80,7 +80,7 @@ test("complete image legal fixture validates and binds source and concrete membe
     const result = verifyImageFiles(root, revision, f.directory);
     assert.equal(result.revision, revision);
     assert.equal(Object.keys(result.baseLegal).length, 6);
-    assert.equal(Object.keys(result.members).length, 11);
+    assert.equal(Object.keys(result.members).length, 12);
   } finally {
     f.cleanup();
   }

@@ -100,7 +100,13 @@ export function resolveAxes(catalog: unknown, read: (source: string) => string) 
       }
       const input = object(JSON.parse(content));
       if (kind === "contracts") {
-        const schema = /^([a-zA-Z0-9_.]+)\.v([1-9][0-9]*)$/u.exec(string(input.schema));
+        // The current Contracts receipt lists every schema source instead of one schema name; the
+        // Hello contract this service serves is identified by its source entry.
+        const named =
+          input.schema === undefined
+            ? helloSchemaOf(object(input.schemaSources))
+            : string(input.schema);
+        const schema = /^([a-zA-Z0-9_.]+)\.v([1-9][0-9]*)$/u.exec(named);
         assert(schema?.[1] && schema[2]);
         assert.match(string(input.descriptorSha256), /^[a-f0-9]{64}$/u);
         assert.equal(input.dirty, false);
@@ -215,6 +221,10 @@ export function expectedIdentity(version: string) {
   };
 }
 
+function helloSchemaOf(sources: Record<string, unknown>) {
+  assert.match(string(sources["public/proto/arcforges/hello/v1/hello.proto"]), /^[a-f0-9]{64}$/u);
+  return "arcforges.hello.v1";
+}
 export type Identity = ReturnType<typeof expectedIdentity>;
 export function verifyIdentity(actual: unknown, version: string) {
   assert.deepEqual(

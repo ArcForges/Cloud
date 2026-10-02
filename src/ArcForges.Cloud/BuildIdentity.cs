@@ -107,7 +107,12 @@ public static partial class BuildIdentity
                 var document = JsonNode.Parse(content)!.AsObject();
                 if (kind == "contracts")
                 {
-                    var schema = ContractPattern().Match(document["schema"]!.GetValue<string>());
+                    // The current Contracts receipt lists every schema source instead of one schema name;
+                    // the Hello contract this service serves is identified by its source entry.
+                    var schemaName = document["schema"] is { } named
+                        ? named.GetValue<string>()
+                        : HelloSchemaOf(document["schemaSources"]!.AsObject());
+                    var schema = ContractPattern().Match(schemaName);
                     Require(schema.Success && HashPattern().IsMatch(document["descriptorSha256"]!.GetValue<string>()) && !document["dirty"]!.GetValue<bool>(), "Invalid restored contract provenance.");
                     Add(schema.Groups[1].Value, schema.Groups[2].Value, document["descriptorSha256"]);
                 }
@@ -158,6 +163,12 @@ public static partial class BuildIdentity
                 && build["pipelineRun"]!.GetValue<string>() == "https://github.com/ArcForges/Cloud/actions/runs/" + run, "Invalid CI identity.");
         }
         else Require(kind == "local" && id == "local." + commit && build["runId"] is null && build["runAttempt"] is null && build["pipelineRun"] is null, "Invalid local identity.");
+    }
+
+    private static string HelloSchemaOf(JsonObject sources)
+    {
+        Require(sources["public/proto/arcforges/hello/v1/hello.proto"] is { } entry && HashPattern().IsMatch(entry.GetValue<string>()), "Invalid restored contract provenance.");
+        return "arcforges.hello.v1";
     }
 
     private static void Require(bool condition, string message)

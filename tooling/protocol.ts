@@ -63,7 +63,6 @@ export async function waitForHealth(
 export async function verifyProtocol(baseUrl: string, worker: boolean) {
   const client = createHelloClient({
     baseUrl,
-    useBinaryFormat: true,
     fetch: (input, init) => fetch(input, { ...init, credentials: "omit", redirect: "error" }),
   });
   for (const name of ["ArcForges", "世界 👋"]) {
@@ -87,7 +86,6 @@ export async function verifyProtocol(baseUrl: string, worker: boolean) {
     ]) {
       const normalized = createHelloClient({
         baseUrl,
-        useBinaryFormat: true,
         fetch: (input, init) => {
           const headers = new Headers(init?.headers);
           headers.set("content-type", contentType);
@@ -105,7 +103,6 @@ export async function verifyProtocol(baseUrl: string, worker: boolean) {
     ] as const) {
       const expired = createHelloClient({
         baseUrl,
-        useBinaryFormat: true,
         fetch: (input, init) => {
           const headers = new Headers(init?.headers);
           headers.set("grpc-timeout", deadline);

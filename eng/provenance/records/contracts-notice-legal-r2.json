@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "contracts-notice-legal-r2",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/ArcForges/Contracts",
+  "sourceCommit": "ca45f36cccbdd31380f76b8f6cdecc958fdcb430",
+  "sourcePaths": [
+    "eng/packaging_tools.py",
+    "eng/check_provenance.py",
+    "eng/provenance/records/hello-bindings-r1.json",
+    "eng/provenance/records/protobuf-generator-licence-r1.json"
+  ],
+  "licence": {
+    "spdx": "Apache-2.0",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "finding": "Complete published Apache-2.0 terms match this producer source licence. The normally restored NuGet source receipt identifies the producer commit."
+      },
+      {
+        "path": "eng/packaging_tools.py",
+        "sha256": "c2b8ca25a74633b3d25f67ba7ee76c989718ed10bccb28a96b68cc566e3cd0d4",
+        "finding": "metadata() compiles the package-specific NOTICE from its resolved dependency inventory and package_notice(). The copied target is the complete NOTICE from the normally restored NuGet CloudInternal 287.1 package."
+      },
+      {
+        "path": "eng/check_provenance.py",
+        "sha256": "c9e888d9845bd479c36439922c26038f29807214740ad7c467dfb3bb414a3024",
+        "finding": "package_notice() retains the active package-scoped hello-bindings and protobuf-generator legal records in the published NOTICE."
+      }
+    ],
+    "scope": "The complete published ArcForges.Contracts.CloudInternal 1.0.0-ci.287.1 NOTICE (a superset of the PublicApi, Events and Foundation notices) is retained verbatim, including ArcForges, Google, gRPC, Buf and Connect attributions and the full protobuf-generator BSD-3-Clause text. Apache-2.0 describes the Contracts notice compilation/source grant; every named component retains its original terms. This admits only the package legal document, not generator implementations or additional runtime dependencies.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "The complete published ArcForges.Contracts.CloudInternal 1.0.0-ci.287.1 NOTICE (a superset of the PublicApi, Events and Foundation notices) is retained verbatim, including ArcForges, Google, gRPC, Buf and Connect attributions and the full protobuf-generator BSD-3-Clause text. Apache-2.0 describes the Contracts notice compilation/source grant; every named component retains its original terms. This admits only the package legal document, not generator implementations or additional runtime dependencies."
+  ],
+  "targets": [
+    {
+      "path": "third-party/Contracts.NOTICE.txt",
+      "sha256": "14ea752012c0211e68cbed5e400c23447a0e90ba8e1258e8318f0430a31d37e3",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "The complete published ArcForges.Contracts.CloudInternal 1.0.0-ci.287.1 NOTICE (a superset of the PublicApi, Events and Foundation notices) is retained verbatim, including ArcForges, Google, gRPC, Buf and Connect attributions and the full protobuf-generator BSD-3-Clause text. Apache-2.0 describes the Contracts notice compilation/source grant; every named component retains its original terms. This admits only the package legal document, not generator implementations or additional runtime dependencies.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/Contracts.NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "The complete published ArcForges.Contracts.CloudInternal 1.0.0-ci.287.1 NOTICE (a superset of the PublicApi, Events and Foundation notices) is retained verbatim, including ArcForges, Google, gRPC, Buf and Connect attributions and the full protobuf-generator BSD-3-Clause text. Apache-2.0 describes the Contracts notice compilation/source grant; every named component retains its original terms. This admits only the package legal document, not generator implementations or additional runtime dependencies."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "ArcForges delivery worker w-c20261002-prf07 (implementation claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewedOn": "2026-10-02",
+    "decision": "approved",
+    "rationale": "The published 287.1 CloudInternal NOTICE adds the Events, Foundation and PublicApi dependency inventory lines and the CON.07 binding provenance. It replaces the 74.1 PublicApi NOTICE retained by contracts-notice-legal-r1 because the Cloud host and Worker now consume that closure. The package source receipt identifies its origin; no downloads, copied implementation or changed licence grants are involved.",
+    "baselineCommit": "44d0a22de705a265b9dcee70f4d689df6e248238",
+    "reconciliation": false
+  },
+  "supersedes": "contracts-notice-legal-r1"
+}
