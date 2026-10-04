@@ -8,11 +8,14 @@ namespace ArcForges.Cloud.Foundation;
 internal sealed record EgressAttempt(string Host, string Outcome, int? Status, long ElapsedMs);
 
 /// <summary>
-/// The blocked-egress proof of the proof Container. It makes harmless outbound attempts to stable public names and reports whether any of them
-/// got an answer. The Container's only permitted outbound paths are the interception hosts; with Internet access disabled every other
-/// destination must fail to connect. A probe cannot pass vacuously: the verdict is "blocked" only when every target failed with a connection
-/// error (a timeout, an HTTP response, or a failure after the handshake is not a block) and the allowed control path, which uses the same HTTP stack to reach the private
-/// storage host, answered in the same call. Nothing is sent that carries data, and no redirect is followed.
+/// The blocked-egress proof of the proof Container. It makes harmless outbound attempts to a stable public name and to a literal address and
+/// reports whether any of them got an HTTP answer. With Internet access disabled the platform does not refuse connections: a hostname times
+/// out and a literal address is accepted and dropped within about a millisecond (both observed on Cloudflare). The accepted criterion is
+/// therefore "no HTTP response at all" (no status line, whatever the code, including a 520 from a proxy), not "connection refused". The
+/// verdict is "blocked" only when every attempt got no response, at least two attempts ran (name and address), and the allowed control path,
+/// which uses the same HTTP stack to reach the private storage host, answered in the same call. This cannot tell a silent drop from a very
+/// slow open route; elapsed times are reported so a reader can see the hostname attempt used its whole window. A response body is never
+/// read, nothing carrying data is sent and no redirect is followed.
 /// </summary>
 internal sealed class EgressProbe(Func<HttpClient> newClient, IReadOnlyList<Uri> targets, Func<CancellationToken, Task<bool>> control, TimeSpan? attemptTimeout = null)
 {
@@ -26,7 +29,7 @@ internal sealed class EgressProbe(Func<HttpClient> newClient, IReadOnlyList<Uri>
         var controlOk = await control(cancellationToken);
         var attempts = new List<EgressAttempt>();
         foreach (var target in targets) attempts.Add(await AttemptAsync(target, cancellationToken));
-        return (controlOk && attempts.Count > 0 && attempts.All(attempt => attempt.Outcome == "connection_failed"), controlOk, attempts);
+        return (controlOk && attempts.Count >= 2 && attempts.All(attempt => attempt.Outcome != "http_response"), controlOk, attempts);
     }
 
     private async Task<EgressAttempt> AttemptAsync(Uri target, CancellationToken cancellationToken)
@@ -47,10 +50,10 @@ internal sealed class EgressProbe(Func<HttpClient> newClient, IReadOnlyList<Uri>
         }
         catch (HttpRequestException exception)
         {
-            // Only a failure to establish the connection (or to resolve the name) is a block. A peer that completed the handshake and then
-            // closed, reset or spoke a bad protocol was reachable, so it is a distinct outcome that fails the verdict.
-            var blocked = exception.HttpRequestError is HttpRequestError.ConnectionError or HttpRequestError.NameResolutionError;
-            return new EgressAttempt(target.Host, blocked ? "connection_failed" : "reached_then_failed", null, timer.ElapsedMilliseconds);
+            // No HTTP response came back. A refused or unresolvable destination is "connection_failed"; a peer that accepted the connection
+            // and then closed or reset it without a status line is "reached_then_failed" (the platform's behavior for a literal address).
+            var refused = exception.HttpRequestError is HttpRequestError.ConnectionError or HttpRequestError.NameResolutionError;
+            return new EgressAttempt(target.Host, refused ? "connection_failed" : "reached_then_failed", null, timer.ElapsedMilliseconds);
         }
     }
 }
