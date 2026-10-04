@@ -622,9 +622,11 @@ public sealed class FoundationHostTests
             {
                 var address = new Uri($"http://127.0.0.1:{((IPEndPoint)peer.LocalEndpoint).Port}/");
                 var result = await new EgressProbe(FoundationModule.NewClient, [address, closed], _ => Task.FromResult(true)).RunAsync(T.Ct);
-                // Accepted-then-dropped without a status line is no response: blocked, with the distinct outcome reported.
+                // Accepted-then-dropped without a status line is no response: blocked. Windows reports the distinct outcome, Linux
+                // reports the reset as a connection error; either way no status line came back.
                 Assert.True(result.Blocked);
-                Assert.Equal("reached_then_failed", result.Attempts[0].Outcome);
+                Assert.Contains(result.Attempts[0].Outcome, new[] { "reached_then_failed", "connection_failed" });
+                Assert.Null(result.Attempts[0].Status);
             }
             finally
             {
