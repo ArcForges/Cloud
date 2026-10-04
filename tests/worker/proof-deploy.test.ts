@@ -19,6 +19,8 @@ import {
   egressProbe,
   expectedJobChecksum,
   helloIngress,
+  queueRetryDeadLetter,
+  sessionExpiry,
   runAll,
   runScenarios,
 } from "../../eng/verification/foundation-scenarios.ts";
@@ -231,6 +233,8 @@ test("a failing scenario never hides the others and its evidence row names the c
         "guard-rollback",
         "session-csrf-revoke",
         "r2-objects",
+        "session-expiry",
+        "queue-retry-dlq",
         "checkpoint-restart",
         "public-denial",
       ],
@@ -325,6 +329,8 @@ test("the runner waits for the Hello signal, then verifies the restarted foundat
     expectedRevision: expected,
     revisionWaitMs: 600,
     revisionPollMs: 10,
+    queueWaitMs: 30,
+    pollIntervalMs: 5,
   };
   const calls: string[] = [];
   interface Script {
@@ -402,7 +408,7 @@ test("the runner waits for the Hello signal, then verifies the restarted foundat
     const rows = await runScenarios(target, "0".repeat(64), { stopContainer: false });
     assert.equal(rows[0]?.scenario, "deployed-revision");
     assert.equal(rows[0]?.ok, false);
-    assert.equal(rows.length, 8);
+    assert.equal(rows.length, 10);
   } finally {
     globalThis.fetch = original;
   }
@@ -444,4 +450,113 @@ test("only the proof environment may run two Container instances", () => {
     2,
     "the proof Hello instance and the foundation instance must not contend for one slot",
   );
+});
+
+test("the queue scenario passes only after one delivery plus six retries and a later dead letter", async () => {
+  const original = globalThis.fetch;
+  const target = {
+    baseUrl: "https://proof.example",
+    origin: "https://proof.example",
+    operatorToken: "t".repeat(40),
+    queueWaitMs: 150,
+    pollIntervalMs: 5,
+  };
+  const attempts = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({ attempt: index + 1, atMs: 100 + index }));
+  const serve = (observations: unknown[]) => {
+    let polled = 0;
+    globalThis.fetch = (async (input: unknown) => {
+      if (String(input).endsWith("/queue/poison"))
+        return Response.json({ probeId: "00000000-0000-4000-8000-0000000000cc" });
+      return Response.json(observations[Math.min(polled++, observations.length - 1)]);
+    }) as typeof fetch;
+  };
+  try {
+    serve([
+      { attempts: attempts(2), deadLetter: null },
+      { attempts: attempts(7), deadLetter: { attempt: 1, atMs: 200 } },
+    ]);
+    const row = await queueRetryDeadLetter(target);
+    assert.equal(row.detail.deliveries, 7);
+    assert.equal(row.detail.retries, 6);
+    // Too few retries, an out-of-order record, a dead letter before the last attempt and no dead letter all fail.
+    serve([{ attempts: attempts(3), deadLetter: { attempt: 1, atMs: 200 } }]);
+    await assert.rejects(queueRetryDeadLetter(target), /max_retries/u);
+    serve([{ attempts: attempts(7).reverse(), deadLetter: { attempt: 1, atMs: 200 } }]);
+    await assert.rejects(queueRetryDeadLetter(target), /max_retries/u);
+    serve([{ attempts: attempts(7), deadLetter: { attempt: 1, atMs: 50 } }]);
+    await assert.rejects(queueRetryDeadLetter(target), /follows the last retry/u);
+    serve([{ attempts: attempts(7), deadLetter: null }]);
+    await assert.rejects(queueRetryDeadLetter(target), /not dead-lettered in time/u);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("the session scenario passes only when both expiries and the default lifetime behave", async () => {
+  const original = globalThis.fetch;
+  const target = {
+    baseUrl: "https://proof.example",
+    origin: "https://proof.example",
+    operatorToken: "t".repeat(40),
+    sessionIdleSeconds: 0.2,
+    sessionAbsoluteSeconds: 0.5,
+    sessionSlackSeconds: 0.1,
+  };
+  interface Session {
+    handle: string;
+    idleUntil: number;
+    absoluteUntil: number;
+    revoked: boolean;
+  }
+  const serve = (honor: { idle: boolean; absolute: boolean }) => {
+    const sessions = new Map<string, Session>();
+    let counter = 0;
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      const now = Date.now();
+      if (url.endsWith("/proof/v1/session/issue")) {
+        const body = JSON.parse(String(init?.body)) as {
+          idleSeconds?: number;
+          absoluteSeconds?: number;
+        };
+        const handle = `h${counter++}`;
+        const absolute = now + (body.absoluteSeconds ?? 1e6) * 1_000;
+        const idle = now + (body.idleSeconds ?? 1e6) * 1_000;
+        sessions.set(handle, {
+          handle,
+          idleUntil: honor.idle ? idle : 1e15,
+          absoluteUntil: honor.absolute ? absolute : 1e15,
+          revoked: false,
+        });
+        return Response.json({ handle, csrfToken: `c-${handle}` });
+      }
+      const headers = new Headers(init?.headers);
+      const session = sessions.get((headers.get("cookie") ?? "").split("=")[1] ?? "");
+      const live =
+        session && !session.revoked && now < session.idleUntil && now < session.absoluteUntil;
+      if (url.endsWith("/session/v1/bootstrap")) {
+        // An authenticated bootstrap renews the idle window (here: leaves it as issued, capped by absolute).
+        return Response.json({ authenticated: Boolean(live) });
+      }
+      if (url.endsWith("/session/v1/logout")) {
+        if (!live || !session) return new Response(null, { status: 401 });
+        session.revoked = true;
+        return Response.json({ effect: "happened" });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+  };
+  try {
+    serve({ idle: true, absolute: true });
+    // The stub does not renew idle windows on bootstrap, so the in-use session needs an idle window longer than
+    // its absolute lifetime for the scenario's active-use step: the scenario passes it a long idle window by default.
+    assert.equal((await sessionExpiry(target)).scenario, "session-expiry");
+    serve({ idle: false, absolute: true });
+    await assert.rejects(sessionExpiry(target), /unused idle session must have expired/u);
+    serve({ idle: true, absolute: false });
+    await assert.rejects(sessionExpiry(target), /absolute lifetime/u);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

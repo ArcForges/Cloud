@@ -20,6 +20,12 @@ export interface Target {
   /** Also observe the anonymous Hello ingress (`/api`) on the target; only a deployed Worker serves it. */
   helloIngress?: boolean;
   helloPollMs?: number;
+  queueWaitMs?: number;
+  /** Proof-only session lifetimes of the expiry scenario, in seconds (defaults 4 and 10). */
+  sessionIdleSeconds?: number;
+  sessionAbsoluteSeconds?: number;
+  /** Margin after each lifetime before the expiry is checked, in seconds (default 2.5). */
+  sessionSlackSeconds?: number;
   /** Also run the blocked-egress probe; only a deployed Container with Internet access disabled can pass it. */
   egressProbe?: boolean;
   /** The revision that was just deployed; the run first waits (bounded) until the origin serves exactly it. */
@@ -467,7 +473,7 @@ export async function egressProbe(target: Target): Promise<Evidence> {
 export async function deployedRevision(target: Target): Promise<Evidence> {
   const expected = target.expectedRevision ?? "";
   assert.match(expected, /^[0-9a-f]{40}$/u, "an expected revision is required");
-  const deadline = Date.now() + (target.revisionWaitMs ?? 180_000);
+  const deadline = Date.now() + (target.revisionWaitMs ?? 720_000);
   let attempts = 0;
   let last = "";
   let helloReady = false;
@@ -481,14 +487,17 @@ export async function deployedRevision(target: Target): Promise<Evidence> {
       const health =
         response.status === 200 ? ((await response.json()) as { revision?: string }) : {};
       const header = response.headers.get("x-arcforges-worker-revision");
-      last = `status ${response.status}, container ${String(health.revision)}, worker ${String(header)}`;
+      last = `status ${response.status}${response.status === 503 ? " (provisioning)" : ""}, container ${String(health.revision)}, worker ${String(header)}`;
       helloReady = health.revision === expected && header === expected;
     } catch (error) {
       last = error instanceof Error ? error.name : "error";
     }
     if (!helloReady) await sleep(target.revisionPollMs ?? 5_000);
   }
-  assert(helloReady, `The proof origin did not serve revision ${expected} in time (${last}).`);
+  assert(
+    helloReady,
+    `The proof origin did not serve revision ${expected} in time (${last}). A fresh deployment needs about ten minutes to provision its Containers.`,
+  );
   const stop = await operator(target, "container/stop", {});
   assert.equal(stop.status, 200, `The foundation instance could not be stopped (${stop.status}).`);
   let foundationRevision = "";
@@ -497,7 +506,7 @@ export async function deployedRevision(target: Target): Promise<Evidence> {
     try {
       const ready = await operator(target, "readiness", {});
       foundationRevision = String(ready.json.revision ?? "");
-      last = `readiness ${ready.status}, foundation ${foundationRevision || "none"}`;
+      last = `readiness ${ready.status}${ready.status === 503 ? " (provisioning)" : ""}, foundation ${foundationRevision || "none"}`;
       if (ready.status === 200 && foundationRevision === expected)
         return {
           scenario: "deployed-revision",
@@ -514,7 +523,138 @@ export async function deployedRevision(target: Target): Promise<Evidence> {
     }
     await sleep(target.revisionPollMs ?? 5_000);
   }
-  assert.fail(`The restarted foundation instance did not report revision ${expected} (${last}).`);
+  assert.fail(
+    `The restarted foundation instance did not report revision ${expected} (${last}). A fresh deployment needs about ten minutes to provision its Containers.`,
+  );
+}
+
+/**
+ * Queue loss and retry (WP-06.04 testing text). An operator-signed route enqueues a poison message carrying a random probe id; the wake
+ * consumer records every delivery attempt and always asks for a retry, so the queue's own retry limit (max_retries 6, that is one delivery
+ * and six retries) runs out and the message is delivered to the dead-letter queue, whose consumer records the delivery. The operator reads
+ * the observation back. Nothing touches D1, the Container or business state.
+ */
+export async function queueRetryDeadLetter(target: Target): Promise<Evidence> {
+  const maxRetries = 6;
+  const issued = await operator(target, "queue/poison", {});
+  assert.equal(issued.status, 200, JSON.stringify(issued.json));
+  const probeId = String(issued.json.probeId);
+  const deadline = Date.now() + (target.queueWaitMs ?? 180_000);
+  let observed: Json = {};
+  while (Date.now() < deadline) {
+    await sleep(target.pollIntervalMs ?? 3_000);
+    const reply = await operator(target, "queue/observation", { probeId });
+    assert.equal(reply.status, 200, JSON.stringify(reply.json));
+    observed = reply.json;
+    if (observed.deadLetter) break;
+  }
+  const attempts = (observed.attempts ?? []) as { attempt: number; atMs: number }[];
+  const deadLetter = observed.deadLetter as { attempt: number; atMs: number } | null;
+  assert(
+    deadLetter,
+    `the message was not dead-lettered in time (${attempts.length} attempts seen)`,
+  );
+  assert.deepEqual(
+    attempts.map((entry) => entry.attempt),
+    Array.from({ length: maxRetries + 1 }, (_, index) => index + 1),
+    "one delivery plus max_retries retries, in order",
+  );
+  const last = attempts.at(-1);
+  assert(last && deadLetter.atMs >= last.atMs, "the dead letter follows the last retry");
+  return {
+    scenario: "queue-retry-dlq",
+    ok: true,
+    detail: {
+      probeId,
+      deliveries: attempts.length,
+      retries: attempts.length - 1,
+      deadLetterAfterMs: deadLetter.atMs - (attempts[0]?.atMs ?? deadLetter.atMs),
+    },
+  };
+}
+
+/**
+ * Session expiry (WP-06.04 testing text). The proof-only issue route accepts short idle and absolute lifetimes (2 to 300 seconds); the
+ * stored expiry is enforced by the same code as the twelve hour and thirty minute defaults, so this observes the rules themselves on the
+ * deployment: an idle session that is not used ends, a session in active use still ends at its absolute lifetime, a default session
+ * outlives both, and an expired session is refused on bootstrap and on logout.
+ */
+export async function sessionExpiry(target: Target): Promise<Evidence> {
+  const issue = async (extra: Json) => {
+    const reply = await operator(target, "session/issue", {
+      userId: randomUUID(),
+      deviceId: randomUUID(),
+      workspaceIds: [randomUUID()],
+      ...extra,
+    });
+    assert.equal(reply.status, 200, JSON.stringify(reply.json));
+    return {
+      cookie: `__Host-af_session=${String(reply.json.handle)}`,
+      csrf: String(reply.json.csrfToken),
+    };
+  };
+  const call = (method: string, path: string, headers: Record<string, string>) =>
+    fetch(`${target.baseUrl}${path}`, {
+      method,
+      headers,
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+  const authenticated = async (cookie: string) =>
+    (
+      (await (
+        await call("GET", "/session/v1/bootstrap", { cookie, origin: target.origin })
+      ).json()) as { authenticated: boolean }
+    ).authenticated;
+  const logoutStatus = async (session: { cookie: string; csrf: string }) =>
+    (
+      await call("POST", "/session/v1/logout", {
+        cookie: session.cookie,
+        origin: target.origin,
+        "x-af-csrf": session.csrf,
+      })
+    ).status;
+  const idleSeconds = target.sessionIdleSeconds ?? 4;
+  const absoluteSeconds = target.sessionAbsoluteSeconds ?? 10;
+  const slack = target.sessionSlackSeconds ?? 2.5;
+  const started = Date.now();
+  // The default session and the absolute-rule session are used while the idle-rule session sits unused.
+  const idle = await issue({ idleSeconds, absoluteSeconds: 300 });
+  const absolute = await issue({ absoluteSeconds });
+  const normal = await issue({});
+  assert.equal(await authenticated(absolute.cookie), true, "a fresh session authenticates");
+  await sleep(Math.max(0, (idleSeconds + slack) * 1_000 - (Date.now() - started)));
+  assert.equal(await authenticated(idle.cookie), false, "an unused idle session must have expired");
+  assert.equal(await logoutStatus(idle), 401, "an expired session cannot log out");
+  // The absolute session is still within its lifetime and keeps authenticating (and renewing its idle window).
+  assert.equal(
+    await authenticated(absolute.cookie),
+    true,
+    "a session in use stays valid until its absolute lifetime",
+  );
+  await sleep(Math.max(0, (absoluteSeconds + 2 * slack) * 1_000 - (Date.now() - started)));
+  assert.equal(
+    await authenticated(absolute.cookie),
+    false,
+    "no activity extends a session past its absolute lifetime",
+  );
+  assert.equal(await logoutStatus(absolute), 401);
+  assert.equal(
+    await authenticated(normal.cookie),
+    true,
+    "a default session outlives the short ones",
+  );
+  assert.equal(await logoutStatus(normal), 200);
+  return {
+    scenario: "session-expiry",
+    ok: true,
+    detail: {
+      idleRefused: true,
+      absoluteRefused: true,
+      defaultSessionAlive: true,
+      ms: Date.now() - started,
+    },
+  };
 }
 
 /**
@@ -604,6 +744,8 @@ export async function runScenarios(
     ["guard-rollback", () => guardedRollback(target)],
     ["session-csrf-revoke", () => sessionLifecycle(target)],
     ["r2-objects", () => objectRoundTrip(target)],
+    ["session-expiry", () => sessionExpiry(target)],
+    ["queue-retry-dlq", () => queueRetryDeadLetter(target)],
     ["checkpoint-restart", () => checkpointRestart(target, options)],
     ["public-denial", () => negatives(target)],
   ];

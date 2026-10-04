@@ -4,6 +4,7 @@
 import { routeRequest, type CloudBindings } from "../router.ts";
 import { postSigned } from "./container-client.ts";
 import { handleProof, isProofPath } from "./proof-routes.ts";
+import { parsePoison, processDeadLetter, processPoison } from "./poison.ts";
 import { maxSliceItems, maxSliceMilliseconds, processWake, type MessageLike } from "./queue.ts";
 import { proofEnabled, type FoundationEnv } from "./types.ts";
 
@@ -21,7 +22,7 @@ export function fetchEntry(
 }
 
 export async function queueEntry(
-  batch: { messages: readonly MessageLike[] },
+  batch: { queue?: string; messages: readonly MessageLike[] },
   env: WorkerEnv,
 ): Promise<void> {
   const proof = env as FoundationEnv;
@@ -29,6 +30,15 @@ export async function queueEntry(
     if (!proofEnabled(env)) {
       // No consumer work exists outside the proof environment.
       message.retry({ delaySeconds: 60 });
+      continue;
+    }
+    // The dead-letter queue of the wake queue has its own consumer: it records what the retry probe produced.
+    if (batch.queue?.endsWith("-dlq")) {
+      await processDeadLetter(message, { coordinators: proof.JOB_COORDINATOR });
+      continue;
+    }
+    if (parsePoison(message.body)) {
+      await processPoison(message, { coordinators: proof.JOB_COORDINATOR });
       continue;
     }
     await processWake(message, {

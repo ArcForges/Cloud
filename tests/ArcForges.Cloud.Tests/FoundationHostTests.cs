@@ -479,6 +479,51 @@ public sealed class FoundationHostTests
         Assert.DoesNotContain(host.Storage.Sessions, s => Encoding.UTF8.GetString(s.Hash).Contains(issued.Json.GetProperty("handle").GetString()!, StringComparison.Ordinal));
     }
 
+    private static async Task<(string Cookie, string Csrf)> IssueShort(Running host, int? idle, int? absolute)
+    {
+        var issued = await Operation(host, "session/issue", new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = new[] { T.Uuid() }, idleSeconds = idle, absoluteSeconds = absolute });
+        Assert.Equal(HttpStatusCode.OK, issued.Status);
+        return ("__Host-af_session=" + issued.Json.GetProperty("handle").GetString(), issued.Json.GetProperty("csrfToken").GetString()!);
+    }
+
+    private static async Task<bool> IsAuthenticated(Running host, string cookie) =>
+        (await Send(host, Browser("GET", "/session/v1/bootstrap", cookie, Origin))).Json.GetProperty("authenticated").GetBoolean();
+
+    [Fact]
+    public async Task ShortProofLifetimesExpireTheSessionByTheIdleAndByTheAbsoluteRuleAndAreRefusedEverywhere()
+    {
+        await using var host = await StartAsync();
+        // Idle rule: no activity for longer than the idle window ends the session; a refused logout follows.
+        var idle = await IssueShort(host, idle: 3, absolute: 60);
+        host.Time.Advance(TimeSpan.FromSeconds(2));
+        host.Time.Advance(TimeSpan.FromSeconds(2));
+        Assert.False(await IsAuthenticated(host, idle.Cookie));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(host, Browser("POST", "/session/v1/logout", idle.Cookie, Origin, idle.Csrf))).Status);
+        // Absolute rule: a long idle window and active use cannot outlive the absolute lifetime.
+        var absolute = await IssueShort(host, idle: null, absolute: 6);
+        host.Time.Advance(TimeSpan.FromSeconds(2));
+        Assert.True(await IsAuthenticated(host, absolute.Cookie));
+        host.Time.Advance(TimeSpan.FromSeconds(3));
+        Assert.True(await IsAuthenticated(host, absolute.Cookie));
+        host.Time.Advance(TimeSpan.FromSeconds(2));
+        Assert.False(await IsAuthenticated(host, absolute.Cookie));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(host, Browser("POST", "/session/v1/logout", absolute.Cookie, Origin, absolute.Csrf))).Status);
+        // Without overrides the configured defaults apply (30 minute idle window stays valid after a minute).
+        var normal = await IssueShort(host, idle: null, absolute: null);
+        host.Time.Advance(TimeSpan.FromMinutes(1));
+        Assert.True(await IsAuthenticated(host, normal.Cookie));
+        // The overrides are bounded and typed on the internal route.
+        foreach (var bad in new object[]
+        {
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), idleSeconds = 1 },
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), idleSeconds = 301 },
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), absoluteSeconds = 0 },
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), absoluteSeconds = 86400 },
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), idleSeconds = "3" },
+        })
+            Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "session/issue", bad)).Status);
+    }
+
     [Fact]
     public async Task JobRoutesRunBoundedSlicesToACompleteExactChecksum()
     {

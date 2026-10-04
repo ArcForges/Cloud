@@ -57,7 +57,7 @@ function environment(
     OBJECTS: createFakeR2(),
     WAKE_QUEUE: {
       send(message) {
-        sent.push(message);
+        sent.push(message as WakeMessage);
         return Promise.resolve();
       },
     },
