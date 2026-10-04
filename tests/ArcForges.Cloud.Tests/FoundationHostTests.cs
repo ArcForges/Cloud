@@ -591,6 +591,30 @@ public sealed class FoundationHostTests
             silent.Stop();
         }
 
+        // A peer that completes the TCP handshake and then closes or resets was reachable: never blocked.
+        foreach (var reset in new[] { false, true })
+        {
+            var peer = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            peer.Start();
+            var accepting = Task.Run(async () =>
+            {
+                using var accepted = await peer.AcceptTcpClientAsync(T.Ct);
+                if (reset) accepted.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+            }, T.Ct);
+            try
+            {
+                var address = new Uri($"http://127.0.0.1:{((IPEndPoint)peer.LocalEndpoint).Port}/");
+                var result = await new EgressProbe(FoundationModule.NewClient, [address], _ => Task.FromResult(true)).RunAsync(T.Ct);
+                await accepting;
+                Assert.False(result.Blocked);
+                Assert.Equal("reached_then_failed", Assert.Single(result.Attempts).Outcome);
+            }
+            finally
+            {
+                peer.Stop();
+            }
+        }
+
         Assert.Equal(["example.com", "1.1.1.1"], EgressProbe.PublicTargets.Select(uri => uri.Host));
     }
 }

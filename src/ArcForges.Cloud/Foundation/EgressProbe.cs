@@ -11,7 +11,7 @@ internal sealed record EgressAttempt(string Host, string Outcome, int? Status, l
 /// The blocked-egress proof of the proof Container. It makes harmless outbound attempts to stable public names and reports whether any of them
 /// got an answer. The Container's only permitted outbound paths are the interception hosts; with Internet access disabled every other
 /// destination must fail to connect. A probe cannot pass vacuously: the verdict is "blocked" only when every target failed with a connection
-/// error (a timeout or any HTTP response is not a block) and the allowed control path, which uses the same HTTP stack to reach the private
+/// error (a timeout, an HTTP response, or a failure after the handshake is not a block) and the allowed control path, which uses the same HTTP stack to reach the private
 /// storage host, answered in the same call. Nothing is sent that carries data, and no redirect is followed.
 /// </summary>
 internal sealed class EgressProbe(Func<HttpClient> newClient, IReadOnlyList<Uri> targets, Func<CancellationToken, Task<bool>> control, TimeSpan? attemptTimeout = null)
@@ -45,9 +45,12 @@ internal sealed class EgressProbe(Func<HttpClient> newClient, IReadOnlyList<Uri>
         {
             return new EgressAttempt(target.Host, "timeout", null, timer.ElapsedMilliseconds);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException exception)
         {
-            return new EgressAttempt(target.Host, "connection_failed", null, timer.ElapsedMilliseconds);
+            // Only a failure to establish the connection (or to resolve the name) is a block. A peer that completed the handshake and then
+            // closed, reset or spoke a bad protocol was reachable, so it is a distinct outcome that fails the verdict.
+            var blocked = exception.HttpRequestError is HttpRequestError.ConnectionError or HttpRequestError.NameResolutionError;
+            return new EgressAttempt(target.Host, blocked ? "connection_failed" : "reached_then_failed", null, timer.ElapsedMilliseconds);
         }
     }
 }

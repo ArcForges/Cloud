@@ -251,10 +251,10 @@ The proof Container keeps Internet access disabled (`enableInternet = false`); i
 hosts `storage.internal` and `objects.internal`. The operator operation `egress/probe` makes the host attempt a harmless
 `HEAD` to `http://example.com/` and to the literal address `http://1.1.1.1/` (no body, no redirect, 8 second limit each)
 and reports only host, outcome and elapsed time. The scenario `egress-blocked` passes only when every attempt failed to
-connect (`connection_failed`; an answer, including an error status, and a timeout both fail it) and the allowed control
+connect (`connection_failed`: the connection or the name resolution failed; an answer including an error status, a timeout, and a failure after the handshake such as a close or reset, `reached_then_failed`, all fail it) and the allowed control
 path, the host's storage readiness through the interception, answered in the same call, so a broken probe cannot pass
 vacuously. The C# tests run the real HTTP stack and host route against a closed loopback port (blocked), an answering
-loopback server (open), a silent listener (timeout) and a failed control. A DNS failure for the name alone could look like
+loopback server (open), a silent listener (timeout), peers that accept and then close or reset (reached), and a failed control. A DNS failure for the name alone could look like
 a block, which is why the literal address is attempted too. Production does not serve the operation.
 
 ## Not claimed

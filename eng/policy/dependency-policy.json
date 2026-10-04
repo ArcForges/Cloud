@@ -25,9 +25,9 @@
     "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
     "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
     "wrangler.json": "3a93fe23f3f9c450a5e20ed8c12122af44134dfe85f96e6039bcb13413e21555",
-    "eng/provenance/artifact-profiles/cloud-release-r18.json": "f3ed12fb3e9ad28398246569e9e7ce1f5e885eb58a085f8d7f85447ce1cd622a",
-    "eng/provenance/records/cloud-runtime-notices-r19.json": "5510eebccb0d39d4bb515a2092a4387bb3a2969a6f966cc9ba2bde0de606eec3",
-    "eng/provenance/records/cloud-worker-bundle-r18.json": "4b26146978cd2c2a9f8ff846301235321b828eea98c60c8c1800bcadcdad0f40",
+    "eng/provenance/artifact-profiles/cloud-release-r19.json": "76448028f9bfcdd82019337849abe89748f863aad87ee5db633b19813c46731b",
+    "eng/provenance/records/cloud-runtime-notices-r20.json": "0eb10f4a98e7adb3f7130de18a990e1f8f0c3218b808ebc5f7850319fc7d8744",
+    "eng/provenance/records/cloud-worker-bundle-r19.json": "4dfdeb5e91438d9473da81aa06889205008b4b49d80279af6b5c903adb9b7588",
     "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
     "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
     ".github/workflows/ci.yml": "2da4aadd5dd733d904b2147c7c5b69c0740febd65ed754743d9a676d2a43003e"
@@ -59,9 +59,9 @@
       "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
       "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
       "wrangler.json": "3a93fe23f3f9c450a5e20ed8c12122af44134dfe85f96e6039bcb13413e21555",
-      "eng/provenance/artifact-profiles/cloud-release-r18.json": "f3ed12fb3e9ad28398246569e9e7ce1f5e885eb58a085f8d7f85447ce1cd622a",
-      "eng/provenance/records/cloud-runtime-notices-r19.json": "5510eebccb0d39d4bb515a2092a4387bb3a2969a6f966cc9ba2bde0de606eec3",
-      "eng/provenance/records/cloud-worker-bundle-r18.json": "4b26146978cd2c2a9f8ff846301235321b828eea98c60c8c1800bcadcdad0f40",
+      "eng/provenance/artifact-profiles/cloud-release-r19.json": "76448028f9bfcdd82019337849abe89748f863aad87ee5db633b19813c46731b",
+      "eng/provenance/records/cloud-runtime-notices-r20.json": "0eb10f4a98e7adb3f7130de18a990e1f8f0c3218b808ebc5f7850319fc7d8744",
+      "eng/provenance/records/cloud-worker-bundle-r19.json": "4dfdeb5e91438d9473da81aa06889205008b4b49d80279af6b5c903adb9b7588",
       "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
       "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
       ".github/workflows/ci.yml": "2da4aadd5dd733d904b2147c7c5b69c0740febd65ed754743d9a676d2a43003e"
@@ -895,13 +895,13 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-runtime-notices-r19", "cloud-worker-bundle-r18"],
+  "artifactRecords": ["cloud-runtime-notices-r20", "cloud-worker-bundle-r19"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
-      "eng/provenance/artifact-profiles/cloud-release-r18.json",
-      "eng/provenance/records/cloud-runtime-notices-r19.json",
-      "eng/provenance/records/cloud-worker-bundle-r18.json"
+      "eng/provenance/artifact-profiles/cloud-release-r19.json",
+      "eng/provenance/records/cloud-runtime-notices-r20.json",
+      "eng/provenance/records/cloud-worker-bundle-r19.json"
     ]
   },
   "buildToolPrereleases": {
@@ -909,7 +909,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/prf-07-r5.json",
+  "reviewRecord": "eng/policy/dependency-reviews/prf-07-r6.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
