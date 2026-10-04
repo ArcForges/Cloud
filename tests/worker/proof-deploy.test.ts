@@ -14,7 +14,11 @@ import {
   secretSources,
   type CandidateConfig,
 } from "../../eng/verification/proof-deploy.ts";
-import { expectedJobChecksum } from "../../eng/verification/foundation-scenarios.ts";
+import {
+  expectedJobChecksum,
+  runAll,
+  runScenarios,
+} from "../../eng/verification/foundation-scenarios.ts";
 
 const wrangler = JSON.parse(
   readFileSync(path.resolve(import.meta.dirname, "../../wrangler.json"), "utf8"),
@@ -187,4 +191,63 @@ test("the expected job checksum is computed exactly beyond 2^53", () => {
   assert.equal(expectedJobChecksum(1), 4_611_686_018_427n);
   assert.equal(expectedJobChecksum(250), 4_611_686_018_427n * 31_375n);
   assert(expectedJobChecksum(250) > BigInt(Number.MAX_SAFE_INTEGER));
+});
+
+test("a failing scenario never hides the others and its evidence row names the cause", async () => {
+  const original = globalThis.fetch;
+  const roundtrip = {
+    fullMatches: true,
+    rangeMatches: true,
+    existingMismatchRejected: false,
+    existingMismatchStatus: 200,
+    freshMismatchRejected: true,
+    freshMismatchStatus: 422,
+    mismatchRejected: false,
+  };
+  globalThis.fetch = (async (input: unknown) => {
+    const url = String(input);
+    return url.endsWith("/objects/roundtrip")
+      ? Response.json(roundtrip)
+      : new Response("{}", { status: 503 });
+  }) as typeof fetch;
+  try {
+    const rows = await runScenarios(
+      {
+        baseUrl: "https://proof.example",
+        origin: "https://proof.example",
+        operatorToken: "t".repeat(40),
+      },
+      "0".repeat(64),
+      { stopContainer: false },
+    );
+    assert.deepEqual(
+      rows.map((row) => row.scenario),
+      [
+        "readiness",
+        "exact-values",
+        "guard-rollback",
+        "session-csrf-revoke",
+        "r2-objects",
+        "checkpoint-restart",
+        "public-denial",
+      ],
+    );
+    assert(rows.every((row) => !row.ok && typeof row.detail.ms === "number"));
+    const objects = rows.find((row) => row.scenario === "r2-objects");
+    assert.match(String(objects?.detail.error), /existing-key mismatching PUT status 200/u);
+    await assert.rejects(
+      runAll(
+        {
+          baseUrl: "https://proof.example",
+          origin: "https://proof.example",
+          operatorToken: "t".repeat(40),
+        },
+        "0".repeat(64),
+        { stopContainer: false },
+      ),
+      /Scenario failures: readiness/u,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
 });

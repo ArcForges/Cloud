@@ -43,7 +43,8 @@ internal sealed record GuardResponse(string Outcome, string Scope, string From, 
 internal sealed record IssueResponse(string SessionId, string Handle, string CsrfToken, string ExpiresAt, string IdleExpiresAt);
 
 internal sealed record RoundtripResponse(string Sha256, int Size, bool FullMatches, bool RangeMatches, bool MismatchRejected,
-    string? ContentRangeHeader = null);
+    string? ContentRangeHeader = null, int PutStatus = 0, int WholeStatus = 0, int RangeStatus = 0, int ExistingMismatchStatus = 0,
+    int FreshMismatchStatus = 0, bool ExistingMismatchRejected = false, bool FreshMismatchRejected = false);
 
 internal sealed record JobStartResponse(string JobId, string Scope, int Total);
 

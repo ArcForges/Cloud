@@ -150,7 +150,7 @@ with the C# tests and the format check) and `Dependency audit and repository che
 inspection), then `Verify`. Only a successful main build deploys. It deploys the default Worker and the production Hello container: the
 default Container class is unchanged (no outbound interception, no environment hook, pinned by
 `tests/worker/container-classes.test.ts`), the default configuration is unchanged, and the Worker bundle is larger
-(61,990 bytes in Hello, 167,717 bytes now) because it now contains the dormant foundation modules, which answer nothing without
+(61,990 bytes in Hello, 168,111 bytes now) because it now contains the dormant foundation modules, which answer nothing without
 `FOUNDATION_PROOF=enabled`. The image likewise contains the dormant host module. The proof environment is never
 deployed by a push or a pull request; it is deployed only by the manually dispatched jobs described
 under Deploying below, and no CI job connects to the deployed service.
@@ -227,6 +227,24 @@ the operator JSON surface, not gRPC-Web: the deployed proof environment exposes 
 carries those primitives (the Hello service carries strings), so the PRF.05 exact-value gRPC-Web scenarios have no
 method to call there until a service that carries them exists.
 
+### R2 facade: what "mismatch rejection" means
+
+A PUT whose bytes do not hash to the declared (and signed) SHA-256, or whose length differs from the declared length,
+is answered 422 and stores nothing, whether or not the key already exists. The first live run found that the
+conditional write (`etagDoesNotMatch: "*"`) returns without evaluating R2's own checksum when the key exists, so a
+mismatching body was answered 200 `existing`; the facade therefore reads the bounded body (one part, 8 MiB), verifies
+length and hash itself and only then writes. The scenario checks both an existing key and a fresh key and reports the
+status of each. The offline fake models the same conditional-first behavior, with a test that fails on the old facade.
+
+### Live evidence and the Hello ingress
+
+`npm run test:foundation:live` runs every scenario even when one fails and writes
+`artifacts/foundation-live-evidence.json` (one row per scenario with its detail, error text and elapsed time) before it
+reports a failure. It also observes the existing anonymous Hello ingress on the proof origin (`/api/healthz` and a
+hand-framed `SayHello`), which only shows that the same Worker serves `/api` next to the proof surface. The proof
+exposes no generated gRPC-Web service that carries int64, uint64 and decimal values: that needs a new Contracts service
+and published packages, so PRF.05's exact-value gRPC-Web scenario is not served here.
+
 ## Not claimed
 
 - No live Cloudflare result of any kind: no deployed D1, R2, Queue, Durable Object or Container behavior, no outbound
@@ -257,7 +275,7 @@ are claimant-reported until the independent review and hosted CI confirm them. N
 | Worker and tooling tests                | `npm test`                                                                                                   | 176 tests passed, 0 failed                                                                                                                   |
 | Dependency policy                       | `npm run test:dependencies`, `node tooling/dependency-policy.ts`                                             | 18 passed; policy and receipt `prf-07-r1` verify                                                                                             |
 | Licence, provenance                     | `node tooling/project.ts licence`, `node tooling/project.ts provenance`                                      | pass                                                                                                                                         |
-| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 167717 bytes)                                                                                                        |
+| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 168111 bytes)                                                                                                        |
 | Plan generator drift                    | `npm run check:plans`                                                                                        | 19 plans, manifest hash matches the generated TS and C#                                                                                      |
 | Formatting, lint, types                 | `prettier --check .`, `biome lint`, `tsc` for both projects                                                  | clean                                                                                                                                        |
 | C# build and tests                      | `dotnet build` and `dotnet test` of `Cloud.slnx`, Release, under the build slot                              | 0 warnings, 159 tests passed                                                                                                                 |

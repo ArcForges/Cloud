@@ -17,7 +17,8 @@ export function createFakeR2(): FakeR2 {
     async put(key, value, options): Promise<R2ObjectLike | null> {
       fake.puts++;
       if (options.onlyIf?.etagDoesNotMatch === "*" && objects.has(key)) return null;
-      const bytes = await readBounded(value, 64 * 1024 * 1024);
+      const bytes =
+        value instanceof Uint8Array ? value : await readBounded(value, 64 * 1024 * 1024);
       if (createHash("sha256").update(bytes).digest("hex") !== options.sha256)
         throw new Error("The SHA-256 checksum you specified did not match what we received.");
       objects.set(key, { bytes, customMetadata: options.customMetadata });

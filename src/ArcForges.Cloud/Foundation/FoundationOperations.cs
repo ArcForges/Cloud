@@ -309,12 +309,18 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
         var range = await objects.GetAsync(request.WorkspaceId, request.ResourceId, sha, (0, last), request.Size, cancellationToken);
         var other = (byte[])data.Clone();
         other[0] ^= 0xff;
-        var wrong = await objects.PutAsync(request.WorkspaceId, request.ResourceId, other, sha, cancellationToken);
+        // Bytes that do not match the declared hash must be refused whether the key already exists or not:
+        // once under the same resource (the object exists) and once under a fresh resource (nothing stored).
+        var existingMismatch = await objects.PutAsync(request.WorkspaceId, request.ResourceId, other, sha, cancellationToken);
+        var freshMismatch = await objects.PutAsync(request.WorkspaceId, Guid.NewGuid().ToString("D"), other, sha, cancellationToken);
+        var existingRejected = existingMismatch.Outcome == ObjectOutcome.Rejected;
+        var freshRejected = freshMismatch.Outcome == ObjectOutcome.Rejected;
         return OperationReply.Json(StatusCodes.Status200OK,
             new RoundtripResponse(sha, request.Size,
                 whole is { Outcome: ObjectOutcome.Ok, Bytes: { } fullBytes } && Convert.ToHexStringLower(SHA256.HashData(fullBytes)) == sha && fullBytes.AsSpan().SequenceEqual(data),
                 range is { Outcome: ObjectOutcome.Ok, Bytes: { } partial } && partial.AsSpan().SequenceEqual(data.AsSpan(0, last + 1)),
-                wrong.Outcome == ObjectOutcome.Rejected, range.ContentRange),
+                existingRejected && freshRejected, range.ContentRange,
+                put.StatusCode, whole.StatusCode, range.StatusCode, existingMismatch.StatusCode, freshMismatch.StatusCode, existingRejected, freshRejected),
             FoundationJsonContext.Default.RoundtripResponse);
     }
 

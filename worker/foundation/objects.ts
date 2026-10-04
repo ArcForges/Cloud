@@ -2,7 +2,8 @@
 // The private `objects.internal` R2 facade (contracts 05 sections 6 and 9, reduced to the foundation
 // probe): bounded signed PUT with a server-verified SHA-256 and signed range GET. There is no public
 // URL, no presigned URL and the raw R2 key never leaves the Worker.
-import { jsonResponse, refusal } from "../private/bounded-body.ts";
+import { BodyTooLarge, jsonResponse, readBounded, refusal } from "../private/bounded-body.ts";
+import { sha256Hex } from "../private/encoding.ts";
 import { loadKeys, verificationKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import { verify } from "../private/signing.ts";
 import type { R2Like } from "./types.ts";
@@ -73,11 +74,24 @@ export async function handleObjects(
     const declaredLength = Number(length);
     if (declaredLength > maxPartBytes) return refusal(413);
     if (!request.body) return refusal(400);
+    // The bytes are verified here, before any storage decision: R2 skips its own checksum when the
+    // conditional write finds the key already present, so without this an existing key would answer
+    // 200 to bytes that do not match the declared hash. The body is bounded by one part.
+    let bytes: Uint8Array;
+    try {
+      bytes = await readBounded(request.body, maxPartBytes);
+    } catch (error) {
+      if (error instanceof BodyTooLarge) return refusal(413);
+      throw error;
+    }
+    if (bytes.length !== declaredLength) return jsonResponse(422, { error: "length_mismatch" });
+    if ((await sha256Hex(bytes)) !== declaredHash)
+      return jsonResponse(422, { error: "hash_mismatch" });
     const key = objectKey(realm, workspace, resource, declaredHash);
     let stored: Awaited<ReturnType<R2Like["put"]>>;
     try {
-      // R2 verifies the SHA-256 of the received bytes against the declared value and fails the write on a mismatch.
-      stored = await env.OBJECTS.put(key, request.body, {
+      // R2 verifies the SHA-256 of the received bytes against the declared value as well.
+      stored = await env.OBJECTS.put(key, bytes, {
         sha256: declaredHash,
         customMetadata: { sha256: declaredHash, length },
         onlyIf: { etagDoesNotMatch: "*" },
@@ -89,7 +103,8 @@ export async function handleObjects(
         : jsonResponse(503, { error: "unavailable" });
     }
     if (stored === null) {
-      // The key embeds the content hash, so an existing object is the identical object.
+      // The key embeds the content hash and the bytes were just verified against it, so an existing
+      // object is the identical object.
       const existing = await env.OBJECTS.head(key);
       return existing?.size === declaredLength
         ? jsonResponse(200, { sha256: declaredHash, size: declaredLength, existing: true })

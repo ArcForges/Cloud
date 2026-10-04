@@ -17,6 +17,8 @@ export interface Target {
   /** Pause before inspecting a restarted job (milliseconds). */
   pollIntervalMs?: number;
   jobTimeoutMs?: number;
+  /** Also observe the anonymous Hello ingress (`/api`) on the target; only a deployed Worker serves it. */
+  helloIngress?: boolean;
 }
 
 type Json = Record<string, unknown>;
@@ -273,13 +275,32 @@ export async function objectRoundTrip(target: Target): Promise<Evidence> {
     seed: 7,
   });
   assert.equal(reply.status, 200, JSON.stringify(reply.json));
-  assert.equal(reply.json.fullMatches, true);
-  assert.equal(reply.json.rangeMatches, true);
+  assert.equal(reply.json.fullMatches, true, `whole GET status ${String(reply.json.wholeStatus)}`);
+  assert.equal(reply.json.rangeMatches, true, `range GET status ${String(reply.json.rangeStatus)}`);
+  // Bytes that do not match the declared hash are refused with a 4xx whether the key exists or not.
+  assert.equal(
+    reply.json.existingMismatchRejected,
+    true,
+    `existing-key mismatching PUT status ${String(reply.json.existingMismatchStatus)}`,
+  );
+  assert.equal(
+    reply.json.freshMismatchRejected,
+    true,
+    `fresh-key mismatching PUT status ${String(reply.json.freshMismatchStatus)}`,
+  );
   assert.equal(reply.json.mismatchRejected, true);
   return {
     scenario: "r2-objects",
     ok: true,
-    detail: { size: reply.json.size, sha256: reply.json.sha256 },
+    detail: {
+      size: reply.json.size,
+      sha256: reply.json.sha256,
+      putStatus: reply.json.putStatus,
+      wholeStatus: reply.json.wholeStatus,
+      rangeStatus: reply.json.rangeStatus,
+      existingMismatchStatus: reply.json.existingMismatchStatus,
+      freshMismatchStatus: reply.json.freshMismatchStatus,
+    },
   };
 }
 
@@ -387,21 +408,113 @@ export async function negatives(target: Target): Promise<Evidence> {
   };
 }
 
+/**
+ * The existing anonymous Hello ingress (`/api/healthz` and the generated-service path) on the proof
+ * origin, observed with a hand-framed binary gRPC-Web request: this only shows that the same Worker
+ * serves `/api` next to the proof surface, it is not the generated-client test of PRF.05.
+ */
+export async function helloIngress(target: Target): Promise<Evidence> {
+  const name = new TextEncoder().encode("proof");
+  const message = Uint8Array.from([0x0a, name.length, ...name]);
+  const frame = new Uint8Array(5 + message.length);
+  new DataView(frame.buffer).setUint32(1, message.length);
+  frame.set(message, 5);
+  const deadline = Date.now() + 90_000;
+  let attempts = 0;
+  let last = "";
+  while (Date.now() < deadline) {
+    attempts++;
+    // Readiness polling of a possibly cold Container; SayHello is idempotent and read-only.
+    const health = await fetch(`${target.baseUrl}/api/healthz`, {
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+    const healthBody = await health.text();
+    last = `healthz ${health.status}`;
+    if (health.status === 200) {
+      const response = await fetch(
+        `${target.baseUrl}/api/arcforges.hello.v1.HelloService/SayHello`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/grpc-web+proto", "grpc-timeout": "10S" },
+          body: frame,
+          redirect: "error",
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const text = new TextDecoder().decode(bytes);
+      last = `sayhello ${response.status}`;
+      if (response.status === 200 && text.includes("Hello, proof!")) {
+        return {
+          scenario: "hello-ingress",
+          ok: true,
+          detail: {
+            attempts,
+            healthStatus: health.status,
+            healthBytes: healthBody.length,
+            sayHelloStatus: response.status,
+            workerRevisionHeader: response.headers.get("x-arcforges-worker-revision"),
+          },
+        };
+      }
+    }
+    await sleep(5_000);
+  }
+  assert.fail(`The Hello ingress did not answer on the proof origin (${last}).`);
+}
+
+/**
+ * Runs every scenario and returns one evidence row for each, including failures with their error
+ * message and the elapsed time, so a failed scenario never hides the others and the caller can persist
+ * the whole record before reporting the failure. Messages are assertion texts; no secret is in them.
+ */
+export async function runScenarios(
+  target: Target,
+  manifestHash: string,
+  options: { stopContainer: boolean },
+): Promise<Evidence[]> {
+  const evidence: Evidence[] = [];
+  const steps: [string, () => Promise<Evidence>][] = [
+    ["readiness", () => readiness(target, manifestHash)],
+    ["exact-values", () => exactValues(target)],
+    ["guard-rollback", () => guardedRollback(target)],
+    ["session-csrf-revoke", () => sessionLifecycle(target)],
+    ["r2-objects", () => objectRoundTrip(target)],
+    ["checkpoint-restart", () => checkpointRestart(target, options)],
+    ["public-denial", () => negatives(target)],
+  ];
+  if (target.helloIngress) steps.push(["hello-ingress", () => helloIngress(target)]);
+  for (const [name, step] of steps) {
+    const started = Date.now();
+    try {
+      const row = await step();
+      evidence.push({ ...row, detail: { ...row.detail, ms: Date.now() - started } });
+    } catch (error) {
+      evidence.push({
+        scenario: name,
+        ok: false,
+        detail: {
+          error: (error instanceof Error ? error.message : String(error)).slice(0, 600),
+          ms: Date.now() - started,
+        },
+      });
+    }
+  }
+  return evidence;
+}
+
 export async function runAll(
   target: Target,
   manifestHash: string,
   options: { stopContainer: boolean },
 ) {
-  const evidence: Evidence[] = [];
-  for (const step of [
-    () => readiness(target, manifestHash),
-    () => exactValues(target),
-    () => guardedRollback(target),
-    () => sessionLifecycle(target),
-    () => objectRoundTrip(target),
-    () => checkpointRestart(target, options),
-    () => negatives(target),
-  ])
-    evidence.push(await step());
+  const evidence = await runScenarios(target, manifestHash, options);
+  const failed = evidence.filter((item) => !item.ok);
+  assert.equal(
+    failed.length,
+    0,
+    `Scenario failures: ${failed.map((item) => `${item.scenario}: ${String(item.detail.error)}`).join(" | ")}`,
+  );
   return evidence;
 }

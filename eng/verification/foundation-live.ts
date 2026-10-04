@@ -8,7 +8,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { manifestHash } from "../../worker/storage/plans.generated.ts";
-import { runAll, type Target } from "./foundation-scenarios.ts";
+import { runScenarios, type Target } from "./foundation-scenarios.ts";
 import { loadOperatorKey, signOperatorRequest } from "./proof-operator.ts";
 
 export async function main() {
@@ -37,14 +37,28 @@ export async function main() {
   const origin = process.env.PROOF_ALLOWED_ORIGIN ?? baseUrl;
 
   const startedAt = new Date().toISOString();
-  const evidence = await runAll({ baseUrl, origin, ...auth }, manifestHash, {
-    stopContainer: true,
-  });
+  const evidence = await runScenarios(
+    { baseUrl, origin, helloIngress: true, ...auth },
+    manifestHash,
+    {
+      stopContainer: true,
+    },
+  );
+  // The evidence is written before any failure is reported, so a failing scenario never loses the rest.
   const file = path.resolve(import.meta.dirname, "../../artifacts/foundation-live-evidence.json");
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(
     file,
-    `${JSON.stringify({ startedAt, finishedAt: new Date().toISOString(), host: new URL(baseUrl).host, manifestHash, evidence }, null, 2)}\n`,
+    `${JSON.stringify({ startedAt, finishedAt: new Date().toISOString(), host: new URL(baseUrl).host, manifestHash, evidence }, null, 2)}
+`,
+  );
+  for (const item of evidence)
+    console.log(`${item.ok ? "PASS" : "FAIL"} ${item.scenario} ${JSON.stringify(item.detail)}`);
+  const failed = evidence.filter((item) => !item.ok);
+  assert.equal(
+    failed.length,
+    0,
+    `Failed scenarios: ${failed.map((item) => item.scenario).join(", ")}`,
   );
   console.log(`Foundation scenarios passed: ${evidence.map((item) => item.scenario).join(", ")}`);
 }
