@@ -150,7 +150,7 @@ with the C# tests and the format check) and `Dependency audit and repository che
 inspection), then `Verify`. Only a successful main build deploys. It deploys the default Worker and the production Hello container: the
 default Container class is unchanged (no outbound interception, no environment hook, pinned by
 `tests/worker/container-classes.test.ts`), the default configuration is unchanged, and the Worker bundle is larger
-(61,990 to 165,123 bytes) because it now contains the dormant foundation modules, which answer nothing without
+(61,990 bytes in Hello, 167,595 bytes now) because it now contains the dormant foundation modules, which answer nothing without
 `FOUNDATION_PROOF=enabled`. The image likewise contains the dormant host module. The proof environment is never
 deployed by a push or a pull request; it is deployed only by the manually dispatched jobs described
 under Deploying below, and no CI job connects to the deployed service.
@@ -254,7 +254,7 @@ are claimant-reported until the independent review and hosted CI confirm them. N
 | Worker and tooling tests                | `npm test`                                                                                                   | 176 tests passed, 0 failed                                                                                                                   |
 | Dependency policy                       | `npm run test:dependencies`, `node tooling/dependency-policy.ts`                                             | 18 passed; policy and receipt `prf-07-r1` verify                                                                                             |
 | Licence, provenance                     | `node tooling/project.ts licence`, `node tooling/project.ts provenance`                                      | pass                                                                                                                                         |
-| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 165267 bytes)                                                                                                        |
+| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 167595 bytes)                                                                                                        |
 | Plan generator drift                    | `npm run check:plans`                                                                                        | 19 plans, manifest hash matches the generated TS and C#                                                                                      |
 | Formatting, lint, types                 | `prettier --check .`, `biome lint`, `tsc` for both projects                                                  | clean                                                                                                                                        |
 | C# build and tests                      | `dotnet build` and `dotnet test` of `Cloud.slnx`, Release, under the build slot                              | 0 warnings, 159 tests passed                                                                                                                 |
