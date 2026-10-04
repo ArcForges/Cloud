@@ -21,6 +21,10 @@
       "kind": "msbuild"
     },
     {
+      "path": "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj",
+      "kind": "msbuild"
+    },
+    {
       "path": "tests/kotlin-consumer/build.gradle.kts",
       "kind": "gradle"
     }
