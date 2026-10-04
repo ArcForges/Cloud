@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "1a001eaeff310d046d4a556a2b06b7f2037157e2",
+  "sourceCommit": "df52ee2d541e942c452e2410ead0f9ceb7fbb95b",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -25,9 +25,9 @@
     "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
     "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
     "wrangler.json": "3a93fe23f3f9c450a5e20ed8c12122af44134dfe85f96e6039bcb13413e21555",
-    "eng/provenance/artifact-profiles/cloud-release-r16.json": "09abb91edb85589e73b25794b09da430b56b382f7d9e4373ad2a78e35e69eba9",
-    "eng/provenance/records/cloud-runtime-notices-r17.json": "9c805dc6bee62ed08b7af6a8876751bca4d392e425a6e40ac06632a4b7ca37f9",
-    "eng/provenance/records/cloud-worker-bundle-r16.json": "6a3223fdca5ef5f602d308f38de8abc4f03b4c6f8d0cf4ec2f763228e6584b50",
+    "eng/provenance/artifact-profiles/cloud-release-r17.json": "2764c17eb6b970e45ed9c00440a27e7438de01c0b68c4acb71189b11c7d1654e",
+    "eng/provenance/records/cloud-runtime-notices-r18.json": "9ec06b73c92ecd30d96e2165126e01572b88651ebf373ef9be432506d519fd40",
+    "eng/provenance/records/cloud-worker-bundle-r17.json": "3459e7b26e87d75bd86f148e7daec531d1616084b9ff163d6c1dd0a07a48940a",
     "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
     "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
     ".github/workflows/ci.yml": "2da4aadd5dd733d904b2147c7c5b69c0740febd65ed754743d9a676d2a43003e"
@@ -59,9 +59,9 @@
       "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
       "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
       "wrangler.json": "3a93fe23f3f9c450a5e20ed8c12122af44134dfe85f96e6039bcb13413e21555",
-      "eng/provenance/artifact-profiles/cloud-release-r16.json": "09abb91edb85589e73b25794b09da430b56b382f7d9e4373ad2a78e35e69eba9",
-      "eng/provenance/records/cloud-runtime-notices-r17.json": "9c805dc6bee62ed08b7af6a8876751bca4d392e425a6e40ac06632a4b7ca37f9",
-      "eng/provenance/records/cloud-worker-bundle-r16.json": "6a3223fdca5ef5f602d308f38de8abc4f03b4c6f8d0cf4ec2f763228e6584b50",
+      "eng/provenance/artifact-profiles/cloud-release-r17.json": "2764c17eb6b970e45ed9c00440a27e7438de01c0b68c4acb71189b11c7d1654e",
+      "eng/provenance/records/cloud-runtime-notices-r18.json": "9ec06b73c92ecd30d96e2165126e01572b88651ebf373ef9be432506d519fd40",
+      "eng/provenance/records/cloud-worker-bundle-r17.json": "3459e7b26e87d75bd86f148e7daec531d1616084b9ff163d6c1dd0a07a48940a",
       "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
       "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
       ".github/workflows/ci.yml": "2da4aadd5dd733d904b2147c7c5b69c0740febd65ed754743d9a676d2a43003e"
@@ -895,13 +895,13 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-runtime-notices-r17", "cloud-worker-bundle-r16"],
+  "artifactRecords": ["cloud-runtime-notices-r18", "cloud-worker-bundle-r17"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
-      "eng/provenance/artifact-profiles/cloud-release-r16.json",
-      "eng/provenance/records/cloud-runtime-notices-r17.json",
-      "eng/provenance/records/cloud-worker-bundle-r16.json"
+      "eng/provenance/artifact-profiles/cloud-release-r17.json",
+      "eng/provenance/records/cloud-runtime-notices-r18.json",
+      "eng/provenance/records/cloud-worker-bundle-r17.json"
     ]
   },
   "buildToolPrereleases": {
@@ -909,7 +909,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/prf-07-r3.json",
+  "reviewRecord": "eng/policy/dependency-reviews/prf-07-r4.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

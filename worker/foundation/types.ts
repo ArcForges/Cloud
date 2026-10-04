@@ -14,7 +14,7 @@ export interface R2ObjectBodyLike extends R2ObjectLike {
 export interface R2Like {
   put(
     key: string,
-    value: ReadableStream<Uint8Array>,
+    value: ReadableStream<Uint8Array> | Uint8Array,
     options: {
       sha256: string;
       customMetadata: Record<string, string>;

@@ -220,3 +220,27 @@ test("missing realm or keys disable the facade instead of opening it", async () 
     );
   }
 });
+
+test("bytes that differ from the declared hash are refused on an existing key too and the object is kept", async () => {
+  // Real R2 evaluates the conditional write first and skips its own checksum when the key exists
+  // (this fake does the same), so the facade must verify the bytes itself.
+  const { env, OBJECTS } = environment();
+  assert.equal((await handleObjects(await put(payload), env, now)).status, 201);
+  const tampered = payload.slice();
+  tampered[0] = (tampered[0] ?? 0) ^ 0xff;
+  const response = await handleObjects(await put(tampered, { declared: hex(payload) }), env, now);
+  assert.equal(response.status, 422);
+  assert.deepEqual(await response.json(), { error: "hash_mismatch" });
+  assert.equal(OBJECTS.objects.size, 1);
+  const [stored] = [...OBJECTS.objects.values()];
+  assert.deepEqual(stored?.bytes, payload, "the stored object is unchanged");
+  // A body larger than the declared length is a length mismatch, not a stored object.
+  const longer = new Uint8Array(payload.length + 1);
+  const mismatch = await handleObjects(
+    await put(longer, { declared: hex(longer), length: "4096" }),
+    env,
+    now,
+  );
+  assert.equal(mismatch.status, 422);
+  assert.equal(OBJECTS.objects.size, 1);
+});
