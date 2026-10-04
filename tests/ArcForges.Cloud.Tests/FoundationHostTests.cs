@@ -596,22 +596,35 @@ public sealed class FoundationHostTests
         {
             var peer = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
             peer.Start();
+            // Every connection is accepted and dropped at once, so a transparent retry of the HEAD on Linux meets the same peer.
+            using var stop = new CancellationTokenSource();
             var accepting = Task.Run(async () =>
             {
-                using var accepted = await peer.AcceptTcpClientAsync(T.Ct);
-                if (reset) accepted.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+                try
+                {
+                    while (!stop.IsCancellationRequested)
+                    {
+                        using var accepted = await peer.AcceptTcpClientAsync(stop.Token);
+                        if (reset) accepted.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+                    }
+                }
+                catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException or System.Net.Sockets.SocketException or OperationCanceledException)
+                {
+                    // The test stopped the listener.
+                }
             }, T.Ct);
             try
             {
                 var address = new Uri($"http://127.0.0.1:{((IPEndPoint)peer.LocalEndpoint).Port}/");
                 var result = await new EgressProbe(FoundationModule.NewClient, [address], _ => Task.FromResult(true)).RunAsync(T.Ct);
-                await accepting;
                 Assert.False(result.Blocked);
                 Assert.Equal("reached_then_failed", Assert.Single(result.Attempts).Outcome);
             }
             finally
             {
+                await stop.CancelAsync();
                 peer.Stop();
+                await Task.WhenAny(accepting, Task.Delay(TimeSpan.FromSeconds(5), T.Ct));
             }
         }
 
