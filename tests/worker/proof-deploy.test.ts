@@ -314,7 +314,7 @@ test("the egress scenario passes on no HTTP response for every attempt and fails
   }
 });
 
-test("the runner waits for the deployed revision before any scenario and fails closed", async () => {
+test("the runner waits for the Hello signal, then verifies the restarted foundation instance and fails closed", async () => {
   const original = globalThis.fetch;
   const expected = "a".repeat(40);
   const stale = "b".repeat(40);
@@ -323,48 +323,82 @@ test("the runner waits for the deployed revision before any scenario and fails c
     origin: "https://proof.example",
     operatorToken: "t".repeat(40),
     expectedRevision: expected,
-    revisionWaitMs: 400,
+    revisionWaitMs: 600,
     revisionPollMs: 10,
   };
   const calls: string[] = [];
-  const serve = (sequence: { container: string; worker: string | null }[]) => {
-    let index = 0;
+  interface Script {
+    hello: { container: string; worker: string | null }[];
+    stopStatus: number;
+    foundation: (string | null)[];
+  }
+  const serve = (script: Script) => {
+    let hello = 0;
+    let foundation = 0;
+    calls.length = 0;
     globalThis.fetch = (async (input: unknown) => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith("/api/healthz")) {
-        const step = sequence[Math.min(index++, sequence.length - 1)] as (typeof sequence)[number];
+        const step = script.hello[
+          Math.min(hello++, script.hello.length - 1)
+        ] as Script["hello"][number];
         return Response.json(
           { revision: step.container },
           { headers: step.worker === null ? {} : { "x-arcforges-worker-revision": step.worker } },
         );
       }
-      return Response.json({ stopped: true });
+      if (url.endsWith("/proof/v1/container/stop"))
+        return Response.json({ stopped: true }, { status: script.stopStatus });
+      const revision = script.foundation[Math.min(foundation++, script.foundation.length - 1)];
+      return revision === null
+        ? Response.json({ error: "unavailable" }, { status: 500 })
+        : Response.json({ ready: true, revision });
     }) as typeof fetch;
   };
   try {
-    // A stale instance and half-updated pairs are waited out; only both revisions equal pass.
-    serve([
-      { container: stale, worker: stale },
-      { container: expected, worker: stale },
-      { container: expected, worker: null },
-      { container: expected, worker: expected },
-    ]);
+    // Stale and half-updated Hello answers are waited out; the stop must succeed; the restarted foundation instance must report
+    // the expected revision (a stale or unavailable instance is polled again).
+    serve({
+      hello: [
+        { container: stale, worker: stale },
+        { container: expected, worker: stale },
+        { container: expected, worker: null },
+        { container: expected, worker: expected },
+      ],
+      stopStatus: 200,
+      foundation: [null, stale, expected],
+    });
     const row = await deployedRevision(target);
     assert.equal(row.scenario, "deployed-revision");
-    assert.equal(row.detail.attempts, 4);
-    assert(
-      calls.some((call) => call.endsWith("/proof/v1/container/stop")),
-      "a fresh instance is forced",
-    );
-    serve([{ container: stale, worker: stale }]);
+    assert.equal(row.detail.foundationRevision, expected);
+    assert(calls.some((call) => call.endsWith("/proof/v1/container/stop")));
+    // The stop must be delivered: a failing stop fails the row (the Hello signal alone is not enough).
+    serve({
+      hello: [{ container: expected, worker: expected }],
+      stopStatus: 500,
+      foundation: [expected],
+    });
+    await assert.rejects(deployedRevision(target), /could not be stopped/u);
+    // A foundation instance that keeps reporting another revision fails, even though Hello reports the expected one.
+    serve({
+      hello: [{ container: expected, worker: expected }],
+      stopStatus: 200,
+      foundation: [stale],
+    });
+    await assert.rejects(deployedRevision(target), /did not report revision/u);
+    // Hello never reaches the expected revision.
+    serve({
+      hello: [{ container: stale, worker: stale }],
+      stopStatus: 200,
+      foundation: [expected],
+    });
     await assert.rejects(deployedRevision(target), /did not serve revision/u);
     await assert.rejects(
       deployedRevision({ ...target, expectedRevision: "short" }),
       /expected revision/u,
     );
     // Every scenario run starts with the wait when a revision is expected, and records its failure.
-    serve([{ container: stale, worker: stale }]);
     const rows = await runScenarios(target, "0".repeat(64), { stopContainer: false });
     assert.equal(rows[0]?.scenario, "deployed-revision");
     assert.equal(rows[0]?.ok, false);

@@ -272,6 +272,9 @@ public sealed class FoundationHostTests
         var ok = await Send(host, Signed(host, "/internal/foundation/v1/readiness", json));
         Assert.True(ok.Json.GetProperty("ready").GetBoolean());
         Assert.Equal(PlanManifest.Hash, ok.Json.GetProperty("manifestHash").GetString());
+        // The host reports its own compiled revision, which the live runner compares with the deployed one.
+        Assert.Equal(HostRevision.Current, ok.Json.GetProperty("revision").GetString());
+        Assert.Matches("^[0-9a-f]{40}(-dirty)?$", HostRevision.Current);
         // The host-wide bound of 4096 bytes protects Hello; the foundation routes raise only their own bound.
         var padded = Encoding.UTF8.GetBytes("{" + new string(' ', 5000) + "}");
         Assert.Equal(HttpStatusCode.OK, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", padded))).Status);
@@ -572,7 +575,8 @@ public sealed class FoundationHostTests
     {
         var closed = ClosedLoopbackAddress();
         // A broken control path means the probe proves nothing: never blocked.
-        var noControl = await new EgressProbe(FoundationModule.NewClient, [closed], _ => Task.FromResult(false)).RunAsync(T.Ct);
+        // Two targets, so the two-attempt rule cannot mask a control that was dropped from the verdict.
+        var noControl = await new EgressProbe(FoundationModule.NewClient, [closed, ClosedLoopbackAddress()], _ => Task.FromResult(false)).RunAsync(T.Ct);
         Assert.False(noControl.Blocked);
         Assert.False(noControl.ControlOk);
         Assert.False((await new EgressProbe(FoundationModule.NewClient, [], _ => Task.FromResult(true)).RunAsync(T.Ct)).Blocked);

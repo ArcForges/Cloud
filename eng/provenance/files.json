@@ -82,6 +82,7 @@
     "eng/policy/dependency-reviews/prf-07-r5.json",
     "eng/policy/dependency-reviews/prf-07-r6.json",
     "eng/policy/dependency-reviews/prf-07-r7.json",
+    "eng/policy/dependency-reviews/prf-07-r8.json",
     "eng/policy/dependency-reviews/wrangler-4-143-1-r1.json",
     "eng/policy/licence-boundary.json",
     "eng/policy/reuse-policy.json",
@@ -99,6 +100,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r19.json",
     "eng/provenance/artifact-profiles/cloud-release-r2.json",
     "eng/provenance/artifact-profiles/cloud-release-r20.json",
+    "eng/provenance/artifact-profiles/cloud-release-r21.json",
     "eng/provenance/artifact-profiles/cloud-release-r3.json",
     "eng/provenance/artifact-profiles/cloud-release-r4.json",
     "eng/provenance/artifact-profiles/cloud-release-r5.json",
@@ -124,6 +126,7 @@
     "eng/provenance/records/cloud-runtime-notices-r2.json",
     "eng/provenance/records/cloud-runtime-notices-r20.json",
     "eng/provenance/records/cloud-runtime-notices-r21.json",
+    "eng/provenance/records/cloud-runtime-notices-r22.json",
     "eng/provenance/records/cloud-runtime-notices-r3.json",
     "eng/provenance/records/cloud-runtime-notices-r4.json",
     "eng/provenance/records/cloud-runtime-notices-r5.json",
@@ -144,6 +147,7 @@
     "eng/provenance/records/cloud-worker-bundle-r19.json",
     "eng/provenance/records/cloud-worker-bundle-r2.json",
     "eng/provenance/records/cloud-worker-bundle-r20.json",
+    "eng/provenance/records/cloud-worker-bundle-r21.json",
     "eng/provenance/records/cloud-worker-bundle-r3.json",
     "eng/provenance/records/cloud-worker-bundle-r4.json",
     "eng/provenance/records/cloud-worker-bundle-r5.json",
@@ -321,5 +325,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["cloud-runtime-notices-r21", "cloud-worker-bundle-r20"]
+  "artifacts": ["cloud-runtime-notices-r22", "cloud-worker-bundle-r21"]
 }

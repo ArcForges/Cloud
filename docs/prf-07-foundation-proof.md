@@ -262,7 +262,7 @@ storage readiness through the interception, answered in the same call, so a brok
 line, a failed control or fewer than two attempts fails it. The platform's own accept-then-drop behavior is the reason a
 peer that accepts and then closes counts as no response here; the limits of that criterion are that it cannot distinguish a
 silent drop from a very slow open route (the elapsed times are recorded, and the hostname attempt is seen to use its whole
-window) and that it proves the absence of an answer, not the mechanism. The C# tests run the real HTTP stack and host route
+window) and that it proves the absence of an answer, not the mechanism. A timeout is not required to use the whole window, so a slow open route can false-pass; a peer that answers with something other than HTTP (a banner or a TLS alert) is also "no response" here, since only a status line counts as an answer. The C# tests run the real HTTP stack and host route
 against a closed port, a silent listener, peers that accept and then close or reset, and answering servers with status 200,
 404 and 520 (all answering cases fail), and a failed control. Production does not serve the operation.
 
@@ -270,11 +270,13 @@ against a closed port, a silent listener, peers that accept and then close or re
 
 After a deployment a Container instance that was started before the rollout finished can still run the previous image (the
 first run after the second deployment answered a new operation with 404 from the old host). The live runner therefore first
-waits, for at most three minutes, until both the Worker revision header and the Container's own health revision equal the
-expected revision (the checked-out commit, or `PROOF_EXPECTED_REVISION`), and then asks the foundation instance to stop so it
-restarts from the current image. The proof environment (and only it) allows two Container instances, because the Hello
+waits, for at most three minutes, until both the Worker revision header and the Hello instance's health revision equal the
+expected revision (the checked-out commit, or `PROOF_EXPECTED_REVISION`); that instance is only a signal that the platform now
+starts the new image. It then stops the foundation instance (the stop must succeed) and restarts it with a readiness call whose
+reply carries the host's own compiled revision, which must equal the expected one; the exact-value and egress scenarios run
+against that foundation instance. The proof environment (and only it) allows two Container instances, because the Hello
 `/api` instance and the foundation instance are separate Durable Object instances of one class and contended for the single
-slot with `max_instances: 1`; production keeps one instance. The Hello scenario retries thrown errors within its deadline.
+slot with `max_instances: 1`; production keeps one instance. The Hello scenario retries thrown errors within its 150 second deadline; each request is bounded by the remaining time, so it cannot overrun the deadline by an iteration.
 
 ## Not claimed
 

@@ -458,10 +458,11 @@ export async function egressProbe(target: Target): Promise<Evidence> {
 }
 
 /**
- * Waits (bounded) until the proof origin serves exactly the deployed revision, so a Container instance that is still running the
- * previous image after a rollout cannot answer a new operation with 404. Both the Worker revision header and the Container's own
- * health revision must equal the expected value. A fresh foundation instance is then forced (best effort) so that it starts from the
- * current image.
+ * Waits (bounded) until the instances the scenarios run against serve exactly the deployed revision, so an instance that was started
+ * before the rollout finished and still runs the previous image cannot answer a new operation with 404. First the Worker revision header
+ * and the Hello instance's health revision must equal the expected value (the Hello instance is only a signal that the platform now starts
+ * the new image). Then the FOUNDATION instance, the one the exact-value and egress scenarios use, is stopped (the stop must succeed) and
+ * restarted by a readiness call whose reply must carry the expected host revision; any other revision, or a failed stop, fails the row.
  */
 export async function deployedRevision(target: Target): Promise<Evidence> {
   const expected = target.expectedRevision ?? "";
@@ -469,7 +470,8 @@ export async function deployedRevision(target: Target): Promise<Evidence> {
   const deadline = Date.now() + (target.revisionWaitMs ?? 180_000);
   let attempts = 0;
   let last = "";
-  while (Date.now() < deadline) {
+  let helloReady = false;
+  while (!helloReady && Date.now() < deadline) {
     attempts++;
     try {
       const response = await fetch(`${target.baseUrl}/api/healthz`, {
@@ -480,25 +482,39 @@ export async function deployedRevision(target: Target): Promise<Evidence> {
         response.status === 200 ? ((await response.json()) as { revision?: string }) : {};
       const header = response.headers.get("x-arcforges-worker-revision");
       last = `status ${response.status}, container ${String(health.revision)}, worker ${String(header)}`;
-      if (health.revision === expected && header === expected) {
-        let stopStatus = 0;
-        try {
-          stopStatus = (await operator(target, "container/stop", {})).status;
-        } catch {
-          // A stop that cannot be delivered only means no stale instance can be replaced now.
-        }
+      helloReady = health.revision === expected && header === expected;
+    } catch (error) {
+      last = error instanceof Error ? error.name : "error";
+    }
+    if (!helloReady) await sleep(target.revisionPollMs ?? 5_000);
+  }
+  assert(helloReady, `The proof origin did not serve revision ${expected} in time (${last}).`);
+  const stop = await operator(target, "container/stop", {});
+  assert.equal(stop.status, 200, `The foundation instance could not be stopped (${stop.status}).`);
+  let foundationRevision = "";
+  while (Date.now() < deadline) {
+    attempts++;
+    try {
+      const ready = await operator(target, "readiness", {});
+      foundationRevision = String(ready.json.revision ?? "");
+      last = `readiness ${ready.status}, foundation ${foundationRevision || "none"}`;
+      if (ready.status === 200 && foundationRevision === expected)
         return {
           scenario: "deployed-revision",
           ok: true,
-          detail: { attempts, revision: expected, foundationStopStatus: stopStatus },
+          detail: {
+            attempts,
+            revision: expected,
+            foundationRevision,
+            foundationStopStatus: stop.status,
+          },
         };
-      }
     } catch (error) {
       last = error instanceof Error ? error.name : "error";
     }
     await sleep(target.revisionPollMs ?? 5_000);
   }
-  assert.fail(`The proof origin did not serve revision ${expected} in time (${last}).`);
+  assert.fail(`The restarted foundation instance did not report revision ${expected} (${last}).`);
 }
 
 /**
@@ -513,6 +529,8 @@ export async function helloIngress(target: Target): Promise<Evidence> {
   new DataView(frame.buffer).setUint32(1, message.length);
   frame.set(message, 5);
   const deadline = Date.now() + 150_000;
+  const within = () =>
+    AbortSignal.timeout(Math.max(1_000, Math.min(30_000, deadline - Date.now())));
   let attempts = 0;
   let last = "";
   while (Date.now() < deadline) {
@@ -522,7 +540,7 @@ export async function helloIngress(target: Target): Promise<Evidence> {
     try {
       const health = await fetch(`${target.baseUrl}/api/healthz`, {
         redirect: "error",
-        signal: AbortSignal.timeout(30_000),
+        signal: within(),
       });
       const healthBody = await health.text();
       last = `healthz ${health.status}`;
@@ -534,7 +552,7 @@ export async function helloIngress(target: Target): Promise<Evidence> {
             headers: { "content-type": "application/grpc-web+proto", "grpc-timeout": "10S" },
             body: frame,
             redirect: "error",
-            signal: AbortSignal.timeout(30_000),
+            signal: within(),
           },
         );
         const bytes = new Uint8Array(await response.arrayBuffer());
@@ -557,6 +575,7 @@ export async function helloIngress(target: Target): Promise<Evidence> {
     } catch (error) {
       last = `${error instanceof Error ? error.name : "error"} on attempt ${attempts}`;
     }
+    if (Date.now() + (target.helloPollMs ?? 5_000) >= deadline) break;
     await sleep(target.helloPollMs ?? 5_000);
   }
   assert.fail(`The Hello ingress did not answer on the proof origin (${last}).`);
