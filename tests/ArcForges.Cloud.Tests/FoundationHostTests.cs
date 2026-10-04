@@ -40,7 +40,7 @@ public sealed class FoundationHostTests
         }
     }
 
-    private static async Task<Running> StartAsync(bool enabled = true)
+    private static async Task<Running> StartAsync(bool enabled = true, EgressProbe? probe = null)
     {
         var storage = new FakeStorage();
         var time = new FakeTime(Start);
@@ -53,6 +53,7 @@ public sealed class FoundationHostTests
         });
         builder.Services.AddSingleton<IPlanExecutor>(storage);
         builder.Services.AddSingleton<TimeProvider>(time);
+        if (probe is not null) builder.Services.AddSingleton(probe);
         IHostModule[] modules =
         [
             new HelloModule(BuildIdentity.FromAssembly(typeof(HelloEndpoint).Assembly)),
@@ -509,5 +510,87 @@ public sealed class FoundationHostTests
         Assert.Equal(HttpStatusCode.NotFound, (await Operation(host, "job/status", new { scope, jobId = T.Uuid() })).Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/start", new { scope, total = 1001 })).Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/start", new { scope = "../x", total = 5 })).Status);
+    }
+
+    private static Uri ClosedLoopbackAddress()
+    {
+        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return new Uri($"http://127.0.0.1:{port}/");
+    }
+
+    private static async Task<(WebApplication App, Uri Address)> StartAnsweringServerAsync()
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http1));
+        var app = builder.Build();
+        app.MapMethods("/{**path}", ["HEAD", "GET"], () => Results.Ok());
+        await app.StartAsync();
+        return (app, new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()));
+    }
+
+    [Fact]
+    public async Task TheEgressProbeReportsBlockedOnlyWhenEveryTargetRefusesTheConnectionAndTheControlAnswers()
+    {
+        var closedA = ClosedLoopbackAddress();
+        var closedB = ClosedLoopbackAddress();
+        // The real HTTP stack and the real host route: a refused connection is the blocked outcome.
+        await using var blocked = await StartAsync(probe: new EgressProbe(FoundationModule.NewClient, [closedA, closedB], _ => Task.FromResult(true)));
+        var reply = await Operation(blocked, "egress/probe", new { });
+        Assert.Equal(HttpStatusCode.OK, reply.Status);
+        Assert.True(reply.Json.GetProperty("blocked").GetBoolean());
+        Assert.True(reply.Json.GetProperty("controlOk").GetBoolean());
+        var attempts = reply.Json.GetProperty("attempts").EnumerateArray().ToArray();
+        Assert.Equal(2, attempts.Length);
+        Assert.All(attempts, attempt => Assert.Equal("connection_failed", attempt.GetProperty("outcome").GetString()));
+        Assert.Equal(["127.0.0.1", "127.0.0.1"], attempts.Select(attempt => attempt.GetProperty("host").GetString()));
+        // The default route also exercises the production wiring: the control is the host's own storage readiness.
+        var (server, open) = await StartAnsweringServerAsync();
+        try
+        {
+            // One answering target is an open route: never "blocked", whatever else was refused.
+            await using var leaking = await StartAsync(probe: new EgressProbe(FoundationModule.NewClient, [closedA, open], _ => Task.FromResult(true)));
+            var leak = await Operation(leaking, "egress/probe", new { });
+            Assert.False(leak.Json.GetProperty("blocked").GetBoolean());
+            var outcomes = leak.Json.GetProperty("attempts").EnumerateArray().Select(a => a.GetProperty("outcome").GetString()).ToArray();
+            Assert.Equal(["connection_failed", "http_response"], outcomes);
+            Assert.Equal(200, leak.Json.GetProperty("attempts")[1].GetProperty("status").GetInt32());
+        }
+        finally
+        {
+            await server.StopAsync(T.Ct);
+            await server.DisposeAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await Operation(blocked, "egress/probe", new { extra = 1 })).Status);
+    }
+
+    [Fact]
+    public async Task TheEgressProbeFailsClosedWithoutTheControlOnATimeoutOrWithoutTargets()
+    {
+        var closed = ClosedLoopbackAddress();
+        // A broken control path means the probe proves nothing: never blocked.
+        var noControl = await new EgressProbe(FoundationModule.NewClient, [closed], _ => Task.FromResult(false)).RunAsync(T.Ct);
+        Assert.False(noControl.Blocked);
+        Assert.False(noControl.ControlOk);
+        Assert.False((await new EgressProbe(FoundationModule.NewClient, [], _ => Task.FromResult(true)).RunAsync(T.Ct)).Blocked);
+        // A target that accepts the connection but never answers is a timeout, which is not a block.
+        var silent = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        silent.Start();
+        try
+        {
+            var address = new Uri($"http://127.0.0.1:{((IPEndPoint)silent.LocalEndpoint).Port}/");
+            var result = await new EgressProbe(FoundationModule.NewClient, [address], _ => Task.FromResult(true), TimeSpan.FromMilliseconds(300)).RunAsync(T.Ct);
+            Assert.False(result.Blocked);
+            Assert.Equal("timeout", Assert.Single(result.Attempts).Outcome);
+        }
+        finally
+        {
+            silent.Stop();
+        }
+
+        Assert.Equal(["example.com", "1.1.1.1"], EgressProbe.PublicTargets.Select(uri => uri.Host));
     }
 }

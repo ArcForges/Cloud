@@ -15,6 +15,7 @@ import {
   type CandidateConfig,
 } from "../../eng/verification/proof-deploy.ts";
 import {
+  egressProbe,
   expectedJobChecksum,
   runAll,
   runScenarios,
@@ -247,6 +248,48 @@ test("a failing scenario never hides the others and its evidence row names the c
       ),
       /Scenario failures: readiness/u,
     );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("the egress scenario passes only when every attempt is refused and the control answered", async () => {
+  const original = globalThis.fetch;
+  const target = {
+    baseUrl: "https://proof.example",
+    origin: "https://proof.example",
+    operatorToken: "t".repeat(40),
+  };
+  const blocked = {
+    blocked: true,
+    controlOk: true,
+    attempts: [
+      { host: "example.com", outcome: "connection_failed" },
+      { host: "1.1.1.1", outcome: "connection_failed" },
+    ],
+  };
+  const answer = (value: unknown, status = 200) => {
+    globalThis.fetch = (async () => Response.json(value, { status })) as typeof fetch;
+  };
+  try {
+    answer(blocked);
+    assert.equal((await egressProbe(target)).scenario, "egress-blocked");
+    const failing = [
+      { ...blocked, controlOk: false },
+      { ...blocked, blocked: false },
+      { ...blocked, attempts: [blocked.attempts[0]] },
+      {
+        ...blocked,
+        attempts: [blocked.attempts[0], { host: "1.1.1.1", outcome: "http_response", status: 200 }],
+      },
+      { ...blocked, attempts: [blocked.attempts[0], { host: "1.1.1.1", outcome: "timeout" }] },
+    ];
+    for (const reply of failing) {
+      answer(reply);
+      await assert.rejects(egressProbe(target));
+    }
+    answer({ error: "unavailable" }, 502);
+    await assert.rejects(egressProbe(target));
   } finally {
     globalThis.fetch = original;
   }

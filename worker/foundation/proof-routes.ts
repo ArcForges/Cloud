@@ -22,6 +22,7 @@ const operations = new Set([
   "guard",
   "session/issue",
   "objects/roundtrip",
+  "egress/probe",
   "job/start",
   "job/slice",
   "job/status",

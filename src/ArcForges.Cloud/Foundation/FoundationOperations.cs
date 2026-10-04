@@ -28,7 +28,7 @@ internal readonly record struct OperationReply(int Status, byte[] Body)
 /// The operations behind the signed internal proof routes. Every 64-bit and decimal value is an exact canonical string,
 /// all arithmetic is checked, and every failure maps to a closed error code.
 /// </summary>
-internal sealed class FoundationOperations(IPlanExecutor executor, SessionService sessions, JobSliceService jobs, ObjectsClient objects, FoundationOptions options)
+internal sealed class FoundationOperations(IPlanExecutor executor, SessionService sessions, JobSliceService jobs, ObjectsClient objects, EgressProbe egress, FoundationOptions options)
 {
     public async Task<OperationReply> ExecuteAsync(string operation, byte[] body, CancellationToken cancellationToken)
     {
@@ -41,6 +41,7 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
                 "guard" => await GuardAsync(body, cancellationToken),
                 "session/issue" => await IssueAsync(body, cancellationToken),
                 "objects/roundtrip" => await RoundtripAsync(body, cancellationToken),
+                "egress/probe" => await EgressProbeAsync(body, cancellationToken),
                 "job/start" => await JobStartAsync(body, cancellationToken),
                 "job/slice" => await JobSliceAsync(body, cancellationToken),
                 "job/status" => await JobStatusAsync(body, cancellationToken),
@@ -322,6 +323,15 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
                 existingRejected && freshRejected, range.ContentRange,
                 put.StatusCode, whole.StatusCode, range.StatusCode, existingMismatch.StatusCode, freshMismatch.StatusCode, existingRejected, freshRejected),
             FoundationJsonContext.Default.RoundtripResponse);
+    }
+
+    private async Task<OperationReply> EgressProbeAsync(byte[] body, CancellationToken cancellationToken)
+    {
+        if (!TryParse(body, FoundationJsonContext.Default.EgressProbeRequest, out _)) return OperationReply.Invalid;
+        var (blocked, controlOk, attempts) = await egress.RunAsync(cancellationToken);
+        return OperationReply.Json(StatusCodes.Status200OK,
+            new EgressProbeResponse(blocked, controlOk, [.. attempts.Select(a => new EgressAttemptResponse(a.Host, a.Outcome, a.Status, a.ElapsedMs))]),
+            FoundationJsonContext.Default.EgressProbeResponse);
     }
 
     private async Task<OperationReply> JobStartAsync(byte[] body, CancellationToken cancellationToken)

@@ -79,6 +79,7 @@
     "eng/policy/dependency-reviews/prf-07-r2.json",
     "eng/policy/dependency-reviews/prf-07-r3.json",
     "eng/policy/dependency-reviews/prf-07-r4.json",
+    "eng/policy/dependency-reviews/prf-07-r5.json",
     "eng/policy/dependency-reviews/wrangler-4-143-1-r1.json",
     "eng/policy/licence-boundary.json",
     "eng/policy/reuse-policy.json",
@@ -92,6 +93,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r15.json",
     "eng/provenance/artifact-profiles/cloud-release-r16.json",
     "eng/provenance/artifact-profiles/cloud-release-r17.json",
+    "eng/provenance/artifact-profiles/cloud-release-r18.json",
     "eng/provenance/artifact-profiles/cloud-release-r2.json",
     "eng/provenance/artifact-profiles/cloud-release-r3.json",
     "eng/provenance/artifact-profiles/cloud-release-r4.json",
@@ -114,6 +116,7 @@
     "eng/provenance/records/cloud-runtime-notices-r16.json",
     "eng/provenance/records/cloud-runtime-notices-r17.json",
     "eng/provenance/records/cloud-runtime-notices-r18.json",
+    "eng/provenance/records/cloud-runtime-notices-r19.json",
     "eng/provenance/records/cloud-runtime-notices-r2.json",
     "eng/provenance/records/cloud-runtime-notices-r3.json",
     "eng/provenance/records/cloud-runtime-notices-r4.json",
@@ -131,6 +134,7 @@
     "eng/provenance/records/cloud-worker-bundle-r15.json",
     "eng/provenance/records/cloud-worker-bundle-r16.json",
     "eng/provenance/records/cloud-worker-bundle-r17.json",
+    "eng/provenance/records/cloud-worker-bundle-r18.json",
     "eng/provenance/records/cloud-worker-bundle-r2.json",
     "eng/provenance/records/cloud-worker-bundle-r3.json",
     "eng/provenance/records/cloud-worker-bundle-r4.json",
@@ -165,6 +169,7 @@
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
     "src/ArcForges.Cloud/Composition/HostModules.cs",
     "src/ArcForges.Cloud/Foundation/BrowserSessionEndpoints.cs",
+    "src/ArcForges.Cloud/Foundation/EgressProbe.cs",
     "src/ArcForges.Cloud/Foundation/FoundationEndpoints.cs",
     "src/ArcForges.Cloud/Foundation/FoundationHttp.cs",
     "src/ArcForges.Cloud/Foundation/FoundationJson.cs",
@@ -308,5 +313,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["cloud-runtime-notices-r18", "cloud-worker-bundle-r17"]
+  "artifacts": ["cloud-runtime-notices-r19", "cloud-worker-bundle-r18"]
 }

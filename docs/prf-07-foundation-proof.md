@@ -150,7 +150,7 @@ with the C# tests and the format check) and `Dependency audit and repository che
 inspection), then `Verify`. Only a successful main build deploys. It deploys the default Worker and the production Hello container: the
 default Container class is unchanged (no outbound interception, no environment hook, pinned by
 `tests/worker/container-classes.test.ts`), the default configuration is unchanged, and the Worker bundle is larger
-(61,990 bytes in Hello, 168,111 bytes now) because it now contains the dormant foundation modules, which answer nothing without
+(61,990 bytes in Hello, 168,129 bytes now) because it now contains the dormant foundation modules, which answer nothing without
 `FOUNDATION_PROOF=enabled`. The image likewise contains the dormant host module. The proof environment is never
 deployed by a push or a pull request; it is deployed only by the manually dispatched jobs described
 under Deploying below, and no CI job connects to the deployed service.
@@ -245,6 +245,18 @@ hand-framed `SayHello`), which only shows that the same Worker serves `/api` nex
 exposes no generated gRPC-Web service that carries int64, uint64 and decimal values: that needs a new Contracts service
 and published packages, so PRF.05's exact-value gRPC-Web scenario is not served here.
 
+### Blocked egress
+
+The proof Container keeps Internet access disabled (`enableInternet = false`); its only outbound paths are the interception
+hosts `storage.internal` and `objects.internal`. The operator operation `egress/probe` makes the host attempt a harmless
+`HEAD` to `http://example.com/` and to the literal address `http://1.1.1.1/` (no body, no redirect, 8 second limit each)
+and reports only host, outcome and elapsed time. The scenario `egress-blocked` passes only when every attempt failed to
+connect (`connection_failed`; an answer, including an error status, and a timeout both fail it) and the allowed control
+path, the host's storage readiness through the interception, answered in the same call, so a broken probe cannot pass
+vacuously. The C# tests run the real HTTP stack and host route against a closed loopback port (blocked), an answering
+loopback server (open), a silent listener (timeout) and a failed control. A DNS failure for the name alone could look like
+a block, which is why the literal address is attempted too. Production does not serve the operation.
+
 ## Not claimed
 
 - No live Cloudflare result of any kind: no deployed D1, R2, Queue, Durable Object or Container behavior, no outbound
@@ -275,7 +287,7 @@ are claimant-reported until the independent review and hosted CI confirm them. N
 | Worker and tooling tests                | `npm test`                                                                                                   | 176 tests passed, 0 failed                                                                                                                   |
 | Dependency policy                       | `npm run test:dependencies`, `node tooling/dependency-policy.ts`                                             | 18 passed; policy and receipt `prf-07-r1` verify                                                                                             |
 | Licence, provenance                     | `node tooling/project.ts licence`, `node tooling/project.ts provenance`                                      | pass                                                                                                                                         |
-| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 168111 bytes)                                                                                                        |
+| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 168129 bytes)                                                                                                        |
 | Plan generator drift                    | `npm run check:plans`                                                                                        | 19 plans, manifest hash matches the generated TS and C#                                                                                      |
 | Formatting, lint, types                 | `prettier --check .`, `biome lint`, `tsc` for both projects                                                  | clean                                                                                                                                        |
 | C# build and tests                      | `dotnet build` and `dotnet test` of `Cloud.slnx`, Release, under the build slot                              | 0 warnings, 159 tests passed                                                                                                                 |

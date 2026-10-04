@@ -38,7 +38,7 @@ export async function main() {
 
   const startedAt = new Date().toISOString();
   const evidence = await runScenarios(
-    { baseUrl, origin, helloIngress: true, ...auth },
+    { baseUrl, origin, helloIngress: true, egressProbe: true, ...auth },
     manifestHash,
     {
       stopContainer: true,
