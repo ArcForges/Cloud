@@ -122,6 +122,7 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
       authorizationHeader,
       {
         method: request.method,
+        host: url.host,
         pathname: url.pathname,
         bodySha256Hex: await sha256Hex(signedBody),
       },

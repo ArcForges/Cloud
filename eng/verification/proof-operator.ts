@@ -67,13 +67,14 @@ export function initOperatorKey(file = defaultKeyFile()): string {
 export async function signOperatorRequest(
   key: KeyObject,
   method: string,
+  host: string,
   pathname: string,
   body: Uint8Array,
   options: { nowSeconds?: number; nonce?: string } = {},
 ): Promise<string> {
   const time = String(options.nowSeconds ?? Math.floor(Date.now() / 1000));
   const nonce = options.nonce ?? randomBytes(16).toString("base64url");
-  const message = operatorMessage(method, pathname, time, nonce, await sha256Hex(body));
+  const message = operatorMessage(method, host, pathname, time, nonce, await sha256Hex(body));
   return operatorAuthorization(
     time,
     nonce,

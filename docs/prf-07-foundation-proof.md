@@ -150,7 +150,7 @@ with the C# tests and the format check) and `Dependency audit and repository che
 inspection), then `Verify`. Only a successful main build deploys. It deploys the default Worker and the production Hello container: the
 default Container class is unchanged (no outbound interception, no environment hook, pinned by
 `tests/worker/container-classes.test.ts`), the default configuration is unchanged, and the Worker bundle is larger
-(61,990 bytes in Hello, 167,595 bytes now) because it now contains the dormant foundation modules, which answer nothing without
+(61,990 bytes in Hello, 167,717 bytes now) because it now contains the dormant foundation modules, which answer nothing without
 `FOUNDATION_PROOF=enabled`. The image likewise contains the dormant host module. The proof environment is never
 deployed by a push or a pull request; it is deployed only by the manually dispatched jobs described
 under Deploying below, and no CI job connects to the deployed service.
@@ -186,8 +186,11 @@ Cloudflare. Nothing is deployed by a push or a pull request.
    deploy step, written to a runner-local file that Wrangler uploads with the Worker version (`--secrets-file`), and
    removed immediately. They are never printed, committed or stored elsewhere, and a redeploy rotates them. There is
    no operator token: see Operator access below.
-3. **Receipts, not tests.** After the deployment the job reads provider metadata only: `workers.dev` is disabled for the
-   proof Worker, the custom domain `proof.arcforges.com` serves `arcforges-cloud-proof`, the production route
+   Before the domain is attached the job stops if a DNS record for `proof.arcforges.com` exists (or the zone, domain or
+   DNS lookup cannot be read) unless the domain already serves the proof Worker, so an existing record or service is
+   never taken over.
+3. **Receipts, not tests.** After the deployment the job reads provider metadata only: `workers.dev` and preview URLs are
+   disabled (an absent field counts as not disabled) for the proof Worker, the custom domain `proof.arcforges.com` serves `arcforges-cloud-proof`, the production route
    `arcforges.com/api/*` still serves `arcforges-cloud` and no route of the zone serves the proof Worker. The job
    writes `proof-deployment.json` (revision, version, image digest, hostname, database id, receipts; no secret) as the
    artifact `proof-evidence-<run>-<attempt>`. No request is sent to the deployed service by CI.
@@ -205,7 +208,7 @@ operator request carries a signature:
 
 ```text
 Authorization: AF-Operator t=<UTC epoch seconds>,n=<unpadded base64url of 128 random bits>,s=<unpadded base64url Ed25519 signature>
-signed text:   AF-OPERATOR-V1 LF METHOD LF exact-path LF t LF n LF lowercase-hex-sha256-of-body
+signed text:   AF-OPERATOR-V2 LF METHOD LF host LF exact-path LF t LF n LF lowercase-hex-sha256-of-body
 ```
 
 The Worker reads the bounded body, verifies the signature over its hash, rejects a time skew above 60 seconds and
@@ -213,7 +216,7 @@ answers every refusal with the same empty HTTP 401. The private key is generated
 `npm run operator:proof -- init` into `~/.arcforges/proof-operator/ed25519-private.pem` (or
 `PROOF_OPERATOR_KEY_FILE`), is never printed, committed or uploaded, and is used only by
 `eng/verification/proof-operator.ts` to sign. Only the public key is printed. A new key means a new public key in
-`wrangler.json` and a redeploy. The signature has no nonce store, so a captured request can be replayed within the skew
+`wrangler.json` and a redeploy. The signature binds the host, so a request signed for another origin is refused. It has no nonce store, so a captured request can be replayed within the skew
 window, which the operator surface tolerates because TLS protects the transport and every operation is a proof
 operation on the isolated proof database. The browser-session routes (`/session/v1/*`) need no operator credential: the
 bootstrap is anonymous and the session round trip starts from `session/issue`, an operator operation, so the PRF.08
@@ -254,7 +257,7 @@ are claimant-reported until the independent review and hosted CI confirm them. N
 | Worker and tooling tests                | `npm test`                                                                                                   | 176 tests passed, 0 failed                                                                                                                   |
 | Dependency policy                       | `npm run test:dependencies`, `node tooling/dependency-policy.ts`                                             | 18 passed; policy and receipt `prf-07-r1` verify                                                                                             |
 | Licence, provenance                     | `node tooling/project.ts licence`, `node tooling/project.ts provenance`                                      | pass                                                                                                                                         |
-| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 167595 bytes)                                                                                                        |
+| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 167717 bytes)                                                                                                        |
 | Plan generator drift                    | `npm run check:plans`                                                                                        | 19 plans, manifest hash matches the generated TS and C#                                                                                      |
 | Formatting, lint, types                 | `prettier --check .`, `biome lint`, `tsc` for both projects                                                  | clean                                                                                                                                        |
 | C# build and tests                      | `dotnet build` and `dotnet test` of `Cloud.slnx`, Release, under the build slot                              | 0 warnings, 159 tests passed                                                                                                                 |

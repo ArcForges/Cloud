@@ -11,7 +11,7 @@ export interface Target {
   /** Bearer credential of the local harness. A deployment uses `authorize` instead. */
   operatorToken?: string;
   /** Produces the Authorization header value for one operator request (signed requests). */
-  authorize?: (method: string, pathname: string, body: Uint8Array) => Promise<string>;
+  authorize?: (method: string, host: string, pathname: string, body: Uint8Array) => Promise<string>;
   /** The exact Origin value the proof environment is configured with. */
   origin: string;
   /** Pause before inspecting a restarted job (milliseconds). */
@@ -35,7 +35,12 @@ async function operator(target: Target, operation: string, body: Json) {
   const pathname = `/proof/v1/${operation}`;
   const bodyText = JSON.stringify(body);
   const authorization = target.authorize
-    ? await target.authorize("POST", pathname, new TextEncoder().encode(bodyText))
+    ? await target.authorize(
+        "POST",
+        new URL(target.baseUrl).host,
+        pathname,
+        new TextEncoder().encode(bodyText),
+      )
     : `Bearer ${target.operatorToken}`;
   const response = await fetch(`${target.baseUrl}${pathname}`, {
     method: "POST",

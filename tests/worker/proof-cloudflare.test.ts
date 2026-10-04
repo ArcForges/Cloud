@@ -5,7 +5,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CloudflareApi,
+  checkProofDomainFree,
   postDeployChecks,
+  report,
   probeAccess,
   provision,
   requireContext,
@@ -24,6 +26,9 @@ interface State {
   workersDev: boolean;
   domains: { hostname: string; service: string }[];
   routes: { pattern: string; script: string }[];
+  zone: boolean;
+  dns: unknown[];
+  subdomain: Record<string, unknown> | null;
 }
 function fakeCloudflare(overrides: Partial<State> = {}) {
   const state: State = {
@@ -35,6 +40,9 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
     workersDev: false,
     domains: [{ hostname: "proof.arcforges.com", service: "arcforges-cloud-proof" }],
     routes: [{ pattern: "arcforges.com/api/*", script: "arcforges-cloud" }],
+    zone: true,
+    dns: [],
+    subdomain: null,
     ...overrides,
   };
   const reply = (result: unknown, status = 200, errors: unknown[] = []) =>
@@ -52,15 +60,15 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
       );
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, string>) : {};
     if (endpoint.endsWith("/tokens/verify")) return Promise.resolve(reply({ status: "active" }));
-    if (endpoint === "/zones") return Promise.resolve(reply([{ id: "zone1" }]));
+    if (endpoint === "/zones") return Promise.resolve(reply(state.zone ? [{ id: "zone1" }] : []));
     if (endpoint.startsWith("/zones/zone1/workers/routes"))
       return Promise.resolve(reply(state.routes));
-    if (endpoint.startsWith("/zones/zone1/dns_records")) return Promise.resolve(reply([]));
+    if (endpoint.startsWith("/zones/zone1/dns_records")) return Promise.resolve(reply(state.dns));
     if (endpoint.endsWith("/workers/scripts")) return Promise.resolve(reply([]));
     if (endpoint.endsWith("/workers/domains"))
       return Promise.resolve(reply(url.searchParams.get("hostname") ? state.domains : []));
     if (endpoint.endsWith("/subdomain"))
-      return Promise.resolve(reply({ enabled: state.workersDev }));
+      return Promise.resolve(reply(state.subdomain ?? { enabled: state.workersDev }));
     if (endpoint.endsWith("/d1/database")) {
       if (method === "POST") {
         state.d1.push({ uuid: d1Id, name: body.name ?? "" });
@@ -153,7 +161,7 @@ test("post-deployment receipts require workers.dev off, the custom domain and th
     (await postDeployChecks(fakeCloudflare({ workersDev: true }).api)).filter(
       (check) => !check.ok,
     )[0]?.name,
-    "workers.dev disabled for the proof Worker",
+    "workers.dev and preview URLs disabled for the proof Worker",
   );
   const noDomain = await postDeployChecks(fakeCloudflare({ domains: [] }).api);
   assert(noDomain.some((check) => !check.ok && check.name.startsWith("custom domain")));
@@ -168,6 +176,76 @@ test("post-deployment receipts require workers.dev off, the custom domain and th
     }).api,
   );
   assert(stolen.some((check) => !check.ok && check.name === "no proof Worker route on the zone"));
+});
+
+test("receipts fail closed: unknown zone, absent or unsafe workers.dev state, foreign domain", async () => {
+  const failures = async (overrides: Partial<State>) =>
+    (await postDeployChecks(fakeCloudflare(overrides).api))
+      .filter((check) => check.required && !check.ok)
+      .map((check) => check.name);
+  // A zone that cannot be found must not skip the production-route assertions.
+  assert.deepEqual(await failures({ zone: false }), [
+    "zone arcforges.com readable for the route receipts",
+  ]);
+  const workersDev = "workers.dev and preview URLs disabled for the proof Worker";
+  // Only an explicit enabled=false passes; an absent field, an enabled one or enabled previews fail.
+  assert.deepEqual(await failures({ subdomain: {} }), [workersDev]);
+  assert.deepEqual(await failures({ subdomain: { enabled: true } }), [workersDev]);
+  assert.deepEqual(await failures({ subdomain: { enabled: false, previews_enabled: true } }), [
+    workersDev,
+  ]);
+  assert.deepEqual(await failures({ subdomain: { enabled: false, previews_enabled: false } }), []);
+  // A custom domain attached to another service is not the proof Worker's domain.
+  assert.deepEqual(
+    await failures({ domains: [{ hostname: "proof.arcforges.com", service: "arcforges-cloud" }] }),
+    ["custom domain proof.arcforges.com serves arcforges-cloud-proof"],
+  );
+});
+
+test("report fails on any failed required check and passes optional ones", () => {
+  const quiet = (checks: Parameters<typeof report>[1]) => {
+    const original = console.log;
+    console.log = () => {};
+    try {
+      report("test", checks);
+    } finally {
+      console.log = original;
+    }
+  };
+  quiet([
+    { name: "a", required: true, ok: true, detail: "" },
+    { name: "b", required: false, ok: false, detail: "" },
+  ]);
+  assert.throws(
+    () => quiet([{ name: "needed", required: true, ok: false, detail: "" }]),
+    /1 required check\(s\) failed: needed/u,
+  );
+});
+
+test("an existing DNS record or foreign domain stops the attach unless it is the proof Worker's own", async () => {
+  await checkProofDomainFree(fakeCloudflare({ domains: [] }).api);
+  // A redeploy: the domain already serves the proof Worker and its record exists.
+  await checkProofDomainFree(fakeCloudflare({ dns: [{ type: "A" }] }).api);
+  await assert.rejects(
+    checkProofDomainFree(fakeCloudflare({ domains: [], dns: [{ type: "CNAME" }] }).api),
+    /DNS record .* exists/u,
+  );
+  await assert.rejects(
+    checkProofDomainFree(
+      fakeCloudflare({ domains: [{ hostname: "proof.arcforges.com", service: "arcforges-cloud" }] })
+        .api,
+    ),
+    /already serves another Worker/u,
+  );
+  await assert.rejects(checkProofDomainFree(fakeCloudflare({ zone: false }).api), /not visible/u);
+  await assert.rejects(
+    checkProofDomainFree(fakeCloudflare({ domains: [], denied: new Set(["/dns_records"]) }).api),
+    /DNS lookup .* failed/u,
+  );
+  await assert.rejects(
+    checkProofDomainFree(fakeCloudflare({ denied: new Set(["/workers/domains"]) }).api),
+    /domains lookup failed/u,
+  );
 });
 
 test("the proof environment is reachable only from a manual run on main with the account inputs", () => {

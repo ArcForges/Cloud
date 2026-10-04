@@ -28,6 +28,7 @@ async function check(
   authorization: string | null,
   overrides: {
     method?: string;
+    host?: string;
     pathname?: string;
     body?: Uint8Array;
     publicKey?: string;
@@ -38,6 +39,7 @@ async function check(
     authorization,
     {
       method: overrides.method ?? "POST",
+      host: overrides.host ?? "proof.example",
       pathname: overrides.pathname ?? "/proof/v1/exact",
       bodySha256Hex: await sha256Hex(overrides.body ?? body),
     },
@@ -46,7 +48,9 @@ async function check(
   );
 }
 const sign = (signer: KeyObject = key) =>
-  signOperatorRequest(signer, "POST", "/proof/v1/exact", body, { nowSeconds: now });
+  signOperatorRequest(signer, "POST", "proof.example", "/proof/v1/exact", body, {
+    nowSeconds: now,
+  });
 
 test("a fresh signature over the exact request verifies and every deviation is refused", async () => {
   const header = await sign();
@@ -55,6 +59,7 @@ test("a fresh signature over the exact request verifies and every deviation is r
   // The signature binds method, path, body, time and the key.
   assert.equal(await check(header, { method: "GET" }), false);
   assert.equal(await check(header, { pathname: "/proof/v1/guard" }), false);
+  assert.equal(await check(header, { host: "evil.example" }), false, "the host is bound");
   assert.equal(await check(header, { body: new TextEncoder().encode("{}") }), false);
   assert.equal(await check(header, { publicKey: publicKeyText(otherKey) }), false);
   assert.equal(await check(await sign(otherKey)), false);
@@ -112,7 +117,7 @@ async function signedRequest(signer: KeyObject, pathname: string, payload: Uint8
   return new Request(`https://proof.example${pathname}`, {
     method: "POST",
     headers: {
-      authorization: await signOperatorRequest(signer, "POST", pathname, payload, {
+      authorization: await signOperatorRequest(signer, "POST", "proof.example", pathname, payload, {
         nowSeconds: Math.floor(Date.now() / 1000),
       }),
       "content-type": "application/json",
@@ -187,6 +192,14 @@ test("credentials are accepted only when configured, and none configured disable
   assert.equal((await handleProof(bearer(token, payload), both.env)).status, 200);
   const keyOnly = environment({ PROOF_OPERATOR_VERIFIER: publicKeyText(key) });
   assert.equal((await handleProof(bearer(token, payload), keyOnly.env)).status, 401);
+  // A configured but too short bearer token is never accepted, even when the key enables the surface.
+  const shortToken = environment({
+    PROOF_OPERATOR_TOKEN: "short",
+    PROOF_OPERATOR_VERIFIER: publicKeyText(key),
+  });
+  assert.equal((await handleProof(bearer("short", payload), shortToken.env)).status, 401);
+  const shortOnly = environment({ PROOF_OPERATOR_TOKEN: "t".repeat(31) });
+  assert.equal((await handleProof(bearer("t".repeat(31), payload), shortOnly.env)).status, 503);
   const none = environment({});
   assert.equal(
     (await handleProof(await signedRequest(key, "/proof/v1/readiness", payload), none.env)).status,

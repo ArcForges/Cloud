@@ -8,15 +8,16 @@ export const operatorScheme = "AF-Operator";
 export const operatorMaxSkewSeconds = 60;
 const header = /^AF-Operator t=(\d{10}),n=([A-Za-z0-9_-]{22}),s=([A-Za-z0-9_-]{86})$/u;
 
-/** The exact text the operator signs: scheme, method, exact path, time, nonce and body hash. */
+/** The exact text the operator signs: scheme, method, exact host and path, time, nonce and body hash. */
 export function operatorMessage(
   method: string,
+  host: string,
   pathname: string,
   time: string,
   nonce: string,
   bodySha256Hex: string,
 ): string {
-  return `AF-OPERATOR-V1\n${method}\n${pathname}\n${time}\n${nonce}\n${bodySha256Hex}`;
+  return `AF-OPERATOR-V2\n${method}\n${host}\n${pathname}\n${time}\n${nonce}\n${bodySha256Hex}`;
 }
 
 export function operatorAuthorization(time: string, nonce: string, signature: string): string {
@@ -30,7 +31,7 @@ export function isOperatorAuthorization(value: string | null): boolean {
 /** True only for a well-formed, fresh signature by the configured public key over this request. */
 export async function verifyOperatorSignature(
   authorization: string | null,
-  request: { method: string; pathname: string; bodySha256Hex: string },
+  request: { method: string; host: string; pathname: string; bodySha256Hex: string },
   publicKey: string | undefined,
   nowSeconds: number,
 ): Promise<boolean> {
@@ -50,7 +51,14 @@ export async function verifyOperatorSignature(
       key,
       signature as BufferSource,
       new TextEncoder().encode(
-        operatorMessage(request.method, request.pathname, time, nonce, request.bodySha256Hex),
+        operatorMessage(
+          request.method,
+          request.host,
+          request.pathname,
+          time,
+          nonce,
+          request.bodySha256Hex,
+        ),
       ) as BufferSource,
     );
   } catch {

@@ -240,6 +240,38 @@ export async function provision(api: CloudflareApi): Promise<Provisioned> {
   return { d1DatabaseId, actions };
 }
 
+/**
+ * Hard stop before the custom domain is attached. An existing DNS record for the proof hostname is
+ * accepted only when the domain already serves the proof Worker (a redeploy); any other record, or a
+ * DNS or domain lookup that cannot be read, stops the job so no existing record or service is taken
+ * over. Wrangler's own refusal to override a record is a second guard, not the only one.
+ */
+export async function checkProofDomainFree(api: CloudflareApi): Promise<void> {
+  const zoneId = await findZoneId(api);
+  assert(
+    zoneId !== null,
+    `Zone ${zoneName} is not visible to the token; the domain is not attached.`,
+  );
+  const domains = await api.request(
+    "GET",
+    api.accountPath(`/workers/domains?hostname=${proofHostname}`),
+  );
+  assert(domains.success, `Workers domains lookup failed (${describe(domains)}); not attaching.`);
+  const attached = (domains.result as { hostname?: string; service?: string }[] | null) ?? [];
+  const entry = attached.find((item) => item.hostname === proofHostname);
+  assert(
+    entry === undefined || entry.service === proofWorkerName,
+    `${proofHostname} already serves another Worker; not attaching.`,
+  );
+  const dns = await api.request("GET", `/zones/${zoneId}/dns_records?name=${proofHostname}`);
+  assert(dns.success, `DNS lookup for ${proofHostname} failed (${describe(dns)}); not attaching.`);
+  const records = Array.isArray(dns.result) ? (dns.result as unknown[]) : [];
+  assert(
+    records.length === 0 || entry?.service === proofWorkerName,
+    `A DNS record for ${proofHostname} exists and is not the proof Worker's custom domain; not attaching.`,
+  );
+}
+
 /** Provider receipts after the deployment: no request reaches the deployed service. */
 export async function postDeployChecks(api: CloudflareApi): Promise<Check[]> {
   const checks: Check[] = [];
@@ -247,12 +279,16 @@ export async function postDeployChecks(api: CloudflareApi): Promise<Check[]> {
     "GET",
     api.accountPath(`/workers/scripts/${proofWorkerName}/subdomain`),
   );
-  const enabled = (subdomain.result as { enabled?: boolean } | null)?.enabled;
+  const state = subdomain.result as { enabled?: boolean; previews_enabled?: boolean } | null;
+  // An absent field is "not disabled": only an explicit false proves workers.dev is off, and preview
+  // URLs must not be reported enabled.
   checks.push({
-    name: "workers.dev disabled for the proof Worker",
+    name: "workers.dev and preview URLs disabled for the proof Worker",
     required: true,
-    ok: subdomain.success && enabled === false,
-    detail: subdomain.success ? `enabled=${String(enabled)}` : describe(subdomain),
+    ok: subdomain.success && state?.enabled === false && state?.previews_enabled !== true,
+    detail: subdomain.success
+      ? `enabled=${String(state?.enabled)}, previews_enabled=${String(state?.previews_enabled)}`
+      : describe(subdomain),
   });
   const domains = await api.request(
     "GET",
@@ -270,32 +306,38 @@ export async function postDeployChecks(api: CloudflareApi): Promise<Check[]> {
     detail: domains.success ? "" : describe(domains),
   });
   const zoneId = await findZoneId(api);
-  if (zoneId !== null) {
-    const routes = await api.request("GET", `/zones/${zoneId}/workers/routes`);
-    const list = Array.isArray(routes.result)
-      ? (routes.result as { pattern?: string; script?: string }[])
-      : [];
+  if (zoneId === null) {
+    // Without the zone the production route cannot be proven intact: fail closed.
     checks.push({
-      name: `production route ${productionRoute} still serves ${productionWorker}`,
+      name: `zone ${zoneName} readable for the route receipts`,
       required: true,
-      ok:
-        routes.success &&
-        list.some(
-          (entry) => entry.pattern === productionRoute && entry.script === productionWorker,
-        ),
-      detail: routes.success ? "" : describe(routes),
+      ok: false,
+      detail: "zone not visible to the token",
     });
-    checks.push({
-      name: "no proof Worker route on the zone",
-      required: true,
-      ok: routes.success && !list.some((entry) => entry.script === proofWorkerName),
-      detail: "",
-    });
+    return checks;
   }
+  const routes = await api.request("GET", `/zones/${zoneId}/workers/routes`);
+  const list = Array.isArray(routes.result)
+    ? (routes.result as { pattern?: string; script?: string }[])
+    : [];
+  checks.push({
+    name: `production route ${productionRoute} still serves ${productionWorker}`,
+    required: true,
+    ok:
+      routes.success &&
+      list.some((entry) => entry.pattern === productionRoute && entry.script === productionWorker),
+    detail: routes.success ? "" : describe(routes),
+  });
+  checks.push({
+    name: "no proof Worker route on the zone",
+    required: true,
+    ok: routes.success && !list.some((entry) => entry.script === proofWorkerName),
+    detail: routes.success ? "" : describe(routes),
+  });
   return checks;
 }
 
-function report(title: string, checks: Check[]): void {
+export function report(title: string, checks: Check[]): void {
   console.log(`${title}:`);
   for (const check of checks) console.log(`  ${line(check)}`);
   const failed = checks.filter((check) => check.required && !check.ok);
@@ -366,6 +408,7 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   const imageDigest = digests.find((value) => value.startsWith(prefix));
   assert(imageDigest, "Cloudflare registry did not return the pushed image digest.");
 
+  await checkProofDomainFree(api);
   const config = buildProofConfig(
     await readJson<CandidateConfig>(path.join(candidateDir, "wrangler.json")),
     {

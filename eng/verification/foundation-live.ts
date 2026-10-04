@@ -30,7 +30,8 @@ export async function main() {
   } else {
     const key = loadOperatorKey();
     auth = {
-      authorize: (method, pathname, body) => signOperatorRequest(key, method, pathname, body),
+      authorize: (method, host, pathname, body) =>
+        signOperatorRequest(key, method, host, pathname, body),
     };
   }
   const origin = process.env.PROOF_ALLOWED_ORIGIN ?? baseUrl;

@@ -77,6 +77,7 @@
     "eng/policy/dependency-reviews/ops-01-r1.json",
     "eng/policy/dependency-reviews/prf-07-r1.json",
     "eng/policy/dependency-reviews/prf-07-r2.json",
+    "eng/policy/dependency-reviews/prf-07-r3.json",
     "eng/policy/dependency-reviews/wrangler-4-143-1-r1.json",
     "eng/policy/licence-boundary.json",
     "eng/policy/reuse-policy.json",
@@ -88,6 +89,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r13.json",
     "eng/provenance/artifact-profiles/cloud-release-r14.json",
     "eng/provenance/artifact-profiles/cloud-release-r15.json",
+    "eng/provenance/artifact-profiles/cloud-release-r16.json",
     "eng/provenance/artifact-profiles/cloud-release-r2.json",
     "eng/provenance/artifact-profiles/cloud-release-r3.json",
     "eng/provenance/artifact-profiles/cloud-release-r4.json",
@@ -108,6 +110,7 @@
     "eng/provenance/records/cloud-runtime-notices-r14.json",
     "eng/provenance/records/cloud-runtime-notices-r15.json",
     "eng/provenance/records/cloud-runtime-notices-r16.json",
+    "eng/provenance/records/cloud-runtime-notices-r17.json",
     "eng/provenance/records/cloud-runtime-notices-r2.json",
     "eng/provenance/records/cloud-runtime-notices-r3.json",
     "eng/provenance/records/cloud-runtime-notices-r4.json",
@@ -123,6 +126,7 @@
     "eng/provenance/records/cloud-worker-bundle-r13.json",
     "eng/provenance/records/cloud-worker-bundle-r14.json",
     "eng/provenance/records/cloud-worker-bundle-r15.json",
+    "eng/provenance/records/cloud-worker-bundle-r16.json",
     "eng/provenance/records/cloud-worker-bundle-r2.json",
     "eng/provenance/records/cloud-worker-bundle-r3.json",
     "eng/provenance/records/cloud-worker-bundle-r4.json",
@@ -300,5 +304,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["cloud-runtime-notices-r16", "cloud-worker-bundle-r15"]
+  "artifacts": ["cloud-runtime-notices-r17", "cloud-worker-bundle-r16"]
 }
