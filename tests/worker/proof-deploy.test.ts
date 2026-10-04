@@ -2,14 +2,14 @@
 // Offline checks of the proof-environment deployment helpers and the live-run guards. The
 // deployment itself needs an operator with Cloudflare access and is not exercised here.
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { main as liveMain } from "../../eng/verification/foundation-live.ts";
 import {
   buildProofConfig,
-  collectSecrets,
+  generateSecrets,
+  proofHostname,
   proofWorkerName,
   secretSources,
   type CandidateConfig,
@@ -26,8 +26,15 @@ test("the checked-in proof environment is isolated from the production Worker", 
   const proof = wrangler.env.proof;
   assert.equal(wrangler.name, "arcforges-cloud");
   assert.equal(proof.name, proofWorkerName);
-  assert.deepEqual(proof.routes, [], "the proof Worker owns no route");
-  assert.equal(proof.workers_dev, true);
+  // The only ingress is the dedicated custom domain; workers.dev and preview URLs stay disabled and
+  // the production route arcforges.com/api/* is not referenced.
+  assert.deepEqual(proof.routes, [{ pattern: proofHostname, custom_domain: true }]);
+  assert.equal(proofHostname, "proof.arcforges.com");
+  assert.equal(proof.workers_dev, false);
+  assert.equal(proof.preview_urls, false);
+  assert(!JSON.stringify(proof).includes("arcforges.com/api"));
+  assert.equal(proof.vars.ALLOWED_ORIGIN, `https://${proofHostname}`);
+  assert.match(String(proof.vars.PROOF_OPERATOR_VERIFIER), /^[A-Za-z0-9_-]{43}$/u);
   assert.equal(proof.vars.FOUNDATION_PROOF, "enabled");
   // Production keeps the Hello-only bindings.
   const top = wrangler as unknown as Record<string, unknown>;
@@ -107,39 +114,49 @@ test("the proof config pins the registry digest, revision and account and nothin
   );
 });
 
-const goodSecrets = () => ({
-  PROOF_OPERATOR_TOKEN: randomBytes(32).toString("base64url"),
-  PROOF_HMAC_C2W_SECRET: randomBytes(32).toString("base64url"),
-  PROOF_HMAC_W2C_SECRET: randomBytes(32).toString("base64url"),
-  PROOF_CSRF_SECRET: randomBytes(32).toString("base64url"),
-});
-
-test("deployment secrets come from named variables, are format-checked and never echoed", () => {
-  const secrets = goodSecrets();
-  const collected = collectSecrets(secrets);
-  assert.deepEqual(Object.keys(collected).sort(), [
+test("deployment secrets are generated fresh, well formed, distinct and carry no operator token", () => {
+  const first = generateSecrets();
+  assert.deepEqual(Object.keys(first).sort(), [
     "CSRF_SECRET",
     "HMAC_C2W_SECRET",
     "HMAC_W2C_SECRET",
-    "PROOF_OPERATOR_TOKEN",
   ]);
-  for (const source of secretSources) {
-    const missing: Record<string, string | undefined> = {
-      ...secrets,
-      [source.variable]: undefined,
-    };
-    assert.throws(
-      () => collectSecrets(missing),
-      (error: Error) => error.message.includes(source.variable),
+  for (const source of secretSources) assert.match(first[source.worker] ?? "", source.pattern);
+  const second = generateSecrets();
+  for (const name of Object.keys(first)) assert.notEqual(first[name], second[name]);
+  assert.equal(new Set(Object.values(first)).size, 3);
+  // A broken random source is refused without echoing a value.
+  assert.throws(
+    () => generateSecrets(() => new Uint8Array(32)),
+    (error: Error) => /distinct/u.test(error.message) && !error.message.includes("AAAA"),
+  );
+  assert.throws(() => generateSecrets(() => new Uint8Array(8)), /required shape/u);
+});
+
+test("the proof config carries the migrations directory and refuses an unsafe environment", () => {
+  const config = buildProofConfig(wrangler, {
+    account,
+    imageDigest: digest,
+    revision: "b".repeat(40),
+    main: "./candidate/worker.js",
+    migrationsDir: "../worker/proof-migrations",
+  });
+  assert.equal(
+    (config.env.proof.d1_databases[0] as { migrations_dir?: string }).migrations_dir,
+    "../worker/proof-migrations",
+  );
+  for (const unsafe of [
+    { workers_dev: true },
+    { preview_urls: true },
+    { routes: [] },
+    { routes: [{ pattern: "arcforges.com/api/*", zone_name: "arcforges.com" }] },
+  ])
+    assert.throws(() =>
+      buildProofConfig(
+        { ...wrangler, env: { proof: { ...wrangler.env.proof, ...unsafe } } },
+        { account, imageDigest: digest, revision: "b".repeat(40), main: "x" },
+      ),
     );
-    const malformed = { ...secrets, [source.variable]: "short" };
-    assert.throws(
-      () => collectSecrets(malformed),
-      (error: Error) => error.message.includes(source.variable) && !error.message.includes("short"),
-    );
-  }
-  const duplicated = { ...secrets, PROOF_CSRF_SECRET: secrets.PROOF_HMAC_C2W_SECRET };
-  assert.throws(() => collectSecrets(duplicated), /distinct/u);
 });
 
 test("the live runner refuses CI and an unusable target before any request", async () => {
@@ -154,6 +171,13 @@ test("the live runner refuses CI and an unusable target before any request", asy
     process.env.PROOF_BASE_URL = "https://proof.example";
     process.env.PROOF_OPERATOR_TOKEN = "short";
     await assert.rejects(liveMain(), /PROOF_OPERATOR_TOKEN/u);
+    // Without a token the operator key file signs the requests; a missing file is refused.
+    process.env.PROOF_OPERATOR_TOKEN = "";
+    process.env.PROOF_OPERATOR_KEY_FILE = path.join(
+      import.meta.dirname,
+      "no-such-operator-key.pem",
+    );
+    await assert.rejects(liveMain(), /No operator key file/u);
   } finally {
     process.env = previous;
   }

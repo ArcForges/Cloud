@@ -2,7 +2,8 @@
 // Public ingress of the isolated proof environment only: the browser session routes of the
 // Contracts exception schema and an operator-gated driver surface. Production answers none of it.
 import { BodyTooLarge, jsonResponse, readBounded, refusal } from "../private/bounded-body.ts";
-import { sha256 } from "../private/encoding.ts";
+import { sha256, sha256Hex } from "../private/encoding.ts";
+import { isOperatorAuthorization, verifyOperatorSignature } from "./operator-signature.ts";
 import { ContainerCallError, postSigned } from "./container-client.ts";
 import {
   foundationContainerName,
@@ -102,10 +103,37 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
   const url = new URL(request.url);
   const operation = url.pathname.slice("/proof/v1/".length);
   const token = env.PROOF_OPERATOR_TOKEN ?? "";
-  // A short or missing operator token disables the surface instead of weakening it.
-  if (token.length < 32) return refusal(503);
-  const authorization = /^Bearer (\S+)$/u.exec(request.headers.get("authorization") ?? "");
-  if (!authorization || !(await equalSecrets(authorization[1] ?? "", token))) return refusal(401);
+  const publicKey = env.PROOF_OPERATOR_VERIFIER ?? "";
+  const tokenEnabled = token.length >= 32;
+  // A missing or short operator credential disables the surface instead of weakening it.
+  if (!tokenEnabled && publicKey === "") return refusal(503);
+  const authorizationHeader = request.headers.get("authorization");
+  // A signed request is verified over its body hash, so the bounded body is read first.
+  let signedBody: Uint8Array | undefined;
+  if (isOperatorAuthorization(authorizationHeader)) {
+    if (publicKey === "") return refusal(401);
+    try {
+      signedBody = await readBounded(request.body, maxRequestBytes);
+    } catch (error) {
+      if (error instanceof BodyTooLarge) return refusal(401);
+      throw error;
+    }
+    const valid = await verifyOperatorSignature(
+      authorizationHeader,
+      {
+        method: request.method,
+        pathname: url.pathname,
+        bodySha256Hex: await sha256Hex(signedBody),
+      },
+      publicKey,
+      Math.floor(Date.now() / 1000),
+    );
+    if (!valid) return refusal(401);
+  } else {
+    const authorization = /^Bearer (\S+)$/u.exec(authorizationHeader ?? "");
+    if (!tokenEnabled || !authorization || !(await equalSecrets(authorization[1] ?? "", token)))
+      return refusal(401);
+  }
   if (url.search !== "") return refusal(400);
   if (request.method !== "POST") return refusal(405);
 
@@ -124,7 +152,7 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
     return refusal(415);
   let body: Uint8Array;
   try {
-    body = await readBounded(request.body, maxRequestBytes);
+    body = signedBody ?? (await readBounded(request.body, maxRequestBytes));
   } catch (error) {
     if (error instanceof BodyTooLarge) return refusal(413);
     throw error;

@@ -56,9 +56,14 @@
   "env": {
     "proof": {
       "name": "arcforges-cloud-proof",
-      "workers_dev": true,
+      "workers_dev": false,
       "preview_urls": false,
-      "routes": [],
+      "routes": [
+        {
+          "pattern": "proof.arcforges.com",
+          "custom_domain": true
+        }
+      ],
       "containers": [
         {
           "class_name": "FoundationContainer",
@@ -130,7 +135,8 @@
         "FOUNDATION_PROOF": "enabled",
         "REALM_ID": "proof",
         "RECOVERY_GENERATION": "0",
-        "ALLOWED_ORIGIN": "https://account.proof.arcforges.test",
+        "ALLOWED_ORIGIN": "https://proof.arcforges.com",
+        "PROOF_OPERATOR_VERIFIER": "jOWMycpHCCr-UWZoF6r7wNTteGrTbS5KxPOveANQUgc",
         "HMAC_C2W_KEY_ID": "c2w-1",
         "HMAC_W2C_KEY_ID": "w2c-1"
       }

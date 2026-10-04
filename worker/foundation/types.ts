@@ -65,6 +65,8 @@ export interface FoundationEnv extends StorageEnv, PrivateKeyEnv {
   ALLOWED_ORIGIN?: string;
   CSRF_SECRET?: string;
   PROOF_OPERATOR_TOKEN?: string;
+  /** Unpadded base64url Ed25519 public key (32 bytes) of the operator who may drive the proof. */
+  PROOF_OPERATOR_VERIFIER?: string;
   OBJECTS: R2Like;
   WAKE_QUEUE: QueueLike;
   JOB_COORDINATOR: CoordinatorNamespaceLike;
