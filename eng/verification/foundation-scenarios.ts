@@ -19,6 +19,8 @@ export interface Target {
   jobTimeoutMs?: number;
   /** Also observe the anonymous Hello ingress (`/api`) on the target; only a deployed Worker serves it. */
   helloIngress?: boolean;
+  /** Also run the blocked-egress probe; only a deployed Container with Internet access disabled can pass it. */
+  egressProbe?: boolean;
 }
 
 type Json = Record<string, unknown>;
@@ -409,6 +411,36 @@ export async function negatives(target: Target): Promise<Evidence> {
 }
 
 /**
+ * Blocked egress of the proof Container: the host attempts harmless outbound requests to a stable public
+ * name and to a literal address and must be refused at connection level on every one, while its allowed
+ * control path (private storage through the outbound interception) answers in the same call, so a broken
+ * probe cannot pass vacuously. An answering target, a timeout or a failed control is a failure.
+ */
+export async function egressProbe(target: Target): Promise<Evidence> {
+  const reply = await operator(target, "egress/probe", {});
+  assert.equal(reply.status, 200, JSON.stringify(reply.json));
+  const attempts = (reply.json.attempts ?? []) as {
+    host: string;
+    outcome: string;
+    status?: number;
+  }[];
+  assert.equal(reply.json.controlOk, true, "the allowed control path did not answer");
+  assert(attempts.length >= 2, "the probe made too few attempts");
+  for (const attempt of attempts)
+    assert.equal(
+      attempt.outcome,
+      "connection_failed",
+      `egress to ${attempt.host} was not refused (${attempt.outcome} ${String(attempt.status ?? "")})`,
+    );
+  assert.equal(reply.json.blocked, true);
+  return {
+    scenario: "egress-blocked",
+    ok: true,
+    detail: { controlOk: true, attempts },
+  };
+}
+
+/**
  * The existing anonymous Hello ingress (`/api/healthz` and the generated-service path) on the proof
  * origin, observed with a hand-framed binary gRPC-Web request: this only shows that the same Worker
  * serves `/api` next to the proof surface, it is not the generated-client test of PRF.05.
@@ -484,6 +516,7 @@ export async function runScenarios(
     ["checkpoint-restart", () => checkpointRestart(target, options)],
     ["public-denial", () => negatives(target)],
   ];
+  if (target.egressProbe) steps.push(["egress-blocked", () => egressProbe(target)]);
   if (target.helloIngress) steps.push(["hello-ingress", () => helloIngress(target)]);
   for (const [name, step] of steps) {
     const started = Date.now();

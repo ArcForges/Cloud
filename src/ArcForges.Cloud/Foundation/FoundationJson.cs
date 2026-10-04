@@ -46,6 +46,12 @@ internal sealed record RoundtripResponse(string Sha256, int Size, bool FullMatch
     string? ContentRangeHeader = null, int PutStatus = 0, int WholeStatus = 0, int RangeStatus = 0, int ExistingMismatchStatus = 0,
     int FreshMismatchStatus = 0, bool ExistingMismatchRejected = false, bool FreshMismatchRejected = false);
 
+internal sealed record EgressProbeRequest;
+
+internal sealed record EgressAttemptResponse(string Host, string Outcome, int? Status, long ElapsedMs);
+
+internal sealed record EgressProbeResponse(bool Blocked, bool ControlOk, EgressAttemptResponse[] Attempts);
+
 internal sealed record JobStartResponse(string JobId, string Scope, int Total);
 
 internal sealed record JobSliceResponse(string State, string Cursor, string Processed, string Fence, string Checksum, bool JobComplete);
@@ -81,6 +87,7 @@ internal sealed record JobSlicePayload(string JobId, string Cursor, string Proce
 [JsonSerializable(typeof(GuardRequest))]
 [JsonSerializable(typeof(IssueRequest))]
 [JsonSerializable(typeof(RoundtripRequest))]
+[JsonSerializable(typeof(EgressProbeRequest))]
 [JsonSerializable(typeof(JobStartRequest))]
 [JsonSerializable(typeof(JobSliceRequest))]
 [JsonSerializable(typeof(JobStatusRequest))]
@@ -90,6 +97,7 @@ internal sealed record JobSlicePayload(string JobId, string Cursor, string Proce
 [JsonSerializable(typeof(GuardResponse))]
 [JsonSerializable(typeof(IssueResponse))]
 [JsonSerializable(typeof(RoundtripResponse))]
+[JsonSerializable(typeof(EgressProbeResponse))]
 [JsonSerializable(typeof(JobStartResponse))]
 [JsonSerializable(typeof(JobSliceResponse))]
 [JsonSerializable(typeof(JobStatusResponse))]
