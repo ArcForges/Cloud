@@ -26,7 +26,7 @@ internal sealed record JobStatusRequest(string Scope, string JobId);
 // Replies.
 internal sealed record ErrorBody(string Error);
 
-internal sealed record ReadinessResponse(bool Ready, string ManifestHash, string SchemaVersion);
+internal sealed record ReadinessResponse(bool Ready, string ManifestHash, string SchemaVersion, string? Revision = null);
 
 internal sealed record ExactArithmetic(string SignedPlusOne, string UnsignedPlusOne, string DecimalTimesTwo);
 

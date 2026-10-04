@@ -15,8 +15,10 @@ import {
   type CandidateConfig,
 } from "../../eng/verification/proof-deploy.ts";
 import {
+  deployedRevision,
   egressProbe,
   expectedJobChecksum,
+  helloIngress,
   runAll,
   runScenarios,
 } from "../../eng/verification/foundation-scenarios.ts";
@@ -253,36 +255,53 @@ test("a failing scenario never hides the others and its evidence row names the c
   }
 });
 
-test("the egress scenario passes only when every attempt is refused and the control answered", async () => {
+test("the egress scenario passes on no HTTP response for every attempt and fails on any answer", async () => {
   const original = globalThis.fetch;
   const target = {
     baseUrl: "https://proof.example",
     origin: "https://proof.example",
     operatorToken: "t".repeat(40),
   };
-  const blocked = {
+  const observed = {
     blocked: true,
     controlOk: true,
     attempts: [
-      { host: "example.com", outcome: "connection_failed" },
-      { host: "1.1.1.1", outcome: "connection_failed" },
+      { host: "example.com", outcome: "timeout", elapsedMs: 8002 },
+      { host: "1.1.1.1", outcome: "reached_then_failed", elapsedMs: 1 },
     ],
   };
   const answer = (value: unknown, status = 200) => {
     globalThis.fetch = (async () => Response.json(value, { status })) as typeof fetch;
   };
   try {
-    answer(blocked);
+    // The platform's observed behavior (timeout and accepted-then-dropped) is the accepted block, as is a refusal.
+    answer(observed);
     assert.equal((await egressProbe(target)).scenario, "egress-blocked");
+    answer({
+      ...observed,
+      attempts: [
+        { host: "example.com", outcome: "connection_failed" },
+        { host: "1.1.1.1", outcome: "connection_failed" },
+      ],
+    });
+    assert.equal((await egressProbe(target)).scenario, "egress-blocked");
+    const answered = (status: number) => ({
+      ...observed,
+      blocked: true,
+      attempts: [observed.attempts[0], { host: "1.1.1.1", outcome: "http_response", status }],
+    });
     const failing = [
-      { ...blocked, controlOk: false },
-      { ...blocked, blocked: false },
-      { ...blocked, attempts: [blocked.attempts[0]] },
+      { ...observed, controlOk: false },
+      { ...observed, blocked: false },
+      { ...observed, attempts: [observed.attempts[0]] },
       {
-        ...blocked,
-        attempts: [blocked.attempts[0], { host: "1.1.1.1", outcome: "http_response", status: 200 }],
+        ...observed,
+        attempts: [observed.attempts[0], { host: "example.org", outcome: "timeout" }],
       },
-      { ...blocked, attempts: [blocked.attempts[0], { host: "1.1.1.1", outcome: "timeout" }] },
+      { ...observed, attempts: [observed.attempts[0], { host: "1.1.1.1", outcome: "unknown" }] },
+      answered(200),
+      answered(404),
+      answered(520),
     ];
     for (const reply of failing) {
       answer(reply);
@@ -293,4 +312,136 @@ test("the egress scenario passes only when every attempt is refused and the cont
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("the runner waits for the Hello signal, then verifies the restarted foundation instance and fails closed", async () => {
+  const original = globalThis.fetch;
+  const expected = "a".repeat(40);
+  const stale = "b".repeat(40);
+  const target = {
+    baseUrl: "https://proof.example",
+    origin: "https://proof.example",
+    operatorToken: "t".repeat(40),
+    expectedRevision: expected,
+    revisionWaitMs: 600,
+    revisionPollMs: 10,
+  };
+  const calls: string[] = [];
+  interface Script {
+    hello: { container: string; worker: string | null }[];
+    stopStatus: number;
+    foundation: (string | null)[];
+  }
+  const serve = (script: Script) => {
+    let hello = 0;
+    let foundation = 0;
+    calls.length = 0;
+    globalThis.fetch = (async (input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/api/healthz")) {
+        const step = script.hello[
+          Math.min(hello++, script.hello.length - 1)
+        ] as Script["hello"][number];
+        return Response.json(
+          { revision: step.container },
+          { headers: step.worker === null ? {} : { "x-arcforges-worker-revision": step.worker } },
+        );
+      }
+      if (url.endsWith("/proof/v1/container/stop"))
+        return Response.json({ stopped: true }, { status: script.stopStatus });
+      const revision = script.foundation[Math.min(foundation++, script.foundation.length - 1)];
+      return revision === null
+        ? Response.json({ error: "unavailable" }, { status: 500 })
+        : Response.json({ ready: true, revision });
+    }) as typeof fetch;
+  };
+  try {
+    // Stale and half-updated Hello answers are waited out; the stop must succeed; the restarted foundation instance must report
+    // the expected revision (a stale or unavailable instance is polled again).
+    serve({
+      hello: [
+        { container: stale, worker: stale },
+        { container: expected, worker: stale },
+        { container: expected, worker: null },
+        { container: expected, worker: expected },
+      ],
+      stopStatus: 200,
+      foundation: [null, stale, expected],
+    });
+    const row = await deployedRevision(target);
+    assert.equal(row.scenario, "deployed-revision");
+    assert.equal(row.detail.foundationRevision, expected);
+    assert(calls.some((call) => call.endsWith("/proof/v1/container/stop")));
+    // The stop must be delivered: a failing stop fails the row (the Hello signal alone is not enough).
+    serve({
+      hello: [{ container: expected, worker: expected }],
+      stopStatus: 500,
+      foundation: [expected],
+    });
+    await assert.rejects(deployedRevision(target), /could not be stopped/u);
+    // A foundation instance that keeps reporting another revision fails, even though Hello reports the expected one.
+    serve({
+      hello: [{ container: expected, worker: expected }],
+      stopStatus: 200,
+      foundation: [stale],
+    });
+    await assert.rejects(deployedRevision(target), /did not report revision/u);
+    // Hello never reaches the expected revision.
+    serve({
+      hello: [{ container: stale, worker: stale }],
+      stopStatus: 200,
+      foundation: [expected],
+    });
+    await assert.rejects(deployedRevision(target), /did not serve revision/u);
+    await assert.rejects(
+      deployedRevision({ ...target, expectedRevision: "short" }),
+      /expected revision/u,
+    );
+    // Every scenario run starts with the wait when a revision is expected, and records its failure.
+    const rows = await runScenarios(target, "0".repeat(64), { stopContainer: false });
+    assert.equal(rows[0]?.scenario, "deployed-revision");
+    assert.equal(rows[0]?.ok, false);
+    assert.equal(rows.length, 8);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("the Hello ingress scenario retries thrown errors within its deadline", async () => {
+  const original = globalThis.fetch;
+  let healthCalls = 0;
+  globalThis.fetch = (async (input: unknown) => {
+    const url = String(input);
+    if (url.endsWith("/api/healthz")) {
+      healthCalls++;
+      if (healthCalls < 3) throw new TypeError("fetch failed");
+      return new Response("{}", { status: 200 });
+    }
+    return new Response(new TextEncoder().encode("\u0000Hello, proof!"), {
+      status: 200,
+      headers: { "x-arcforges-worker-revision": "r" },
+    });
+  }) as typeof fetch;
+  try {
+    const row = await helloIngress({
+      baseUrl: "https://proof.example",
+      origin: "https://proof.example",
+      helloPollMs: 5,
+    });
+    assert.equal(row.detail.attempts, 3);
+    assert.equal(row.detail.sayHelloStatus, 200);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("only the proof environment may run two Container instances", () => {
+  const top = wrangler as unknown as { containers: { max_instances: number }[] };
+  assert.equal(top.containers[0]?.max_instances, 1, "production keeps one instance");
+  assert.equal(
+    (wrangler.env.proof.containers[0] as { max_instances?: number }).max_instances,
+    2,
+    "the proof Hello instance and the foundation instance must not contend for one slot",
+  );
 });

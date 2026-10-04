@@ -272,6 +272,9 @@ public sealed class FoundationHostTests
         var ok = await Send(host, Signed(host, "/internal/foundation/v1/readiness", json));
         Assert.True(ok.Json.GetProperty("ready").GetBoolean());
         Assert.Equal(PlanManifest.Hash, ok.Json.GetProperty("manifestHash").GetString());
+        // The host reports its own compiled revision, which the live runner compares with the deployed one.
+        Assert.Equal(HostRevision.Current, ok.Json.GetProperty("revision").GetString());
+        Assert.Matches("^[0-9a-f]{40}(-dirty)?$", HostRevision.Current);
         // The host-wide bound of 4096 bytes protects Hello; the foundation routes raise only their own bound.
         var padded = Encoding.UTF8.GetBytes("{" + new string(' ', 5000) + "}");
         Assert.Equal(HttpStatusCode.OK, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", padded))).Status);
@@ -532,7 +535,7 @@ public sealed class FoundationHostTests
     }
 
     [Fact]
-    public async Task TheEgressProbeReportsBlockedOnlyWhenEveryTargetRefusesTheConnectionAndTheControlAnswers()
+    public async Task TheEgressProbeReportsBlockedOnlyWhenNoTargetAnswersAndTheControlAnswers()
     {
         var closedA = ClosedLoopbackAddress();
         var closedB = ClosedLoopbackAddress();
@@ -550,7 +553,7 @@ public sealed class FoundationHostTests
         var (server, open) = await StartAnsweringServerAsync();
         try
         {
-            // One answering target is an open route: never "blocked", whatever else was refused.
+            // One answering target, whatever its status, is an open route: never "blocked", whatever else was refused.
             await using var leaking = await StartAsync(probe: new EgressProbe(FoundationModule.NewClient, [closedA, open], _ => Task.FromResult(true)));
             var leak = await Operation(leaking, "egress/probe", new { });
             Assert.False(leak.Json.GetProperty("blocked").GetBoolean());
@@ -568,30 +571,36 @@ public sealed class FoundationHostTests
     }
 
     [Fact]
-    public async Task TheEgressProbeFailsClosedWithoutTheControlOnATimeoutOrWithoutTargets()
+    public async Task TheEgressProbeFailsClosedWithoutTheControlTargetsOrAnyAnswerAndCountsSilenceAsNoResponse()
     {
         var closed = ClosedLoopbackAddress();
         // A broken control path means the probe proves nothing: never blocked.
-        var noControl = await new EgressProbe(FoundationModule.NewClient, [closed], _ => Task.FromResult(false)).RunAsync(T.Ct);
+        // Two targets, so the two-attempt rule cannot mask a control that was dropped from the verdict.
+        var noControl = await new EgressProbe(FoundationModule.NewClient, [closed, ClosedLoopbackAddress()], _ => Task.FromResult(false)).RunAsync(T.Ct);
         Assert.False(noControl.Blocked);
         Assert.False(noControl.ControlOk);
         Assert.False((await new EgressProbe(FoundationModule.NewClient, [], _ => Task.FromResult(true)).RunAsync(T.Ct)).Blocked);
-        // A target that accepts the connection but never answers is a timeout, which is not a block.
-        var silent = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        silent.Start();
+        // One attempt is not enough: the proof needs the name and the address.
+        Assert.False((await new EgressProbe(FoundationModule.NewClient, [closed], _ => Task.FromResult(true)).RunAsync(T.Ct)).Blocked);
+        // The platform's observed behavior: a silent target (timeout) and peers that accept and drop (close or reset) are "no response".
+        var silentA = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        var silentB = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        silentA.Start();
+        silentB.Start();
         try
         {
-            var address = new Uri($"http://127.0.0.1:{((IPEndPoint)silent.LocalEndpoint).Port}/");
-            var result = await new EgressProbe(FoundationModule.NewClient, [address], _ => Task.FromResult(true), TimeSpan.FromMilliseconds(300)).RunAsync(T.Ct);
-            Assert.False(result.Blocked);
-            Assert.Equal("timeout", Assert.Single(result.Attempts).Outcome);
+            var addresses = new[] { silentA, silentB }.Select(listener => new Uri($"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}/")).ToArray();
+            var result = await new EgressProbe(FoundationModule.NewClient, addresses, _ => Task.FromResult(true), TimeSpan.FromMilliseconds(300)).RunAsync(T.Ct);
+            Assert.True(result.Blocked);
+            Assert.Equal(["timeout", "timeout"], result.Attempts.Select(attempt => attempt.Outcome));
+            Assert.All(result.Attempts, attempt => Assert.True(attempt.ElapsedMs >= 250, "the silent target used its whole window"));
         }
         finally
         {
-            silent.Stop();
+            silentA.Stop();
+            silentB.Stop();
         }
 
-        // A peer that completes the TCP handshake and then closes or resets was reachable: never blocked.
         foreach (var reset in new[] { false, true })
         {
             var peer = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
@@ -616,15 +625,40 @@ public sealed class FoundationHostTests
             try
             {
                 var address = new Uri($"http://127.0.0.1:{((IPEndPoint)peer.LocalEndpoint).Port}/");
-                var result = await new EgressProbe(FoundationModule.NewClient, [address], _ => Task.FromResult(true)).RunAsync(T.Ct);
-                Assert.False(result.Blocked);
-                Assert.Equal("reached_then_failed", Assert.Single(result.Attempts).Outcome);
+                var result = await new EgressProbe(FoundationModule.NewClient, [address, closed], _ => Task.FromResult(true)).RunAsync(T.Ct);
+                // Accepted-then-dropped without a status line is no response: blocked. Windows reports the distinct outcome, Linux
+                // reports the reset as a connection error; either way no status line came back.
+                Assert.True(result.Blocked);
+                Assert.Contains(result.Attempts[0].Outcome, new[] { "reached_then_failed", "connection_failed" });
+                Assert.Null(result.Attempts[0].Status);
             }
             finally
             {
                 await stop.CancelAsync();
                 peer.Stop();
                 await Task.WhenAny(accepting, Task.Delay(TimeSpan.FromSeconds(5), T.Ct));
+            }
+        }
+
+        // Any status line is an answer from the network, including a proxy error.
+        foreach (var status in new[] { 200, 404, 520 })
+        {
+            var builder = WebApplication.CreateSlimBuilder();
+            builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http1));
+            var app = builder.Build();
+            app.MapMethods("/{**path}", ["HEAD", "GET"], () => Results.StatusCode(status));
+            await app.StartAsync(T.Ct);
+            try
+            {
+                var address = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
+                var result = await new EgressProbe(FoundationModule.NewClient, [closed, address], _ => Task.FromResult(true)).RunAsync(T.Ct);
+                Assert.False(result.Blocked);
+                Assert.Equal(status, result.Attempts[1].Status);
+            }
+            finally
+            {
+                await app.StopAsync(T.Ct);
+                await app.DisposeAsync();
             }
         }
 

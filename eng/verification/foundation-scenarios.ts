@@ -19,8 +19,13 @@ export interface Target {
   jobTimeoutMs?: number;
   /** Also observe the anonymous Hello ingress (`/api`) on the target; only a deployed Worker serves it. */
   helloIngress?: boolean;
+  helloPollMs?: number;
   /** Also run the blocked-egress probe; only a deployed Container with Internet access disabled can pass it. */
   egressProbe?: boolean;
+  /** The revision that was just deployed; the run first waits (bounded) until the origin serves exactly it. */
+  expectedRevision?: string;
+  revisionWaitMs?: number;
+  revisionPollMs?: number;
 }
 
 type Json = Record<string, unknown>;
@@ -411,10 +416,12 @@ export async function negatives(target: Target): Promise<Evidence> {
 }
 
 /**
- * Blocked egress of the proof Container: the host attempts harmless outbound requests to a stable public
- * name and to a literal address and must be refused at connection level on every one, while its allowed
- * control path (private storage through the outbound interception) answers in the same call, so a broken
- * probe cannot pass vacuously. An answering target, a timeout or a failed control is a failure.
+ * Blocked egress of the proof Container. With Internet access disabled the platform does not refuse connections: a hostname times out and
+ * a literal address is accepted and dropped within about a millisecond (both observed on the deployed proof). The accepted criterion is
+ * therefore that no HTTP response at all (no status line of any code, including a 520 from a proxy) came back for any attempt, that both a
+ * hostname and a literal address were attempted, and that the allowed control path (private storage through the outbound interception)
+ * answered in the same call, so a broken probe cannot pass vacuously. This cannot distinguish a silent drop from a very slow open route;
+ * the elapsed times are recorded so the hostname attempt can be seen to have used its whole window.
  */
 export async function egressProbe(target: Target): Promise<Evidence> {
   const reply = await operator(target, "egress/probe", {});
@@ -423,21 +430,91 @@ export async function egressProbe(target: Target): Promise<Evidence> {
     host: string;
     outcome: string;
     status?: number;
+    elapsedMs?: number;
   }[];
   assert.equal(reply.json.controlOk, true, "the allowed control path did not answer");
   assert(attempts.length >= 2, "the probe made too few attempts");
-  for (const attempt of attempts)
-    assert.equal(
+  const literal = (host: string) => /^\d{1,3}(\.\d{1,3}){3}$/u.test(host);
+  assert(
+    attempts.some((attempt) => literal(attempt.host)) &&
+      attempts.some((attempt) => !literal(attempt.host)),
+    "the probe must attempt a hostname and a literal address",
+  );
+  const known = new Set(["connection_failed", "timeout", "reached_then_failed"]);
+  for (const attempt of attempts) {
+    assert.notEqual(
       attempt.outcome,
-      "connection_failed",
-      `egress to ${attempt.host} was not refused (${attempt.outcome} ${String(attempt.status ?? "")})`,
+      "http_response",
+      `egress to ${attempt.host} got an HTTP response (${String(attempt.status ?? "")})`,
     );
+    assert(known.has(attempt.outcome), `unknown egress outcome ${attempt.outcome}`);
+  }
   assert.equal(reply.json.blocked, true);
   return {
     scenario: "egress-blocked",
     ok: true,
-    detail: { controlOk: true, attempts },
+    detail: { controlOk: true, criterion: "no HTTP response for any attempt", attempts },
   };
+}
+
+/**
+ * Waits (bounded) until the instances the scenarios run against serve exactly the deployed revision, so an instance that was started
+ * before the rollout finished and still runs the previous image cannot answer a new operation with 404. First the Worker revision header
+ * and the Hello instance's health revision must equal the expected value (the Hello instance is only a signal that the platform now starts
+ * the new image). Then the FOUNDATION instance, the one the exact-value and egress scenarios use, is stopped (the stop must succeed) and
+ * restarted by a readiness call whose reply must carry the expected host revision; any other revision, or a failed stop, fails the row.
+ */
+export async function deployedRevision(target: Target): Promise<Evidence> {
+  const expected = target.expectedRevision ?? "";
+  assert.match(expected, /^[0-9a-f]{40}$/u, "an expected revision is required");
+  const deadline = Date.now() + (target.revisionWaitMs ?? 180_000);
+  let attempts = 0;
+  let last = "";
+  let helloReady = false;
+  while (!helloReady && Date.now() < deadline) {
+    attempts++;
+    try {
+      const response = await fetch(`${target.baseUrl}/api/healthz`, {
+        redirect: "error",
+        signal: AbortSignal.timeout(20_000),
+      });
+      const health =
+        response.status === 200 ? ((await response.json()) as { revision?: string }) : {};
+      const header = response.headers.get("x-arcforges-worker-revision");
+      last = `status ${response.status}, container ${String(health.revision)}, worker ${String(header)}`;
+      helloReady = health.revision === expected && header === expected;
+    } catch (error) {
+      last = error instanceof Error ? error.name : "error";
+    }
+    if (!helloReady) await sleep(target.revisionPollMs ?? 5_000);
+  }
+  assert(helloReady, `The proof origin did not serve revision ${expected} in time (${last}).`);
+  const stop = await operator(target, "container/stop", {});
+  assert.equal(stop.status, 200, `The foundation instance could not be stopped (${stop.status}).`);
+  let foundationRevision = "";
+  while (Date.now() < deadline) {
+    attempts++;
+    try {
+      const ready = await operator(target, "readiness", {});
+      foundationRevision = String(ready.json.revision ?? "");
+      last = `readiness ${ready.status}, foundation ${foundationRevision || "none"}`;
+      if (ready.status === 200 && foundationRevision === expected)
+        return {
+          scenario: "deployed-revision",
+          ok: true,
+          detail: {
+            attempts,
+            revision: expected,
+            foundationRevision,
+            foundationStopStatus: stop.status,
+          },
+        };
+    } catch (error) {
+      last = error instanceof Error ? error.name : "error";
+    }
+    await sleep(target.revisionPollMs ?? 5_000);
+  }
+  assert.fail(`The restarted foundation instance did not report revision ${expected} (${last}).`);
 }
 
 /**
@@ -451,47 +528,55 @@ export async function helloIngress(target: Target): Promise<Evidence> {
   const frame = new Uint8Array(5 + message.length);
   new DataView(frame.buffer).setUint32(1, message.length);
   frame.set(message, 5);
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + 150_000;
+  const within = () =>
+    AbortSignal.timeout(Math.max(1_000, Math.min(30_000, deadline - Date.now())));
   let attempts = 0;
   let last = "";
   while (Date.now() < deadline) {
     attempts++;
-    // Readiness polling of a possibly cold Container; SayHello is idempotent and read-only.
-    const health = await fetch(`${target.baseUrl}/api/healthz`, {
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    });
-    const healthBody = await health.text();
-    last = `healthz ${health.status}`;
-    if (health.status === 200) {
-      const response = await fetch(
-        `${target.baseUrl}/api/arcforges.hello.v1.HelloService/SayHello`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/grpc-web+proto", "grpc-timeout": "10S" },
-          body: frame,
-          redirect: "error",
-          signal: AbortSignal.timeout(30_000),
-        },
-      );
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      const text = new TextDecoder().decode(bytes);
-      last = `sayhello ${response.status}`;
-      if (response.status === 200 && text.includes("Hello, proof!")) {
-        return {
-          scenario: "hello-ingress",
-          ok: true,
-          detail: {
-            attempts,
-            healthStatus: health.status,
-            healthBytes: healthBody.length,
-            sayHelloStatus: response.status,
-            workerRevisionHeader: response.headers.get("x-arcforges-worker-revision"),
+    // Readiness polling of a possibly cold Container; SayHello is idempotent and read-only. A thrown error (reset, timeout,
+    // another instance holding the slot) is retried within the overall deadline.
+    try {
+      const health = await fetch(`${target.baseUrl}/api/healthz`, {
+        redirect: "error",
+        signal: within(),
+      });
+      const healthBody = await health.text();
+      last = `healthz ${health.status}`;
+      if (health.status === 200) {
+        const response = await fetch(
+          `${target.baseUrl}/api/arcforges.hello.v1.HelloService/SayHello`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/grpc-web+proto", "grpc-timeout": "10S" },
+            body: frame,
+            redirect: "error",
+            signal: within(),
           },
-        };
+        );
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const text = new TextDecoder().decode(bytes);
+        last = `sayhello ${response.status}`;
+        if (response.status === 200 && text.includes("Hello, proof!")) {
+          return {
+            scenario: "hello-ingress",
+            ok: true,
+            detail: {
+              attempts,
+              healthStatus: health.status,
+              healthBytes: healthBody.length,
+              sayHelloStatus: response.status,
+              workerRevisionHeader: response.headers.get("x-arcforges-worker-revision"),
+            },
+          };
+        }
       }
+    } catch (error) {
+      last = `${error instanceof Error ? error.name : "error"} on attempt ${attempts}`;
     }
-    await sleep(5_000);
+    if (Date.now() + (target.helloPollMs ?? 5_000) >= deadline) break;
+    await sleep(target.helloPollMs ?? 5_000);
   }
   assert.fail(`The Hello ingress did not answer on the proof origin (${last}).`);
 }
@@ -508,6 +593,12 @@ export async function runScenarios(
 ): Promise<Evidence[]> {
   const evidence: Evidence[] = [];
   const steps: [string, () => Promise<Evidence>][] = [
+    ...(target.expectedRevision
+      ? ([["deployed-revision", () => deployedRevision(target)]] as [
+          string,
+          () => Promise<Evidence>,
+        ][])
+      : []),
     ["readiness", () => readiness(target, manifestHash)],
     ["exact-values", () => exactValues(target)],
     ["guard-rollback", () => guardedRollback(target)],

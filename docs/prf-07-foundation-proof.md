@@ -249,13 +249,34 @@ and published packages, so PRF.05's exact-value gRPC-Web scenario is not served 
 
 The proof Container keeps Internet access disabled (`enableInternet = false`); its only outbound paths are the interception
 hosts `storage.internal` and `objects.internal`. The operator operation `egress/probe` makes the host attempt a harmless
-`HEAD` to `http://example.com/` and to the literal address `http://1.1.1.1/` (no body, no redirect, 8 second limit each)
-and reports only host, outcome and elapsed time. The scenario `egress-blocked` passes only when every attempt failed to
-connect (`connection_failed`: the connection or the name resolution failed; an answer including an error status, a timeout, and a failure after the handshake such as a close or reset, `reached_then_failed`, all fail it) and the allowed control
-path, the host's storage readiness through the interception, answered in the same call, so a broken probe cannot pass
-vacuously. The C# tests run the real HTTP stack and host route against a closed loopback port (blocked), an answering
-loopback server (open), a silent listener (timeout), peers that accept and then close or reset (reached), and a failed control. A DNS failure for the name alone could look like
-a block, which is why the literal address is attempted too. Production does not serve the operation.
+`HEAD` to `http://example.com/` and to the literal address `http://1.1.1.1/` (no body, no redirect, response body never
+read, 8 second limit each) and reports only host, outcome and elapsed time.
+
+**What blocked means on this platform.** The first live probe showed that Cloudflare does not refuse the connection: the
+hostname attempt timed out after the whole window (8,002 ms) and the literal address was accepted and dropped within about
+1 ms (`reached_then_failed`), while the allowed control path answered in the same call. The accepted criterion is therefore
+**no HTTP response at all** (no status line of any code, including a 520 from a proxy), not "connection refused". The
+scenario `egress-blocked` passes only when every attempt got no response (`connection_failed`, `timeout` and
+`reached_then_failed` all count), both a hostname and a literal address were attempted, and the control path, the host's
+storage readiness through the interception, answered in the same call, so a broken probe cannot pass vacuously. Any status
+line, a failed control or fewer than two attempts fails it. The platform's own accept-then-drop behavior is the reason a
+peer that accepts and then closes counts as no response here; the limits of that criterion are that it cannot distinguish a
+silent drop from a very slow open route (the elapsed times are recorded, and the hostname attempt is seen to use its whole
+window) and that it proves the absence of an answer, not the mechanism. A timeout is not required to use the whole window, so a slow open route can false-pass; a peer that answers with something other than HTTP (a banner or a TLS alert) is also "no response" here, since only a status line counts as an answer. The C# tests run the real HTTP stack and host route
+against a closed port, a silent listener, peers that accept and then close or reset, and answering servers with status 200,
+404 and 520 (all answering cases fail), and a failed control. Production does not serve the operation.
+
+### Rollout and instance limits of the live run
+
+After a deployment a Container instance that was started before the rollout finished can still run the previous image (the
+first run after the second deployment answered a new operation with 404 from the old host). The live runner therefore first
+waits, for at most three minutes, until both the Worker revision header and the Hello instance's health revision equal the
+expected revision (the checked-out commit, or `PROOF_EXPECTED_REVISION`); that instance is only a signal that the platform now
+starts the new image. It then stops the foundation instance (the stop must succeed) and restarts it with a readiness call whose
+reply carries the host's own compiled revision, which must equal the expected one; the exact-value and egress scenarios run
+against that foundation instance. The proof environment (and only it) allows two Container instances, because the Hello
+`/api` instance and the foundation instance are separate Durable Object instances of one class and contended for the single
+slot with `max_instances: 1`; production keeps one instance. The Hello scenario retries thrown errors within its 150 second deadline; each request is bounded by the remaining time, so it cannot overrun the deadline by an iteration.
 
 ## Not claimed
 

@@ -28,6 +28,18 @@ internal readonly record struct OperationReply(int Status, byte[] Body)
 /// The operations behind the signed internal proof routes. Every 64-bit and decimal value is an exact canonical string,
 /// all arithmetic is checked, and every failure maps to a closed error code.
 /// </summary>
+/// <summary>The source revision compiled into this host, formatted exactly like the health route's revision.</summary>
+internal static class HostRevision
+{
+    public static string Current { get; } = Compute();
+
+    private static string Compute()
+    {
+        var build = BuildIdentity.FromAssembly(typeof(HostRevision).Assembly)["build"]!.AsObject();
+        return build["sourceCommit"]!.GetValue<string>() + (build["dirty"]!.GetValue<bool>() ? "-dirty" : "");
+    }
+}
+
 internal sealed class FoundationOperations(IPlanExecutor executor, SessionService sessions, JobSliceService jobs, ObjectsClient objects, EgressProbe egress, FoundationOptions options)
 {
     public async Task<OperationReply> ExecuteAsync(string operation, byte[] body, CancellationToken cancellationToken)
@@ -84,7 +96,7 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
     {
         if (!TryParse(body, FoundationJsonContext.Default.ReadinessRequest, out _)) return OperationReply.Invalid;
         return await sessions.IsReadyAsync(cancellationToken)
-            ? OperationReply.Json(StatusCodes.Status200OK, new ReadinessResponse(true, PlanManifest.Hash, "1"), FoundationJsonContext.Default.ReadinessResponse)
+            ? OperationReply.Json(StatusCodes.Status200OK, new ReadinessResponse(true, PlanManifest.Hash, "1", HostRevision.Current), FoundationJsonContext.Default.ReadinessResponse)
             : OperationReply.Error(StatusCodes.Status503ServiceUnavailable, "unavailable");
     }
 
