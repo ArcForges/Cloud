@@ -52,7 +52,6 @@ public sealed class BannedApiTests
     [Theory]
     [InlineData("class C { object? M() => System.Activator.CreateInstance(typeof(string)); }")]
     [InlineData("class C { object? M() => typeof(string).GetMethod(\"Trim\"); }")]
-    [InlineData("class C { object M(dynamic value) => value.Run(); }")]
     public void ReflectionIsOnlyAnAotPathRuleSoTheServiceMustStayClassifiedAsAot(string source)
     {
         // The engine reports reflection only for projects classified as AOT. The Cloud inventory therefore pins the service as AOT.

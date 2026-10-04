@@ -108,17 +108,14 @@ internal static class CloudRepository
     {
         using var document = JsonDocument.Parse(reportJson);
         var report = document.RootElement;
-        bool wellFormed = report.TryGetProperty("evidenceClass", out var evidenceClass)
-            && evidenceClass.GetString() == "source-policy-scan"
-            && report.TryGetProperty("substeps", out var substeps)
-            && substeps.EnumerateArray().Select(value => value.GetString()).SequenceEqual(["WP00.00", "WP00.01"])
-            && report.TryGetProperty("repositories", out var repositories);
+        bool wellFormed = report.GetProperty("evidenceClass").GetString() == "source-policy-scan"
+            && report.GetProperty("substeps").EnumerateArray().Select(value => value.GetString()).SequenceEqual(["WP00.00", "WP00.01"]);
         if (!wellFormed)
         {
             return new ExternalPolicyEvidence(rule, sourceCommit, false, [Finding(rule, "The naming report is not the canonical source-policy scan.")]);
         }
 
-        var rows = repositories.EnumerateArray().Where(row => row.GetProperty("repository").GetString() == Owner).ToArray();
+        var rows = report.GetProperty("repositories").EnumerateArray().Where(row => row.GetProperty("repository").GetString() == Owner).ToArray();
         if (rows.Length != 1)
         {
             return new ExternalPolicyEvidence(rule, sourceCommit, false, [Finding(rule, "The naming report needs exactly one Cloud row.")]);

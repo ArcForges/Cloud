@@ -431,7 +431,11 @@ export async function namingScan() {
     naming.sourceCommit,
   );
   for (const [asset, expected] of Object.entries(naming.assets))
-    assert.equal(await sha256(path.join(namingRoot, asset)), expected, `Naming asset changed: ${asset}`);
+    assert.equal(
+      await sha256(path.join(namingRoot, asset)),
+      expected,
+      `Naming asset changed: ${asset}`,
+    );
   await run("python", [
     path.join(namingRoot, "tools/naming/eng/check_naming.py"),
     "--repository",

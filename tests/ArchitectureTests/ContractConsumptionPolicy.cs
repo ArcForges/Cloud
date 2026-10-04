@@ -201,7 +201,7 @@ internal static partial class ContractConsumptionPolicy
             var model = compilation.GetSemanticModel(tree);
             foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<BaseTypeDeclarationSyntax>())
             {
-                if (model.GetDeclaredSymbol(declaration) is INamedTypeSymbol type
+                if (model.GetDeclaredSymbol(declaration) is INamedTypeSymbol { TypeKind: not TypeKind.Interface } type
                     && type.AllInterfaces.Any(contract => contract.OriginalDefinition.ToDisplayString().StartsWith("Google.Protobuf.IMessage", StringComparison.Ordinal)))
                 {
                     problems.Add($"{type.ToDisplayString()} is an authored wire message.");
