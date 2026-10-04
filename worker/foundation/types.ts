@@ -36,14 +36,26 @@ export interface WakeMessage {
   scope: string;
   eventId: string;
 }
+export interface PoisonMessage {
+  v: 1;
+  kind: "proof.poison";
+  probeId: string;
+}
+export interface PoisonObservation {
+  attempts: { attempt: number; atMs: number }[];
+  deadLetter: { attempt: number; atMs: number } | null;
+}
 export interface QueueLike {
-  send(message: WakeMessage, options?: { delaySeconds?: number }): Promise<void>;
+  send(message: WakeMessage | PoisonMessage, options?: { delaySeconds?: number }): Promise<void>;
 }
 
 export interface CoordinatorLike {
   admit(eventId: string): Promise<AdmitResult>;
   complete(eventId: string): Promise<void>;
   release(eventId: string): Promise<void>;
+  recordPoisonAttempt(attempt: number): Promise<void>;
+  recordDeadLetter(attempt: number): Promise<void>;
+  readPoison(): Promise<PoisonObservation>;
 }
 export type AdmitResult = { admit: true } | { admit: false; reason: "duplicate" | "busy" };
 

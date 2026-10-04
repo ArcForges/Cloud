@@ -290,7 +290,10 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
     {
         if (!TryParse(body, FoundationJsonContext.Default.IssueRequest, out var request) || !FoundationIds.IsUuid(request.UserId) || !FoundationIds.IsUuid(request.DeviceId)
             || request.WorkspaceIds.Length > SessionService.MaxWorkspaces || !request.WorkspaceIds.All(FoundationIds.IsUuid)) return OperationReply.Invalid;
-        var issued = await sessions.IssueAsync(request.UserId, request.DeviceId, request.WorkspaceIds, cancellationToken);
+        // Proof-only short lifetimes (2 to 300 seconds) let the live run observe both expiries; omitted, the configured defaults apply.
+        if (request.IdleSeconds is < 2 or > 300 || request.AbsoluteSeconds is < 2 or > 300) return OperationReply.Invalid;
+        var issued = await sessions.IssueAsync(request.UserId, request.DeviceId, request.WorkspaceIds, cancellationToken,
+            request.AbsoluteSeconds is { } absolute ? TimeSpan.FromSeconds(absolute) : null, request.IdleSeconds is { } idle ? TimeSpan.FromSeconds(idle) : null);
         return OperationReply.Json(StatusCodes.Status200OK,
             new IssueResponse(issued.SessionId, issued.Handle, issued.CsrfToken, BrowserSessionEndpoints.Timestamp(issued.AbsoluteExpiresAt), BrowserSessionEndpoints.Timestamp(issued.IdleExpiresAt)),
             FoundationJsonContext.Default.IssueResponse);

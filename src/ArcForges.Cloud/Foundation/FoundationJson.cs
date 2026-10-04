@@ -13,7 +13,7 @@ internal sealed record ExactRequest(string Scope, string Id, string Signed, stri
 internal sealed record GuardRequest(string Scope, string From, string To, string Amount, string CommandId, string? SeedFrom = null,
     string? SeedTo = null, string? ExpectedFromRevisionOverride = null);
 
-internal sealed record IssueRequest(string UserId, string DeviceId, string[] WorkspaceIds);
+internal sealed record IssueRequest(string UserId, string DeviceId, string[] WorkspaceIds, int? IdleSeconds = null, int? AbsoluteSeconds = null);
 
 internal sealed record RoundtripRequest(string WorkspaceId, string ResourceId, int Size, uint Seed);
 
