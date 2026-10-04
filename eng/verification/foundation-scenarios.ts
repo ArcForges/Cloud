@@ -8,7 +8,10 @@ import { randomUUID } from "node:crypto";
 
 export interface Target {
   baseUrl: string;
-  operatorToken: string;
+  /** Bearer credential of the local harness. A deployment uses `authorize` instead. */
+  operatorToken?: string;
+  /** Produces the Authorization header value for one operator request (signed requests). */
+  authorize?: (method: string, host: string, pathname: string, body: Uint8Array) => Promise<string>;
   /** The exact Origin value the proof environment is configured with. */
   origin: string;
   /** Pause before inspecting a restarted job (milliseconds). */
@@ -29,13 +32,20 @@ const int64Max = 2n ** 63n - 1n;
 const uint64Max = 2n ** 64n - 1n;
 
 async function operator(target: Target, operation: string, body: Json) {
-  const response = await fetch(`${target.baseUrl}/proof/v1/${operation}`, {
+  const pathname = `/proof/v1/${operation}`;
+  const bodyText = JSON.stringify(body);
+  const authorization = target.authorize
+    ? await target.authorize(
+        "POST",
+        new URL(target.baseUrl).host,
+        pathname,
+        new TextEncoder().encode(bodyText),
+      )
+    : `Bearer ${target.operatorToken}`;
+  const response = await fetch(`${target.baseUrl}${pathname}`, {
     method: "POST",
-    headers: {
-      authorization: `Bearer ${target.operatorToken}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
+    headers: { authorization, "content-type": "application/json" },
+    body: bodyText,
     redirect: "error",
     signal: AbortSignal.timeout(60_000),
   });
@@ -343,6 +353,21 @@ export async function negatives(target: Target): Promise<Evidence> {
     body: "{}",
   });
   assert.equal(wrong.status, 401);
+  const forged = await fetch(`${target.baseUrl}/proof/v1/readiness`, {
+    method: "POST",
+    headers: {
+      authorization: `AF-Operator t=${Math.floor(Date.now() / 1000)},n=${"A".repeat(22)},s=${"A".repeat(86)}`,
+      "content-type": "application/json",
+    },
+    body: "{}",
+  });
+  assert.equal(forged.status, 401, "an invalid operator signature must be refused");
+  const unauthenticated = await fetch(`${target.baseUrl}/proof/v1/readiness`, {
+    method: "POST",
+    body: "{}",
+    headers: { "content-type": "application/json" },
+  });
+  assert.equal(unauthenticated.status, 401);
   for (const path of [
     "/internal/foundation/v1/readiness",
     "/internal/storage/v1/execute-plan",
@@ -358,7 +383,7 @@ export async function negatives(target: Target): Promise<Evidence> {
   return {
     scenario: "public-denial",
     ok: true,
-    detail: { operatorWrongToken: 401, internalPaths: 404 },
+    detail: { operatorWrongToken: 401, forgedSignature: 401, anonymous: 401, internalPaths: 404 },
   };
 }
 

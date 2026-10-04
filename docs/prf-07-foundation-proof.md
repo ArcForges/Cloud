@@ -23,7 +23,8 @@ without introducing product behavior:
 | Private ingress                 | the Container reaches bindings only through outbound handlers on exact virtual hosts; ordinary Internet egress stays disabled                                                                                                                                                         | `worker/index.ts`, `worker/storage/handler.ts`, `worker/foundation/objects.ts` |
 
 The proof is deployed only by the explicit `proof` Wrangler environment (Worker
-`arcforges-cloud-proof`, its own D1 database, R2 bucket, queue and Container). The production
+`arcforges-cloud-proof`, its own D1 database, R2 bucket, queue and Container), reachable only at the
+dedicated custom domain `proof.arcforges.com`; `workers.dev` and preview URLs stay disabled. The production
 `arcforges-cloud` Worker keeps its anonymous Hello behavior: every proof route is refused there
 unless the `FOUNDATION_PROOF` variable is `enabled`.
 
@@ -100,6 +101,7 @@ has exactly one owner, this task, and later module tasks use their own names.
 | R2              | binding `OBJECTS`, bucket `arcforges-proof-objects`, key `realm/<realm>/workspace/<workspace>/diagnostic/<resource>/<sha256>`                                                                                                                          |
 | Queue           | binding `WAKE_QUEUE`, queue `arcforges-proof-wake`, dead-letter queue `arcforges-proof-wake-dlq`                                                                                                                                                       |
 | Durable Objects | `CloudContainer` (the unchanged production Container controller), `FoundationContainer` (its proof-environment subclass, which alone registers the outbound hosts and the environment hook) and `FoundationJobCoordinator`; no alarm namespace is used |
+| Ingress         | custom domain `proof.arcforges.com` of `arcforges-cloud-proof` only (`wrangler.json` `env.proof.routes`); `workers_dev` and `preview_urls` are `false`; the production route `arcforges.com/api/*` and the Web apex Custom Domain are not referenced   |
 | Virtual hosts   | `storage.internal`, `objects.internal`                                                                                                                                                                                                                 |
 
 ## Behavior
@@ -148,37 +150,82 @@ with the C# tests and the format check) and `Dependency audit and repository che
 inspection), then `Verify`. Only a successful main build deploys. It deploys the default Worker and the production Hello container: the
 default Container class is unchanged (no outbound interception, no environment hook, pinned by
 `tests/worker/container-classes.test.ts`), the default configuration is unchanged, and the Worker bundle is larger
-(61,990 to 165,123 bytes) because it now contains the dormant foundation modules, which answer nothing without
+(61,990 bytes in Hello, 167,717 bytes now) because it now contains the dormant foundation modules, which answer nothing without
 `FOUNDATION_PROOF=enabled`. The image likewise contains the dormant host module. The proof environment is never
-deployed by CI and CI never connects to a live service.
+deployed by a push or a pull request; it is deployed only by the manually dispatched jobs described
+under Deploying below, and no CI job connects to the deployed service.
 
 ## Running the checks
 
-| Check                                                                                    | Command                                                               | Where it runs                                                                            |
-| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Plan manifest, Worker vectors and tests                                                  | `npm run check`                                                       | hosted CI and locally                                                                    |
-| C# build, tests, format                                                                  | `npm run check:dotnet`                                                | hosted CI and locally                                                                    |
-| Linux Native AOT image and sealed Worker candidate                                       | `npm run candidate`                                                   | hosted CI (needs Docker)                                                                 |
-| Local cross-process integration (real host, workerd with local D1/R2/DO/Queue emulation) | `FOUNDATION_HOST_EXE=<host executable> npm run test:foundation:local` | explicit local opt-in only                                                               |
-| Deployed proof environment                                                               | `npm run deploy:proof`, then `npm run test:foundation:live`           | explicit local opt-in only, needs Cloudflare access and the lease `RES-cloud-deployment` |
+| Check                                                                                    | Command                                                                     | Where it runs                                                                              |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Plan manifest, Worker vectors and tests                                                  | `npm run check`                                                             | hosted CI and locally                                                                      |
+| C# build, tests, format                                                                  | `npm run check:dotnet`                                                      | hosted CI and locally                                                                      |
+| Linux Native AOT image and sealed Worker candidate                                       | `npm run candidate`                                                         | hosted CI (needs Docker)                                                                   |
+| Local cross-process integration (real host, workerd with local D1/R2/DO/Queue emulation) | `FOUNDATION_HOST_EXE=<host executable> npm run test:foundation:local`       | explicit local opt-in only                                                                 |
+| Proof token access, resources and deployment                                             | dispatch of `CI` on `main` with `proof` = `access`, `provision` or `deploy` | manually dispatched CI jobs in the `cloudflare` environment, never on push or pull request |
+| Live scenarios against the deployed proof environment                                    | `npm run test:foundation:live`                                              | explicit local opt-in only, under the lease `RES-cloud-deployment`                         |
 
 ### Deploying and exercising the proof environment
 
-This is the live part. It was not run by the author of this change because it needs interactive Cloudflare
-account access that does not exist in the authoring environment.
+The deployment runs in CI, so that the Cloudflare token and the proof secrets never leave GitHub Actions and
+Cloudflare. Nothing is deployed by a push or a pull request.
 
-1. One-time account setup by the account owner: create the D1 database `arcforges-proof-business`, the R2 bucket
-   `arcforges-proof-objects` and the queues `arcforges-proof-wake` and `arcforges-proof-wake-dlq`, and an API token
-   with Workers Scripts, Containers, D1, R2 and Queues edit rights for that account.
-2. Export `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` for the local session, and the secrets
-   `PROOF_OPERATOR_TOKEN`, `PROOF_HMAC_C2W_SECRET`, `PROOF_HMAC_W2C_SECRET` and `PROOF_CSRF_SECRET` (each at least 32
-   random bytes encoded as unpadded base64url, the operator token any 32 to 256 URL-safe characters). Optionally set
-   `PROOF_D1_DATABASE_ID`.
-3. Build the sealed candidate (`npm run candidate`, needs Docker), then hold the lease
-   `python tools/delivery.py claim RES-cloud-deployment --worker W --task PRF.07` for the live run only.
-4. `npm run deploy:proof` pushes the sealed image, applies the proof migration, sets the four Worker secrets and deploys
-   `--env proof`. Set `PROOF_BASE_URL` to the resulting `workers.dev` origin and run `npm run test:foundation:live`.
-5. Release the lease immediately. The run writes `artifacts/foundation-live-evidence.json`; it never records a secret.
+1. **Dispatch** the `CI` workflow on `main` with the input `proof`:
+   - `access` runs `npm run access:proof` (job `Proof Cloudflare access and resources`, `cloudflare` environment):
+     read probes of the token's Workers Scripts, D1, R2, Queues and `arcforges.com` zone permissions, printed as
+     `PASS` / `FAIL` / `INFO` lines of capability names and HTTP statuses only.
+   - `provision` adds `npm run provision:proof`: idempotent creation, after a lookup by exact name, of the D1
+     database `arcforges-proof-business`, the R2 bucket `arcforges-proof-objects` and the queues
+     `arcforges-proof-wake` and `arcforges-proof-wake-dlq`. Nothing else is created, changed or deleted.
+   - `deploy` runs both and then, in the job `Deploy Cloudflare proof environment`, consumes the sealed candidate of the
+     same run: pushes the sealed image, applies the proof migration to the proof database, deploys
+     `--env proof` with `--containers-rollout immediate` and a configuration generated at deploy time (the real D1
+     database id, the registry image digest, the revision), and attaches the custom domain `proof.arcforges.com`.
+2. **Secrets.** `HMAC_C2W_SECRET`, `HMAC_W2C_SECRET` and `CSRF_SECRET` are 256-bit random values generated inside the
+   deploy step, written to a runner-local file that Wrangler uploads with the Worker version (`--secrets-file`), and
+   removed immediately. They are never printed, committed or stored elsewhere, and a redeploy rotates them. There is
+   no operator token: see Operator access below.
+   Before the domain is attached the job stops if a DNS record for `proof.arcforges.com` exists (or the zone, domain or
+   DNS lookup cannot be read) unless the domain already serves the proof Worker, so an existing record or service is
+   never taken over.
+3. **Receipts, not tests.** After the deployment the job reads provider metadata only: `workers.dev` and preview URLs are
+   disabled (an absent field counts as not disabled) for the proof Worker, the custom domain `proof.arcforges.com` serves `arcforges-cloud-proof`, the production route
+   `arcforges.com/api/*` still serves `arcforges-cloud` and no route of the zone serves the proof Worker. The job
+   writes `proof-deployment.json` (revision, version, image digest, hostname, database id, receipts; no secret) as the
+   artifact `proof-evidence-<run>-<attempt>`. No request is sent to the deployed service by CI.
+4. **Live scenarios** (explicit local opt-in, once, under the lease): hold
+   `python tools/delivery.py claim RES-cloud-deployment --worker W --task PRF.07` only for the run, then
+   `npm run test:foundation:live` (default target `https://proof.arcforges.com`; `PROOF_BASE_URL` overrides it) and
+   release the lease immediately. The run writes `artifacts/foundation-live-evidence.json`; it never records a secret.
+
+### Operator access
+
+The proof surface (`/proof/v1/*`) lets its caller drive the D1, R2, Queue and Container paths, so it is gated, but the
+person or agent who runs the live scenarios must not need a shared secret. The Worker therefore trusts an Ed25519
+**public key** (`PROOF_OPERATOR_VERIFIER`, a plain variable of `env.proof`, committed in `wrangler.json`) and each
+operator request carries a signature:
+
+```text
+Authorization: AF-Operator t=<UTC epoch seconds>,n=<unpadded base64url of 128 random bits>,s=<unpadded base64url Ed25519 signature>
+signed text:   AF-OPERATOR-V2 LF METHOD LF host LF exact-path LF t LF n LF lowercase-hex-sha256-of-body
+```
+
+The Worker reads the bounded body, verifies the signature over its hash, rejects a time skew above 60 seconds and
+answers every refusal with the same empty HTTP 401. The private key is generated by
+`npm run operator:proof -- init` into `~/.arcforges/proof-operator/ed25519-private.pem` (or
+`PROOF_OPERATOR_KEY_FILE`), is never printed, committed or uploaded, and is used only by
+`eng/verification/proof-operator.ts` to sign. Only the public key is printed. A new key means a new public key in
+`wrangler.json` and a redeploy. The signature binds the host, so a request signed for another origin is refused. It has no nonce store, so a captured request can be replayed within the skew
+window, which the operator surface tolerates because TLS protects the transport and every operation is a proof
+operation on the isolated proof database. The browser-session routes (`/session/v1/*`) need no operator credential: the
+bootstrap is anonymous and the session round trip starts from `session/issue`, an operator operation, so the PRF.08
+session and CSRF round trip is run with the same local signing key and without any human handling a secret.
+
+The scenario file `eng/verification/foundation-scenarios.ts` runs exact `int64`, `uint64` and `decimal` values through
+the operator JSON surface, not gRPC-Web: the deployed proof environment exposes no generated gRPC-Web service that
+carries those primitives (the Hello service carries strings), so the PRF.05 exact-value gRPC-Web scenarios have no
+method to call there until a service that carries them exists.
 
 ## Not claimed
 
@@ -195,8 +242,8 @@ account access that does not exist in the authoring environment.
   contracts 05 section 2 do not.
 - The R2 facade (`/internal/objects/v1/probe/...`) and `worker/proof-migrations/0001_foundation_probe.sql` are
   proof-only. They are not the CON.15 job-object ports and are not part of the global D1 migration sequence.
-- `npm run deploy:proof` (secret creation before the first deploy, `d1 migrations apply` without a database id,
-  `PROOF_D1_DATABASE_ID`) has never run and its step ordering may need adjustment on the first live attempt.
+- The CI proof jobs (`access`, `provision`, `deploy`) are exercised offline only (fake Cloudflare API, configuration
+  and secret generation); their first run on the real account is recorded in the ledger, not here.
 - The proof environment binds `FoundationContainer`; its container start path with outbound interception has not been
   observed on Cloudflare. The production class does not register any.
 
@@ -210,7 +257,7 @@ are claimant-reported until the independent review and hosted CI confirm them. N
 | Worker and tooling tests                | `npm test`                                                                                                   | 176 tests passed, 0 failed                                                                                                                   |
 | Dependency policy                       | `npm run test:dependencies`, `node tooling/dependency-policy.ts`                                             | 18 passed; policy and receipt `prf-07-r1` verify                                                                                             |
 | Licence, provenance                     | `node tooling/project.ts licence`, `node tooling/project.ts provenance`                                      | pass                                                                                                                                         |
-| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 165267 bytes)                                                                                                        |
+| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 167717 bytes)                                                                                                        |
 | Plan generator drift                    | `npm run check:plans`                                                                                        | 19 plans, manifest hash matches the generated TS and C#                                                                                      |
 | Formatting, lint, types                 | `prettier --check .`, `biome lint`, `tsc` for both projects                                                  | clean                                                                                                                                        |
 | C# build and tests                      | `dotnet build` and `dotnet test` of `Cloud.slnx`, Release, under the build slot                              | 0 warnings, 159 tests passed                                                                                                                 |
@@ -224,14 +271,13 @@ Queue emulation, and a Node SQLite bridge standing in for D1.
 ### Unobserved
 
 - Any deployed Cloudflare behavior: D1, R2, Queue, Durable Object, Container, outbound handlers, blocked egress,
-  public-surface denial, provider limits. `npm run deploy:proof` and `npm run test:foundation:live` have never been run.
+  public-surface denial, provider limits. `npm run test:foundation:live` has not been run against a deployment as of this document.
 - The Linux Native AOT image and the Docker build (no Docker here); they are exercised only by hosted CI.
 - The local Node and npm are newer than the pinned toolchain; the pinned toolchain check runs only in hosted CI.
 - SQLite and workerd are emulation, not the provider.
 
 ### What the live evidence needs
 
-Cloudflare account id and an API token with Workers Scripts, Containers, D1, R2 and Queues edit rights; the D1 database
-`arcforges-proof-business`, the R2 bucket `arcforges-proof-objects` and the queues `arcforges-proof-wake` and
-`arcforges-proof-wake-dlq`; the four proof secrets; a built candidate (`npm run candidate`, needs Docker); the
-`RES-cloud-deployment` lease. Until then PRF.07 cannot be complete.
+The deployed proof environment (dispatch `CI` with `proof` = `deploy`, see above), the operator key file on the
+workstation that runs the scenarios, and the `RES-cloud-deployment` lease for that run. Until the scenarios have run
+against the deployment and their evidence is recorded, PRF.07 cannot be complete.

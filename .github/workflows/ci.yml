@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      proof:
+        description: >-
+          Isolated proof environment (main only). none: nothing. access: verify the deployment token's
+          D1, R2, Queues, Workers and zone permissions. provision: access plus idempotent creation of the
+          reserved proof D1 database, R2 bucket and queues. deploy: provision plus deployment of the
+          sealed candidate to the proof Worker on proof.arcforges.com.
+        type: choice
+        options: [none, access, provision, deploy]
+        default: none
   schedule:
     - cron: "43 6 * * 1"
 
@@ -263,5 +273,83 @@ jobs:
           name: cloudflare-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             artifacts/deployment.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  proof-access:
+    name: Proof Cloudflare access and resources
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      && inputs.proof != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: cloudflare
+    concurrency:
+      group: cloudflare-proof
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # Reads (and, for provision and deploy, idempotently creates) only the reserved proof resources.
+      # Output names capabilities and HTTP statuses; no token, secret or response body is printed.
+      - name: Verify token access and provision the reserved proof resources
+        run: |
+          if [ "$PROOF_ACTION" = access ]; then npm run access:proof; else npm run provision:proof; fi
+        env:
+          PROOF_ACTION: ${{ inputs.proof }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+  deploy-proof:
+    name: Deploy Cloudflare proof environment
+    if: >-
+      !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      && inputs.proof == 'deploy' && needs.verify.result == 'success'
+      && needs.candidate.result == 'success' && needs.proof-access.result == 'success'
+    needs: [verify, candidate, proof-access]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: cloudflare
+    concurrency:
+      group: cloudflare-proof-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          artifact-ids: ${{ needs.candidate.outputs.artifact-id }}
+          path: artifacts/candidate
+          merge-multiple: true
+      # The sealed candidate is promoted unchanged. The proof secrets are generated inside this step,
+      # uploaded with the Worker version and never printed or stored; the deployment token is the
+      # existing one and the production Worker, its route and its version are not touched.
+      - run: npm run deploy:proof
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+      - name: Preserve proof deployment evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: proof-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/proof-deployment.json
           if-no-files-found: warn
           retention-days: 90
