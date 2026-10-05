@@ -155,7 +155,7 @@ internal sealed class OutboxPublisher(IPlanExecutor executor, ulong recoveryGene
         if (through < 1 || cutoffMicros <= 0) throw new ArgumentOutOfRangeException(nameof(through));
         var guard = D1Values.Text(StorageFormats.Id(Guid.NewGuid()));
         var key = D1Values.Text(streamKey);
-        D1Scalar[][] arguments = [[guard, key, D1Values.Int64(through)], [key, D1Values.Int64(through), D1Values.Int64(cutoffMicros)], [D1Values.Int64(cutoffMicros)], [guard]];
+        D1Scalar[][] arguments = [[guard, key, D1Values.Int64(through)], [key, D1Values.Int64(through), key, D1Values.Int64(cutoffMicros)], [D1Values.Int64(cutoffMicros)], [guard]];
         return await GuardedAsync(PlanCall.New(PlanManifest.Platform.OutboxPurge, streamKey, recoveryGeneration, arguments), cancellationToken);
     }
 

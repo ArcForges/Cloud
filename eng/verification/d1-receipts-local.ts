@@ -30,7 +30,7 @@ import { i64, txt, uuid } from "../../tests/worker/support/plan-calls.ts";
 
 const root = path.resolve(import.meta.dirname, "../..");
 /** One database per scenario, so no scenario sees another's rows. */
-const scenarioDatabases = 9;
+const scenarioDatabases = 10;
 const sc = (value: string): D1Scalar => ({ kind: "text", value });
 
 interface Result {
@@ -424,7 +424,67 @@ export async function main(): Promise<void> {
         "INSERT INTO platform_outbox_position (outbox_id, stream_key, sequence) VALUES ('00000000-0000-4000-8000-0000000000ff', 'workspace:fixture-a', 9)",
         /FOREIGN KEY/u,
       );
-      return "updates and deletes of positions and archive rows, a watermark beyond the allocation and a position without its outbox row are refused by workerd's D1";
+      return "updates of positions and archive rows, deletes of a stream, a watermark beyond the allocation and a position without its outbox row are refused by workerd's D1 (deleting positions and archive rows is the purge plans' job, see the purge scenario)";
+    });
+
+    await scenario("purge-is-clamped-to-the-acknowledged-watermark", async () => {
+      const db = await freshDatabase(mf, "S10");
+      for (let index = 0; index < 6; index++)
+        assert(
+          (
+            await commit(db, {
+              commandId: uuid(),
+              itemId: `u${index}`,
+              plan: "item-store-one",
+              events: [event()],
+            })
+          ).ok,
+        );
+      assert((await ack(db, 0, 2)).ok);
+      const guard = uuid();
+      // The guard passes for 2 while the DELETE is bound to 6: the plan's own clamp keeps everything above the watermark.
+      const outcome = await execute(
+        db,
+        "platform.outbox-purge",
+        [
+          [txt(guard), sc(stream), i64(2)],
+          [sc(stream), i64(6), sc(stream), i64(9_000_000)],
+          [i64(9_000_000)],
+          [txt(guard)],
+        ],
+        stream,
+      );
+      assert(outcome.ok, JSON.stringify(outcome));
+      assert.deepEqual(await sequences(db), [3, 4, 5, 6]);
+      assert.equal(await count(db, "platform_outbox"), 4);
+      const archiveGuard = uuid();
+      assert(
+        (
+          await execute(
+            db,
+            "platform.archive-ack",
+            [
+              [txt(archiveGuard), i64(0), i64(0), i64(0), i64(2), i64(0), i64(2), i64(2)],
+              [i64(2), txt("r"), i64(5_000_000), i64(0), i64(0), i64(0)],
+              [txt(archiveGuard)],
+            ],
+            "platform",
+          )
+        ).ok,
+      );
+      const purgeGuard = uuid();
+      assert(
+        (
+          await execute(
+            db,
+            "platform.archive-purge",
+            [[txt(purgeGuard), i64(2)], [i64(6), i64(9_000_000)], [txt(purgeGuard)]],
+            "platform",
+          )
+        ).ok,
+      );
+      assert.equal(await count(db, "platform_change_archive"), 4);
+      return "a purge whose DELETE is bound beyond its guard deletes only rows at or below the acknowledged watermark (positions 1-2 and their outbox rows, archive records 1-2); sequences 3-6 stay";
     });
 
     await scenario("archive-pages-are-byte-bounded-and-hashes-survive-blob-binding", async () => {

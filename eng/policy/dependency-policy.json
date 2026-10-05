@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "0f4cdcebd99420c042db5f5bd88d35f813689bd2",
+  "sourceCommit": "c38374e620e87aff6bc9a3dc004ecd5149a3c140",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -72,15 +72,15 @@
     "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "a3bdd02ca2bc05a26d60fe226faf2fdedb1c1388e78cd2a65f8f627562ea7d2f",
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "5ef3c196005caf9cddb702a0061fafd310d149f1326708b958d1381934f69313",
-    "eng/provenance/artifact-profiles/cloud-release-r32.json": "28f4b9f46fd8a32936ec06a756d7fc2657f6d29e1eee01a056f91a7d6cb9566d",
-    "eng/provenance/records/cloud-04-cloud-runtime-notices-r1.json": "857dd5fdee4e4825c9235a418c6ae0b8b9d54b5d1246922ce1b845b553616aab",
-    "eng/provenance/records/cloud-04-cloud-worker-bundle-r1.json": "8c30a078b4543ac841a764474957f7f63d8db9265ce41e931fe2879c2703310a"
+    "eng/provenance/artifact-profiles/cloud-release-r33.json": "a33ced1368589fbf1524d9e9639e0dcb82cb0cdd4ffd67bb4b5132284ea4bfb6",
+    "eng/provenance/records/cloud-04b-cloud-runtime-notices-r1.json": "f1febb9a98ea9dda9cd723b29fbe89611d8ca37736410ec88b163d3f5b36fe67",
+    "eng/provenance/records/cloud-04b-cloud-worker-bundle-r1.json": "164d4050857262fc0826351e699392280437b74e205dc49e06ce89ca65dc4c0e"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "ArcForges delivery worker w-c20261005-cloud04 (CLOUD.04 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "date": "2026-10-05",
-    "rationale": "CLOUD.04 adds the receipts, outbox, inbox and change-archive mechanism: source files of the existing Storage.D1 project, the platform owner's plans, the plan generator rule, tests, one npm script block and the Docker context rules of the new source folders. package.json (new check and test scripts), the Docker context rules, the first-party inventory and the release records are hash-bound inputs, so they are re-bound here; the release profile and runtime notices are re-bound by immutable successor records because the first-party source file list of the Native AOT closure changed, and the Worker bundle record follows the new profile and the regenerated plan dictionary. No npm or NuGet coordinate, integrity value or closure entry changes, no project, reference or lock file changes, and no new native capability or broader source reuse permission is created.",
+    "rationale": "CLOUD.04 follow-up (purge hardening): source files of the existing Storage.D1 project, the platform owner's plans, the plan generator rule, tests, one npm script block and the Docker context rules of the new source folders. package.json (new check and test scripts), the Docker context rules, the first-party inventory and the release records are hash-bound inputs, so they are re-bound here; the release profile and runtime notices are re-bound by immutable successor records because the first-party source file list of the Native AOT closure changed, and the Worker bundle record follows the new profile and the regenerated plan dictionary. No npm or NuGet coordinate, integrity value or closure entry changes, no project, reference or lock file changes, and no new native capability or broader source reuse permission is created.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -150,9 +150,9 @@
       "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "a3bdd02ca2bc05a26d60fe226faf2fdedb1c1388e78cd2a65f8f627562ea7d2f",
       "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "5ef3c196005caf9cddb702a0061fafd310d149f1326708b958d1381934f69313",
-      "eng/provenance/artifact-profiles/cloud-release-r32.json": "28f4b9f46fd8a32936ec06a756d7fc2657f6d29e1eee01a056f91a7d6cb9566d",
-      "eng/provenance/records/cloud-04-cloud-runtime-notices-r1.json": "857dd5fdee4e4825c9235a418c6ae0b8b9d54b5d1246922ce1b845b553616aab",
-      "eng/provenance/records/cloud-04-cloud-worker-bundle-r1.json": "8c30a078b4543ac841a764474957f7f63d8db9265ce41e931fe2879c2703310a"
+      "eng/provenance/artifact-profiles/cloud-release-r33.json": "a33ced1368589fbf1524d9e9639e0dcb82cb0cdd4ffd67bb4b5132284ea4bfb6",
+      "eng/provenance/records/cloud-04b-cloud-runtime-notices-r1.json": "f1febb9a98ea9dda9cd723b29fbe89611d8ca37736410ec88b163d3f5b36fe67",
+      "eng/provenance/records/cloud-04b-cloud-worker-bundle-r1.json": "164d4050857262fc0826351e699392280437b74e205dc49e06ce89ca65dc4c0e"
     },
     "checks": [
       "locked-restore",
@@ -983,7 +983,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-04-cloud-runtime-notices-r1", "cloud-04-cloud-worker-bundle-r1"],
+  "artifactRecords": ["cloud-04b-cloud-runtime-notices-r1", "cloud-04b-cloud-worker-bundle-r1"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -997,7 +997,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-04-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-04b-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
