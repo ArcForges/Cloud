@@ -344,6 +344,7 @@
       "arcforges.cloud.storage.d1": {
         "type": "Project",
         "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )",
           "ArcForges.Contracts.CloudInternal": "[1.0.0-ci.287.1, )"
         }
       },

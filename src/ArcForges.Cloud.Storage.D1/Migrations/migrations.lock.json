@@ -168,6 +168,13 @@
       "module": "platform",
       "mode": "expand",
       "sha256": "fdae6d0c2863640891d9a90c11b594ea7bccb24a63cb0d8a31a67a26e3f57776"
+    },
+    {
+      "sequence": 24,
+      "file": "0024_entitlement__resolver-inputs.sql",
+      "module": "entitlement",
+      "mode": "expand",
+      "sha256": "61c9b10c0e34ee223fad5ddd7ebba7027d92dab112e096c8dc753798ac01eff3"
     }
   ]
 }

@@ -88,7 +88,8 @@ public sealed partial class ModuleBoundaryTests
         var projects = SourceProjects().ToDictionary(p => p.Name);
         Assert.Empty(projects[Abstractions].ProjectReferences);
         Assert.Empty(projects[Abstractions].PackageReferences);
-        Assert.Empty(projects[Storage].ProjectReferences);
+        // The plan bridge references the Abstractions project only to implement its generic plan-execution port (COM.16) and no module.
+        Assert.Equal([Abstractions], projects[Storage].ProjectReferences);
         Assert.Equal(["ArcForges.Contracts.CloudInternal"], projects[Storage].PackageReferences);
     }
 
@@ -146,7 +147,7 @@ public sealed partial class ModuleBoundaryTests
             {
                 foreach (Match match in CloudNamespaces().Matches(File.ReadAllText(file)))
                 {
-                    var own = shared == Abstractions ? match.Value == "ArcForges.Cloud.Modules" : match.Value is "ArcForges.Cloud.Storage" or "ArcForges.Cloud.Hmac";
+                    var own = shared == Abstractions ? match.Value == "ArcForges.Cloud.Modules" : match.Value is "ArcForges.Cloud.Storage" or "ArcForges.Cloud.Hmac" or "ArcForges.Cloud.Modules";
                     Assert.True(own, Path.GetRelativePath(root, file) + " references " + match.Value);
                 }
             }

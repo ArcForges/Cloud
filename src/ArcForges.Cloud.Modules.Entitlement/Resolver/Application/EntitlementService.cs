@@ -32,6 +32,7 @@ internal sealed class EntitlementService(
     IEntitlementStore store, IEntitlementDefinitionSource definitions, IEntitlementIdSource ids, TimeProvider clock)
 {
     private const int Attempts = 4;
+    private const string UnknownDetail = "The store could not tell whether the commit happened; send the same request again.";
 
     /// <summary>The current snapshot. A stored snapshot is returned while its validity holds; otherwise it is recomputed and stored.</summary>
     public async ValueTask<EntitlementResult<EntitlementSnapshot>> ReadAsync(string workspaceId, CancellationToken cancellationToken)
@@ -69,10 +70,9 @@ internal sealed class EntitlementService(
             }
 
             var append = new EntitlementAppend([], [], activations);
-            if (await store.CommitAsync(workspaceId, state.Revision, append, snapshot, cancellationToken).ConfigureAwait(false) == CommitOutcome.Committed)
-            {
-                return EntitlementResult<EntitlementSnapshot>.Success(snapshot);
-            }
+            var outcome = await store.CommitAsync(workspaceId, state.Revision, append, snapshot, cancellationToken).ConfigureAwait(false);
+            if (outcome == CommitOutcome.Committed) return EntitlementResult<EntitlementSnapshot>.Success(snapshot);
+            if (outcome == CommitOutcome.UnknownOutcome) return EntitlementResult<EntitlementSnapshot>.Failure(EntitlementError.OutcomeUnknown, UnknownDetail);
         }
 
         return EntitlementResult<EntitlementSnapshot>.Failure(EntitlementError.ConcurrentUpdate, "The workspace changed concurrently on every attempt.");
@@ -102,10 +102,9 @@ internal sealed class EntitlementService(
             var snapshot = Seal(state, records, now, out var failure);
             if (snapshot is null) return EntitlementResult<Grant>.Failure(EntitlementError.InvalidHistory, failure!);
             var append = new EntitlementAppend([grant], [], activations);
-            if (await store.CommitAsync(request.WorkspaceId, state.Revision, append, snapshot, cancellationToken).ConfigureAwait(false) == CommitOutcome.Committed)
-            {
-                return EntitlementResult<Grant>.Success(grant);
-            }
+            var outcome = await store.CommitAsync(request.WorkspaceId, state.Revision, append, snapshot, cancellationToken).ConfigureAwait(false);
+            if (outcome == CommitOutcome.Committed) return EntitlementResult<Grant>.Success(grant);
+            if (outcome == CommitOutcome.UnknownOutcome) return EntitlementResult<Grant>.Failure(EntitlementError.OutcomeUnknown, UnknownDetail);
         }
 
         return EntitlementResult<Grant>.Failure(EntitlementError.ConcurrentUpdate, "The workspace changed concurrently on every attempt.");
@@ -144,11 +143,10 @@ internal sealed class EntitlementService(
             var records = withActivation with { Revocations = withActivation.Revocations.Add(revocation) };
             var snapshot = Seal(state, records, now, out var failure);
             if (snapshot is null) return EntitlementResult<Revocation>.Failure(EntitlementError.InvalidHistory, failure!);
-            if (await store.CommitAsync(request.WorkspaceId, state.Revision, new EntitlementAppend([], [revocation], activations), snapshot, cancellationToken)
-                    .ConfigureAwait(false) == CommitOutcome.Committed)
-            {
-                return EntitlementResult<Revocation>.Success(revocation);
-            }
+            var outcome = await store.CommitAsync(request.WorkspaceId, state.Revision, new EntitlementAppend([], [revocation], activations), snapshot, cancellationToken)
+                .ConfigureAwait(false);
+            if (outcome == CommitOutcome.Committed) return EntitlementResult<Revocation>.Success(revocation);
+            if (outcome == CommitOutcome.UnknownOutcome) return EntitlementResult<Revocation>.Failure(EntitlementError.OutcomeUnknown, UnknownDetail);
         }
 
         return EntitlementResult<Revocation>.Failure(EntitlementError.ConcurrentUpdate, "The workspace changed concurrently on every attempt.");

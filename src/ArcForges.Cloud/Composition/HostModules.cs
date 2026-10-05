@@ -5,6 +5,7 @@ using ArcForges.Cloud.Foundation;
 using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Storage;
+using ArcForges.Cloud.Storage.ModuleBinding;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ArcForges.Cloud.Composition;
@@ -31,7 +32,7 @@ internal static class HostModules
     /// <summary>The ingress module comes first so its pipeline runs before the gRPC-Web adapter; it reads the other modules' policies when mapping.</summary>
     public static IReadOnlyList<IHostModule> All(JsonObject identity)
     {
-        IHostModule[] served = [new HelloModule(identity), new FoundationModule(), .. ModuleBoundaries.All.Select(boundary => new ModuleBoundaryHost(boundary))];
+        IHostModule[] served = [new HelloModule(identity), new FoundationModule(), new ModulePlanBindingModule(), .. ModuleBoundaries.All.Select(boundary => new ModuleBoundaryHost(boundary))];
         return [new IngressModule(served), .. served];
     }
 }
@@ -80,6 +81,23 @@ internal sealed class HelloModule(JsonObject identity) : IHostModule
         var health = new HealthStatus("arcforges-cloud", revision, !RuntimeFeature.IsDynamicCodeSupported,
             identity["artifact"]!.AsObject(), build);
         app.MapGet("/healthz", () => Results.Json(health, HealthJsonContext.Default.HealthStatus));
+    }
+}
+
+/// <summary>
+/// Binds the generic plan-execution port of the Abstractions project to the signed Worker executor (COM.16): a module project asks the
+/// factory for the port of its own descriptor and reaches D1 only through named plans of its own owner. The binding is created only
+/// when a module asks for it, and it needs the executor and the recovery generation of the foundation configuration, so without that
+/// configuration (production today) nothing resolves it and no route, method or request changes.
+/// </summary>
+internal sealed class ModulePlanBindingModule : IHostModule
+{
+    public void Register(WebApplicationBuilder builder) =>
+        builder.Services.TryAddSingleton<IModulePlanPortFactory>(provider => new ModulePlanPortFactory(
+            provider.GetRequiredService<IPlanExecutor>(), provider.GetRequiredService<FoundationOptions>().RecoveryGeneration, provider.GetRequiredService<TimeProvider>()));
+
+    public void Map(WebApplication app)
+    {
     }
 }
 

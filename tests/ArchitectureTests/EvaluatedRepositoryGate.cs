@@ -30,6 +30,24 @@ public sealed class EvaluatedRepositoryGate
             ["TheHostListsEveryBoundaryOnceAndAListedBoundaryServesNothing", "TheComposedHostStillServesOnlyHelloAndHealthAndRefusesEveryModulePath"]),
         ("ArcForges.Cloud.Modules.IModuleBoundary", "Map", "ArcForges.Cloud.Tests.ModuleBoundaryTests",
             ["TheHostListsEveryBoundaryOnceAndAListedBoundaryServesNothing", "TheComposedHostStillServesOnlyHelloAndHealthAndRefusesEveryModulePath"]),
+        // COM.16: the published grant port and the generic plan-execution port. The grant port is exercised through its Entitlement implementation
+        // (no Entitlement type crosses it); the plan port through the adapter of the plan bridge and the D1 store that uses it; the plan value
+        // type directly and through every plan call.
+        ("ArcForges.Cloud.Modules.IEntitlementGrantPort", "IssueGrantAsync", "ArcForges.Cloud.Tests.Entitlement.GrantPortContractTests",
+            ["AGrantIsIssuedWithItsSnapshotAndReportedAsPrimitives", "AReplayBySourceReferenceIsAnIdempotentNoOpAndADifferentGrantUnderTheReferenceIsAConflict",
+                "AMalformedRequestIsRefusedBeforeAnyStoreCallAndNeverCoerced"]),
+        ("ArcForges.Cloud.Modules.IEntitlementGrantPort", "RevokeGrantAsync", "ArcForges.Cloud.Tests.Entitlement.GrantPortContractTests",
+            ["ARevocationNamesOneGrantGuardsTheVersionAndReplaysAsANoOp", "ASubMicrosecondRevocationInstantAndAMalformedRevocationAreRefused"]),
+        ("ArcForges.Cloud.Modules.IModulePlanPort", "ReadAsync", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
+            ["ARoundTripCarriesExactTypedValuesTheScopeAndTheRecoveryGeneration", "EveryPlanFailureBecomesATypedStatus"]),
+        ("ArcForges.Cloud.Modules.IModulePlanPort", "WriteAsync", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
+            ["EveryPlanFailureBecomesATypedStatus", "ACommitForAPlanThatDeclaresNoTailIsRejected"]),
+        ("ArcForges.Cloud.Modules.IModulePlanPortFactory", "For", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
+            ["APlanOfAnotherOwnerIsRefusedBeforeAnythingIsSent", "AnUnknownPlanAndAnAccessMismatchAreCallerDefectsThatNeverReachTheExecutor"]),
+        ("ArcForges.Cloud.Modules.ModulePlanOutcome", "Of", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests", ["EveryPlanFailureBecomesATypedStatus"]),
+        .. new[] { "FromInt64", "FromBool", "FromText", "FromBytes", "FromOptionalText", "AsInt64", "AsBool", "AsText", "AsBytes", "AsOptionalText", "AsOptionalInt64", "Equals", "GetHashCode", "ToString" }
+            .Select(member => ("ArcForges.Cloud.Modules.PlanValue", member, "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
+                new[] { "PlanValuesAreExactAndNeverDescribeTheirContent", "ARoundTripCarriesExactTypedValuesTheScopeAndTheRecoveryGeneration" })),
     ];
 
     [Fact]

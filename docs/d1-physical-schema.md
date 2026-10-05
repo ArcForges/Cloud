@@ -10,7 +10,7 @@ boundaries are described in [storage plans](storage-plans.md).
 
 | Path                                                          | Content                                                                                                                                            |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/ArcForges.Cloud.Storage.D1/Physical/manifest/*.json`     | The checked-in physical manifest: one file per owner (19 modules and `platform`) and the closed enum registry `enums.json`. 158 tables.            |
+| `src/ArcForges.Cloud.Storage.D1/Physical/manifest/*.json`     | The checked-in physical manifest: one file per owner (19 modules and `platform`) and the closed enum registry `enums.json`. 161 tables.            |
 | `src/ArcForges.Cloud.Storage.D1/Physical/PhysicalSchema.g.cs` | Generated C# column maps, enum registry, manifest hash and migration-lock identity.                                                                |
 | `src/ArcForges.Cloud.Storage.D1/Physical/*.cs`                | The typed exact bind/result adapters: `ColumnCodec`, `PhysicalValue`, `RowShape`, `ExactOrderBytes`, `Fts5Query`, `SchemaCompatibility`.           |
 | `src/ArcForges.Cloud.Storage.D1/Migrations/`                  | The numbered, checksum-locked migrations (`NNNN_<module>__<slug>.sql`), `migrations.lock.json` and the `pending/` folder of unnumbered migrations. |
@@ -56,6 +56,8 @@ Model 01 describes these records without a field list; the owning task defines t
 records and the sort-key columns of any table that a module orders by an exact decimal. The change archive and the commit support records that CLOUD.04 needed
 (`platform_sequence_stream`, `platform_outbox_position`, `platform_change_archive`, and the guard table `platform_command_guard` that CLOUD.06 defines) are defined in model 01 section 2 and added by migrations 0022 and 0023
 ([receipts and outbox](d1-receipts-outbox.md)). The cloud `search_retrieval_chunk` has no vector column: embeddings live in Vectorize.
+
+COM.16 adds three Entitlement-owned append-only records that the resolver reads and model 01 now lists (`entitlement_definitions_activation`, `entitlement_workspace_status_fact`, `entitlement_feature_release`; migration 0024), so the manifest holds 161 tables (158 before, counted from `Physical/manifest/*.json`). The `entitlement_snapshot` json columns hold the whole resolver output, and the `entitlement_grant.reason` column and the `entitlement_revision` fence were already in the manifest ([entitlement resolver](entitlement-resolver.md#the-grant-port-and-the-durable-store)).
 
 ## Typed exact adapters (C#)
 

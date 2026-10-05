@@ -15,15 +15,15 @@ namespace ArcForges.Cloud.Tests.Entitlement;
 /// </summary>
 public sealed class RebuildEquivalenceTests
 {
-    private sealed record Step(long AtSeconds, Func<EntitlementHarness, Task> Run);
+    internal sealed record Step(long AtSeconds, Func<IScenario, Task> Run);
 
-    private sealed record Account(string Name, bool SelfHost, long EndSeconds, Step[] Steps);
+    internal sealed record Account(string Name, bool SelfHost, long EndSeconds, Step[] Steps);
 
-    private static Step S(long at, Func<EntitlementHarness, Task> run) => new(at, run);
+    private static Step S(long at, Func<IScenario, Task> run) => new(at, run);
 
-    private static Func<EntitlementHarness, Task> Issue(IssueGrantRequest request) => async h => await h.Issue(request);
+    private static Func<IScenario, Task> Issue(IssueGrantRequest request) => async h => await h.Issue(request);
 
-    private static IEnumerable<Account> Accounts()
+    internal static IEnumerable<Account> Accounts()
     {
         yield return new Account("empty", false, 100 * Day, []);
         yield return new Account("monthly-with-renewal-addon-and-cancel", false, 100 * Day,
@@ -31,59 +31,59 @@ public sealed class RebuildEquivalenceTests
             S(0, Issue(Capability("cloud.sync", 0, null, "sub1-p1"))),
             S(0, Issue(Quota("cloud.storage.bytes", 50, 0, null, "base"))),
             S(0, Issue(Allowance("ai.capacity", "plan-basic", 0, null, "al1"))),
-            S(0, h => h.AddTerm(Term("t1", Day, 31 * Day, graceSeconds: 38 * Day))),
-            S(20 * Day, h => h.AddTerm(Term("t2", 31 * Day, 61 * Day, graceSeconds: 68 * Day, createdSeconds: 20 * Day))),
+            S(0, h => h.AddTermFact(Term("t1", Day, 31 * Day, graceSeconds: 38 * Day))),
+            S(20 * Day, h => h.AddTermFact(Term("t2", 31 * Day, 61 * Day, graceSeconds: 68 * Day, createdSeconds: 20 * Day))),
             S(24 * Day, Issue(Quota("cloud.storage.bytes", 100, 25 * Day, 50 * Day, "addon", GrantSource.StorageAddOn))),
-            S(40 * Day, h => h.AddStatus(new WorkspaceStatusFact(T(40 * Day), WorkspaceStatus.Normal, AutoRenew: false, PurchasePending: false))),
+            S(40 * Day, h => h.AddStatusFact(new WorkspaceStatusFact(T(40 * Day), WorkspaceStatus.Normal, AutoRenew: false, PurchasePending: false))),
         ]);
         yield return new Account("refunded-pass", false, 100 * Day,
         [
             S(0, Issue(Capability("cloud.sync", 0, null, "pass1", GrantSource.CloudPass))),
-            S(0, h => h.AddTerm(Term("pass-t", 0, 60 * Day, kind: ServiceTermKind.Pass))),
+            S(0, h => h.AddTermFact(Term("pass-t", 0, 60 * Day, kind: ServiceTermKind.Pass))),
             S(5 * Day, async h =>
             {
                 var snapshot = await h.Read();
                 await h.Revoke(Capability(snapshot, "cloud.sync").SourceGrantIds.Single(), snapshot.Version, effectiveSeconds: 0);
-                await h.AddAction(new TermActionFact("pass-t", ServiceTermActionKind.Revoke, T(5 * Day), T(5 * Day)));
+                await h.AddActionFact(new TermActionFact("pass-t", ServiceTermActionKind.Revoke, T(5 * Day), T(5 * Day)));
             }),
         ]);
         yield return new Account("grace-then-late-recovery", false, 100 * Day,
         [
             S(0, Issue(Capability("cloud.sync", 0, null, "sub1"))),
-            S(0, h => h.AddTerm(Term("t1", 0, 30 * Day, graceSeconds: 37 * Day))),
-            S(33 * Day, h => h.AddTerm(Term("t2", 30 * Day, 60 * Day, authorizedSeconds: 33 * Day, createdSeconds: 33 * Day))),
+            S(0, h => h.AddTermFact(Term("t1", 0, 30 * Day, graceSeconds: 37 * Day))),
+            S(33 * Day, h => h.AddTermFact(Term("t2", 30 * Day, 60 * Day, authorizedSeconds: 33 * Day, createdSeconds: 33 * Day))),
         ]);
         yield return new Account("late-issued-grant-with-earlier-start", false, 100 * Day,
         [
-            S(0, h => h.AddTerm(Term("t1", 0, 100 * Day))),
+            S(0, h => h.AddTermFact(Term("t1", 0, 100 * Day))),
             S(10 * Day, Issue(Capability("cloud.sync", 2 * Day, null, "late1"))),
         ]);
         yield return new Account("restricted-suspended-normal", false, 100 * Day,
         [
             S(0, Issue(Capability("cloud.sync", 0, null, "sub1"))),
-            S(0, h => h.AddTerm(Term("t1", 0, 90 * Day))),
-            S(10 * Day, h => h.AddStatus(new WorkspaceStatusFact(T(10 * Day), WorkspaceStatus.Restricted, true, false))),
-            S(20 * Day, h => h.AddStatus(new WorkspaceStatusFact(T(20 * Day), WorkspaceStatus.Suspended, true, false))),
-            S(30 * Day, h => h.AddStatus(new WorkspaceStatusFact(T(30 * Day), WorkspaceStatus.Normal, true, false))),
+            S(0, h => h.AddTermFact(Term("t1", 0, 90 * Day))),
+            S(10 * Day, h => h.AddStatusFact(new WorkspaceStatusFact(T(10 * Day), WorkspaceStatus.Restricted, true, false))),
+            S(20 * Day, h => h.AddStatusFact(new WorkspaceStatusFact(T(20 * Day), WorkspaceStatus.Suspended, true, false))),
+            S(30 * Day, h => h.AddStatusFact(new WorkspaceStatusFact(T(30 * Day), WorkspaceStatus.Normal, true, false))),
         ]);
         yield return new Account("feature-rollout", false, 100 * Day,
         [
             S(0, Issue(Capability("cloud.ai", 0, null, "ai1"))),
-            S(0, h => h.AddTerm(Term("t1", 0, 90 * Day))),
-            S(0, h => h.AddRelease(new FeatureReleaseFact("feature.ai", T(15 * Day)))),
+            S(0, h => h.AddTermFact(Term("t1", 0, 90 * Day))),
+            S(0, h => h.AddReleaseFact(new FeatureReleaseFact("feature.ai", T(15 * Day)))),
         ]);
         yield return new Account("admin-and-compensation-grants", false, 100 * Day,
         [
             S(0, Issue(Capability("cloud.web_continuity", 0, 40 * Day, "ticket-9", GrantSource.AdminGrant, reason: "goodwill"))),
             S(0, Issue(Quota("cloud.devices.max", 4, 0, null, "mig-1", GrantSource.Migration, reason: "migration"))),
-            S(0, h => h.AddTerm(Term("t1", 0, 20 * Day))),
+            S(0, h => h.AddTermFact(Term("t1", 0, 20 * Day))),
             S(10 * Day, Issue(Capability("cloud.sync", 10 * Day, 30 * Day, "incident-3", GrantSource.Compensation, reason: "incident 3"))),
-            S(15 * Day, h => h.AddTerm(Term("comp", 20 * Day, 27 * Day, kind: ServiceTermKind.Compensation, createdSeconds: 15 * Day))),
+            S(15 * Day, h => h.AddTermFact(Term("comp", 20 * Day, 27 * Day, kind: ServiceTermKind.Compensation, createdSeconds: 15 * Day))),
         ]);
         yield return new Account("self-host", true, 100 * Day,
         [
             S(0, Issue(Capability("cloud.sync", 0, null, "op-1", GrantSource.AdminGrant, reason: "operator funded"))),
-            S(0, h => h.AddTerm(Term("sg", 0, 50 * Day, kind: ServiceTermKind.SelfHostGrant))),
+            S(0, h => h.AddTermFact(Term("sg", 0, 50 * Day, kind: ServiceTermKind.SelfHostGrant))),
         ]);
     }
 
