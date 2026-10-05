@@ -1,0 +1,1184 @@
+{
+  "schemaVersion": 1,
+  "owner": "chat",
+  "enums": {
+    "chat.iteration_output_state": {
+      "source": "model 01 section 8 task.iteration_output.state (inline, listed order); chat.iteration_output has the same fields",
+      "values": ["complete", "interrupted", "refused", "toolProposals"]
+    },
+    "chat.tool_request_state": {
+      "source": "model 01 section 8 task.tool_request.state (inline, listed order); chat.tool_request has the same fields",
+      "values": ["queued", "delivered", "answered", "expired", "refused"]
+    },
+    "chat.transient_purpose": {
+      "source": "model 01 section 8 chat.transient_content.purpose (inline, listed order)",
+      "values": ["transientInput", "transientOutput"]
+    }
+  },
+  "tables": [
+    {
+      "name": "chat_conversation",
+      "model": "01 section 8 chat.conversation",
+      "note": "The row lists mode=cloud: stored as a fixed-value key column mode with check = 'cloud' (not an enum). active_branch_id, project_id and workspace_id carry no declared FK.",
+      "columns": [
+        {
+          "name": "conversation_id",
+          "type": "id"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "product_id",
+          "type": "productId"
+        },
+        {
+          "name": "title",
+          "type": "text"
+        },
+        {
+          "name": "active_branch_id",
+          "type": "id"
+        },
+        {
+          "name": "project_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "mode",
+          "type": "key"
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        },
+        {
+          "name": "updated_at",
+          "type": "instant"
+        },
+        {
+          "name": "deleted_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["conversation_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "product_id", "conversation_id"],
+          "unique": true,
+          "path": "scoped conversation lookup (workspace, product, conversation)"
+        },
+        {
+          "columns": ["workspace_id", "product_id", "deleted_at", "updated_at", "conversation_id"],
+          "path": "the conversation list"
+        }
+      ],
+      "checks": [
+        {
+          "name": "mode_cloud",
+          "sql": "\"mode\" = 'cloud'"
+        }
+      ]
+    },
+    {
+      "name": "chat_branch",
+      "model": "01 section 8 chat.branch",
+      "note": "Parent/fork membership in this conversation and acyclicity are cross-row rules (guarded plan). fork_message_id has no declared FK.",
+      "columns": [
+        {
+          "name": "branch_id",
+          "type": "id"
+        },
+        {
+          "name": "conversation_id",
+          "type": "id"
+        },
+        {
+          "name": "parent_branch_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "fork_message_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["branch_id"],
+      "foreignKeys": [
+        {
+          "columns": ["conversation_id"],
+          "references": {
+            "table": "chat_conversation",
+            "columns": ["conversation_id"]
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["parent_branch_id"],
+          "references": {
+            "table": "chat_branch",
+            "columns": ["branch_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "chat_message",
+      "model": "01 section 8 chat.message",
+      "note": "Committed content is immutable (update none); delete stays any because the model names no no-delete rule. The 16 KiB inline threshold and verified body resource are plan rules. task_id/turn_id carry no declared FK.",
+      "columns": [
+        {
+          "name": "message_id",
+          "type": "id"
+        },
+        {
+          "name": "conversation_id",
+          "type": "id"
+        },
+        {
+          "name": "branch_id",
+          "type": "id"
+        },
+        {
+          "name": "ordinal",
+          "type": "int64"
+        },
+        {
+          "name": "role",
+          "type": "enum",
+          "enum": "TranscriptRole"
+        },
+        {
+          "name": "state",
+          "type": "text"
+        },
+        {
+          "name": "parts_proto",
+          "type": "proto",
+          "nullable": true
+        },
+        {
+          "name": "body_resource_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "body_hash",
+          "type": "hash"
+        },
+        {
+          "name": "task_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "turn_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        },
+        {
+          "name": "conversation_rev_at_commit",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["message_id"],
+      "indexes": [
+        {
+          "columns": ["branch_id", "ordinal"],
+          "unique": true,
+          "path": "ordered transcript of one branch"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["conversation_id"],
+          "references": {
+            "table": "chat_conversation",
+            "columns": ["conversation_id"]
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["branch_id"],
+          "references": {
+            "table": "chat_branch",
+            "columns": ["branch_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "exactly_one_body",
+          "sql": "(\"parts_proto\" IS NULL) <> (\"body_resource_id\" IS NULL)"
+        },
+        {
+          "name": "task_or_turn_at_most_one",
+          "sql": "\"task_id\" IS NULL OR \"turn_id\" IS NULL"
+        }
+      ],
+      "mutability": {
+        "update": "none"
+      }
+    },
+    {
+      "name": "chat_project",
+      "model": "01 section 8 chat.project",
+      "columns": [
+        {
+          "name": "project_id",
+          "type": "id"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "product_id",
+          "type": "productId"
+        },
+        {
+          "name": "body_proto",
+          "type": "proto"
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        },
+        {
+          "name": "deleted_at",
+          "type": "instant",
+          "nullable": true
+        }
+      ],
+      "primaryKey": ["project_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "product_id", "deleted_at"],
+          "path": "project list for a workspace and product"
+        }
+      ]
+    },
+    {
+      "name": "chat_compaction_record",
+      "model": "01 section 8 chat.compaction_record",
+      "note": "model_id and config_version are text per the row (not ModelId). Publication guarding of the current source hash/branch revision is a plan rule.",
+      "columns": [
+        {
+          "name": "compaction_id",
+          "type": "id"
+        },
+        {
+          "name": "conversation_id",
+          "type": "id"
+        },
+        {
+          "name": "branch_id",
+          "type": "id"
+        },
+        {
+          "name": "through_ordinal",
+          "type": "int64"
+        },
+        {
+          "name": "source_hash",
+          "type": "hash"
+        },
+        {
+          "name": "summary_resource_id",
+          "type": "id"
+        },
+        {
+          "name": "summary_hash",
+          "type": "hash"
+        },
+        {
+          "name": "model_id",
+          "type": "text"
+        },
+        {
+          "name": "config_version",
+          "type": "text"
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["compaction_id"],
+      "indexes": [
+        {
+          "columns": ["branch_id", "through_ordinal", "source_hash", "config_version"],
+          "unique": true,
+          "path": "one compaction per branch, ordinal, source and configuration"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["conversation_id"],
+          "references": {
+            "table": "chat_conversation",
+            "columns": ["conversation_id"]
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["branch_id"],
+          "references": {
+            "table": "chat_branch",
+            "columns": ["branch_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "chat_turn",
+      "model": "01 section 8 chat.turn and Chat-owned execution rules",
+      "note": "Row-level history_mode rules encoded with HistoryMode local=1 cloud=2 temporary=3 and ChatMode ordinary=1 temporary=3: temporary requires mode temporary, others ordinary; cloud-history requires conversation and input message; local/temporary require origin_installation_id and null conversation/input/final message ids. Omitted (plan): committed final message or no-answer outcome before success, verified transient receipts, scope immutable at admission. FKs only on conversation_id and input_message_id (named in the model); final_message_id, run_id, stream_id carry none.",
+      "columns": [
+        {
+          "name": "turn_id",
+          "type": "id"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "product_id",
+          "type": "productId"
+        },
+        {
+          "name": "history_mode",
+          "type": "enum",
+          "enum": "HistoryMode"
+        },
+        {
+          "name": "origin_installation_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "conversation_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "input_message_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "final_message_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "mode",
+          "type": "enum",
+          "enum": "ChatMode"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "ChatTurnState"
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        },
+        {
+          "name": "run_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "stream_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "reason",
+          "type": "key",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        },
+        {
+          "name": "expires_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "has_unknown_effect",
+          "type": "bool"
+        },
+        {
+          "name": "transient_input_ref",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "transient_output_receipt_id",
+          "type": "id",
+          "nullable": true
+        }
+      ],
+      "primaryKey": ["turn_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "input_message_id"],
+          "unique": true,
+          "path": "one turn per input message in a workspace"
+        },
+        {
+          "columns": ["workspace_id", "product_id", "state", "created_at"],
+          "path": "turn list by state"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["conversation_id"],
+          "references": {
+            "table": "chat_conversation",
+            "columns": ["conversation_id"]
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["input_message_id"],
+          "references": {
+            "table": "chat_message",
+            "columns": ["message_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "temporary_requires_temporary_mode",
+          "sql": "(\"history_mode\" = 3) = (\"mode\" = 3)"
+        },
+        {
+          "name": "non_temporary_requires_ordinary_mode",
+          "sql": "\"history_mode\" = 3 OR \"mode\" = 1"
+        },
+        {
+          "name": "cloud_history_has_conversation_and_input",
+          "sql": "\"history_mode\" <> 2 OR (\"conversation_id\" IS NOT NULL AND \"input_message_id\" IS NOT NULL)"
+        },
+        {
+          "name": "local_or_temporary_has_no_cloud_rows",
+          "sql": "\"history_mode\" = 2 OR (\"conversation_id\" IS NULL AND \"input_message_id\" IS NULL AND \"final_message_id\" IS NULL AND \"origin_installation_id\" IS NOT NULL)"
+        }
+      ]
+    },
+    {
+      "name": "chat_turn_promotion",
+      "model": "01 section 8 chat.turn_promotion",
+      "columns": [
+        {
+          "name": "turn_id",
+          "type": "id"
+        },
+        {
+          "name": "task_id",
+          "type": "id"
+        },
+        {
+          "name": "preview_hash",
+          "type": "hash"
+        },
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["turn_id"],
+      "indexes": [
+        {
+          "columns": ["task_id"],
+          "unique": true,
+          "path": "a Task is promoted from one turn only"
+        },
+        {
+          "columns": ["command_id"],
+          "unique": true,
+          "path": "promotion command replay"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["turn_id"],
+          "references": {
+            "table": "chat_turn",
+            "columns": ["turn_id"]
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["task_id"],
+          "references": {
+            "table": "task_task",
+            "columns": ["task_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "chat_run",
+      "model": "01 section 8 chat.run (same fields as task.run; turn_id replaces task_id)",
+      "note": "Same typed fields as task.run per model 01 section 8, so state is the named TaskState enum even though the owner is a Turn; turn_id replaces task_id and references chat_turn (owner must exist in Chat).",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "turn_id",
+          "type": "id"
+        },
+        {
+          "name": "ordinal",
+          "type": "int"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "TaskState"
+        },
+        {
+          "name": "workflow_id",
+          "type": "text"
+        },
+        {
+          "name": "worker_version",
+          "type": "text"
+        },
+        {
+          "name": "recovery_generation",
+          "type": "int64"
+        },
+        {
+          "name": "last_iteration_receipt",
+          "type": "hash",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        },
+        {
+          "name": "updated_at",
+          "type": "instant"
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["run_id"],
+      "indexes": [
+        {
+          "columns": ["turn_id", "ordinal"],
+          "unique": true,
+          "path": "one run ordinal per turn"
+        },
+        {
+          "columns": ["state", "updated_at"],
+          "path": "scan of runs by state (recovery and reconciliation)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["turn_id"],
+          "references": {
+            "table": "chat_turn",
+            "columns": ["turn_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "chat_execution_lease",
+      "model": "01 section 8 chat.execution_lease (same fields as task.execution_lease; turn_id replaces task_id)",
+      "note": "Epoch and recovery_generation fencing is guarded by the execution plans (lease holder CAS); the model declares no row-level monotonic rule.",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "holder",
+          "type": "text"
+        },
+        {
+          "name": "workflow_id",
+          "type": "text"
+        },
+        {
+          "name": "worker_version",
+          "type": "text"
+        },
+        {
+          "name": "epoch",
+          "type": "int64"
+        },
+        {
+          "name": "expires_at",
+          "type": "instant"
+        },
+        {
+          "name": "recovery_generation",
+          "type": "int64"
+        }
+      ],
+      "primaryKey": ["run_id"],
+      "indexes": [
+        {
+          "columns": ["expires_at"],
+          "path": "expired lease sweep"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["run_id"],
+          "references": {
+            "table": "chat_run",
+            "columns": ["run_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "chat_execution_command",
+      "model": "01 section 8 chat.execution_command (same fields as task.execution_command; turn_id replaces task_id)",
+      "columns": [
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "epoch",
+          "type": "int64"
+        },
+        {
+          "name": "operation",
+          "type": "text"
+        },
+        {
+          "name": "request_sha256",
+          "type": "text"
+        },
+        {
+          "name": "state",
+          "type": "text"
+        },
+        {
+          "name": "result_ref",
+          "type": "json",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["command_id"],
+      "indexes": [
+        {
+          "columns": ["run_id", "operation", "command_id"],
+          "unique": true,
+          "path": "command replay lookup for one run and operation"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["run_id"],
+          "references": {
+            "table": "chat_run",
+            "columns": ["run_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "chat_iteration_output",
+      "model": "01 section 8 chat.iteration_output (same fields as task.iteration_output; turn_id replaces task_id) and 8 CH-D5",
+      "note": "Immutable per CH-D5 (each invocation has immutable iteration output), so update is none. The terminal-reference and receipt rules are guarded plans.",
+      "columns": [
+        {
+          "name": "output_id",
+          "type": "id"
+        },
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "iteration_ordinal",
+          "type": "int"
+        },
+        {
+          "name": "logical_request_id",
+          "type": "id"
+        },
+        {
+          "name": "provider_attempt_id",
+          "type": "id"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "chat.iteration_output_state"
+        },
+        {
+          "name": "parts_proto",
+          "type": "proto",
+          "nullable": true
+        },
+        {
+          "name": "body_resource_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "checksum",
+          "type": "hash"
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["output_id"],
+      "indexes": [
+        {
+          "columns": ["run_id", "iteration_ordinal"],
+          "unique": true,
+          "path": "one output per run iteration"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["run_id"],
+          "references": {
+            "table": "chat_run",
+            "columns": ["run_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "exactly_one_body",
+          "sql": "(\"parts_proto\" IS NULL) <> (\"body_resource_id\" IS NULL)"
+        }
+      ],
+      "mutability": {
+        "update": "none"
+      }
+    },
+    {
+      "name": "chat_tool_request",
+      "model": "01 section 8 chat.tool_request (same fields/constraints as task.tool_request with turn_id instead of task_id)",
+      "note": "The model says immutable command payload/hash: there is no hash column, so arguments_proto, context_proto and actor_proto are the immutable payload and every other column stays updatable. Device vs cloud is not a column: a request carries the full target (device, installation, product) or none of the four target fields; the epoch is filled at delivery. run_id/step_id/attempt_id/command_id carry no declared FK. ChatTurn permits only its admitted pure-read tool set (plan), no fabricated Task FK.",
+      "columns": [
+        {
+          "name": "tool_request_id",
+          "type": "id"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "product_id",
+          "type": "productId"
+        },
+        {
+          "name": "turn_id",
+          "type": "id"
+        },
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "step_id",
+          "type": "id"
+        },
+        {
+          "name": "attempt_id",
+          "type": "id"
+        },
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "target_device_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "target_installation_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "target_product_id",
+          "type": "productId",
+          "nullable": true
+        },
+        {
+          "name": "target_instance_epoch",
+          "type": "int64",
+          "nullable": true
+        },
+        {
+          "name": "capability",
+          "type": "text"
+        },
+        {
+          "name": "arguments_proto",
+          "type": "proto"
+        },
+        {
+          "name": "context_proto",
+          "type": "proto"
+        },
+        {
+          "name": "actor_proto",
+          "type": "proto"
+        },
+        {
+          "name": "approval_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "expires_at",
+          "type": "instant"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "chat.tool_request_state"
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["tool_request_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "target_installation_id", "state", "expires_at"],
+          "path": "the device tool-request pull path"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["turn_id"],
+          "references": {
+            "table": "chat_turn",
+            "columns": ["turn_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "device_target_full_or_none",
+          "sql": "(\"target_device_id\" IS NOT NULL AND \"target_installation_id\" IS NOT NULL AND \"target_product_id\" IS NOT NULL) OR (\"target_device_id\" IS NULL AND \"target_installation_id\" IS NULL AND \"target_product_id\" IS NULL AND \"target_instance_epoch\" IS NULL)"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": [
+            "tool_request_id",
+            "workspace_id",
+            "product_id",
+            "turn_id",
+            "run_id",
+            "step_id",
+            "attempt_id",
+            "command_id",
+            "target_device_id",
+            "target_installation_id",
+            "target_product_id",
+            "target_instance_epoch",
+            "capability",
+            "approval_id",
+            "expires_at",
+            "state",
+            "rev"
+          ]
+        }
+      }
+    },
+    {
+      "name": "chat_tool_result",
+      "model": "01 section 8 chat.tool_result (same as task.tool_result)",
+      "note": "Idempotent on the composite key; a repeated key with a different result_hash is refused by the plan (cannot be a row check).",
+      "columns": [
+        {
+          "name": "tool_request_id",
+          "type": "id"
+        },
+        {
+          "name": "attempt_id",
+          "type": "id"
+        },
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "result_hash",
+          "type": "hash"
+        },
+        {
+          "name": "body_proto",
+          "type": "proto"
+        },
+        {
+          "name": "effect_certainty",
+          "type": "enum",
+          "enum": "EffectCertainty"
+        },
+        {
+          "name": "received_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["tool_request_id", "attempt_id", "command_id"],
+      "foreignKeys": [
+        {
+          "columns": ["tool_request_id"],
+          "references": {
+            "table": "chat_tool_request",
+            "columns": ["tool_request_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "chat_control_receipt",
+      "model": "01 section 8 chat.control_receipt",
+      "columns": [
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "owner_id",
+          "type": "id"
+        },
+        {
+          "name": "kind",
+          "type": "key"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "ControlState"
+        },
+        {
+          "name": "requested_at",
+          "type": "instant"
+        },
+        {
+          "name": "acknowledged_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "reason",
+          "type": "key",
+          "nullable": true
+        },
+        {
+          "name": "request_hash",
+          "type": "hash"
+        }
+      ],
+      "primaryKey": ["command_id"],
+      "indexes": [
+        {
+          "columns": ["owner_id", "requested_at"],
+          "path": "receipts of one turn in order"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["owner_id"],
+          "references": {
+            "table": "chat_turn",
+            "columns": ["turn_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "chat_cf_instance_inventory",
+      "model": "01 section 10 chat.cf_instance_inventory",
+      "columns": [
+        {
+          "name": "kind",
+          "type": "text"
+        },
+        {
+          "name": "instance_id",
+          "type": "text"
+        },
+        {
+          "name": "recovery_generation",
+          "type": "int64"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "owner_job_id",
+          "type": "id"
+        },
+        {
+          "name": "worker_version",
+          "type": "text"
+        },
+        {
+          "name": "deletion_receipt",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["kind", "instance_id", "recovery_generation"]
+    },
+    {
+      "name": "chat_transient_content",
+      "model": "01 section 8 chat.transient_content",
+      "note": "turn_id/task_id carry no declared FK (the exactly-one execution owner is checked per row; the owner's existence is a plan rule). Expiry (24 h) and purge (1 h after close) windows are time-dependent plan rules.",
+      "columns": [
+        {
+          "name": "resource_id",
+          "type": "id"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "product_id",
+          "type": "productId"
+        },
+        {
+          "name": "origin_installation_id",
+          "type": "id"
+        },
+        {
+          "name": "turn_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "task_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "purpose",
+          "type": "enum",
+          "enum": "chat.transient_purpose"
+        },
+        {
+          "name": "key_ref",
+          "type": "text"
+        },
+        {
+          "name": "ciphertext_ref",
+          "type": "text"
+        },
+        {
+          "name": "sha256",
+          "type": "hash"
+        },
+        {
+          "name": "size",
+          "type": "int64"
+        },
+        {
+          "name": "expires_at",
+          "type": "instant"
+        },
+        {
+          "name": "closed_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "purged_at",
+          "type": "instant",
+          "nullable": true
+        }
+      ],
+      "primaryKey": ["resource_id"],
+      "indexes": [
+        {
+          "columns": ["expires_at", "purged_at"],
+          "path": "transient expiry and purge sweep"
+        }
+      ],
+      "checks": [
+        {
+          "name": "size_nonnegative",
+          "sql": "\"size\" >= 0"
+        },
+        {
+          "name": "exactly_one_owner",
+          "sql": "(\"turn_id\" IS NULL) <> (\"task_id\" IS NULL)"
+        }
+      ]
+    }
+  ]
+}

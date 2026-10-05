@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "owner": "trustsafety",
+  "enums": {
+    "trustsafety.report_state": {
+      "source": "model 01 section 11 trustsafety.report.state (inline, listed order)",
+      "values": ["received", "reviewing", "actioned", "dismissed"]
+    },
+    "trustsafety.appeal_state": {
+      "source": "model 01 section 11 trustsafety.enforcement_action.appeal_state (inline, listed order)",
+      "values": ["none", "pending", "upheld", "reversed"]
+    }
+  },
+  "tables": [
+    {
+      "name": "trustsafety_report",
+      "model": "01 section 11 trustsafety.report",
+      "note": "action_id declares no foreign key in the model, so none is added.",
+      "columns": [
+        { "name": "report_id", "type": "id" },
+        { "name": "reporter_user_id", "type": "id" },
+        { "name": "subject_ref", "type": "aggregateRef" },
+        { "name": "reason", "type": "key" },
+        { "name": "evidence_ref", "type": "text" },
+        { "name": "state", "type": "enum", "enum": "trustsafety.report_state" },
+        { "name": "action_id", "type": "id", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "updated_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["report_id"],
+      "indexes": [{ "columns": ["state", "created_at"], "path": "the review queue by state" }]
+    },
+    {
+      "name": "trustsafety_enforcement_action",
+      "model": "01 section 11 trustsafety.enforcement_action",
+      "note": "notification_id declares no foreign key in the model, so none is added.",
+      "columns": [
+        { "name": "action_id", "type": "id" },
+        { "name": "subject_ref", "type": "aggregateRef" },
+        { "name": "level", "type": "key" },
+        { "name": "reason", "type": "key" },
+        { "name": "evidence_ref", "type": "text" },
+        { "name": "operator_subject", "type": "text" },
+        { "name": "notification_id", "type": "id" },
+        { "name": "appeal_state", "type": "enum", "enum": "trustsafety.appeal_state" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["action_id"],
+      "indexes": [
+        {
+          "columns": ["subject_ref_kind", "subject_ref_id", "created_at"],
+          "path": "the enforcement ladder of one subject"
+        }
+      ]
+    }
+  ]
+}

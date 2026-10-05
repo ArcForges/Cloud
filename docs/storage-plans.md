@@ -132,9 +132,12 @@ build time, not correctness.
 
 ## Not claimed
 
-- **No module owns a plan or a table yet.** The module projects are boundaries with a descriptor. The physical manifest and migrations
-  (CLOUD.03), receipts, outbox and archive (CLOUD.04), the shared families (CLOUD.06) and every module's behavior are later tasks. The
-  checks above prove the boundary and the rule, not a module implementation.
+- **No module owns a plan yet.** The module projects are boundaries with a descriptor. The physical tables and the migration runner exist
+  ([D1 physical schema and migrations](d1-physical-schema.md), CLOUD.03), so a module plan names real tables; receipts, outbox and archive
+  (CLOUD.04), the shared families (CLOUD.06) and every module's behavior are later tasks. The checks above prove the boundary and the rule,
+  not a module implementation. The migration bookkeeping tables (`platform_schema_state`, `platform_migration_receipt`,
+  `platform_backfill_checkpoint`) are written only by the migration runner: the ownership rule accepts any `platform_` table in a module plan,
+  so a plan that names one of them is a review finding.
 - **The typed repository API for modules does not exist yet.** The bridge is internal to the host and `Storage.D1`.
 - **No new deployed observation.** CLOUD.02 changes where the proven bridge lives, not how it behaves; the manifest hash and the Worker
   dictionary are unchanged, and no deployment or live scenario was run for it. The PRF.07 live results apply to the same plans and the same

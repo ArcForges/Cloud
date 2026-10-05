@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 1,
+  "note": "Scope-first FTS5 MATCH expressions. The C# builder must produce exactly match; SQLite FTS5 must return exactly expectedIds for the documents below.",
+  "scopeWords": {
+    "A": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+    "B": "0198a7c01c3e7d4a9b1f00000000000bxarcscope",
+    "AC": "0198a7c01c3e7d4a9b1f00000000000axcompanion"
+  },
+  "documents": [
+    {
+      "id": "0198a7c0-1c3e-7d4a-9b1f-000000000101",
+      "workspaceId": "0198a7c0-1c3e-7d4a-9b1f-00000000000a",
+      "productId": "arcscope",
+      "title": "Hello",
+      "body": "world of arcs"
+    },
+    {
+      "id": "0198a7c0-1c3e-7d4a-9b1f-000000000102",
+      "workspaceId": "0198a7c0-1c3e-7d4a-9b1f-00000000000a",
+      "productId": "arcscope",
+      "title": "secret",
+      "body": "hello hello"
+    },
+    {
+      "id": "0198a7c0-1c3e-7d4a-9b1f-000000000103",
+      "workspaceId": "0198a7c0-1c3e-7d4a-9b1f-00000000000b",
+      "productId": "arcscope",
+      "title": "Hello",
+      "body": "secret world"
+    },
+    {
+      "id": "0198a7c0-1c3e-7d4a-9b1f-000000000104",
+      "workspaceId": "0198a7c0-1c3e-7d4a-9b1f-00000000000a",
+      "productId": "companion",
+      "title": "Hello",
+      "body": "world secret OR title"
+    },
+    {
+      "id": "0198a7c0-1c3e-7d4a-9b1f-000000000105",
+      "workspaceId": "0198a7c0-1c3e-7d4a-9b1f-00000000000a",
+      "productId": "arcscope",
+      "title": "café au lait",
+      "body": "NEAR title:secret scope_key"
+    }
+  ],
+  "queries": [
+    {
+      "name": "a plain term in scope A arcscope",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "hello",
+      "expectedIds": [
+        "0198a7c0-1c3e-7d4a-9b1f-000000000101",
+        "0198a7c0-1c3e-7d4a-9b1f-000000000102"
+      ],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"hello\")"
+    },
+    {
+      "name": "two terms are both required",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "hello world",
+      "expectedIds": ["0198a7c0-1c3e-7d4a-9b1f-000000000101"],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"hello\" AND \"world\")"
+    },
+    {
+      "name": "a term of the other workspace is invisible",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "secret",
+      "expectedIds": [
+        "0198a7c0-1c3e-7d4a-9b1f-000000000102",
+        "0198a7c0-1c3e-7d4a-9b1f-000000000105"
+      ],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"secret\")"
+    },
+    {
+      "name": "the other workspace sees only its own",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000bxarcscope",
+      "input": "secret",
+      "expectedIds": ["0198a7c0-1c3e-7d4a-9b1f-000000000103"],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000bxarcscope\" AND {title body} : (\"secret\")"
+    },
+    {
+      "name": "the other product of the same workspace is a separate scope",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axcompanion",
+      "input": "hello",
+      "expectedIds": ["0198a7c0-1c3e-7d4a-9b1f-000000000104"],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axcompanion\" AND {title body} : (\"hello\")"
+    },
+    {
+      "name": "OR is a literal word, not an operator",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "hello OR world",
+      "expectedIds": [],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"hello\" AND \"OR\" AND \"world\")"
+    },
+    {
+      "name": "a column filter typed by the user is only the words scope and key (found in the body of one document of the scope)",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "scope_key:*",
+      "expectedIds": ["0198a7c0-1c3e-7d4a-9b1f-000000000105"],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"scope_key:*\")"
+    },
+    {
+      "name": "a title filter typed by the user is only the words title and secret in sequence",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "title:secret",
+      "expectedIds": ["0198a7c0-1c3e-7d4a-9b1f-000000000105"],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"title:secret\")"
+    },
+    {
+      "name": "NEAR is a literal word",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "NEAR(hello world)",
+      "expectedIds": [],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"NEAR(hello\" AND \"world)\")"
+    },
+    {
+      "name": "a quote cannot close the phrase",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "hello\" OR \"world",
+      "expectedIds": [],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"hello\"\"\" AND \"OR\" AND \"\"\"world\")"
+    },
+    {
+      "name": "a leading minus is not a negation: it is punctuation inside the phrase",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "-hello",
+      "expectedIds": [
+        "0198a7c0-1c3e-7d4a-9b1f-000000000101",
+        "0198a7c0-1c3e-7d4a-9b1f-000000000102"
+      ],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"-hello\")"
+    },
+    {
+      "name": "a star is not a prefix unless asked",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "wor*",
+      "expectedIds": [],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"wor*\")"
+    },
+    {
+      "name": "a prefix on the last term when asked",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "wor",
+      "prefix": true,
+      "expectedIds": ["0198a7c0-1c3e-7d4a-9b1f-000000000101"],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"wor\" *)"
+    },
+    {
+      "name": "accented text folds",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "cafe",
+      "expectedIds": ["0198a7c0-1c3e-7d4a-9b1f-000000000105"],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"cafe\")"
+    },
+    {
+      "name": "parentheses are literal",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "(hello)",
+      "expectedIds": [
+        "0198a7c0-1c3e-7d4a-9b1f-000000000101",
+        "0198a7c0-1c3e-7d4a-9b1f-000000000102"
+      ],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"(hello)\")"
+    },
+    {
+      "name": "a scope word in the text cannot reach the scope column",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "0198a7c01c3e7d4a9b1f00000000000bxarcscope",
+      "expectedIds": [],
+      "match": "scope_key : \"0198a7c01c3e7d4a9b1f00000000000axarcscope\" AND {title body} : (\"0198a7c01c3e7d4a9b1f00000000000bxarcscope\")"
+    }
+  ],
+  "refusals": [
+    {
+      "name": "empty text",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": ""
+    },
+    {
+      "name": "only spaces",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "   "
+    },
+    {
+      "name": "too many terms",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "t0 t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 t12 t13 t14 t15 t16"
+    },
+    {
+      "name": "a term of 65 characters",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "text of 513 characters",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd "
+    },
+    {
+      "name": "a control character",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcscope",
+      "input": "hello\u0000world"
+    },
+    {
+      "name": "a malformed scope key",
+      "scopeWord": "not-a-scope",
+      "input": "hello"
+    },
+    {
+      "name": "an upper case scope key",
+      "scopeWord": "0198A7C01C3E7D4A9B1F00000000000AXARCSCOPE",
+      "input": "hello"
+    },
+    {
+      "name": "an unknown product in the scope key",
+      "scopeWord": "0198a7c01c3e7d4a9b1f00000000000axarcnotes",
+      "input": "hello"
+    }
+  ]
+}

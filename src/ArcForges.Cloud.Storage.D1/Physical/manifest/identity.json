@@ -1,0 +1,539 @@
+{
+  "schemaVersion": 1,
+  "owner": "identity",
+  "enums": {
+    "identity.user_state": {
+      "source": "model 01 section 3 identity.user.state (inline, listed order)",
+      "values": ["active", "restricted", "suspended", "pendingDeletion", "deleted"]
+    },
+    "identity.auth_method": {
+      "source": "model 01 section 3 identity.auth_identity.method (inline, listed order)",
+      "values": ["passkey", "emailCode", "password", "oidc"]
+    },
+    "identity.email_purpose": {
+      "source": "model 01 section 3 identity.email_address.purpose (inline, listed order)",
+      "values": ["primary", "recovery", "notification"]
+    },
+    "identity.credential_kind": {
+      "source": "model 01 section 3 identity.session.credential_kind (inline, listed order)",
+      "values": ["nativeBearer", "browserCookie"]
+    },
+    "identity.browser_flow_method": {
+      "source": "model 01 section 3 identity.browser_auth_flow.method ('existing passkey/email method'); member names taken from identity.auth_identity.method",
+      "values": ["passkey", "emailCode"]
+    },
+    "identity.step_up_state": {
+      "source": "model 01 section 3 identity.step_up_challenge.state (inline, listed order)",
+      "values": ["pending", "proved", "consumed", "expired", "denied"]
+    },
+    "identity.recovery_flow_state": {
+      "source": "model 01 section 3 identity.recovery_flow.state (inline, listed order)",
+      "values": ["pending", "proved", "completed", "expired", "denied"]
+    }
+  },
+  "tables": [
+    {
+      "name": "identity_user",
+      "model": "01 section 3 identity.user",
+      "columns": [
+        { "name": "user_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "display_name", "type": "text" },
+        { "name": "state", "type": "enum", "enum": "identity.user_state" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "deletion_requested_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["user_id"],
+      "indexes": [{ "columns": ["realm_id", "state"], "path": "listing a realm's users by state" }],
+      "note": "realm_id has no foreign key: model 01 says 'FK to realm' but no realm table exists in model 01. 'A deleted user retains the row with all personal fields cleared' is a lifecycle rule enforced by the deletion plan (display_name is NOT NULL, so 'cleared' has no row-level form)."
+    },
+    {
+      "name": "identity_auth_identity",
+      "model": "01 section 3 identity.auth_identity",
+      "columns": [
+        { "name": "auth_identity_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "method", "type": "enum", "enum": "identity.auth_method" },
+        { "name": "subject", "type": "text" },
+        { "name": "public_key", "type": "bytes", "nullable": true },
+        { "name": "user_handle", "type": "bytes", "nullable": true },
+        { "name": "backup_eligible", "type": "bool", "nullable": true },
+        { "name": "backup_state", "type": "bool", "nullable": true },
+        { "name": "transports", "type": "json", "nullable": true },
+        { "name": "sign_count", "type": "int64", "nullable": true },
+        { "name": "label", "type": "text", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "last_used_at", "type": "instant", "nullable": true },
+        { "name": "revoked_at", "type": "instant", "nullable": true },
+        { "name": "realm_id", "type": "id" },
+        { "name": "provider_id", "type": "text" },
+        { "name": "password_hash", "type": "text", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["auth_identity_id"],
+      "indexes": [
+        {
+          "columns": ["realm_id", "provider_id", "subject"],
+          "unique": true,
+          "path": "one configured-provider credential belongs to one user (credential lookup by provider subject)"
+        },
+        { "columns": ["user_id", "revoked_at"], "path": "listing a user's credentials" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["user_id"],
+          "references": { "table": "identity_user", "columns": ["user_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "backup_state_requires_backup_eligible",
+          "sql": "\"backup_state\" IS NULL OR \"backup_eligible\" IS NOT NULL"
+        },
+        {
+          "name": "passkey_requires_user_handle",
+          "sql": "\"method\" <> 1 OR \"user_handle\" IS NOT NULL"
+        },
+        {
+          "name": "password_hash_only_for_password",
+          "sql": "\"method\" = 3 OR \"password_hash\" IS NULL"
+        }
+      ],
+      "note": "The last-usable-credential rule (identity.last_credential) is cross-row and stays in the guarded plan. Passkey-only columns (public_key, backup_*, sign_count) are not forced null for other methods because the model only labels them as passkey data."
+    },
+    {
+      "name": "identity_email_address",
+      "model": "01 section 3 identity.email_address",
+      "columns": [
+        { "name": "email_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "address_normalised", "type": "text" },
+        { "name": "verified_at", "type": "instant", "nullable": true },
+        { "name": "purpose", "type": "enum", "enum": "identity.email_purpose" }
+      ],
+      "primaryKey": ["email_id"],
+      "indexes": [
+        {
+          "columns": ["address_normalised", "purpose"],
+          "unique": true,
+          "where": "\"verified_at\" IS NOT NULL",
+          "path": "verified address lookup for recovery and contact"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["user_id"],
+          "references": { "table": "identity_user", "columns": ["user_id"] },
+          "onDelete": "cascade"
+        }
+      ],
+      "note": "Model 01 gives no list index for user_id, so none is added. The FK cascades because the model says 'cascade on purge'."
+    },
+    {
+      "name": "identity_session",
+      "model": "01 section 3 identity.session",
+      "columns": [
+        { "name": "session_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "device_id", "type": "id" },
+        { "name": "installation_id", "type": "id" },
+        { "name": "issued_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "revoked_at", "type": "instant", "nullable": true },
+        { "name": "credential_kind", "type": "enum", "enum": "identity.credential_kind" },
+        { "name": "refresh_token_hash", "type": "text", "nullable": true },
+        { "name": "browser_handle_hash", "type": "text", "nullable": true },
+        { "name": "browser_origin", "type": "text", "nullable": true },
+        { "name": "idle_expires_at", "type": "instant", "nullable": true },
+        { "name": "last_activity_at", "type": "instant", "nullable": true },
+        { "name": "session_policy_version", "type": "text" },
+        { "name": "refresh_generation", "type": "int", "nullable": true },
+        { "name": "step_up_at", "type": "instant", "nullable": true },
+        { "name": "step_up_classes", "type": "json", "root": "array" },
+        { "name": "access_token_hash", "type": "text", "nullable": true },
+        { "name": "access_expires_at", "type": "instant", "nullable": true },
+        { "name": "csrf_hash", "type": "text", "nullable": true },
+        { "name": "purpose", "type": "enum", "enum": "AuthPurpose" },
+        { "name": "auth_epoch", "type": "int64" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "rev", "type": "int64" },
+        { "name": "family_id", "type": "id", "nullable": true },
+        { "name": "product_id", "type": "productId" }
+      ],
+      "primaryKey": ["session_id"],
+      "indexes": [
+        {
+          "columns": ["user_id", "revoked_at", "expires_at"],
+          "path": "active-session listing and mass revocation"
+        },
+        { "columns": ["device_id"], "path": "device revocation cascade" },
+        {
+          "columns": ["refresh_token_hash"],
+          "unique": true,
+          "where": "\"refresh_token_hash\" IS NOT NULL",
+          "path": "native refresh-token lookup (partial unique for native sessions)"
+        },
+        {
+          "columns": ["browser_handle_hash"],
+          "unique": true,
+          "where": "\"browser_handle_hash\" IS NOT NULL",
+          "path": "browser handle lookup (partial unique for browser sessions)"
+        },
+        {
+          "columns": ["access_token_hash"],
+          "unique": true,
+          "where": "\"access_token_hash\" IS NOT NULL",
+          "path": "native access-token lookup (unique hash for nativeBearer)"
+        },
+        { "columns": ["browser_origin", "idle_expires_at"], "path": "browser expiry maintenance" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["user_id"],
+          "references": { "table": "identity_user", "columns": ["user_id"] },
+          "onDelete": "cascade"
+        },
+        {
+          "columns": ["device_id"],
+          "references": { "table": "device_device", "columns": ["device_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "native_bearer_credential_shape",
+          "sql": "\"credential_kind\" <> 1 OR (\"refresh_token_hash\" IS NOT NULL AND \"refresh_generation\" IS NOT NULL AND \"browser_handle_hash\" IS NULL AND \"browser_origin\" IS NULL AND \"idle_expires_at\" IS NULL)"
+        },
+        {
+          "name": "browser_cookie_credential_shape",
+          "sql": "\"credential_kind\" <> 2 OR (\"browser_handle_hash\" IS NOT NULL AND \"browser_origin\" IS NOT NULL AND \"idle_expires_at\" IS NOT NULL AND \"csrf_hash\" IS NOT NULL AND \"refresh_token_hash\" IS NULL AND \"refresh_generation\" IS NULL AND \"family_id\" IS NULL AND \"access_token_hash\" IS NULL)"
+        },
+        {
+          "name": "refresh_hash_requires_family",
+          "sql": "\"refresh_token_hash\" IS NULL OR \"family_id\" IS NOT NULL"
+        },
+        {
+          "name": "access_hash_requires_access_expiry",
+          "sql": "\"access_token_hash\" IS NULL OR \"access_expires_at\" IS NOT NULL"
+        },
+        {
+          "name": "idle_expiry_not_after_absolute",
+          "sql": "\"idle_expires_at\" IS NULL OR \"idle_expires_at\" <= \"expires_at\""
+        }
+      ],
+      "note": "auth_epoch, recovery_generation and rev are typed bigint NN in the model, so they are int64 here (not rev) and are not marked monotonic because the model does not say 'monotonic'. installation_id has no foreign key because the model declares none. Superseded-generation family revocation, origin/idle checks at use, and the device/installation liveness invariant (CX-06) are guarded-plan rules."
+    },
+    {
+      "name": "identity_browser_auth_flow",
+      "model": "01 section 3 identity.browser_auth_flow",
+      "columns": [
+        { "name": "flow_id", "type": "id" },
+        { "name": "binding_hash", "type": "text" },
+        { "name": "origin", "type": "text" },
+        { "name": "method", "type": "enum", "enum": "identity.browser_flow_method" },
+        { "name": "purpose", "type": "enum", "enum": "AuthPurpose" },
+        { "name": "challenge", "type": "json" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "attempts", "type": "int" },
+        { "name": "max_attempts", "type": "int" },
+        { "name": "consumed_at", "type": "instant", "nullable": true },
+        { "name": "csrf_hash", "type": "text" }
+      ],
+      "primaryKey": ["flow_id"],
+      "indexes": [{ "columns": ["expires_at"], "path": "indexed expiry cleanup" }],
+      "checks": [
+        { "name": "purpose_authentication_recovery_enrollment", "sql": "\"purpose\" IN (1, 2, 4)" },
+        {
+          "name": "attempts_within_bound",
+          "sql": "\"attempts\" >= 0 AND \"attempts\" <= \"max_attempts\""
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": [
+            "flow_id",
+            "binding_hash",
+            "origin",
+            "method",
+            "purpose",
+            "challenge",
+            "created_at",
+            "expires_at",
+            "attempts",
+            "max_attempts",
+            "consumed_at",
+            "csrf_hash"
+          ],
+          "when": "OLD.\"consumed_at\" IS NULL"
+        },
+        "delete": "any"
+      },
+      "note": "The model lists method/purpose only as 'enum NN' with prose values: method is the passkey/emailCode subset of auth_identity.method and purpose is AuthPurpose limited by a check to authenticate, enroll and recover (authentication/recovery/enrollment). 'One-way terminal consumption' is a row that cannot change once consumed_at is set; expired/consumed rows are purged, so delete stays any. attempts <= max_attempts encodes 'atomically bounded'."
+    },
+    {
+      "name": "identity_step_up_challenge",
+      "model": "01 section 3 identity.step_up_challenge",
+      "columns": [
+        { "name": "challenge_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "session_id", "type": "id" },
+        { "name": "operation_class", "type": "text" },
+        { "name": "target_hash", "type": "text" },
+        { "name": "method", "type": "text" },
+        { "name": "proof_hash", "type": "hash" },
+        { "name": "state", "type": "enum", "enum": "identity.step_up_state" },
+        { "name": "attempt_count", "type": "int" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "consumed_at", "type": "instant", "nullable": true },
+        { "name": "auth_epoch", "type": "int64" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["challenge_id"],
+      "indexes": [
+        {
+          "columns": ["session_id", "expires_at"],
+          "path": "a session's live challenges and the expiry sweep"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["user_id"],
+          "references": { "table": "identity_user", "columns": ["user_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["session_id"],
+          "references": { "table": "identity_session", "columns": ["session_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [{ "name": "attempt_count_range", "sql": "\"attempt_count\" BETWEEN 0 AND 5" }],
+      "note": "target_hash is typed text in the model (name ends _hash), so it stays text; proof_hash is typed hash."
+    },
+    {
+      "name": "identity_recovery_flow",
+      "model": "01 section 3 identity.recovery_flow",
+      "columns": [
+        { "name": "flow_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "user_id", "type": "id", "nullable": true },
+        { "name": "method", "type": "enum", "enum": "RecoveryMethod" },
+        { "name": "proof_hash", "type": "hash" },
+        { "name": "replacement_challenge", "type": "bytes", "nullable": true },
+        { "name": "state", "type": "enum", "enum": "identity.recovery_flow_state" },
+        { "name": "attempt_count", "type": "int" },
+        { "name": "rate_limit_key", "type": "text" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "completed_at", "type": "instant", "nullable": true },
+        { "name": "auth_epoch", "type": "int64" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["flow_id"],
+      "indexes": [{ "columns": ["expires_at"], "path": "the expiry sweep" }],
+      "checks": [{ "name": "attempt_count_range", "sql": "\"attempt_count\" BETWEEN 0 AND 5" }],
+      "note": "No foreign keys: the model marks realm_id and user_id as plain id columns (user_id nullable until bound). 'No credential replacement before bound proof' is a guarded-plan rule."
+    },
+    {
+      "name": "identity_spent_refresh",
+      "model": "01 section 3 Account proofs and lifecycle records: spent_refresh",
+      "columns": [
+        { "name": "token_hash", "type": "hash" },
+        { "name": "session_id", "type": "id" },
+        { "name": "family_id", "type": "id" },
+        { "name": "generation", "type": "int64" },
+        { "name": "consumed_at", "type": "instant" },
+        { "name": "family_expires_at", "type": "instant" }
+      ],
+      "primaryKey": ["token_hash"],
+      "indexes": [
+        {
+          "columns": ["family_id", "generation"],
+          "unique": true,
+          "path": "detecting reuse of a superseded refresh generation in a family"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["session_id"],
+          "references": { "table": "identity_session", "columns": ["session_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "The model says 'session_id/family_id: id FK NN' but family_id has no referenced table (identity.session.family_id is not unique), so only the session_id foreign key is declared. Retention (family expiry plus 60 seconds) and the atomic rotation are guarded-plan rules."
+    },
+    {
+      "name": "identity_recovery_code",
+      "model": "01 section 3 Account proofs and lifecycle records: recovery_code",
+      "columns": [
+        { "name": "code_hash", "type": "hash" },
+        { "name": "set_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "issued_at", "type": "instant" },
+        { "name": "consumed_at", "type": "instant", "nullable": true },
+        { "name": "invalidated_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["code_hash"],
+      "indexes": [{ "columns": ["user_id", "set_id"], "path": "a user's live recovery-code set" }],
+      "note": "No foreign keys: the model declares none for set_id/user_id. 'One live set per user' is cross-row and stays in the guarded plan."
+    },
+    {
+      "name": "identity_api_token",
+      "model": "01 section 3 Account proofs and lifecycle records: api_token",
+      "columns": [
+        { "name": "token_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "secret_hash", "type": "hash" },
+        { "name": "name", "type": "text" },
+        { "name": "scopes", "type": "json", "root": "array" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "last_used_at", "type": "instant", "nullable": true },
+        { "name": "revoked_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" },
+        { "name": "auth_epoch", "type": "int64" },
+        { "name": "recovery_generation", "type": "int64" }
+      ],
+      "primaryKey": ["token_id"],
+      "indexes": [
+        {
+          "columns": ["secret_hash"],
+          "unique": true,
+          "path": "token authentication by secret hash"
+        },
+        { "columns": ["user_id", "revoked_at"], "path": "listing a user's tokens" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["user_id"],
+          "references": { "table": "identity_user", "columns": ["user_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "identity_security_flow",
+      "model": "01 section 3 Account proofs and lifecycle records: security_flow",
+      "columns": [
+        { "name": "flow_id", "type": "id" },
+        { "name": "kind", "type": "key" },
+        { "name": "purpose", "type": "key" },
+        { "name": "provider", "type": "text", "nullable": true },
+        { "name": "user_id", "type": "id", "nullable": true },
+        { "name": "installation_id", "type": "id", "nullable": true },
+        { "name": "device_id", "type": "id", "nullable": true },
+        { "name": "origin", "type": "text", "nullable": true },
+        { "name": "proof_hash", "type": "hash" },
+        { "name": "target_payload_hash", "type": "hash" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "attempts", "type": "int" },
+        { "name": "consumed_at", "type": "instant", "nullable": true },
+        { "name": "payload_proto", "type": "proto" }
+      ],
+      "primaryKey": ["flow_id"],
+      "note": "No foreign keys and no index: the model declares none (user/installation/device ids are plain optional ids). kind values (enrollment, emailChange, providerCallback, deletionReauth and the native-authorization reference) are an open Key, not an enum."
+    },
+    {
+      "name": "identity_native_authorization",
+      "model": "01 section 3 Native authorization and operator records: identity.native_authorization",
+      "columns": [
+        { "name": "flow_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "installation_id", "type": "id" },
+        { "name": "client_id", "type": "text" },
+        { "name": "redirect_uri", "type": "text" },
+        { "name": "state_hash", "type": "text" },
+        { "name": "pkce_challenge", "type": "text" },
+        { "name": "code_hash", "type": "text", "nullable": true },
+        { "name": "user_id", "type": "id", "nullable": true },
+        { "name": "session_id", "type": "id", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "code_expires_at", "type": "instant", "nullable": true },
+        { "name": "consumed_at", "type": "instant", "nullable": true },
+        { "name": "attempt_count", "type": "int" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["flow_id"],
+      "indexes": [
+        {
+          "columns": ["code_hash"],
+          "unique": true,
+          "path": "authorization-code redemption by code hash"
+        }
+      ],
+      "checks": [{ "name": "attempt_count_range", "sql": "\"attempt_count\" BETWEEN 0 AND 5" }],
+      "note": "code_hash is text (typed text, name ends _hash) and UNIQUE; SQLite unique indexes allow several NULLs. No foreign keys: the model declares none."
+    },
+    {
+      "name": "identity_operator_session",
+      "model": "01 section 3 Native authorization and operator records: identity.operator_session",
+      "columns": [
+        { "name": "session_id", "type": "id" },
+        { "name": "provider_id", "type": "text" },
+        { "name": "subject", "type": "text" },
+        { "name": "tenant_id", "type": "text" },
+        { "name": "handle_hash", "type": "text" },
+        { "name": "issued_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "revoked_at", "type": "instant", "nullable": true },
+        { "name": "auth_epoch", "type": "int64" },
+        { "name": "recovery_generation", "type": "int64" }
+      ],
+      "primaryKey": ["session_id"],
+      "indexes": [
+        {
+          "columns": ["handle_hash"],
+          "unique": true,
+          "path": "operator session lookup by handle hash"
+        }
+      ]
+    },
+    {
+      "name": "identity_operator_access",
+      "model": "01 section 3 Native authorization and operator records: identity.operator_access",
+      "columns": [
+        { "name": "provider_id", "type": "text" },
+        { "name": "subject", "type": "text" },
+        { "name": "role", "type": "text" },
+        { "name": "granted_by", "type": "text" },
+        { "name": "expires_at", "type": "instant", "nullable": true },
+        { "name": "revoked_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["provider_id", "subject", "role"],
+      "note": "role stays text; the model limits it to roles from registry 04 section 9, which is a plan-level validation, not a closed enum in model 01."
+    },
+    {
+      "name": "identity_operator_action",
+      "model": "01 section 3 Native authorization and operator records: identity.operator_action",
+      "columns": [
+        { "name": "action_id", "type": "id" },
+        { "name": "proposer", "type": "text" },
+        { "name": "approver", "type": "text", "nullable": true },
+        { "name": "operation_id", "type": "text" },
+        { "name": "proposal_hash", "type": "text" },
+        { "name": "evidence_ref", "type": "text" },
+        { "name": "state", "type": "text" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "consumed_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["action_id"],
+      "note": "state is text per the model's own field list (the OperatorProposalState registry enum exists but model 01 types this column text). Dual-control (different active subjects, exact proposal hash) is guarded-plan logic: it applies only to dual-control operations, so no row-level approver <> proposer check is written."
+    }
+  ]
+}

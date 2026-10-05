@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "owner": "package-catalog",
+  "enums": {
+    "package-catalog.publisher_state": {
+      "source": "model 01 section 11.1 package_catalog publisher.state (inline, listed order)",
+      "values": ["pending", "verified", "suspended"]
+    },
+    "package-catalog.version_state": {
+      "source": "model 01 section 11.1 package_catalog version.state (inline, listed order)",
+      "values": ["submitted", "reviewing", "published", "rejected", "revoked"]
+    },
+    "package-catalog.publication_state": {
+      "source": "model 01 section 11.1 package_catalog publication.state (inline, listed order)",
+      "values": ["pending", "published"]
+    }
+  },
+  "tables": [
+    {
+      "name": "package_catalog_publisher",
+      "model": "01 section 11.1 package_catalog publisher",
+      "columns": [
+        { "name": "publisher_id", "type": "id" },
+        { "name": "owner_user_id", "type": "id" },
+        { "name": "domain", "type": "text" },
+        { "name": "state", "type": "enum", "enum": "package-catalog.publisher_state" },
+        { "name": "challenge_hash", "type": "text" },
+        { "name": "challenge_expires_at", "type": "instant" },
+        { "name": "verified_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["publisher_id"],
+      "indexes": [
+        { "columns": ["domain"], "unique": true, "path": "one publisher per verified domain" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["owner_user_id"],
+          "references": { "table": "identity_user", "columns": ["user_id"] },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "package_catalog_package",
+      "model": "01 section 11.1 package_catalog package",
+      "note": "Publisher binding immutable (no package ID takeover): publisher_id and package_id are excluded from the updatable columns.",
+      "columns": [
+        { "name": "package_id", "type": "text" },
+        { "name": "publisher_id", "type": "id" },
+        { "name": "name", "type": "text" },
+        { "name": "summary", "type": "text" },
+        { "name": "kind", "type": "text" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["package_id"],
+      "foreignKeys": [
+        {
+          "columns": ["publisher_id"],
+          "references": { "table": "package_catalog_publisher", "columns": ["publisher_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": { "columns": ["name", "summary", "kind", "created_at", "rev"] } }
+    },
+    {
+      "name": "package_catalog_version",
+      "model": "01 section 11.1 package_catalog version",
+      "note": "Archive immutable: archive_resource_id, digest and manifest_hash cannot be updated (as well as the key). Submission ownership follows publisher is a plan-level rule.",
+      "columns": [
+        { "name": "package_id", "type": "text" },
+        { "name": "version", "type": "text" },
+        { "name": "submission_id", "type": "id" },
+        { "name": "archive_resource_id", "type": "id" },
+        { "name": "digest", "type": "text" },
+        { "name": "manifest_hash", "type": "text" },
+        { "name": "state", "type": "enum", "enum": "package-catalog.version_state" },
+        { "name": "submitted_at", "type": "instant" },
+        { "name": "published_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["package_id", "version"],
+      "indexes": [
+        {
+          "columns": ["submission_id"],
+          "unique": true,
+          "path": "submission lookup (review target)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["package_id"],
+          "references": { "table": "package_catalog_package", "columns": ["package_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": {
+        "update": { "columns": ["submission_id", "state", "submitted_at", "published_at", "rev"] }
+      }
+    },
+    {
+      "name": "package_catalog_review",
+      "model": "01 section 11.1 package_catalog review",
+      "note": "Append-only. The foreign key targets package_catalog_version(submission_id), its unique submission_id.",
+      "columns": [
+        { "name": "review_id", "type": "id" },
+        { "name": "submission_id", "type": "id" },
+        { "name": "operator_subject", "type": "text" },
+        { "name": "decision", "type": "text" },
+        { "name": "reason", "type": "text" },
+        { "name": "evidence", "type": "text" },
+        { "name": "proposal_hash", "type": "text" },
+        { "name": "decided_at", "type": "instant" },
+        { "name": "command_id", "type": "id" }
+      ],
+      "primaryKey": ["review_id"],
+      "indexes": [{ "columns": ["command_id"], "unique": true, "path": "one review per command" }],
+      "foreignKeys": [
+        {
+          "columns": ["submission_id"],
+          "references": { "table": "package_catalog_version", "columns": ["submission_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" }
+    },
+    {
+      "name": "package_catalog_revocation",
+      "model": "01 section 11.1 package_catalog revocation",
+      "note": "Never erase a published revocation: delete none. The model does not state update immutability, so update stays any.",
+      "columns": [
+        { "name": "revocation_id", "type": "id" },
+        { "name": "package_id", "type": "text" },
+        { "name": "version", "type": "text" },
+        { "name": "reason", "type": "text" },
+        { "name": "operator_subject", "type": "text" },
+        { "name": "revoked_at", "type": "instant" },
+        { "name": "publication_revision", "type": "int64" },
+        { "name": "command_id", "type": "id" }
+      ],
+      "primaryKey": ["revocation_id"],
+      "indexes": [
+        {
+          "columns": ["publication_revision"],
+          "unique": true,
+          "path": "one revocation per publication revision"
+        },
+        { "columns": ["command_id"], "unique": true, "path": "one revocation per command" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["package_id", "version"],
+          "references": {
+            "table": "package_catalog_version",
+            "columns": ["package_id", "version"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "delete": "none" }
+    },
+    {
+      "name": "package_catalog_publication",
+      "model": "01 section 11.1 package_catalog publication",
+      "note": "revision advances with review/revocation (guarded revision), hence monotonic.",
+      "columns": [
+        { "name": "channel", "type": "text" },
+        { "name": "revision", "type": "int64", "monotonic": true },
+        { "name": "index_hash", "type": "text" },
+        { "name": "revocation_hash", "type": "text" },
+        { "name": "signed_object_ref", "type": "text", "nullable": true },
+        { "name": "state", "type": "enum", "enum": "package-catalog.publication_state" },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["channel"]
+    }
+  ]
+}

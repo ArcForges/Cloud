@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "owner": "workspace",
+  "enums": {
+    "workspace.protection_profile": {
+      "source": "model 01 section 4 workspace.workspace.protection_profile (inline, listed order)",
+      "values": ["standard"]
+    },
+    "workspace.workspace_state": {
+      "source": "model 01 section 4 workspace.workspace.state (inline, listed order)",
+      "values": ["active", "suspended", "pendingDeletion"]
+    },
+    "workspace.transfer_direction": {
+      "source": "model 01 section 4 workspace.transfer_job.direction (inline, listed order)",
+      "values": ["import", "export"]
+    },
+    "workspace.data_deletion_state": {
+      "source": "model 01 section 3 workspace.data_deletion.state (inline, listed order)",
+      "values": ["pending", "running", "completed", "failed"]
+    }
+  },
+  "tables": [
+    {
+      "name": "workspace_workspace",
+      "model": "01 section 4 workspace.workspace",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "owner_user_id", "type": "id" },
+        { "name": "name", "type": "text" },
+        { "name": "data_region", "type": "text" },
+        { "name": "protection_profile", "type": "enum", "enum": "workspace.protection_profile" },
+        { "name": "state", "type": "enum", "enum": "workspace.workspace_state" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["workspace_id"],
+      "indexes": [
+        {
+          "columns": ["realm_id", "owner_user_id"],
+          "unique": true,
+          "path": "one personal workspace per realm (owner lookup)"
+        },
+        { "columns": ["owner_user_id", "state"], "path": "an owner's workspaces by state" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["owner_user_id"],
+          "references": { "table": "identity_user", "columns": ["user_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": [
+            "workspace_id",
+            "realm_id",
+            "owner_user_id",
+            "name",
+            "protection_profile",
+            "state",
+            "created_at",
+            "rev"
+          ]
+        },
+        "delete": "any"
+      },
+      "note": "data_region is immutable after creation (every other column keeps the default update freedom); moving regions creates a new workspace. realm_id has no foreign key (model 01 has no realm table)."
+    },
+    {
+      "name": "workspace_transfer_job",
+      "model": "01 section 4 Resumable owner-data transfer: workspace.transfer_job",
+      "columns": [
+        { "name": "transfer_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "direction", "type": "enum", "enum": "workspace.transfer_direction" },
+        { "name": "state", "type": "enum", "enum": "TransferState" },
+        { "name": "manifest_hash", "type": "hash" },
+        { "name": "manifest_resource_id", "type": "id", "nullable": true },
+        { "name": "preview_hash", "type": "hash", "nullable": true },
+        { "name": "rev", "type": "rev" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant", "nullable": true },
+        { "name": "committed_roots", "type": "int64" },
+        { "name": "total_roots", "type": "int64" },
+        { "name": "reason", "type": "key", "nullable": true }
+      ],
+      "primaryKey": ["transfer_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "state", "created_at"],
+          "path": "a workspace's transfers by state, newest last"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "workspace_transfer_mapping",
+      "model": "01 section 4 Resumable owner-data transfer: workspace.transfer_mapping",
+      "columns": [
+        { "name": "transfer_id", "type": "id" },
+        { "name": "source_kind", "type": "text" },
+        { "name": "source_id", "type": "id" },
+        { "name": "target_kind", "type": "text" },
+        { "name": "target_id", "type": "id" },
+        { "name": "state", "type": "enum", "enum": "TransferState" },
+        { "name": "source_hash", "type": "hash" },
+        { "name": "target_rev", "type": "rev", "nullable": true },
+        { "name": "receipt_id", "type": "id", "nullable": true }
+      ],
+      "primaryKey": ["transfer_id", "source_kind", "source_id"],
+      "indexes": [
+        {
+          "columns": ["transfer_id", "target_kind", "target_id"],
+          "unique": true,
+          "path": "one source per target within a transfer (paged mapping reads)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["transfer_id"],
+          "references": { "table": "workspace_transfer_job", "columns": ["transfer_id"] },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "workspace_transfer_issue",
+      "model": "01 section 4 Resumable owner-data transfer: workspace.transfer_issue",
+      "columns": [
+        { "name": "transfer_id", "type": "id" },
+        { "name": "ordinal", "type": "int64" },
+        { "name": "code", "type": "key" },
+        { "name": "source_kind", "type": "text", "nullable": true },
+        { "name": "source_id", "type": "id", "nullable": true },
+        { "name": "blocks_commit", "type": "bool" },
+        { "name": "accepted_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["transfer_id", "ordinal"],
+      "foreignKeys": [
+        {
+          "columns": ["transfer_id"],
+          "references": { "table": "workspace_transfer_job", "columns": ["transfer_id"] },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "workspace_data_deletion",
+      "model": "01 section 3 Account proofs and lifecycle records: workspace.data_deletion",
+      "columns": [
+        { "name": "deletion_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "preview_hash", "type": "hash" },
+        { "name": "captured_revision", "type": "rev" },
+        { "name": "state", "type": "enum", "enum": "workspace.data_deletion_state" },
+        { "name": "owner_job_inventory", "type": "json" },
+        { "name": "completed_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["deletion_id"],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "Defined in the identity records table (model 01 section 3), workspace-owned. owner_job_inventory is canonical JSON of owner/job/receipt references with no declared root, so root is unconstrained."
+    }
+  ]
+}

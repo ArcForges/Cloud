@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "owner": "agent",
+  "enums": {
+    "agent.model_provider": {
+      "source": "model 01 section 8 agent.model_descriptor.provider enum(workersAi) (inline)",
+      "values": ["workersAi"]
+    }
+  },
+  "tables": [
+    {
+      "name": "agent_model_descriptor",
+      "model": "01 section 8 agent.model_descriptor",
+      "columns": [
+        { "name": "model_descriptor_id", "type": "id" },
+        { "name": "model_id", "type": "modelId" },
+        { "name": "config_revision_id", "type": "id" },
+        { "name": "provider", "type": "enum", "enum": "agent.model_provider" },
+        { "name": "route", "type": "key" },
+        { "name": "purpose", "type": "key" },
+        { "name": "lifecycle_state", "type": "key" },
+        { "name": "descriptor_json", "type": "json", "root": "object" },
+        { "name": "descriptor_hash", "type": "hash" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["model_descriptor_id"],
+      "indexes": [
+        {
+          "columns": ["config_revision_id", "model_id", "purpose"],
+          "unique": true,
+          "path": "one descriptor per revision, model and purpose (resolution time)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["config_revision_id"],
+          "references": { "table": "config_revision", "columns": ["config_revision_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "Projected snapshot of an activated config revision. The model states route/tokenizer/limits are immutable for a descriptor identity but does not declare the row update-none (lifecycle_state is a column), so mutability is left at the default. descriptor_json is a closed object profile from contracts 08."
+    },
+    {
+      "name": "agent_supplier_price_version",
+      "model": "01 section 8 agent.supplier_price_version",
+      "columns": [
+        { "name": "supplier_price_version_id", "type": "id" },
+        { "name": "model_descriptor_id", "type": "id" },
+        { "name": "config_revision_id", "type": "id" },
+        { "name": "currency", "type": "text" },
+        { "name": "valid_from", "type": "instant" },
+        { "name": "valid_to", "type": "instant", "nullable": true },
+        { "name": "rates_json", "type": "json", "root": "object" },
+        { "name": "rates_hash", "type": "hash" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["supplier_price_version_id"],
+      "indexes": [
+        {
+          "columns": ["model_descriptor_id", "valid_from"],
+          "path": "price lookup at dispatch time"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["model_descriptor_id"],
+          "references": { "table": "agent_model_descriptor", "columns": ["model_descriptor_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["config_revision_id"],
+          "references": { "table": "config_revision", "columns": ["config_revision_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "Append-only snapshot. currency is declared text (not char(3)) by the model, so it stays text rather than the currency type. The no-missing-category-rate rule is a dispatch-time plan check."
+    },
+    {
+      "name": "agent_tariff_version",
+      "model": "01 section 8 agent.tariff_version",
+      "columns": [
+        { "name": "tariff_version_id", "type": "id" },
+        { "name": "model_descriptor_id", "type": "id" },
+        { "name": "config_revision_id", "type": "id" },
+        { "name": "valid_from", "type": "instant" },
+        { "name": "valid_to", "type": "instant", "nullable": true },
+        { "name": "rates_json", "type": "json", "root": "object" },
+        { "name": "rates_hash", "type": "hash" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["tariff_version_id"],
+      "indexes": [
+        {
+          "columns": ["model_descriptor_id", "valid_from"],
+          "path": "tariff pinned to a run or request"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["model_descriptor_id"],
+          "references": { "table": "agent_model_descriptor", "columns": ["model_descriptor_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["config_revision_id"],
+          "references": { "table": "config_revision", "columns": ["config_revision_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "Append-only snapshot with effective dates; a new price is a new row."
+    },
+    {
+      "name": "agent_agent_profile",
+      "model": "01 section 8 chat.* table row agent.agent_profile / agent.skill",
+      "columns": [
+        { "name": "profile_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "product_id", "type": "productId" },
+        { "name": "revision", "type": "rev" },
+        { "name": "body_proto", "type": "proto" },
+        { "name": "deleted_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["profile_id", "revision"],
+      "mutability": { "update": "none" },
+      "note": "Interpretation: 'version rows PK(id,revision) are immutable' means each revision is a row keyed (profile_id, revision), so the single-id 'PK' in the row is the logical identity and the stored key is composite. Update none; delete left at default (the model does not forbid it). deleted_at is therefore settable only at insert."
+    },
+    {
+      "name": "agent_skill",
+      "model": "01 section 8 chat.* table row agent.agent_profile / agent.skill",
+      "columns": [
+        { "name": "skill_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "product_id", "type": "productId" },
+        { "name": "revision", "type": "rev" },
+        { "name": "body_proto", "type": "proto" },
+        { "name": "deleted_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["skill_id", "revision"],
+      "mutability": { "update": "none" },
+      "note": "Same interpretation as agent_agent_profile (SkillRecord body). Declarations never grant capability."
+    }
+  ]
+}

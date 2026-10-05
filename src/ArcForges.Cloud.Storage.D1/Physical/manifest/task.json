@@ -1,0 +1,1121 @@
+{
+  "schemaVersion": 1,
+  "owner": "task",
+  "enums": {
+    "task.origin_surface": {
+      "source": "model 01 section 8 task.task.origin_surface (inline, listed order)",
+      "values": ["desktop", "web", "mobile", "automation"]
+    },
+    "task.history_mode": {
+      "source": "model 01 section 8 task.task.history_mode (inline enum(local, cloud); the HistoryMode registry also has temporary, which cannot be an agent)",
+      "values": ["local", "cloud"]
+    },
+    "task.iteration_output_state": {
+      "source": "model 01 section 8 task.iteration_output.state (inline, listed order)",
+      "values": ["complete", "interrupted", "refused", "toolProposals"]
+    },
+    "task.attempt_state": {
+      "source": "model 01 section 8 task.attempt.state (inline, listed order)",
+      "values": ["pending", "running", "succeeded", "failed", "canceled"]
+    },
+    "task.failure_class": {
+      "source": "model 01 section 8 task.attempt.failure_class (inline, listed order)",
+      "values": ["transient", "permanent", "refused", "canceled", "unknownEffect"]
+    },
+    "task.approval_state": {
+      "source": "model 01 section 8 task.approval.state (inline, listed order)",
+      "values": ["pending", "approved", "rejected", "expired", "withdrawn"]
+    },
+    "task.automation_occurrence_state": {
+      "source": "model 01 section 8 task.automation_occurrence.state (inline, listed order)",
+      "values": ["pending", "admitted", "skipped", "completed", "failed", "canceled"]
+    },
+    "task.tool_request_state": {
+      "source": "model 01 section 8 task.tool_request.state (written queued/delivered/answered/expired/refused, listed order)",
+      "values": ["queued", "delivered", "answered", "expired", "refused"]
+    }
+  },
+  "tables": [
+    {
+      "name": "task_task",
+      "model": "01 section 8 task.task",
+      "note": "state/reason_facet use the named TaskState and TaskReasonFacet enums (waiting=3, none=1); history_mode is the inline task.history_mode enum (local=1, cloud=2), not the HistoryMode registry. Encoded: waiting facet, current_iteration >= 0, local history requires origin_installation_id, cloud history has null transient refs. Omitted (plan): terminal pointer exactness, final_message/no_answer rules.",
+      "columns": [
+        {
+          "name": "task_id",
+          "type": "id"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "origin_surface",
+          "type": "enum",
+          "enum": "task.origin_surface"
+        },
+        {
+          "name": "origin_device_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "TaskState"
+        },
+        {
+          "name": "reason_facet",
+          "type": "enum",
+          "enum": "TaskReasonFacet"
+        },
+        {
+          "name": "intent_summary",
+          "type": "text"
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        },
+        {
+          "name": "updated_at",
+          "type": "instant"
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        },
+        {
+          "name": "product_id",
+          "type": "productId"
+        },
+        {
+          "name": "origin_installation_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "transient_input_ref",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "transient_output_receipt_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "current_iteration",
+          "type": "int"
+        },
+        {
+          "name": "current_provider_attempt_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "final_message_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "terminal_output_commit_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "no_answer_reason",
+          "type": "key",
+          "nullable": true
+        },
+        {
+          "name": "has_unknown_effect",
+          "type": "bool"
+        },
+        {
+          "name": "history_mode",
+          "type": "enum",
+          "enum": "task.history_mode"
+        }
+      ],
+      "primaryKey": ["task_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "state", "updated_at"],
+          "path": "the task centre"
+        }
+      ],
+      "checks": [
+        {
+          "name": "waiting_facet",
+          "sql": "(\"state\" = 3) = (\"reason_facet\" <> 1)"
+        },
+        {
+          "name": "current_iteration_nonnegative",
+          "sql": "\"current_iteration\" >= 0"
+        },
+        {
+          "name": "local_history_has_origin_installation",
+          "sql": "\"history_mode\" <> 1 OR \"origin_installation_id\" IS NOT NULL"
+        },
+        {
+          "name": "cloud_history_has_no_transient_refs",
+          "sql": "\"history_mode\" <> 2 OR (\"transient_input_ref\" IS NULL AND \"transient_output_receipt_id\" IS NULL)"
+        }
+      ]
+    },
+    {
+      "name": "task_run",
+      "model": "01 section 8 task.run",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "task_id",
+          "type": "id"
+        },
+        {
+          "name": "ordinal",
+          "type": "int"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "TaskState"
+        },
+        {
+          "name": "workflow_id",
+          "type": "text"
+        },
+        {
+          "name": "worker_version",
+          "type": "text"
+        },
+        {
+          "name": "recovery_generation",
+          "type": "int64"
+        },
+        {
+          "name": "last_iteration_receipt",
+          "type": "hash",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        },
+        {
+          "name": "updated_at",
+          "type": "instant"
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["run_id"],
+      "indexes": [
+        {
+          "columns": ["task_id", "ordinal"],
+          "unique": true,
+          "path": "one run ordinal per task"
+        },
+        {
+          "columns": ["state", "updated_at"],
+          "path": "scan of runs by state (recovery and reconciliation)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["task_id"],
+          "references": {
+            "table": "task_task",
+            "columns": ["task_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "task_execution_lease",
+      "model": "01 section 8 task.execution_lease",
+      "note": "Epoch and recovery_generation fencing is guarded by the execution plans (lease holder CAS); the model declares no row-level monotonic rule.",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "holder",
+          "type": "text"
+        },
+        {
+          "name": "workflow_id",
+          "type": "text"
+        },
+        {
+          "name": "worker_version",
+          "type": "text"
+        },
+        {
+          "name": "epoch",
+          "type": "int64"
+        },
+        {
+          "name": "expires_at",
+          "type": "instant"
+        },
+        {
+          "name": "recovery_generation",
+          "type": "int64"
+        }
+      ],
+      "primaryKey": ["run_id"],
+      "indexes": [
+        {
+          "columns": ["expires_at"],
+          "path": "expired lease sweep"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["run_id"],
+          "references": {
+            "table": "task_run",
+            "columns": ["run_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "task_execution_command",
+      "model": "01 section 8 task.execution_command",
+      "columns": [
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "epoch",
+          "type": "int64"
+        },
+        {
+          "name": "operation",
+          "type": "text"
+        },
+        {
+          "name": "request_sha256",
+          "type": "text"
+        },
+        {
+          "name": "state",
+          "type": "text"
+        },
+        {
+          "name": "result_ref",
+          "type": "json",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["command_id"],
+      "indexes": [
+        {
+          "columns": ["run_id", "operation", "command_id"],
+          "unique": true,
+          "path": "command replay lookup for one run and operation"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["run_id"],
+          "references": {
+            "table": "task_run",
+            "columns": ["run_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "task_iteration_output",
+      "model": "01 section 8 task.iteration_output and 8 CH-D5",
+      "note": "Immutable per CH-D5 (each invocation has immutable iteration output), so update is none. The terminal-reference and receipt rules are guarded plans.",
+      "columns": [
+        {
+          "name": "output_id",
+          "type": "id"
+        },
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "iteration_ordinal",
+          "type": "int"
+        },
+        {
+          "name": "logical_request_id",
+          "type": "id"
+        },
+        {
+          "name": "provider_attempt_id",
+          "type": "id"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "task.iteration_output_state"
+        },
+        {
+          "name": "parts_proto",
+          "type": "proto",
+          "nullable": true
+        },
+        {
+          "name": "body_resource_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "checksum",
+          "type": "hash"
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["output_id"],
+      "indexes": [
+        {
+          "columns": ["run_id", "iteration_ordinal"],
+          "unique": true,
+          "path": "one output per run iteration"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["run_id"],
+          "references": {
+            "table": "task_run",
+            "columns": ["run_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "exactly_one_body",
+          "sql": "(\"parts_proto\" IS NULL) <> (\"body_resource_id\" IS NULL)"
+        }
+      ],
+      "mutability": {
+        "update": "none"
+      }
+    },
+    {
+      "name": "task_tool_request",
+      "model": "01 section 8 task.tool_request",
+      "note": "The model says immutable command payload/hash: there is no hash column, so arguments_proto, context_proto and actor_proto are the immutable payload and every other column stays updatable. Device vs cloud is not a column: a request carries the full target (device, installation, product) or none of the four target fields; the epoch is filled at delivery. run_id/step_id/attempt_id/command_id carry no declared FK.",
+      "columns": [
+        {
+          "name": "tool_request_id",
+          "type": "id"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "product_id",
+          "type": "productId"
+        },
+        {
+          "name": "task_id",
+          "type": "id"
+        },
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "step_id",
+          "type": "id"
+        },
+        {
+          "name": "attempt_id",
+          "type": "id"
+        },
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "target_device_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "target_installation_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "target_product_id",
+          "type": "productId",
+          "nullable": true
+        },
+        {
+          "name": "target_instance_epoch",
+          "type": "int64",
+          "nullable": true
+        },
+        {
+          "name": "capability",
+          "type": "text"
+        },
+        {
+          "name": "arguments_proto",
+          "type": "proto"
+        },
+        {
+          "name": "context_proto",
+          "type": "proto"
+        },
+        {
+          "name": "actor_proto",
+          "type": "proto"
+        },
+        {
+          "name": "approval_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "expires_at",
+          "type": "instant"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "task.tool_request_state"
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["tool_request_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "target_installation_id", "state", "expires_at"],
+          "path": "the device tool-request pull path"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["task_id"],
+          "references": {
+            "table": "task_task",
+            "columns": ["task_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "device_target_full_or_none",
+          "sql": "(\"target_device_id\" IS NOT NULL AND \"target_installation_id\" IS NOT NULL AND \"target_product_id\" IS NOT NULL) OR (\"target_device_id\" IS NULL AND \"target_installation_id\" IS NULL AND \"target_product_id\" IS NULL AND \"target_instance_epoch\" IS NULL)"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": [
+            "tool_request_id",
+            "workspace_id",
+            "product_id",
+            "task_id",
+            "run_id",
+            "step_id",
+            "attempt_id",
+            "command_id",
+            "target_device_id",
+            "target_installation_id",
+            "target_product_id",
+            "target_instance_epoch",
+            "capability",
+            "approval_id",
+            "expires_at",
+            "state",
+            "rev"
+          ]
+        }
+      }
+    },
+    {
+      "name": "task_tool_result",
+      "model": "01 section 8 task.tool_result",
+      "note": "Idempotent on the composite key; a repeated key with a different result_hash is refused by the plan (cannot be a row check).",
+      "columns": [
+        {
+          "name": "tool_request_id",
+          "type": "id"
+        },
+        {
+          "name": "attempt_id",
+          "type": "id"
+        },
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "result_hash",
+          "type": "hash"
+        },
+        {
+          "name": "body_proto",
+          "type": "proto"
+        },
+        {
+          "name": "effect_certainty",
+          "type": "enum",
+          "enum": "EffectCertainty"
+        },
+        {
+          "name": "received_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["tool_request_id", "attempt_id", "command_id"],
+      "foreignKeys": [
+        {
+          "columns": ["tool_request_id"],
+          "references": {
+            "table": "task_tool_request",
+            "columns": ["tool_request_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "task_plan_step",
+      "model": "01 section 8 task.plan_step",
+      "note": "state is text NN and reason_facet text? per the table. Device locality (ToolLocality device=2) requires target device, product and installation; cloud (=1) requires all four target fields null. 'Matches Task product' and the no-cloud-substitute rule are plan rules.",
+      "columns": [
+        {
+          "name": "plan_step_id",
+          "type": "id"
+        },
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "step_ordinal",
+          "type": "int"
+        },
+        {
+          "name": "capability_key",
+          "type": "text"
+        },
+        {
+          "name": "tool_locality",
+          "type": "enum",
+          "enum": "ToolLocality"
+        },
+        {
+          "name": "target_device_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "target_product_id",
+          "type": "productId",
+          "nullable": true
+        },
+        {
+          "name": "target_installation_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "target_instance_epoch",
+          "type": "int64",
+          "nullable": true
+        },
+        {
+          "name": "arguments_proto",
+          "type": "proto"
+        },
+        {
+          "name": "approval_required",
+          "type": "bool"
+        },
+        {
+          "name": "compensation_proto",
+          "type": "proto",
+          "nullable": true
+        },
+        {
+          "name": "state",
+          "type": "text"
+        },
+        {
+          "name": "reason_facet",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "primaryKey": ["plan_step_id"],
+      "indexes": [
+        {
+          "columns": ["target_device_id", "target_installation_id", "state"],
+          "path": "the tool-request pull path"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["run_id"],
+          "references": {
+            "table": "task_run",
+            "columns": ["run_id"]
+          },
+          "onDelete": "cascade"
+        }
+      ],
+      "checks": [
+        {
+          "name": "locality_target",
+          "sql": "(\"tool_locality\" = 2 AND \"target_device_id\" IS NOT NULL AND \"target_product_id\" IS NOT NULL AND \"target_installation_id\" IS NOT NULL) OR (\"tool_locality\" = 1 AND \"target_device_id\" IS NULL AND \"target_product_id\" IS NULL AND \"target_installation_id\" IS NULL AND \"target_instance_epoch\" IS NULL)"
+        }
+      ]
+    },
+    {
+      "name": "task_attempt",
+      "model": "01 section 8 task.attempt",
+      "note": "run_id and step_id carry no declared FK. attempt_ordinal monotonicity is guarded per command/run (not a column-level rule); the unknown-effect no-auto-retry transition refusal is a state-machine rule.",
+      "columns": [
+        {
+          "name": "attempt_id",
+          "type": "id"
+        },
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "step_id",
+          "type": "id"
+        },
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "task.attempt_state"
+        },
+        {
+          "name": "attempt_ordinal",
+          "type": "int"
+        },
+        {
+          "name": "failure_class",
+          "type": "enum",
+          "enum": "task.failure_class",
+          "nullable": true
+        },
+        {
+          "name": "effect_certainty",
+          "type": "enum",
+          "enum": "EffectCertainty",
+          "nullable": true
+        },
+        {
+          "name": "started_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "ended_at",
+          "type": "instant",
+          "nullable": true
+        }
+      ],
+      "primaryKey": ["attempt_id"],
+      "indexes": [
+        {
+          "columns": ["command_id", "attempt_ordinal"],
+          "unique": true,
+          "path": "one ordinal per attempt of a command"
+        }
+      ]
+    },
+    {
+      "name": "task_approval",
+      "model": "01 section 8 task.approval",
+      "columns": [
+        {
+          "name": "approval_id",
+          "type": "id"
+        },
+        {
+          "name": "task_id",
+          "type": "id"
+        },
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "step_id",
+          "type": "id"
+        },
+        {
+          "name": "proposal_hash",
+          "type": "hash"
+        },
+        {
+          "name": "actor_proto",
+          "type": "proto"
+        },
+        {
+          "name": "frozen_context_proto",
+          "type": "proto"
+        },
+        {
+          "name": "risk",
+          "type": "key"
+        },
+        {
+          "name": "local_presence_required",
+          "type": "bool"
+        },
+        {
+          "name": "description",
+          "type": "text"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "task.approval_state"
+        },
+        {
+          "name": "decision_by",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        },
+        {
+          "name": "expires_at",
+          "type": "instant"
+        },
+        {
+          "name": "decided_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "consumed_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["approval_id"],
+      "indexes": [
+        {
+          "columns": ["task_id", "state", "expires_at"],
+          "path": "pending approvals of a task by expiry"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["task_id"],
+          "references": {
+            "table": "task_task",
+            "columns": ["task_id"]
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["run_id"],
+          "references": {
+            "table": "task_run",
+            "columns": ["run_id"]
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["step_id"],
+          "references": {
+            "table": "task_plan_step",
+            "columns": ["plan_step_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "task_automation_definition",
+      "model": "01 section 8 task.automation_definition",
+      "columns": [
+        {
+          "name": "automation_id",
+          "type": "id"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "product_id",
+          "type": "productId"
+        },
+        {
+          "name": "definition_version",
+          "type": "int64"
+        },
+        {
+          "name": "definition_proto",
+          "type": "proto"
+        },
+        {
+          "name": "enabled",
+          "type": "bool"
+        },
+        {
+          "name": "next_due_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "event_cursor",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        },
+        {
+          "name": "updated_at",
+          "type": "instant"
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["automation_id"],
+      "indexes": [
+        {
+          "columns": ["enabled", "next_due_at"],
+          "path": "the due-automation scan"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": {
+            "table": "workspace_workspace",
+            "columns": ["workspace_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "task_automation_occurrence",
+      "model": "01 section 8 task.automation_occurrence",
+      "note": "task_id carries no declared FK.",
+      "columns": [
+        {
+          "name": "occurrence_id",
+          "type": "id"
+        },
+        {
+          "name": "automation_id",
+          "type": "id"
+        },
+        {
+          "name": "definition_version",
+          "type": "int64"
+        },
+        {
+          "name": "occurrence_key",
+          "type": "text"
+        },
+        {
+          "name": "scheduled_at",
+          "type": "instant"
+        },
+        {
+          "name": "event_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "task.automation_occurrence_state"
+        },
+        {
+          "name": "task_id",
+          "type": "id",
+          "nullable": true
+        },
+        {
+          "name": "reason",
+          "type": "key",
+          "nullable": true
+        },
+        {
+          "name": "completed_at",
+          "type": "instant",
+          "nullable": true
+        }
+      ],
+      "primaryKey": ["occurrence_id"],
+      "indexes": [
+        {
+          "columns": ["automation_id", "definition_version", "occurrence_key"],
+          "unique": true,
+          "path": "one occurrence per automation version and key"
+        },
+        {
+          "columns": ["state", "scheduled_at"],
+          "path": "pending occurrence scan"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["automation_id"],
+          "references": {
+            "table": "task_automation_definition",
+            "columns": ["automation_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "task_control_receipt",
+      "model": "01 section 8 task.control_receipt",
+      "columns": [
+        {
+          "name": "command_id",
+          "type": "id"
+        },
+        {
+          "name": "owner_id",
+          "type": "id"
+        },
+        {
+          "name": "kind",
+          "type": "key"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "ControlState"
+        },
+        {
+          "name": "requested_at",
+          "type": "instant"
+        },
+        {
+          "name": "acknowledged_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "reason",
+          "type": "key",
+          "nullable": true
+        },
+        {
+          "name": "request_hash",
+          "type": "hash"
+        }
+      ],
+      "primaryKey": ["command_id"],
+      "indexes": [
+        {
+          "columns": ["owner_id", "requested_at"],
+          "path": "receipts of one task in order"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["owner_id"],
+          "references": {
+            "table": "task_task",
+            "columns": ["task_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "task_cf_instance_inventory",
+      "model": "01 section 10 task.cf_instance_inventory",
+      "columns": [
+        {
+          "name": "kind",
+          "type": "text"
+        },
+        {
+          "name": "instance_id",
+          "type": "text"
+        },
+        {
+          "name": "recovery_generation",
+          "type": "int64"
+        },
+        {
+          "name": "workspace_id",
+          "type": "id"
+        },
+        {
+          "name": "owner_job_id",
+          "type": "id"
+        },
+        {
+          "name": "worker_version",
+          "type": "text"
+        },
+        {
+          "name": "deletion_receipt",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["kind", "instance_id", "recovery_generation"]
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "owner": "audit",
+  "enums": {
+    "audit.approval_decision": {
+      "source": "model 01 section 11 audit.operator_approval.decision (inline, listed order)",
+      "values": ["approve", "reject"]
+    }
+  },
+  "tables": [
+    {
+      "name": "audit_audit_event",
+      "model": "01 section 11 audit.audit_event",
+      "note": "payload_proto is typed event-schema JSON in the model, so it is a json column despite the _proto name; actor_proto (ActorChain) is proto. Append-only under application roles; only the approved expired-partition retention purge deletes, so update is none and delete is any.",
+      "columns": [
+        { "name": "event_id", "type": "id" },
+        { "name": "workspace_id", "type": "id", "nullable": true },
+        { "name": "actor_ref", "type": "text" },
+        { "name": "actor_proto", "type": "proto" },
+        { "name": "event_type", "type": "key" },
+        { "name": "reason", "type": "key" },
+        { "name": "correlation_id", "type": "id", "nullable": true },
+        { "name": "command_id", "type": "id", "nullable": true },
+        { "name": "target_ref", "type": "aggregateRef", "nullable": true },
+        { "name": "occurred_at", "type": "instant" },
+        { "name": "payload_proto", "type": "json" },
+        { "name": "previous_hash", "type": "hash" },
+        { "name": "event_hash", "type": "hash" }
+      ],
+      "primaryKey": ["event_id"],
+      "indexes": [
+        { "columns": ["workspace_id", "occurred_at"], "path": "workspace audit timeline" },
+        { "columns": ["actor_ref", "occurred_at"], "path": "actor audit timeline" }
+      ],
+      "mutability": { "update": "none", "delete": "any" }
+    },
+    {
+      "name": "audit_operator_proposal",
+      "model": "01 section 11 (Operator proposal, approval and financial owner closure) audit.operator_proposal",
+      "note": "state uses the OperatorProposalState registry enum, whose members equal the model list. Immutable payload/hash: mutation_proto, proposal_hash and configuration_hash cannot be updated. The 15 minute bound is 900000000 microseconds. Delete stays any because the model retains proposals under retention policy and legal holds rather than forbidding deletion. Plan-level: consumption guards (state/revision/hash/expiry/generation, approver eligibility).",
+      "columns": [
+        { "name": "proposal_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "operation_id", "type": "key" },
+        { "name": "mutation_proto", "type": "proto" },
+        { "name": "case_id", "type": "id", "nullable": true },
+        { "name": "incident_id", "type": "id", "nullable": true },
+        { "name": "purpose", "type": "text" },
+        { "name": "reason", "type": "text" },
+        { "name": "proposer_subject", "type": "text" },
+        { "name": "approver_subject", "type": "text", "nullable": true },
+        { "name": "proposal_hash", "type": "hash" },
+        { "name": "configuration_hash", "type": "hash" },
+        { "name": "expected_owner_revision", "type": "rev" },
+        { "name": "state", "type": "enum", "enum": "OperatorProposalState" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "consumed_command_id", "type": "id", "nullable": true },
+        { "name": "result_ref", "type": "aggregateRef", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["proposal_id"],
+      "indexes": [
+        {
+          "columns": ["consumed_command_id"],
+          "unique": true,
+          "path": "one command consumes one proposal"
+        },
+        { "columns": ["state", "expires_at"], "path": "expiry sweep of pending proposals" },
+        { "columns": ["case_id", "created_at"], "path": "proposals of one support case" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["case_id"],
+          "references": { "table": "support_support_case", "columns": ["case_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "exactly_one_case_or_incident",
+          "sql": "(\"case_id\" IS NULL) <> (\"incident_id\" IS NULL)"
+        },
+        {
+          "name": "expires_within_15_minutes",
+          "sql": "\"expires_at\" <= \"created_at\" + 900000000"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": [
+            "realm_id",
+            "operation_id",
+            "case_id",
+            "incident_id",
+            "purpose",
+            "reason",
+            "proposer_subject",
+            "approver_subject",
+            "expected_owner_revision",
+            "state",
+            "created_at",
+            "expires_at",
+            "recovery_generation",
+            "consumed_command_id",
+            "result_ref_kind",
+            "result_ref_id",
+            "rev"
+          ]
+        },
+        "delete": "any"
+      }
+    },
+    {
+      "name": "audit_operator_approval",
+      "model": "01 section 11 (Operator proposal, approval and financial owner closure) audit.operator_approval",
+      "note": "Append-only. Not expressible per row: approver differs from proposer and the current eligible directory role at approval and execution (guarded plan).",
+      "columns": [
+        { "name": "approval_id", "type": "id" },
+        { "name": "proposal_id", "type": "id" },
+        { "name": "proposal_hash", "type": "hash" },
+        { "name": "approver_subject", "type": "text" },
+        { "name": "decision", "type": "enum", "enum": "audit.approval_decision" },
+        { "name": "reason", "type": "text" },
+        { "name": "decided_at", "type": "instant" },
+        { "name": "command_id", "type": "id" }
+      ],
+      "primaryKey": ["approval_id"],
+      "indexes": [
+        {
+          "columns": ["proposal_id"],
+          "unique": true,
+          "path": "one approval decision per proposal"
+        },
+        { "columns": ["command_id"], "unique": true, "path": "one approval per command" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["proposal_id"],
+          "references": { "table": "audit_operator_proposal", "columns": ["proposal_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" }
+    }
+  ]
+}

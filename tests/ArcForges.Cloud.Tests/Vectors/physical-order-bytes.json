@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "note": "Order-preserving sort keys. Every list is in ascending numeric order; the keys must be strictly ascending as unsigned bytes (the comparison SQLite applies to a BLOB), in C# and in SQLite.",
+  "uint64": [
+    {
+      "value": "0",
+      "orderHex": "0000000000000000"
+    },
+    {
+      "value": "1",
+      "orderHex": "0000000000000001"
+    },
+    {
+      "value": "255",
+      "orderHex": "00000000000000ff"
+    },
+    {
+      "value": "256",
+      "orderHex": "0000000000000100"
+    },
+    {
+      "value": "9007199254740993",
+      "orderHex": "0020000000000001"
+    },
+    {
+      "value": "9223372036854775808",
+      "orderHex": "8000000000000000"
+    },
+    {
+      "value": "18446744073709551615",
+      "orderHex": "ffffffffffffffff"
+    }
+  ],
+  "int64": [
+    {
+      "value": "-9223372036854775808",
+      "orderHex": "0000000000000000"
+    },
+    {
+      "value": "-9007199254740993",
+      "orderHex": "7fdfffffffffffff"
+    },
+    {
+      "value": "-1",
+      "orderHex": "7fffffffffffffff"
+    },
+    {
+      "value": "0",
+      "orderHex": "8000000000000000"
+    },
+    {
+      "value": "1",
+      "orderHex": "8000000000000001"
+    },
+    {
+      "value": "9007199254740993",
+      "orderHex": "8020000000000001"
+    },
+    {
+      "value": "9223372036854775807",
+      "orderHex": "ffffffffffffffff"
+    }
+  ],
+  "decimal": [
+    {
+      "value": "-9999999999999999999.999999999",
+      "orderHex": "7fffffffdfb031a1c1dafd9ef0000001"
+    },
+    {
+      "value": "-1234567890123456789.123456789",
+      "orderHex": "7ffffffffc02ca149286856e3b27a0eb"
+    },
+    {
+      "value": "-10",
+      "orderHex": "7ffffffffffffffffffffffdabf41c00"
+    },
+    {
+      "value": "-1.5",
+      "orderHex": "7fffffffffffffffffffffffa697d100"
+    },
+    {
+      "value": "-1",
+      "orderHex": "7fffffffffffffffffffffffc4653600"
+    },
+    {
+      "value": "-0.000000001",
+      "orderHex": "7fffffffffffffffffffffffffffffff"
+    },
+    {
+      "value": "0",
+      "orderHex": "80000000000000000000000000000000"
+    },
+    {
+      "value": "0.000000001",
+      "orderHex": "80000000000000000000000000000001"
+    },
+    {
+      "value": "0.5",
+      "orderHex": "8000000000000000000000001dcd6500"
+    },
+    {
+      "value": "1",
+      "orderHex": "8000000000000000000000003b9aca00"
+    },
+    {
+      "value": "1.5",
+      "orderHex": "80000000000000000000000059682f00"
+    },
+    {
+      "value": "9.999999999",
+      "orderHex": "800000000000000000000002540be3ff"
+    },
+    {
+      "value": "10",
+      "orderHex": "800000000000000000000002540be400"
+    },
+    {
+      "value": "99.5",
+      "orderHex": "8000000000000000000000172aa98300"
+    },
+    {
+      "value": "9999999999999999999.999999999",
+      "orderHex": "80000000204fce5e3e2502610fffffff"
+    },
+    {
+      "value": "1234567890123456789012345678",
+      "orderHex": "80edc4e57e669eb52d3a8e6e46e78c00"
+    }
+  ]
+}

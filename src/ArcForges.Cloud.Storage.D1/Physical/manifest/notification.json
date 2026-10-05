@@ -1,0 +1,229 @@
+{
+  "schemaVersion": 1,
+  "owner": "notification",
+  "enums": {
+    "notification.durability": {
+      "source": "model 01 section 11 notification.notification.durability (inline, listed order)",
+      "values": ["durable", "transient"]
+    },
+    "notification.push_delivery_state": {
+      "source": "model 01 section 11 notification.push_delivery.state (listed in the prose Fields list, listed order)",
+      "values": [
+        "pending",
+        "sending",
+        "providerAccepted",
+        "expired",
+        "invalidated",
+        "configurationFailed"
+      ]
+    },
+    "notification.delivery_state": {
+      "source": "model 01 section 11 (Notification email delivery) notification.delivery.state (inline, listed order)",
+      "values": [
+        "pending",
+        "sending",
+        "providerAccepted",
+        "unknown",
+        "rejected",
+        "bounced",
+        "complained",
+        "expired",
+        "canceled"
+      ]
+    },
+    "notification.delivery_provider": {
+      "source": "model 01 section 11 (Notification email delivery) notification.delivery_attempt.provider (inline, listed order)",
+      "values": ["postmark", "ses"]
+    },
+    "notification.dispatch_state": {
+      "source": "model 01 section 11 (Notification email delivery) notification.delivery_attempt.dispatch_state (inline, listed order)",
+      "values": ["prepared", "dispatched", "accepted", "rejected", "unknown"]
+    },
+    "notification.suppression_stream": {
+      "source": "model 01 section 11 (Notification email delivery) notification.suppression.stream (inline, listed order)",
+      "values": ["security", "broadcast"]
+    },
+    "notification.suppression_reason": {
+      "source": "model 01 section 11 (Notification email delivery) notification.suppression.reason (inline, listed order)",
+      "values": ["hardBounce", "complaint", "operator"]
+    }
+  },
+  "tables": [
+    {
+      "name": "notification_notification",
+      "model": "01 section 11 notification.notification",
+      "columns": [
+        { "name": "notification_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "product_id", "type": "productId", "nullable": true },
+        { "name": "kind", "type": "key" },
+        { "name": "owner_ref", "type": "aggregateRef" },
+        { "name": "durability", "type": "enum", "enum": "notification.durability" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant", "nullable": true },
+        { "name": "resolved_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["notification_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "durability", "resolved_at"],
+          "path": "unresolved durable notifications of a workspace"
+        }
+      ]
+    },
+    {
+      "name": "notification_push_registration",
+      "model": "01 section 11 notification.push_registration",
+      "note": "The prose mentions platform=android-fcm, but the field list does not declare a platform column and the value is a constant, so no platform column is added. registration_revision is increasing, hence monotonic. Not row-expressible: token-invalid deletion compares id/revision/token_hash/generation (guarded plan).",
+      "columns": [
+        { "name": "registration_id", "type": "id" },
+        { "name": "device_id", "type": "id" },
+        { "name": "installation_id", "type": "id" },
+        { "name": "registration_revision", "type": "int64", "monotonic": true },
+        { "name": "encrypted_token", "type": "text" },
+        { "name": "token_hash", "type": "text" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["registration_id"],
+      "indexes": [
+        {
+          "columns": ["device_id", "installation_id"],
+          "unique": true,
+          "path": "one current registration per device installation (RegisterPush upsert)"
+        }
+      ]
+    },
+    {
+      "name": "notification_push_delivery",
+      "model": "01 section 11 notification.push_delivery",
+      "note": "state is not in the typed field list but is in the model prose Fields list with its members, so it is built as an inline enum. last_reason is ReasonCode (key). lease_fence is a fence token, hence monotonic. The model declares no foreign keys for this table.",
+      "columns": [
+        { "name": "delivery_id", "type": "id" },
+        { "name": "notification_id", "type": "id" },
+        { "name": "registration_id", "type": "id" },
+        { "name": "registration_revision", "type": "int64" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "state", "type": "enum", "enum": "notification.push_delivery_state" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "next_attempt_at", "type": "instant" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "attempt_count", "type": "int64" },
+        { "name": "lease_fence", "type": "int64", "monotonic": true },
+        { "name": "provider_message_id", "type": "text", "nullable": true },
+        { "name": "last_reason", "type": "key", "nullable": true },
+        { "name": "completed_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["delivery_id"],
+      "indexes": [
+        {
+          "columns": [
+            "notification_id",
+            "registration_id",
+            "registration_revision",
+            "recovery_generation"
+          ],
+          "unique": true,
+          "path": "one delivery per notification, registration revision and generation"
+        }
+      ]
+    },
+    {
+      "name": "notification_delivery",
+      "model": "01 section 11 (Notification email delivery) notification.delivery",
+      "note": "user_id is declared FK without a named target; identity.user is the only user table, so the FK targets identity_user(user_id).",
+      "columns": [
+        { "name": "delivery_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "template_version", "type": "text" },
+        { "name": "purpose", "type": "text" },
+        { "name": "recipient_hash", "type": "text" },
+        { "name": "recipient_secret_ref", "type": "text" },
+        { "name": "state", "type": "enum", "enum": "notification.delivery_state" },
+        { "name": "challenge_ref", "type": "id", "nullable": true },
+        { "name": "security_epoch", "type": "int64" },
+        { "name": "current_attempt_id", "type": "id", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["delivery_id"],
+      "indexes": [
+        { "columns": ["state", "expires_at"], "path": "expiry and dispatch sweep by state" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["user_id"],
+          "references": { "table": "identity_user", "columns": ["user_id"] },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "notification_delivery_attempt",
+      "model": "01 section 11 (Notification email delivery) notification.delivery_attempt",
+      "columns": [
+        { "name": "attempt_id", "type": "id" },
+        { "name": "delivery_id", "type": "id" },
+        { "name": "provider", "type": "enum", "enum": "notification.delivery_provider" },
+        { "name": "dispatch_state", "type": "enum", "enum": "notification.dispatch_state" },
+        { "name": "request_hash", "type": "hash" },
+        { "name": "provider_message_id", "type": "text", "nullable": true },
+        { "name": "accepted_at", "type": "instant", "nullable": true },
+        { "name": "outcome", "type": "key", "nullable": true },
+        { "name": "reconciled_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["attempt_id"],
+      "indexes": [
+        {
+          "columns": ["provider", "provider_message_id"],
+          "unique": true,
+          "path": "provider message lookup for reconciliation"
+        },
+        {
+          "columns": ["dispatch_state", "reconciled_at"],
+          "path": "reconciliation of unreconciled attempts"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["delivery_id"],
+          "references": { "table": "notification_delivery", "columns": ["delivery_id"] },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "notification_provider_event",
+      "model": "01 section 11 (Notification email delivery) notification.provider_event",
+      "note": "The model declares no foreign keys; contradictory replay rejection is a guarded-plan rule.",
+      "columns": [
+        { "name": "provider", "type": "text" },
+        { "name": "event_id", "type": "text" },
+        { "name": "delivery_id", "type": "id" },
+        { "name": "attempt_id", "type": "id" },
+        { "name": "body_hash", "type": "hash" },
+        { "name": "kind", "type": "key" },
+        { "name": "received_at", "type": "instant" },
+        { "name": "applied_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["provider", "event_id"]
+    },
+    {
+      "name": "notification_suppression",
+      "model": "01 section 11 (Notification email delivery) notification.suppression",
+      "columns": [
+        { "name": "recipient_hash", "type": "text" },
+        { "name": "stream", "type": "enum", "enum": "notification.suppression_stream" },
+        { "name": "reason", "type": "enum", "enum": "notification.suppression_reason" },
+        { "name": "provider_event_id", "type": "text", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "cleared_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["recipient_hash", "stream"]
+    }
+  ]
+}

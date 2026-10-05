@@ -1,0 +1,368 @@
+{
+  "schemaVersion": 1,
+  "owner": "platform",
+  "enums": {
+    "platform.command_status": {
+      "source": "model 01 section 2 platform.command.status (inline, listed order)",
+      "values": ["inProgress", "succeeded", "failed"]
+    },
+    "platform.outbox_state": {
+      "source": "model 01 section 2 platform.outbox.state (inline, listed order)",
+      "values": ["pending", "dispatched", "deadLettered"]
+    },
+    "platform.inbox_outcome": {
+      "source": "model 01 section 2 platform.inbox.outcome (inline, listed order)",
+      "values": ["applied", "duplicateIgnored", "rejected"]
+    },
+    "platform.job_state": {
+      "source": "model 01 section 2 platform.job_lease.state (inline, listed order)",
+      "values": ["ready", "leased", "succeeded", "deadLettered"]
+    },
+    "platform.operating_dimension": {
+      "source": "model 01 section 2 platform.operating_budget.dimension (inline, listed order); also the type of platform.operating_reservation.dimension so that the composite foreign key has matching types",
+      "values": ["vectors", "namespaces", "r2Bytes", "r2Objects", "classA", "classB", "servedBytes"]
+    },
+    "platform.reservation_state": {
+      "source": "model 01 section 2 platform.operating_reservation.state (inline, listed order)",
+      "values": ["held", "committed", "released", "unknown"]
+    },
+    "platform.safety_status": {
+      "source": "model 01 section 10 platform.safety_receipt.status (inline, listed order)",
+      "values": ["pending", "verified"]
+    },
+    "platform.recovery_state": {
+      "source": "model 01 section 10 platform.recovery_epoch.state (inline, listed order)",
+      "values": ["fenced", "restoring", "reconciling", "open"]
+    },
+    "platform.migration_mode": {
+      "source": "model 04 section 6 migration modes (expand, backfill, cutover, contract)",
+      "values": ["expand", "backfill", "cutover", "contract"]
+    },
+    "platform.migration_state": {
+      "source": "model 04 section 6 migration bookkeeping",
+      "values": ["applying", "applied"]
+    }
+  },
+  "tables": [
+    {
+      "name": "platform_command",
+      "model": "01 section 2 platform.command",
+      "columns": [
+        { "name": "command_id", "type": "id" },
+        { "name": "workspace_id", "type": "id", "nullable": true },
+        { "name": "actor_ref", "type": "text" },
+        { "name": "operation", "type": "text" },
+        { "name": "request_hash", "type": "text" },
+        { "name": "status", "type": "enum", "enum": "platform.command_status" },
+        { "name": "result_payload", "type": "json", "nullable": true },
+        { "name": "result_rev", "type": "rev", "nullable": true },
+        { "name": "error_code", "type": "text", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" }
+      ],
+      "primaryKey": ["command_id"],
+      "indexes": [
+        {
+          "columns": ["expires_at"],
+          "path": "the retention sweep (model 01 section 2, overview 7.1)"
+        }
+      ],
+      "checks": [
+        {
+          "name": "failed_has_error_code",
+          "sql": "\"status\" <> 3 OR \"error_code\" IS NOT NULL"
+        }
+      ]
+    },
+    {
+      "name": "platform_outbox",
+      "model": "01 section 2 platform.outbox",
+      "columns": [
+        { "name": "outbox_id", "type": "id" },
+        { "name": "aggregate_kind", "type": "text" },
+        { "name": "aggregate_id", "type": "id" },
+        { "name": "aggregate_rev", "type": "rev" },
+        { "name": "event_type", "type": "text" },
+        { "name": "payload", "type": "json" },
+        { "name": "workspace_id", "type": "id", "nullable": true },
+        { "name": "correlation_id", "type": "id" },
+        { "name": "causation_id", "type": "id", "nullable": true },
+        { "name": "state", "type": "enum", "enum": "platform.outbox_state" },
+        { "name": "attempts", "type": "int" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "dispatched_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["outbox_id"],
+      "indexes": [
+        { "columns": ["state", "created_at"], "path": "the dispatcher's only query path" },
+        {
+          "columns": ["aggregate_kind", "aggregate_id", "aggregate_rev"],
+          "path": "replay for one aggregate"
+        }
+      ],
+      "checks": [{ "name": "attempts_nonnegative", "sql": "\"attempts\" >= 0" }]
+    },
+    {
+      "name": "platform_inbox",
+      "model": "01 section 2 platform.inbox",
+      "columns": [
+        { "name": "source", "type": "text" },
+        { "name": "message_id", "type": "text" },
+        { "name": "received_at", "type": "instant" },
+        { "name": "processed_at", "type": "instant", "nullable": true },
+        { "name": "outcome", "type": "enum", "enum": "platform.inbox_outcome", "nullable": true },
+        { "name": "expires_at", "type": "instant" }
+      ],
+      "primaryKey": ["source", "message_id"],
+      "indexes": [{ "columns": ["expires_at"], "path": "the inbox retention sweep" }]
+    },
+    {
+      "name": "platform_job_lease",
+      "model": "01 section 2 platform.job_lease",
+      "columns": [
+        { "name": "job_id", "type": "id" },
+        { "name": "job_type", "type": "text" },
+        { "name": "holder", "type": "text", "nullable": true },
+        { "name": "leased_until", "type": "instant", "nullable": true },
+        { "name": "attempts", "type": "int" },
+        { "name": "fence_token", "type": "int64", "monotonic": true },
+        { "name": "state", "type": "enum", "enum": "platform.job_state" },
+        { "name": "payload", "type": "json" },
+        { "name": "available_at", "type": "instant" }
+      ],
+      "primaryKey": ["job_id"],
+      "indexes": [{ "columns": ["state", "available_at"], "path": "the only claim path" }],
+      "checks": [
+        {
+          "name": "leased_has_holder",
+          "sql": "\"state\" <> 2 OR (\"holder\" IS NOT NULL AND \"leased_until\" IS NOT NULL)"
+        },
+        { "name": "attempts_nonnegative", "sql": "\"attempts\" >= 0" },
+        { "name": "fence_nonnegative", "sql": "\"fence_token\" >= 0" }
+      ]
+    },
+    {
+      "name": "platform_operating_budget",
+      "model": "01 section 2 Realm operating-budget reservations: platform.operating_budget",
+      "columns": [
+        { "name": "realm_id", "type": "id" },
+        { "name": "dimension", "type": "enum", "enum": "platform.operating_dimension" },
+        { "name": "period_start", "type": "instant" },
+        { "name": "profile_hash", "type": "hash" },
+        { "name": "ceiling", "type": "int64" },
+        { "name": "used", "type": "int64" },
+        { "name": "held", "type": "int64" },
+        { "name": "rev", "type": "rev" },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["realm_id", "dimension", "period_start"],
+      "checks": [
+        {
+          "name": "nonnegative",
+          "sql": "\"ceiling\" >= 0 AND \"used\" >= 0 AND \"held\" >= 0"
+        }
+      ]
+    },
+    {
+      "name": "platform_operating_reservation",
+      "model": "01 section 2 Realm operating-budget reservations: platform.operating_reservation",
+      "columns": [
+        { "name": "reservation_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "dimension", "type": "enum", "enum": "platform.operating_dimension" },
+        { "name": "period_start", "type": "instant" },
+        { "name": "account_id", "type": "id", "nullable": true },
+        { "name": "owner_ref", "type": "aggregateRef" },
+        { "name": "command_id", "type": "id" },
+        { "name": "reservation_key", "type": "key" },
+        { "name": "dispatch_attempt_id", "type": "id", "nullable": true },
+        { "name": "bound", "type": "int64" },
+        { "name": "actual", "type": "int64" },
+        { "name": "state", "type": "enum", "enum": "platform.reservation_state" },
+        { "name": "fence", "type": "int64" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "updated_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["reservation_id"],
+      "indexes": [
+        {
+          "columns": ["realm_id", "reservation_key", "dimension"],
+          "unique": true,
+          "path": "a duplicate claim resolves the same reservation"
+        },
+        {
+          "columns": ["state", "updated_at"],
+          "path": "reconciliation of held and unknown reservations"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["realm_id", "dimension", "period_start"],
+          "references": {
+            "table": "platform_operating_budget",
+            "columns": ["realm_id", "dimension", "period_start"]
+          },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "platform_safety_receipt",
+      "model": "01 section 10 platform.safety_receipt",
+      "columns": [
+        { "name": "journal_record_id", "type": "text" },
+        { "name": "record_hash", "type": "hash" },
+        { "name": "owner_command_id", "type": "id" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "kind", "type": "key" },
+        { "name": "status", "type": "enum", "enum": "platform.safety_status" },
+        { "name": "independent_receipt", "type": "text", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "verified_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["journal_record_id"],
+      "indexes": [
+        {
+          "columns": ["status", "created_at"],
+          "path": "pending receipts awaiting the independent journal acknowledgement"
+        }
+      ],
+      "checks": [
+        {
+          "name": "verified_has_receipt",
+          "sql": "\"status\" <> 2 OR (\"independent_receipt\" IS NOT NULL AND \"verified_at\" IS NOT NULL)"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": ["status", "independent_receipt", "verified_at"],
+          "when": "OLD.\"status\" = 1"
+        }
+      }
+    },
+    {
+      "name": "platform_recovery_epoch",
+      "model": "01 section 10 platform.recovery_epoch",
+      "columns": [
+        { "name": "realm_id", "type": "id" },
+        { "name": "recovery_generation", "type": "int64", "monotonic": true },
+        { "name": "recovery_point", "type": "text" },
+        { "name": "journal_inventory_hash", "type": "hash" },
+        { "name": "state", "type": "enum", "enum": "platform.recovery_state" },
+        { "name": "updated_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["realm_id"]
+    },
+    {
+      "name": "platform_schema_state",
+      "model": "04 section 6 Migration bookkeeping and modes: platform.schema_state (CLOUD.03)",
+      "bootstrap": true,
+      "columns": [
+        { "name": "singleton", "type": "int" },
+        { "name": "schema_version", "type": "int64", "monotonic": true },
+        { "name": "read_horizon", "type": "int64" },
+        { "name": "write_horizon", "type": "int64" },
+        { "name": "fence", "type": "int64", "monotonic": true },
+        { "name": "lease_holder", "type": "text", "nullable": true },
+        { "name": "lease_expires_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["singleton"],
+      "checks": [
+        { "name": "single_row", "sql": "\"singleton\" = 1" },
+        {
+          "name": "horizons",
+          "sql": "\"read_horizon\" >= 0 AND \"write_horizon\" >= \"read_horizon\" AND \"schema_version\" >= \"write_horizon\" AND \"fence\" >= 0"
+        },
+        {
+          "name": "lease_pair",
+          "sql": "(\"lease_holder\" IS NULL) = (\"lease_expires_at\" IS NULL)"
+        }
+      ],
+      "mutability": { "delete": "none" }
+    },
+    {
+      "name": "platform_migration_receipt",
+      "model": "04 section 6 Migration bookkeeping and modes: platform.migration_receipt (CLOUD.03)",
+      "bootstrap": true,
+      "columns": [
+        { "name": "sequence", "type": "int64" },
+        { "name": "file_name", "type": "text" },
+        { "name": "module", "type": "key" },
+        { "name": "mode", "type": "enum", "enum": "platform.migration_mode" },
+        { "name": "checksum", "type": "text" },
+        { "name": "state", "type": "enum", "enum": "platform.migration_state" },
+        { "name": "statement_count", "type": "int" },
+        { "name": "statements_done", "type": "int" },
+        { "name": "runner", "type": "text" },
+        { "name": "fence", "type": "int64" },
+        { "name": "started_at", "type": "instant" },
+        { "name": "applied_at", "type": "instant", "nullable": true },
+        { "name": "compatibility", "type": "json", "root": "object" }
+      ],
+      "primaryKey": ["sequence"],
+      "indexes": [
+        {
+          "columns": ["file_name"],
+          "unique": true,
+          "path": "a migration file is applied once"
+        }
+      ],
+      "checks": [
+        { "name": "sequence_nonnegative", "sql": "\"sequence\" >= 0" },
+        {
+          "name": "checksum_shape",
+          "sql": "length(\"checksum\") = 64 AND \"checksum\" NOT GLOB '*[^0-9a-f]*'"
+        },
+        {
+          "name": "progress",
+          "sql": "\"statement_count\" >= 0 AND \"statements_done\" >= 0 AND \"statements_done\" <= \"statement_count\""
+        },
+        {
+          "name": "applied_complete",
+          "sql": "\"state\" <> 2 OR (\"applied_at\" IS NOT NULL AND \"statements_done\" = \"statement_count\")"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": ["statements_done", "state", "applied_at", "fence"],
+          "when": "OLD.\"state\" = 1"
+        },
+        "delete": "none"
+      }
+    },
+    {
+      "name": "platform_backfill_checkpoint",
+      "model": "04 section 6 Migration bookkeeping and modes: platform.backfill_checkpoint (CLOUD.03)",
+      "bootstrap": true,
+      "columns": [
+        { "name": "sequence", "type": "int64" },
+        { "name": "last_key", "type": "text", "nullable": true },
+        { "name": "pages_done", "type": "int64" },
+        { "name": "rows_converted", "type": "int64" },
+        { "name": "rows_stale", "type": "int64" },
+        { "name": "verified", "type": "bool" },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["sequence"],
+      "foreignKeys": [
+        {
+          "columns": ["sequence"],
+          "references": { "table": "platform_migration_receipt", "columns": ["sequence"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "counters",
+          "sql": "\"pages_done\" >= 0 AND \"rows_converted\" >= 0 AND \"rows_stale\" >= 0"
+        }
+      ],
+      "mutability": { "delete": "none" }
+    }
+  ]
+}

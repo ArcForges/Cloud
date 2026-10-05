@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "owner": "support",
+  "enums": {},
+  "tables": [
+    {
+      "name": "support_support_case",
+      "model": "01 section 11 support.support_case",
+      "note": "state is the model inline list, identical to the SupportCaseState registry enum, so the registry enum is used.",
+      "columns": [
+        { "name": "case_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "category", "type": "text" },
+        { "name": "subject", "type": "text" },
+        { "name": "state", "type": "enum", "enum": "SupportCaseState" },
+        { "name": "diagnostic_ref", "type": "id", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "updated_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["case_id"],
+      "indexes": [
+        { "columns": ["user_id", "state", "updated_at"], "path": "cases of one user by state" }
+      ]
+    },
+    {
+      "name": "support_case_message",
+      "model": "01 section 11 support.case_message (defined inside the support.support_case row)",
+      "columns": [
+        { "name": "message_id", "type": "id" },
+        { "name": "case_id", "type": "id" },
+        { "name": "ordinal", "type": "int64" },
+        { "name": "actor_ref", "type": "text" },
+        { "name": "text", "type": "text" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["message_id"],
+      "indexes": [
+        {
+          "columns": ["case_id", "ordinal"],
+          "unique": true,
+          "path": "ordered messages of one case"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["case_id"],
+          "references": { "table": "support_support_case", "columns": ["case_id"] },
+          "onDelete": "restrict"
+        }
+      ]
+    },
+    {
+      "name": "support_access_grant",
+      "model": "01 section 11 support.access_grant",
+      "note": "scope_proto is typed support.access.v1 JSON in the model, so it is a json column despite the _proto name.",
+      "columns": [
+        { "name": "access_id", "type": "id" },
+        { "name": "case_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "operator_subject", "type": "text" },
+        { "name": "scope_proto", "type": "json" },
+        { "name": "proposal_hash", "type": "hash" },
+        { "name": "consented_at", "type": "instant", "nullable": true },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "revoked_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["access_id"],
+      "indexes": [{ "columns": ["expires_at"], "path": "expiry sweep of access grants" }],
+      "foreignKeys": [
+        {
+          "columns": ["case_id"],
+          "references": { "table": "support_support_case", "columns": ["case_id"] },
+          "onDelete": "restrict"
+        }
+      ]
+    }
+  ]
+}

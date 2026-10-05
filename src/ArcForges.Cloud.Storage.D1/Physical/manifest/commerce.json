@@ -1,0 +1,912 @@
+{
+  "schemaVersion": 1,
+  "owner": "commerce",
+  "enums": {
+    "commerce.offer_kind": {
+      "source": "model 01 section 7 commerce.offer.kind (inline, listed order)",
+      "values": ["subscription", "pass", "credit", "storageAddOn"]
+    },
+    "commerce.purchase_intent_state": {
+      "source": "model 01 section 7 commerce.purchase_intent.state (inline, listed order)",
+      "values": ["open", "checkoutStarted", "completed", "expired", "abandoned"]
+    },
+    "commerce.checkout_attempt_state": {
+      "source": "model 01 section 7 commerce.checkout_attempt.state (inline, listed order)",
+      "values": ["prepared", "created", "unknown", "completed", "expired", "failed"]
+    },
+    "commerce.provider_event_state": {
+      "source": "model 01 section 7 commerce.provider_event.processing_state (inline, listed order)",
+      "values": ["received", "processed", "quarantined"]
+    },
+    "commerce.order_state": {
+      "source": "model 01 section 7 commerce.order.state (inline, listed order)",
+      "values": ["pending", "completed", "canceled"]
+    },
+    "commerce.payment_state": {
+      "source": "model 01 section 7 commerce.payment.state (inline, listed order)",
+      "values": ["pending", "captured", "failed", "canceled"]
+    },
+    "commerce.lot_class": {
+      "source": "model 01 section 7 commerce.credit_lot.lot_class (inline, listed order)",
+      "values": ["purchased", "compensation"]
+    },
+    "commerce.credit_transaction_kind": {
+      "source": "model 01 section 7 commerce.credit_transaction.kind (inline, listed order)",
+      "values": ["reserve", "settle", "release", "expire", "refund", "adjust"]
+    },
+    "commerce.ledger": {
+      "source": "model 01 section 7 commerce.ledger_entry.ledger (inline, listed order)",
+      "values": ["providerCost", "customerCredit", "paymentRevenue"]
+    },
+    "commerce.spend_reservation_state": {
+      "source": "model 01 section 8.1 commerce.spend_reservation.state (inline, listed order)",
+      "values": ["held", "settled", "released", "uncertain"]
+    },
+    "commerce.beneficiary": {
+      "source": "model 01 section 8.1 commerce.logical_ai_request.beneficiary (inline, listed order)",
+      "values": [
+        "userDelivered",
+        "platformRouting",
+        "platformAbuse",
+        "platformHealth",
+        "platformIndexing",
+        "platformRetry"
+      ]
+    },
+    "commerce.logical_request_state": {
+      "source": "model 01 section 8.1 commerce.logical_ai_request.state (inline, listed order)",
+      "values": [
+        "admitted",
+        "dispatched",
+        "settled",
+        "usagePending",
+        "costUnconfirmed",
+        "resolvedByPolicy",
+        "cancelled",
+        "rejected"
+      ]
+    },
+    "commerce.dispatch_state": {
+      "source": "model 01 section 8.1 commerce.provider_attempt.dispatch_state (inline, listed order)",
+      "values": ["intentCommitted", "outcomeRecorded", "unknown", "reconciled"]
+    },
+    "commerce.funding_class": {
+      "source": "model 01 section 8.1 commerce.provider_attempt.funding_class (inline, listed order)",
+      "values": ["userAttempt", "platformRetry", "platformJob"]
+    },
+    "commerce.usage_source": {
+      "source": "model 01 section 8.1 commerce.provider_attempt.usage_source (inline, listed order)",
+      "values": ["providerFinal", "providerStream", "invoice", "unresolved"]
+    },
+    "commerce.completeness": {
+      "source": "model 01 section 8.1 commerce.provider_attempt.completeness (inline, listed order)",
+      "values": ["complete", "pending", "unconfirmed", "mismatched"]
+    },
+    "commerce.attempt_outcome": {
+      "source": "model 01 section 8.1 commerce.provider_attempt.outcome (inline, listed order)",
+      "values": ["delivered", "providerError", "platformError", "canceled", "timeout"]
+    },
+    "commerce.cost_basis": {
+      "source": "model 01 section 8.1 commerce.supplier_cost_entry.basis (inline, listed order)",
+      "values": ["estimated", "usageConfirmed", "invoiceReconciled"]
+    },
+    "commerce.refund_state": {
+      "source": "model 01 operator closure commerce.refund.state (inline, listed order)",
+      "values": [
+        "requested",
+        "approved",
+        "rejected",
+        "dispatching",
+        "unknown",
+        "succeeded",
+        "failed"
+      ]
+    }
+  },
+  "tables": [
+    {
+      "name": "commerce_billing_account",
+      "model": "01 section 7 commerce.billing_account",
+      "columns": [
+        { "name": "billing_account_id", "type": "id" },
+        { "name": "owner_user_id", "type": "id" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["billing_account_id"],
+      "note": "Never keyed by email. No FK on owner_user_id: the model declares none."
+    },
+    {
+      "name": "commerce_provider_customer",
+      "model": "01 section 7 commerce.provider_customer",
+      "columns": [
+        { "name": "billing_account_id", "type": "id" },
+        { "name": "provider", "type": "text" },
+        { "name": "external_customer_ref", "type": "text" }
+      ],
+      "primaryKey": ["billing_account_id", "provider"],
+      "indexes": [
+        {
+          "columns": ["provider", "external_customer_ref"],
+          "unique": true,
+          "path": "resolve a provider customer reference to its billing account"
+        }
+      ],
+      "note": "The model marks billing_account_id only as PK part 1 and declares no FK, so none is written."
+    },
+    {
+      "name": "commerce_offer",
+      "model": "01 section 7 commerce.offer",
+      "columns": [
+        { "name": "offer_id", "type": "id" },
+        { "name": "kind", "type": "enum", "enum": "commerce.offer_kind" },
+        { "name": "name", "type": "text" },
+        { "name": "scope", "type": "text" },
+        { "name": "active", "type": "bool" },
+        { "name": "term_profile", "type": "text" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["offer_id"],
+      "note": "Only currently accepted CT-05 kinds are activated: a plan-level rule, not encoded here."
+    },
+    {
+      "name": "commerce_price_version",
+      "model": "01 section 7 commerce.price_version",
+      "columns": [
+        { "name": "price_version_id", "type": "id" },
+        { "name": "offer_id", "type": "id" },
+        { "name": "version", "type": "int64" },
+        { "name": "amount", "type": "money" },
+        { "name": "tax_category", "type": "text" },
+        { "name": "starts_at", "type": "instant" },
+        { "name": "ends_at", "type": "instant", "nullable": true },
+        { "name": "config_revision_id", "type": "id" }
+      ],
+      "primaryKey": ["price_version_id"],
+      "indexes": [
+        {
+          "columns": ["offer_id", "version"],
+          "unique": true,
+          "path": "one numbered version per offer"
+        },
+        { "columns": ["offer_id", "starts_at"], "path": "the effective price lookup for an offer" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["offer_id"],
+          "references": { "table": "commerce_offer", "columns": ["offer_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "any" },
+      "note": "Price versions are never mutated (PC-01). Restrict-delete once referenced is the restrict foreign keys from orders and attempts; deletion of an unreferenced version is not otherwise forbidden by the model."
+    },
+    {
+      "name": "commerce_purchase_intent",
+      "model": "01 section 7 commerce.purchase_intent",
+      "columns": [
+        { "name": "purchase_intent_id", "type": "id" },
+        { "name": "billing_account_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "offer_id", "type": "id" },
+        { "name": "price_version_id", "type": "id" },
+        { "name": "state", "type": "enum", "enum": "commerce.purchase_intent_state" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" }
+      ],
+      "primaryKey": ["purchase_intent_id"],
+      "indexes": [{ "columns": ["state", "expires_at"], "path": "the expiry sweeper" }],
+      "foreignKeys": [
+        {
+          "columns": ["billing_account_id"],
+          "references": { "table": "commerce_billing_account", "columns": ["billing_account_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "Only billing_account_id carries a declared FK. The model states the at-most-one non-terminal checkout_attempt constraint here; it is realised as a partial unique index on commerce_checkout_attempt."
+    },
+    {
+      "name": "commerce_checkout_attempt",
+      "model": "01 section 7 commerce.checkout_attempt",
+      "columns": [
+        { "name": "attempt_id", "type": "id" },
+        { "name": "intent_id", "type": "id" },
+        { "name": "billing_account_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "offer_id", "type": "id" },
+        { "name": "price_version_id", "type": "id" },
+        { "name": "provider", "type": "text" },
+        { "name": "external_session_ref", "type": "text", "nullable": true },
+        { "name": "state", "type": "enum", "enum": "commerce.checkout_attempt_state" },
+        { "name": "request_hash", "type": "hash" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["attempt_id"],
+      "indexes": [
+        {
+          "columns": ["provider", "external_session_ref"],
+          "unique": true,
+          "path": "resolve a provider session reference to its attempt"
+        },
+        { "columns": ["intent_id", "created_at"], "path": "the attempts of one intent in order" },
+        {
+          "columns": ["intent_id"],
+          "unique": true,
+          "where": "\"state\" NOT IN (4, 5, 6)",
+          "path": "at most one non-terminal checkout attempt per intent (PU-02)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["intent_id"],
+          "references": { "table": "commerce_purchase_intent", "columns": ["purchase_intent_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["billing_account_id"],
+          "references": { "table": "commerce_billing_account", "columns": ["billing_account_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["offer_id"],
+          "references": { "table": "commerce_offer", "columns": ["offer_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["price_version_id"],
+          "references": { "table": "commerce_price_version", "columns": ["price_version_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "Terminal states are completed, expired and failed (values 4, 5, 6); unknown is non-terminal. A browser return cannot advance state: a plan rule."
+    },
+    {
+      "name": "commerce_provider_event",
+      "model": "01 section 7 commerce.provider_event",
+      "columns": [
+        { "name": "provider_event_id", "type": "id" },
+        { "name": "provider", "type": "text" },
+        { "name": "external_event_id", "type": "text" },
+        { "name": "event_type", "type": "text" },
+        { "name": "raw_payload", "type": "json" },
+        { "name": "signature_verified", "type": "bool" },
+        { "name": "received_at", "type": "instant" },
+        { "name": "processing_state", "type": "enum", "enum": "commerce.provider_event_state" },
+        { "name": "retry_count", "type": "int" },
+        { "name": "quarantine_reason", "type": "text", "nullable": true }
+      ],
+      "primaryKey": ["provider_event_id"],
+      "indexes": [
+        {
+          "columns": ["provider", "event_type", "external_event_id"],
+          "unique": true,
+          "path": "the idempotency key of EI-02"
+        },
+        { "columns": ["processing_state", "received_at"], "path": "backlog age (AL-02)" }
+      ],
+      "checks": [
+        {
+          "name": "unverified_never_processed",
+          "sql": "\"processing_state\" <> 2 OR \"signature_verified\" = 1"
+        }
+      ],
+      "note": "An unverified event is stored and rejected, never processed (EI-01): expressed as a processed row requiring signature_verified."
+    },
+    {
+      "name": "commerce_order",
+      "model": "01 section 7 commerce.order",
+      "columns": [
+        { "name": "order_id", "type": "id" },
+        { "name": "purchase_intent_id", "type": "id" },
+        { "name": "billing_account_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "offer_id", "type": "id" },
+        { "name": "price_version_id", "type": "id" },
+        { "name": "amount", "type": "money" },
+        { "name": "state", "type": "enum", "enum": "commerce.order_state" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "completed_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["order_id"],
+      "indexes": [
+        {
+          "columns": ["purchase_intent_id"],
+          "unique": true,
+          "path": "one order per purchase intent"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["purchase_intent_id"],
+          "references": { "table": "commerce_purchase_intent", "columns": ["purchase_intent_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["billing_account_id"],
+          "references": { "table": "commerce_billing_account", "columns": ["billing_account_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["offer_id"],
+          "references": { "table": "commerce_offer", "columns": ["offer_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["price_version_id"],
+          "references": { "table": "commerce_price_version", "columns": ["price_version_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": {
+        "update": { "columns": ["state", "completed_at", "rev"], "when": "OLD.\"state\" = 1" },
+        "delete": "any"
+      },
+      "note": "The physical table is commerce_order. Append-only after completion: while pending only state, completed_at and rev may change; the commercial terms (amount, references) are never updatable. The model gives no delete rule."
+    },
+    {
+      "name": "commerce_payment",
+      "model": "01 section 7 commerce.payment",
+      "columns": [
+        { "name": "payment_id", "type": "id" },
+        { "name": "order_id", "type": "id" },
+        { "name": "provider", "type": "text" },
+        { "name": "provider_payment_ref", "type": "text" },
+        { "name": "amount", "type": "money" },
+        { "name": "state", "type": "enum", "enum": "commerce.payment_state" },
+        { "name": "provider_event_id", "type": "id" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "captured_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["payment_id"],
+      "indexes": [
+        {
+          "columns": ["provider", "provider_payment_ref"],
+          "unique": true,
+          "path": "resolve a provider payment reference to its payment"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["order_id"],
+          "references": { "table": "commerce_order", "columns": ["order_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["provider_event_id"],
+          "references": { "table": "commerce_provider_event", "columns": ["provider_event_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "Omitted (guarded plan): captured only from verified provider evidence, and contradictory or older events never regress a capture."
+    },
+    {
+      "name": "commerce_subscription",
+      "model": "01 section 7 commerce.subscription",
+      "columns": [
+        { "name": "subscription_id", "type": "id" },
+        { "name": "billing_account_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "offer_id", "type": "id" },
+        { "name": "price_version_id", "type": "id" },
+        { "name": "state", "type": "enum", "enum": "SubscriptionState" },
+        { "name": "paid_through", "type": "instant" },
+        { "name": "cancel_at_period_end", "type": "bool" },
+        { "name": "external_subscription_ref", "type": "text", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["subscription_id"],
+      "indexes": [{ "columns": ["state", "paid_through"], "path": "the state-transition sweeper" }],
+      "note": "The model declares no FK on this table. state is recomputed from paid_through plus the grace policy (a plan rule, not a row check)."
+    },
+    {
+      "name": "commerce_credit_lot",
+      "model": "01 section 7 commerce.credit_lot (rev per section 12 operator closure)",
+      "columns": [
+        { "name": "credit_lot_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "lot_class", "type": "enum", "enum": "commerce.lot_class" },
+        { "name": "original_micro", "type": "int64" },
+        { "name": "remaining_micro", "type": "int64" },
+        { "name": "held_micro", "type": "int64" },
+        { "name": "expires_at", "type": "instant", "nullable": true },
+        { "name": "refund_hold", "type": "bool" },
+        { "name": "source_ref", "type": "text", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["credit_lot_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "lot_class", "refund_hold", "expires_at", "created_at"],
+          "path": "the funding-order query (CD-05)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "balances_nonnegative",
+          "sql": "\"remaining_micro\" >= 0 AND \"held_micro\" >= 0 AND \"held_micro\" <= \"remaining_micro\""
+        },
+        {
+          "name": "purchased_never_expires",
+          "sql": "\"lot_class\" <> 1 OR \"expires_at\" IS NULL"
+        },
+        {
+          "name": "compensation_expires",
+          "sql": "\"lot_class\" <> 2 OR \"expires_at\" IS NOT NULL"
+        }
+      ],
+      "note": "source_ref carries the order or compensation-grant reference, and the proposal_id for administrative/time-compensation lots (operator closure rule, no new column). rev is the version every held/remaining mutation advances. A lot is never created by a refill: a plan rule."
+    },
+    {
+      "name": "commerce_credit_transaction",
+      "model": "01 section 7 commerce.credit_transaction",
+      "columns": [
+        { "name": "transaction_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "credit_lot_id", "type": "id" },
+        { "name": "reservation_id", "type": "id", "nullable": true },
+        { "name": "logical_request_id", "type": "id", "nullable": true },
+        { "name": "kind", "type": "enum", "enum": "commerce.credit_transaction_kind" },
+        { "name": "amount_micro", "type": "int64" },
+        { "name": "reason", "type": "key" },
+        { "name": "command_id", "type": "id" },
+        { "name": "movement_ordinal", "type": "int" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["transaction_id"],
+      "indexes": [
+        {
+          "columns": ["command_id", "movement_ordinal"],
+          "unique": true,
+          "path": "one movement per command ordinal (idempotent retry)"
+        },
+        { "columns": ["credit_lot_id", "created_at"], "path": "the movement history of one lot" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["credit_lot_id"],
+          "references": { "table": "commerce_credit_lot", "columns": ["credit_lot_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" }
+    },
+    {
+      "name": "commerce_ledger_entry",
+      "model": "01 section 7 commerce.ledger_entry",
+      "columns": [
+        { "name": "ledger_entry_id", "type": "id" },
+        { "name": "ledger", "type": "enum", "enum": "commerce.ledger" },
+        { "name": "workspace_id", "type": "id", "nullable": true },
+        { "name": "amount_micro", "type": "int64", "nullable": true },
+        { "name": "amount_money", "type": "decimal", "nullable": true },
+        { "name": "currency", "type": "currency", "nullable": true },
+        { "name": "occurred_at", "type": "instant" },
+        { "name": "reference_kind", "type": "text" },
+        { "name": "reference_id", "type": "id" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["ledger_entry_id"],
+      "indexes": [
+        {
+          "columns": ["ledger", "occurred_at"],
+          "path": "one ledger in time order (reconciliation)"
+        },
+        {
+          "columns": ["ledger", "workspace_id", "occurred_at"],
+          "path": "one ledger for one workspace in time order"
+        }
+      ],
+      "checks": [
+        {
+          "name": "customer_credit_units",
+          "sql": "\"ledger\" <> 2 OR (\"amount_micro\" IS NOT NULL AND \"amount_money\" IS NULL AND \"currency\" IS NULL)"
+        },
+        {
+          "name": "money_ledger_units",
+          "sql": "\"ledger\" NOT IN (1, 3) OR (\"amount_money\" IS NOT NULL AND \"currency\" IS NOT NULL AND \"amount_micro\" IS NULL)"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "Append-only: a correction is a new entry. amount_money is a plain signed decimal with its own nullable currency column, not the money type. Never netting distinct ledgers is a write-path rule."
+    },
+    {
+      "name": "commerce_spend_budget",
+      "model": "01 section 8.1 commerce.spend_budget",
+      "columns": [
+        { "name": "scope_kind", "type": "text" },
+        { "name": "scope_id", "type": "text" },
+        { "name": "period_key", "type": "text" },
+        { "name": "unit", "type": "text" },
+        { "name": "limit", "type": "decimal" },
+        { "name": "used", "type": "decimal" },
+        { "name": "held", "type": "decimal" },
+        { "name": "rev", "type": "rev" },
+        { "name": "period_ends_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["scope_kind", "scope_id", "period_key", "unit"],
+      "checks": [
+        {
+          "name": "nonnegative",
+          "sql": "\"limit\" NOT GLOB '-*' AND \"used\" NOT GLOB '-*' AND \"held\" NOT GLOB '-*'"
+        }
+      ],
+      "note": "decimal is canonical text, so limit, used and held >= 0 is encoded as not starting with a minus sign. Omitted: the integer-valued rule for the microcredit customer Run unit, and the no-mixed-unit-arithmetic rule (guarded plans)."
+    },
+    {
+      "name": "commerce_spend_reservation",
+      "model": "01 section 8.1 commerce.spend_reservation",
+      "columns": [
+        { "name": "reservation_id", "type": "id" },
+        { "name": "provider_attempt_id", "type": "id", "nullable": true },
+        { "name": "logical_request_id", "type": "id", "nullable": true },
+        { "name": "scope_kind", "type": "text" },
+        { "name": "scope_id", "type": "text" },
+        { "name": "period_key", "type": "text" },
+        { "name": "unit", "type": "text" },
+        { "name": "bound", "type": "decimal" },
+        { "name": "used", "type": "decimal" },
+        { "name": "state", "type": "enum", "enum": "commerce.spend_reservation_state" },
+        { "name": "lease_expires_at", "type": "instant", "nullable": true },
+        { "name": "reconcile_at", "type": "instant", "nullable": true },
+        { "name": "reconciliation_ref", "type": "id", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["reservation_id"],
+      "indexes": [
+        {
+          "columns": ["provider_attempt_id", "scope_kind", "scope_id", "period_key", "unit"],
+          "unique": true,
+          "path": "one supplier exposure per attempt and budget key"
+        },
+        {
+          "columns": ["logical_request_id", "scope_kind", "scope_id", "period_key", "unit"],
+          "unique": true,
+          "path": "one customer ceiling per logical request and budget key"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["scope_kind", "scope_id", "period_key", "unit"],
+          "references": {
+            "table": "commerce_spend_budget",
+            "columns": ["scope_kind", "scope_id", "period_key", "unit"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "exactly_one_request_identity",
+          "sql": "(\"provider_attempt_id\" IS NULL) <> (\"logical_request_id\" IS NULL)"
+        }
+      ],
+      "note": "NULLs are distinct in SQLite unique indexes, so the two plain unique indexes each constrain only their own identity. The model declares no FK for provider_attempt_id or logical_request_id. Supplier uncertainty not expiring as a customer hold is a plan rule."
+    },
+    {
+      "name": "commerce_logical_ai_request",
+      "model": "01 section 8.1 commerce.logical_ai_request",
+      "columns": [
+        { "name": "logical_request_id", "type": "id" },
+        { "name": "workspace_id", "type": "id", "nullable": true },
+        { "name": "service_term_id", "type": "id", "nullable": true },
+        { "name": "operator_job_ref", "type": "id", "nullable": true },
+        { "name": "run_id", "type": "id", "nullable": true },
+        { "name": "step_id", "type": "id", "nullable": true },
+        { "name": "attempt_id", "type": "id", "nullable": true },
+        { "name": "beneficiary", "type": "enum", "enum": "commerce.beneficiary" },
+        { "name": "tariff_version_id", "type": "id", "nullable": true },
+        { "name": "config_revision_id", "type": "id" },
+        { "name": "state", "type": "enum", "enum": "commerce.logical_request_state" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "settled_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["logical_request_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "created_at"],
+          "path": "the requests of one workspace in time order"
+        },
+        { "columns": ["state", "created_at"], "path": "the reconciliation-deadline sweep" }
+      ],
+      "note": "The model declares no FK. The conditional 'required for ...' rules on workspace_id, service_term_id, operator_job_ref, run/step/attempt and tariff_version_id depend on beneficiary and caller context and are enforced in the admission plan; pure platform jobs never debit a customer or have a settlement/reservation (plan rule)."
+    },
+    {
+      "name": "commerce_provider_attempt",
+      "model": "01 section 8.1 commerce.provider_attempt",
+      "columns": [
+        { "name": "provider_attempt_id", "type": "id" },
+        { "name": "logical_request_id", "type": "id" },
+        { "name": "attempt_ordinal", "type": "int" },
+        { "name": "provider_request_ref", "type": "text", "nullable": true },
+        { "name": "client_dispatch_key", "type": "id" },
+        { "name": "dispatch_state", "type": "enum", "enum": "commerce.dispatch_state" },
+        { "name": "intent_committed_at", "type": "instant" },
+        { "name": "owner_fence", "type": "int64", "monotonic": true },
+        { "name": "funding_class", "type": "enum", "enum": "commerce.funding_class" },
+        { "name": "model_descriptor_id", "type": "id" },
+        { "name": "supplier_price_version_id", "type": "id" },
+        { "name": "route", "type": "text" },
+        { "name": "processing_tier", "type": "text" },
+        { "name": "context_tier", "type": "text" },
+        { "name": "region_tier", "type": "text" },
+        { "name": "dispatched_at", "type": "instant", "nullable": true },
+        { "name": "completed_at", "type": "instant", "nullable": true },
+        { "name": "usage_source", "type": "enum", "enum": "commerce.usage_source" },
+        { "name": "completeness", "type": "enum", "enum": "commerce.completeness" },
+        { "name": "outcome", "type": "enum", "enum": "commerce.attempt_outcome", "nullable": true },
+        { "name": "output_commit_ref", "type": "id", "nullable": true }
+      ],
+      "primaryKey": ["provider_attempt_id"],
+      "indexes": [
+        {
+          "columns": ["logical_request_id", "attempt_ordinal"],
+          "unique": true,
+          "path": "the attempts of one logical request in order"
+        },
+        {
+          "columns": ["client_dispatch_key"],
+          "unique": true,
+          "path": "idempotent dispatch correlation by the internal key"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["logical_request_id"],
+          "references": {
+            "table": "commerce_logical_ai_request",
+            "columns": ["logical_request_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "owner_fence is a fencing generation, so it is monotonic. The model also asks for provider identity uniqueness conditional on non-NULL provider_request_ref and scoped to the provider account; the table has no provider account column and none is invented, so only the two stated unique indexes exist. No prompt or response content is stored here (MT-02)."
+    },
+    {
+      "name": "commerce_attempt_usage",
+      "model": "01 section 8.1 commerce.attempt_usage",
+      "columns": [
+        { "name": "attempt_usage_id", "type": "id" },
+        { "name": "provider_attempt_id", "type": "id" },
+        { "name": "usage_revision", "type": "int" },
+        { "name": "category", "type": "text" },
+        { "name": "quantity", "type": "int64" },
+        { "name": "unit", "type": "text" },
+        { "name": "recorded_at", "type": "instant" }
+      ],
+      "primaryKey": ["attempt_usage_id"],
+      "indexes": [
+        {
+          "columns": ["provider_attempt_id", "usage_revision", "category"],
+          "unique": true,
+          "path": "the idempotency key (ST-03, MT-11)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["provider_attempt_id"],
+          "references": {
+            "table": "commerce_provider_attempt",
+            "columns": ["provider_attempt_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [{ "name": "quantity_nonnegative", "sql": "\"quantity\" >= 0" }],
+      "note": "Rejecting a category the attempt's model descriptor does not declare into reconciliation (UN-02) is a plan rule."
+    },
+    {
+      "name": "commerce_supplier_cost_entry",
+      "model": "01 section 8.1 commerce.supplier_cost_entry",
+      "columns": [
+        { "name": "supplier_cost_id", "type": "id" },
+        { "name": "provider_attempt_id", "type": "id" },
+        { "name": "currency", "type": "currency" },
+        { "name": "amount", "type": "decimal" },
+        { "name": "basis", "type": "enum", "enum": "commerce.cost_basis" },
+        { "name": "unresolved", "type": "bool" },
+        { "name": "adjusts_cost_id", "type": "id", "nullable": true }
+      ],
+      "primaryKey": ["supplier_cost_id"],
+      "indexes": [{ "columns": ["basis", "unresolved"], "path": "the reconciliation queue" }],
+      "foreignKeys": [
+        {
+          "columns": ["provider_attempt_id"],
+          "references": {
+            "table": "commerce_provider_attempt",
+            "columns": ["provider_attempt_id"]
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["adjusts_cost_id"],
+          "references": {
+            "table": "commerce_supplier_cost_entry",
+            "columns": ["supplier_cost_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "amount and currency are separate columns as the model lists them (not the money type). The model says a unique source reconciliation event prevents adjustment replay but declares no column for it; none is invented, so replay prevention is enforced by the reconciliation plan."
+    },
+    {
+      "name": "commerce_customer_settlement",
+      "model": "01 section 8.1 commerce.customer_settlement",
+      "columns": [
+        { "name": "settlement_id", "type": "id" },
+        { "name": "logical_request_id", "type": "id" },
+        { "name": "reservation_id", "type": "id" },
+        { "name": "debit_capacity_micro", "type": "int64" },
+        { "name": "debit_compensation_micro", "type": "int64" },
+        { "name": "debit_purchased_micro", "type": "int64" },
+        { "name": "released_micro", "type": "int64" },
+        { "name": "rounding_mode", "type": "text" },
+        { "name": "settled_at", "type": "instant" },
+        { "name": "adjusts_settlement_id", "type": "id", "nullable": true }
+      ],
+      "primaryKey": ["settlement_id"],
+      "indexes": [
+        {
+          "columns": ["logical_request_id"],
+          "unique": true,
+          "where": "\"adjusts_settlement_id\" IS NULL",
+          "path": "one original settlement per logical request (ST-01)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["logical_request_id"],
+          "references": {
+            "table": "commerce_logical_ai_request",
+            "columns": ["logical_request_id"]
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["reservation_id"],
+          "references": {
+            "table": "entitlement_capacity_reservation",
+            "columns": ["reservation_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "any" },
+      "note": "The original settlement is never edited (ST-04), so update is none; the model states no delete rule. adjusts_settlement_id has no declared FK. Funding conservation and debit-against-held-sources are guarded plan rules."
+    },
+    {
+      "name": "commerce_refund",
+      "model": "01 section 12 operator closure commerce.refund",
+      "columns": [
+        { "name": "refund_id", "type": "id" },
+        { "name": "payment_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "reason", "type": "text" },
+        { "name": "amount", "type": "money", "nullable": true },
+        { "name": "state", "type": "enum", "enum": "commerce.refund_state" },
+        { "name": "decision_proposal_id", "type": "id", "nullable": true },
+        { "name": "provider_refund_ref", "type": "text", "nullable": true },
+        { "name": "provider_event_id", "type": "id", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "updated_at", "type": "instant" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["refund_id"],
+      "indexes": [
+        {
+          "columns": ["payment_id", "provider_refund_ref"],
+          "unique": true,
+          "path": "resolve a provider refund reference within its payment"
+        },
+        {
+          "columns": ["workspace_id", "created_at"],
+          "path": "the refunds of one workspace in time order"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["payment_id"],
+          "references": { "table": "commerce_payment", "columns": ["payment_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["decision_proposal_id"],
+          "references": { "table": "audit_operator_proposal", "columns": ["proposal_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "amount is absent until owner adjudication (no false zero refund). Omitted as cross-row or cross-table (guarded plans): original payment currency, aggregate approved/dispatching/unknown amounts not exceeding the captured total minus verified refunds, the outstanding-to-confirmed ledger move, and payment-revision guards. provider_event_id has no declared FK."
+    },
+    {
+      "name": "commerce_compensation_adjustment",
+      "model": "01 section 12 operator closure commerce.compensation_adjustment",
+      "columns": [
+        { "name": "adjustment_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "source_lot_id", "type": "id" },
+        { "name": "new_lot_id", "type": "id", "nullable": true },
+        { "name": "delta_micro", "type": "int64" },
+        { "name": "proposal_id", "type": "id" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "command_id", "type": "id" }
+      ],
+      "primaryKey": ["adjustment_id"],
+      "indexes": [
+        {
+          "columns": ["proposal_id"],
+          "unique": true,
+          "path": "one adjustment per approved proposal"
+        },
+        {
+          "columns": ["command_id"],
+          "unique": true,
+          "path": "one adjustment per command (idempotent retry)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["source_lot_id"],
+          "references": { "table": "commerce_credit_lot", "columns": ["credit_lot_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["new_lot_id"],
+          "references": { "table": "commerce_credit_lot", "columns": ["credit_lot_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["proposal_id"],
+          "references": { "table": "audit_operator_proposal", "columns": ["proposal_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        { "name": "delta_nonzero", "sql": "\"delta_micro\" <> 0" },
+        {
+          "name": "new_lot_iff_positive",
+          "sql": "(\"delta_micro\" > 0) = (\"new_lot_id\" IS NOT NULL)"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "Compensation reduction into a held balance is rejected by the guarded plan, not a row check."
+    }
+  ]
+}
