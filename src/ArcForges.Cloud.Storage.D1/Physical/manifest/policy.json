@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "owner": "policy",
+  "enums": {},
+  "tables": [
+    {
+      "name": "policy_policy_bundle",
+      "model": "01 section 11 policy.policy_bundle",
+      "note": "Versioned, signed, append-only: update none, delete none. hash and signature are text per the model.",
+      "columns": [
+        { "name": "bundle_id", "type": "id" },
+        { "name": "version", "type": "int64" },
+        { "name": "schema_version", "type": "text" },
+        { "name": "document_proto", "type": "proto" },
+        { "name": "hash", "type": "text" },
+        { "name": "signature", "type": "text" },
+        { "name": "issued_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" }
+      ],
+      "primaryKey": ["bundle_id", "version"],
+      "mutability": { "update": "none", "delete": "none" }
+    },
+    {
+      "name": "policy_rollout_assignment",
+      "model": "01 section 11 policy.rollout_assignment",
+      "note": "Derived cache, recomputable from the rule version it was stored with; built as defined.",
+      "columns": [
+        { "name": "installation_id", "type": "id" },
+        { "name": "rollout_id", "type": "id" },
+        { "name": "rule_version", "type": "int64" },
+        { "name": "bucket", "type": "int" },
+        { "name": "expires_at", "type": "instant" }
+      ],
+      "primaryKey": ["installation_id", "rollout_id"]
+    },
+    {
+      "name": "policy_source_policy",
+      "model": "01 section 11 (Source knowledge policy) policy.source_policy",
+      "note": "The four nullable overrides are snake_cased (searchable, cloud_index_allowed, ai_retrieval_allowed, managed_ai_processing_allowed) because manifest names must be snake_case; null inherits.",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "target_kind", "type": "key" },
+        { "name": "target_id", "type": "id" },
+        { "name": "revision", "type": "rev" },
+        { "name": "searchable", "type": "bool", "nullable": true },
+        { "name": "cloud_index_allowed", "type": "bool", "nullable": true },
+        { "name": "ai_retrieval_allowed", "type": "bool", "nullable": true },
+        { "name": "managed_ai_processing_allowed", "type": "bool", "nullable": true },
+        { "name": "updated_by", "type": "id" },
+        { "name": "updated_at", "type": "instant" },
+        { "name": "command_id", "type": "id" }
+      ],
+      "primaryKey": ["workspace_id", "target_kind", "target_id"]
+    }
+  ]
+}

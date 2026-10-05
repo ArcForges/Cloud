@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "enums": {
+    "AuthPurpose": {
+      "source": "contracts 04 section 3 (proto numbers; zero is UNSPECIFIED and never stored)",
+      "values": ["authenticate", "enroll", "stepUp", "recover", "cancelDeletion"]
+    },
+    "ChatMode": {
+      "source": "contracts 04 section 3",
+      "values": ["ordinary", "agent", "temporary"]
+    },
+    "ChatTurnState": {
+      "source": "contracts 04 section 3",
+      "values": ["queued", "running", "waiting", "succeeded", "failed", "canceled", "interrupted"]
+    },
+    "ControlState": {
+      "source": "contracts 04 section 3",
+      "values": ["requested", "acknowledged", "refused", "completed"]
+    },
+    "EffectCertainty": {
+      "source": "contracts 04 section 3",
+      "values": ["didNotHappen", "happened", "unknown"]
+    },
+    "HistoryMode": {
+      "source": "contracts 10 (HistoryMode: 1 local, 2 cloud, 3 temporary)",
+      "values": ["local", "cloud", "temporary"]
+    },
+    "OperatorProposalState": {
+      "source": "contracts 04 section 3",
+      "values": ["pending", "approved", "rejected", "expired", "invalidated", "executed"]
+    },
+    "RecoveryMethod": {
+      "source": "contracts 04 section 3",
+      "values": ["emailCode", "recoveryCode", "passkey", "adminGrant"]
+    },
+    "SubscriptionState": {
+      "source": "contracts 04 section 3",
+      "values": ["pending", "active", "grace", "cancelScheduled", "ended", "suspended"]
+    },
+    "SupportCaseState": {
+      "source": "contracts 04 section 3",
+      "values": ["open", "inProgress", "awaitingUser", "resolved", "closed"]
+    },
+    "TaskReasonFacet": {
+      "source": "contracts 04 section 3",
+      "values": ["none", "approval", "device", "capacity", "dependency", "reconciliation"]
+    },
+    "TaskState": {
+      "source": "contracts 04 section 3",
+      "values": [
+        "queued",
+        "running",
+        "waiting",
+        "paused",
+        "interrupted",
+        "succeeded",
+        "partiallySucceeded",
+        "failed",
+        "canceled"
+      ]
+    },
+    "ToolLocality": {
+      "source": "contracts 04 section 3",
+      "values": ["cloud", "device"]
+    },
+    "TransferState": {
+      "source": "contracts 04 section 3",
+      "values": [
+        "queued",
+        "validating",
+        "waitingConsent",
+        "importing",
+        "succeeded",
+        "partiallySucceeded",
+        "failed",
+        "canceled"
+      ]
+    },
+    "TranscriptRole": {
+      "source": "contracts 10 (TranscriptRole: 1 user, 2 assistant, 3 tool, 4 system)",
+      "values": ["user", "assistant", "tool", "system"]
+    }
+  }
+}

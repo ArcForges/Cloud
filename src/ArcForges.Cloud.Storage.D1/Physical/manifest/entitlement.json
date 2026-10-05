@@ -1,0 +1,466 @@
+{
+  "schemaVersion": 1,
+  "owner": "entitlement",
+  "enums": {
+    "entitlement.grant_kind": {
+      "source": "model 01 section 6 entitlement.grant.kind (inline, listed order)",
+      "values": ["capability", "quota", "allowance"]
+    },
+    "entitlement.grant_source": {
+      "source": "model 01 section 6 entitlement.grant.source (inline, listed order)",
+      "values": [
+        "Subscription",
+        "CloudPass",
+        "StorageAddOn",
+        "PurchasedCredit",
+        "AdminGrant",
+        "Migration",
+        "Compensation"
+      ]
+    },
+    "entitlement.service_term_kind": {
+      "source": "model 01 section 6 entitlement.service_term.kind (inline, listed order)",
+      "values": ["subscription", "pass", "compensation", "selfHostGrant"]
+    },
+    "entitlement.service_term_action_kind": {
+      "source": "model 01 section 6 entitlement.service_term_action.kind (inline, listed order)",
+      "values": ["supersede", "revoke"]
+    },
+    "entitlement.capacity_reservation_state": {
+      "source": "model 01 section 6 entitlement.capacity_reservation.state (inline, listed order)",
+      "values": ["held", "settled", "released", "expired"]
+    },
+    "entitlement.quota_scope_kind": {
+      "source": "model 01 section 6 quota_budget: scope is workspace or deployment (also the type of quota_reservation.scope_kind so the composite foreign key has matching types)",
+      "values": ["workspace", "deployment"]
+    },
+    "entitlement.quota_reservation_state": {
+      "source": "model 01 section 6 quota_reservation state held/settled/releasing/released (inline, listed order)",
+      "values": ["held", "settled", "releasing", "released"]
+    },
+    "entitlement.quota_event_kind": {
+      "source": "model 01 section 6 quota_event typed consume/release/adjust event (inline, listed order)",
+      "values": ["consume", "release", "adjust"]
+    }
+  },
+  "tables": [
+    {
+      "name": "entitlement_grant",
+      "model": "01 section 6 entitlement.grant",
+      "columns": [
+        { "name": "grant_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "kind", "type": "enum", "enum": "entitlement.grant_kind" },
+        { "name": "subject", "type": "text" },
+        { "name": "value", "type": "json" },
+        { "name": "source", "type": "enum", "enum": "entitlement.grant_source" },
+        { "name": "source_ref", "type": "text", "nullable": true },
+        { "name": "effective_from", "type": "instant" },
+        { "name": "effective_until", "type": "instant", "nullable": true },
+        { "name": "issued_by_actor", "type": "text" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "reason", "type": "text", "nullable": true }
+      ],
+      "primaryKey": ["grant_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "kind", "effective_from"],
+          "path": "the resolver's only scan path"
+        },
+        { "columns": ["source", "source_ref"], "path": "reconciliation lookup" }
+      ],
+      "checks": [
+        {
+          "name": "reason_required_for_operator_sources",
+          "sql": "(\"source\" IN (5, 6, 7)) = (\"reason\" IS NOT NULL)"
+        },
+        {
+          "name": "reason_shape",
+          "sql": "\"reason\" IS NULL OR (length(\"reason\") BETWEEN 1 AND 512 AND instr(\"reason\", char(0)) = 0 AND \"reason\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*'))"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "reason is the recorded cause of an AdminGrant (5), Migration (6) or Compensation (7) grant (model 01 GR-04, GR-05): required for exactly those sources, non-empty, at most 512 characters, no control character. Added with COM.16's model 01 amendment."
+    },
+    {
+      "name": "entitlement_revision",
+      "model": "01 section 6 entitlement.revision (COM.16)",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "rev", "type": "rev" },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["workspace_id"],
+      "note": "The per-workspace write fence of the Entitlement module: every Entitlement commit guards the rev it read and increments it in the same batch. No foreign key: the guard names only entitlement_ tables (CM-01 to CM-03). Created with the workspace's first Entitlement commit."
+    },
+    {
+      "name": "entitlement_revocation",
+      "model": "01 section 6 entitlement.revocation",
+      "columns": [
+        { "name": "revocation_id", "type": "id" },
+        { "name": "grant_id", "type": "id" },
+        { "name": "reason_code", "type": "text" },
+        { "name": "effective_from", "type": "instant" },
+        { "name": "issued_by_actor", "type": "text" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["revocation_id"],
+      "indexes": [{ "columns": ["grant_id"], "path": "revocations of one grant" }],
+      "foreignKeys": [
+        {
+          "columns": ["grant_id"],
+          "references": { "table": "entitlement_grant", "columns": ["grant_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" }
+    },
+    {
+      "name": "entitlement_snapshot",
+      "model": "01 section 6 entitlement.snapshot",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "entitlement_version", "type": "int64" },
+        { "name": "computed_at", "type": "instant" },
+        { "name": "valid_until", "type": "instant", "nullable": true },
+        { "name": "capabilities", "type": "json", "root": "object" },
+        { "name": "quotas", "type": "json", "root": "object" },
+        { "name": "features", "type": "json" }
+      ],
+      "primaryKey": ["workspace_id"],
+      "note": "Derived, rebuildable table (EN-02). capabilities and quotas are keyed maps, so their root is object; features gives no shape. entitlement_version 'increments on every change' but is not declared monotonic (a rebuild may recompute it), so no trigger. The rebuild-equals-stored rule is a fixture-level check and stays in tests."
+    },
+    {
+      "name": "entitlement_usage_counter",
+      "model": "01 section 6 entitlement.usage_counter",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "quota_key", "type": "text" },
+        { "name": "period_start", "type": "instant" },
+        { "name": "used", "type": "int64" },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["workspace_id", "quota_key", "period_start"],
+      "note": "Display/reconciliation projection; admission never trusts it. The period boundary rule (QA-02) is plan-level."
+    },
+    {
+      "name": "entitlement_service_term",
+      "model": "01 section 6 entitlement.service_term",
+      "columns": [
+        { "name": "service_term_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "kind", "type": "enum", "enum": "entitlement.service_term_kind" },
+        { "name": "subscription_ref", "type": "text", "nullable": true },
+        { "name": "period_ref", "type": "text" },
+        { "name": "starts_at", "type": "instant" },
+        { "name": "ends_at", "type": "instant" },
+        { "name": "grace_ends_at", "type": "instant", "nullable": true },
+        { "name": "supersedes_id", "type": "id", "nullable": true },
+        { "name": "offer_id", "type": "id" },
+        { "name": "offer_snapshot_id", "type": "id" },
+        { "name": "authorized_at", "type": "instant" },
+        { "name": "selection_priority", "type": "int64" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["service_term_id"],
+      "indexes": [
+        {
+          "columns": ["realm_id", "kind", "period_ref"],
+          "unique": true,
+          "path": "idempotent creation per paid period"
+        },
+        { "columns": ["workspace_id", "starts_at", "ends_at"], "path": "the admission-path query" },
+        { "columns": ["subscription_ref", "starts_at"], "path": "the renewal-chain query" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        { "name": "ends_after_starts", "sql": "\"ends_at\" > \"starts_at\"" },
+        {
+          "name": "subscription_ref_matches_kind",
+          "sql": "(\"kind\" = 1 AND \"subscription_ref\" IS NOT NULL) OR (\"kind\" <> 1 AND \"subscription_ref\" IS NULL)"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "Immutable rows per TM-04; supersession and revocation are appended to entitlement_service_term_action. supersedes_id, offer_id and offer_snapshot_id have no declared FK in the model, so none is added. The credit-grant/trial/balance-edit prohibition (SV-03) is enforced by the grant interface."
+    },
+    {
+      "name": "entitlement_service_term_action",
+      "model": "01 section 6 entitlement.service_term_action",
+      "columns": [
+        { "name": "term_action_id", "type": "id" },
+        { "name": "term_id", "type": "id" },
+        { "name": "kind", "type": "enum", "enum": "entitlement.service_term_action_kind" },
+        { "name": "effective_at", "type": "instant" },
+        { "name": "recorded_at", "type": "instant" },
+        { "name": "source_ref", "type": "text" },
+        { "name": "replacement_term_id", "type": "id", "nullable": true }
+      ],
+      "primaryKey": ["term_action_id"],
+      "indexes": [
+        {
+          "columns": ["source_ref"],
+          "unique": true,
+          "path": "idempotent append per source reference"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["term_id"],
+          "references": { "table": "entitlement_service_term", "columns": ["service_term_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["replacement_term_id"],
+          "references": { "table": "entitlement_service_term", "columns": ["service_term_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "replacement_matches_kind",
+          "sql": "(\"kind\" = 1 AND \"replacement_term_id\" IS NOT NULL) OR (\"kind\" = 2 AND \"replacement_term_id\" IS NULL)"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "Append-only under TM-04. The rule that both terms share realm and workspace is cross-row and stays in the guarded plan."
+    },
+    {
+      "name": "entitlement_capacity_plan_assignment",
+      "model": "01 section 6 entitlement.capacity_plan_assignment",
+      "columns": [
+        { "name": "assignment_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "offer_id", "type": "id" },
+        { "name": "term_id", "type": "id" },
+        { "name": "selection_priority", "type": "int64" },
+        { "name": "effective_from", "type": "instant" },
+        { "name": "effective_to", "type": "instant", "nullable": true },
+        { "name": "cause_ref", "type": "id" }
+      ],
+      "primaryKey": ["assignment_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "effective_from"],
+          "unique": true,
+          "path": "one assignment per workspace start instant"
+        },
+        {
+          "columns": ["workspace_id", "effective_to"],
+          "path": "the current (open) assignment of a workspace"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["term_id"],
+          "references": { "table": "entitlement_service_term", "columns": ["service_term_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": {
+        "update": { "columns": ["effective_to"], "when": "OLD.\"effective_to\" IS NULL" },
+        "delete": "none"
+      },
+      "note": "TM-06: only closing a current assignment and appending its successor is permitted, so only effective_to may change, only while NULL. offer_id is declared 'FK' but names no target table (the offer catalogue is not an entitlement table and entitlement has no Commerce FK), so no FK is emitted. Non-overlap is guarded by the workspace bucket revision."
+    },
+    {
+      "name": "entitlement_capacity_bucket",
+      "model": "01 section 6 entitlement.capacity_bucket",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "available_micro", "type": "int64" },
+        { "name": "held_micro", "type": "int64" },
+        { "name": "remainder_num", "type": "int64" },
+        { "name": "remainder_den", "type": "int64" },
+        { "name": "watermark_at", "type": "instant", "monotonic": true },
+        { "name": "activation_term_id", "type": "id", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["workspace_id"],
+      "foreignKeys": [
+        {
+          "columns": ["activation_term_id"],
+          "references": { "table": "entitlement_service_term", "columns": ["service_term_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        { "name": "available_nonnegative", "sql": "\"available_micro\" >= 0" },
+        { "name": "held_nonnegative", "sql": "\"held_micro\" >= 0" }
+      ],
+      "note": "Deliberately no CHECK ceiling on available_micro: the model bounds the increase, not the resting value (RF-04/RF-05), enforced by the guarded update predicate. watermark_at is monotonic (RF-02)."
+    },
+    {
+      "name": "entitlement_capacity_policy_period",
+      "model": "01 section 6 entitlement.capacity_policy_period",
+      "columns": [
+        { "name": "policy_period_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "offer_id", "type": "id" },
+        { "name": "config_revision_id", "type": "id" },
+        { "name": "burst_micro", "type": "int64" },
+        { "name": "rate_micro_per_second", "type": "int64" },
+        { "name": "effective_from", "type": "instant" },
+        { "name": "effective_to", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["policy_period_id"],
+      "indexes": [
+        {
+          "columns": ["realm_id", "offer_id", "effective_from"],
+          "unique": true,
+          "path": "one period per activation instant"
+        },
+        {
+          "columns": ["realm_id", "offer_id", "effective_from", "effective_to"],
+          "path": "the refill integration query"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["config_revision_id"],
+          "references": { "table": "config_revision", "columns": ["config_revision_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": {
+        "update": { "columns": ["effective_to"], "when": "OLD.\"effective_to\" IS NULL" },
+        "delete": "none"
+      },
+      "note": "Never updated except to close effective_to, never deleted (I-494). Contiguity and non-overlap are enforced in the activation transaction (CA-03). config_revision is written by the config owner."
+    },
+    {
+      "name": "entitlement_capacity_reservation",
+      "model": "01 section 6 entitlement.capacity_reservation",
+      "columns": [
+        { "name": "reservation_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "logical_request_id", "type": "id" },
+        { "name": "from_capacity_micro", "type": "int64" },
+        { "name": "from_compensation_micro", "type": "int64" },
+        { "name": "from_purchased_micro", "type": "int64" },
+        { "name": "state", "type": "enum", "enum": "entitlement.capacity_reservation_state" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["reservation_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "state"],
+          "path": "live reservations of a workspace (CX-08 reconciliation)"
+        },
+        { "columns": ["state", "expires_at"], "path": "the sweeper path" },
+        {
+          "columns": ["logical_request_id"],
+          "unique": true,
+          "where": "\"state\" = 1",
+          "path": "one live (held) reservation per logical request (FU-02)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "entitlement_capacity_bucket", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "logical_request_id is a plain id (no Commerce FK). The model states no range check on the three source columns; none is added. 'from_purchased_micro > 0 requires a live extra-usage authorisation' (AD-05) is cross-table and stays in the guarded plan."
+    },
+    {
+      "name": "entitlement_quota_budget",
+      "model": "01 section 6 entitlement.quota_budget",
+      "columns": [
+        { "name": "scope_kind", "type": "enum", "enum": "entitlement.quota_scope_kind" },
+        { "name": "scope_id", "type": "text" },
+        { "name": "quota_key", "type": "text" },
+        { "name": "period_key", "type": "text" },
+        { "name": "unit", "type": "text" },
+        { "name": "limit", "type": "int64" },
+        { "name": "used", "type": "int64" },
+        { "name": "held", "type": "int64" },
+        { "name": "policy_version", "type": "int64" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["scope_kind", "scope_id", "quota_key", "period_key"],
+      "checks": [
+        { "name": "limit_nonnegative", "sql": "\"limit\" >= 0" },
+        { "name": "used_nonnegative", "sql": "\"used\" >= 0" },
+        { "name": "held_nonnegative", "sql": "\"held\" >= 0" }
+      ],
+      "note": "Model leaves types open: scope_id is text (a workspace id or a deployment identifier), period_key is text (an explicit entitlement period or 'gauge'), unit is text, policy_version is int64 (counted among the checked int64 quantities; non-negativity is encoded only for limit/used/held). No CHECK used + held <= limit: a downgrade may legitimately leave it exceeded; admission is a guarded predicate."
+    },
+    {
+      "name": "entitlement_quota_reservation",
+      "model": "01 section 6 entitlement.quota_reservation",
+      "columns": [
+        { "name": "reservation_id", "type": "id" },
+        { "name": "operation_id", "type": "id" },
+        { "name": "scope_kind", "type": "enum", "enum": "entitlement.quota_scope_kind" },
+        { "name": "scope_id", "type": "text" },
+        { "name": "quota_key", "type": "text" },
+        { "name": "period_key", "type": "text" },
+        { "name": "owner", "type": "aggregateRef" },
+        { "name": "bound", "type": "int64" },
+        { "name": "consumed", "type": "int64" },
+        { "name": "state", "type": "enum", "enum": "entitlement.quota_reservation_state" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "lease_until", "type": "instant", "nullable": true },
+        { "name": "fence", "type": "int64", "nullable": true }
+      ],
+      "primaryKey": ["reservation_id"],
+      "indexes": [
+        {
+          "columns": ["operation_id", "scope_kind", "scope_id", "quota_key", "period_key"],
+          "unique": true,
+          "path": "one reservation per operation and budget (all-or-none multi-limit admission)"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["scope_kind", "scope_id", "quota_key", "period_key"],
+          "references": {
+            "table": "entitlement_quota_budget",
+            "columns": ["scope_kind", "scope_id", "quota_key", "period_key"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [{ "name": "consumed_within_bound", "sql": "\"consumed\" <= \"bound\"" }],
+      "note": "Column names chosen from the model's words: 'budget key' is the four budget PK columns (composite FK to quota_budget); 'owner kind/id' is the aggregateRef owner (owner_kind, owner_id); 'lease/fence where applicable' are nullable lease_until and fence. operation_id is a plain id. No non-negativity check on bound/consumed (not stated for this table). Enlarging a bound requires a new atomic admission (plan-level)."
+    },
+    {
+      "name": "entitlement_quota_event",
+      "model": "01 section 6 entitlement.quota_event",
+      "columns": [
+        { "name": "reservation_id", "type": "id" },
+        { "name": "effect_id", "type": "id" },
+        { "name": "kind", "type": "enum", "enum": "entitlement.quota_event_kind" },
+        { "name": "measured_quantity", "type": "int64" },
+        { "name": "budget_rev", "type": "rev" },
+        { "name": "source_object_id", "type": "id", "nullable": true },
+        { "name": "source_segment_id", "type": "id", "nullable": true },
+        { "name": "deletion_receipt_id", "type": "id", "nullable": true }
+      ],
+      "primaryKey": ["reservation_id", "effect_id"],
+      "foreignKeys": [
+        {
+          "columns": ["reservation_id"],
+          "references": { "table": "entitlement_quota_reservation", "columns": ["reservation_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none" },
+      "note": "The model names no PK, only the immutable unique (reservation_id, effect_id), which is used as the PK (no surrogate invented). Column names derived from the model: measured_quantity (signed; adjust may be negative, so no sign check), budget_rev (resulting budget revision), and source object/segment/deletion receipt as three nullable ids with no exactly-one check (not stated). Immutable: update none; the model is silent on delete, so delete stays any."
+    }
+  ]
+}

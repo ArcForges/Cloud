@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "owner": "device",
+  "enums": {
+    "device.platform": {
+      "source": "model 01 section 5 device.device.platform (inline, listed order)",
+      "values": ["windows", "macos", "linux", "android", "ios", "web"]
+    },
+    "device.trust_level": {
+      "source": "model 01 section 5 device.device.trust_level (inline, listed order)",
+      "values": ["untrusted", "trusted"]
+    }
+  },
+  "tables": [
+    {
+      "name": "device_device",
+      "model": "01 section 5 device.device",
+      "columns": [
+        { "name": "device_id", "type": "id" },
+        { "name": "user_id", "type": "id" },
+        { "name": "display_name", "type": "text" },
+        { "name": "platform", "type": "enum", "enum": "device.platform" },
+        { "name": "trust_level", "type": "enum", "enum": "device.trust_level" },
+        { "name": "trust_raised_at", "type": "instant", "nullable": true },
+        { "name": "remote_enabled", "type": "bool" },
+        { "name": "first_seen_at", "type": "instant" },
+        { "name": "last_seen_at", "type": "instant" },
+        { "name": "revoked_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["device_id"],
+      "indexes": [{ "columns": ["user_id", "revoked_at"], "path": "listing a user's devices" }],
+      "foreignKeys": [
+        {
+          "columns": ["user_id"],
+          "references": { "table": "identity_user", "columns": ["user_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "remote_enabled_requires_trusted",
+          "sql": "\"remote_enabled\" = 0 OR \"trust_level\" = 2"
+        }
+      ],
+      "note": "Defaults (trust_level untrusted, remote_enabled false) are supplied by the writing plan. The step-up-within-validity-window part of the remote_enabled constraint is time-dependent and stays in the guarded plan, as does 'trust_raised_at requires step-up'."
+    },
+    {
+      "name": "device_installation",
+      "model": "01 section 5 device.installation",
+      "columns": [
+        { "name": "installation_id", "type": "id" },
+        { "name": "device_id", "type": "id" },
+        { "name": "product_id", "type": "productId" },
+        { "name": "app_version", "type": "text" },
+        { "name": "contract_set_version", "type": "text" },
+        { "name": "installed_at", "type": "instant" },
+        { "name": "last_active_at", "type": "instant" },
+        { "name": "platform", "type": "text" },
+        { "name": "public_key", "type": "text" },
+        { "name": "key_version", "type": "int64" },
+        { "name": "revoked_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["installation_id"],
+      "indexes": [
+        {
+          "columns": ["device_id", "product_id"],
+          "unique": true,
+          "path": "one installation per device and product"
+        },
+        { "columns": ["contract_set_version"], "path": "the minimum-version rollout query (UP-11)" }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["device_id"],
+          "references": { "table": "device_device", "columns": ["device_id"] },
+          "onDelete": "cascade"
+        }
+      ],
+      "note": "platform is text NN in the model (windows/linux/macos/android/web, a different list from device.platform), so it stays text. public_key is text and key_version bigint per the model's 'text NN, bigint NN' pair."
+    },
+    {
+      "name": "device_remote_policy",
+      "model": "01 section 3 Account proofs and lifecycle records: device.remote_policy",
+      "columns": [
+        { "name": "device_id", "type": "id" },
+        { "name": "allowed_capabilities", "type": "json", "root": "array" },
+        { "name": "local_confirmation_capabilities", "type": "json", "root": "array" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["device_id"],
+      "foreignKeys": [
+        {
+          "columns": ["device_id"],
+          "references": { "table": "device_device", "columns": ["device_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "Defined in the identity records table (model 01 section 3), device-owned. The two columns are 'canonical Key arrays'; element-level Key validation is done by the writing plan."
+    }
+  ]
+}

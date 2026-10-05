@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "owner": "sync",
+  "enums": {
+    "sync.change_kind": {
+      "source": "model 01 section 9 sync.change.change_kind (inline, listed order)",
+      "values": ["upsert", "tombstone"]
+    },
+    "sync.change_origin_kind": {
+      "source": "model 01 section 9 sync.change.origin_kind (inline, listed order)",
+      "values": ["device", "cloud"]
+    },
+    "sync.conflict_state": {
+      "source": "model 01 section 9 sync.conflict.state (inline, listed order)",
+      "values": ["unresolved", "resolved"]
+    }
+  },
+  "tables": [
+    {
+      "name": "sync_sync_scope",
+      "model": "01 section 9 sync.sync_scope",
+      "columns": [
+        { "name": "sync_scope_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "product_id", "type": "productId" },
+        { "name": "scope_kind", "type": "text" },
+        { "name": "scope_ref", "type": "id", "nullable": true },
+        { "name": "enabled", "type": "bool" },
+        { "name": "content_exclusions", "type": "json" },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["sync_scope_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "product_id", "scope_kind", "scope_ref"],
+          "unique": true,
+          "path": "one selective-sync scope per workspace, product, kind and object"
+        }
+      ],
+      "note": "scope_ref is nullable (null = product-wide); SQLite treats NULLs as distinct in a unique index, so a second product-wide row for the same kind is not rejected by the index and stays a guarded-plan rule."
+    },
+    {
+      "name": "sync_change",
+      "model": "01 section 9 sync.change",
+      "columns": [
+        { "name": "change_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "aggregate_kind", "type": "text" },
+        { "name": "aggregate_id", "type": "id" },
+        { "name": "aggregate_rev", "type": "rev" },
+        { "name": "change_kind", "type": "enum", "enum": "sync.change_kind" },
+        { "name": "origin_kind", "type": "enum", "enum": "sync.change_origin_kind" },
+        { "name": "origin_device_id", "type": "id", "nullable": true },
+        { "name": "occurred_at", "type": "instant" },
+        { "name": "publish_seq", "type": "int64", "nullable": true },
+        { "name": "published_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["change_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "publish_seq"],
+          "where": "\"publish_seq\" IS NOT NULL",
+          "path": "the only feed query path"
+        },
+        {
+          "columns": ["workspace_id", "aggregate_kind", "aggregate_id", "aggregate_rev"],
+          "where": "\"publish_seq\" IS NULL",
+          "path": "find the first unpublished revision of an aggregate"
+        },
+        {
+          "columns": ["workspace_id", "aggregate_kind", "aggregate_id", "aggregate_rev"],
+          "unique": true,
+          "path": "exactly one publication identity per committed revision"
+        },
+        {
+          "columns": ["workspace_id", "publish_seq"],
+          "unique": true,
+          "path": "one change per publication sequence in a workspace"
+        }
+      ],
+      "checks": [
+        {
+          "name": "origin_device_agrees",
+          "sql": "(\"origin_kind\" = 1 AND \"origin_device_id\" IS NOT NULL) OR (\"origin_kind\" = 2 AND \"origin_device_id\" IS NULL)"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": ["publish_seq", "published_at"],
+          "when": "OLD.\"publish_seq\" IS NULL"
+        },
+        "delete": "any"
+      },
+      "note": "publish_seq is assigned once and never changed: only publish_seq and published_at may change, and only while publish_seq IS NULL (a published row is immutable). publish_seq is nullable so it cannot be a monotonic column; monotonic assignment is the publisher's guarded batch (model 04 section 5). Delete stays allowed (retention); model 01 states no delete rule."
+    },
+    {
+      "name": "sync_publication_watermark",
+      "model": "01 section 9 sync.publication_watermark",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "last_seq", "type": "int64", "monotonic": true },
+        { "name": "last_aggregate_key", "type": "text", "nullable": true },
+        { "name": "holder_instance", "type": "text", "nullable": true },
+        { "name": "fence_token", "type": "int64", "monotonic": true },
+        { "name": "lease_expires_at", "type": "instant", "nullable": true },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["workspace_id"],
+      "note": "last_seq never decreases and fence_token is increased on each acquisition (both monotonic). sync.bootstrap_manifest is described in prose only and is not written here."
+    },
+    {
+      "name": "sync_tombstone",
+      "model": "01 section 9 sync.tombstone",
+      "columns": [
+        { "name": "aggregate_kind", "type": "text" },
+        { "name": "aggregate_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "deleted_at", "type": "instant" },
+        { "name": "deleted_by_device_id", "type": "id", "nullable": true },
+        { "name": "retain_until", "type": "instant" }
+      ],
+      "primaryKey": ["aggregate_kind", "aggregate_id"],
+      "indexes": [{ "columns": ["retain_until"], "path": "the purge sweeper" }]
+    },
+    {
+      "name": "sync_conflict",
+      "model": "01 section 9 sync.conflict",
+      "columns": [
+        { "name": "conflict_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "aggregate_kind", "type": "text" },
+        { "name": "aggregate_id", "type": "id" },
+        { "name": "base_rev", "type": "rev" },
+        { "name": "current_rev", "type": "rev" },
+        { "name": "incoming_hash", "type": "hash" },
+        { "name": "retained_version_ref", "type": "id" },
+        { "name": "policy_version", "type": "text" },
+        { "name": "state", "type": "enum", "enum": "sync.conflict_state" },
+        { "name": "resolution", "type": "key", "nullable": true },
+        { "name": "created_at", "type": "instant" },
+        { "name": "resolved_at", "type": "instant", "nullable": true },
+        { "name": "resolution_command_id", "type": "id", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["conflict_id"],
+      "indexes": [
+        {
+          "columns": ["resolution_command_id"],
+          "unique": true,
+          "path": "a resolution command resolves at most one conflict (UNIQUE, nullable)"
+        },
+        {
+          "columns": ["workspace_id", "state", "created_at"],
+          "path": "list unresolved conflicts of a workspace"
+        }
+      ]
+    }
+  ]
+}

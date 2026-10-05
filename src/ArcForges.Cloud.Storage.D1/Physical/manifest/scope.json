@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "owner": "scope",
+  "enums": {
+    "scope.simulation_clock_mode": {
+      "source": "model 01 section 8.3 scope.simulation_run.clock_mode (inline, listed order)",
+      "values": ["realTime", "accelerated"]
+    },
+    "scope.simulation_run_state": {
+      "source": "model 01 section 8.3 scope.simulation_run.state (inline, listed order)",
+      "values": [
+        "queued",
+        "starting",
+        "running",
+        "pausing",
+        "paused",
+        "stopping",
+        "canceled",
+        "succeeded",
+        "failed"
+      ]
+    },
+    "scope.synced_aggregate_state": {
+      "source": "model 01 section 8.5 scope.synced_aggregate.state (inline, listed order)",
+      "values": ["live", "deleted"]
+    }
+  },
+  "tables": [
+    {
+      "name": "scope_simulation_definition",
+      "model": "01 section 8.3 scope.simulation_definition",
+      "columns": [
+        { "name": "definition_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["definition_id"],
+      "indexes": [{ "columns": ["workspace_id"], "path": "list the definitions of a workspace" }],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "The model gives one shared field table for definition and version. Immutable content (channel_schema, expression_ast, fault_profile, content_hash) and version_ordinal belong to scenario_version (a definition edit creates a new version); the definition keeps its PK, owner workspace and created_at."
+    },
+    {
+      "name": "scope_scenario_version",
+      "model": "01 section 8.3 scope.scenario_version",
+      "columns": [
+        { "name": "scenario_version_id", "type": "id" },
+        { "name": "definition_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "version_ordinal", "type": "int" },
+        { "name": "channel_schema", "type": "json" },
+        { "name": "expression_ast", "type": "json", "nullable": true },
+        { "name": "fault_profile", "type": "json", "nullable": true },
+        { "name": "content_hash", "type": "bytes" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["scenario_version_id"],
+      "indexes": [
+        {
+          "columns": ["definition_id", "version_ordinal"],
+          "unique": true,
+          "path": "one version per ordinal of a definition"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "mutability": { "update": "none", "delete": "any" },
+      "note": "A scenario_version is immutable (SIM-02): update none. definition_id is implied by UQ (definition_id, version_ordinal); the model declares no FK from it to simulation_definition, so none is added. Delete is left open (the model states no delete rule); simulation_run restricts it by FK. content_hash is bytes as the model types it. AST validation before admission stays in the guarded plan."
+    },
+    {
+      "name": "scope_simulation_run",
+      "model": "01 section 8.3 scope.simulation_run",
+      "columns": [
+        { "name": "run_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "scenario_version_id", "type": "id" },
+        { "name": "seed", "type": "int64" },
+        { "name": "execution_profile", "type": "text" },
+        { "name": "clock_mode", "type": "enum", "enum": "scope.simulation_clock_mode" },
+        { "name": "duration_ticks", "type": "int64" },
+        { "name": "state", "type": "enum", "enum": "scope.simulation_run_state" },
+        { "name": "terminal_reason", "type": "text", "nullable": true },
+        { "name": "completed_ticks", "type": "int64" },
+        { "name": "service_term_id", "type": "id" },
+        { "name": "rev", "type": "rev" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "updated_at", "type": "instant" },
+        { "name": "pacing_origin_at", "type": "instant", "nullable": true },
+        { "name": "pacing_origin_tick", "type": "int64" },
+        { "name": "next_due_at", "type": "instant", "nullable": true },
+        { "name": "pacer_epoch", "type": "int64", "monotonic": true }
+      ],
+      "primaryKey": ["run_id"],
+      "indexes": [
+        { "columns": ["workspace_id", "state"], "path": "list a workspace's runs by state" },
+        {
+          "columns": ["state", "updated_at"],
+          "path": "scan runs by state and latest durable transition"
+        },
+        {
+          "columns": ["state", "next_due_at"],
+          "path": "the scheduler path (Cron rescue of nonterminal runs)"
+        },
+        {
+          "columns": ["workspace_id", "created_at DESC", "run_id DESC"],
+          "path": "run history (simulation.listRuns), descending created_at/run_id"
+        },
+        {
+          "columns": ["workspace_id", "scenario_version_id", "created_at DESC", "run_id DESC"],
+          "path": "run history per scenario version, descending created_at/run_id"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["workspace_id"],
+          "references": { "table": "workspace_workspace", "columns": ["workspace_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["scenario_version_id"],
+          "references": { "table": "scope_scenario_version", "columns": ["scenario_version_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["service_term_id"],
+          "references": { "table": "entitlement_service_term", "columns": ["service_term_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "succeeded_complete",
+          "sql": "\"state\" <> 8 OR \"completed_ticks\" = \"duration_ticks\""
+        }
+      ],
+      "note": "pacer_epoch is typed bigint and marked monotonic (the model says it increases on pause/resume/cancel/recovery fencing). 'A terminal run cannot be resurrected' and 'a duplicate start creates no second run' (SIM-09) are not row-expressible with the mutability object and stay in guarded plans."
+    },
+    {
+      "name": "scope_simulation_lease",
+      "model": "01 section 8.3 scope.simulation_lease",
+      "columns": [
+        { "name": "run_id", "type": "id" },
+        { "name": "holder_instance", "type": "text" },
+        { "name": "fence_token", "type": "int64", "monotonic": true },
+        { "name": "expires_at", "type": "instant" }
+      ],
+      "primaryKey": ["run_id"],
+      "note": "One live lease per run is the PK. fence_token is monotonic within the row; a stale-token publish is rejected by the guarded plan (SIM-10)."
+    },
+    {
+      "name": "scope_simulation_segment",
+      "model": "01 section 8.3 scope.simulation_segment",
+      "columns": [
+        { "name": "segment_id", "type": "id" },
+        { "name": "run_id", "type": "id" },
+        { "name": "sequence", "type": "int64" },
+        { "name": "logical_from_tick", "type": "int64" },
+        { "name": "logical_to_tick", "type": "int64" },
+        { "name": "sample_count", "type": "int64" },
+        { "name": "encoding", "type": "text" },
+        { "name": "byte_length", "type": "int64" },
+        { "name": "content_hash", "type": "bytes" },
+        { "name": "object_key", "type": "text" },
+        { "name": "fence_token", "type": "int64" }
+      ],
+      "primaryKey": ["segment_id"],
+      "indexes": [
+        {
+          "columns": ["run_id", "sequence"],
+          "unique": true,
+          "path": "one segment per sequence of a run"
+        },
+        {
+          "columns": ["run_id", "logical_from_tick"],
+          "unique": true,
+          "path": "no duplicate logical range in a run"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["run_id"],
+          "references": { "table": "scope_simulation_run", "columns": ["run_id"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "note": "The manifest row is the commit point: a row never references an unverified partial object (SIM-11), enforced by the write order in the guarded plan, not by a row check."
+    },
+    {
+      "name": "scope_simulation_checkpoint",
+      "model": "01 section 8.3 scope.simulation_checkpoint",
+      "columns": [
+        { "name": "run_id", "type": "id" },
+        { "name": "next_tick", "type": "int64" },
+        { "name": "rng_state", "type": "bytes" },
+        { "name": "generator_state", "type": "json" },
+        { "name": "replay_position", "type": "json", "nullable": true },
+        { "name": "pending_fault_state", "type": "json" },
+        { "name": "committed_segment_sequence", "type": "int64" },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["run_id"],
+      "note": "The checkpoint advances only after the matching manifest row commits (SIM-11/SIM-12); that ordering is a guarded-plan rule."
+    },
+    {
+      "name": "scope_synced_aggregate",
+      "model": "01 section 8.5 scope.synced_aggregate",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "aggregate_kind", "type": "text" },
+        { "name": "aggregate_id", "type": "id" },
+        { "name": "rev", "type": "rev" },
+        { "name": "schema_version", "type": "text" },
+        { "name": "payload_proto", "type": "proto" },
+        { "name": "source_device_id", "type": "id" },
+        { "name": "content_rev", "type": "int64" },
+        { "name": "state", "type": "enum", "enum": "scope.synced_aggregate_state" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "updated_at", "type": "instant" },
+        { "name": "deleted_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["workspace_id", "aggregate_kind", "aggregate_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "aggregate_kind", "state", "aggregate_id"],
+          "path": "library reads of live project/session rows per kind"
+        }
+      ],
+      "checks": [
+        {
+          "name": "state_deleted_at_agree",
+          "sql": "(\"state\" = 2) = (\"deleted_at\" IS NOT NULL)"
+        }
+      ],
+      "note": "The registered-kind allowlist that selects the exact validated payload record is enforced by the generated allowlist in C#, not by a row check."
+    },
+    {
+      "name": "scope_replica_revision",
+      "model": "01 section 8.5 scope.replica_revision",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "aggregate_kind", "type": "text" },
+        { "name": "aggregate_id", "type": "id" },
+        { "name": "rev", "type": "rev" },
+        { "name": "schema_version", "type": "text" },
+        { "name": "payload_resource_id", "type": "id" },
+        { "name": "payload_hash", "type": "hash" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["workspace_id", "aggregate_kind", "aggregate_id", "rev"],
+      "mutability": { "update": "none", "delete": "any" },
+      "note": "Immutable retained revision: update none; delete stays open because retention follows the ordinary replica/reference rules. The library read model is derived and is not a table."
+    }
+  ]
+}

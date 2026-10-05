@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "owner": "resource",
+  "enums": {
+    "resource.cloud_object_sensitivity": {
+      "source": "model 01 section 10 resource.cloud_object.sensitivity (inline, listed order)",
+      "values": ["public", "internal", "confidential", "restricted"]
+    },
+    "resource.cloud_object_state": {
+      "source": "model 01 section 10 resource.cloud_object.state (inline, listed order)",
+      "values": ["staged", "verified", "committed", "releasing", "deleted"]
+    },
+    "resource.upload_session_state": {
+      "source": "model 01 section 10 resource.upload_session state (prose, listed order receiving/verifying/verified/promoted/expiring/deleted)",
+      "values": ["receiving", "verifying", "verified", "promoted", "expiring", "deleted"]
+    },
+    "resource.upload_verification_state": {
+      "source": "model 01 section 10 resource.upload_session.verification_state (listed order pending/running/verified/failed)",
+      "values": ["pending", "running", "verified", "failed"]
+    },
+    "resource.service_object_direction": {
+      "source": "model 01 section 10 resource.service_object_grant.direction (inline, listed order)",
+      "values": ["read", "write"]
+    }
+  },
+  "tables": [
+    {
+      "name": "resource_cloud_object",
+      "model": "01 section 10 resource.cloud_object",
+      "columns": [
+        { "name": "cloud_object_id", "type": "id" },
+        { "name": "quota_reservation_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "owner_product", "type": "text" },
+        { "name": "content_hash", "type": "text" },
+        { "name": "size_bytes", "type": "int64" },
+        { "name": "content_type", "type": "text", "nullable": true },
+        { "name": "sensitivity", "type": "enum", "enum": "resource.cloud_object_sensitivity" },
+        { "name": "state", "type": "enum", "enum": "resource.cloud_object_state" },
+        { "name": "storage_key", "type": "text" },
+        { "name": "reference_count", "type": "int" },
+        { "name": "last_reference_released_at", "type": "instant", "nullable": true },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["cloud_object_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "state"],
+          "path": "list a workspace's objects by lifecycle state"
+        },
+        {
+          "columns": ["workspace_id", "content_hash", "size_bytes"],
+          "unique": true,
+          "where": "\"state\" <> 5",
+          "path": "deduplication within an authorised workspace, live physical objects only"
+        },
+        {
+          "columns": ["state", "last_reference_released_at"],
+          "path": "the garbage collector's only path"
+        }
+      ],
+      "checks": [{ "name": "reference_count_nonnegative", "sql": "\"reference_count\" >= 0" }],
+      "note": "The unique dedup index is partial and excludes state deleted ('live physical objects'). 'A reference is only published when state = committed' (XS-05) is cross-row and stays in guarded plans; reference_count is derived from resource_object_reference."
+    },
+    {
+      "name": "resource_object_reference",
+      "model": "01 section 10 resource.object_reference",
+      "columns": [
+        { "name": "cloud_object_id", "type": "id" },
+        { "name": "referrer_kind", "type": "text" },
+        { "name": "referrer_id", "type": "id" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["cloud_object_id", "referrer_kind", "referrer_id"],
+      "note": "The model declares no FK from cloud_object_id, so none is added; the reference count is derived from this table."
+    },
+    {
+      "name": "resource_upload_session",
+      "model": "01 section 10 resource.upload_session",
+      "columns": [
+        { "name": "upload_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "operation_key", "type": "text" },
+        { "name": "object_key", "type": "text" },
+        { "name": "expected_hash", "type": "hash" },
+        { "name": "declared_max_bytes", "type": "int64" },
+        { "name": "chunk_bitmap", "type": "bytes" },
+        { "name": "reservation_group_id", "type": "id" },
+        { "name": "state", "type": "enum", "enum": "resource.upload_session_state" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "extension_count", "type": "int" },
+        { "name": "sealed_parts_proto", "type": "proto", "nullable": true },
+        { "name": "verification_job_id", "type": "id", "nullable": true },
+        {
+          "name": "verification_state",
+          "type": "enum",
+          "enum": "resource.upload_verification_state"
+        },
+        { "name": "verification_hash", "type": "hash", "nullable": true },
+        { "name": "provisional_pin_id", "type": "id", "nullable": true },
+        { "name": "completed_at", "type": "instant", "nullable": true },
+        { "name": "rev", "type": "rev" }
+      ],
+      "primaryKey": ["upload_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "operation_key"],
+          "unique": true,
+          "path": "the same operation key returns the same session"
+        }
+      ],
+      "note": "The first paragraph of the model lists fields in prose without types: expected_hash is typed hash (it is compared with verification_hash:hash), declared_max_bytes is int64, chunk_bitmap is one bytes column holding the received bitmap with verified chunk lengths, extension_count is int, operation_key and object_key are text; all are NOT NULL (no '?'). verification_state has no '?' and is NOT NULL. The extension bound and oversize/chunk-mismatch refusal are configuration and guarded-plan rules, not checks."
+    },
+    {
+      "name": "resource_upload_part",
+      "model": "01 section 10 resource.upload_part",
+      "columns": [
+        { "name": "upload_id", "type": "id" },
+        { "name": "part_number", "type": "int" },
+        { "name": "offset", "type": "uint64" },
+        { "name": "length", "type": "uint64" },
+        { "name": "sha256", "type": "hash" },
+        { "name": "provider_receipt", "type": "text" },
+        { "name": "verified_at", "type": "instant" }
+      ],
+      "primaryKey": ["upload_id", "part_number"],
+      "note": "part_number has no stated type and is int. The model declares no FK to upload_session, so none is added. 'Exact repeat is accepted; changed bytes at an accepted part number refuse' is a guarded-plan comparison, not a mutability rule."
+    },
+    {
+      "name": "resource_service_object_grant",
+      "model": "01 section 10 resource.service_object_grant",
+      "columns": [
+        { "name": "grant_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "owner_job_id", "type": "id" },
+        { "name": "owner_kind", "type": "key" },
+        { "name": "attempt_id", "type": "id", "nullable": true },
+        { "name": "epoch", "type": "int64" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "direction", "type": "enum", "enum": "resource.service_object_direction" },
+        { "name": "resource_id", "type": "id" },
+        { "name": "upload_id", "type": "id", "nullable": true },
+        { "name": "byte_limit", "type": "int64" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "revoked_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["grant_id"],
+      "indexes": [
+        { "columns": ["expires_at"], "path": "the expiry sweep of service-object grants" }
+      ],
+      "note": "Limits and the current owner lease are checked on each use by the guarded plan."
+    },
+    {
+      "name": "resource_cf_instance_inventory",
+      "model": "01 section 10 resource.cf_instance_inventory",
+      "columns": [
+        { "name": "kind", "type": "text" },
+        { "name": "instance_id", "type": "text" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "owner_job_id", "type": "id" },
+        { "name": "worker_version", "type": "text" },
+        { "name": "deletion_receipt", "type": "text", "nullable": true },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["kind", "instance_id", "recovery_generation"]
+    },
+    {
+      "name": "resource_source_consent",
+      "model": "01 section 10 resource.source_consent",
+      "columns": [
+        { "name": "consent_id", "type": "id" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "actor_id", "type": "id" },
+        { "name": "operation_id", "type": "key" },
+        { "name": "purpose", "type": "key" },
+        { "name": "source_manifest_hash", "type": "hash" },
+        { "name": "policy_rev", "type": "rev" },
+        { "name": "max_bytes", "type": "int64" },
+        { "name": "expires_at", "type": "instant" },
+        { "name": "consumed_at", "type": "instant", "nullable": true },
+        { "name": "revoked_at", "type": "instant", "nullable": true },
+        { "name": "generation", "type": "int64" }
+      ],
+      "primaryKey": ["consent_id"],
+      "indexes": [{ "columns": ["expires_at"], "path": "the expiry sweep of source consents" }],
+      "note": "The model types operation_id as Key (operation_id/purpose:Key NN)."
+    }
+  ]
+}

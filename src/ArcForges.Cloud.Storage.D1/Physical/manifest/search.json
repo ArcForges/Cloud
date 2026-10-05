@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "owner": "search",
+  "enums": {
+    "search.inference_purpose": {
+      "source": "model 01 section 10.1 search.inference_job.purpose (embedding/rerank, listed order)",
+      "values": ["embedding", "rerank"]
+    },
+    "search.inference_state": {
+      "source": "model 01 section 10.1 search.inference_job.state (inline, listed order)",
+      "values": ["queued", "running", "unknown", "succeeded", "failed", "cancelled"]
+    }
+  },
+  "tables": [
+    {
+      "name": "search_inference_job",
+      "model": "01 section 10.1 search.inference_job",
+      "columns": [
+        { "name": "job_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "principal_id", "type": "id" },
+        { "name": "service_term_id", "type": "id" },
+        { "name": "purpose", "type": "enum", "enum": "search.inference_purpose" },
+        { "name": "input_hash", "type": "hash" },
+        { "name": "source_manifest_ref", "type": "proto" },
+        { "name": "source_set_hash", "type": "hash" },
+        { "name": "model_descriptor_id", "type": "id" },
+        { "name": "config_revision_id", "type": "id" },
+        { "name": "profile", "type": "text" },
+        { "name": "state", "type": "enum", "enum": "search.inference_state" },
+        { "name": "reason", "type": "key" },
+        { "name": "rev", "type": "rev" },
+        { "name": "created_at", "type": "instant" },
+        { "name": "updated_at", "type": "instant" },
+        { "name": "deadline", "type": "instant" },
+        { "name": "logical_request_id", "type": "id" },
+        { "name": "provider_attempt_id", "type": "id", "nullable": true },
+        { "name": "intent_receipt", "type": "id" },
+        { "name": "workflow_id", "type": "text" },
+        { "name": "worker_version", "type": "text", "nullable": true },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "lease_holder", "type": "text", "nullable": true },
+        { "name": "lease_epoch", "type": "int64" },
+        { "name": "lease_expires_at", "type": "instant", "nullable": true },
+        { "name": "result_ref", "type": "id", "nullable": true },
+        { "name": "outcome_receipt", "type": "text", "nullable": true },
+        { "name": "outcome_hash", "type": "hash", "nullable": true },
+        { "name": "source_publication_ref", "type": "id", "nullable": true },
+        { "name": "cancellation_requested_at", "type": "instant", "nullable": true },
+        { "name": "completed_at", "type": "instant", "nullable": true }
+      ],
+      "primaryKey": ["job_id"],
+      "indexes": [
+        {
+          "columns": ["logical_request_id"],
+          "unique": true,
+          "path": "a logical request belongs to one job (idempotent receipts)"
+        },
+        {
+          "columns": ["provider_attempt_id"],
+          "unique": true,
+          "path": "a provider attempt belongs to one job (idempotent receipts)"
+        }
+      ],
+      "checks": [
+        {
+          "name": "succeeded_has_result",
+          "sql": "\"state\" <> 4 OR (\"result_ref\" IS NOT NULL AND \"outcome_hash\" IS NOT NULL)"
+        },
+        {
+          "name": "unknown_no_completion",
+          "sql": "\"state\" <> 3 OR (\"result_ref\" IS NULL AND \"completed_at\" IS NULL)"
+        }
+      ],
+      "note": "Built from the field table. Columns the model lists without '?' are NOT NULL, except four that cannot exist at admission and are nullable by lifecycle: provider_attempt_id (no attempt before dispatch), worker_version (observed), lease_holder and lease_expires_at (no lease while queued); the Search owner should confirm. Types: input_hash/source_set_hash/outcome_hash are hash; source_manifest_ref is the typed ResourceVersionRef (proto); result_ref/source_publication_ref and the Commerce identities (logical_request_id, provider_attempt_id, intent_receipt) are id; reason is the named reason (key); profile, workflow_id, outcome_receipt are text. The 120 second admission-to-result deadline is policy, not a check; reusing a job_id with a different input hash, source revocation cancelling queued jobs and the current-epoch lease rule are guarded-plan rules. outcome_hash is not unique (the model says only that it makes receipts idempotent)."
+    },
+    {
+      "name": "search_cf_instance_inventory",
+      "model": "01 section 10 search.cf_instance_inventory",
+      "columns": [
+        { "name": "kind", "type": "text" },
+        { "name": "instance_id", "type": "text" },
+        { "name": "recovery_generation", "type": "int64" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "owner_job_id", "type": "id" },
+        { "name": "worker_version", "type": "text" },
+        { "name": "deletion_receipt", "type": "text", "nullable": true },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["kind", "instance_id", "recovery_generation"]
+    },
+    {
+      "name": "search_search_document",
+      "model": "03 section 5 search.search_document (same shape as 03 section 2 search_document, scoped by workspace_id)",
+      "columns": [
+        { "name": "search_doc_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "product_id", "type": "productId" },
+        { "name": "source_kind", "type": "key" },
+        { "name": "source_id", "type": "id" },
+        { "name": "source_version", "type": "json" },
+        { "name": "title", "type": "text" },
+        { "name": "body", "type": "text" },
+        { "name": "indexed_at", "type": "instant" },
+        {
+          "name": "scope_key",
+          "type": "text",
+          "generated": "replace(\"workspace_id\", '-', '') || 'x' || \"product_id\""
+        }
+      ],
+      "primaryKey": ["search_doc_id"],
+      "indexes": [
+        {
+          "columns": ["workspace_id", "product_id", "source_kind", "source_id"],
+          "unique": true,
+          "path": "one document per canonical source aggregate within a workspace and product"
+        }
+      ],
+      "fts5": {
+        "name": "search_search_document_fts",
+        "columns": ["scope_key", "title", "body"],
+        "tokenize": "unicode61 remove_diacritics 2"
+      },
+      "note": "Cloud store: the local search_document shape scoped by workspace_id (and product_id, model 04 section 8). The local workspace_scope column is replaced by workspace_id. scope_key is the single alphanumeric FTS token of workspace and product used as the mandatory scope predicate of every query (model 04 section 8); it is not a model field. Permission is applied at query time and is not stored (SI-03)."
+    },
+    {
+      "name": "search_retrieval_chunk",
+      "model": "03 section 5 search.retrieval_chunk (same shape as 03 section 3 retrieval_chunk, scoped by workspace_id)",
+      "columns": [
+        { "name": "chunk_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "product_id", "type": "productId" },
+        { "name": "source_kind", "type": "key" },
+        { "name": "source_id", "type": "id" },
+        { "name": "source_version", "type": "json" },
+        { "name": "anchor_id", "type": "id", "nullable": true },
+        { "name": "chunk_ordinal", "type": "int" },
+        { "name": "text", "type": "text" },
+        { "name": "embedding_model_id", "type": "text" },
+        { "name": "embedded_at", "type": "instant" }
+      ],
+      "primaryKey": ["chunk_id"],
+      "indexes": [
+        {
+          "columns": ["source_kind", "source_id"],
+          "path": "incremental invalidation of the chunks of a changed source"
+        }
+      ],
+      "note": "There is no embedding column in D1: the 1024-dimension vectors live in Vectorize (model 04 section 8), keyed by chunk_id with workspace namespace and realm/product metadata. embedding_model_id is the staleness key. The model's invalidation index includes source_version; this index is (source_kind, source_id) as assigned, and source_version stays a stored column. No search_anchor table is built in the cloud."
+    }
+  ]
+}

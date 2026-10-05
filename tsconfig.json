@@ -13,5 +13,11 @@
     "noUncheckedIndexedAccess": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["worker/router.ts", "tooling/**/*.ts", "tests/worker/**/*.ts"]
+  "include": [
+    "worker/router.ts",
+    "tooling/**/*.ts",
+    "eng/migrations/**/*.ts",
+    "eng/verification/physical-schema.ts",
+    "tests/worker/**/*.ts"
+  ]
 }

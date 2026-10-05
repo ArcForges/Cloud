@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "migrations": [
+    {
+      "sequence": 0,
+      "file": "0000_platform__bookkeeping.sql",
+      "module": "platform",
+      "mode": "expand",
+      "sha256": "7cced52d923dc4a232f2adef85570f7723f4d27cfc156325d4a857168ba21558"
+    },
+    {
+      "sequence": 1,
+      "file": "0001_platform__baseline.sql",
+      "module": "platform",
+      "mode": "expand",
+      "sha256": "942c1105baa4ec38358907cef88a77fcf3f8014944bb57e33ccf949b447a4e6d"
+    },
+    {
+      "sequence": 2,
+      "file": "0002_config__baseline.sql",
+      "module": "config",
+      "mode": "expand",
+      "sha256": "1f7ba247dbd4f2be58cdb4a49c69ad446ba85060e9529784fba096d4af6a6103"
+    },
+    {
+      "sequence": 3,
+      "file": "0003_identity__baseline.sql",
+      "module": "identity",
+      "mode": "expand",
+      "sha256": "3be87e1eaa59efb1454356218c6e3fc6c28220f8824b14fcf32395edde5b4601"
+    },
+    {
+      "sequence": 4,
+      "file": "0004_device__baseline.sql",
+      "module": "device",
+      "mode": "expand",
+      "sha256": "fa0cec60dc4b6fd4d23b7384364cad8eede946781defdf6085d2d4b2db0ca280"
+    },
+    {
+      "sequence": 5,
+      "file": "0005_workspace__baseline.sql",
+      "module": "workspace",
+      "mode": "expand",
+      "sha256": "26cd3b9eb5eaa08e589f336d258d3900ed1392283866c2b6b170eb59305db6c4"
+    },
+    {
+      "sequence": 6,
+      "file": "0006_entitlement__baseline.sql",
+      "module": "entitlement",
+      "mode": "expand",
+      "sha256": "a768e5dfb41918b7005b96813f85f8872bf5b398102f3eb309b898f96be54732"
+    },
+    {
+      "sequence": 7,
+      "file": "0007_commerce__baseline.sql",
+      "module": "commerce",
+      "mode": "expand",
+      "sha256": "f9753c8bfcca7728dcc9c68263f476ea645b9cf5d6963a0a4f58a284ad696668"
+    },
+    {
+      "sequence": 8,
+      "file": "0008_audit__baseline.sql",
+      "module": "audit",
+      "mode": "expand",
+      "sha256": "79ac1e5120fcb2199f36bada19f23f01ff31c6cfc621242c7075b06821b943e0"
+    },
+    {
+      "sequence": 9,
+      "file": "0009_support__baseline.sql",
+      "module": "support",
+      "mode": "expand",
+      "sha256": "fdeb38d92fa96539ac8506abb33a0b53c5722e7c5b156cee29072ae84d5b8f04"
+    },
+    {
+      "sequence": 10,
+      "file": "0010_agent__baseline.sql",
+      "module": "agent",
+      "mode": "expand",
+      "sha256": "5920cffc3b61db30b8429a4d2e9b620a296485db755a7207754e4a4f0f86ca8d"
+    },
+    {
+      "sequence": 11,
+      "file": "0011_chat__baseline.sql",
+      "module": "chat",
+      "mode": "expand",
+      "sha256": "d543efa7fe321b74930414594bc6955da7c874a83d7d6d375c2678adbb4e152f"
+    },
+    {
+      "sequence": 12,
+      "file": "0012_task__baseline.sql",
+      "module": "task",
+      "mode": "expand",
+      "sha256": "e8791ef6706a11c025a21748fc6786b68a2a44b8f1b2fb38e1203c701db9fdd3"
+    },
+    {
+      "sequence": 13,
+      "file": "0013_sync__baseline.sql",
+      "module": "sync",
+      "mode": "expand",
+      "sha256": "9a3a35ee852f5b3199a45239717accac3185e4bce7f512ee23fc9e620927a74d"
+    },
+    {
+      "sequence": 14,
+      "file": "0014_resource__baseline.sql",
+      "module": "resource",
+      "mode": "expand",
+      "sha256": "088a695310cd71412f1d0710f1618e86ffecc6aebb77fc5ff42372722947cd79"
+    },
+    {
+      "sequence": 15,
+      "file": "0015_search__baseline.sql",
+      "module": "search",
+      "mode": "expand",
+      "sha256": "d67d234fe1b47843f59470c85c051de4cc0a25ae6e7c81dbda534265b378d98d"
+    },
+    {
+      "sequence": 16,
+      "file": "0016_notification__baseline.sql",
+      "module": "notification",
+      "mode": "expand",
+      "sha256": "d35c23864db3a49596d6fe187681e2ddb86a02911afad68c1f742b7d6952e43d"
+    },
+    {
+      "sequence": 17,
+      "file": "0017_policy__baseline.sql",
+      "module": "policy",
+      "mode": "expand",
+      "sha256": "b8af497f24d4b07066c9a711bf19b46cb35dad2b9dbdcca1e91052f3766e45a8"
+    },
+    {
+      "sequence": 18,
+      "file": "0018_scope__baseline.sql",
+      "module": "scope",
+      "mode": "expand",
+      "sha256": "d46dc59398c6bd8fb8a5d17b82f54794dcbc6a65f615a4d0eeefd2952795bb58"
+    },
+    {
+      "sequence": 19,
+      "file": "0019_package-catalog__baseline.sql",
+      "module": "package-catalog",
+      "mode": "expand",
+      "sha256": "3ab23b9b3080af7d41f2b890f6225534bce0bca752e3a132b02cd59f04b88e61"
+    },
+    {
+      "sequence": 20,
+      "file": "0020_trustsafety__baseline.sql",
+      "module": "trustsafety",
+      "mode": "expand",
+      "sha256": "c3b4786eaa2802e59339685d82fff325d7d56098eb665735cf9c284e8f2c7fca"
+    },
+    {
+      "sequence": 21,
+      "file": "0021_search__fts5.sql",
+      "module": "search",
+      "mode": "expand",
+      "sha256": "b791ca53af26db6722f545bf7fe132d4bcd5c8afada79f20d7fe772aa2d514ef"
+    }
+  ]
+}

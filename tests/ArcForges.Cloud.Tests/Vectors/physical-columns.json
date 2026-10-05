@@ -1,0 +1,1867 @@
+{
+  "schemaVersion": 1,
+  "planKinds": {
+    "id": "text",
+    "text": "text",
+    "key": "text",
+    "productId": "text",
+    "modelId": "text",
+    "currency": "text",
+    "json": "text",
+    "bool": "bool",
+    "int": "int64",
+    "int64": "int64",
+    "rev": "int64",
+    "instant": "int64",
+    "enum": "int64",
+    "uint64": "uint64",
+    "decimal": "decimal",
+    "hash": "bytes",
+    "bytes": "bytes",
+    "proto": "bytes"
+  },
+  "note": "Shared by tests/worker/d1-physical-columns.test.ts (SQLite oracle) and tests/ArcForges.Cloud.Tests/Physical/ColumnCodecVectorTests.cs (C# adapters). A round-trip case must be encoded to exactly this scalar and decoded back, and SQLite must store and return it; a refuse case must be refused by the C# decoder (and the encoder when a value is given) and by SQLite unless sqlAccepts is set.",
+  "cases": [
+    {
+      "name": "id canonical",
+      "column": {
+        "kind": "id",
+        "nullable": false
+      },
+      "value": {
+        "text": "0198a7c0-1c3e-7d4a-9b1f-2e5d6a7b8c9d"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "0198a7c0-1c3e-7d4a-9b1f-2e5d6a7b8c9d"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "id nil",
+      "column": {
+        "kind": "id",
+        "nullable": false
+      },
+      "value": {
+        "text": "00000000-0000-0000-0000-000000000000"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "00000000-0000-0000-0000-000000000000"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "id upper case",
+      "column": {
+        "kind": "id",
+        "nullable": false
+      },
+      "value": {
+        "text": "0198A7C0-1C3E-7D4A-9B1F-2E5D6A7B8C9D"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "0198A7C0-1C3E-7D4A-9B1F-2E5D6A7B8C9D"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "id without hyphens",
+      "column": {
+        "kind": "id",
+        "nullable": false
+      },
+      "value": {
+        "text": "0198a7c01c3e7d4a9b1f2e5d6a7b8c9d"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "0198a7c01c3e7d4a9b1f2e5d6a7b8c9d"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "id too long",
+      "column": {
+        "kind": "id",
+        "nullable": false
+      },
+      "value": {
+        "text": "0198a7c0-1c3e-7d4a-9b1f-2e5d6a7b8c9d0"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "0198a7c0-1c3e-7d4a-9b1f-2e5d6a7b8c9d0"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "id with a non hex digit",
+      "column": {
+        "kind": "id",
+        "nullable": false
+      },
+      "value": {
+        "text": "0198a7c0-1c3g-7d4a-9b1f-2e5d6a7b8c9d"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "0198a7c0-1c3g-7d4a-9b1f-2e5d6a7b8c9d"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "id of the wrong kind",
+      "column": {
+        "kind": "id",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "nullable id null",
+      "column": {
+        "kind": "id",
+        "nullable": true
+      },
+      "value": {
+        "null": true
+      },
+      "scalar": {
+        "kind": "null"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "non-nullable id null",
+      "column": {
+        "kind": "id",
+        "nullable": false
+      },
+      "value": {
+        "null": true
+      },
+      "scalar": {
+        "kind": "null"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "key one character",
+      "column": {
+        "kind": "key",
+        "nullable": false
+      },
+      "value": {
+        "text": "a"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "a"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "key every allowed punctuation",
+      "column": {
+        "kind": "key",
+        "nullable": false
+      },
+      "value": {
+        "text": "A.b_c:d/e-F9"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "A.b_c:d/e-F9"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "key 128 characters",
+      "column": {
+        "kind": "key",
+        "nullable": false
+      },
+      "value": {
+        "text": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "key 129 characters",
+      "column": {
+        "kind": "key",
+        "nullable": false
+      },
+      "value": {
+        "text": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "key empty",
+      "column": {
+        "kind": "key",
+        "nullable": false
+      },
+      "value": {
+        "text": ""
+      },
+      "scalar": {
+        "kind": "text",
+        "value": ""
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "key with a space",
+      "column": {
+        "kind": "key",
+        "nullable": false
+      },
+      "value": {
+        "text": "a b"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "a b"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "key with a non ascii letter",
+      "column": {
+        "kind": "key",
+        "nullable": false
+      },
+      "value": {
+        "text": "café"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "café"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "product arcscope",
+      "column": {
+        "kind": "productId",
+        "nullable": false
+      },
+      "value": {
+        "text": "arcscope"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "arcscope"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "product companion",
+      "column": {
+        "kind": "productId",
+        "nullable": false
+      },
+      "value": {
+        "text": "companion"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "companion"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "product retired arcnotes",
+      "column": {
+        "kind": "productId",
+        "nullable": false
+      },
+      "value": {
+        "text": "arcnotes"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "arcnotes"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "product upper case",
+      "column": {
+        "kind": "productId",
+        "nullable": false
+      },
+      "value": {
+        "text": "ArcScope"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "ArcScope"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "model id worker route",
+      "column": {
+        "kind": "modelId",
+        "nullable": false
+      },
+      "value": {
+        "text": "@cf/openai/gpt-oss-120b"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "@cf/openai/gpt-oss-120b"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "model id 256 characters",
+      "column": {
+        "kind": "modelId",
+        "nullable": false
+      },
+      "value": {
+        "text": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "model id 257 characters",
+      "column": {
+        "kind": "modelId",
+        "nullable": false
+      },
+      "value": {
+        "text": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "model id empty",
+      "column": {
+        "kind": "modelId",
+        "nullable": false
+      },
+      "value": {
+        "text": ""
+      },
+      "scalar": {
+        "kind": "text",
+        "value": ""
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "currency USD",
+      "column": {
+        "kind": "currency",
+        "nullable": false
+      },
+      "value": {
+        "text": "USD"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "USD"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "currency lower case",
+      "column": {
+        "kind": "currency",
+        "nullable": false
+      },
+      "value": {
+        "text": "usd"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "usd"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "currency two letters",
+      "column": {
+        "kind": "currency",
+        "nullable": false
+      },
+      "value": {
+        "text": "US"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "US"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "currency four letters",
+      "column": {
+        "kind": "currency",
+        "nullable": false
+      },
+      "value": {
+        "text": "USDX"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "USDX"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "text multi byte",
+      "column": {
+        "kind": "text",
+        "nullable": false
+      },
+      "value": {
+        "text": "A中😀"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "A中😀"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "text empty",
+      "column": {
+        "kind": "text",
+        "nullable": false
+      },
+      "value": {
+        "text": ""
+      },
+      "scalar": {
+        "kind": "text",
+        "value": ""
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "bool true",
+      "column": {
+        "kind": "bool",
+        "nullable": false
+      },
+      "value": {
+        "bool": true
+      },
+      "scalar": {
+        "kind": "boolean",
+        "value": true
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "bool false",
+      "column": {
+        "kind": "bool",
+        "nullable": false
+      },
+      "value": {
+        "bool": false
+      },
+      "scalar": {
+        "kind": "boolean",
+        "value": false
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "bool as int64",
+      "column": {
+        "kind": "bool",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "1"
+      },
+      "roundTrip": false,
+      "bridgeOnly": true
+    },
+    {
+      "name": "int32 minimum",
+      "column": {
+        "kind": "int",
+        "nullable": false
+      },
+      "value": {
+        "int64": "-2147483648"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "-2147483648"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "int32 maximum",
+      "column": {
+        "kind": "int",
+        "nullable": false
+      },
+      "value": {
+        "int64": "2147483647"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "2147483647"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "int32 above maximum",
+      "column": {
+        "kind": "int",
+        "nullable": false
+      },
+      "value": {
+        "int64": "2147483648"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "2147483648"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "int32 below minimum",
+      "column": {
+        "kind": "int",
+        "nullable": false
+      },
+      "value": {
+        "int64": "-2147483649"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "-2147483649"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "int64 zero",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "value": {
+        "int64": "0"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "0"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "int64 minimum",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "value": {
+        "int64": "-9223372036854775808"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "-9223372036854775808"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "int64 maximum",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "value": {
+        "int64": "9223372036854775807"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "9223372036854775807"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "int64 two to the 53 plus one",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "value": {
+        "int64": "9007199254740993"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "9007199254740993"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "int64 negative two to the 53 plus one",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "value": {
+        "int64": "-9007199254740993"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "-9007199254740993"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "int64 one",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "value": {
+        "int64": "1"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "1"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "int64 minus one",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "value": {
+        "int64": "-1"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "-1"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "int64 overflow",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "9223372036854775808"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "int64 leading zero",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "01"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "int64 exponent",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "1e3"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "int64 sent as text",
+      "column": {
+        "kind": "int64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "rev zero",
+      "column": {
+        "kind": "rev",
+        "nullable": false
+      },
+      "value": {
+        "int64": "0"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "0"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "rev maximum",
+      "column": {
+        "kind": "rev",
+        "nullable": false
+      },
+      "value": {
+        "int64": "9223372036854775807"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "9223372036854775807"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "rev negative",
+      "column": {
+        "kind": "rev",
+        "nullable": false
+      },
+      "value": {
+        "int64": "-1"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "-1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "instant epoch",
+      "column": {
+        "kind": "instant",
+        "nullable": false
+      },
+      "value": {
+        "int64": "0"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "0"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "instant one microsecond before the epoch",
+      "column": {
+        "kind": "instant",
+        "nullable": false
+      },
+      "value": {
+        "int64": "-1"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "-1"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "instant last microsecond of year 9999",
+      "column": {
+        "kind": "instant",
+        "nullable": false
+      },
+      "value": {
+        "int64": "253402300799999999"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "253402300799999999"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "instant 2026 microseconds",
+      "column": {
+        "kind": "instant",
+        "nullable": false
+      },
+      "value": {
+        "int64": "1790000000123456"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "1790000000123456"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "uint64 0",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "value": {
+        "uint64": "0"
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "0"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "uint64 1",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "value": {
+        "uint64": "1"
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "1"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "uint64 9223372036854775808",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "value": {
+        "uint64": "9223372036854775808"
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "9223372036854775808"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "uint64 18446744073709551615",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "value": {
+        "uint64": "18446744073709551615"
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "18446744073709551615"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "uint64 9007199254740993",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "value": {
+        "uint64": "9007199254740993"
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "9007199254740993"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "uint64 refuses \"18446744073709551616\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "18446744073709551616"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "uint64 refuses \"-1\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "-1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "uint64 refuses \"00\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "00"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "uint64 refuses \"01\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "01"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "uint64 refuses \"1.0\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "1.0"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "uint64 refuses \"+1\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "+1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "uint64 refuses \"\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": ""
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "uint64 refuses \"1e3\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "1e3"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "uint64 refuses \" 1\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": " 1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "uint64 refuses \"99999999999999999999\"",
+      "column": {
+        "kind": "uint64",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "uint64",
+        "value": "99999999999999999999"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal 0",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "0"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "0"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal 1",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "1"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "1"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal 1.5",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "1.5"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "1.5"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal -1.5",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "-1.5"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "-1.5"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal 0.000000001",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "0.000000001"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "0.000000001"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal -0.000000001",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "-0.000000001"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "-0.000000001"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal -1234567890123456789.123456789",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "-1234567890123456789.123456789"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "-1234567890123456789.123456789"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal 9999999999999999999.999999999",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "9999999999999999999.999999999"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "9999999999999999999.999999999"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal 123456789012345678901234567",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "123456789012345678901234567"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "123456789012345678901234567"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal 1234567890123456789012345678",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "1234567890123456789012345678"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "1234567890123456789012345678"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal 0.5",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "0.5"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "0.5"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal 10",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "10"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "10"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal 100.25",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "value": {
+        "decimal": "100.25"
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "100.25"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "decimal refuses \"-0\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "-0"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"00.1\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "00.1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"1.10\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "1.10"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"1e3\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "1e3"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \".5\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": ".5"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"5.\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "5."
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"+1\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "+1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"1.0000000001\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "1.0000000001"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"12345678901234567890123456789\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "12345678901234567890123456789"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": ""
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"-\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "-"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"--1\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "--1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"1-2\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "1-2"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"0.0\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "0.0"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"1,5\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "1,5"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"1 \"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "1 "
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"-.5\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "-.5"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "decimal refuses \"0x10\"",
+      "column": {
+        "kind": "decimal",
+        "nullable": false
+      },
+      "scalar": {
+        "kind": "decimal",
+        "value": "0x10"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "hash 32 bytes",
+      "column": {
+        "kind": "hash",
+        "nullable": false
+      },
+      "value": {
+        "bytesHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+      },
+      "scalar": {
+        "kind": "bytes",
+        "value": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "hash 31 bytes",
+      "column": {
+        "kind": "hash",
+        "nullable": false
+      },
+      "value": {
+        "bytesHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e"
+      },
+      "scalar": {
+        "kind": "bytes",
+        "value": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "hash 33 bytes",
+      "column": {
+        "kind": "hash",
+        "nullable": false
+      },
+      "value": {
+        "bytesHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+      },
+      "scalar": {
+        "kind": "bytes",
+        "value": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "hash empty",
+      "column": {
+        "kind": "hash",
+        "nullable": false
+      },
+      "value": {
+        "bytesHex": ""
+      },
+      "scalar": {
+        "kind": "bytes",
+        "value": ""
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "bytes empty",
+      "column": {
+        "kind": "bytes",
+        "nullable": false
+      },
+      "value": {
+        "bytesHex": ""
+      },
+      "scalar": {
+        "kind": "bytes",
+        "value": ""
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "bytes every value",
+      "column": {
+        "kind": "bytes",
+        "nullable": false
+      },
+      "value": {
+        "bytesHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+      },
+      "scalar": {
+        "kind": "bytes",
+        "value": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6uvs7e7v8PHy8_T19vf4-fr7_P3-_w"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "proto bytes",
+      "column": {
+        "kind": "proto",
+        "nullable": false
+      },
+      "value": {
+        "bytesHex": "0a0368656c"
+      },
+      "scalar": {
+        "kind": "bytes",
+        "value": "CgNoZWw"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "bytes nullable null",
+      "column": {
+        "kind": "bytes",
+        "nullable": true
+      },
+      "value": {
+        "null": true
+      },
+      "scalar": {
+        "kind": "null"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "json object",
+      "column": {
+        "kind": "json",
+        "nullable": false
+      },
+      "value": {
+        "text": "{\"a\":1,\"b\":[true,null,\"x\"]}"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "{\"a\":1,\"b\":[true,null,\"x\"]}"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "json scalar",
+      "column": {
+        "kind": "json",
+        "nullable": false
+      },
+      "value": {
+        "text": "1"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "1"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "json null literal",
+      "column": {
+        "kind": "json",
+        "nullable": false
+      },
+      "value": {
+        "text": "null"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "null"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "json array for an array column",
+      "column": {
+        "kind": "json",
+        "nullable": false,
+        "jsonRoot": "array"
+      },
+      "value": {
+        "text": "[\"a\",\"b\"]"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "[\"a\",\"b\"]"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "json object for an object column",
+      "column": {
+        "kind": "json",
+        "nullable": false,
+        "jsonRoot": "object"
+      },
+      "value": {
+        "text": "{}"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "{}"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "json array for an object column",
+      "column": {
+        "kind": "json",
+        "nullable": false,
+        "jsonRoot": "object"
+      },
+      "value": {
+        "text": "[]"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "[]"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "json object for an array column",
+      "column": {
+        "kind": "json",
+        "nullable": false,
+        "jsonRoot": "array"
+      },
+      "value": {
+        "text": "{}"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "{}"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "json malformed",
+      "column": {
+        "kind": "json",
+        "nullable": false
+      },
+      "value": {
+        "text": "{\"a\":"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "{\"a\":"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "json empty",
+      "column": {
+        "kind": "json",
+        "nullable": false
+      },
+      "value": {
+        "text": ""
+      },
+      "scalar": {
+        "kind": "text",
+        "value": ""
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "json single quotes",
+      "column": {
+        "kind": "json",
+        "nullable": false
+      },
+      "value": {
+        "text": "{'a':1}"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "{'a':1}"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "json trailing comma",
+      "column": {
+        "kind": "json",
+        "nullable": false
+      },
+      "value": {
+        "text": "[1,]"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "[1,]"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "json deeper than 64 levels (SQLite accepts it; the host refuses it)",
+      "column": {
+        "kind": "json",
+        "nullable": false
+      },
+      "value": {
+        "text": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
+      },
+      "roundTrip": false,
+      "sqlAccepts": true
+    },
+    {
+      "name": "enum TaskState 1",
+      "column": {
+        "kind": "enum",
+        "nullable": false,
+        "enum": "TaskState"
+      },
+      "value": {
+        "int64": "1"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "1"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "enum TaskState 5",
+      "column": {
+        "kind": "enum",
+        "nullable": false,
+        "enum": "TaskState"
+      },
+      "value": {
+        "int64": "5"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "5"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "enum TaskState 9",
+      "column": {
+        "kind": "enum",
+        "nullable": false,
+        "enum": "TaskState"
+      },
+      "value": {
+        "int64": "9"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "9"
+      },
+      "roundTrip": true
+    },
+    {
+      "name": "enum TaskState refuses 0",
+      "column": {
+        "kind": "enum",
+        "nullable": false,
+        "enum": "TaskState"
+      },
+      "value": {
+        "int64": "0"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "0"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "enum TaskState refuses 10",
+      "column": {
+        "kind": "enum",
+        "nullable": false,
+        "enum": "TaskState"
+      },
+      "value": {
+        "int64": "10"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "10"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "enum TaskState refuses -1",
+      "column": {
+        "kind": "enum",
+        "nullable": false,
+        "enum": "TaskState"
+      },
+      "value": {
+        "int64": "-1"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "-1"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "enum TaskState refuses 65536",
+      "column": {
+        "kind": "enum",
+        "nullable": false,
+        "enum": "TaskState"
+      },
+      "value": {
+        "int64": "65536"
+      },
+      "scalar": {
+        "kind": "int64",
+        "value": "65536"
+      },
+      "roundTrip": false
+    },
+    {
+      "name": "enum sent as text",
+      "column": {
+        "kind": "enum",
+        "nullable": false,
+        "enum": "TaskState"
+      },
+      "scalar": {
+        "kind": "text",
+        "value": "queued"
+      },
+      "roundTrip": false
+    }
+  ]
+}

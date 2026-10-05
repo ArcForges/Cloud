@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "owner": "config",
+  "enums": {
+    "config.revision_state": {
+      "source": "model 01 section 8.2 config.revision.state (inline, listed order)",
+      "values": ["validated", "active", "superseded", "rejected"]
+    }
+  },
+  "tables": [
+    {
+      "name": "config_revision",
+      "model": "01 section 8.2 config.revision",
+      "columns": [
+        { "name": "config_revision_id", "type": "id" },
+        { "name": "schema_version", "type": "text" },
+        { "name": "revision_identity", "type": "text" },
+        { "name": "content_hash", "type": "bytes" },
+        { "name": "environment", "type": "text" },
+        { "name": "realm_id", "type": "id" },
+        { "name": "effective_at", "type": "instant" },
+        { "name": "activated_at", "type": "instant", "nullable": true },
+        { "name": "state", "type": "enum", "enum": "config.revision_state" },
+        { "name": "document", "type": "json" }
+      ],
+      "primaryKey": ["config_revision_id"],
+      "indexes": [
+        {
+          "columns": ["revision_identity"],
+          "unique": true,
+          "path": "a revision identity cannot be reused with different content"
+        },
+        {
+          "columns": ["realm_id", "state"],
+          "unique": true,
+          "where": "\"state\" = 2",
+          "path": "exactly one active revision per realm (the activated-bundle load)"
+        }
+      ],
+      "checks": [
+        {
+          "name": "active_has_activated_at",
+          "sql": "\"state\" <> 2 OR \"activated_at\" IS NOT NULL"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": [
+            "config_revision_id",
+            "schema_version",
+            "content_hash",
+            "environment",
+            "realm_id",
+            "effective_at",
+            "activated_at",
+            "state",
+            "document"
+          ]
+        },
+        "delete": "any"
+      },
+      "note": "revision_identity is immutable (operator-supplied). content_hash is model type 'bytes NN' so it is a BLOB (not the 32-byte hash type). Environment/realm mismatch rejection, 'never reactivate a superseded row' and the no-fallback load rule are guarded-plan rules; the UQ(revision_identity)+content_hash comparison is enforced by the activation plan."
+    }
+  ]
+}

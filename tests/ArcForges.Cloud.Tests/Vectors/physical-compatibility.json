@@ -1,0 +1,422 @@
+{
+  "schemaVersion": 1,
+  "note": "The compatible-rollback rule: a build is refused when it expects a newer schema, and the horizons name the oldest builds that may still read and write.",
+  "cases": [
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 0,
+      "expected": {
+        "canRead": true,
+        "canWrite": true,
+        "reason": "compatible"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 2,
+      "expected": {
+        "canRead": true,
+        "canWrite": true,
+        "reason": "compatible"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 3,
+      "expected": {
+        "canRead": true,
+        "canWrite": true,
+        "reason": "compatible"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 4,
+      "expected": {
+        "canRead": true,
+        "canWrite": true,
+        "reason": "compatible"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 5,
+      "expected": {
+        "canRead": true,
+        "canWrite": true,
+        "reason": "compatible"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 6,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 7,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 8,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 3,
+        "writeHorizon": 5
+      },
+      "application": 0,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the build is below the read horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 3,
+        "writeHorizon": 5
+      },
+      "application": 2,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the build is below the read horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 3,
+        "writeHorizon": 5
+      },
+      "application": 3,
+      "expected": {
+        "canRead": true,
+        "canWrite": false,
+        "reason": "the build is below the write horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 3,
+        "writeHorizon": 5
+      },
+      "application": 4,
+      "expected": {
+        "canRead": true,
+        "canWrite": false,
+        "reason": "the build is below the write horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 3,
+        "writeHorizon": 5
+      },
+      "application": 5,
+      "expected": {
+        "canRead": true,
+        "canWrite": true,
+        "reason": "compatible"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 3,
+        "writeHorizon": 5
+      },
+      "application": 6,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 3,
+        "writeHorizon": 5
+      },
+      "application": 7,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 5,
+        "readHorizon": 3,
+        "writeHorizon": 5
+      },
+      "application": 8,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 7,
+        "readHorizon": 7,
+        "writeHorizon": 7
+      },
+      "application": 0,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the build is below the read horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 7,
+        "readHorizon": 7,
+        "writeHorizon": 7
+      },
+      "application": 2,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the build is below the read horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 7,
+        "readHorizon": 7,
+        "writeHorizon": 7
+      },
+      "application": 3,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the build is below the read horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 7,
+        "readHorizon": 7,
+        "writeHorizon": 7
+      },
+      "application": 4,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the build is below the read horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 7,
+        "readHorizon": 7,
+        "writeHorizon": 7
+      },
+      "application": 5,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the build is below the read horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 7,
+        "readHorizon": 7,
+        "writeHorizon": 7
+      },
+      "application": 6,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the build is below the read horizon"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 7,
+        "readHorizon": 7,
+        "writeHorizon": 7
+      },
+      "application": 7,
+      "expected": {
+        "canRead": true,
+        "canWrite": true,
+        "reason": "compatible"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 7,
+        "readHorizon": 7,
+        "writeHorizon": 7
+      },
+      "application": 8,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 0,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 0,
+      "expected": {
+        "canRead": true,
+        "canWrite": true,
+        "reason": "compatible"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 0,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 2,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 0,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 3,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 0,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 4,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 0,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 5,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 0,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 6,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 0,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 7,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    },
+    {
+      "state": {
+        "schemaVersion": 0,
+        "readHorizon": 0,
+        "writeHorizon": 0
+      },
+      "application": 8,
+      "expected": {
+        "canRead": false,
+        "canWrite": false,
+        "reason": "the application expects a newer schema than the database has applied"
+      }
+    }
+  ]
+}
