@@ -1,4 +1,29 @@
 {
   "schemaVersion": 1,
-  "families": []
+  "families": [
+    {
+      "family": "account-enrollment",
+      "title": "Authentication/enrollment completion and default workspace provisioning",
+      "source": "data model 00 section 6.1.1 (SU-01 row 'Authentication/enrollment completion and default workspace provisioning'); Device, Entitlement and Notification are conditional here because their tasks append their own plans of this family (CLOUD.11 planning repair, Design #248)",
+      "participants": [
+        { "module": "identity", "requirement": "required" },
+        { "module": "workspace", "requirement": "required" },
+        {
+          "module": "device",
+          "requirement": "conditional",
+          "when": "when the completion creates the first installation and session (CLOUD.12, CLOUD.13)"
+        },
+        {
+          "module": "entitlement",
+          "requirement": "conditional",
+          "when": "when configured initial grants apply to a new user"
+        },
+        {
+          "module": "notification",
+          "requirement": "conditional",
+          "when": "when the completion queues a security notification (CLOUD.12)"
+        }
+      ]
+    }
+  ]
 }

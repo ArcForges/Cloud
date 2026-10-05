@@ -162,6 +162,12 @@ test("stale or missing generated output fails the check and is repaired by gener
     cpSync(path.join(repositoryRoot, "storage/plans"), path.join(root, "storage/plans"), {
       recursive: true,
     });
+    // The family plans are expanded against the physical manifest, so the temporary root needs it too.
+    cpSync(
+      path.join(repositoryRoot, "src/ArcForges.Cloud.Storage.D1/Physical/manifest"),
+      path.join(root, "src/ArcForges.Cloud.Storage.D1/Physical/manifest"),
+      { recursive: true },
+    );
     await assert.rejects(generate(root, true), /stale/u);
     const first = await generate(root, false);
     assert.equal(first.manifestHash, manifestHash);
@@ -210,6 +216,15 @@ const realmLevelPlatformPlans = new Set([
   "platform.archive-purge",
 ]);
 
+// The identity reads and the credential-use record are keyed by realm and user or by provider subject, before any workspace exists
+// (an enrollment looks the subject up first), so they carry no workspace scope; every identity write that has a workspace names it.
+const realmLevelIdentityPlans = new Set([
+  "identity.user-load",
+  "identity.credential-find",
+  "identity.credential-list",
+  "identity.credential-touch",
+]);
+
 test("every checked-in plan is DML-only, scoped and exact", () => {
   for (const plan of plans) {
     for (const statement of plan.statements) {
@@ -223,7 +238,11 @@ test("every checked-in plan is DML-only, scoped and exact", () => {
     }
     // Every plan names the owner scope in at least one parameter, except the schema probe and the realm-level
     // platform plans, whose rows are keyed by a command id, an inbox key or the one change archive and not by a scope.
-    if (plan.id !== "foundation.readiness" && !realmLevelPlatformPlans.has(plan.id))
+    if (
+      plan.id !== "foundation.readiness" &&
+      !realmLevelPlatformPlans.has(plan.id) &&
+      !realmLevelIdentityPlans.has(plan.id)
+    )
       assert(
         plan.statements.some((statement) =>
           statement.params.some((param) => param.kind === "scope"),

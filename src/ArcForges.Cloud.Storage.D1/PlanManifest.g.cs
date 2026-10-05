@@ -9,7 +9,117 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "fd997113ed229737822cc0e346e27d19db8ac628edfb53557dc672bfd00768b5";
+    public const string Hash = "7f66040285480af115ca5c4fb94a4ea43326a3ee3d6a4be4eaab882f3571548a";
+
+    /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
+    internal static class Identity
+    {
+        public static readonly PlanDefinition CredentialAdd = new(
+            "identity.credential-add",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes, true), new(PlanKind.Bytes, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Scope)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition CredentialFind = new(
+            "identity.credential-find",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition CredentialList = new(
+            "identity.credential-list",
+            1,
+            PlanAccess.Read,
+            64,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64, true), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition CredentialRelabel = new(
+            "identity.credential-relabel",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Scope)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition CredentialRevoke = new(
+            "identity.credential-revoke",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Scope)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition CredentialTouch = new(
+            "identity.credential-touch",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null)
+            ]);
+
+        public static readonly PlanDefinition UserLoad = new(
+            "identity.user-load",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition UserRename = new(
+            "identity.user-rename",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Scope)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+    }
 
     /// <summary>The reviewed plans of the platform owner (<c>storage/plans/platform</c>).</summary>
     internal static class Platform
@@ -372,11 +482,58 @@ internal static class PlanManifest
             ]);
     }
 
-    public static readonly IReadOnlyList<PlanDefinition> All = [Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer];
+    /// <summary>The reviewed shared family plans (<c>storage/plans/families</c>); <see cref="FamilyPlans"/> describes their statements.</summary>
+    internal static class Families
+    {
+        public static readonly PlanDefinition AccountEnrollmentCreateUser = new(
+            "families.account-enrollment.create-user",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes, true), new(PlanKind.Bytes, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Scope)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+    }
+
+    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.UserLoad, Identity.UserRename, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser];
 
     /// <summary>The closed registry of shared transaction families (<c>storage/plans/families.json</c>, Design SU-01).</summary>
-    public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = [];
+    public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = [
+        new("account-enrollment", "Authentication/enrollment completion and default workspace provisioning", "data model 00 section 6.1.1 (SU-01 row 'Authentication/enrollment completion and default workspace provisioning'); Device, Entitlement and Notification are conditional here because their tasks append their own plans of this family (CLOUD.11 planning repair, Design #248)", [new(FamilyModule.Identity, true, null), new(FamilyModule.Workspace, true, null), new(FamilyModule.Device, false, "when the completion creates the first installation and session (CLOUD.12, CLOUD.13)"), new(FamilyModule.Entitlement, false, "when configured initial grants apply to a new user"), new(FamilyModule.Notification, false, "when the completion queues a security notification (CLOUD.12)")])
+    ];
 
     /// <summary>The statement roles of every shared family plan, in plan order.</summary>
-    public static readonly IReadOnlyList<FamilyPlanDefinition> FamilyPlans = [];
+    public static readonly IReadOnlyList<FamilyPlanDefinition> FamilyPlans = [
+        new(Families.AccountEnrollmentCreateUser, "account-enrollment", [
+            new(FamilyModule.Identity, FamilyPhase.Guard, FamilyClass.Revision, "credential-id"),
+            new(FamilyModule.Identity, FamilyPhase.Guard, FamilyClass.Revision, "credential-subject"),
+            new(FamilyModule.Identity, FamilyPhase.Guard, FamilyClass.Revision, "user"),
+            new(FamilyModule.Workspace, FamilyPhase.Guard, FamilyClass.Revision, "owner"),
+            new(FamilyModule.Workspace, FamilyPhase.Guard, FamilyClass.Revision, "workspace"),
+            new(FamilyModule.Identity, FamilyPhase.Mutation, FamilyClass.Record, "account"),
+            new(FamilyModule.Identity, FamilyPhase.Mutation, FamilyClass.Record, "credential"),
+            new(FamilyModule.Workspace, FamilyPhase.Mutation, FamilyClass.Record, "workspace"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "a-receipt"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "b-stream"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "c-outbox"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "d-position"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "e-archive-stream"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "f-archive"),
+            new(FamilyModule.Platform, FamilyPhase.Release, FamilyClass.Release, "release")
+        ])
+    ];
 }

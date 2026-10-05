@@ -91,7 +91,7 @@ The same rules are enforced again in C# when the generated manifest is loaded (`
 - The oracle proves the guard SQL, the `af_guard_failed` classification, the whole-batch rollback and the stale-writer and stale-holder behaviour on SQLite, the engine D1 shares. It is not D1.
 - workerd's D1 is the closest local engine and ran the contention and stale-holder cases through the production executor. It is not a Cloudflare provider result.
 - The C# tests prove the unit of work, the order refusal and the executor's mapping and reread bounds against a scripted bridge; they do not execute SQL.
-- The fixture family is a test fixture: **no Design family is implemented here**. Which modules enlist in which family, each family's real statements and the Abstractions port for modules belong to the module tasks (CLOUD.11, CLOUD.13, CLOUD.39, CLOUD.42, CLOUD.53) and CLOUD.63.
+- The fixture family is a test fixture: **no Design family is implemented here** (the first real one, `account-enrollment`, is CLOUD.11's: [identity core](identity-core.md)). Which modules enlist in which family, each family's real statements and the Abstractions port for modules belong to the module tasks (CLOUD.11, CLOUD.13, CLOUD.39, CLOUD.42, CLOUD.53) and CLOUD.63.
 
 ## Not claimed
 

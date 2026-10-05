@@ -135,7 +135,7 @@ build time, not correctness.
 
 ## Not claimed
 
-- **No module owns a plan yet.** The module projects are boundaries with a descriptor. The physical tables and the migration runner exist
+- **Only the Identity module owns plans so far** (CLOUD.11, [identity core](identity-core.md)); every other module project is a boundary with a descriptor. The physical tables and the migration runner exist
   ([D1 physical schema and migrations](d1-physical-schema.md), CLOUD.03), so a module plan names real tables. The receipts, outbox, inbox and change
   archive mechanism exists ([receipts and outbox](d1-receipts-outbox.md), CLOUD.04): every module write plan declares its commit tail in its header
   and the generator verifies it; the platform owner's plans (`storage/plans/platform`) are the first plans of a registered owner other than the proof.

@@ -1,1 +1,115 @@
-{ "schemaVersion": 1, "plans": [] }
+{
+  "schemaVersion": 1,
+  "plans": [
+    {
+      "id": "families.account-enrollment.create-user",
+      "version": 1,
+      "family": "account-enrollment",
+      "sha256": "d4a76fce731dcf2632b4e789486cbf2d60e5b0098da877344fd56730c1a41efe",
+      "statements": [
+        {
+          "role": "guard identity revision credential-id",
+          "sql": "INSERT INTO platform_command_guard (command_id, guard_key, allowed)\nSELECT ?, 'identity.credential-id', CASE WHEN COALESCE((SELECT rev FROM identity_auth_identity WHERE auth_identity_id = ?), 0) = CAST(? AS INTEGER) THEN 1 ELSE 0 END;",
+          "params": ["text", "text", "int64"]
+        },
+        {
+          "role": "guard identity revision credential-subject",
+          "sql": "INSERT INTO platform_command_guard (command_id, guard_key, allowed)\nSELECT ?, 'identity.credential-subject', CASE WHEN COALESCE((SELECT rev FROM identity_auth_identity WHERE realm_id = ? AND provider_id = ? AND subject = ?), 0) = CAST(? AS INTEGER) THEN 1 ELSE 0 END;",
+          "params": ["text", "text", "text", "text", "int64"]
+        },
+        {
+          "role": "guard identity revision user",
+          "sql": "INSERT INTO platform_command_guard (command_id, guard_key, allowed)\nSELECT ?, 'identity.user', CASE WHEN COALESCE((SELECT rev FROM identity_user WHERE realm_id = ? AND user_id = ?), 0) = CAST(? AS INTEGER) THEN 1 ELSE 0 END;",
+          "params": ["text", "text", "text", "int64"]
+        },
+        {
+          "role": "guard workspace revision owner",
+          "sql": "INSERT INTO platform_command_guard (command_id, guard_key, allowed)\nSELECT ?, 'workspace.owner', CASE WHEN COALESCE((SELECT rev FROM workspace_workspace WHERE realm_id = ? AND owner_user_id = ?), 0) = CAST(? AS INTEGER) THEN 1 ELSE 0 END;",
+          "params": ["text", "text", "text", "int64"]
+        },
+        {
+          "role": "guard workspace revision workspace",
+          "sql": "INSERT INTO platform_command_guard (command_id, guard_key, allowed)\nSELECT ?, 'workspace.workspace', CASE WHEN COALESCE((SELECT rev FROM workspace_workspace WHERE workspace_id = ?), 0) = CAST(? AS INTEGER) THEN 1 ELSE 0 END;",
+          "params": ["text", "scope", "int64"]
+        },
+        {
+          "role": "mutation identity record account",
+          "sql": "INSERT INTO identity_user (user_id, realm_id, display_name, state, created_at, deletion_requested_at, rev)\nVALUES (?, ?, ?, 1, CAST(? AS INTEGER), NULL, 1);",
+          "params": ["text", "text", "text", "int64"]
+        },
+        {
+          "role": "mutation identity record credential",
+          "sql": "INSERT INTO identity_auth_identity (auth_identity_id, user_id, method, subject, public_key, user_handle, backup_eligible, backup_state, transports, sign_count, label, created_at, last_used_at, revoked_at, realm_id, provider_id, password_hash, rev)\nVALUES (?, ?, CAST(? AS INTEGER), ?, ?, ?, NULLIF(CAST(? AS INTEGER), -1), NULLIF(CAST(? AS INTEGER), -1), ?, NULLIF(CAST(? AS INTEGER), -1), ?, CAST(? AS INTEGER), NULL, NULL, ?, ?, ?, 1);",
+          "params": [
+            "text",
+            "text",
+            "int64",
+            "text",
+            "bytes?",
+            "bytes?",
+            "int64",
+            "int64",
+            "text?",
+            "int64",
+            "text?",
+            "int64",
+            "text",
+            "text",
+            "text?"
+          ]
+        },
+        {
+          "role": "mutation workspace record workspace",
+          "sql": "INSERT INTO workspace_workspace (workspace_id, realm_id, owner_user_id, name, data_region, protection_profile, state, created_at, rev)\nVALUES (?, ?, ?, ?, ?, 1, 1, CAST(? AS INTEGER), 1);",
+          "params": ["scope", "text", "text", "text", "text", "int64"]
+        },
+        {
+          "role": "mutation platform record a-receipt",
+          "sql": "INSERT INTO platform_command (command_id, workspace_id, actor_ref, operation, request_hash, status, result_payload, result_rev, error_code, created_at, expires_at)\nVALUES (?, ?, ?, ?, ?, 2, ?, NULLIF(CAST(? AS INTEGER), -1), NULL, CAST(? AS INTEGER), CAST(? AS INTEGER));",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        {
+          "role": "mutation platform record b-stream",
+          "sql": "INSERT INTO platform_sequence_stream (stream_key, last_sequence, published_watermark, publish_rev, fence, ack_receipt, updated_at)\nVALUES (?, 1, 0, 0, 0, NULL, CAST(? AS INTEGER))\nON CONFLICT (stream_key) DO UPDATE SET last_sequence = last_sequence + 1, updated_at = excluded.updated_at;",
+          "params": ["scope", "int64"]
+        },
+        {
+          "role": "mutation platform record c-outbox",
+          "sql": "INSERT INTO platform_outbox (outbox_id, aggregate_kind, aggregate_id, aggregate_rev, event_type, payload, workspace_id, correlation_id, causation_id, state, attempts, created_at, dispatched_at)\nVALUES (?, ?, ?, CAST(? AS INTEGER), ?, ?, ?, ?, ?, 1, 0, CAST(? AS INTEGER), NULL);",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        {
+          "role": "mutation platform record d-position",
+          "sql": "INSERT INTO platform_outbox_position (outbox_id, stream_key, sequence)\nVALUES (?, ?, (SELECT last_sequence FROM platform_sequence_stream WHERE stream_key = ?));",
+          "params": ["text", "scope", "scope"]
+        },
+        {
+          "role": "mutation platform record e-archive-stream",
+          "sql": "INSERT INTO platform_sequence_stream (stream_key, last_sequence, published_watermark, publish_rev, fence, ack_receipt, updated_at)\nVALUES ('platform:change-archive', 1, 0, 0, 0, NULL, CAST(? AS INTEGER))\nON CONFLICT (stream_key) DO UPDATE SET last_sequence = last_sequence + 1, updated_at = excluded.updated_at;",
+          "params": ["int64"]
+        },
+        {
+          "role": "mutation platform record f-archive",
+          "sql": "INSERT INTO platform_change_archive (archive_sequence, command_id, schema_version, record, record_hash, created_at)\nVALUES ((SELECT last_sequence FROM platform_sequence_stream WHERE stream_key = 'platform:change-archive'), ?, CAST(? AS INTEGER), ?, ?, CAST(? AS INTEGER));",
+          "params": ["text", "int64", "text", "bytes", "int64"]
+        },
+        {
+          "role": "release platform release release",
+          "sql": "DELETE FROM platform_command_guard WHERE command_id = ?;",
+          "params": ["text"]
+        }
+      ]
+    }
+  ]
+}
