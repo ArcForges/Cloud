@@ -32,8 +32,8 @@
       },
       "ArcForges.Contracts.Foundation": {
         "type": "Transitive",
-        "resolved": "1.0.0-ci.287.1",
-        "contentHash": "Jwe5Z6K57vDsKmcxQFbbwyQZQUQsOkzYH26ogQIRb/biRtaGxLCtOsNg4felCuNTJt9bwRmC6AGx3eJyCoCk/g==",
+        "resolved": "1.0.0-ci.322.1",
+        "contentHash": "qBWGabCJa2sgCa8hm/nh6wdY5tuiMYO51v1l+p92mmFuJiAWlSSZpz6E2Qez+wMOM1XEGw/HJKQKx/BKaGtadg==",
         "dependencies": {
           "Google.Protobuf": "3.36.1"
         }
@@ -219,7 +219,7 @@
           "ArcForges.Cloud.Modules.Workspace": "[1.0.0, )",
           "ArcForges.Cloud.Storage.D1": "[1.0.0, )",
           "ArcForges.Contracts.CloudInternal": "[1.0.0-ci.287.1, )",
-          "ArcForges.Contracts.PublicApi": "[1.0.0-ci.287.1, )",
+          "ArcForges.Contracts.PublicApi": "[1.0.0-ci.322.1, )",
           "Grpc.AspNetCore": "[2.84.0, )",
           "Grpc.AspNetCore.Web": "[2.84.0, )"
         }
@@ -362,11 +362,11 @@
       },
       "ArcForges.Contracts.PublicApi": {
         "type": "CentralTransitive",
-        "requested": "[1.0.0-ci.287.1, )",
-        "resolved": "1.0.0-ci.287.1",
-        "contentHash": "/chAZbT/NTs4yyQBV5dgh37/dWBTKt3PHCikIidI9T90LheydsJoCWxKHGC6Tjzw0rqA62rYxnQfXGzKhTea5Q==",
+        "requested": "[1.0.0-ci.322.1, )",
+        "resolved": "1.0.0-ci.322.1",
+        "contentHash": "uxyOdUl0A4Su6bBn5eBTYfrCRRVrv3d/Brsj8T4vlBxxK335bQIgml8JrjBXsj6izgPXytziufST2pRSPqzKxg==",
         "dependencies": {
-          "ArcForges.Contracts.Foundation": "1.0.0-ci.287.1",
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.322.1",
           "Google.Protobuf": "3.36.1",
           "Grpc.Core.Api": "2.84.0"
         }
