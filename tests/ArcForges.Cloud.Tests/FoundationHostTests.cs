@@ -594,14 +594,14 @@ public sealed class FoundationHostTests
         Assert.Equal(HttpStatusCode.OK, slice.Status);
         Assert.Equal(correlationId, slice.Json.GetProperty("correlationId").GetString());
         Assert.Equal(causationId, slice.Json.GetProperty("causationId").GetString());
-        var row = Assert.Single(host.Storage.Outbox, o => o.Command == "job.slice");
+        var row = Assert.Single(host.Storage.Outbox, o => o.Key == "job.slice");
         using var payload = System.Text.Json.JsonDocument.Parse(row.Payload);
         Assert.Equal(correlationId, payload.RootElement.GetProperty("correlationId").GetString());
         Assert.Equal(causationId, payload.RootElement.GetProperty("causationId").GetString());
         // A replayed event is a duplicate whatever identity it carries: the identity is diagnostic and never decides the outcome.
         var replay = await Operation(host, "job/slice", new { scope, jobId = job, eventId, correlationId = T.Uuid(), causationId = T.Uuid(), maxItems = 10, maxMilliseconds = 1000 });
         Assert.Equal("duplicate", replay.Json.GetProperty("state").GetString());
-        Assert.Single(host.Storage.Outbox, o => o.Command == "job.slice");
+        Assert.Single(host.Storage.Outbox, o => o.Key == "job.slice");
     }
 
     [Fact]
@@ -625,7 +625,7 @@ public sealed class FoundationHostTests
             new { scope, jobId = job, eventId = T.Uuid(), correlationId = good, causationId = good, traceparent = "x", maxItems = 5, maxMilliseconds = 1000 },
         })
             Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/slice", bad)).Status);
-        Assert.Empty(host.Storage.Outbox.Where(o => o.Command == "job.slice"));
+        Assert.DoesNotContain(host.Storage.Outbox, o => o.Key == "job.slice");
     }
 
     [Fact]

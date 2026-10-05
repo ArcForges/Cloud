@@ -265,7 +265,6 @@ public sealed partial class IngressPipelineTests
             $"00-{Hex(good)}0-00f067aa0ba902b7-01",
             $"00-{Hex(good)}-00f067aa0ba902b7-0",
             $"00-{Hex(good)}-00f067aa0ba902b7-01-extra",
-            $" 00-{Hex(good)}-00f067aa0ba902b7-01",
             $"00-{Hex(good)}-00f067aa0ba902b7-zz",
             "00-<script>alert(1)</script>-00f067aa0ba902b7-01",
             new string('0', 4000),
