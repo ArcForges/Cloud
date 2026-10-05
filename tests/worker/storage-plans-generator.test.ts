@@ -199,6 +199,17 @@ test("foreign files in the plan directory are refused", async () => {
   }
 });
 
+const realmLevelPlatformPlans = new Set([
+  "platform.command-load",
+  "platform.command-record-failure",
+  "platform.inbox-load",
+  "platform.inbox-record",
+  "platform.archive-state",
+  "platform.archive-select",
+  "platform.archive-ack",
+  "platform.archive-purge",
+]);
+
 test("every checked-in plan is DML-only, scoped and exact", () => {
   for (const plan of plans) {
     for (const statement of plan.statements) {
@@ -210,8 +221,9 @@ test("every checked-in plan is DML-only, scoped and exact", () => {
         plan.id,
       );
     }
-    // Every plan names the owner scope in at least one parameter, except the schema probe.
-    if (plan.id !== "foundation.readiness")
+    // Every plan names the owner scope in at least one parameter, except the schema probe and the realm-level
+    // platform plans, whose rows are keyed by a command id, an inbox key or the one change archive and not by a scope.
+    if (plan.id !== "foundation.readiness" && !realmLevelPlatformPlans.has(plan.id))
       assert(
         plan.statements.some((statement) =>
           statement.params.some((param) => param.kind === "scope"),

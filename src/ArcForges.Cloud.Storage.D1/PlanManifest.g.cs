@@ -9,7 +9,173 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "3716534cb8f64bea85f02c18a6f07281f0703b64115f0087ec73a405dd3bc7d7";
+    public const string Hash = "6c30ccee93f8b66c8fd720b4238ef01a1412e792f0cf64d5d29d8ac8c9030b47";
+
+    /// <summary>The reviewed plans of the platform owner (<c>storage/plans/platform</c>).</summary>
+    internal static class Platform
+    {
+        public static readonly PlanDefinition ArchiveAck = new(
+            "platform.archive-ack",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition ArchivePurge = new(
+            "platform.archive-purge",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition ArchiveSelect = new(
+            "platform.archive-select",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Int64), new(PlanKind.Int64)], [new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition ArchiveState = new(
+            "platform.archive-state",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([], [new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text, true)])
+            ]);
+
+        public static readonly PlanDefinition CommandLoad = new(
+            "platform.command-load",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64, true), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true)])
+            ]);
+
+        public static readonly PlanDefinition CommandRecordFailure = new(
+            "platform.command-record-failure",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64)], null)
+            ]);
+
+        public static readonly PlanDefinition InboxLoad = new(
+            "platform.inbox-load",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text)], [new(PlanKind.Int64, true), new(PlanKind.Int64, true)])
+            ]);
+
+        public static readonly PlanDefinition InboxRecord = new(
+            "platform.inbox-record",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null)
+            ]);
+
+        public static readonly PlanDefinition OutboxAck = new(
+            "platform.outbox-ack",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition OutboxAttempt = new(
+            "platform.outbox-attempt",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition OutboxDeadLetter = new(
+            "platform.outbox-dead-letter",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition OutboxPurge = new(
+            "platform.outbox-purge",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition OutboxRequeue = new(
+            "platform.outbox-requeue",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition OutboxSelect = new(
+            "platform.outbox-select",
+            1,
+            PlanAccess.Read,
+            50,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64)], [new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition StreamFence = new(
+            "platform.stream-fence",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition StreamLoad = new(
+            "platform.stream-load",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Scope)], [new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text, true)])
+            ]);
+    }
 
     /// <summary>The reviewed plans of the foundation owner (<c>storage/plans/foundation</c>).</summary>
     internal static class Foundation
@@ -206,7 +372,7 @@ internal static class PlanManifest
             ]);
     }
 
-    public static readonly IReadOnlyList<PlanDefinition> All = [Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer];
+    public static readonly IReadOnlyList<PlanDefinition> All = [Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer];
 
     /// <summary>The closed registry of shared transaction families (<c>storage/plans/families.json</c>, Design SU-01).</summary>
     public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = [];

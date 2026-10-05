@@ -376,6 +376,86 @@
         }
       ],
       "mutability": { "delete": "none" }
+    },
+    {
+      "name": "platform_sequence_stream",
+      "model": "01 section 2 Commit support: platform.sequence_stream (CLOUD.04)",
+      "columns": [
+        { "name": "stream_key", "type": "key" },
+        { "name": "last_sequence", "type": "int64", "monotonic": true },
+        { "name": "published_watermark", "type": "int64", "monotonic": true },
+        { "name": "publish_rev", "type": "rev" },
+        { "name": "fence", "type": "int64", "monotonic": true },
+        { "name": "ack_receipt", "type": "text", "nullable": true },
+        { "name": "updated_at", "type": "instant" }
+      ],
+      "primaryKey": ["stream_key"],
+      "checks": [
+        {
+          "name": "watermark_within_allocation",
+          "sql": "\"last_sequence\" >= 0 AND \"published_watermark\" >= 0 AND \"published_watermark\" <= \"last_sequence\" AND \"fence\" >= 0"
+        }
+      ],
+      "mutability": { "delete": "none" }
+    },
+    {
+      "name": "platform_outbox_position",
+      "model": "01 section 2 Commit support: platform.outbox_position (CLOUD.04)",
+      "columns": [
+        { "name": "outbox_id", "type": "id" },
+        { "name": "stream_key", "type": "key" },
+        { "name": "sequence", "type": "int64" }
+      ],
+      "primaryKey": ["outbox_id"],
+      "indexes": [
+        {
+          "columns": ["stream_key", "sequence"],
+          "unique": true,
+          "path": "the contiguous publisher's range read and the one-row-per-sequence rule"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["outbox_id"],
+          "references": { "table": "platform_outbox", "columns": ["outbox_id"] },
+          "onDelete": "restrict"
+        },
+        {
+          "columns": ["stream_key"],
+          "references": { "table": "platform_sequence_stream", "columns": ["stream_key"] },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        { "name": "sequence_positive", "sql": "\"sequence\" >= 1" },
+        { "name": "owner_stream", "sql": "\"stream_key\" NOT GLOB 'platform:*'" }
+      ],
+      "mutability": { "update": "none", "delete": "any" }
+    },
+    {
+      "name": "platform_change_archive",
+      "model": "01 section 2 Commit support: platform.change_archive (CLOUD.04)",
+      "columns": [
+        { "name": "archive_sequence", "type": "int64" },
+        { "name": "command_id", "type": "id" },
+        { "name": "schema_version", "type": "int64" },
+        { "name": "record", "type": "json", "root": "object" },
+        { "name": "record_hash", "type": "hash" },
+        { "name": "created_at", "type": "instant" }
+      ],
+      "primaryKey": ["archive_sequence"],
+      "indexes": [
+        {
+          "columns": ["command_id"],
+          "unique": true,
+          "path": "one change record per committed command"
+        }
+      ],
+      "checks": [
+        { "name": "positive", "sql": "\"archive_sequence\" >= 1 AND \"schema_version\" >= 0" },
+        { "name": "record_bounded", "sql": "length(CAST(\"record\" AS BLOB)) <= 65536" }
+      ],
+      "mutability": { "update": "none", "delete": "any" }
     }
   ]
 }

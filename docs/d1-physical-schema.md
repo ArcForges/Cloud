@@ -10,7 +10,7 @@ boundaries are described in [storage plans](storage-plans.md).
 
 | Path                                                          | Content                                                                                                                                            |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/ArcForges.Cloud.Storage.D1/Physical/manifest/*.json`     | The checked-in physical manifest: one file per owner (19 modules and `platform`) and the closed enum registry `enums.json`. 155 tables.            |
+| `src/ArcForges.Cloud.Storage.D1/Physical/manifest/*.json`     | The checked-in physical manifest: one file per owner (19 modules and `platform`) and the closed enum registry `enums.json`. 158 tables.            |
 | `src/ArcForges.Cloud.Storage.D1/Physical/PhysicalSchema.g.cs` | Generated C# column maps, enum registry, manifest hash and migration-lock identity.                                                                |
 | `src/ArcForges.Cloud.Storage.D1/Physical/*.cs`                | The typed exact bind/result adapters: `ColumnCodec`, `PhysicalValue`, `RowShape`, `ExactOrderBytes`, `Fts5Query`, `SchemaCompatibility`.           |
 | `src/ArcForges.Cloud.Storage.D1/Migrations/`                  | The numbered, checksum-locked migrations (`NNNN_<module>__<slug>.sql`), `migrations.lock.json` and the `pending/` folder of unnumbered migrations. |
@@ -53,8 +53,9 @@ It is described in [shared families](shared-families.md).
 ### Not in the manifest
 
 Model 01 describes these records without a field list; the owning task defines them in its own migration under RES-cloud-d1-migrations: the Sync bootstrap manifest and page
-records, the change archive of the receipts/outbox task (CLOUD.04) and the sort-key columns of any table that a module orders by an exact decimal. The cloud
-`search_retrieval_chunk` has no vector column: embeddings live in Vectorize.
+records and the sort-key columns of any table that a module orders by an exact decimal. The change archive and the commit support records that CLOUD.04 needed
+(`platform_sequence_stream`, `platform_outbox_position`, `platform_change_archive`, and the guard table `platform_command_guard` that CLOUD.06 defines) are defined in model 01 section 2 and added by migrations 0022 and 0023
+([receipts and outbox](d1-receipts-outbox.md)). The cloud `search_retrieval_chunk` has no vector column: embeddings live in Vectorize.
 
 ## Typed exact adapters (C#)
 

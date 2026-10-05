@@ -63,7 +63,7 @@ const tableOf = (name: string): PhysicalTable => {
 };
 
 test("the manifest covers every owner and keeps every table inside its owner's prefix", () => {
-  assert.equal(schema.tables.length, 155);
+  assert.equal(schema.tables.length, 158);
   for (const owner of schema.owners) {
     const tables = schema.tables.filter((table) => table.owner === owner.owner);
     assert(tables.length > 0, `owner ${owner.owner} has no table`);
@@ -334,6 +334,12 @@ test("a limited-update table changes only the allowed columns and only while its
   );
 });
 
+// A monotonic column that a cross-column check bounds needs its sibling set so that 5, 9 and 8 stay inside the bound.
+const monotonicSiblings: Record<string, Record<string, bigint>> = {
+  "platform_sequence_stream.last_sequence": { published_watermark: 0n },
+  "platform_sequence_stream.published_watermark": { last_sequence: 100n },
+};
+
 test("a monotonic column may stay or rise and may never fall", () => {
   const database = migratedDatabase(false);
   let serial = 9500;
@@ -344,7 +350,11 @@ test("a monotonic column may stay or rise and may never fall", () => {
     for (const column of monotonic) {
       const local = migratedDatabase(false);
       const built = buildAcceptedRow(local, schema, table, { boundary: false }, serial++);
-      const row = { ...built.row, [column.name]: 5n };
+      const row = {
+        ...built.row,
+        ...monotonicSiblings[`${table.name}.${column.name}`],
+        [column.name]: 5n,
+      };
       insertRow(local, table, row);
       const key = table.primaryKey.map((name) =>
         typeof row[name] === "bigint" ? String(row[name]) : row[name],

@@ -30,8 +30,8 @@ before(() => {
 
 test("real locked Wrangler output matches the approved exact Worker closure", () => {
   const result = verifyWorker(root, worker, metadata);
-  assert.equal(result.sha256, "ecbed698efa4f37c638ef7880366890309245563941d16d56e968df6f7dce26c");
-  assert.equal(result.bytes, 209480);
+  assert.equal(result.sha256, "548295ebb1620d988b96316e83ca7e03decfd6439000d1f7dba8daf9aea3ac8b");
+  assert.equal(result.bytes, 228502);
   assert.equal(Object.keys(result.inputs).length, 107);
   assert.equal(result.outputInputs.length, 38);
 });

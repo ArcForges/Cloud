@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { format } from "prettier";
 import type { PlanKind, PlanParam } from "../../worker/storage/plan-types.ts";
+import { assertTail, parseTailHeader, reservedTables } from "./commit-tail.ts";
 import { loadManifest, planKindOf, type PhysicalSchema } from "./physical-schema.ts";
 
 export interface PlanStatement {
@@ -26,6 +27,8 @@ export interface PlanDefinition {
   access: "read" | "write";
   maxRows: number;
   statements: PlanStatement[];
+  /** The raw `-- tail:` header (CLOUD.04): the commit tail a module write plan declares, or why it has none. */
+  tail?: string;
   sha256: string;
   /** Only in a shared family plan: the family it belongs to. */
   family?: string;
@@ -342,6 +345,60 @@ export function assertOwnership(plan: PlanDefinition, registry: OwnerRegistry) {
         `${where}: table ${table} is not owned by ${owner} (allowed prefixes: ${allowed.join(", ")})`,
       );
   });
+}
+
+/**
+ * Every write plan of a module declares its commit tail (`-- tail: v1 [events=N] [inbox]`) or why it has none
+ * (`-- tail: none <reason>`); a declared tail is verified statement by statement (commit-tail.ts). Read plans and
+ * the platform and proof owners declare nothing unless they use the tail.
+ */
+export function assertCommitTail(plan: PlanDefinition, registry: OwnerRegistry) {
+  const owner = registry.owners.find((entry) => entry.owner === plan.id.split(".")[0]);
+  const where = `${plan.id}: -- tail`;
+  let range: { ownerStart: number; ownerEnd: number } | undefined;
+  if (plan.tail === undefined) {
+    assert(
+      !(owner?.kind === "module" && plan.access === "write"),
+      `${plan.id}: a module write plan declares its commit tail ('-- tail: v1 events=N [inbox]') or '-- tail: none <reason>'`,
+    );
+  } else {
+    assert(plan.access === "write", `${where}: only a write plan declares a tail`);
+    range = assertTail(plan, parseTailHeader(plan.tail, where));
+  }
+  // Whatever the header says, no module plan writes a table that only the commit tail (or the platform owner) may write. The
+  // targets come from the generator's own tokenizer, so a CTE-led statement, INSERT OR REPLACE, an upsert or a nested statement is seen.
+  if (owner?.kind === "module" && plan.access === "write") {
+    const from = range?.ownerStart ?? 0;
+    const to = range?.ownerEnd ?? plan.statements.length;
+    plan.statements.slice(from, to).forEach((statement, index) => {
+      for (const target of writeTargets(statement.sql, `${plan.id} statement ${from + index + 1}`))
+        assert(
+          !reservedTables.includes(target),
+          `${plan.id}: statement ${from + index + 1} writes ${target}, which only the commit tail may write`,
+        );
+    });
+  }
+}
+
+/** Every table a statement inserts into, updates or deletes from, wherever it stands in the statement (CTEs, subqueries, upserts included). */
+export function writeTargets(sql: string, where: string): string[] {
+  const tokens = tokenizeSql(sql, where);
+  const targets = new Set<string>();
+  tokens.forEach((token, index) => {
+    if (token.kind !== "word") return;
+    const previous = tokens[index - 1]?.value;
+    let at = index + 1;
+    if (token.value === "into") {
+      // INSERT INTO t, REPLACE INTO t, INSERT OR IGNORE INTO t
+    } else if (token.value === "update") {
+      if (previous === "do") return; // ON CONFLICT DO UPDATE SET
+      if (tokens[at]?.value === "or") at += 2;
+    } else if (token.value === "delete" && tokens[at]?.value === "from") at++;
+    else return;
+    const target = tokens[at];
+    if (target?.kind === "word") targets.add(target.value);
+  });
+  return [...targets];
 }
 
 const kinds: readonly PlanKind[] = ["int64", "uint64", "decimal", "text", "bytes", "bool", "scope"];
@@ -939,7 +996,7 @@ export function parsePlanFile(
   let cursor = 0;
   for (; cursor < lines.length; cursor++) {
     const line = lines[cursor] ?? "";
-    const match = /^-- (plan|version|access|maxRows): (.+)$/u.exec(line);
+    const match = /^-- (plan|version|access|maxRows|tail): (.+)$/u.exec(line);
     if (!match) break;
     assert(!header.has(match[1] ?? ""), `${file}: duplicate header ${match[1]}`);
     header.set(match[1] ?? "", match[2] ?? "");
@@ -1090,6 +1147,7 @@ export function parsePlanFile(
     );
     assert.equal(maxRows, 0, `${file}: a write plan has no maxRows`);
   }
+  const tail = header.get("tail");
   // A family plan's statements are partly generated from the physical manifest, so its identity covers the expanded text too:
   // a manifest change that alters a guard changes the plan hash and so the manifest identity both sides compare.
   const identity = context
@@ -1105,6 +1163,7 @@ export function parsePlanFile(
     maxRows,
     statements,
     sha256: identity,
+    ...(tail === undefined ? {} : { tail }),
     ...(familyId === undefined ? {} : { family: familyId }),
   };
 }
@@ -1164,6 +1223,7 @@ export function buildManifest(root: string, options: BuildOptions = {}): PlanMan
       const relative = `${planDirectory}/${owner.name}/${file}`;
       const plan = parsePlanFile(readFileSync(path.join(root, relative), "utf8"), relative);
       assertOwnership(plan, registry);
+      assertCommitTail(plan, registry);
       plans.push(plan);
     }
   }
