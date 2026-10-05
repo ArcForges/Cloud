@@ -194,7 +194,7 @@ public sealed class ContractConsumptionTests
     [InlineData("using static Grpc.Core.Marshallers; class U { object M() => Create<int>(); }")]
     public void HandBuiltRpcDescriptorsAndMarshallersAreRejected(string source)
     {
-        Assert.NotEmpty(ContractConsumptionPolicy.FindHandBuiltRpcDescriptors(Compile(GrpcStubs + "\n" + source)));
+        Assert.NotEmpty(ContractConsumptionPolicy.FindHandBuiltRpcDescriptors(Compile(source + "\n" + GrpcStubs)));
     }
 
     [Fact]
