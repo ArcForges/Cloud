@@ -8,13 +8,13 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "8a5644881b31e54eacd216d6b4260996ab8dcd9ac3d50adfe9bccb985ceddbd2";
+    public const string ManifestHash = "e0726a799d0031e10409ff656f30a036bc0c616d3aa37a3bc578c6108cadc168";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
-    public const int HighestMigration = 22;
+    public const int HighestMigration = 23;
 
     /// <summary>SHA-256 over the ordered sequence and checksum of every locked migration.</summary>
-    public const string MigrationLockHash = "2f10dc5b921bbd08eea784a34214133c0b004adaa4ebd45320930b51ea92287c";
+    public const string MigrationLockHash = "3740ebb64d91f9c1489453209e298a043ed950b161d1ca8ce182f56db62cce13";
 
     public static IReadOnlyList<PhysicalEnum> Enums { get; } =
     [
@@ -1706,6 +1706,19 @@ internal static partial class PhysicalSchema
         ],
         ["sequence"]);
 
+    public static PhysicalTable PlatformChangeArchive { get; } = new(
+        "platform_change_archive",
+        "platform",
+        [
+            new("archive_sequence", PhysicalKind.Int64, false),
+            new("command_id", PhysicalKind.Id, false),
+            new("schema_version", PhysicalKind.Int64, false),
+            new("record", PhysicalKind.Json, false, JsonRoot: PhysicalJsonRoot.Object),
+            new("record_hash", PhysicalKind.Hash, false),
+            new("created_at", PhysicalKind.Instant, false),
+        ],
+        ["archive_sequence"]);
+
     public static PhysicalTable PlatformCommand { get; } = new(
         "platform_command",
         "platform",
@@ -1844,6 +1857,16 @@ internal static partial class PhysicalSchema
         ],
         ["outbox_id"]);
 
+    public static PhysicalTable PlatformOutboxPosition { get; } = new(
+        "platform_outbox_position",
+        "platform",
+        [
+            new("outbox_id", PhysicalKind.Id, false),
+            new("stream_key", PhysicalKind.Key, false),
+            new("sequence", PhysicalKind.Int64, false),
+        ],
+        ["outbox_id"]);
+
     public static PhysicalTable PlatformRecoveryEpoch { get; } = new(
         "platform_recovery_epoch",
         "platform",
@@ -1889,6 +1912,20 @@ internal static partial class PhysicalSchema
             new("updated_at", PhysicalKind.Instant, false),
         ],
         ["singleton"]);
+
+    public static PhysicalTable PlatformSequenceStream { get; } = new(
+        "platform_sequence_stream",
+        "platform",
+        [
+            new("stream_key", PhysicalKind.Key, false),
+            new("last_sequence", PhysicalKind.Int64, false),
+            new("published_watermark", PhysicalKind.Int64, false),
+            new("publish_rev", PhysicalKind.Rev, false),
+            new("fence", PhysicalKind.Int64, false),
+            new("ack_receipt", PhysicalKind.Text, true),
+            new("updated_at", PhysicalKind.Instant, false),
+        ],
+        ["stream_key"]);
 
     public static PhysicalTable PolicyPolicyBundle { get; } = new(
         "policy_policy_bundle",
@@ -2883,6 +2920,7 @@ internal static partial class PhysicalSchema
         PackageCatalogRevocation,
         PackageCatalogVersion,
         PlatformBackfillCheckpoint,
+        PlatformChangeArchive,
         PlatformCommand,
         PlatformCommandGuard,
         PlatformInbox,
@@ -2891,9 +2929,11 @@ internal static partial class PhysicalSchema
         PlatformOperatingBudget,
         PlatformOperatingReservation,
         PlatformOutbox,
+        PlatformOutboxPosition,
         PlatformRecoveryEpoch,
         PlatformSafetyReceipt,
         PlatformSchemaState,
+        PlatformSequenceStream,
         PolicyPolicyBundle,
         PolicyRolloutAssignment,
         PolicySourcePolicy,

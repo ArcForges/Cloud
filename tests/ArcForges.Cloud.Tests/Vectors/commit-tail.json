@@ -1,0 +1,881 @@
+{
+  "schemaVersion": 1,
+  "archiveStreamKey": "platform:change-archive",
+  "maxEvents": 16,
+  "release": { "role": "guard-release", "params": ["text"] },
+  "variants": [
+    {
+      "events": 0,
+      "inbox": false,
+      "statements": [
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    },
+    {
+      "events": 1,
+      "inbox": false,
+      "statements": [
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    },
+    {
+      "events": 2,
+      "inbox": false,
+      "statements": [
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    },
+    {
+      "events": 3,
+      "inbox": false,
+      "statements": [
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    },
+    {
+      "events": 16,
+      "inbox": false,
+      "statements": [
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    },
+    {
+      "events": 0,
+      "inbox": true,
+      "statements": [
+        { "role": "inbox", "params": ["text", "text", "int64", "int64", "int64"] },
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    },
+    {
+      "events": 1,
+      "inbox": true,
+      "statements": [
+        { "role": "inbox", "params": ["text", "text", "int64", "int64", "int64"] },
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    },
+    {
+      "events": 2,
+      "inbox": true,
+      "statements": [
+        { "role": "inbox", "params": ["text", "text", "int64", "int64", "int64"] },
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    },
+    {
+      "events": 3,
+      "inbox": true,
+      "statements": [
+        { "role": "inbox", "params": ["text", "text", "int64", "int64", "int64"] },
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    },
+    {
+      "events": 16,
+      "inbox": true,
+      "statements": [
+        { "role": "inbox", "params": ["text", "text", "int64", "int64", "int64"] },
+        {
+          "role": "receipt",
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
+        },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "stream", "params": ["scope", "int64"] },
+        {
+          "role": "outbox",
+          "params": [
+            "text",
+            "text",
+            "text",
+            "int64",
+            "text",
+            "text",
+            "text?",
+            "text",
+            "text?",
+            "int64"
+          ]
+        },
+        { "role": "position", "params": ["text", "scope", "scope"] },
+        { "role": "archive-stream", "params": ["int64"] },
+        { "role": "archive", "params": ["text", "int64", "text", "bytes", "int64"] }
+      ]
+    }
+  ]
+}

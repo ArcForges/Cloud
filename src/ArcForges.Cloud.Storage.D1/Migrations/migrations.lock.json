@@ -161,6 +161,13 @@
       "module": "platform",
       "mode": "expand",
       "sha256": "74e015c10a5a7cb16139b769af01a5a1e93e4009073eb1b0766a7d5a48eb078f"
+    },
+    {
+      "sequence": 23,
+      "file": "0023_platform__commit-tail.sql",
+      "module": "platform",
+      "mode": "expand",
+      "sha256": "fdae6d0c2863640891d9a90c11b594ea7bccb24a63cb0d8a31a67a26e3f57776"
     }
   ]
 }

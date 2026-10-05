@@ -125,7 +125,9 @@ build time, not correctness.
 ## Adding a module's plans
 
 1. Write `storage/plans/<owner>/<name>.sql` for your own owner. Touch only your tables and, for receipts, outbox and similar, the
-   `platform_` tables.
+   `platform_` tables. A write plan starts with its guard inserts, holds your mutations and ends with the canonical commit tail and the guard release
+   (`-- tail: v1 events=N [inbox]` in its header; `node eng/verification/commit-tail.ts print --events N` prints the blocks), or states
+   `-- tail: none <reason>` ([receipts and outbox](d1-receipts-outbox.md)).
 2. Run `node eng/verification/storage-plans.ts` and commit both generated files.
 3. Call the plan through the typed repository API your task adds to `Storage.D1`. The executor and the exact scalar values are internal
    to the bridge today (`InternalsVisibleTo` for the host and its tests); a module reaches them only through that API, never through the
@@ -134,8 +136,10 @@ build time, not correctness.
 ## Not claimed
 
 - **No module owns a plan yet.** The module projects are boundaries with a descriptor. The physical tables and the migration runner exist
-  ([D1 physical schema and migrations](d1-physical-schema.md), CLOUD.03), so a module plan names real tables; receipts, outbox and archive
-  (CLOUD.04) and every module's behavior are later tasks; the shared-family engine exists ([shared families](shared-families.md), CLOUD.06). The checks above prove the boundary and the rule,
+  ([D1 physical schema and migrations](d1-physical-schema.md), CLOUD.03), so a module plan names real tables. The receipts, outbox, inbox and change
+  archive mechanism exists ([receipts and outbox](d1-receipts-outbox.md), CLOUD.04): every module write plan declares its commit tail in its header
+  and the generator verifies it; the platform owner's plans (`storage/plans/platform`) are the first plans of a registered owner other than the proof.
+  The shared-family engine exists ([shared families](shared-families.md), CLOUD.06); every module's behavior is a later task. The checks above prove the boundary and the rule,
   not a module implementation. The migration bookkeeping tables (`platform_schema_state`, `platform_migration_receipt`,
   `platform_backfill_checkpoint`) are written only by the migration runner: the ownership rule accepts any `platform_` table in a module plan,
   so a plan that names one of them is a review finding.
