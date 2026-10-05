@@ -1163,14 +1163,14 @@ test("retention purges only acknowledged rows past the cutoff, positions before 
   const db = commitDatabase();
   await commits(db, 5, 1);
   assert((await ack(db, 0, 3)).ok);
-  const purge = (through: number, cutoff: number) => {
+  const purge = (through: number, cutoff: number, deleteThrough = through) => {
     const guard = uuid();
     return execute(
       db,
       "platform.outbox-purge",
       [
         [txt(guard), sc(stream), i64(through)],
-        [sc(stream), i64(through), i64(cutoff)],
+        [sc(stream), i64(deleteThrough), sc(stream), i64(cutoff)],
         [i64(cutoff)],
         [txt(guard)],
       ],
@@ -1203,12 +1203,12 @@ test("retention purges only acknowledged rows past the cutoff, positions before 
   );
   assert.deepEqual(positions(db), [4, 5, 6]);
   // The archive: acknowledged records only, past the backup cutoff.
-  const archivePurge = (through: number, cutoff: number) => {
+  const archivePurge = (through: number, cutoff: number, deleteThrough = through) => {
     const guard = uuid();
     return execute(
       db,
       "platform.archive-purge",
-      [[txt(guard), i64(through)], [i64(through), i64(cutoff)], [txt(guard)]],
+      [[txt(guard), i64(through)], [i64(deleteThrough), i64(cutoff)], [txt(guard)]],
       "platform",
     );
   };
@@ -1222,4 +1222,42 @@ test("retention purges only acknowledged rows past the cutoff, positions before 
     (await archiveSelect(db, 4, 6)).map((row) => row[0]),
     ["5", "6"],
   );
+});
+
+test("a purge whose DELETE is bound beyond its guard still deletes nothing above the acknowledged watermark", async () => {
+  const db = commitDatabase();
+  await commits(db, 6, 1);
+  assert((await ack(db, 0, 2)).ok);
+  assert((await archiveAck(db, 0, 2)).ok);
+  const outbox = (through: number, deleteThrough: number) => {
+    const guard = uuid();
+    return execute(
+      db,
+      "platform.outbox-purge",
+      [
+        [txt(guard), sc(stream), i64(through)],
+        [sc(stream), i64(deleteThrough), sc(stream), i64(9_000_000)],
+        [i64(9_000_000)],
+        [txt(guard)],
+      ],
+      stream,
+    );
+  };
+  // The guard passes for 2 while the DELETE says 6: only what the stream acknowledged (1 and 2) may go.
+  assert((await outbox(2, 6)).ok);
+  assert.deepEqual(positions(db), [3, 4, 5, 6]);
+  assert.equal(count(db, "platform_outbox", "state = 1"), 4);
+  assert.equal(count(db, "platform_outbox"), 4);
+  const archive = (through: number, deleteThrough: number) => {
+    const guard = uuid();
+    return execute(
+      db,
+      "platform.archive-purge",
+      [[txt(guard), i64(through)], [i64(deleteThrough), i64(9_000_000)], [txt(guard)]],
+      "platform",
+    );
+  };
+  assert((await archive(2, 6)).ok);
+  assert.deepEqual(archiveSequences(db), [3, 4, 5, 6]);
+  assert.deepEqual(positions(db), [3, 4, 5, 6]);
 });
