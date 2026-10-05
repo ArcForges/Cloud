@@ -45,6 +45,26 @@ public sealed class ModulePlanPortTests
         Assert.Empty(storage.Calls);
     }
 
+    [Theory]
+    [InlineData("entitlementx.revision-load")]
+    [InlineData("xentitlement.revision-load")]
+    [InlineData("commerce.entitlement.revision-load")]
+    [InlineData("foundation.entitlement.revision-load")]
+    [InlineData("entitlement")]
+    [InlineData("entitlement.")]
+    [InlineData(".revision-load")]
+    [InlineData("Entitlement.revision-load")]
+    public async Task OwnershipIsTheExactFirstSegmentOfThePlanIdNeverAPrefixOrAContainedName(string planId)
+    {
+        var (factory, storage) = Create();
+        var port = factory.For(Entitlement);
+
+        await Assert.ThrowsAnyAsync<Exception>(async () => await port.ReadAsync(new ModulePlanRead(planId, "s", [PlanValue.FromText("s")]), T.Ct));
+        await Assert.ThrowsAnyAsync<Exception>(async () => await port.WriteAsync(new ModulePlanWrite(planId, "s", [[PlanValue.FromText("s")]], null), T.Ct));
+
+        Assert.Empty(storage.Calls);
+    }
+
     [Fact]
     public async Task AnUnknownPlanAndAnAccessMismatchAreCallerDefectsThatNeverReachTheExecutor()
     {

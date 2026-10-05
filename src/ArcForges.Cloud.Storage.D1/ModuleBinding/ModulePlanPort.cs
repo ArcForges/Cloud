@@ -111,7 +111,9 @@ internal sealed class ModulePlanPort : IModulePlanPort
     private PlanDefinition Owned(string planId, PlanAccess access)
     {
         ArgumentException.ThrowIfNullOrEmpty(planId);
-        if (!planId.StartsWith(module.PlanOwner + ".", StringComparison.Ordinal))
+        // The owner is the whole first segment of the plan id: "entitlement.x" belongs to Entitlement, "entitlementx.y" and "x.entitlement.y" do not.
+        var boundary = planId.IndexOf('.', StringComparison.Ordinal);
+        if (boundary <= 0 || !string.Equals(planId[..boundary], module.PlanOwner, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("The plan '" + planId + "' is not a plan of the " + module.Name + " module.");
         }

@@ -104,6 +104,7 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
             if (grant.WorkspaceId != workspaceId) throw new ArgumentException("A grant belongs to another workspace.", nameof(append));
         }
 
+        RequireWellFormed(append);
         var columns = SnapshotMapper.ToColumns(snapshot);
         var newRevision = expectedRevision + 1;
         var grants = EntitlementRowCodec.GrantsJson(append.Grants);
@@ -181,6 +182,18 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
             default:
                 throw new EntitlementStoreException(EntitlementStoreFailure.Defect, "The feature release was refused: " + outcome.Status + ".");
         }
+    }
+
+    /// <summary>Text with an unpaired surrogate would be replaced on the way to D1 and the stored row would differ from the record the caller holds, so it is refused here.</summary>
+    private static void RequireWellFormed(EntitlementAppend append)
+    {
+        var texts = append.Grants.SelectMany(g => new[] { g.GrantId, g.Subject, g.SourceRef, g.IssuedByActor, g.Reason, (g.Value as AllowanceValue)?.CapacityPlanRef })
+            .Concat(append.Revocations.SelectMany(r => new[] { r.RevocationId, r.GrantId, r.ReasonCode, r.IssuedByActor }))
+            .Concat(append.Terms.SelectMany(r => new[] { r.Fact.TermId, r.RealmId, r.SubscriptionRef, r.PeriodRef, r.SupersedesId, r.OfferId, r.OfferSnapshotId }))
+            .Concat(append.TermActions.SelectMany(r => new[] { r.ActionId, r.SourceRef, r.Fact.TermId, r.ReplacementTermId }))
+            .Concat(append.Activations.Select(a => a.Version))
+            .Concat(append.StatusFacts.SelectMany(f => new[] { f.FactId, f.SourceRef }));
+        if (texts.Any(text => text is not null && !Utf16.IsWellFormed(text))) throw new ArgumentException("A record holds text with an unpaired surrogate.", nameof(append));
     }
 
     private async Task<long> ReadRevisionAsync(string scope, CancellationToken cancellationToken)

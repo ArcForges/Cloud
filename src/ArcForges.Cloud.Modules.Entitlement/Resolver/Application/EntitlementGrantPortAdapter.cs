@@ -14,7 +14,8 @@ internal sealed class EntitlementGrantPortAdapter(EntitlementService service) : 
     public async ValueTask<EntitlementPortResult<EntitlementGrantRecord>> IssueGrantAsync(IssueGrantCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-        if (!TryRequest(command, out var request)) return Refusal<EntitlementGrantRecord>(EntitlementPortStatus.InvalidRequest, "The grant request is malformed.");
+        if (!WellFormed(command.WorkspaceId, command.Subject, command.SourceRef, command.IssuedByActor, command.Reason, (command.Terms as AllowanceGrantTerms)?.CapacityPlanRef)
+            || !TryRequest(command, out var request)) return Refusal<EntitlementGrantRecord>(EntitlementPortStatus.InvalidRequest, "The grant request is malformed.");
         try
         {
             var result = await service.IssueGrantAsync(request, cancellationToken).ConfigureAwait(false);
@@ -31,7 +32,8 @@ internal sealed class EntitlementGrantPortAdapter(EntitlementService service) : 
     public async ValueTask<EntitlementPortResult<EntitlementRevocationRecord>> RevokeGrantAsync(RevokeGrantCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-        if (command.EffectiveFrom is { } effective && !IsWholeMicroseconds(effective))
+        if (!WellFormed(command.WorkspaceId, command.GrantId, command.ReasonCode, command.IssuedByActor)
+            || (command.EffectiveFrom is { } effective && !IsWholeMicroseconds(effective)))
         {
             return Refusal<EntitlementRevocationRecord>(EntitlementPortStatus.InvalidRequest, "Instants have whole-microsecond precision.");
         }
@@ -81,6 +83,12 @@ internal sealed class EntitlementGrantPortAdapter(EntitlementService service) : 
             command.IssuedByActor, command.Reason);
         return true;
     }
+
+    /// <summary>
+    /// Text with an unpaired UTF-16 surrogate cannot be stored: it would be replaced on the way to D1 and the stored row would differ from the
+    /// record returned to the caller. It is refused at the boundary, before any admission rule or store call.
+    /// </summary>
+    private static bool WellFormed(params string?[] values) => values.All(value => value is null || Utf16.IsWellFormed(value));
 
     private static bool IsWholeMicroseconds(DateTimeOffset instant) => instant.UtcTicks % (TimeSpan.TicksPerMillisecond / 1000) == 0;
 
@@ -134,4 +142,10 @@ internal sealed class EntitlementGrantPortAdapter(EntitlementService service) : 
         EntitlementError.ConcurrentUpdate => EntitlementPortStatus.ConcurrentUpdate,
         _ => EntitlementPortStatus.OutcomeUnknown,
     };
+}
+
+/// <summary>Well-formedness of UTF-16 text: no unpaired surrogate.</summary>
+internal static class Utf16
+{
+    public static bool IsWellFormed(string value) => !value.Where((c, i) => char.IsHighSurrogate(c) ? i + 1 == value.Length || !char.IsLowSurrogate(value[i + 1]) : char.IsLowSurrogate(c) && (i == 0 || !char.IsHighSurrogate(value[i - 1]))).Any();
 }

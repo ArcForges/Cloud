@@ -140,6 +140,22 @@ public sealed class GrantPortContractTests
         Assert.Equal(0, harness.Store.CommitCount);
     }
 
+    [Theory]
+    [InlineData("reason \ud800")]
+    [InlineData("\udc00 reason")]
+    [InlineData("a\ud800b")]
+    public async Task TextWithAnUnpairedSurrogateIsRefusedBeforeAnyStoreCallAndAPairedOneIsAccepted(string text)
+    {
+        var (port, harness) = Create();
+
+        Assert.Equal(EntitlementPortStatus.InvalidRequest, (await port.IssueGrantAsync(Command(source: EntitlementGrantSource.AdminGrant, reason: text), T.Ct)).Status);
+        Assert.Equal(EntitlementPortStatus.InvalidRequest, (await port.IssueGrantAsync(Command() with { IssuedByActor = text }, T.Ct)).Status);
+        Assert.Equal(EntitlementPortStatus.InvalidRequest, (await port.IssueGrantAsync(Command() with { Subject = "x" + text }, T.Ct)).Status);
+        Assert.Equal(EntitlementPortStatus.InvalidRequest, (await port.RevokeGrantAsync(new RevokeGrantCommand(EntitlementHarness.Workspace, "g", "refund", null, text, 0), T.Ct)).Status);
+        Assert.Equal(0, harness.Store.CommitCount);
+        Assert.Equal(EntitlementPortStatus.Succeeded, (await port.IssueGrantAsync(Command(source: EntitlementGrantSource.AdminGrant, reason: "ok \ud83d\ude00"), T.Ct)).Status);
+    }
+
     [Fact]
     public async Task ARevocationNamesOneGrantGuardsTheVersionAndReplaysAsANoOp()
     {

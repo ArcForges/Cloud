@@ -333,6 +333,55 @@ public sealed class D1EntitlementStoreTests
     }
 
     [Fact]
+    public async Task AWorkspaceNeverLoadsAnotherWorkspacesRecords()
+    {
+        using var harness = await D1EntitlementHarness.CreateAsync();
+        var second = D1EntitlementHarness.Uuid(0xB2);
+        await harness.Bridge.SeedWorkspaceAsync(Guid.Parse(second), T.Ct);
+        var workspaces = new List<(string Workspace, int Salt)> { (D1EntitlementHarness.Workspace, 0x100), (second, 0x200) };
+        foreach (var (workspace, salt) in workspaces)
+        {
+            var state = await harness.Store.LoadAsync(workspace, T.Ct);
+            var grant = new Grant(Id(salt + 1), workspace, GrantKind.Capability, "cloud.sync", new CapabilityValue(), GrantSource.AdminGrant, "ticket-" + salt,
+                Fixtures.T(0), null, "operator", Fixtures.T(5), "isolation");
+            var term = D1EntitlementHarness.TermRow(Fixtures.Term(Id(salt + 2), 0, 30 * Fixtures.Day, createdSeconds: 5), "period-" + salt) with { RealmId = Id(salt + 3) };
+            var records = state.Records with { Grants = [grant], Terms = [term.Fact] };
+            Assert.Equal(CommitOutcome.Committed, await harness.Store.CommitAsync(
+                workspace, 0, EntitlementAppend.None with { Grants = [grant], Terms = [term] }, EntitlementResolver.Resolve(records, Fixtures.Definitions(), Fixtures.T(6)), T.Ct));
+            var revocation = new Revocation(Id(salt + 4), grant.GrantId, "refund", Fixtures.T(7), "operator", Fixtures.T(7));
+            var action = new TermActionRow(Id(salt + 5), "action-" + salt, new TermActionFact(term.Fact.TermId, ServiceTermActionKind.Revoke, Fixtures.T(8), Fixtures.T(8)), null);
+            var after = records with { Revocations = [revocation], TermActions = [action.Fact] };
+            Assert.Equal(CommitOutcome.Committed, await harness.Store.CommitAsync(
+                workspace, 1, EntitlementAppend.None with { Revocations = [revocation], TermActions = [action] }, EntitlementResolver.Resolve(after, Fixtures.Definitions(), Fixtures.T(9)), T.Ct));
+        }
+
+        foreach (var (workspace, salt) in workspaces)
+        {
+            var loaded = (await harness.Store.LoadAsync(workspace, T.Ct)).Records;
+            Assert.Equal([Id(salt + 1)], loaded.Grants.Select(g => g.GrantId));
+            Assert.Equal([Id(salt + 4)], loaded.Revocations.Select(r => r.RevocationId));
+            Assert.Equal([Id(salt + 2)], loaded.Terms.Select(x => x.TermId));
+            Assert.Equal([Id(salt + 2)], loaded.TermActions.Select(x => x.TermId));
+        }
+    }
+
+    [Fact]
+    public async Task AReasonWithAnUnpairedSurrogateIsRefusedAndAPairedOneRoundTripsExactly()
+    {
+        using var harness = await D1EntitlementHarness.CreateAsync();
+        harness.At(10);
+        var state = await harness.Store.LoadAsync(D1EntitlementHarness.Workspace, T.Ct);
+        var broken = AdminGrantWithReason(Id(0x91), "bad \ud800 reason");
+        await Assert.ThrowsAsync<ArgumentException>(async () => await harness.Store.CommitAsync(D1EntitlementHarness.Workspace, 0, Append(broken), Snapshot(state, broken, 6), T.Ct));
+        Assert.Equal(0, await harness.Count("entitlement_grant"));
+
+        var emoji = "ok \ud83d\ude00 reason";
+        var issued = await harness.Issue(Fixtures.Capability("cloud.sync", 0, null, "TICKET-1", GrantSource.AdminGrant, emoji));
+        Assert.Equal(emoji, issued.Reason);
+        Assert.Equal(emoji, (await harness.Store.LoadAsync(D1EntitlementHarness.Workspace, T.Ct)).Records.Grants.Single().Reason);
+    }
+
+    [Fact]
     public async Task AFeatureReleaseIsAppendedOnceAndAReplayOrAConflictChangesNothing()
     {
         using var harness = await D1EntitlementHarness.CreateAsync();
