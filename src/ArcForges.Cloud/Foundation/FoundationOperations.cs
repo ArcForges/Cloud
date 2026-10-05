@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using ArcForges.Cloud.Hmac;
 using ArcForges.Cloud.Ingress;
+using ArcForges.Cloud.Readiness;
 using ArcForges.Cloud.Storage;
 using ArcForges.Contracts.CloudInternal.Storage.V1;
 
@@ -96,9 +97,9 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
     private async Task<OperationReply> ReadinessAsync(byte[] body, CancellationToken cancellationToken)
     {
         if (!TryParse(body, FoundationJsonContext.Default.ReadinessRequest, out _)) return OperationReply.Invalid;
-        return await sessions.IsReadyAsync(cancellationToken)
-            ? OperationReply.Json(StatusCodes.Status200OK, new ReadinessResponse(true, PlanManifest.Hash, "1", HostRevision.Current), FoundationJsonContext.Default.ReadinessResponse)
-            : OperationReply.Error(StatusCodes.Status503ServiceUnavailable, "unavailable");
+        // Ready is 200; anything else is 503 with the same closed report, so the Worker can tell a plan mismatch from an outage.
+        var report = await new HostReadiness(executor, options).ReportAsync(cancellationToken);
+        return OperationReply.Json(report.Ready ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable, report, FoundationJsonContext.Default.ReadinessResponse);
     }
 
     // ---- exact ----------------------------------------------------------------------------------------------------

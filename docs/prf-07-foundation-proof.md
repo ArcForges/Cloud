@@ -278,6 +278,11 @@ against that foundation instance. The proof environment (and only it) allows two
 `/api` instance and the foundation instance are separate Durable Object instances of one class and contended for the single
 slot with `max_instances: 1`; production keeps one instance. The Hello scenario retries thrown errors within its 150 second deadline; each request is bounded by the remaining time, so it cannot overrun the deadline by an iteration.
 
+The operator `readiness` operation (CLOUD.08) reports the Container, D1, the Durable Object, R2, the Queue and the ingress
+separately, with a closed reason for each component that is not ready; the runner's progress text names them, so a wait that
+ends in a failure says whether the Container could not be provided, the plan manifests differ or a binding is missing
+([cloud-readiness](cloud-readiness.md)).
+
 ### Queue loss and retry, and session expiry
 
 Two cases of the WP-06.04 testing text (loss and retry, expiry) are observed on the deployment by proof-only scenarios.

@@ -121,6 +121,10 @@ export async function main() {
     await new Promise((resolve) => running.once("exit", resolve));
   };
   let restarts = 0;
+  // The harness fault of the readiness-failures scenario: the bridge answers the host as a Worker built from different
+  // plans would, by presenting another plan-manifest hash in every storage reply.
+  let presentedManifest: string | null = null;
+  const otherManifest = "f".repeat(64);
   // Only the harness control channel is a function binding: it restarts the host. Every request to the host goes
   // over real HTTP (an external service), as the platform's Container stub does, so a closed response closes the connection.
   const control = async (request: Request): Promise<Response> => {
@@ -201,8 +205,15 @@ export async function main() {
               ? undefined
               : Buffer.concat(chunks),
           });
-          outgoing.writeHead(reply.status, Object.fromEntries(reply.headers));
-          outgoing.end(Buffer.from(await reply.arrayBuffer()));
+          const replyHeaders = Object.fromEntries(reply.headers);
+          delete replyHeaders["content-length"];
+          outgoing.writeHead(reply.status, replyHeaders);
+          let replyBytes = Buffer.from(await reply.arrayBuffer());
+          if (presentedManifest && incoming.url?.startsWith("/internal/storage/"))
+            replyBytes = Buffer.from(
+              replyBytes.toString("utf8").replaceAll(manifestHash, presentedManifest),
+            );
+          outgoing.end(replyBytes);
         } catch {
           outgoing.writeHead(502).end();
         }
@@ -229,6 +240,12 @@ export async function main() {
         pollIntervalMs: 500,
         jobTimeoutMs: 120_000,
         pipeline: true,
+        readinessFaults: {
+          presentManifest: (hash) => {
+            presentedManifest = hash;
+          },
+          otherManifest,
+        },
         only: process.env.FOUNDATION_LOCAL_ONLY?.split(",").filter(Boolean),
       },
       manifestHash,

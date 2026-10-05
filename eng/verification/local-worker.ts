@@ -58,7 +58,13 @@ export default {
         asVirtualHost(request, "objects.internal", "/__objects"),
         env as FoundationEnv,
       );
-    return fetchEntry(request, withContainer(env), context);
+    // A harness-only fault: the named bindings are absent for this one request, as in a deployment that forgot them.
+    const dropped = (request.headers.get("x-harness-drop-binding") ?? "")
+      .split(",")
+      .filter(Boolean);
+    const effective = withContainer(env) as unknown as Record<string, unknown>;
+    for (const name of dropped) delete effective[name];
+    return fetchEntry(request, effective as unknown as WorkerEnv, context);
   },
   queue: (batch: Parameters<typeof queueEntry>[0], env: WorkerEnv & LocalEnv) =>
     queueEntry(batch, withContainer(env)),

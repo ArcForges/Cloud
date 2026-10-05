@@ -126,7 +126,7 @@ async function signedRequest(signer: KeyObject, pathname: string, payload: Uint8
   });
 }
 const bearer = (token: string, payload: Uint8Array) =>
-  new Request("https://proof.example/proof/v1/readiness", {
+  new Request("https://proof.example/proof/v1/exact", {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: payload as BodyInit,
@@ -135,12 +135,12 @@ const bearer = (token: string, payload: Uint8Array) =>
 test("the proof surface accepts only the configured operator key and refuses everything else with 401", async () => {
   const { env, forwarded } = environment({ PROOF_OPERATOR_VERIFIER: publicKeyText(key) });
   const payload = new TextEncoder().encode("{}");
-  const ok = await handleProof(await signedRequest(key, "/proof/v1/readiness", payload), env);
+  const ok = await handleProof(await signedRequest(key, "/proof/v1/exact", payload), env);
   assert.equal(ok.status, 200);
-  assert.deepEqual(forwarded, [{ path: "/internal/foundation/v1/readiness" }]);
+  assert.deepEqual(forwarded, [{ path: "/internal/foundation/v1/exact" }]);
   const before = forwarded.length;
   const signedForGuard = await signedRequest(key, "/proof/v1/guard", payload);
-  const wrongPath = new Request("https://proof.example/proof/v1/readiness", {
+  const wrongPath = new Request("https://proof.example/proof/v1/exact", {
     method: "POST",
     headers: {
       authorization: signedForGuard.headers.get("authorization") ?? "",
@@ -149,11 +149,11 @@ test("the proof surface accepts only the configured operator key and refuses eve
     body: payload as BodyInit,
   });
   const refused = [
-    await handleProof(await signedRequest(otherKey, "/proof/v1/readiness", payload), env),
+    await handleProof(await signedRequest(otherKey, "/proof/v1/exact", payload), env),
     await handleProof(wrongPath, env),
     await handleProof(bearer("t".repeat(40), payload), env),
     await handleProof(
-      new Request("https://proof.example/proof/v1/readiness", {
+      new Request("https://proof.example/proof/v1/exact", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: payload as BodyInit,
@@ -161,7 +161,7 @@ test("the proof surface accepts only the configured operator key and refuses eve
       env,
     ),
     await handleProof(
-      await signedRequest(key, "/proof/v1/readiness", new Uint8Array(20_000).fill(32)),
+      await signedRequest(key, "/proof/v1/exact", new Uint8Array(20_000).fill(32)),
       env,
     ),
   ];
@@ -177,7 +177,7 @@ test("credentials are accepted only when configured, and none configured disable
   const payload = new TextEncoder().encode("{}");
   const bearerOnly = environment({ PROOF_OPERATOR_TOKEN: token });
   assert.equal(
-    (await handleProof(await signedRequest(key, "/proof/v1/readiness", payload), bearerOnly.env))
+    (await handleProof(await signedRequest(key, "/proof/v1/exact", payload), bearerOnly.env))
       .status,
     401,
   );
@@ -186,7 +186,7 @@ test("credentials are accepted only when configured, and none configured disable
     PROOF_OPERATOR_VERIFIER: publicKeyText(key),
   });
   assert.equal(
-    (await handleProof(await signedRequest(key, "/proof/v1/readiness", payload), both.env)).status,
+    (await handleProof(await signedRequest(key, "/proof/v1/exact", payload), both.env)).status,
     200,
   );
   assert.equal((await handleProof(bearer(token, payload), both.env)).status, 200);
@@ -202,7 +202,7 @@ test("credentials are accepted only when configured, and none configured disable
   assert.equal((await handleProof(bearer("t".repeat(31), payload), shortOnly.env)).status, 503);
   const none = environment({});
   assert.equal(
-    (await handleProof(await signedRequest(key, "/proof/v1/readiness", payload), none.env)).status,
+    (await handleProof(await signedRequest(key, "/proof/v1/exact", payload), none.env)).status,
     503,
   );
 });

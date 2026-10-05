@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using System.Text.Json.Serialization;
+using ArcForges.Cloud.Readiness;
 
 namespace ArcForges.Cloud.Foundation;
 
@@ -25,8 +26,6 @@ internal sealed record JobStatusRequest(string Scope, string JobId);
 
 // Replies.
 internal sealed record ErrorBody(string Error);
-
-internal sealed record ReadinessResponse(bool Ready, string ManifestHash, string SchemaVersion, string? Revision = null);
 
 internal sealed record ExactArithmetic(string SignedPlusOne, string UnsignedPlusOne, string DecimalTimesTwo);
 

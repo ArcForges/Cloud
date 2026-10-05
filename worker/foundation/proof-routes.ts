@@ -7,6 +7,10 @@ import { isCorrelationId, newCorrelationId } from "../ingress/correlation.ts";
 import { poisonName } from "./poison.ts";
 import { isOperatorAuthorization, verifyOperatorSignature } from "./operator-signature.ts";
 import { ContainerCallError, postSigned } from "./container-client.ts";
+import { classifyStartFailureResponse } from "../readiness/container.ts";
+import { evaluateReadiness } from "../readiness/evaluate.ts";
+import { readinessLogEvent, readinessResponse } from "../readiness/http.ts";
+import { retryAfterSeconds } from "../readiness/model.ts";
 import {
   foundationContainerName,
   proofEnabled,
@@ -58,6 +62,14 @@ export function sessionCookieOnly(header: string | null): string | null {
   return matches.length === 1 ? (matches[0] ?? null) : null;
 }
 
+/** The empty 503 of the proof surface for a request that never reached the host, with the two second retry guidance. */
+function unavailableRefusal(): Response {
+  return new Response(null, {
+    status: 503,
+    headers: { "cache-control": "no-store", "retry-after": String(retryAfterSeconds) },
+  });
+}
+
 async function forwardSession(request: Request, env: FoundationEnv): Promise<Response> {
   const url = new URL(request.url);
   const bootstrap = url.pathname === "/session/v1/bootstrap";
@@ -82,6 +94,12 @@ async function forwardSession(request: Request, env: FoundationEnv): Promise<Res
     );
   } catch {
     return refusal(503);
+  }
+  // A Container the platform could not start answers with the library's own text. The request never reached the
+  // host, so the refusal is safe to retry and says so; the library's text is never passed on.
+  if (await classifyStartFailureResponse(response)) {
+    void response.body?.cancel().catch(() => {});
+    return unavailableRefusal();
   }
   let reply: Uint8Array;
   try {
@@ -108,7 +126,25 @@ export function newWake(
   return { v: 1, kind: "job.wake", jobId, scope, eventId, correlationId, causationId };
 }
 
-async function operatorOperation(request: Request, env: FoundationEnv): Promise<Response> {
+function isEmptyObject(body: Uint8Array): boolean {
+  try {
+    const value: unknown = JSON.parse(new TextDecoder().decode(body));
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function operatorOperation(
+  request: Request,
+  env: FoundationEnv,
+  log: (line: string) => void,
+): Promise<Response> {
   const url = new URL(request.url);
   const operation = url.pathname.slice("/proof/v1/".length);
   const token = env.PROOF_OPERATOR_TOKEN ?? "";
@@ -167,6 +203,13 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
   } catch (error) {
     if (error instanceof BodyTooLarge) return refusal(413);
     throw error;
+  }
+  if (operation === "readiness") {
+    // The Worker answers it: the Container is one component of the report, asked through the signed private call.
+    if (!isEmptyObject(body)) return refusal(400);
+    const report = await evaluateReadiness(env);
+    log(JSON.stringify(readinessLogEvent(report)));
+    return readinessResponse(report);
   }
   if (queueProbe) {
     // Worker-only operations: nothing reaches the Container or D1. The poison message carries a random id only.
@@ -286,9 +329,13 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
   });
 }
 
-export async function handleProof(request: Request, env: FoundationEnv): Promise<Response> {
+export async function handleProof(
+  request: Request,
+  env: FoundationEnv,
+  log: (line: string) => void = (line) => console.info(line),
+): Promise<Response> {
   if (!proofEnabled(env)) return refusal(404);
   const pathname = new URL(request.url).pathname;
   if (pathname.startsWith("/session/v1/")) return forwardSession(request, env);
-  return operatorOperation(request, env);
+  return operatorOperation(request, env, log);
 }

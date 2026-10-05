@@ -42,6 +42,11 @@ export interface Target {
   only?: string[];
   /** Also run the CLOUD.01 ingress pipeline scenarios (authenticated unary, refusals, stream, cancel, deadline). */
   pipeline?: boolean;
+  /**
+   * Only the local harness can break its own deployment: it supplies the control that makes the bridge present another plan
+   * manifest to the host, which enables the readiness-failures scenario. A deployed target never has it.
+   */
+  readinessFaults?: { presentManifest(hash: string | null): void; otherManifest: string };
   /** Also run the blocked-egress probe; only a deployed Container with Internet access disabled can pass it. */
   egressProbe?: boolean;
   /** The revision that was just deployed; the run first waits (bounded) until the origin serves exactly it. */
@@ -62,7 +67,12 @@ const int64Min = -(2n ** 63n);
 const int64Max = 2n ** 63n - 1n;
 const uint64Max = 2n ** 64n - 1n;
 
-export async function operator(target: Target, operation: string, body: Json) {
+export async function operator(
+  target: Target,
+  operation: string,
+  body: Json,
+  extraHeaders: Record<string, string> = {},
+) {
   const pathname = `/proof/v1/${operation}`;
   const bodyText = JSON.stringify(body);
   const authorization = target.authorize
@@ -75,7 +85,7 @@ export async function operator(target: Target, operation: string, body: Json) {
     : `Bearer ${target.operatorToken}`;
   const response = await fetch(`${target.baseUrl}${pathname}`, {
     method: "POST",
-    headers: { authorization, "content-type": "application/json" },
+    headers: { authorization, "content-type": "application/json", ...extraHeaders },
     body: bodyText,
     redirect: "error",
     signal: AbortSignal.timeout(60_000),
@@ -90,20 +100,119 @@ export async function operator(target: Target, operation: string, body: Json) {
   return { status: response.status, json };
 }
 
+const readinessComponentIds = [
+  "ingress",
+  "container",
+  "d1",
+  "durableObject",
+  "r2",
+  "queue",
+] as const;
+type ReadinessComponent = {
+  state?: string;
+  reason?: string;
+  evidence?: string;
+  elapsedMs?: number;
+};
+
+/** One line naming each component of a readiness reply as `state` or `state:reason`, for a run's progress text. */
+function describeReadiness(json: Json): string {
+  const components = (json.components ?? {}) as Record<string, ReadinessComponent>;
+  const parts = readinessComponentIds.map((id) => {
+    const component = components[id];
+    return `${id} ${component?.state ?? "?"}${component?.reason ? `:${component.reason}` : ""}`;
+  });
+  return `${String(json.status ?? "?")} (${parts.join(", ")})`;
+}
+
+/**
+ * CLOUD.08: the operator readiness operation reports the six components separately. In the proof environment every one is
+ * declared, so every one must be `ready`; the Container and D1 are probed through the real signed call, and the Queue is
+ * only checked for its binding (`evidence: bound`), which the row records instead of claiming more.
+ */
 export async function readiness(target: Target, manifestHash: string): Promise<Evidence> {
   const reply = await operator(target, "readiness", {});
-  assert.equal(reply.status, 200);
+  assert.equal(reply.status, 200, describeReadiness(reply.json));
   assert.equal(reply.json.ready, true);
+  assert.equal(reply.json.status, "ready");
   assert.equal(
     reply.json.manifestHash,
     manifestHash,
     "Worker and Container disagree on the plan manifest",
   );
+  const components = (reply.json.components ?? {}) as Record<string, ReadinessComponent>;
+  assert.deepEqual(Object.keys(components), [...readinessComponentIds]);
+  for (const id of readinessComponentIds)
+    assert.equal(components[id]?.state, "ready", `${id}: ${JSON.stringify(components[id])}`);
+  assert.equal(components.queue?.evidence, "bound", "a Queue binding is checked for shape only");
+  assert.equal(components.container?.evidence, "probed");
   return {
     scenario: "readiness",
     ok: true,
-    detail: { manifestHash, schemaVersion: reply.json.schemaVersion },
+    detail: {
+      manifestHash,
+      schemaVersion: reply.json.schemaVersion,
+      components: Object.fromEntries(
+        readinessComponentIds.map((id) => [
+          id,
+          {
+            state: components[id]?.state,
+            evidence: components[id]?.evidence,
+            elapsedMs: components[id]?.elapsedMs,
+          },
+        ]),
+      ),
+    },
   };
+}
+
+/**
+ * CLOUD.08 runtime failures, in the local harness only: a missing binding and a plan-manifest mismatch must fail readiness
+ * with the right component and reason, with the others unaffected, and not let a partially configured deployment look
+ * successful. The binding is dropped for one request, and the mismatch is presented to the real host by the bridge, so the
+ * host's own classification runs; both faults are removed again before the scenario ends.
+ */
+export async function readinessFailures(target: Target): Promise<Evidence> {
+  const faults = target.readinessFaults;
+  assert(faults, "The readiness-failures scenario needs the local harness fault controls.");
+  type Report = {
+    status: string;
+    ready: boolean;
+    components: Record<string, ReadinessComponent & { missing?: string[] }>;
+  };
+  const detail: Json = {};
+
+  const missing = await operator(target, "readiness", {}, { "x-harness-drop-binding": "OBJECTS" });
+  const missingReport = missing.json as unknown as Report;
+  assert.equal(missing.status, 503, describeReadiness(missing.json));
+  assert.equal(missingReport.ready, false);
+  assert.equal(missingReport.status, "misconfigured");
+  assert.equal(missingReport.components.r2?.state, "misconfigured");
+  assert.equal(missingReport.components.r2?.reason, "binding_missing");
+  assert.deepEqual(missingReport.components.r2?.missing, ["OBJECTS"]);
+  for (const id of ["ingress", "container", "d1", "durableObject", "queue"])
+    assert.equal(missingReport.components[id]?.state, "ready", `${id} stays ready`);
+  detail.missingBinding = describeReadiness(missing.json);
+
+  faults.presentManifest(faults.otherManifest);
+  try {
+    const mismatch = await operator(target, "readiness", {});
+    const mismatchReport = mismatch.json as unknown as Report;
+    assert.equal(mismatch.status, 503, describeReadiness(mismatch.json));
+    assert.equal(mismatchReport.ready, false);
+    assert.equal(mismatchReport.status, "misconfigured");
+    assert.equal(mismatchReport.components.d1?.state, "misconfigured");
+    assert.equal(mismatchReport.components.d1?.reason, "plan_hash_mismatch");
+    assert.equal(mismatchReport.components.container?.state, "ready", "the host itself answered");
+    detail.planMismatch = describeReadiness(mismatch.json);
+  } finally {
+    faults.presentManifest(null);
+  }
+  const recovered = await operator(target, "readiness", {});
+  assert.equal(recovered.status, 200, describeReadiness(recovered.json));
+  assert.equal(recovered.json.ready, true);
+  detail.afterRepair = describeReadiness(recovered.json);
+  return { scenario: "readiness-failures", ok: true, detail };
 }
 
 export async function exactValues(target: Target): Promise<Evidence> {
@@ -525,7 +634,7 @@ export async function deployedRevision(target: Target): Promise<Evidence> {
     try {
       const ready = await operator(target, "readiness", {});
       foundationRevision = String(ready.json.revision ?? "");
-      last = `readiness ${ready.status}${ready.status === 503 ? " (provisioning)" : ""}, foundation ${foundationRevision || "none"}`;
+      last = `readiness ${ready.status} ${describeReadiness(ready.json)}, foundation ${foundationRevision || "none"}`;
       if (ready.status === 200 && foundationRevision === expected)
         return {
           scenario: "deployed-revision",
@@ -759,6 +868,12 @@ export async function runScenarios(
         ][])
       : []),
     ["readiness", () => readiness(target, manifestHash)],
+    ...(target.readinessFaults
+      ? ([["readiness-failures", () => readinessFailures(target)]] as [
+          string,
+          () => Promise<Evidence>,
+        ][])
+      : []),
     ["exact-values", () => exactValues(target)],
     ["guard-rollback", () => guardedRollback(target)],
     ["session-csrf-revoke", () => sessionLifecycle(target)],

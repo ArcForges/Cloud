@@ -18,6 +18,7 @@ import type {
 import { base64UrlEncode, sha256Hex } from "../../worker/private/encoding.ts";
 import { loadKeys, verificationKeys } from "../../worker/private/hmac-settings.ts";
 import { verify } from "../../worker/private/signing.ts";
+import { manifestHash } from "../../worker/storage/plans.generated.ts";
 import { createFakeR2 } from "./support/fake-r2.ts";
 
 const operatorToken = "t".repeat(40);
@@ -164,19 +165,19 @@ test("operations are an exact allowlist with method, content type, query and siz
 
 test("an operation is signed with the Worker-to-Container key over the exact path and body hash", async () => {
   const { env, recorded } = environment({ body: '{"ready":true}' });
-  const response = await handleProof(operator("/proof/v1/readiness", {}), env);
+  const response = await handleProof(operator("/proof/v1/guard", {}), env);
   assert.equal(response.status, 200);
   assert.equal(await response.text(), '{"ready":true}');
   assert.equal(response.headers.get("cache-control"), "no-store");
   const call = recorded[0] as Recorded;
-  assert.equal(new URL(call.request.url).pathname, "/internal/foundation/v1/readiness");
+  assert.equal(new URL(call.request.url).pathname, "/internal/foundation/v1/guard");
   assert.equal(call.request.method, "POST");
   const keys = loadKeys(env, "W2C");
   assert(keys);
   const verification = await verify(
     {
       method: "POST",
-      pathAndQuery: "/internal/foundation/v1/readiness",
+      pathAndQuery: "/internal/foundation/v1/guard",
       bodySha256Hex: await sha256Hex(call.body),
       headers: call.request.headers,
     },
@@ -197,11 +198,11 @@ test("the Container status and body are relayed, a Container failure is a 502 or
   failing.env.CLOUD_CONTAINER = {
     getByName: () => ({ fetch: () => Promise.reject(new Error("down")) }),
   };
-  assert.equal((await handleProof(operator("/proof/v1/readiness", {}), failing.env)).status, 503);
+  assert.equal((await handleProof(operator("/proof/v1/guard", {}), failing.env)).status, 503);
   const unsigned = environment({}, { HMAC_W2C_SECRET: undefined });
-  assert.equal((await handleProof(operator("/proof/v1/readiness", {}), unsigned.env)).status, 502);
+  assert.equal((await handleProof(operator("/proof/v1/guard", {}), unsigned.env)).status, 502);
   const oversized = environment({ body: "x".repeat(70_000) });
-  assert.equal((await handleProof(operator("/proof/v1/readiness", {}), oversized.env)).status, 502);
+  assert.equal((await handleProof(operator("/proof/v1/guard", {}), oversized.env)).status, 502);
 });
 
 test("starting a job enqueues exactly one wake hint that carries identifiers only", async () => {
@@ -552,4 +553,173 @@ test("the egress probe is an operator operation signed toward the Container and 
   assert.equal((await handleProof(anonymous, env)).status, 401);
   assert.equal(recorded.length, 1);
   assert.equal((await handleProof(operator("/proof/v1/egress/other", {}), env)).status, 404);
+});
+
+// ---- readiness (CLOUD.08) ----
+
+const readyHost = (overrides: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    ready: true,
+    manifestHash,
+    schemaVersion: "1",
+    revision: "r".repeat(40),
+    components: { d1: { state: "ready" } },
+    ...overrides,
+  });
+
+/** A complete proof environment: every binding present, and the Container answers as stated. */
+function readinessEnvironment(
+  reply: { status?: number; body?: string; headers?: Record<string, string> },
+  overrides: Partial<FoundationEnv> = {},
+) {
+  const built = environment(reply, {
+    DB: { prepare: () => ({}), batch: async () => [] } as never,
+    JOB_COORDINATOR: {
+      getByName: () => ({ readPoison: async () => ({ attempts: [], deadLetter: null }) }),
+    } as never,
+    HMAC_C2W_KEY_ID: "c2w-1",
+    HMAC_C2W_SECRET: base64UrlEncode(new Uint8Array(32).fill(1)),
+    CSRF_SECRET: "c".repeat(43),
+    ALLOWED_ORIGIN: "https://proof.example",
+    REALM_ID: "proof",
+    ...overrides,
+  });
+  Object.assign(built.env, {
+    SOURCE_REVISION: "x",
+    HELLO_RATE_LIMITER: { limit: async () => ({}) },
+  });
+  return built;
+}
+
+test("the operator readiness operation reports every component, signed toward the Container once", async () => {
+  const lines: string[] = [];
+  const { env, recorded } = readinessEnvironment({ body: readyHost() });
+  const response = await handleProof(operator("/proof/v1/readiness", {}), env, (line) =>
+    lines.push(line),
+  );
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as Record<string, unknown> & {
+    components: Record<string, { state: string }>;
+  };
+  assert.equal(body.ready, true);
+  assert.equal(body.status, "ready");
+  assert.equal(body.manifestHash, manifestHash);
+  assert.equal(body.schemaVersion, "1");
+  assert.equal(body.revision, "r".repeat(40));
+  assert.deepEqual(Object.keys(body.components), [
+    "ingress",
+    "container",
+    "d1",
+    "durableObject",
+    "r2",
+    "queue",
+  ]);
+  assert.equal(recorded.length, 1);
+  assert.equal(
+    new URL((recorded[0] as Recorded).request.url).pathname,
+    "/internal/foundation/v1/readiness",
+  );
+  assert.equal((recorded[0] as Recorded).request.headers.get("authorization"), null);
+  // One closed log line, no content.
+  assert.equal(lines.length, 1);
+  assert.equal((JSON.parse(lines[0] as string) as { event: string }).event, "cloud.readiness");
+});
+
+test("the operator readiness operation fails readiness for a mismatching plan manifest", async () => {
+  const { env } = readinessEnvironment({ body: readyHost({ manifestHash: "b".repeat(64) }) });
+  const response = await handleProof(operator("/proof/v1/readiness", {}), env, () => {});
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("retry-after"), null);
+  const body = (await response.json()) as {
+    ready: boolean;
+    components: Record<string, { state: string; reason?: string }>;
+  };
+  assert.equal(body.ready, false);
+  assert.equal(body.components.d1?.reason, "plan_hash_mismatch");
+});
+
+test("the operator readiness operation fails readiness for a missing binding without waking the Container", async () => {
+  const { env, recorded } = readinessEnvironment(
+    { body: readyHost() },
+    { OBJECTS: undefined as never },
+  );
+  const response = await handleProof(operator("/proof/v1/readiness", {}), env, () => {});
+  assert.equal(response.status, 503);
+  const body = (await response.json()) as {
+    status: string;
+    components: Record<string, { state: string; missing?: string[] }>;
+  };
+  assert.equal(body.status, "misconfigured");
+  assert.deepEqual(body.components.r2?.missing, ["OBJECTS"]);
+  assert.equal(body.components.container?.state, "ready", "components fail independently");
+  assert.equal(recorded.length, 1);
+});
+
+test("a Container the platform could not start is reported, with retry guidance, not relayed", async () => {
+  const { env } = readinessEnvironment({
+    status: 503,
+    body: "There is no Container instance available at this time.\nmore text",
+    headers: { "content-type": "text/plain;charset=UTF-8" },
+  });
+  const response = await handleProof(operator("/proof/v1/readiness", {}), env, () => {});
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("retry-after"), "2");
+  const text = await response.text();
+  const body = JSON.parse(text) as {
+    components: Record<string, { state: string; reason?: string }>;
+  };
+  assert.equal(body.components.container?.reason, "no_instance_available");
+  assert.equal(body.components.d1?.state, "unknown");
+  assert.equal(text.includes("There is no Container"), false);
+});
+
+test("the readiness operation takes an empty object and nothing else", async () => {
+  const { env, recorded } = readinessEnvironment({ body: readyHost() });
+  for (const body of [{ x: 1 }, [], "text", null])
+    assert.equal(
+      (
+        await handleProof(
+          new Request("https://proof.example/proof/v1/readiness", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${operatorToken}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(body),
+          }),
+          env,
+          () => {},
+        )
+      ).status,
+      400,
+    );
+  assert.equal(recorded.length, 0);
+});
+
+test("a session request whose Container could not be started is a retryable empty 503 with no library text", async () => {
+  const { env, recorded } = environment({
+    status: 503,
+    body: "There is no Container instance available at this time.\nmore",
+    headers: { "content-type": "text/plain;charset=UTF-8" },
+  });
+  const response = await handleProof(
+    new Request("https://proof.example/session/v1/bootstrap"),
+    env,
+  );
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("retry-after"), "2");
+  assert.equal(await response.text(), "");
+  assert.equal(recorded.length, 1, "one attempt, no replay");
+  // The host's own 503 stays what it answered, with no retry guidance (it may have processed the request).
+  const host = environment({
+    status: 503,
+    body: '{"error":"unavailable"}',
+    headers: { "content-type": "application/json" },
+  });
+  const own = await handleProof(
+    new Request("https://proof.example/session/v1/bootstrap"),
+    host.env,
+  );
+  assert.equal(own.status, 503);
+  assert.equal(own.headers.get("retry-after"), null);
 });
