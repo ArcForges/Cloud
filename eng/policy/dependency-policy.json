@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "b24b0cf2cd83b163514fd5f7fd31a559e73fa18d",
+  "sourceCommit": "c588685ded5be801419ecff5596b69f25cbd724d",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -44,7 +44,7 @@
     "src/ArcForges.Cloud.Modules.Configuration/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Modules.Devices/ArcForges.Cloud.Modules.Devices.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
     "src/ArcForges.Cloud.Modules.Devices/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
-    "src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
+    "src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj": "dfb860b88c916ed63e242f740b52b4b7f1fc92cf7f05399756fd2e0eea947aeb",
     "src/ArcForges.Cloud.Modules.Entitlement/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
     "src/ArcForges.Cloud.Modules.Identity/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
@@ -72,15 +72,15 @@
     "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "a3bdd02ca2bc05a26d60fe226faf2fdedb1c1388e78cd2a65f8f627562ea7d2f",
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "5ef3c196005caf9cddb702a0061fafd310d149f1326708b958d1381934f69313",
-    "eng/provenance/artifact-profiles/cloud-release-r28.json": "9d6a6d2bf96005a20cc5c07b165b39902acfdbc9837f3308c9dc14c22baee015",
-    "eng/provenance/records/cloud-03-cloud-runtime-notices-r1.json": "ed3f066a5c0cf14fe01ae68e24eb0c9ccdfe62e94b8b9d15ebbe512807cb8d1d",
-    "eng/provenance/records/cloud-03-cloud-worker-bundle-r1.json": "30b26ca05b478b25f029c5ca5edcbfb0d59cfc4d8b2f24034d94a2895dd93215"
+    "eng/provenance/artifact-profiles/cloud-release-r29.json": "04b1d196d63808786a2c29a06cb1b48365590818e45c4a67906937df2516bfb9",
+    "eng/provenance/records/com-05-cloud-runtime-notices-r1.json": "50df5a3a3f0175f2f8ab4a648e11be196e06fe33c3a6a4dfcc42a3effdeb9a67",
+    "eng/provenance/records/com-05-cloud-worker-bundle-r1.json": "e7eaee9d98bd85eda6786672f27664c9ab121cd136d25783ad271b5b4a5edc6d"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-c20261005-cloud03 (CLOUD.03 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-c20261005-com05 (COM.05 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "date": "2026-10-05",
-    "rationale": "CLOUD.03 adds the physical D1 manifest, the typed exact adapters in the Storage.D1 project, the migration runner and their tests and one npm script block. package.json (new check and test scripts) and the release profile and records (new Storage.D1 sources) are hash-bound inputs, so they are re-bound here. No npm or NuGet coordinate, integrity value or closure entry changes, no project, reference or lock file changes, and no new native capability or broader source reuse permission is created.",
+    "rationale": "COM.05 adds the Entitlement resolver as source files of the existing Entitlement module project and an InternalsVisibleTo item for the existing test assembly to its project file, and adds explicit Resolver source rules to the Docker build context. The changed Entitlement project file, the Docker context rules, the first-party inventory and the release records are hash-bound inputs, so they are re-bound here; the release profile and runtime notices are re-bound by immutable successor records because the first-party source file list of the Native AOT closure changed, and the Worker bundle record only follows the new profile. No npm or NuGet coordinate, integrity value or closure entry changes, no project lock changes, and no new native capability or broader source reuse permission is created.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -122,7 +122,7 @@
       "src/ArcForges.Cloud.Modules.Configuration/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Modules.Devices/ArcForges.Cloud.Modules.Devices.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
       "src/ArcForges.Cloud.Modules.Devices/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
-      "src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
+      "src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj": "dfb860b88c916ed63e242f740b52b4b7f1fc92cf7f05399756fd2e0eea947aeb",
       "src/ArcForges.Cloud.Modules.Entitlement/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
       "src/ArcForges.Cloud.Modules.Identity/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
@@ -150,9 +150,9 @@
       "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "a3bdd02ca2bc05a26d60fe226faf2fdedb1c1388e78cd2a65f8f627562ea7d2f",
       "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "5ef3c196005caf9cddb702a0061fafd310d149f1326708b958d1381934f69313",
-      "eng/provenance/artifact-profiles/cloud-release-r28.json": "9d6a6d2bf96005a20cc5c07b165b39902acfdbc9837f3308c9dc14c22baee015",
-      "eng/provenance/records/cloud-03-cloud-runtime-notices-r1.json": "ed3f066a5c0cf14fe01ae68e24eb0c9ccdfe62e94b8b9d15ebbe512807cb8d1d",
-      "eng/provenance/records/cloud-03-cloud-worker-bundle-r1.json": "30b26ca05b478b25f029c5ca5edcbfb0d59cfc4d8b2f24034d94a2895dd93215"
+      "eng/provenance/artifact-profiles/cloud-release-r29.json": "04b1d196d63808786a2c29a06cb1b48365590818e45c4a67906937df2516bfb9",
+      "eng/provenance/records/com-05-cloud-runtime-notices-r1.json": "50df5a3a3f0175f2f8ab4a648e11be196e06fe33c3a6a4dfcc42a3effdeb9a67",
+      "eng/provenance/records/com-05-cloud-worker-bundle-r1.json": "e7eaee9d98bd85eda6786672f27664c9ab121cd136d25783ad271b5b4a5edc6d"
     },
     "checks": [
       "locked-restore",
@@ -983,7 +983,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-03-cloud-runtime-notices-r1", "cloud-03-cloud-worker-bundle-r1"],
+  "artifactRecords": ["com-05-cloud-runtime-notices-r1", "com-05-cloud-worker-bundle-r1"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -997,7 +997,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-03-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/com-05-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

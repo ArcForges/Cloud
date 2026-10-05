@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using ArcForges.Cloud.Modules.Entitlement.Resolver.Application;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
 namespace ArcForges.Cloud.Modules.Entitlement;
 
 /// <summary>
@@ -12,4 +16,19 @@ public sealed class EntitlementModule : IModuleBoundary
     public static EntitlementModule Instance { get; } = new();
 
     public ModuleDescriptor Descriptor { get; } = ModuleDescriptor.Create("Entitlement", "entitlement");
+
+    /// <summary>
+    /// Lists the resolver service (COM.05). It is created only when something asks for it, and it needs the store, definition and
+    /// identifier ports, which no composition supplies until the persistence task adds them: listing it serves no method and reads
+    /// no table.
+    /// </summary>
+    void IModuleBoundary.Register(IServiceCollection services)
+    {
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton(provider => new EntitlementService(
+            provider.GetRequiredService<IEntitlementStore>(),
+            provider.GetRequiredService<IEntitlementDefinitionSource>(),
+            provider.GetRequiredService<IEntitlementIdSource>(),
+            provider.GetRequiredService<TimeProvider>()));
+    }
 }

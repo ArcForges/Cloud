@@ -35,6 +35,13 @@
 !src/ArcForges.Cloud.Modules.*/Application/*.cs
 !src/ArcForges.Cloud.Modules.*/Infrastructure/
 !src/ArcForges.Cloud.Modules.*/Infrastructure/*.cs
+!src/ArcForges.Cloud.Modules.*/Resolver/
+!src/ArcForges.Cloud.Modules.*/Resolver/Domain/
+!src/ArcForges.Cloud.Modules.*/Resolver/Domain/*.cs
+!src/ArcForges.Cloud.Modules.*/Resolver/Application/
+!src/ArcForges.Cloud.Modules.*/Resolver/Application/*.cs
+!src/ArcForges.Cloud.Modules.*/Resolver/Infrastructure/
+!src/ArcForges.Cloud.Modules.*/Resolver/Infrastructure/*.cs
 !artifacts/
 !artifacts/image-notices/
 !artifacts/image-notices/**
