@@ -658,8 +658,29 @@ public sealed class FoundationHostTests
                 {
                     while (!stop.IsCancellationRequested)
                     {
-                        using var accepted = await peer.AcceptTcpClientAsync(stop.Token);
-                        if (reset) accepted.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+                        var accepted = await peer.AcceptTcpClientAsync(stop.Token);
+                        // The probing client may already have given up on this connection (a transparent retry opens another), so
+                        // the socket can be gone before an option is set: that race is part of the scenario, not a failure, and the
+                        // loop must keep accepting the next connection either way.
+                        try
+                        {
+                            if (reset) accepted.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+                        }
+                        catch (Exception exception) when (exception is System.Net.Sockets.SocketException or ObjectDisposedException)
+                        {
+                            // Already reset or closed by the peer; closing it below still ends the connection.
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                accepted.Dispose();
+                            }
+                            catch (System.Net.Sockets.SocketException)
+                            {
+                                // Closing an already reset socket.
+                            }
+                        }
                     }
                 }
                 catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException or System.Net.Sockets.SocketException or OperationCanceledException)
@@ -670,12 +691,16 @@ public sealed class FoundationHostTests
             try
             {
                 var address = new Uri($"http://127.0.0.1:{((IPEndPoint)peer.LocalEndpoint).Port}/");
-                var result = await new EgressProbe(FoundationModule.NewClient, [address, closed], _ => Task.FromResult(true)).RunAsync(T.Ct);
-                // Accepted-then-dropped without a status line is no response: blocked. Windows reports the distinct outcome, Linux
-                // reports the reset as a connection error; either way no status line came back.
-                Assert.True(result.Blocked);
-                Assert.Contains(result.Attempts[0].Outcome, new[] { "reached_then_failed", "connection_failed" });
-                Assert.Null(result.Attempts[0].Status);
+                // Repeated so that the accept-and-drop race cannot hide: every iteration must give the same verdict.
+                for (var iteration = 0; iteration < 25; iteration++)
+                {
+                    var result = await new EgressProbe(FoundationModule.NewClient, [address, closed], _ => Task.FromResult(true)).RunAsync(T.Ct);
+                    // Accepted-then-dropped without a status line is no response: blocked. Windows reports the distinct outcome, Linux
+                    // reports the reset as a connection error; either way no status line came back.
+                    Assert.True(result.Blocked);
+                    Assert.Contains(result.Attempts[0].Outcome, new[] { "reached_then_failed", "connection_failed" });
+                    Assert.Null(result.Attempts[0].Status);
+                }
             }
             finally
             {

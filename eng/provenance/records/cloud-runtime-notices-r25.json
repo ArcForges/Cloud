@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "gov-09-cloud-runtime-notices-r1",
+  "id": "cloud-runtime-notices-r25",
   "kind": "generated",
   "sourceRepository": "https://github.com/ArcForges/Cloud",
   "sourceCommit": "7c606cda27bfb4e85f7cb39110a4bb1039d8d466",
@@ -62,7 +62,7 @@
       "package": "arcforges-cloud-container",
       "kind": "native-image-notices",
       "profile": "eng/provenance/artifact-profiles/cloud-release-r24.json",
-      "sha256": "4fbfd89147d6e4f94af6908579118c93f29f295da3226b2655d0bbc02d69ebcd"
+      "sha256": "1ae096899c0a9c3f73692e12a772a3ff4731966f8ad883990cae0fd8615c4d26"
     }
   ],
   "disposition": "Copy",
@@ -228,10 +228,10 @@
   },
   "review": {
     "owner": "Licensing and Provenance Owner",
-    "reviewer": "ArcForges delivery worker w-c20261004-gov09 (GOV.09; independent pull-request review is recorded on the pull request)",
-    "reviewedOn": "2026-10-04",
+    "reviewer": "ArcForges delivery worker w-c20261004-prf07f (PRF.07 repair author, maintainer-authorized; the task is complete and not claimable, so this is a narrowly necessary repair of merged evidence; independent pull-request review is recorded on the pull request)",
+    "reviewedOn": "2026-10-05",
     "decision": "approved",
-    "rationale": "GOV.09 moves the exact ArcForges.Build.Policy build-only pin and adds the Cloud architecture test host. The runtime image, its notices and legal files are unchanged; the successor re-binds the new release profile whose Directory.Packages.props, service lock and package-lock hashes changed. Previous immutable records are retained.",
+    "rationale": "PRF.07 repair of the egress probe changes only host source (EgressProbe.cs) and tests; the runtime image notices and legal files are unchanged. The successor re-binds the new release profile that records the host sources. Previous immutable records are retained.",
     "baselineCommit": "7c606cda27bfb4e85f7cb39110a4bb1039d8d466",
     "reconciliation": false
   },

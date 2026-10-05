@@ -1,12 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "gov-09-cloud-worker-bundle-r1",
+  "id": "cloud-worker-bundle-r24",
   "kind": "generated",
   "sourceRepository": "https://github.com/ArcForges/Cloud",
   "sourceCommit": "7c606cda27bfb4e85f7cb39110a4bb1039d8d466",
   "sourcePaths": [
     "worker/foundation/types.ts",
     "worker/foundation/container-env.ts",
+    "worker/ingress/errors.ts",
+    "worker/ingress/io.ts",
+    "worker/ingress/edge-caller.ts",
+    "worker/ingress/frames.ts",
+    "worker/ingress/routes.ts",
+    "worker/ingress/pipeline.ts",
     "worker/router.ts",
     "worker/private/encoding.ts",
     "worker/private/signing.ts",
@@ -25,13 +31,7 @@
     "worker/storage/handler.ts",
     "worker/foundation/coordination.ts",
     "worker/foundation/durable.ts",
-    "worker/index.ts",
-    "worker/ingress/errors.ts",
-    "worker/ingress/io.ts",
-    "worker/ingress/edge-caller.ts",
-    "worker/ingress/frames.ts",
-    "worker/ingress/routes.ts",
-    "worker/ingress/pipeline.ts"
+    "worker/index.ts"
   ],
   "licence": {
     "spdx": "AGPL-3.0-only",
@@ -56,7 +56,7 @@
       "package": "arcforges-cloud-worker",
       "kind": "worker-bundle",
       "profile": "eng/provenance/artifact-profiles/cloud-release-r24.json",
-      "sha256": "4fbfd89147d6e4f94af6908579118c93f29f295da3226b2655d0bbc02d69ebcd"
+      "sha256": "1ae096899c0a9c3f73692e12a772a3ff4731966f8ad883990cae0fd8615c4d26"
     }
   ],
   "disposition": "Rewrite",
@@ -135,6 +135,12 @@
         "paths": [
           "worker/foundation/types.ts",
           "worker/foundation/container-env.ts",
+          "worker/ingress/errors.ts",
+          "worker/ingress/io.ts",
+          "worker/ingress/edge-caller.ts",
+          "worker/ingress/frames.ts",
+          "worker/ingress/routes.ts",
+          "worker/ingress/pipeline.ts",
           "worker/router.ts",
           "worker/private/encoding.ts",
           "worker/private/signing.ts",
@@ -153,13 +159,7 @@
           "worker/storage/handler.ts",
           "worker/foundation/coordination.ts",
           "worker/foundation/durable.ts",
-          "worker/index.ts",
-          "worker/ingress/errors.ts",
-          "worker/ingress/io.ts",
-          "worker/ingress/edge-caller.ts",
-          "worker/ingress/frames.ts",
-          "worker/ingress/routes.ts",
-          "worker/ingress/pipeline.ts"
+          "worker/index.ts"
         ],
         "spdx": "AGPL-3.0-only",
         "evidence": [
@@ -210,10 +210,10 @@
   },
   "review": {
     "owner": "Licensing and Provenance Owner",
-    "reviewer": "ArcForges delivery worker w-c20261004-gov09 (GOV.09; independent pull-request review is recorded on the pull request)",
-    "reviewedOn": "2026-10-04",
+    "reviewer": "ArcForges delivery worker w-c20261004-prf07f (PRF.07 repair author, maintainer-authorized; the task is complete and not claimable, so this is a narrowly necessary repair of merged evidence; independent pull-request review is recorded on the pull request)",
+    "reviewedOn": "2026-10-05",
     "decision": "approved",
-    "rationale": "GOV.09 changes no Worker source, package, generator, legal file or export. The Worker bundle bytes and every bundled input hash are unchanged; the successor re-binds the new release profile because the shared profile is one immutable file. Previous immutable records are retained.",
+    "rationale": "PRF.07 repair of the egress probe changes only host source and tests: the Worker bundle bytes, inputs, exports and legal files are unchanged from cloud-worker-bundle-r23 (the CLOUD.01 bundle, which added the public ingress pipeline under worker/ingress and replaced the Hello-only router body). The successor re-binds the new release profile. Previous immutable records are retained.",
     "baselineCommit": "7c606cda27bfb4e85f7cb39110a4bb1039d8d466",
     "reconciliation": false
   },
