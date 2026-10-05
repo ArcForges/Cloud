@@ -201,7 +201,7 @@ export async function main(): Promise<void> {
       for (let round = 0; round < rounds; round++) {
         const state = await revisionOf(db);
         const outcomes = await Promise.all(
-          Array.from({ length: contenders }, (_, index) => {
+          Array.from({ length: contenders }, (_, _index) => {
             const n = ++serial;
             return run(
               db,
