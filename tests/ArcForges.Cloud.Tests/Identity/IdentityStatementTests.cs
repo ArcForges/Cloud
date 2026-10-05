@@ -70,12 +70,12 @@ public sealed class IdentityStatementTests
         switch (op)
         {
             case "enroll":
-            {
-                var credential = Credential(input.GetProperty("credential"));
-                var user = new User(credential.UserId, credential.Realm, S(input, "displayName"), UserState.Active, new UtcMicros(L(input, "now")), null, 1);
-                var workspace = new Workspace(WorkspaceId.Parse(S(input, "workspace")), user.Realm, user.Id, S(input, "workspaceName"), S(input, "region"), WorkspaceState.Active, user.CreatedAt, 1);
-                return (new IdentityCommit.Enroll(command, user, credential, workspace), context);
-            }
+                {
+                    var credential = Credential(input.GetProperty("credential"));
+                    var user = new User(credential.UserId, credential.Realm, S(input, "displayName"), UserState.Active, new UtcMicros(L(input, "now")), null, 1);
+                    var workspace = new Workspace(WorkspaceId.Parse(S(input, "workspace")), user.Realm, user.Id, S(input, "workspaceName"), S(input, "region"), WorkspaceState.Active, user.CreatedAt, 1);
+                    return (new IdentityCommit.Enroll(command, user, credential, workspace), context);
+                }
 
             case "add":
                 return (new IdentityCommit.AddCredential(command, WorkspaceId.Parse(S(input, "scope")), Caller(input), L(input, "expectedUserRevision"), Credential(input.GetProperty("credential"))), context);

@@ -162,39 +162,39 @@ internal sealed class InMemoryIdentityStore : IIdentityStore
                 return CommitOutcome.Committed;
 
             case IdentityCommit.AddCredential add:
-            {
-                if (!users.TryGetValue(add.Caller.User, out var user) || user.Realm != add.Caller.Realm || user.Revision != add.ExpectedUserRevision || user.State != UserState.Active) return CommitOutcome.Refused;
-                if (credentials.Values.Any(c => c.Realm == add.Caller.Realm && c.ProviderId == add.Credential.ProviderId && c.Subject == add.Credential.Subject)) return CommitOutcome.Refused;
-                credentials[add.Credential.Id] = add.Credential;
-                users[user.Id] = user with { Revision = user.Revision + 1 };
-                return CommitOutcome.Committed;
-            }
+                {
+                    if (!users.TryGetValue(add.Caller.User, out var user) || user.Realm != add.Caller.Realm || user.Revision != add.ExpectedUserRevision || user.State != UserState.Active) return CommitOutcome.Refused;
+                    if (credentials.Values.Any(c => c.Realm == add.Caller.Realm && c.ProviderId == add.Credential.ProviderId && c.Subject == add.Credential.Subject)) return CommitOutcome.Refused;
+                    credentials[add.Credential.Id] = add.Credential;
+                    users[user.Id] = user with { Revision = user.Revision + 1 };
+                    return CommitOutcome.Committed;
+                }
 
             case IdentityCommit.RevokeCredential revoke:
-            {
-                if (!credentials.TryGetValue(revoke.Target, out var target) || target.Realm != revoke.Caller.Realm || target.UserId != revoke.Caller.User || target.Revision != revoke.ExpectedCredentialRevision || target.IsRevoked) return CommitOutcome.Refused;
-                if (!users.TryGetValue(revoke.Caller.User, out var user) || user.Realm != revoke.Caller.Realm || user.Revision != revoke.ExpectedUserRevision || !IdentityRules.MayChangeCredentials(user)) return CommitOutcome.Refused;
-                var remaining = credentials.Values.Any(c => c.Realm == user.Realm && c.UserId == user.Id && c.Id != target.Id && !c.IsRevoked);
-                if (!remaining && !recoveryPaths.Contains(user.Id)) return CommitOutcome.Refused;
-                credentials[target.Id] = target with { RevokedAt = revoke.At, Revision = target.Revision + 1 };
-                users[user.Id] = user with { Revision = user.Revision + 1 };
-                return CommitOutcome.Committed;
-            }
+                {
+                    if (!credentials.TryGetValue(revoke.Target, out var target) || target.Realm != revoke.Caller.Realm || target.UserId != revoke.Caller.User || target.Revision != revoke.ExpectedCredentialRevision || target.IsRevoked) return CommitOutcome.Refused;
+                    if (!users.TryGetValue(revoke.Caller.User, out var user) || user.Realm != revoke.Caller.Realm || user.Revision != revoke.ExpectedUserRevision || !IdentityRules.MayChangeCredentials(user)) return CommitOutcome.Refused;
+                    var remaining = credentials.Values.Any(c => c.Realm == user.Realm && c.UserId == user.Id && c.Id != target.Id && !c.IsRevoked);
+                    if (!remaining && !recoveryPaths.Contains(user.Id)) return CommitOutcome.Refused;
+                    credentials[target.Id] = target with { RevokedAt = revoke.At, Revision = target.Revision + 1 };
+                    users[user.Id] = user with { Revision = user.Revision + 1 };
+                    return CommitOutcome.Committed;
+                }
 
             case IdentityCommit.RelabelCredential relabel:
-            {
-                if (!credentials.TryGetValue(relabel.Target, out var target) || target.Realm != relabel.Caller.Realm || target.UserId != relabel.Caller.User || target.Revision != relabel.ExpectedCredentialRevision || target.IsRevoked) return CommitOutcome.Refused;
-                if (!users.TryGetValue(relabel.Caller.User, out var user) || user.Realm != relabel.Caller.Realm || !IdentityRules.MayChangeCredentials(user)) return CommitOutcome.Refused;
-                credentials[target.Id] = target with { Label = relabel.Label, Revision = target.Revision + 1 };
-                return CommitOutcome.Committed;
-            }
+                {
+                    if (!credentials.TryGetValue(relabel.Target, out var target) || target.Realm != relabel.Caller.Realm || target.UserId != relabel.Caller.User || target.Revision != relabel.ExpectedCredentialRevision || target.IsRevoked) return CommitOutcome.Refused;
+                    if (!users.TryGetValue(relabel.Caller.User, out var user) || user.Realm != relabel.Caller.Realm || !IdentityRules.MayChangeCredentials(user)) return CommitOutcome.Refused;
+                    credentials[target.Id] = target with { Label = relabel.Label, Revision = target.Revision + 1 };
+                    return CommitOutcome.Committed;
+                }
 
             case IdentityCommit.RenameUser rename:
-            {
-                if (!users.TryGetValue(rename.Caller.User, out var user) || user.Realm != rename.Caller.Realm || user.Revision != rename.ExpectedUserRevision || !IdentityRules.MayChangeCredentials(user)) return CommitOutcome.Refused;
-                users[user.Id] = user with { DisplayName = rename.DisplayName, Revision = user.Revision + 1 };
-                return CommitOutcome.Committed;
-            }
+                {
+                    if (!users.TryGetValue(rename.Caller.User, out var user) || user.Realm != rename.Caller.Realm || user.Revision != rename.ExpectedUserRevision || !IdentityRules.MayChangeCredentials(user)) return CommitOutcome.Refused;
+                    users[user.Id] = user with { DisplayName = rename.DisplayName, Revision = user.Revision + 1 };
+                    return CommitOutcome.Committed;
+                }
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(commit));
