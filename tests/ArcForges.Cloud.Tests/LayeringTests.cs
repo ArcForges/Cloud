@@ -68,6 +68,30 @@ public sealed class LayeringTests
         foreach (var boundary in ModuleBoundaries.All) Assert.Empty(Violations(boundary.GetType().Assembly));
     }
 
+    /// <summary>
+    /// The engine does not apply AT-01 to the layers inside a module project, so this check must not pass vacuously: a module assembly
+    /// that holds any layered type must hold Domain and Application types (otherwise its layers are mislabeled), and the checker has
+    /// to see every one of them.
+    /// </summary>
+    [Fact]
+    public void EveryLayeredModuleAssemblyIsCheckedNonVacuously()
+    {
+        var layeredAssemblies = 0;
+        foreach (var boundary in ModuleBoundaries.All)
+        {
+            var assembly = boundary.GetType().Assembly;
+            var layers = assembly.GetTypes().Where(t => !Attribute.IsDefined(t, typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute)))
+                .Select(Layer).Where(layer => layer is not null).ToArray();
+            if (layers.Length == 0) continue;
+            layeredAssemblies++;
+            Assert.Contains("Domain", layers);
+            Assert.Contains("Application", layers);
+            Assert.Empty(Violations(assembly));
+        }
+
+        Assert.True(layeredAssemblies >= 1, "At least the Entitlement module holds layered code.");
+    }
+
     [Fact]
     public void TheCheckerFlagsEveryKindOfViolationAndNothingElse()
     {

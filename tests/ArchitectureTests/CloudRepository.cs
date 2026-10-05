@@ -36,8 +36,13 @@ internal static class CloudRepository
         new(Host, ProjectRole.Test, Owner, Production: false, Aot: false),
         // CLOUD.02 (ADP-07 inventory binding): the shared boundary types, the named-plan bridge and the nineteen module boundaries.
         // The bridge is Persistence so that the host, a shell, may reference it (AT-14) and no module may (AT-07). A module boundary
-        // holds only its descriptor today, so it is classified as an Abstractions seam owned by its module; a module task that adds
-        // layered code re-reviews this role together with its own policy changes.
+        // is classified as an Abstractions seam owned by its module, whether or not it holds layered code. No layered role fits a module:
+        // the host is a Shell, AT-14 refuses a Shell whose closure holds a Domain, Application or Infrastructure project, and AT-01 would
+        // refuse the repository-wide build-policy package. So engine rules AT-01 and AT-13 do not cover the layers inside a module project.
+        // Cloud's own tests compensate and are not equivalent engine enforcement: ModuleBoundaryTests (a module references only the
+        // Abstractions project and only the host references a module) and LayeringTests (RD-01 to RD-04 over every module assembly).
+        // A module that adds Domain, Application or Infrastructure namespaces must be named in LayeredModules, which
+        // LayeredModuleGuardTests holds to exactly the modules that have them.
         new(ModuleAbstractions, ProjectRole.Abstractions, Owner, Production: true, Aot: true),
         new(StorageD1, ProjectRole.Persistence, Owner, Production: true, Aot: true),
         new("src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj", ProjectRole.Abstractions, Owner, "Identity", Production: true, Aot: true),
@@ -60,6 +65,13 @@ internal static class CloudRepository
         new("src/ArcForges.Cloud.Modules.Support/ArcForges.Cloud.Modules.Support.csproj", ProjectRole.Abstractions, Owner, "Support", Production: true, Aot: true),
         new("src/ArcForges.Cloud.Modules.TrustSafety/ArcForges.Cloud.Modules.TrustSafety.csproj", ProjectRole.Abstractions, Owner, "TrustSafety", Production: true, Aot: true),
     ];
+
+    /// <summary>
+    /// The module projects reviewed to hold layered code (Domain, Application and Infrastructure as folders and namespaces of the one
+    /// module project). Entitlement is first (COM.05). Adding a module here is a reviewed change: its layers must satisfy LayeringTests
+    /// non-vacuously, and the role stays Abstractions until the engine gains a role that fits (deferred hardening, see the COM.05 record).
+    /// </summary>
+    public static IReadOnlySet<string> LayeredModules { get; } = new HashSet<string>(StringComparer.Ordinal) { "Entitlement" };
 
     /// <summary>
     /// Reconstructs the semantic input of a completed build exactly as the shared producer does, with one addition the producer does
