@@ -66,17 +66,7 @@
         {
           "role": "mutation platform record a-receipt",
           "sql": "INSERT INTO platform_command (command_id, workspace_id, actor_ref, operation, request_hash, status, result_payload, result_rev, error_code, created_at, expires_at)\nVALUES (?, ?, ?, ?, ?, 2, ?, NULLIF(CAST(? AS INTEGER), -1), NULL, CAST(? AS INTEGER), CAST(? AS INTEGER));",
-          "params": [
-            "text",
-            "text?",
-            "text",
-            "text",
-            "text",
-            "text",
-            "int64",
-            "int64",
-            "int64"
-          ]
+          "params": ["text", "text?", "text", "text", "text", "text", "int64", "int64", "int64"]
         },
         {
           "role": "mutation platform record b-stream",

@@ -8,7 +8,7 @@ using ArcForges.Cloud.Modules.Identity.Core.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-namespace ArcForges.Cloud.Tests.Identity;
+namespace ArcForges.Cloud.Tests.IdentityCore;
 
 /// <summary>
 /// The structural half of WP-22.00 on the compiled Identity assembly: no member carries a membership, role, invitation, seat or
@@ -41,7 +41,8 @@ public sealed partial class IdentityStructureTests
         foreach (var type in ModuleTypes())
         {
             names.Add(type.Name);
-            names.AddRange(type.GetMembers(All).Where(member => member.MemberType is not MemberTypes.NestedType).Select(member => member.Name));
+            // PrintMembers is the method the compiler writes for every record; it names a language construct, not a domain concept.
+            names.AddRange(type.GetMembers(All).Where(member => member.MemberType is not MemberTypes.NestedType && member.Name != "PrintMembers").Select(member => member.Name));
             names.AddRange(type.GetMethods(All).SelectMany(method => method.GetParameters()).Select(parameter => parameter.Name ?? ""));
             if (type.IsEnum) names.AddRange(Enum.GetNames(type));
         }

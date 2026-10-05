@@ -3,7 +3,7 @@ using ArcForges.Cloud.Modules.Identity.Core.Application;
 using ArcForges.Cloud.Modules.Identity.Core.Domain;
 using Xunit;
 
-namespace ArcForges.Cloud.Tests.Identity;
+namespace ArcForges.Cloud.Tests.IdentityCore;
 
 public sealed class IdentityServiceTests
 {
@@ -58,8 +58,8 @@ public sealed class IdentityServiceTests
         Assert.Equal(2, h.Store.Users.Count);
         Assert.True(b.CreatedUser);
         // Neither realm can authorize the other's workspace, even with the other's identifiers.
-        Assert.Equal(IdentityError.NotFound, (await h.Service.AuthorizeWorkspaceAsync(new Principal(RealmB, a.User.Id), a.Workspace.Id, default)).Error);
-        Assert.Equal(IdentityError.NotFound, (await h.Service.AuthorizeWorkspaceAsync(new Principal(RealmA, b.User.Id), b.Workspace.Id, default)).Error);
+        Assert.Equal(IdentityError.NotFound, (await h.Service.AuthorizeWorkspaceAsync(new Principal(RealmB, a.User.Id), a.Workspace.Id, TestContext.Current.CancellationToken)).Error);
+        Assert.Equal(IdentityError.NotFound, (await h.Service.AuthorizeWorkspaceAsync(new Principal(RealmA, b.User.Id), b.Workspace.Id, TestContext.Current.CancellationToken)).Error);
     }
 
     [Fact]
@@ -70,10 +70,10 @@ public sealed class IdentityServiceTests
         // The commit of the loser meets a winner that committed the same credential first.
         h.Store.BeforeNextCommit(() =>
         {
-            var other = h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Winner", IdentityHarness.Email("race@example.test")), default).AsTask().GetAwaiter().GetResult();
+            var other = h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Winner", IdentityHarness.Email("race@example.test")), TestContext.Current.CancellationToken).AsTask().GetAwaiter().GetResult();
             winner = other.Value;
         });
-        var loser = await h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Loser", IdentityHarness.Email("race@example.test")), default);
+        var loser = await h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Loser", IdentityHarness.Email("race@example.test")), TestContext.Current.CancellationToken);
         Assert.True(loser.IsSuccess);
         Assert.False(loser.Value!.CreatedUser);
         Assert.Equal(winner!.User.Id, loser.Value.User.Id);
@@ -86,7 +86,7 @@ public sealed class IdentityServiceTests
     {
         var h = new IdentityHarness();
         var results = await Task.WhenAll(Enumerable.Range(0, 64).Select(i => Task.Run(() =>
-            h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Ada " + i, IdentityHarness.Email("many@example.test")), default).AsTask())));
+            h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Ada " + i, IdentityHarness.Email("many@example.test")), TestContext.Current.CancellationToken).AsTask())));
         Assert.All(results, r => Assert.True(r.IsSuccess));
         Assert.Equal(1, results.Count(r => r.Value!.CreatedUser));
         Assert.Single(results.Select(r => r.Value!.User.Id).Distinct());
@@ -100,11 +100,11 @@ public sealed class IdentityServiceTests
     {
         var h = new IdentityHarness();
         h.Store.RefuseNext(IdentityService.MaxAttempts);
-        var result = await h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Ada", IdentityHarness.Email("a@example.test")), default);
+        var result = await h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Ada", IdentityHarness.Email("a@example.test")), TestContext.Current.CancellationToken);
         Assert.Equal(IdentityError.Conflict, result.Error);
         Assert.Empty(h.Store.Users);
         h.Store.RefuseNext(IdentityService.MaxAttempts - 1);
-        Assert.True((await h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Ada", IdentityHarness.Email("a@example.test")), default)).IsSuccess);
+        Assert.True((await h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "Ada", IdentityHarness.Email("a@example.test")), TestContext.Current.CancellationToken)).IsSuccess);
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public sealed class IdentityServiceTests
             new EnrollmentRequest(RealmA, h.Command(), "Ada", good with { Method = AuthMethod.Password }),
             new EnrollmentRequest(RealmA, h.Command(), "Ada", IdentityHarness.Passkey("x") with { Passkey = null }),
         };
-        foreach (var request in cases) Assert.Equal(IdentityError.InvalidRequest, (await h.Service.CompleteEnrollmentAsync(request, default)).Error);
+        foreach (var request in cases) Assert.Equal(IdentityError.InvalidRequest, (await h.Service.CompleteEnrollmentAsync(request, TestContext.Current.CancellationToken)).Error);
         Assert.Equal(0, h.Store.Reads);
         Assert.Empty(h.Store.Users);
     }
@@ -152,11 +152,11 @@ public sealed class IdentityServiceTests
         var workspaceBefore = h.Store.Workspaces.Single();
         var userBefore = h.Store.Users.Single();
 
-        var passkey = (await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("cred-2"), default)).Value!;
-        var oidc = (await h.Service.AddCredentialAsync(caller, h.Command(), new NewCredential("corp-oidc", AuthMethod.Oidc, "issuer|sub", null, null, null), default)).Value!;
-        Assert.True((await h.Service.RelabelCredentialAsync(caller, h.Command(), passkey.Id, "Work phone", default)).IsSuccess);
-        Assert.True((await h.Service.RevokeCredentialAsync(caller, h.Command(), account.Credential.Id, default)).IsSuccess);
-        Assert.True((await h.Service.RevokeCredentialAsync(caller, h.Command(), oidc.Id, default)).IsSuccess);
+        var passkey = (await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("cred-2"), TestContext.Current.CancellationToken)).Value!;
+        var oidc = (await h.Service.AddCredentialAsync(caller, h.Command(), new NewCredential("corp-oidc", AuthMethod.Oidc, "issuer|sub", null, null, null), TestContext.Current.CancellationToken)).Value!;
+        Assert.True((await h.Service.RelabelCredentialAsync(caller, h.Command(), passkey.Id, "Work phone", TestContext.Current.CancellationToken)).IsSuccess);
+        Assert.True((await h.Service.RevokeCredentialAsync(caller, h.Command(), account.Credential.Id, TestContext.Current.CancellationToken)).IsSuccess);
+        Assert.True((await h.Service.RevokeCredentialAsync(caller, h.Command(), oidc.Id, TestContext.Current.CancellationToken)).IsSuccess);
 
         var userAfter = h.Store.Users.Single();
         Assert.Equal(userBefore.Id, userAfter.Id);
@@ -165,7 +165,7 @@ public sealed class IdentityServiceTests
         Assert.Equal(5, userAfter.Revision); // two links and two revocations advance the lifecycle revision; the relabel does not
         Assert.All(h.Store.Credentials, credential => Assert.Equal(userBefore.Id, credential.UserId));
         Assert.Equal(1, h.Store.Credentials.Count(credential => !credential.IsRevoked));
-        var resolved = await h.Service.ResolveCredentialAsync(RealmA, "official-passkey", "cred-2", default);
+        var resolved = await h.Service.ResolveCredentialAsync(RealmA, "official-passkey", "cred-2", TestContext.Current.CancellationToken);
         Assert.Equal(userBefore.Id, resolved.Value!.User.Id);
         Assert.Equal("Work phone", resolved.Value.Credential.Label);
     }
@@ -176,11 +176,11 @@ public sealed class IdentityServiceTests
         var h = new IdentityHarness();
         var account = await h.EnrollAsync(RealmA, "ada@example.test");
         var caller = IdentityHarness.Caller(account);
-        Assert.True((await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("cred-2"), default)).IsSuccess);
-        Assert.True((await h.Service.RevokeCredentialAsync(caller, h.Command(), account.Credential.Id, default)).IsSuccess);
-        Assert.Equal(IdentityError.CredentialUnavailable, (await h.Service.ResolveCredentialAsync(RealmA, "official-email", "ada@example.test", default)).Error);
-        Assert.True((await h.Service.GetPersonalWorkspaceAsync(caller, default)).IsSuccess);
-        Assert.Equal(account.Workspace.Id, (await h.Service.GetPersonalWorkspaceAsync(caller, default)).Value!.Id);
+        Assert.True((await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("cred-2"), TestContext.Current.CancellationToken)).IsSuccess);
+        Assert.True((await h.Service.RevokeCredentialAsync(caller, h.Command(), account.Credential.Id, TestContext.Current.CancellationToken)).IsSuccess);
+        Assert.Equal(IdentityError.CredentialUnavailable, (await h.Service.ResolveCredentialAsync(RealmA, "official-email", "ada@example.test", TestContext.Current.CancellationToken)).Error);
+        Assert.True((await h.Service.GetPersonalWorkspaceAsync(caller, TestContext.Current.CancellationToken)).IsSuccess);
+        Assert.Equal(account.Workspace.Id, (await h.Service.GetPersonalWorkspaceAsync(caller, TestContext.Current.CancellationToken)).Value!.Id);
     }
 
     [Fact]
@@ -188,11 +188,11 @@ public sealed class IdentityServiceTests
     {
         var h = new IdentityHarness();
         var account = await h.EnrollAsync(RealmA, "ada@example.test", "Ada");
-        var renamed = await h.Service.RenameUserAsync(IdentityHarness.Caller(account), h.Command(), "Ada Lovelace", default);
+        var renamed = await h.Service.RenameUserAsync(IdentityHarness.Caller(account), h.Command(), "Ada Lovelace", TestContext.Current.CancellationToken);
         Assert.Equal("Ada Lovelace", renamed.Value!.DisplayName);
         Assert.Equal(account.User.Id, renamed.Value.Id);
         Assert.Equal(account.User.CreatedAt, renamed.Value.CreatedAt);
-        Assert.Equal(IdentityError.InvalidRequest, (await h.Service.RenameUserAsync(IdentityHarness.Caller(account), h.Command(), " ", default)).Error);
+        Assert.Equal(IdentityError.InvalidRequest, (await h.Service.RenameUserAsync(IdentityHarness.Caller(account), h.Command(), " ", TestContext.Current.CancellationToken)).Error);
     }
 
     // ------------------------------------------------------------------------------------------------------------------------
@@ -205,11 +205,11 @@ public sealed class IdentityServiceTests
         var h = new IdentityHarness();
         var ada = await h.EnrollAsync(RealmA, "ada@example.test");
         var bob = await h.EnrollAsync(RealmA, "bob@example.test");
-        var stolen = await h.Service.AddCredentialAsync(IdentityHarness.Caller(bob), h.Command(), IdentityHarness.Email("ada@example.test"), default);
-        var own = await h.Service.AddCredentialAsync(IdentityHarness.Caller(ada), h.Command(), IdentityHarness.Email("ada@example.test"), default);
+        var stolen = await h.Service.AddCredentialAsync(IdentityHarness.Caller(bob), h.Command(), IdentityHarness.Email("ada@example.test"), TestContext.Current.CancellationToken);
+        var own = await h.Service.AddCredentialAsync(IdentityHarness.Caller(ada), h.Command(), IdentityHarness.Email("ada@example.test"), TestContext.Current.CancellationToken);
         Assert.Equal(IdentityError.CredentialUnavailable, stolen.Error);
         Assert.Equal(stolen, own);
-        Assert.Single(h.Store.Credentials.Where(c => c.Subject == "ada@example.test"));
+        Assert.Single(h.Store.Credentials, c => c.Subject == "ada@example.test");
     }
 
     [Fact]
@@ -218,8 +218,8 @@ public sealed class IdentityServiceTests
         var h = new IdentityHarness();
         var account = await h.EnrollAsync(RealmA, "ada@example.test");
         var caller = IdentityHarness.Caller(account);
-        h.Store.BeforeNextCommit(() => Assert.True(h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("winner"), default).AsTask().GetAwaiter().GetResult().IsSuccess));
-        var result = await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("loser"), default);
+        h.Store.BeforeNextCommit(() => Assert.True(h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("winner"), TestContext.Current.CancellationToken).AsTask().GetAwaiter().GetResult().IsSuccess));
+        var result = await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("loser"), TestContext.Current.CancellationToken);
         Assert.True(result.IsSuccess);
         Assert.Equal(3, h.Store.Credentials.Count);
         Assert.Equal(3, h.Store.Users.Single().Revision);
@@ -232,10 +232,10 @@ public sealed class IdentityServiceTests
         var ada = await h.EnrollAsync(RealmA, "ada@example.test");
         var bob = await h.EnrollAsync(RealmA, "bob@example.test");
         var results = await Task.WhenAll(Enumerable.Range(0, 40).Select(i => Task.Run(() =>
-            h.Service.AddCredentialAsync(IdentityHarness.Caller(i % 2 == 0 ? ada : bob), h.Command(), IdentityHarness.Passkey("shared"), default).AsTask())));
+            h.Service.AddCredentialAsync(IdentityHarness.Caller(i % 2 == 0 ? ada : bob), h.Command(), IdentityHarness.Passkey("shared"), TestContext.Current.CancellationToken).AsTask())));
         Assert.Equal(1, results.Count(r => r.IsSuccess));
         Assert.All(results.Where(r => !r.IsSuccess), r => Assert.Equal(IdentityError.CredentialUnavailable, r.Error));
-        Assert.Single(h.Store.Credentials.Where(c => c.Subject == "shared"));
+        Assert.Single(h.Store.Credentials, c => c.Subject == "shared");
     }
 
     [Fact]
@@ -244,10 +244,10 @@ public sealed class IdentityServiceTests
         var h = new IdentityHarness();
         var account = await h.EnrollAsync(RealmA, "ada@example.test");
         var caller = IdentityHarness.Caller(account);
-        Assert.Equal(IdentityError.LastCredential, (await h.Service.RevokeCredentialAsync(caller, h.Command(), account.Credential.Id, default)).Error);
+        Assert.Equal(IdentityError.LastCredential, (await h.Service.RevokeCredentialAsync(caller, h.Command(), account.Credential.Id, TestContext.Current.CancellationToken)).Error);
         Assert.False(h.Store.Credentials.Single().IsRevoked);
         h.Store.SetRecoveryPath(account.User.Id, true);
-        Assert.True((await h.Service.RevokeCredentialAsync(caller, h.Command(), account.Credential.Id, default)).IsSuccess);
+        Assert.True((await h.Service.RevokeCredentialAsync(caller, h.Command(), account.Credential.Id, TestContext.Current.CancellationToken)).IsSuccess);
     }
 
     [Fact]
@@ -259,9 +259,9 @@ public sealed class IdentityServiceTests
             var account = await h.EnrollAsync(RealmA, "ada@example.test");
             var caller = IdentityHarness.Caller(account);
             var extra = new List<AuthIdentity>();
-            for (var i = 0; i < 3; i++) extra.Add((await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("c" + i), default)).Value!);
+            for (var i = 0; i < 3; i++) extra.Add((await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("c" + i), TestContext.Current.CancellationToken)).Value!);
             var targets = new[] { account.Credential.Id }.Concat(extra.Select(c => c.Id)).ToArray();
-            var results = await Task.WhenAll(targets.Select(id => Task.Run(() => h.Service.RevokeCredentialAsync(caller, h.Command(), id, default).AsTask())));
+            var results = await Task.WhenAll(targets.Select(id => Task.Run(() => h.Service.RevokeCredentialAsync(caller, h.Command(), id, TestContext.Current.CancellationToken).AsTask())));
             Assert.True(h.Store.Credentials.Any(c => !c.IsRevoked), "the user keeps a usable credential");
             Assert.All(results.Where(r => !r.IsSuccess), r => Assert.Contains(r.Error, new IdentityError?[] { IdentityError.LastCredential, IdentityError.Conflict }));
         }
@@ -274,29 +274,30 @@ public sealed class IdentityServiceTests
         var ada = await h.EnrollAsync(RealmA, "ada@example.test");
         var bob = await h.EnrollAsync(RealmA, "bob@example.test");
         var carol = await h.EnrollAsync(RealmB, "carol@example.test");
-        Assert.True((await h.Service.AddCredentialAsync(IdentityHarness.Caller(bob), h.Command(), IdentityHarness.Passkey("b2"), default)).IsSuccess);
+        Assert.True((await h.Service.AddCredentialAsync(IdentityHarness.Caller(bob), h.Command(), IdentityHarness.Passkey("b2"), TestContext.Current.CancellationToken)).IsSuccess);
         var before = h.Store.Credentials.ToArray();
-        Assert.Equal(IdentityError.NotFound, (await h.Service.RevokeCredentialAsync(IdentityHarness.Caller(ada), h.Command(), bob.Credential.Id, default)).Error);
-        Assert.Equal(IdentityError.NotFound, (await h.Service.RevokeCredentialAsync(IdentityHarness.Caller(ada), h.Command(), carol.Credential.Id, default)).Error);
-        Assert.Equal(IdentityError.NotFound, (await h.Service.RelabelCredentialAsync(IdentityHarness.Caller(ada), h.Command(), bob.Credential.Id, "mine now", default)).Error);
-        Assert.Equal(IdentityError.NotFound, (await h.Service.RelabelCredentialAsync(new Principal(RealmB, ada.User.Id), h.Command(), ada.Credential.Id, "x", default)).Error);
+        Assert.Equal(IdentityError.NotFound, (await h.Service.RevokeCredentialAsync(IdentityHarness.Caller(ada), h.Command(), bob.Credential.Id, TestContext.Current.CancellationToken)).Error);
+        Assert.Equal(IdentityError.NotFound, (await h.Service.RevokeCredentialAsync(IdentityHarness.Caller(ada), h.Command(), carol.Credential.Id, TestContext.Current.CancellationToken)).Error);
+        Assert.Equal(IdentityError.NotFound, (await h.Service.RelabelCredentialAsync(IdentityHarness.Caller(ada), h.Command(), bob.Credential.Id, "mine now", TestContext.Current.CancellationToken)).Error);
+        Assert.Equal(IdentityError.NotFound, (await h.Service.RelabelCredentialAsync(new Principal(RealmB, ada.User.Id), h.Command(), ada.Credential.Id, "x", TestContext.Current.CancellationToken)).Error);
         Assert.Equal(before.OrderBy(c => c.Id.Value), h.Store.Credentials.OrderBy(c => c.Id.Value));
     }
 
     [Theory]
-    [InlineData(UserState.Restricted)]
-    [InlineData(UserState.Suspended)]
-    [InlineData(UserState.PendingDeletion)]
-    [InlineData(UserState.Deleted)]
-    public async Task OnlyAnActiveUserLinksAndOnlyAnActiveOrRestrictedUserChangesCredentials(UserState state)
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public async Task OnlyAnActiveUserLinksAndOnlyAnActiveOrRestrictedUserChangesCredentials(int stored)
     {
+        var state = (UserState)stored;
         var h = new IdentityHarness();
         var account = await h.EnrollAsync(RealmA, "ada@example.test");
         var caller = IdentityHarness.Caller(account);
-        Assert.True((await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("c2"), default)).IsSuccess);
+        Assert.True((await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("c2"), TestContext.Current.CancellationToken)).IsSuccess);
         h.Store.SetUserState(account.User.Id, state);
-        Assert.Equal(IdentityError.NotPermitted, (await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("c3"), default)).Error);
-        var change = await h.Service.RelabelCredentialAsync(caller, h.Command(), account.Credential.Id, "x", default);
+        Assert.Equal(IdentityError.NotPermitted, (await h.Service.AddCredentialAsync(caller, h.Command(), IdentityHarness.Passkey("c3"), TestContext.Current.CancellationToken)).Error);
+        var change = await h.Service.RelabelCredentialAsync(caller, h.Command(), account.Credential.Id, "x", TestContext.Current.CancellationToken);
         if (state == UserState.Restricted) Assert.True(change.IsSuccess);
         else Assert.Equal(IdentityError.NotPermitted, change.Error);
     }
@@ -311,12 +312,12 @@ public sealed class IdentityServiceTests
         var h = new IdentityHarness();
         var ada = await h.EnrollAsync(RealmA, "ada@example.test");
         var bob = await h.EnrollAsync(RealmA, "bob@example.test");
-        var owner = await h.Service.AuthorizeWorkspaceAsync(IdentityHarness.Caller(ada), ada.Workspace.Id, default);
+        var owner = await h.Service.AuthorizeWorkspaceAsync(IdentityHarness.Caller(ada), ada.Workspace.Id, TestContext.Current.CancellationToken);
         Assert.Equal(ada.Workspace, owner.Value);
-        var other = await h.Service.AuthorizeWorkspaceAsync(IdentityHarness.Caller(bob), ada.Workspace.Id, default);
-        var unknown = await h.Service.AuthorizeWorkspaceAsync(IdentityHarness.Caller(bob), WorkspaceId.Parse("00000000-0000-4000-8000-0000000000ff"), default);
-        var foreignRealm = await h.Service.AuthorizeWorkspaceAsync(new Principal(RealmB, ada.User.Id), ada.Workspace.Id, default);
-        var none = await h.Service.AuthorizeWorkspaceAsync(IdentityHarness.Caller(ada), default, default);
+        var other = await h.Service.AuthorizeWorkspaceAsync(IdentityHarness.Caller(bob), ada.Workspace.Id, TestContext.Current.CancellationToken);
+        var unknown = await h.Service.AuthorizeWorkspaceAsync(IdentityHarness.Caller(bob), WorkspaceId.Parse("00000000-0000-4000-8000-0000000000ff"), TestContext.Current.CancellationToken);
+        var foreignRealm = await h.Service.AuthorizeWorkspaceAsync(new Principal(RealmB, ada.User.Id), ada.Workspace.Id, TestContext.Current.CancellationToken);
+        var none = await h.Service.AuthorizeWorkspaceAsync(IdentityHarness.Caller(ada), default, TestContext.Current.CancellationToken);
         Assert.Equal(IdentityResult<Workspace>.Failure(IdentityError.NotFound), other);
         Assert.Equal(other, unknown);
         Assert.Equal(other, foreignRealm);
@@ -330,9 +331,9 @@ public sealed class IdentityServiceTests
         var account = await h.EnrollAsync(RealmA, "ada@example.test");
         // The only way to reuse the text of a credential as a user is to parse it as one: such a user does not exist.
         var asUser = new Principal(RealmA, UserId.Parse(account.Credential.Id.Value));
-        Assert.Equal(IdentityError.NotFound, (await h.Service.AuthorizeWorkspaceAsync(asUser, account.Workspace.Id, default)).Error);
-        Assert.Equal(IdentityError.NotFound, (await h.Service.GetPersonalWorkspaceAsync(asUser, default)).Error);
-        Assert.Equal(IdentityError.NotFound, (await h.Service.RenameUserAsync(asUser, h.Command(), "Mallory", default)).Error);
+        Assert.Equal(IdentityError.NotFound, (await h.Service.AuthorizeWorkspaceAsync(asUser, account.Workspace.Id, TestContext.Current.CancellationToken)).Error);
+        Assert.Equal(IdentityError.NotFound, (await h.Service.GetPersonalWorkspaceAsync(asUser, TestContext.Current.CancellationToken)).Error);
+        Assert.Equal(IdentityError.NotFound, (await h.Service.RenameUserAsync(asUser, h.Command(), "Mallory", TestContext.Current.CancellationToken)).Error);
         Assert.Equal("Ada", h.Store.Users.Single().DisplayName);
     }
 
@@ -343,26 +344,26 @@ public sealed class IdentityServiceTests
         var ada = await h.EnrollAsync(RealmA, "ada@example.test");
         var gone = await h.EnrollAsync(RealmA, "gone@example.test");
         var suspended = await h.EnrollAsync(RealmA, "suspended@example.test");
-        Assert.True((await h.Service.AddCredentialAsync(IdentityHarness.Caller(gone), h.Command(), IdentityHarness.Passkey("g2"), default)).IsSuccess);
-        Assert.True((await h.Service.RevokeCredentialAsync(IdentityHarness.Caller(gone), h.Command(), gone.Credential.Id, default)).IsSuccess);
+        Assert.True((await h.Service.AddCredentialAsync(IdentityHarness.Caller(gone), h.Command(), IdentityHarness.Passkey("g2"), TestContext.Current.CancellationToken)).IsSuccess);
+        Assert.True((await h.Service.RevokeCredentialAsync(IdentityHarness.Caller(gone), h.Command(), gone.Credential.Id, TestContext.Current.CancellationToken)).IsSuccess);
         h.Store.SetUserState(suspended.User.Id, UserState.Suspended);
 
-        var known = await h.Service.ResolveCredentialAsync(RealmA, "official-email", "ada@example.test", default);
+        var known = await h.Service.ResolveCredentialAsync(RealmA, "official-email", "ada@example.test", TestContext.Current.CancellationToken);
         Assert.Equal(ada.User.Id, known.Value!.User.Id);
         var refusals = new[]
         {
-            await h.Service.ResolveCredentialAsync(RealmA, "official-email", "nobody@example.test", default),
-            await h.Service.ResolveCredentialAsync(RealmA, "official-email", "gone@example.test", default),
-            await h.Service.ResolveCredentialAsync(RealmB, "official-email", "ada@example.test", default),
-            await h.Service.ResolveCredentialAsync(RealmA, "official-email", "suspended@example.test", default),
-            await h.Service.ResolveCredentialAsync(RealmA, "official-passkey", "ada@example.test", default),
-            await h.Service.ResolveCredentialAsync(RealmA, "BAD PROVIDER", "ada@example.test", default),
-            await h.Service.ResolveCredentialAsync(default, "official-email", "ada@example.test", default),
+            await h.Service.ResolveCredentialAsync(RealmA, "official-email", "nobody@example.test", TestContext.Current.CancellationToken),
+            await h.Service.ResolveCredentialAsync(RealmA, "official-email", "gone@example.test", TestContext.Current.CancellationToken),
+            await h.Service.ResolveCredentialAsync(RealmB, "official-email", "ada@example.test", TestContext.Current.CancellationToken),
+            await h.Service.ResolveCredentialAsync(RealmA, "official-email", "suspended@example.test", TestContext.Current.CancellationToken),
+            await h.Service.ResolveCredentialAsync(RealmA, "official-passkey", "ada@example.test", TestContext.Current.CancellationToken),
+            await h.Service.ResolveCredentialAsync(RealmA, "BAD PROVIDER", "ada@example.test", TestContext.Current.CancellationToken),
+            await h.Service.ResolveCredentialAsync(default, "official-email", "ada@example.test", TestContext.Current.CancellationToken),
         };
         Assert.All(refusals, refusal => Assert.Equal(IdentityResult<CredentialResolution>.Failure(IdentityError.CredentialUnavailable), refusal));
         // The enrollment path says the same about a revoked or suspended credential.
         foreach (var subject in new[] { "gone@example.test", "suspended@example.test" })
-            Assert.Equal(IdentityError.CredentialUnavailable, (await h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "x", IdentityHarness.Email(subject)), default)).Error);
+            Assert.Equal(IdentityError.CredentialUnavailable, (await h.Service.CompleteEnrollmentAsync(new EnrollmentRequest(RealmA, h.Command(), "x", IdentityHarness.Email(subject)), TestContext.Current.CancellationToken)).Error);
     }
 
     [Fact]

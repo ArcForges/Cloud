@@ -4,7 +4,7 @@ using ArcForges.Cloud.Modules.Identity.Core.Application;
 using ArcForges.Cloud.Modules.Identity.Core.Domain;
 using Xunit;
 
-namespace ArcForges.Cloud.Tests.Identity;
+namespace ArcForges.Cloud.Tests.IdentityCore;
 
 internal sealed class IdentityClock(DateTimeOffset start) : TimeProvider
 {
@@ -237,7 +237,7 @@ internal sealed class IdentityHarness
 
     public async Task<EnrollmentOutcome> EnrollAsync(RealmId realm, string subject, string name = "Ada", NewCredential? credential = null)
     {
-        var result = await Service.CompleteEnrollmentAsync(new EnrollmentRequest(realm, Command(), name, credential ?? Email(subject)), default);
+        var result = await Service.CompleteEnrollmentAsync(new EnrollmentRequest(realm, Command(), name, credential ?? Email(subject)), TestContext.Current.CancellationToken);
         Assert.True(result.IsSuccess, "enrollment failed: " + result.Error);
         return result.Value!;
     }

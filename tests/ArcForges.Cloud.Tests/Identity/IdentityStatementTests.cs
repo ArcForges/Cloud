@@ -13,7 +13,7 @@ using ArcForges.Cloud.Storage.SharedFamilies;
 using ArcForges.Contracts.CloudInternal.Storage.V1;
 using Xunit;
 
-namespace ArcForges.Cloud.Tests.Identity;
+namespace ArcForges.Cloud.Tests.IdentityCore;
 
 /// <summary>
 /// The module builds the arguments of its named plans without naming SQL or referencing the plan bridge. These tests hold that builder to

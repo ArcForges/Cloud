@@ -99,10 +99,11 @@ function eventFor(
   revision: number,
   payload: string,
   scope: string,
+  aggregateKind = "identity.user",
 ): EventInput {
   return {
     outboxId: tail.outbox,
-    aggregateKind: "identity.user",
+    aggregateKind,
     aggregateId,
     aggregateRevision: revision,
     eventType: type,
@@ -361,7 +362,17 @@ export function relabelArguments(r: RelabelInputs): D1Scalar[][] {
       r.realm,
       hash,
       r.expectedCredentialRevision + 1,
-      [],
+      [
+        eventFor(
+          r,
+          "identity.auth_identity.relabeled",
+          r.target,
+          r.expectedCredentialRevision + 1,
+          json({ authIdentityId: r.target, userId: r.user }),
+          r.scope,
+          "identity.auth_identity",
+        ),
+      ],
       { authIdentityId: r.target, credentialRevision: r.expectedCredentialRevision + 1 },
     ),
   ];
@@ -391,7 +402,16 @@ export function renameArguments(r: RenameInputs): D1Scalar[][] {
       r.realm,
       hash,
       r.expectedUserRevision + 1,
-      [],
+      [
+        eventFor(
+          r,
+          "identity.user.renamed",
+          r.user,
+          r.expectedUserRevision + 1,
+          json({ userId: r.user }),
+          r.scope,
+        ),
+      ],
       {
         userRevision: r.expectedUserRevision + 1,
       },

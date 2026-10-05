@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 using ArcForges.Cloud.Modules.Identity.Core.Domain;
 using Xunit;
 
-namespace ArcForges.Cloud.Tests.Identity;
+namespace ArcForges.Cloud.Tests.IdentityCore;
 
 public sealed class IdentityDomainTests
 {
@@ -63,9 +63,17 @@ public sealed class IdentityDomainTests
     [InlineData("   ", false)]
     [InlineData("tab\there", false)]
     [InlineData("new\nline", false)]
-    [InlineData("\ud800", false)]
-    [InlineData("\udc00x", false)]
     public void DisplayNamesArePlainBoundedText(string text, bool valid) => Assert.Equal(valid, IdentityRules.IsValidDisplayName(text));
+
+    [Fact]
+    public void UnpairedSurrogatesAreRefusedAndPairedOnesAreText()
+    {
+        Assert.False(IdentityRules.IsValidDisplayName("\ud800"));
+        Assert.False(IdentityRules.IsValidDisplayName("a\ud800"));
+        Assert.False(IdentityRules.IsValidDisplayName("\udc00x"));
+        Assert.False(IdentityRules.IsValidDisplayName("\udc00\ud800"));
+        Assert.True(IdentityRules.IsValidDisplayName("\ud83d\ude00"));
+    }
 
     [Fact]
     public void TextBoundsAreExact()
@@ -114,13 +122,14 @@ public sealed class IdentityDomainTests
     }
 
     [Theory]
-    [InlineData(UserState.Active, true, true)]
-    [InlineData(UserState.Restricted, false, true)]
-    [InlineData(UserState.Suspended, false, false)]
-    [InlineData(UserState.PendingDeletion, false, false)]
-    [InlineData(UserState.Deleted, false, false)]
-    public void OnlyAnActiveUserMayAddAndOnlyAnActiveOrRestrictedUserMayChangeCredentials(UserState state, bool mayAdd, bool mayChange)
+    [InlineData(1, true, true)]
+    [InlineData(2, false, true)]
+    [InlineData(3, false, false)]
+    [InlineData(4, false, false)]
+    [InlineData(5, false, false)]
+    public void OnlyAnActiveUserMayAddAndOnlyAnActiveOrRestrictedUserMayChangeCredentials(int stored, bool mayAdd, bool mayChange)
     {
+        var state = (UserState)stored;
         Assert.Equal(mayAdd, IdentityRules.MayAddCredential(User(UserOne, state)));
         Assert.Equal(mayChange, IdentityRules.MayChangeCredentials(User(UserOne, state)));
     }

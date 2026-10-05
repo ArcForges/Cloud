@@ -1426,7 +1426,7 @@ export async function renderFamilyExpansion(manifest: PlanManifest) {
         params: statement.params.map((param) => param.kind + (param.nullable ? "?" : "")),
       })),
     }));
-  return format(JSON.stringify({ schemaVersion: 1, plans }), { parser: "json" });
+  return format(JSON.stringify({ schemaVersion: 1, plans }), { parser: "json", printWidth: 100 });
 }
 
 export async function generate(root: string, check: boolean) {

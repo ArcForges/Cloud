@@ -145,7 +145,8 @@ public sealed partial class ExactValueTests
     {
         var directory = Path.Combine(T.RepoRoot().FullName, "storage", "plans");
         var lines = new List<(string Id, int Version, string Line)>();
-        foreach (var file in Directory.GetFiles(directory, "*.sql", SearchOption.AllDirectories))
+        // A family plan has its own identity (its text and its generated statements, recomputed by SharedFamilies.FamilyExpansion).
+        foreach (var file in Directory.GetFiles(directory, "*.sql", SearchOption.AllDirectories).Where(file => !string.Equals(Path.GetFileName(Path.GetDirectoryName(file)), "families", StringComparison.Ordinal)))
         {
             var text = File.ReadAllText(file).Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd() + "\n";
             var id = Regex.Match(text, @"^-- plan: (\S+)", RegexOptions.Multiline).Groups[1].Value;
@@ -153,6 +154,7 @@ public sealed partial class ExactValueTests
             lines.Add((id, version, $"{id}@{version}:{T.Sha256Hex(text)}"));
         }
 
+        lines.AddRange(SharedFamilies.FamilyExpansion.Identities().Select(family => (family.Id, family.Version, $"{family.Id}@{family.Version}:{family.Sha256}")));
         var joined = string.Join('\n', lines.OrderBy(l => l.Id, StringComparer.Ordinal).ThenBy(l => l.Version).Select(l => l.Line)) + "\n";
         Assert.Equal(PlanManifest.Hash, T.Sha256Hex(joined));
         Assert.Equal(lines.Count, PlanManifest.All.Count);
@@ -163,7 +165,7 @@ public sealed partial class ExactValueTests
     public void EveryPlanDefinitionMatchesItsSqlPlaceholdersAndExactCasts()
     {
         var directory = Path.Combine(T.RepoRoot().FullName, "storage", "plans");
-        foreach (var plan in PlanManifest.All)
+        foreach (var plan in PlanManifest.All.Where(plan => !plan.Id.StartsWith("families.", StringComparison.Ordinal)))
         {
             var file = Directory.GetFiles(directory, plan.Id[(plan.Id.IndexOf('.', StringComparison.Ordinal) + 1)..] + ".sql", SearchOption.AllDirectories).Single();
             var blocks = Regex.Split(File.ReadAllText(file).Replace("\r\n", "\n", StringComparison.Ordinal), @"^-- statement:.*\n", RegexOptions.Multiline).Skip(1).ToArray();

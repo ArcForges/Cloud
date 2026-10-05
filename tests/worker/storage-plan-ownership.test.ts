@@ -543,9 +543,15 @@ test("plans of different owners may share a name without clashing in the C# defi
 
 test("every checked-in plan satisfies the ownership rule of its owner directory", () => {
   const manifest = buildManifest(repositoryRoot);
-  for (const definition of manifest.plans) assertOwnership(definition, manifest.registry);
+  // A shared family plan is not an owner plan: the family grammar checks it statement by statement (docs/shared-families.md).
+  const owned = manifest.plans.filter((entry) => entry.family === undefined);
+  for (const definition of owned) assertOwnership(definition, manifest.registry);
   assert.deepEqual(
-    [...new Set(manifest.plans.map((entry) => entry.id.split(".")[0]))],
-    ["foundation", "platform"],
+    [...new Set(owned.map((entry) => entry.id.split(".")[0]))],
+    ["foundation", "identity", "platform"],
+  );
+  assert.deepEqual(
+    manifest.plans.filter((entry) => entry.family !== undefined).map((entry) => entry.id),
+    ["families.account-enrollment.create-user"],
   );
 });

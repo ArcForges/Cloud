@@ -278,11 +278,7 @@ test("the whole vector sequence commits on the real migrations, one receipt and 
   }
   assert.equal(count(db, "platform_command"), steps.length);
   assert.equal(count(db, "platform_change_archive"), steps.length);
-  assert.equal(
-    count(db, "platform_outbox"),
-    5,
-    "enrollments, links and the revocation publish an event; relabel and rename none",
-  );
+  assert.equal(count(db, "platform_outbox"), 8, "every step publishes exactly one event");
   assert.equal(count(db, "platform_command_guard"), 0);
   // The final state: Ada keeps two usable credentials of the three, her workspace is untouched, her display name is the renamed one.
   assert.deepEqual(

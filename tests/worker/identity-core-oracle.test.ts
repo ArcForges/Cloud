@@ -494,6 +494,93 @@ test("a revoked credential cannot be revoked twice, and a credential of another 
   );
 });
 
+test("a revocation decided before another credential was linked is refused: the user revision it read is stale", async () => {
+  const db = openIdentityD1();
+  const account = await enroll(db, realmA, "ada@example.test");
+  const second = await add(db, account, "second", 1);
+  assert.equal(second.outcome.ok, true);
+  // The revocation read user revision 2; a third credential commits first and moves it to 3.
+  const stale = revokeArguments({
+    ...tailInputs(),
+    realm: account.realm,
+    user: account.user,
+    scope: account.workspace,
+    target: account.credential.credentialId,
+    expectedCredentialRevision: 1,
+    expectedUserRevision: 2,
+    at: nowMicros + 1_000_000,
+  });
+  assert.equal((await add(db, account, "third", 2)).outcome.ok, true);
+  const before = snapshotIdentity(db);
+  assert.deepEqual(
+    await runPlan(db, "identity.credential-revoke", stale, account.workspace),
+    refused,
+  );
+  assert.deepEqual(
+    snapshotIdentity(db),
+    before,
+    "nothing changed, and the user revision was not bumped by a silent no-op",
+  );
+});
+
+test("a revoked credential cannot be relabelled, and a user who may not change credentials cannot rename or relabel", async () => {
+  const db = openIdentityD1();
+  const account = await enroll(db, realmA, "ada@example.test");
+  const second = await add(db, account, "second", 1);
+  assert.equal((await revoke(db, account, account.credential.credentialId, 1, 2)).ok, true);
+  const relabelWith = (target: string, revision: number, label: string | null) =>
+    runPlan(
+      db,
+      "identity.credential-relabel",
+      relabelArguments({
+        ...tailInputs(),
+        realm: account.realm,
+        user: account.user,
+        scope: account.workspace,
+        target,
+        expectedCredentialRevision: revision,
+        label,
+      }),
+      account.workspace,
+    );
+  assert.deepEqual(
+    await relabelWith(account.credential.credentialId, 2, "late"),
+    refused,
+    "already revoked",
+  );
+  assert.equal((await relabelWith(second.credential.credentialId, 1, "kept")).ok, true);
+  const renameWith = (revision: number, displayName: string) =>
+    runPlan(
+      db,
+      "identity.user-rename",
+      renameArguments({
+        ...tailInputs(),
+        realm: account.realm,
+        user: account.user,
+        scope: account.workspace,
+        expectedUserRevision: revision,
+        displayName,
+      }),
+      account.workspace,
+    );
+  for (const state of [3, 4, 5]) {
+    db.database
+      .prepare("UPDATE identity_user SET state = ? WHERE user_id = ?")
+      .run(state, account.user);
+    assert.deepEqual(await renameWith(3, "Nope"), refused, `state ${state}`);
+    assert.deepEqual(
+      await relabelWith(second.credential.credentialId, 2, "nope"),
+      refused,
+      `state ${state}`,
+    );
+  }
+  db.database.prepare("UPDATE identity_user SET state = 2 WHERE user_id = ?").run(account.user);
+  assert.equal(
+    (await renameWith(3, "Restricted but allowed")).ok,
+    true,
+    "a restricted user may still change its profile",
+  );
+});
 test("a revoked credential keeps its subject reserved: it cannot be linked again by anyone, so a credential never moves between users", async () => {
   const db = openIdentityD1();
   const ada = await enroll(db, realmA, "ada@example.test");

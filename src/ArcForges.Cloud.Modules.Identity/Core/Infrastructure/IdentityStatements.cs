@@ -37,7 +37,7 @@ internal static class IdentityStatements
         ];
         var tail = Tail(
             commit, context, "identity.credential.add", commit.Caller, commit.ExpectedUserRevision + 1,
-            [Event(context, "identity.auth_identity.added", user, commit.ExpectedUserRevision + 1, Payload(credential.UserId, credential.Id, (int)credential.Method))],
+            [Event(context, "identity.auth_identity.added", "identity.user", user, commit.ExpectedUserRevision + 1, Payload(credential.UserId, credential.Id, (int)credential.Method))],
             writer =>
             {
                 writer.WriteString("authIdentityId", credential.Id.Value);
@@ -65,7 +65,7 @@ internal static class IdentityStatements
         ];
         var tail = Tail(
             commit, context, "identity.credential.revoke", commit.Caller, commit.ExpectedUserRevision + 1,
-            [Event(context, "identity.auth_identity.revoked", user, commit.ExpectedUserRevision + 1, Payload(commit.Caller.User, commit.Target, null))],
+            [Event(context, "identity.auth_identity.revoked", "identity.user", user, commit.ExpectedUserRevision + 1, Payload(commit.Caller.User, commit.Target, null))],
             writer =>
             {
                 writer.WriteString("authIdentityId", target);
@@ -87,7 +87,8 @@ internal static class IdentityStatements
             [PlanArgument.NullableText(commit.Label), Text(realm), Text(target), Text(user), Int64(commit.ExpectedCredentialRevision)],
         ];
         var tail = Tail(
-            commit, context, "identity.credential.relabel", commit.Caller, commit.ExpectedCredentialRevision + 1, [],
+            commit, context, "identity.credential.relabel", commit.Caller, commit.ExpectedCredentialRevision + 1,
+            [Event(context, "identity.auth_identity.relabeled", "identity.auth_identity", target, commit.ExpectedCredentialRevision + 1, Payload(commit.Caller.User, commit.Target, null))],
             writer =>
             {
                 writer.WriteString("authIdentityId", target);
@@ -107,7 +108,8 @@ internal static class IdentityStatements
             [Text(commit.DisplayName), Text(realm), Text(user), Int64(commit.ExpectedUserRevision)],
         ];
         var tail = Tail(
-            commit, context, "identity.user.rename", commit.Caller, commit.ExpectedUserRevision + 1, [],
+            commit, context, "identity.user.rename", commit.Caller, commit.ExpectedUserRevision + 1,
+            [Event(context, "identity.user.renamed", "identity.user", user, commit.ExpectedUserRevision + 1, UserPayload(commit.Caller.User))],
             writer => writer.WriteNumber("userRevision", commit.ExpectedUserRevision + 1));
         return new IdentityPlanCall(UserRenamePlan, commit.Scope, own, tail);
     }
@@ -138,7 +140,7 @@ internal static class IdentityStatements
         ];
         var tail = Tail(
             commit, context, "identity.account.enroll", caller, 1,
-            [Event(context, "identity.user.enrolled", user.Id.Value, 1, Payload(user.Id, credential.Id, (int)credential.Method))],
+            [Event(context, "identity.user.enrolled", "identity.user", user.Id.Value, 1, Payload(user.Id, credential.Id, (int)credential.Method))],
             writer =>
             {
                 writer.WriteString("workspaceId", workspace.Id.Value);
@@ -192,8 +194,21 @@ internal static class IdentityStatements
         return Utf8.GetString(stream.ToArray());
     }
 
-    private static OutboxEventContent Event(CommitContext context, string eventType, string aggregateId, long revision, string payload) =>
-        new(context.OutboxId, "identity.user", aggregateId, revision, eventType, payload, context.CorrelationId, context.CausationId);
+    private static OutboxEventContent Event(CommitContext context, string eventType, string aggregateKind, string aggregateId, long revision, string payload) =>
+        new(context.OutboxId, aggregateKind, aggregateId, revision, eventType, payload, context.CorrelationId, context.CausationId);
+
+    private static string UserPayload(UserId user)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("userId", user.Value);
+            writer.WriteEndObject();
+        }
+
+        return Utf8.GetString(stream.ToArray());
+    }
 
     /// <summary>
     /// The receipt, the events and the change record. The request hash is the SHA-256 of the canonical operation text, so a reused command
