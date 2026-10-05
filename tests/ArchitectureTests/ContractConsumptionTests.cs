@@ -180,7 +180,7 @@ public sealed class ContractConsumptionTests
         {
             public sealed class Method<TRequest, TResponse> { }
             public sealed class Marshaller<T> { }
-            public static class Marshallers { public static Marshaller<T> Create<T>() => new(); }
+            public static class Marshallers { public static Marshaller<T> Create<T>() => null!; }
             public abstract class ClientBase<T> { }
         }
         namespace Grpc.Net.Client.Web { public enum GrpcWebMode { GrpcWeb, GrpcWebText } }
