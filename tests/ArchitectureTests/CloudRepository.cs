@@ -66,14 +66,32 @@ internal static class CloudRepository
                 + string.Join(Environment.NewLine, errors.Select(error => error.ToString())));
     }
     /// <summary>
-    /// Source emitted by the pinned SDK's own first-party generators into the evaluation-owned generated directory. It is
-    /// reconstructed so that authored code resolves against it, but it is not Cloud-authored: its AOT safety is enforced by the Native AOT
-    /// compiler with warnings as errors (the candidate build), not by source scanning. Output of any other generator is never exempt.
+    /// Source emitted by the pinned SDK's own first-party generators into the evaluation-owned generated directory of the project being
+    /// scanned. It is reconstructed so that authored code resolves against it, but it is not Cloud-authored: its AOT safety is enforced by
+    /// the Native AOT compiler with warnings as errors (the candidate build), not by source scanning. The exemption is anchored: the
+    /// rooted tree path must lie under <c>&lt;projectDirectory&gt;/obj/arcforges-policy/Release/generated/&lt;generator&gt;/</c> with the
+    /// generator directory matching a listed name exactly. The producer deletes and recreates that directory for every evaluation, so
+    /// nothing committed there survives; a path anywhere else (a nested or another project's obj directory, a prefix-extended generator
+    /// name, a traversal) is authored source. Output of any other generator is never exempt.
     /// </summary>
-    public static bool IsOfficialGeneratorOutput(string path)
+    public static bool IsOfficialGeneratorOutput(string path, string? projectDirectory)
     {
-        var match = System.Text.RegularExpressions.Regex.Match(path.Replace('\\', '/'), @"/obj/arcforges-policy/[^/]+/generated/(?<generator>[^/]+)/");
-        return match.Success && OfficialGenerators.Any(prefix => match.Groups["generator"].Value.StartsWith(prefix, StringComparison.Ordinal));
+        if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(projectDirectory) || !Path.IsPathRooted(path) || !Path.IsPathRooted(projectDirectory))
+        {
+            return false;
+        }
+
+        string generated = Path.GetFullPath(Path.Combine(projectDirectory, "obj", "arcforges-policy", "Release", "generated"))
+            .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string full = Path.GetFullPath(path);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!full.StartsWith(generated, comparison))
+        {
+            return false;
+        }
+
+        string[] parts = full[generated.Length..].Split(Path.DirectorySeparatorChar);
+        return parts.Length >= 3 && OfficialGenerators.Any(generator => string.Equals(parts[0], generator, comparison));
     }
 
     internal static readonly string[] OfficialGenerators =
@@ -81,7 +99,6 @@ internal static class CloudRepository
         "System.Text.Json.SourceGeneration", "Microsoft.AspNetCore.Http.RequestDelegateGenerator", "Microsoft.Extensions.Logging.Generators",
         "System.Text.RegularExpressions.Generator", "Microsoft.Interop.LibraryImportGenerator",
     ];
-
     public static string FindRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

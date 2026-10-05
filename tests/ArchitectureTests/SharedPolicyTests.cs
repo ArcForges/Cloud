@@ -162,17 +162,65 @@ public sealed class SharedPolicyTests
         Assert.Contains(fixture.Check(), finding => finding.Rule == "RP-10");
     }
 
-    [Theory]
-    [InlineData("C:\\r\\src\\ArcForges.Cloud\\obj\\arcforges-policy\\Release\\generated\\System.Text.Json.SourceGeneration\\System.Text.Json.SourceGeneration.JsonSourceGenerator\\Ctx.g.cs", true)]
-    [InlineData("/r/src/ArcForges.Cloud/obj/arcforges-policy/Release/generated/Microsoft.AspNetCore.Http.RequestDelegateGenerator/X/Routes.g.cs", true)]
-    [InlineData("/r/src/ArcForges.Cloud/obj/arcforges-policy/Release/generated/Third.Party.Generator/X/Evil.g.cs", false)]
-    [InlineData("/r/src/ArcForges.Cloud/obj/Release/net10.0/generated/System.Text.Json.SourceGeneration/X/Stale.g.cs", false)]
-    [InlineData("/r/src/ArcForges.Cloud/Foundation/Authored.cs", false)]
-    [InlineData("/r/src/ArcForges.Cloud/System.Text.Json.SourceGeneration/Authored.cs", false)]
-    public void OnlyFirstPartyGeneratorOutputOfTheEvaluationIsExemptFromSourceScanning(string path, bool exempt)
+    private static readonly string Repo = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "gov09-repo"));
+    private static readonly string Service = Path.Combine(Repo, "src", "ArcForges.Cloud");
+
+    private static string Generated(params string[] parts) => Path.Combine([Service, "obj", "arcforges-policy", "Release", "generated", .. parts]);
+
+    public static TheoryData<string, bool> GeneratorPaths => new()
     {
-        Assert.Equal(exempt, CloudRepository.IsOfficialGeneratorOutput(path));
+        { Generated("System.Text.Json.SourceGeneration", "System.Text.Json.SourceGeneration.JsonSourceGenerator", "Ctx.g.cs"), true },
+        { Generated("Microsoft.AspNetCore.Http.RequestDelegateGenerator", "X", "Routes.g.cs"), true },
+        // Spoofs: the generator-looking directory is not the evaluation-owned directory of the scanned project.
+        { Path.Combine(Service, "Spoof", "obj", "arcforges-policy", "Release", "generated", "System.Text.Json.SourceGeneration", "X", "Evil.cs"), false },
+        { Path.Combine(Service, "Foundation", "obj", "arcforges-policy", "Release", "generated", "System.Text.Json.SourceGeneration", "X", "Evil.cs"), false },
+        { Path.Combine(Repo, "tests", "Other", "obj", "arcforges-policy", "Release", "generated", "System.Text.Json.SourceGeneration", "X", "Evil.cs"), false },
+        { Path.Combine(Service, "generated", "System.Text.Json.SourceGeneration", "X", "Evil.cs"), false },
+        { Path.Combine(Service, "arcforges-policy", "Release", "generated", "System.Text.Json.SourceGeneration", "X", "Evil.cs"), false },
+        { Path.Combine(Service, "obj", "Release", "generated", "System.Text.Json.SourceGeneration", "X", "Stale.cs"), false },
+        { Path.Combine(Service, "obj", "arcforges-policy", "Debug", "generated", "System.Text.Json.SourceGeneration", "X", "Evil.cs"), false },
+        // Names that merely start like a first-party generator, a generator directory with no output below it, and traversals.
+        { Generated("System.Text.Json.SourceGenerationX", "X", "Evil.cs"), false },
+        { Generated("Third.Party.Generator", "X", "Evil.cs"), false },
+        { Generated("System.Text.Json.SourceGeneration", "Evil.cs"), false },
+        { Generated("System.Text.Json.SourceGeneration", "..", "..", "..", "..", "..", "Authored.cs"), false },
+        { Path.Combine(Service, "Foundation", "Authored.cs"), false },
+        { Path.Combine(Service, "System.Text.Json.SourceGeneration", "Authored.cs"), false },
+    };
+
+    [Theory]
+    [MemberData(nameof(GeneratorPaths))]
+    public void OnlyFirstPartyGeneratorOutputOfTheScannedProjectsOwnEvaluationDirectoryIsExempt(string path, bool exempt)
+    {
+        Assert.Equal(exempt, CloudRepository.IsOfficialGeneratorOutput(path, Service));
+        Assert.False(CloudRepository.IsOfficialGeneratorOutput(path, null));
+        Assert.False(CloudRepository.IsOfficialGeneratorOutput(path, Path.Combine(Repo, "src", "Other")));
+        Assert.False(CloudRepository.IsOfficialGeneratorOutput("relative/path.cs", Service));
     }
+
+    [Fact]
+    public void ASpoofedGeneratorPathCannotHideBannedCodeSuppressionsJsonOrServiceBases()
+    {
+        const string suppression = "#pragma warning disable IL2026\nclass C { }";
+        const string json = "static class J { static string M(int value) => System.Text.Json.JsonSerializer.Serialize(value); }";
+        const string rpc = "namespace Grpc.Core { public sealed class Method<TRequest, TResponse> { } } class R { object M() => new Grpc.Core.Method<int, int>(); }";
+        string spoof = Path.Combine(Service, "Spoof", "obj", "arcforges-policy", "Release", "generated", "System.Text.Json.SourceGeneration", "X", "Evil.cs");
+        string real = Generated("System.Text.Json.SourceGeneration", "X", "Real.g.cs");
+        foreach (var (source, check) in new (string, Func<Microsoft.CodeAnalysis.CSharp.CSharpCompilation, string, int>)[]
+        {
+            (suppression, (compilation, directory) => CloudAotPolicy.FindSuppressions(compilation, directory).Count),
+            (json, (compilation, directory) => CloudAotPolicy.FindUnregisteredJsonSerialization(compilation, directory).Count),
+            (rpc, (compilation, directory) => ContractConsumptionPolicy.FindHandBuiltRpcDescriptors(compilation, directory).Count),
+        })
+        {
+            Assert.NotEqual(0, check(AtPath(source, spoof), Service));
+            Assert.NotEqual(0, check(AtPath(source, Path.Combine(Service, "Authored.cs")), Service));
+            Assert.Equal(0, check(AtPath(source, real), Service));
+        }
+    }
+
+    private static Microsoft.CodeAnalysis.CSharp.CSharpCompilation AtPath(string source, string path) =>
+        FixtureCompiler.Create("AtPath", new Dictionary<string, string> { [path] = source });
     [Fact]
     public void TheCloudCompilationReaderStaysFailClosed()
     {

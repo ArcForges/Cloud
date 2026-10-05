@@ -48,20 +48,22 @@ public sealed class EvaluatedRepositoryGate
         var findings = PolicyEngine.Check(repository, configuration, compilations, DateOnly.FromDateTime(DateTime.UtcNow)).ToList();
 
         var service = compilations[CloudRepository.Service];
+        string serviceDirectory = Path.GetDirectoryName(Path.GetFullPath(Path.Combine(root, CloudRepository.Service)))!;
         var serviceProject = projects.Single(project => project.Classification.Path == CloudRepository.Service);
         // Banned-symbol findings inside the SDK's own generator output are not Cloud-authored (see CloudRepository.IsOfficialGeneratorOutput).
-        findings.RemoveAll(finding => finding.Rule.StartsWith("BAN-", StringComparison.Ordinal) && CloudRepository.IsOfficialGeneratorOutput(finding.Path));
-        foreach (string problem in CloudAotPolicy.FindSuppressions(service))
+        findings.RemoveAll(finding => finding.Rule.StartsWith("BAN-", StringComparison.Ordinal) && CloudRepository.IsOfficialGeneratorOutput(finding.Path, serviceDirectory));
+        foreach (string problem in CloudAotPolicy.FindSuppressions(service, serviceDirectory))
         {
             findings.Add(new PolicyFinding("RP-07", CloudRepository.Service, "Trim or AOT suppression at " + problem));
         }
 
-        foreach (string problem in CloudAotPolicy.FindUnregisteredJsonSerialization(service))
+        foreach (string problem in CloudAotPolicy.FindUnregisteredJsonSerialization(service, serviceDirectory))
         {
             findings.Add(new PolicyFinding("BAN-REFLECTION", CloudRepository.Service, "JSON serialization without compile-time metadata at " + problem));
         }
 
-        foreach (string problem in ContractConsumptionPolicy.CheckServiceBases(service).Concat(ContractConsumptionPolicy.CheckNoAuthoredWireMessages(service)))
+        foreach (string problem in ContractConsumptionPolicy.CheckServiceBases(service, serviceDirectory).Concat(ContractConsumptionPolicy.CheckNoAuthoredWireMessages(service, serviceDirectory))
+            .Concat(ContractConsumptionPolicy.FindHandBuiltRpcDescriptors(service, serviceDirectory)).Concat(ContractConsumptionPolicy.FindTextEncodedGrpcWeb(service, serviceDirectory)))
         {
             findings.Add(new PolicyFinding("AT-04", CloudRepository.Service, problem));
         }

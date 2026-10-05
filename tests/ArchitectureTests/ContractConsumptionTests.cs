@@ -175,6 +175,58 @@ public sealed class ContractConsumptionTests
         Assert.Empty(ContractConsumptionPolicy.CheckNoAuthoredWireMessages(Compile(stub + " public sealed class Handler { public void Use(Google.Protobuf.IMessage message) { } }")));
     }
 
+    private const string GrpcStubs = """
+        namespace Grpc.Core
+        {
+            public sealed class Method<TRequest, TResponse> { }
+            public sealed class Marshaller<T> { }
+            public static class Marshallers { public static Marshaller<T> Create<T>() => new(); }
+            public abstract class ClientBase<T> { }
+        }
+        namespace Grpc.Net.Client.Web { public enum GrpcWebMode { GrpcWeb, GrpcWebText } }
+        """;
+
+    [Theory]
+    [InlineData("class U { object M() => new Grpc.Core.Method<string, string>(); }")]
+    [InlineData("class U { object M() { Grpc.Core.Method<int, int> m = new(); return m; } }")]
+    [InlineData("class U { object M() => new Grpc.Core.Marshaller<string>(); }")]
+    [InlineData("class U { object M() => Grpc.Core.Marshallers.Create<string>(); }")]
+    [InlineData("using static Grpc.Core.Marshallers; class U { object M() => Create<int>(); }")]
+    public void HandBuiltRpcDescriptorsAndMarshallersAreRejected(string source)
+    {
+        Assert.NotEmpty(ContractConsumptionPolicy.FindHandBuiltRpcDescriptors(Compile(GrpcStubs + "\n" + source)));
+    }
+
+    [Fact]
+    public void GeneratedServiceUseWithoutDescriptorConstructionIsAccepted()
+    {
+        Assert.Empty(ContractConsumptionPolicy.FindHandBuiltRpcDescriptors(Compile(GrpcStubs + " class U { object? M(Grpc.Core.Method<int, int>? generated) => generated; }")));
+    }
+
+    [Fact]
+    public void AHandWrittenGrpcClientIsRejected()
+    {
+        Assert.NotEmpty(ContractConsumptionPolicy.CheckNoAuthoredWireMessages(Compile(GrpcStubs + " sealed class Hand : Grpc.Core.ClientBase<Hand> { }")));
+        Assert.Empty(ContractConsumptionPolicy.CheckNoAuthoredWireMessages(Compile(GrpcStubs + " sealed class Plain { }")));
+    }
+
+    [Fact]
+    public void TextEncodedGrpcWebIsRejectedAndBinaryIsAccepted()
+    {
+        Assert.NotEmpty(ContractConsumptionPolicy.FindTextEncodedGrpcWeb(Compile(GrpcStubs + " class U { object M() => Grpc.Net.Client.Web.GrpcWebMode.GrpcWebText; }")));
+        Assert.Empty(ContractConsumptionPolicy.FindTextEncodedGrpcWeb(Compile(GrpcStubs + " class U { object M() => Grpc.Net.Client.Web.GrpcWebMode.GrpcWeb; }")));
+    }
+
+    [Fact]
+    public void AProjectItemNamingTheEvaluationOwnedDirectoryIsRejected()
+    {
+        string root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "cloud-root"));
+        var projects = new Dictionary<string, string>
+        {
+            ["src/Service/Service.csproj"] = "<Project Sdk=\"Microsoft.NET.Sdk\"><ItemGroup><Compile Include=\"obj/arcforges-policy/Release/generated/Evil.cs\" /></ItemGroup></Project>",
+        };
+        Assert.NotEmpty(ContractConsumptionPolicy.CheckProjectInputs(root, projects));
+    }
     private static string MapSource(string service, string declaration) => $$"""
         static class Mapper { public static void MapGrpcService<T>(this object app) where T : class { } }
         {{declaration}}

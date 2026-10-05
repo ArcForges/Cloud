@@ -70,6 +70,11 @@ internal static partial class ContractConsumptionPolicy
             foreach (var element in XDocument.Parse(xml).Descendants())
             {
                 string name = element.Name.LocalName;
+                if (element.Attributes().Any(attribute => attribute.Value.Contains("arcforges-policy", StringComparison.Ordinal)))
+                {
+                    problems.Add($"{path}: a project item names the evaluation-owned policy directory.");
+                }
+
                 if (name is "Protobuf" or "ProtoRoot" or "GrpcServices")
                 {
                     problems.Add($"{path}: Cloud authors no wire schema ({name}).");
@@ -126,10 +131,10 @@ internal static partial class ContractConsumptionPolicy
     /// declared in an ArcForges.Contracts assembly, never in the compiling project. A base without the attribute, or one declared in
     /// any other assembly, is a hand-written or foreign RPC surface.
     /// </summary>
-    public static IReadOnlyList<string> CheckServiceBases(Compilation compilation)
+    public static IReadOnlyList<string> CheckServiceBases(Compilation compilation, string? projectDirectory = null)
     {
         var problems = new List<string>();
-        foreach (var tree in compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath)))
+        foreach (var tree in compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath, projectDirectory)))
         {
             var model = compilation.GetSemanticModel(tree);
             foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
@@ -192,19 +197,31 @@ internal static partial class ContractConsumptionPolicy
         }
     }
 
-    /// <summary>Cloud consumes generated messages and never declares a protobuf message (wire type) of its own.</summary>
-    public static IReadOnlyList<string> CheckNoAuthoredWireMessages(Compilation compilation)
+    /// <summary>Cloud consumes generated messages and never declares a protobuf message, or derives a gRPC client, of its own.</summary>
+    public static IReadOnlyList<string> CheckNoAuthoredWireMessages(Compilation compilation, string? projectDirectory = null)
     {
         var problems = new List<string>();
-        foreach (var tree in compilation.SyntaxTrees)
+        foreach (var tree in Authored(compilation, projectDirectory))
         {
             var model = compilation.GetSemanticModel(tree);
             foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<BaseTypeDeclarationSyntax>())
             {
-                if (model.GetDeclaredSymbol(declaration) is INamedTypeSymbol { TypeKind: not TypeKind.Interface } type
-                    && type.AllInterfaces.Any(contract => contract.OriginalDefinition.ToDisplayString().StartsWith("Google.Protobuf.IMessage", StringComparison.Ordinal)))
+                if (model.GetDeclaredSymbol(declaration) is not INamedTypeSymbol { TypeKind: not TypeKind.Interface } type)
+                {
+                    continue;
+                }
+
+                if (type.AllInterfaces.Any(contract => contract.OriginalDefinition.ToDisplayString().StartsWith("Google.Protobuf.IMessage", StringComparison.Ordinal)))
                 {
                     problems.Add($"{type.ToDisplayString()} is an authored wire message.");
+                }
+
+                for (var current = type.BaseType; current is not null; current = current.BaseType)
+                {
+                    if (current.OriginalDefinition.ToDisplayString().StartsWith("Grpc.Core.ClientBase", StringComparison.Ordinal))
+                    {
+                        problems.Add($"{type.ToDisplayString()} is a hand-written gRPC client.");
+                    }
                 }
             }
         }
@@ -212,6 +229,55 @@ internal static partial class ContractConsumptionPolicy
         return problems;
     }
 
+    /// <summary>Hand-built method descriptors or marshallers bypass the generated service identity and descriptors.</summary>
+    public static IReadOnlyList<string> FindHandBuiltRpcDescriptors(Compilation compilation, string? projectDirectory = null)
+    {
+        var findings = new List<string>();
+        foreach (var tree in Authored(compilation, projectDirectory))
+        {
+            var model = compilation.GetSemanticModel(tree);
+            foreach (var creation in tree.GetRoot().DescendantNodes().OfType<BaseObjectCreationExpressionSyntax>())
+            {
+                if (model.GetTypeInfo(creation).Type is { } created
+                    && created.OriginalDefinition.ToDisplayString() is "Grpc.Core.Method<TRequest, TResponse>" or "Grpc.Core.Marshaller<T>")
+                {
+                    findings.Add(creation.GetLocation().ToString());
+                }
+            }
+
+            foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (model.GetSymbolInfo(invocation).Symbol is IMethodSymbol { Name: "Create", ContainingType: { } owner } && owner.ToDisplayString() == "Grpc.Core.Marshallers")
+                {
+                    findings.Add(invocation.GetLocation().ToString());
+                }
+            }
+        }
+
+        return findings;
+    }
+
+    /// <summary>Public business clients use binary gRPC-Web; the text-encoded mode is never selected.</summary>
+    public static IReadOnlyList<string> FindTextEncodedGrpcWeb(Compilation compilation, string? projectDirectory = null)
+    {
+        var findings = new List<string>();
+        foreach (var tree in Authored(compilation, projectDirectory))
+        {
+            var model = compilation.GetSemanticModel(tree);
+            foreach (var access in tree.GetRoot().DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            {
+                if (model.GetSymbolInfo(access).Symbol is IFieldSymbol { Name: "GrpcWebText", ContainingType: { } owner } && owner.ToDisplayString() == "Grpc.Net.Client.Web.GrpcWebMode")
+                {
+                    findings.Add(access.GetLocation().ToString());
+                }
+            }
+        }
+
+        return findings;
+    }
+
+    private static IEnumerable<SyntaxTree> Authored(Compilation compilation, string? projectDirectory) =>
+        compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath, projectDirectory));
     [GeneratedRegex(@"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$", RegexOptions.CultureInvariant)]
     private static partial Regex ExactVersion();
 }

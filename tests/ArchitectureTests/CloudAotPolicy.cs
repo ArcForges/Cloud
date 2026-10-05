@@ -71,10 +71,10 @@ internal static partial class CloudAotPolicy
     }
 
     /// <summary>Source-level escapes: pragmas, SuppressMessage and UnconditionalSuppressMessage for trim and AOT diagnostics.</summary>
-    public static IReadOnlyList<string> FindSuppressions(Compilation compilation)
+    public static IReadOnlyList<string> FindSuppressions(Compilation compilation, string? projectDirectory = null)
     {
         var findings = new List<string>();
-        foreach (var tree in compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath)))
+        foreach (var tree in compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath, projectDirectory)))
         {
             var root = tree.GetRoot();
             foreach (var pragma in root.DescendantTrivia(descendIntoTrivia: true).Select(trivia => trivia.GetStructure())
@@ -107,10 +107,10 @@ internal static partial class CloudAotPolicy
     /// Reflection-based System.Text.Json is unavailable on the AOT path. Every serializer entry point (including the ASP.NET Core
     /// JSON helpers) must receive compile-time metadata: a JsonTypeInfo or a JsonSerializerContext.
     /// </summary>
-    public static IReadOnlyList<string> FindUnregisteredJsonSerialization(Compilation compilation)
+    public static IReadOnlyList<string> FindUnregisteredJsonSerialization(Compilation compilation, string? projectDirectory = null)
     {
         var findings = new List<string>();
-        foreach (var tree in compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath)))
+        foreach (var tree in compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath, projectDirectory)))
         {
             var model = compilation.GetSemanticModel(tree);
             foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
