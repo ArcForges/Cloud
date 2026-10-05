@@ -69,7 +69,10 @@ test("a module references only the Abstractions and no package, and the shared p
   assert.deepEqual(includes(abstractions, "ProjectReference"), []);
   assert.deepEqual(includes(abstractions, "PackageReference"), []);
   const storage = read("src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj");
-  assert.deepEqual(includes(storage, "ProjectReference"), []);
+  // The plan bridge references the Abstractions project only to implement its generic plan-execution port (COM.16), never a module.
+  assert.deepEqual(includes(storage, "ProjectReference"), [
+    "../ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj",
+  ]);
   assert.deepEqual(includes(storage, "PackageReference"), ["ArcForges.Contracts.CloudInternal"]);
 });
 

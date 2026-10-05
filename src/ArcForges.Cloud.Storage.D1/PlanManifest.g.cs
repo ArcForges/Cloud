@@ -9,7 +9,134 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "6c30ccee93f8b66c8fd720b4238ef01a1412e792f0cf64d5d29d8ac8c9030b47";
+    public const string Hash = "b0a578caa28f69ba77e713df76d539d7e866d6d430623e1cc48e653e5999f3c4";
+
+    /// <summary>The reviewed plans of the entitlement owner (<c>storage/plans/entitlement</c>).</summary>
+    internal static class Entitlement
+    {
+        public static readonly PlanDefinition ActivationsLoad = new(
+            "entitlement.activations-load",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64)], [new(PlanKind.Text), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition Commit = new(
+            "entitlement.commit",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Scope)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition FeatureReleaseAppend = new(
+            "entitlement.feature-release-append",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Int64)], null)
+            ]);
+
+        public static readonly PlanDefinition FeatureReleaseGet = new(
+            "entitlement.feature-release-get",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text)], [new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition FeatureReleasesLoad = new(
+            "entitlement.feature-releases-load",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition GrantsLoad = new(
+            "entitlement.grants-load",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text, true)])
+            ]);
+
+        public static readonly PlanDefinition RevisionLoad = new(
+            "entitlement.revision-load",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Scope)], [new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition RevocationsLoad = new(
+            "entitlement.revocations-load",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition SnapshotLoad = new(
+            "entitlement.snapshot-load",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Scope)], [new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)])
+            ]);
+
+        public static readonly PlanDefinition StatusFactsLoad = new(
+            "entitlement.status-facts-load",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition TermActionsLoad = new(
+            "entitlement.term-actions-load",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition TermsLoad = new(
+            "entitlement.terms-load",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+    }
 
     /// <summary>The reviewed plans of the platform owner (<c>storage/plans/platform</c>).</summary>
     internal static class Platform
@@ -372,7 +499,7 @@ internal static class PlanManifest
             ]);
     }
 
-    public static readonly IReadOnlyList<PlanDefinition> All = [Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer];
+    public static readonly IReadOnlyList<PlanDefinition> All = [Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer];
 
     /// <summary>The closed registry of shared transaction families (<c>storage/plans/families.json</c>, Design SU-01).</summary>
     public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = [];

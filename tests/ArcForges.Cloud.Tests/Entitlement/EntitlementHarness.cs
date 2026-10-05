@@ -25,6 +25,7 @@ internal sealed class InMemoryEntitlementStore : IEntitlementStore
 {
     private readonly object gate = new();
     private readonly Dictionary<string, (EntitlementRecordSet Records, EntitlementSnapshot? Snapshot, long Revision)> rows = new(StringComparer.Ordinal);
+    private readonly List<FeatureReleaseFact> releases = [];
 
     /// <summary>Runs after a load and before the commit decision, to interleave another writer deterministically.</summary>
     public Func<Task>? BeforeNextCommit { get; set; }
@@ -36,7 +37,7 @@ internal sealed class InMemoryEntitlementStore : IEntitlementStore
         lock (gate)
         {
             var row = Row(workspaceId);
-            return ValueTask.FromResult(new EntitlementState(row.Records, row.Snapshot, row.Revision));
+            return ValueTask.FromResult(new EntitlementState(row.Records with { FeatureReleases = row.Records.FeatureReleases.AddRange(releases) }, row.Snapshot, row.Revision));
         }
     }
 
@@ -55,10 +56,24 @@ internal sealed class InMemoryEntitlementStore : IEntitlementStore
                 Grants = row.Records.Grants.AddRange(append.Grants),
                 Revocations = row.Records.Revocations.AddRange(append.Revocations),
                 Activations = row.Records.Activations.AddRange(append.Activations),
+                Terms = row.Records.Terms.AddRange(append.Terms.Select(term => term.Fact)),
+                TermActions = row.Records.TermActions.AddRange(append.TermActions.Select(action => action.Fact)),
+                StatusFacts = row.Records.StatusFacts.AddRange(append.StatusFacts.Select(fact => fact.Fact)),
             };
             rows[workspaceId] = (records, snapshot, row.Revision + 1);
             CommitCount++;
             return CommitOutcome.Committed;
+        }
+    }
+
+    public ValueTask<FeatureReleaseOutcome> AppendFeatureReleaseAsync(FeatureReleaseFact release, CancellationToken cancellationToken)
+    {
+        lock (gate)
+        {
+            var existing = releases.FirstOrDefault(candidate => candidate.Feature == release.Feature);
+            if (existing is not null) return ValueTask.FromResult(existing == release ? FeatureReleaseOutcome.AlreadyReleased : FeatureReleaseOutcome.Conflict);
+            releases.Add(release);
+            return ValueTask.FromResult(FeatureReleaseOutcome.Released);
         }
     }
 

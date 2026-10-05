@@ -8,13 +8,13 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "e0726a799d0031e10409ff656f30a036bc0c616d3aa37a3bc578c6108cadc168";
+    public const string ManifestHash = "0273dbd090cdc2cb7db14327aac86cd9eb4600775415eebdebc31dd34e9fd6ac";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
-    public const int HighestMigration = 23;
+    public const int HighestMigration = 24;
 
     /// <summary>SHA-256 over the ordered sequence and checksum of every locked migration.</summary>
-    public const string MigrationLockHash = "3740ebb64d91f9c1489453209e298a043ed950b161d1ca8ce182f56db62cce13";
+    public const string MigrationLockHash = "53751e3f5bd780159f8cfa607c41b5d57fbd1f3e038b6e6ad0ac818229a362c9";
 
     public static IReadOnlyList<PhysicalEnum> Enums { get; } =
     [
@@ -58,6 +58,7 @@ internal static partial class PhysicalSchema
         new("entitlement.quota_scope_kind", false, [new("workspace", 1), new("deployment", 2)]),
         new("entitlement.service_term_action_kind", false, [new("supersede", 1), new("revoke", 2)]),
         new("entitlement.service_term_kind", false, [new("subscription", 1), new("pass", 2), new("compensation", 3), new("selfHostGrant", 4)]),
+        new("entitlement.workspace_status", false, [new("normal", 1), new("restricted", 2), new("suspended", 3)]),
         new("HistoryMode", false, [new("local", 1), new("cloud", 2), new("temporary", 3)]),
         new("identity.auth_method", false, [new("passkey", 1), new("emailCode", 2), new("password", 3), new("oidc", 4)]),
         new("identity.browser_flow_method", false, [new("passkey", 1), new("emailCode", 2)]),
@@ -1038,6 +1039,25 @@ internal static partial class PhysicalSchema
         ],
         ["reservation_id"]);
 
+    public static PhysicalTable EntitlementDefinitionsActivation { get; } = new(
+        "entitlement_definitions_activation",
+        "entitlement",
+        [
+            new("workspace_id", PhysicalKind.Id, false),
+            new("activated_at", PhysicalKind.Instant, false),
+            new("definitions_version", PhysicalKind.Key, false),
+        ],
+        ["workspace_id", "activated_at"]);
+
+    public static PhysicalTable EntitlementFeatureRelease { get; } = new(
+        "entitlement_feature_release",
+        "entitlement",
+        [
+            new("feature_key", PhysicalKind.Key, false),
+            new("released_at", PhysicalKind.Instant, false),
+        ],
+        ["feature_key"]);
+
     public static PhysicalTable EntitlementGrant { get; } = new(
         "entitlement_grant",
         "entitlement",
@@ -1194,6 +1214,20 @@ internal static partial class PhysicalSchema
             new("updated_at", PhysicalKind.Instant, false),
         ],
         ["workspace_id", "quota_key", "period_start"]);
+
+    public static PhysicalTable EntitlementWorkspaceStatusFact { get; } = new(
+        "entitlement_workspace_status_fact",
+        "entitlement",
+        [
+            new("status_fact_id", PhysicalKind.Id, false),
+            new("workspace_id", PhysicalKind.Id, false),
+            new("recorded_at", PhysicalKind.Instant, false),
+            new("status", PhysicalKind.Enum, false, EnumName: "entitlement.workspace_status"),
+            new("auto_renew", PhysicalKind.Bool, false),
+            new("purchase_pending", PhysicalKind.Bool, false),
+            new("source_ref", PhysicalKind.Text, false),
+        ],
+        ["status_fact_id"]);
 
     public static PhysicalTable IdentityApiToken { get; } = new(
         "identity_api_token",
@@ -2881,6 +2915,8 @@ internal static partial class PhysicalSchema
         EntitlementCapacityPlanAssignment,
         EntitlementCapacityPolicyPeriod,
         EntitlementCapacityReservation,
+        EntitlementDefinitionsActivation,
+        EntitlementFeatureRelease,
         EntitlementGrant,
         EntitlementQuotaBudget,
         EntitlementQuotaEvent,
@@ -2891,6 +2927,7 @@ internal static partial class PhysicalSchema
         EntitlementServiceTermAction,
         EntitlementSnapshot,
         EntitlementUsageCounter,
+        EntitlementWorkspaceStatusFact,
         IdentityApiToken,
         IdentityAuthIdentity,
         IdentityBrowserAuthFlow,

@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="ArcForges.Contracts.CloudInternal" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj" />
     <InternalsVisibleTo Include="ArcForges.Cloud" />
     <InternalsVisibleTo Include="ArcForges.Cloud.Tests" />
   </ItemGroup>

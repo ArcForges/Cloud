@@ -41,6 +41,10 @@
     "entitlement.quota_event_kind": {
       "source": "model 01 section 6 quota_event typed consume/release/adjust event (inline, listed order)",
       "values": ["consume", "release", "adjust"]
+    },
+    "entitlement.workspace_status": {
+      "source": "model 01 section 6 entitlement.workspace_status_fact.status (inline, listed order; COM.16)",
+      "values": ["normal", "restricted", "suspended"]
     }
   },
   "tables": [
@@ -461,6 +465,54 @@
       ],
       "mutability": { "update": "none" },
       "note": "The model names no PK, only the immutable unique (reservation_id, effect_id), which is used as the PK (no surrogate invented). Column names derived from the model: measured_quantity (signed; adjust may be negative, so no sign check), budget_rev (resulting budget revision), and source object/segment/deletion receipt as three nullable ids with no exactly-one check (not stated). Immutable: update none; the model is silent on delete, so delete stays any."
+    },
+    {
+      "name": "entitlement_definitions_activation",
+      "model": "01 section 6 entitlement.definitions_activation (COM.16)",
+      "columns": [
+        { "name": "workspace_id", "type": "id" },
+        { "name": "activated_at", "type": "instant" },
+        { "name": "definitions_version", "type": "key" }
+      ],
+      "primaryKey": ["workspace_id", "activated_at"],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "Append-only input of the resolver (BN-02). No foreign key: the revision guard names only entitlement_ tables (CM-01 to CM-03). The first activation of a workspace does not raise the version; each later one does. Written in the same guarded batch as the snapshot it changes."
+    },
+    {
+      "name": "entitlement_workspace_status_fact",
+      "model": "01 section 6 entitlement.workspace_status_fact (COM.16)",
+      "columns": [
+        { "name": "status_fact_id", "type": "id" },
+        { "name": "workspace_id", "type": "id" },
+        { "name": "recorded_at", "type": "instant" },
+        { "name": "status", "type": "enum", "enum": "entitlement.workspace_status" },
+        { "name": "auto_renew", "type": "bool" },
+        { "name": "purchase_pending", "type": "bool" },
+        { "name": "source_ref", "type": "text" }
+      ],
+      "primaryKey": ["status_fact_id"],
+      "indexes": [
+        { "columns": ["workspace_id", "recorded_at"], "path": "the resolver's status scan" },
+        {
+          "columns": ["source_ref"],
+          "unique": true,
+          "path": "idempotent append per owning admission reference"
+        }
+      ],
+      "checks": [{ "name": "source_ref_shape", "sql": "length(\"source_ref\") BETWEEN 1 AND 128" }],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "Append-only (SU-03): auto_renew and purchase_pending are two independent facts. No foreign key to workspace_workspace: the guard names only entitlement_ tables. The newest fact recorded at or before the evaluated instant applies; same-instant facts resolve by the resolver's total order, never by row order."
+    },
+    {
+      "name": "entitlement_feature_release",
+      "model": "01 section 6 entitlement.feature_release (COM.16)",
+      "columns": [
+        { "name": "feature_key", "type": "key" },
+        { "name": "released_at", "type": "instant" }
+      ],
+      "primaryKey": ["feature_key"],
+      "mutability": { "update": "none", "delete": "none" },
+      "note": "Global, not per workspace: a feature is released once from released_at and a feature with no row is not released. Appended without a workspace revision; a snapshot learns of it at its next refresh (knowledge time)."
     }
   ]
 }
