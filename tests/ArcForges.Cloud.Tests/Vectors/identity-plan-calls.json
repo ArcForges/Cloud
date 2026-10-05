@@ -755,7 +755,7 @@
           "subject": "ada",
           "label": "Café ключ 😀",
           "passkey": null,
-          "password": "pbkdf2-sha256$600000$c2FsdA$aGFzaA",
+          "password": "verifier-example",
           "createdAt": 1790000001123456
         }
       },
@@ -846,7 +846,7 @@
           },
           {
             "kind": "text",
-            "value": "pbkdf2-sha256$600000$c2FsdA$aGFzaA"
+            "value": "verifier-example"
           }
         ],
         [

@@ -137,17 +137,17 @@ test("an enrollment creates the user, the credential and exactly one personal wo
 test("the outbox and change record of an enrollment carry identifiers and numbers and never the subject, the display name or a secret", async () => {
   const db = openIdentityD1();
   const user = uid();
-  await enroll(db, realmA, "private-subject-9d41", {
+  await enroll(db, realmA, "marker-subject-alpha", {
     user,
     displayName: "Private Display Name",
-    credential: credential(user, realmA, "private-subject-9d41", { label: "private-label-x" }),
+    credential: credential(user, realmA, "marker-subject-alpha", { label: "private-label-x" }),
   });
   const stored = JSON.stringify([
     rows(db, "SELECT payload FROM platform_outbox"),
     rows(db, "SELECT record FROM platform_change_archive"),
     rows(db, "SELECT actor_ref, operation, request_hash, result_payload FROM platform_command"),
   ]);
-  for (const secret of ["private-subject-9d41", "Private Display Name", "private-label-x"])
+  for (const secret of ["marker-subject-alpha", "Private Display Name", "private-label-x"])
     assert.equal(
       stored.includes(secret),
       false,

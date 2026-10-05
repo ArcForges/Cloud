@@ -70,7 +70,7 @@ const adaPassword: CredentialInput = {
   method: 3,
   subject: "ada",
   label: "Café ключ 😀",
-  password: "pbkdf2-sha256$600000$c2FsdA$aGFzaA",
+  password: "verifier-example",
   createdAt: now + 1_000_000,
 };
 const adaOidc: CredentialInput = {

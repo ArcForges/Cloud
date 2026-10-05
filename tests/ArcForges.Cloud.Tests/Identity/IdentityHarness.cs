@@ -233,7 +233,7 @@ internal sealed class IdentityHarness
             new PasskeyMaterial([1, 2, 3], [9, 8, 7], true, false, "[\"internal\"]", 0), null);
 
     public static NewCredential Password(string subject) =>
-        new("self-host-password", AuthMethod.Password, subject, null, null, "pbkdf2-sha256$600000$c2FsdA$aGFzaA");
+        new("self-host-password", AuthMethod.Password, subject, null, null, "verifier-example");
 
     public async Task<EnrollmentOutcome> EnrollAsync(RealmId realm, string subject, string name = "Ada", NewCredential? credential = null)
     {
