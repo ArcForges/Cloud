@@ -60,6 +60,13 @@
 !src/ArcForges.Cloud.Modules.Abstractions/Entitlement/*.cs
 !src/ArcForges.Cloud.Modules.Abstractions/Storage/
 !src/ArcForges.Cloud.Modules.Abstractions/Storage/*.cs
+!src/ArcForges.Cloud.Modules.*/Core/
+!src/ArcForges.Cloud.Modules.*/Core/Domain/
+!src/ArcForges.Cloud.Modules.*/Core/Domain/*.cs
+!src/ArcForges.Cloud.Modules.*/Core/Application/
+!src/ArcForges.Cloud.Modules.*/Core/Application/*.cs
+!src/ArcForges.Cloud.Modules.*/Core/Infrastructure/
+!src/ArcForges.Cloud.Modules.*/Core/Infrastructure/*.cs
 !artifacts/
 !artifacts/image-notices/
 !artifacts/image-notices/**

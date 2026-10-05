@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "com-16-cloud-worker-bundle-r1",
+  "id": "cloud-11-cloud-worker-bundle-r1",
   "kind": "generated",
   "sourceRepository": "https://github.com/ArcForges/Cloud",
   "sourceCommit": "9b51f99d48e5281fb7a8ec71aa7b6a37eaa7f145",
@@ -62,7 +62,7 @@
       "package": "arcforges-cloud-worker",
       "kind": "worker-bundle",
       "profile": "eng/provenance/artifact-profiles/cloud-release-r34.json",
-      "sha256": "5f2fcb1cd1a8c17b5c81869b31d8d8593fe0feee6f503fa786611738c447aa05"
+      "sha256": "c5871a2cca95918ac2d780efd2e159e56526ce1a39089e5b89397a07eb32fb1c"
     }
   ],
   "disposition": "Rewrite",
@@ -222,10 +222,10 @@
   },
   "review": {
     "owner": "Licensing and Provenance Owner",
-    "reviewer": "ArcForges delivery worker w-c20261005-com16 (maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-c20261005-cloud11 (CLOUD.11 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "reviewedOn": "2026-10-05",
     "decision": "approved",
-    "rationale": "COM.16 adds the published Entitlement grant port and the generic plan-execution port (new source files of the existing Abstractions project), their adapter in a new ModuleBinding folder of the existing Storage.D1 project, the Entitlement module's port adapter and D1 store (new source files of the existing Entitlement project), the Entitlement owner's named plans with the regenerated plan dictionary and manifest, one expand migration and the three new Entitlement tables of the physical manifest, the Docker context rules of the new source folders and new check and test scripts in package.json. The only project change is the project reference from Storage.D1 to the Abstractions project, with its project-reference entries in the per-project lock files. package.json, the project files and locks of the changed projects, the first-party inventory and the release records are hash-bound inputs, so they are re-bound here; the release profile and runtime notices are re-bound by immutable successor records because the first-party source file list of the Native AOT closure changed, and the Worker bundle record follows the new profile and the regenerated plan dictionary. No npm or NuGet coordinate, integrity value or closure entry changes, and no new native capability or broader source reuse permission is created.",
+    "rationale": "CLOUD.11 adds named storage plans (the identity owner and the account enrollment family), so the generated plan dictionary (worker/storage/plans.generated.ts) that the Worker bundles changes and with it the bundle bytes. No Worker source other than that generated file, no package, generator, legal file, export or output membership changes; the record follows the new profile.",
     "baselineCommit": "9b51f99d48e5281fb7a8ec71aa7b6a37eaa7f145",
     "reconciliation": false
   },

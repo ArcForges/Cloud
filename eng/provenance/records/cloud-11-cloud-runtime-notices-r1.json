@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "com-16-cloud-runtime-notices-r1",
+  "id": "cloud-11-cloud-runtime-notices-r1",
   "kind": "generated",
   "sourceRepository": "https://github.com/ArcForges/Cloud",
   "sourceCommit": "9b51f99d48e5281fb7a8ec71aa7b6a37eaa7f145",
@@ -41,6 +41,16 @@
     "src/ArcForges.Cloud.Modules.Entitlement/packages.lock.json",
     "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj",
     "src/ArcForges.Cloud.Modules.Identity/IdentityModule.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Application/IdentityService.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Application/Ports.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Application/Requests.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Domain/Identifiers.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Domain/IdentityRules.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Domain/Model.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Domain/UtcMicros.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Infrastructure/CommitContext.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Infrastructure/IdentityStatements.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Infrastructure/PlanArguments.cs",
     "src/ArcForges.Cloud.Modules.Identity/packages.lock.json",
     "src/ArcForges.Cloud.Modules.Notification/ArcForges.Cloud.Modules.Notification.csproj",
     "src/ArcForges.Cloud.Modules.Notification/NotificationModule.cs",
@@ -138,16 +148,7 @@
     "src/ArcForges.Cloud.Storage.D1/Outbox/OutboxPublisher.cs",
     "src/ArcForges.Cloud.Storage.D1/Outbox/SequenceStream.cs",
     "src/ArcForges.Cloud.Storage.D1/Archive/ChangeArchiveReader.cs",
-    "src/ArcForges.Cloud.Storage.D1/Archive/ChangeRecord.cs",
-    "src/ArcForges.Cloud.Modules.Abstractions/Entitlement/EntitlementGrantPort.cs",
-    "src/ArcForges.Cloud.Modules.Abstractions/Storage/ModulePlanPort.cs",
-    "src/ArcForges.Cloud.Modules.Abstractions/Storage/PlanValue.cs",
-    "src/ArcForges.Cloud.Modules.Entitlement/Persistence/D1EntitlementStore.cs",
-    "src/ArcForges.Cloud.Modules.Entitlement/Persistence/EntitlementRowCodec.cs",
-    "src/ArcForges.Cloud.Modules.Entitlement/Persistence/GuidEntitlementIdSource.cs",
-    "src/ArcForges.Cloud.Modules.Entitlement/Persistence/SnapshotColumns.cs",
-    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/EntitlementGrantPortAdapter.cs",
-    "src/ArcForges.Cloud.Storage.D1/ModuleBinding/ModulePlanPort.cs"
+    "src/ArcForges.Cloud.Storage.D1/Archive/ChangeRecord.cs"
   ],
   "licence": {
     "spdx": "AGPL-3.0-only",
@@ -172,7 +173,7 @@
       "package": "arcforges-cloud-container",
       "kind": "native-image-notices",
       "profile": "eng/provenance/artifact-profiles/cloud-release-r34.json",
-      "sha256": "5f2fcb1cd1a8c17b5c81869b31d8d8593fe0feee6f503fa786611738c447aa05"
+      "sha256": "c5871a2cca95918ac2d780efd2e159e56526ce1a39089e5b89397a07eb32fb1c"
     }
   ],
   "disposition": "Copy",
@@ -338,10 +339,10 @@
   },
   "review": {
     "owner": "Licensing and Provenance Owner",
-    "reviewer": "ArcForges delivery worker w-c20261005-com16 (maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-c20261005-cloud11 (CLOUD.11 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "reviewedOn": "2026-10-05",
     "decision": "approved",
-    "rationale": "COM.16 adds the published Entitlement grant port and the generic plan-execution port (new source files of the existing Abstractions project), their adapter in a new ModuleBinding folder of the existing Storage.D1 project, the Entitlement module's port adapter and D1 store (new source files of the existing Entitlement project), the Entitlement owner's named plans with the regenerated plan dictionary and manifest, one expand migration and the three new Entitlement tables of the physical manifest, the Docker context rules of the new source folders and new check and test scripts in package.json. The only project change is the project reference from Storage.D1 to the Abstractions project, with its project-reference entries in the per-project lock files. package.json, the project files and locks of the changed projects, the first-party inventory and the release records are hash-bound inputs, so they are re-bound here; the release profile and runtime notices are re-bound by immutable successor records because the first-party source file list of the Native AOT closure changed, and the Worker bundle record follows the new profile and the regenerated plan dictionary. No npm or NuGet coordinate, integrity value or closure entry changes, and no new native capability or broader source reuse permission is created.",
+    "rationale": "CLOUD.11 adds the core identity model as source files of the existing Identity module project (the Core folder: domain, application and infrastructure layers) and an InternalsVisibleTo item of that project, which are in the Native AOT closure already; no package, generator, legal file or native capability changes and no new source reuse permission is created. The release profile and this record are re-bound by immutable successors because the first-party source list and the input hashes of the Native AOT closure changed.",
     "baselineCommit": "9b51f99d48e5281fb7a8ec71aa7b6a37eaa7f145",
     "reconciliation": false
   },
