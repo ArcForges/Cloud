@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "c38374e620e87aff6bc9a3dc004ecd5149a3c140",
+  "sourceCommit": "912a851fca6f69928596967f560916386584b411",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -12,7 +12,7 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "b0581c303a7324b5038331dd7ba54cebf1fcd9bbdf1ab30bb042ae1173696f4e",
-    "package.json": "2a257cea384f49da2d83e8752cee949faba650c6f41a9289c899382acd0f294d",
+    "package.json": "30c7b78be1fcf3b260825909bb6de06233fa2cc84b5464a2c0b56e945ec548ef",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "e987c7c5f052759bb916bf9616d3a724430172c80ba3cc1a406c04231e6ee149",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -29,7 +29,7 @@
     "wrangler.json": "d7ed04c091f43fe9f246eba894c2c0a560fa7934d160bbbd34f57a75514c1c9e",
     "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
     "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
-    ".github/workflows/ci.yml": "e983f5b9471355e057e8a7d7762aa7f0d3e74d176d812cf34d2d4d35cd44bb5e",
+    ".github/workflows/ci.yml": "23b6d9bea16c4090723b0688251c34e4c9aa8b0b711ff78f221f93e95b3884c5",
     "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
     "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
     "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -78,9 +78,9 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-c20261005-cloud04 (CLOUD.04 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-c20261005-cloud70 (CLOUD.70 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "date": "2026-10-05",
-    "rationale": "CLOUD.04 follow-up (purge hardening): source files of the existing Storage.D1 project, the platform owner's plans, the plan generator rule, tests, one npm script block and the Docker context rules of the new source folders. package.json (new check and test scripts), the Docker context rules, the first-party inventory and the release records are hash-bound inputs, so they are re-bound here; the release profile and runtime notices are re-bound by immutable successor records because the first-party source file list of the Native AOT closure changed, and the Worker bundle record follows the new profile and the regenerated plan dictionary. No npm or NuGet coordinate, integrity value or closure entry changes, no project, reference or lock file changes, and no new native capability or broader source reuse permission is created.",
+    "rationale": "CLOUD.70 adds the gated D1 migration step of the deployment jobs: one new Node tooling file (eng/migrations/deploy.ts, not shipped), a guard call in tooling/cloudflare.ts, two workflow steps in .github/workflows/ci.yml, one new test file, one npm script and one test list entry, and the factual document. package.json and .github/workflows/ci.yml are the hash-bound inputs that change and are re-bound here, with the first-party inventory; no Worker source, plan dictionary, Docker context, Native AOT source list or shipped artifact changes, so the release profile and artifact records are retained unchanged. No npm or NuGet coordinate, integrity value or closure entry changes, no project, reference or lock file changes, and no new native capability or broader source reuse permission is created.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -90,7 +90,7 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "b0581c303a7324b5038331dd7ba54cebf1fcd9bbdf1ab30bb042ae1173696f4e",
-      "package.json": "2a257cea384f49da2d83e8752cee949faba650c6f41a9289c899382acd0f294d",
+      "package.json": "30c7b78be1fcf3b260825909bb6de06233fa2cc84b5464a2c0b56e945ec548ef",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "e987c7c5f052759bb916bf9616d3a724430172c80ba3cc1a406c04231e6ee149",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -107,7 +107,7 @@
       "wrangler.json": "d7ed04c091f43fe9f246eba894c2c0a560fa7934d160bbbd34f57a75514c1c9e",
       "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
       "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
-      ".github/workflows/ci.yml": "e983f5b9471355e057e8a7d7762aa7f0d3e74d176d812cf34d2d4d35cd44bb5e",
+      ".github/workflows/ci.yml": "23b6d9bea16c4090723b0688251c34e4c9aa8b0b711ff78f221f93e95b3884c5",
       "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
       "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
       "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -997,7 +997,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-04b-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-70-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

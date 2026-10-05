@@ -7,6 +7,7 @@ import { verifyProtocol, waitForHealth } from "./protocol.ts";
 import { verifyKotlin } from "./kotlin.ts";
 
 import { expectedIdentity, verifyHealthIdentity } from "./build-identity.ts";
+import { requireGatePassed } from "../eng/migrations/deploy.ts";
 
 const productionBase = "https://arcforges.com/api";
 const deploymentFile = path.join(root, "artifacts", "deployment.json");
@@ -51,6 +52,9 @@ async function deploy() {
     "Set the CLOUDFLARE_API_TOKEN environment secret; see docs/deployment.md.",
   );
   await requireCurrentMain(candidate.revision);
+  // CLOUD.70: nothing is pushed or promoted unless the gated D1 migration step passed for this very candidate
+  // (a failing or missing step stops promotion; the workflow step before this one writes the record).
+  requireGatePassed("production", candidate.revision);
   await run("docker", ["load", "--input", "artifacts/candidate/docker-image.tar"]);
   const imageId = await run(
     "docker",
