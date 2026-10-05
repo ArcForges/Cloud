@@ -154,6 +154,13 @@
       "module": "search",
       "mode": "expand",
       "sha256": "b791ca53af26db6722f545bf7fe132d4bcd5c8afada79f20d7fe772aa2d514ef"
+    },
+    {
+      "sequence": 22,
+      "file": "0022_platform__command-guard.sql",
+      "module": "platform",
+      "mode": "expand",
+      "sha256": "74e015c10a5a7cb16139b769af01a5a1e93e4009073eb1b0766a7d5a48eb078f"
     }
   ]
 }

@@ -8,13 +8,13 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "87277448c1ab49cfe7e88e6a7f5b7243d690a6e3fa6e175c018c007a90a87082";
+    public const string ManifestHash = "8a5644881b31e54eacd216d6b4260996ab8dcd9ac3d50adfe9bccb985ceddbd2";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
-    public const int HighestMigration = 21;
+    public const int HighestMigration = 22;
 
     /// <summary>SHA-256 over the ordered sequence and checksum of every locked migration.</summary>
-    public const string MigrationLockHash = "93a7e1fef4c10f3f8e155dff127b986f48e42096907ee4d398183215132bf52d";
+    public const string MigrationLockHash = "2f10dc5b921bbd08eea784a34214133c0b004adaa4ebd45320930b51ea92287c";
 
     public static IReadOnlyList<PhysicalEnum> Enums { get; } =
     [
@@ -1724,6 +1724,16 @@ internal static partial class PhysicalSchema
         ],
         ["command_id"]);
 
+    public static PhysicalTable PlatformCommandGuard { get; } = new(
+        "platform_command_guard",
+        "platform",
+        [
+            new("command_id", PhysicalKind.Id, false),
+            new("guard_key", PhysicalKind.Key, false),
+            new("allowed", PhysicalKind.Bool, false),
+        ],
+        ["command_id", "guard_key"]);
+
     public static PhysicalTable PlatformInbox { get; } = new(
         "platform_inbox",
         "platform",
@@ -2874,6 +2884,7 @@ internal static partial class PhysicalSchema
         PackageCatalogVersion,
         PlatformBackfillCheckpoint,
         PlatformCommand,
+        PlatformCommandGuard,
         PlatformInbox,
         PlatformJobLease,
         PlatformMigrationReceipt,

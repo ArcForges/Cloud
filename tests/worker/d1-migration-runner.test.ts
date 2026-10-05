@@ -790,6 +790,9 @@ test("editing a locked migration, leaving a gap or mismatching a header is refus
   }
 });
 
+/** The sequence number of the n-th migration numbered after the checked-in baseline (a later migration of another task moves it). */
+const sequence = (offset: number) => String(baseline.length + offset).padStart(4, "0");
+
 test("the integration owner numbers pending migrations in order and locks them; the lock stays append-only against its base", () => {
   const directory = copyCatalog();
   try {
@@ -805,9 +808,12 @@ test("the integration owner numbers pending migrations in order and locks them; 
     );
     assert.doesNotThrow(() => checkPending(directory));
     const assigned = assignPending(directory);
-    assert.deepEqual(assigned, ["0022_chat__add-pin.sql", "0023_identity__add-nickname.sql"]);
+    assert.deepEqual(assigned, [
+      `${sequence(0)}_chat__add-pin.sql`,
+      `${sequence(1)}_identity__add-nickname.sql`,
+    ]);
     const lock = readLock(directory);
-    assert.equal(lock.length, 24);
+    assert.equal(lock.length, baseline.length + 2);
     assert.deepEqual(appendOnlyProblems(baseLock, lock), []);
     // The same lock with a base entry edited is not append-only.
     const tampered = lock.map((entry, index) =>
@@ -829,7 +835,7 @@ test("the integration owner numbers pending migrations in order and locks them; 
     rmSync(path.join(directory, "pending", "chat__drop-it.sql"));
     lockNumbered(directory);
     const extended = loadCatalog(directory);
-    assert.equal(extended.length, 24);
+    assert.equal(extended.length, baseline.length + 2);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -851,7 +857,7 @@ test("an extended catalog applies on top of an already migrated database in orde
     const result = await applyPending(options(client, extended, "next", time));
     assert.deepEqual(
       result.applied.map((entry) => entry.file),
-      ["0022_identity__add-nickname.sql"],
+      [`${sequence(0)}_identity__add-nickname.sql`],
     );
     assert.equal(
       scalar(

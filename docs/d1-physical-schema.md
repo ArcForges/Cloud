@@ -10,7 +10,7 @@ boundaries are described in [storage plans](storage-plans.md).
 
 | Path                                                          | Content                                                                                                                                            |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/ArcForges.Cloud.Storage.D1/Physical/manifest/*.json`     | The checked-in physical manifest: one file per owner (19 modules and `platform`) and the closed enum registry `enums.json`. 154 tables.            |
+| `src/ArcForges.Cloud.Storage.D1/Physical/manifest/*.json`     | The checked-in physical manifest: one file per owner (19 modules and `platform`) and the closed enum registry `enums.json`. 155 tables.            |
 | `src/ArcForges.Cloud.Storage.D1/Physical/PhysicalSchema.g.cs` | Generated C# column maps, enum registry, manifest hash and migration-lock identity.                                                                |
 | `src/ArcForges.Cloud.Storage.D1/Physical/*.cs`                | The typed exact bind/result adapters: `ColumnCodec`, `PhysicalValue`, `RowShape`, `ExactOrderBytes`, `Fts5Query`, `SchemaCompatibility`.           |
 | `src/ArcForges.Cloud.Storage.D1/Migrations/`                  | The numbered, checksum-locked migrations (`NNNN_<module>__<slug>.sql`), `migrations.lock.json` and the `pending/` folder of unnumbered migrations. |
@@ -45,6 +45,10 @@ Immutable and append-only tables, columns that must never decrease (fences, wate
 triggers whose abort message contains `CHECK constraint failed: af_immutable_<table>` or `af_monotonic_<table>_<column>`, so the Worker's existing classifier reports them as
 a constraint failure. Model 01 section 12 invariants that span rows or modules stay in the guarded plans of their owners; each table's `note` in the manifest says what it
 leaves to a plan. The 28 foreign keys that model 01 declares across modules are kept and pinned by a test, so adding one is an explicit, reviewed change.
+
+`platform_command_guard` (CLOUD.06, migration `0022_platform__command-guard.sql`) holds the guard rows of one guarded batch: a check named `af_guard_failed` refuses
+`allowed = 0`, so a false guard rolls the whole D1 batch back and the Worker classifies it as a failed precondition, and the batch's last statement deletes the command's rows.
+It is described in [shared families](shared-families.md).
 
 ### Not in the manifest
 

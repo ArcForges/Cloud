@@ -23,6 +23,8 @@
 !src/ArcForges.Cloud.Storage.D1/Hmac/*.cs
 !src/ArcForges.Cloud.Storage.D1/Physical/
 !src/ArcForges.Cloud.Storage.D1/Physical/*.cs
+!src/ArcForges.Cloud.Storage.D1/SharedFamilies/
+!src/ArcForges.Cloud.Storage.D1/SharedFamilies/*.cs
 !src/ArcForges.Cloud.Storage.D1/*.csproj
 !src/ArcForges.Cloud.Storage.D1/packages.lock.json
 !src/ArcForges.Cloud.Modules.*/

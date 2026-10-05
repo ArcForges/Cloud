@@ -1,0 +1,324 @@
+{
+  "schemaVersion": 1,
+  "source": "Design data model 00 SU-04: Config, Identity, Workspace, Device, Entitlement, Commerce, Policy, Agent, Chat, Scope, Task, Search, PackageCatalog, Notification, Resource, Sync, Audit. Platform lies outside the order: its guards come first, its receipt and outbox statements last. Support and TrustSafety have no position.",
+  "lockOrder": [
+    "config",
+    "identity",
+    "workspace",
+    "device",
+    "entitlement",
+    "commerce",
+    "policy",
+    "agent",
+    "chat",
+    "scope",
+    "task",
+    "search",
+    "package-catalog",
+    "notification",
+    "resource",
+    "sync",
+    "audit"
+  ],
+  "guardClassOrder": ["authorization", "revision", "policy", "balance", "lease"],
+  "mutationClassOrder": ["bucket", "reservation", "record"],
+  "orderCases": [
+    {
+      "name": "every phase in order with platform first and last",
+      "valid": true,
+      "roles": [
+        "guard platform lease job-lease",
+        "guard config policy active-config",
+        "guard workspace authorization owner",
+        "guard entitlement revision workspace-revision",
+        "guard entitlement balance quota",
+        "guard policy policy source-policy",
+        "guard notification revision suppression",
+        "mutation entitlement bucket quota",
+        "mutation entitlement record revision",
+        "mutation notification record suppression",
+        "mutation platform record receipt",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "the smallest valid family plan",
+      "valid": true,
+      "roles": [
+        "guard identity revision user",
+        "mutation identity record user",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "all 17 modules in order, two statements each class",
+      "valid": true,
+      "roles": [
+        "guard config authorization a",
+        "guard identity authorization a",
+        "guard workspace authorization a",
+        "guard device authorization a",
+        "guard entitlement authorization a",
+        "guard commerce authorization a",
+        "guard policy authorization a",
+        "guard agent authorization a",
+        "guard chat authorization a",
+        "guard scope authorization a",
+        "guard task authorization a",
+        "guard search authorization a",
+        "guard package-catalog authorization a",
+        "guard notification authorization a",
+        "guard resource authorization a",
+        "guard sync authorization a",
+        "guard audit authorization a",
+        "mutation config record a",
+        "mutation sync record a",
+        "mutation audit bucket a",
+        "mutation audit reservation a",
+        "mutation audit record a",
+        "mutation audit record b",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "a mutation before a guard",
+      "valid": false,
+      "roles": [
+        "mutation identity record user",
+        "guard identity revision user",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "the release before a mutation",
+      "valid": false,
+      "roles": [
+        "guard identity revision user",
+        "release platform release release",
+        "mutation identity record user"
+      ]
+    },
+    {
+      "name": "workspace before identity among guards",
+      "valid": false,
+      "roles": [
+        "guard workspace revision a",
+        "guard identity revision a",
+        "mutation workspace record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "audit before sync among mutations",
+      "valid": false,
+      "roles": [
+        "guard sync revision a",
+        "guard audit revision a",
+        "mutation audit record a",
+        "mutation sync record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "a platform guard after a module guard",
+      "valid": false,
+      "roles": [
+        "guard identity revision a",
+        "guard platform lease job-lease",
+        "mutation identity record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "a platform mutation before a module mutation",
+      "valid": false,
+      "roles": [
+        "guard identity revision a",
+        "mutation platform record receipt",
+        "mutation identity record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "policy class before revision inside one module",
+      "valid": false,
+      "roles": [
+        "guard identity policy a",
+        "guard identity revision a",
+        "mutation identity record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "lease class before balance inside one module",
+      "valid": false,
+      "roles": [
+        "guard entitlement lease a",
+        "guard entitlement balance a",
+        "mutation entitlement record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "a reservation before a quota bucket",
+      "valid": false,
+      "roles": [
+        "guard entitlement revision a",
+        "mutation entitlement reservation a",
+        "mutation entitlement bucket a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "a record before a reservation",
+      "valid": false,
+      "roles": [
+        "guard entitlement revision a",
+        "mutation entitlement record a",
+        "mutation entitlement reservation a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "stable keys descending inside one class",
+      "valid": false,
+      "roles": [
+        "guard identity revision b",
+        "guard identity revision a",
+        "mutation identity record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "the same key twice in one class",
+      "valid": false,
+      "roles": [
+        "guard identity revision a",
+        "guard identity revision a",
+        "mutation identity record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "two releases",
+      "valid": false,
+      "roles": [
+        "guard identity revision a",
+        "mutation identity record a",
+        "release platform release release",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "a release that is not the platform's",
+      "valid": false,
+      "roles": [
+        "guard identity revision a",
+        "mutation identity record a",
+        "release identity release release"
+      ]
+    },
+    {
+      "name": "no release at the end of a plan that ends with a mutation is still ordered but a release in the middle is not",
+      "valid": false,
+      "roles": [
+        "guard identity revision a",
+        "release platform release release",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "Support has no position in the SU-04 order",
+      "valid": false,
+      "roles": [
+        "guard support revision a",
+        "mutation support record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "TrustSafety has no position in the SU-04 order",
+      "valid": false,
+      "roles": [
+        "guard trustsafety revision a",
+        "mutation trustsafety record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "a mutation class on a guard",
+      "valid": false,
+      "roles": [
+        "guard identity bucket a",
+        "mutation identity record a",
+        "release platform release release"
+      ]
+    },
+    {
+      "name": "a guard class on a mutation",
+      "valid": false,
+      "roles": [
+        "guard identity revision a",
+        "mutation identity authorization a",
+        "release platform release release"
+      ]
+    }
+  ],
+  "identity": {
+    "normalizedText": "-- plan: families.x.y\n-- version: 1\n",
+    "statementSql": ["INSERT INTO a (b) VALUES (?);", "DELETE FROM a WHERE b = ?;"],
+    "sha256": "ed759d9837777b073af8e093dfcdb1f69677b988c68d7bd883c323d47cf95383"
+  },
+  "fixturePlan": {
+    "id": "families.fixture-pair.commit",
+    "family": "fixture-pair",
+    "participants": [
+      { "module": "config", "required": true },
+      { "module": "workspace", "required": true },
+      { "module": "entitlement", "required": true },
+      { "module": "policy", "required": false },
+      { "module": "notification", "required": true }
+    ],
+    "statements": [
+      {
+        "role": "guard platform lease job-lease",
+        "params": ["text", "text", "text", "int64", "int64"]
+      },
+      { "role": "guard config policy active-config", "params": ["text", "text", "int64", "bytes"] },
+      {
+        "role": "guard workspace authorization owner",
+        "params": ["text", "scope", "text", "int64"]
+      },
+      {
+        "role": "guard entitlement revision workspace-revision",
+        "params": ["text", "scope", "int64"]
+      },
+      {
+        "role": "guard entitlement balance quota",
+        "params": ["text", "int64", "text", "text", "text", "int64", "int64", "int64"]
+      },
+      {
+        "role": "guard policy policy source-policy",
+        "params": ["text", "text", "text", "text", "int64"]
+      },
+      {
+        "role": "guard notification revision suppression",
+        "params": ["text", "text", "int64", "int64"]
+      },
+      {
+        "role": "mutation entitlement bucket quota",
+        "params": ["int64", "int64", "int64", "text", "text", "text"]
+      },
+      { "role": "mutation entitlement record revision", "params": ["int64", "scope"] },
+      {
+        "role": "mutation notification record suppression",
+        "params": ["text", "int64", "int64", "int64"]
+      },
+      {
+        "role": "mutation platform record receipt",
+        "params": ["text", "scope", "text", "text", "text", "int64", "int64", "int64", "int64"]
+      },
+      { "role": "release platform release release", "params": ["text"] }
+    ]
+  }
+}
