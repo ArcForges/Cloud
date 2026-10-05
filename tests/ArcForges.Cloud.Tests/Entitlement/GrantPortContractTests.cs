@@ -141,11 +141,15 @@ public sealed class GrantPortContractTests
     }
 
     [Theory]
-    [InlineData("reason \ud800")]
-    [InlineData("\udc00 reason")]
-    [InlineData("a\ud800b")]
-    public async Task TextWithAnUnpairedSurrogateIsRefusedBeforeAnyStoreCallAndAPairedOneIsAccepted(string text)
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task TextWithAnUnpairedSurrogateIsRefusedBeforeAnyStoreCallAndAPairedOneIsAccepted(int variant)
     {
+        // Built in the body: a test attribute cannot carry an unpaired surrogate (it would be replaced on the way).
+        var high = ((char)0xD800).ToString();
+        var low = ((char)0xDC00).ToString();
+        var text = variant switch { 0 => "reason " + high, 1 => low + " reason", _ => "a" + high + "b" };
         var (port, harness) = Create();
 
         Assert.Equal(EntitlementPortStatus.InvalidRequest, (await port.IssueGrantAsync(Command(source: EntitlementGrantSource.AdminGrant, reason: text), T.Ct)).Status);

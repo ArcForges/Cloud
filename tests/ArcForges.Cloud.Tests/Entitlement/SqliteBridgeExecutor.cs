@@ -100,7 +100,7 @@ internal sealed class SqliteBridgeExecutor : IPlanExecutor, IDisposable
     /// <summary>A workspace row for the tables that reference one (the foreign key to the identity owner is switched off for this fixture insert only).</summary>
     public Task SeedWorkspaceAsync(Guid workspace, CancellationToken cancellationToken) => ExecAsync(
         "PRAGMA foreign_keys = OFF; INSERT INTO workspace_workspace (workspace_id, realm_id, owner_user_id, name, data_region, protection_profile, state, created_at, rev) VALUES ('"
-        + workspace.ToString("D") + "', '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2', 'fixture', 'eu', 1, 1, 1, 0); PRAGMA foreign_keys = ON;",
+        + workspace.ToString("D") + "', '00000000-0000-4000-8000-0000000000a1', '" + workspace.ToString("D") + "', 'fixture', 'eu', 1, 1, 1, 0); PRAGMA foreign_keys = ON;",
         cancellationToken);
 
     private static string Message(string kind, string field, string value)
