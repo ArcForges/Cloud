@@ -2,9 +2,8 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0.401-noble-aot@sha256:96f3b7d45f53eb05990f05b89ce61c4e23d07a5098521c2f20b018630e34f298 AS build
 WORKDIR /source
 COPY global.json Directory.Build.props Directory.Build.targets Directory.Packages.props NuGet.Config ./
-COPY src/ArcForges.Cloud/ArcForges.Cloud.csproj src/ArcForges.Cloud/packages.lock.json ./src/ArcForges.Cloud/
+COPY src/ ./src/
 RUN dotnet restore src/ArcForges.Cloud --locked-mode
-COPY src/ArcForges.Cloud/ ./src/ArcForges.Cloud/
 COPY package-lock.json ./
 COPY eng/version-sources.json ./eng/version-sources.json
 ARG SOURCE_REVISION

@@ -19,6 +19,8 @@ internal static class CloudRepository
     public const string ServiceTests = "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj";
     public const string Consumer = "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj";
     public const string Host = "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj";
+    public const string ModuleAbstractions = "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj";
+    public const string StorageD1 = "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj";
 
     /// <summary>
     /// Cloud is one Native AOT host project and composition root. It is classified as the shell rather than an adapter on purpose: the
@@ -32,6 +34,31 @@ internal static class CloudRepository
         new(ServiceTests, ProjectRole.Test, Owner, Production: false, Aot: false),
         new(Consumer, ProjectRole.Test, Owner, Production: false, Aot: false),
         new(Host, ProjectRole.Test, Owner, Production: false, Aot: false),
+        // CLOUD.02 (ADP-07 inventory binding): the shared boundary types, the named-plan bridge and the nineteen module boundaries.
+        // The bridge is Persistence so that the host, a shell, may reference it (AT-14) and no module may (AT-07). A module boundary
+        // holds only its descriptor today, so it is classified as an Abstractions seam owned by its module; a module task that adds
+        // layered code re-reviews this role together with its own policy changes.
+        new(ModuleAbstractions, ProjectRole.Abstractions, Owner, Production: true, Aot: true),
+        new(StorageD1, ProjectRole.Persistence, Owner, Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj", ProjectRole.Abstractions, Owner, "Identity", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj", ProjectRole.Abstractions, Owner, "Workspace", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Devices/ArcForges.Cloud.Modules.Devices.csproj", ProjectRole.Abstractions, Owner, "Devices", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj", ProjectRole.Abstractions, Owner, "Entitlement", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Commerce/ArcForges.Cloud.Modules.Commerce.csproj", ProjectRole.Abstractions, Owner, "Commerce", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Chat/ArcForges.Cloud.Modules.Chat.csproj", ProjectRole.Abstractions, Owner, "Chat", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Task/ArcForges.Cloud.Modules.Task.csproj", ProjectRole.Abstractions, Owner, "Task", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj", ProjectRole.Abstractions, Owner, "Agent", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Sync/ArcForges.Cloud.Modules.Sync.csproj", ProjectRole.Abstractions, Owner, "Sync", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Resource/ArcForges.Cloud.Modules.Resource.csproj", ProjectRole.Abstractions, Owner, "Resource", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Search/ArcForges.Cloud.Modules.Search.csproj", ProjectRole.Abstractions, Owner, "Search", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.PackageCatalog/ArcForges.Cloud.Modules.PackageCatalog.csproj", ProjectRole.Abstractions, Owner, "PackageCatalog", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Notification/ArcForges.Cloud.Modules.Notification.csproj", ProjectRole.Abstractions, Owner, "Notification", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Policy/ArcForges.Cloud.Modules.Policy.csproj", ProjectRole.Abstractions, Owner, "Policy", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Scope/ArcForges.Cloud.Modules.Scope.csproj", ProjectRole.Abstractions, Owner, "Scope", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Configuration/ArcForges.Cloud.Modules.Configuration.csproj", ProjectRole.Abstractions, Owner, "Configuration", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Audit/ArcForges.Cloud.Modules.Audit.csproj", ProjectRole.Abstractions, Owner, "Audit", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.Support/ArcForges.Cloud.Modules.Support.csproj", ProjectRole.Abstractions, Owner, "Support", Production: true, Aot: true),
+        new("src/ArcForges.Cloud.Modules.TrustSafety/ArcForges.Cloud.Modules.TrustSafety.csproj", ProjectRole.Abstractions, Owner, "TrustSafety", Production: true, Aot: true),
     ];
 
     /// <summary>

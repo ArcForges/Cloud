@@ -22,6 +22,14 @@ public sealed class EvaluatedRepositoryGate
             ["NineRealSourceKindsAreIndependentAndDeterministic", "CurrentContractsReceiptShapeResolvesThroughTheHelloSchemaSource", "InvalidSourcesCannotProduceAReport"]),
         ("ArcForges.Cloud.BuildIdentity", "ValidateBuild", "ArcForges.Cloud.Tests.BuildIdentityTests", ["DirtyOrIncompleteCiIdentityIsRejected"]),
         ("ArcForges.Cloud.BuildIdentity", "FromAssembly", "ArcForges.Cloud.Tests.BuildMetadataTests", ["EveryOwnedAssemblyCarriesActualSourceAndBuildIdentity"]),
+        // CLOUD.02: the module boundary types. Descriptor creation is tested directly; the boundary entry points are exercised through
+        // the host composition that lists every module and by the composed host that maps them.
+        ("ArcForges.Cloud.Modules.ModuleDescriptor", "Create", "ArcForges.Cloud.Tests.ModuleBoundaryTests",
+            ["AMalformedDescriptorCannotBeCreated", "DescriptorsDeriveTheOwnerAndThePrefixFromTheSchemaOnly"]),
+        ("ArcForges.Cloud.Modules.IModuleBoundary", "Register", "ArcForges.Cloud.Tests.ModuleBoundaryTests",
+            ["TheHostListsEveryBoundaryOnceAndAListedBoundaryServesNothing", "TheComposedHostStillServesOnlyHelloAndHealthAndRefusesEveryModulePath"]),
+        ("ArcForges.Cloud.Modules.IModuleBoundary", "Map", "ArcForges.Cloud.Tests.ModuleBoundaryTests",
+            ["TheHostListsEveryBoundaryOnceAndAListedBoundaryServesNothing", "TheComposedHostStillServesOnlyHelloAndHealthAndRefusesEveryModulePath"]),
     ];
 
     [Fact]
@@ -47,25 +55,31 @@ public sealed class EvaluatedRepositoryGate
             CloudRepository.ReadPackageLicences(projects), new HashSet<string>(StringComparer.Ordinal), [], [], evidence);
         var findings = PolicyEngine.Check(repository, configuration, compilations, DateOnly.FromDateTime(DateTime.UtcNow)).ToList();
 
-        var service = compilations[CloudRepository.Service];
-        string serviceDirectory = Path.GetDirectoryName(Path.GetFullPath(Path.Combine(root, CloudRepository.Service)))!;
         var serviceProject = projects.Single(project => project.Classification.Path == CloudRepository.Service);
-        // Banned-symbol findings inside the SDK's own generator output are not Cloud-authored (see CloudRepository.IsOfficialGeneratorOutput).
-        findings.RemoveAll(finding => finding.Rule.StartsWith("BAN-", StringComparison.Ordinal) && CloudRepository.IsOfficialGeneratorOutput(finding.Path, serviceDirectory));
-        foreach (string problem in CloudAotPolicy.FindSuppressions(service, serviceDirectory))
+        // The source checks below ran on the service project alone while it held all the code. Code now also lives in the Native AOT
+        // projects it references (the plan bridge and the module boundaries), so the same checks run on every production project.
+        foreach (var production in projects.Where(project => project.Classification.Production))
         {
-            findings.Add(new PolicyFinding("RP-07", CloudRepository.Service, "Trim or AOT suppression at " + problem));
-        }
+            string path = production.Classification.Path;
+            var compilation = compilations[path];
+            string directory = Path.GetDirectoryName(Path.GetFullPath(Path.Combine(root, path)))!;
+            // Banned-symbol findings inside the SDK's own generator output are not Cloud-authored (see CloudRepository.IsOfficialGeneratorOutput).
+            findings.RemoveAll(finding => finding.Rule.StartsWith("BAN-", StringComparison.Ordinal) && CloudRepository.IsOfficialGeneratorOutput(finding.Path, directory));
+            foreach (string problem in CloudAotPolicy.FindSuppressions(compilation, directory))
+            {
+                findings.Add(new PolicyFinding("RP-07", path, "Trim or AOT suppression at " + problem));
+            }
 
-        foreach (string problem in CloudAotPolicy.FindUnregisteredJsonSerialization(service, serviceDirectory))
-        {
-            findings.Add(new PolicyFinding("BAN-REFLECTION", CloudRepository.Service, "JSON serialization without compile-time metadata at " + problem));
-        }
+            foreach (string problem in CloudAotPolicy.FindUnregisteredJsonSerialization(compilation, directory))
+            {
+                findings.Add(new PolicyFinding("BAN-REFLECTION", path, "JSON serialization without compile-time metadata at " + problem));
+            }
 
-        foreach (string problem in ContractConsumptionPolicy.CheckServiceBases(service, serviceDirectory).Concat(ContractConsumptionPolicy.CheckNoAuthoredWireMessages(service, serviceDirectory))
-            .Concat(ContractConsumptionPolicy.FindHandBuiltRpcDescriptors(service, serviceDirectory)).Concat(ContractConsumptionPolicy.FindTextEncodedGrpcWeb(service, serviceDirectory)))
-        {
-            findings.Add(new PolicyFinding("AT-04", CloudRepository.Service, problem));
+            foreach (string problem in ContractConsumptionPolicy.CheckServiceBases(compilation, directory).Concat(ContractConsumptionPolicy.CheckNoAuthoredWireMessages(compilation, directory))
+                .Concat(ContractConsumptionPolicy.FindHandBuiltRpcDescriptors(compilation, directory)).Concat(ContractConsumptionPolicy.FindTextEncodedGrpcWeb(compilation, directory)))
+            {
+                findings.Add(new PolicyFinding("AT-04", path, problem));
+            }
         }
 
         foreach (var unverified in evidence.Where(item => !item.Passed))

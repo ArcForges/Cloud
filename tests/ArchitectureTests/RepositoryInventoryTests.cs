@@ -8,7 +8,7 @@ namespace ArcForges.Cloud.ArchitectureTests;
 public sealed class RepositoryInventoryTests
 {
     private static readonly DateOnly Today = new(2026, 10, 4);
-    private static readonly string[] Files = [CloudRepository.Service, CloudRepository.ServiceTests, CloudRepository.Consumer, CloudRepository.Host];
+    private static readonly string[] Files = [.. CloudRepository.Classifications.Select(project => project.Path)];
 
     private static string Solution(params string[] paths) =>
         "<Solution>" + string.Concat(paths.Select(path => $"<Project Path=\"{path}\" />")) + "</Solution>";
@@ -22,10 +22,10 @@ public sealed class RepositoryInventoryTests
     [Fact]
     public void ADriftedOrUnclassifiedProjectIsRejected()
     {
-        Assert.NotEmpty(RepositoryInventoryPolicy.CheckProjects(Solution(Files[..3]), Files, CloudRepository.Classifications));
+        Assert.NotEmpty(RepositoryInventoryPolicy.CheckProjects(Solution(Files[..^1]), Files, CloudRepository.Classifications));
         Assert.NotEmpty(RepositoryInventoryPolicy.CheckProjects(Solution([.. Files, "src/New/New.csproj"]), Files, CloudRepository.Classifications));
         Assert.NotEmpty(RepositoryInventoryPolicy.CheckProjects(Solution(Files), [.. Files, "src/New/New.csproj"], CloudRepository.Classifications));
-        Assert.NotEmpty(RepositoryInventoryPolicy.CheckProjects(Solution(Files), Files, CloudRepository.Classifications.Take(3)));
+        Assert.NotEmpty(RepositoryInventoryPolicy.CheckProjects(Solution(Files), Files, CloudRepository.Classifications.Take(Files.Length - 1)));
         Assert.NotEmpty(RepositoryInventoryPolicy.CheckProjects(Solution(Files), Files, [.. CloudRepository.Classifications, CloudRepository.Classifications[0]]));
     }
 

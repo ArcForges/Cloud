@@ -10,10 +10,10 @@ public sealed class ActualRepositoryTests
     private static readonly string Root = CloudRepository.FindRoot();
 
     [Fact]
-    public void SolutionProjectFilesAndRolesAreTheSameFourProjects()
+    public void SolutionProjectFilesAndRolesAreTheSameClassifiedProjects()
     {
         var files = TrackedFiles().Where(file => file.EndsWith(".csproj", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(4, files.Length);
+        Assert.Equal(CloudRepository.Classifications.Count, files.Length);
         Assert.Empty(RepositoryInventoryPolicy.CheckProjects(CloudRepository.Read(Root, "Cloud.slnx"), files, CloudRepository.Classifications));
     }
 

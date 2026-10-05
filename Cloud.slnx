@@ -1,6 +1,27 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/ArcForges.Cloud/ArcForges.Cloud.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Devices/ArcForges.Cloud.Modules.Devices.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Commerce/ArcForges.Cloud.Modules.Commerce.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Chat/ArcForges.Cloud.Modules.Chat.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Task/ArcForges.Cloud.Modules.Task.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Sync/ArcForges.Cloud.Modules.Sync.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Resource/ArcForges.Cloud.Modules.Resource.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Search/ArcForges.Cloud.Modules.Search.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.PackageCatalog/ArcForges.Cloud.Modules.PackageCatalog.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Notification/ArcForges.Cloud.Modules.Notification.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Policy/ArcForges.Cloud.Modules.Policy.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Scope/ArcForges.Cloud.Modules.Scope.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Configuration/ArcForges.Cloud.Modules.Configuration.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Audit/ArcForges.Cloud.Modules.Audit.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.Support/ArcForges.Cloud.Modules.Support.csproj" />
+    <Project Path="src/ArcForges.Cloud.Modules.TrustSafety/ArcForges.Cloud.Modules.TrustSafety.csproj" />
+    <Project Path="src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj" />

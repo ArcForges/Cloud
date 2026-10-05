@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using ArcForges.Cloud.Foundation;
 using ArcForges.Cloud.Ingress;
+using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Storage;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -30,7 +31,7 @@ internal static class HostModules
     /// <summary>The ingress module comes first so its pipeline runs before the gRPC-Web adapter; it reads the other modules' policies when mapping.</summary>
     public static IReadOnlyList<IHostModule> All(JsonObject identity)
     {
-        IHostModule[] served = [new HelloModule(identity), new FoundationModule()];
+        IHostModule[] served = [new HelloModule(identity), new FoundationModule(), .. ModuleBoundaries.All.Select(boundary => new ModuleBoundaryHost(boundary))];
         return [new IngressModule(served), .. served];
     }
 }

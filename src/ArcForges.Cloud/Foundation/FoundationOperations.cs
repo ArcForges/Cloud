@@ -123,7 +123,7 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
         PlanResult store;
         try
         {
-            store = await RunAsync(PlanManifest.ExactStore, request.Scope, cancellationToken,
+            store = await RunAsync(PlanManifest.Foundation.ExactStore, request.Scope, cancellationToken,
                 [[D1Values.Text(request.CommandId), D1Values.Text(request.Scope), D1Values.Text(request.Id), D1Values.Int64(expected)],
                     [D1Values.Text(request.Scope), D1Values.Text(request.Id), D1Values.Int64(signed), D1Values.Uint64(unsigned), D1Values.Decimal(amount),
                         payload is null ? D1Values.Null() : D1Values.Bytes(payload), D1Values.Int64(expected)],
@@ -139,7 +139,7 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
             return replay is null ? OperationReply.Conflict : OperationReply.Json(StatusCodes.Status200OK, replay with { Replayed = true }, FoundationJsonContext.Default.ExactResponse);
         }
 
-        var load = await RunAsync(PlanManifest.ExactLoad, request.Scope, cancellationToken, [[D1Values.Text(request.Scope), D1Values.Text(request.Id)]]);
+        var load = await RunAsync(PlanManifest.Foundation.ExactLoad, request.Scope, cancellationToken, [[D1Values.Text(request.Scope), D1Values.Text(request.Id)]]);
         var exact = false;
         if (load.Rows.Count == 1)
         {
@@ -172,7 +172,7 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
 
     private async Task<(string Hash, string Result)?> LoadReceiptAsync(string scope, string commandId, CancellationToken cancellationToken)
     {
-        var result = await RunAsync(PlanManifest.ReceiptLoad, scope, cancellationToken, [[D1Values.Text(scope), D1Values.Text(commandId)]]);
+        var result = await RunAsync(PlanManifest.Foundation.ReceiptLoad, scope, cancellationToken, [[D1Values.Text(scope), D1Values.Text(commandId)]]);
         if (result.Rows.Count != 1 || !D1Values.TryGetText(result.Rows[0][0], out var hash) || !D1Values.TryGetText(result.Rows[0][1], out var stored)) return null;
         return (hash, stored);
     }
@@ -181,14 +181,14 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
 
     private async Task<(long Balance, long Revision)?> LoadAccountAsync(string scope, string id, CancellationToken cancellationToken)
     {
-        var result = await RunAsync(PlanManifest.AccountLoad, scope, cancellationToken, [[D1Values.Text(scope), D1Values.Text(id)]]);
+        var result = await RunAsync(PlanManifest.Foundation.AccountLoad, scope, cancellationToken, [[D1Values.Text(scope), D1Values.Text(id)]]);
         if (result.Rows.Count != 1 || !D1Values.TryGetInt64(result.Rows[0][0], out var balance) || !D1Values.TryGetInt64(result.Rows[0][1], out var revision)) return null;
         return (balance, revision);
     }
 
     private async Task<(long Count, long MaxSequence)> LoadOutboxAsync(string scope, CancellationToken cancellationToken)
     {
-        var result = await RunAsync(PlanManifest.OutboxState, scope, cancellationToken, [[D1Values.Text(scope)]]);
+        var result = await RunAsync(PlanManifest.Foundation.OutboxState, scope, cancellationToken, [[D1Values.Text(scope)]]);
         if (result.Rows.Count != 1 || !D1Values.TryGetInt64(result.Rows[0][0], out var count) || !D1Values.TryGetInt64(result.Rows[0][1], out var max))
             throw new PlanFailureException(PlanFailureKind.InvalidPlan);
         return (count, max);
@@ -215,8 +215,8 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
         }
 
         var scope = request.Scope;
-        if (seedFrom is { } sf) await RunAsync(PlanManifest.AccountSeed, scope, cancellationToken, [[D1Values.Text(scope), D1Values.Text(request.From), D1Values.Int64(sf)]]);
-        if (seedTo is { } st) await RunAsync(PlanManifest.AccountSeed, scope, cancellationToken, [[D1Values.Text(scope), D1Values.Text(request.To), D1Values.Int64(st)]]);
+        if (seedFrom is { } sf) await RunAsync(PlanManifest.Foundation.AccountSeed, scope, cancellationToken, [[D1Values.Text(scope), D1Values.Text(request.From), D1Values.Int64(sf)]]);
+        if (seedTo is { } st) await RunAsync(PlanManifest.Foundation.AccountSeed, scope, cancellationToken, [[D1Values.Text(scope), D1Values.Text(request.To), D1Values.Int64(st)]]);
         var outboxBefore = await LoadOutboxAsync(scope, cancellationToken);
         if (await LoadAccountAsync(scope, request.From, cancellationToken) is not { } source || await LoadAccountAsync(scope, request.To, cancellationToken) is not { } target)
             return OperationReply.NotFound;
@@ -239,7 +239,7 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
         var expectedFrom = overrideRevision ?? source.Revision;
         try
         {
-            await RunAsync(PlanManifest.Transfer, scope, cancellationToken,
+            await RunAsync(PlanManifest.Foundation.Transfer, scope, cancellationToken,
                 [[D1Values.Text(command), D1Values.Text(scope), D1Values.Text(request.From), D1Values.Int64(expectedFrom), D1Values.Int64(amount),
                         D1Values.Text(scope), D1Values.Text(request.To), D1Values.Int64(target.Revision)],
                     [D1Values.Int64(amount), D1Values.Text(scope), D1Values.Text(request.From), D1Values.Int64(expectedFrom)],
