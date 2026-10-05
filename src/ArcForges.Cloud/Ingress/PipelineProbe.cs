@@ -2,6 +2,8 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using ArcForges.Contracts.Foundation.V1;
+using Google.Protobuf;
 
 namespace ArcForges.Cloud.Ingress;
 
@@ -36,7 +38,10 @@ internal sealed class PipelineProbeState
 /// trailer, and an observation of how the host saw its streams end. It is registered only when the foundation proof is enabled, so the
 /// production host and Worker route table do not contain it. The messages are hand-framed proof bytes, not Contracts records: the pinned
 /// generated surface carries no authenticated unary or server-streaming method that fits, and no wire meaning is invented for product use.
-/// Request messages follow the envelope convention (field 1 is <c>RequestMeta</c>).
+/// Request messages follow the envelope convention (field 1 is <c>RequestMeta</c>). Every reply the probe builds carries the call's
+/// correlation identity the way a business reply does (CLOUD.69): field 10 is <c>ResponseMeta</c> (a unary reply and every stream frame)
+/// and, for an acknowledged domain refusal, field 11 is an <c>ArcError</c> in a reply with an OK status. Whoami asks for that refusal with
+/// request field 10 set to 1; it is the one place the host builds an <c>ArcError</c> today.
 /// </summary>
 internal static partial class PipelineProbe
 {
@@ -48,6 +53,10 @@ internal static partial class PipelineProbe
     public const int MaxTotalMilliseconds = 30_000;
     public const int DefaultFrames = 3;
     public const int DefaultIntervalMilliseconds = 100;
+    public const int MetaField = 10;
+    public const int ErrorField = 11;
+    public const int RefuseField = 10;
+    public const string RefusalCode = "state.not_found";
     public const string TrailerName = "x-af-probe";
     public const string TrailerValue = "done";
 
@@ -68,22 +77,56 @@ internal static partial class PipelineProbe
     private static async Task WhoamiAsync(HttpContext context)
     {
         var call = context.Features.Get<IngressCall>()!;
+        using var body = new MemoryStream();
+        await context.Request.Body.CopyToAsync(body, context.RequestAborted);
+        if (WantsRefusal(body.ToArray()))
+        {
+            // An acknowledged domain refusal: gRPC OK, and the outcome is an ArcError that carries the call's correlation identity.
+            var refusal = new ProtoBuilder()
+                .Bytes(MetaField, CorrelationReplies.Meta(call.Correlation).ToByteArray())
+                .Bytes(ErrorField, CorrelationReplies.Error(call.Correlation, RefusalCode, ErrorCategory.State, RefusalCode).ToByteArray());
+            await WriteUnaryAsync(context, refusal.ToArray());
+            return;
+        }
+
         var message = new ProtoBuilder()
             .String(1, call.Caller.SessionId ?? "")
             .String(2, call.Caller.UserId ?? "")
             .String(3, call.Owner?.WorkspaceId ?? "")
-            .Varint(4, call.Owner?.RecoveryGeneration ?? 0);
+            .Varint(4, call.Owner?.RecoveryGeneration ?? 0)
+            .Bytes(MetaField, CorrelationReplies.Meta(call.Correlation).ToByteArray());
         await WriteUnaryAsync(context, message.ToArray());
+    }
+
+    /// <summary>The pipeline already read this envelope strictly; here only the proof's own request field is looked at.</summary>
+    private static bool WantsRefusal(byte[] body)
+    {
+        if (!GrpcWebFraming.TryReadSingleMessage(body, out var message)) return false;
+        var position = 0;
+        while (position < message.Length)
+        {
+            if (!ProtoWire.TryReadTag(message, ref position, out var field, out var wire)) return false;
+            if (field == RefuseField && wire == 0)
+            {
+                return ProtoWire.TryReadVarint(message, ref position, out var value) && value == 1;
+            }
+
+            if (!ProtoWire.TrySkip(message, ref position, wire)) return false;
+        }
+
+        return false;
     }
 
     private static async Task ObservationAsync(HttpContext context)
     {
         var state = context.RequestServices.GetRequiredService<PipelineProbeState>();
+        var call = context.Features.Get<IngressCall>()!;
         var message = new ProtoBuilder()
             .Varint(1, (ulong)state.Started)
             .Varint(2, (ulong)state.Completed)
             .Varint(3, (ulong)state.Canceled)
-            .Varint(4, (ulong)state.DeadlineExceeded);
+            .Varint(4, (ulong)state.DeadlineExceeded)
+            .Bytes(MetaField, CorrelationReplies.Meta(call.Correlation).ToByteArray());
         await WriteUnaryAsync(context, message.ToArray());
     }
 
@@ -101,6 +144,7 @@ internal static partial class PipelineProbe
     private static async Task StreamAsync(HttpContext context)
     {
         var state = context.RequestServices.GetRequiredService<PipelineProbeState>();
+        var meta = CorrelationReplies.Meta(context.Features.Get<IngressCall>()!.Correlation).ToByteArray();
         using var body = new MemoryStream();
         await context.Request.Body.CopyToAsync(body, context.RequestAborted);
         if (!TryReadStreamRequest(body.ToArray(), out var frames, out var interval))
@@ -121,7 +165,7 @@ internal static partial class PipelineProbe
             for (var sequence = 0; sequence < frames; sequence++)
             {
                 if (sequence > 0 && interval > 0) await Task.Delay(interval, linked.Token);
-                var message = new ProtoBuilder().Varint(1, (ulong)sequence).Bytes(2, Payload(sequence));
+                var message = new ProtoBuilder().Varint(1, (ulong)sequence).Bytes(2, Payload(sequence)).Bytes(MetaField, meta);
                 await response.Body.WriteAsync(GrpcWebFraming.Frame(message.ToArray()), linked.Token);
                 await response.Body.FlushAsync(linked.Token);
             }

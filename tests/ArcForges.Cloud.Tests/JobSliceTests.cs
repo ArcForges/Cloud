@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using ArcForges.Cloud.Foundation;
+using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Storage;
 using Xunit;
 
@@ -20,7 +21,7 @@ public sealed class JobSliceTests
     private static async Task<string> StartAsync(JobSliceService jobs, int total) => await jobs.StartAsync(Scope, total, T.Ct);
 
     private static Task<SliceResult> SliceAsync(JobSliceService jobs, string job, string? eventId = null, int items = 100, int milliseconds = 20_000) =>
-        jobs.SliceAsync(Scope, job, eventId ?? T.Uuid(), items, milliseconds, T.Ct);
+        jobs.SliceAsync(Scope, job, eventId ?? T.Uuid(), items, milliseconds, CorrelationContext.Continue(T.Uuid(), T.Uuid()), T.Ct);
 
     [Fact]
     public void ItemAmountsAreExactCheckedInt64AndTheRunningSumPassesTwoToTheFiftyThree()

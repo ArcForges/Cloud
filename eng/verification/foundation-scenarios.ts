@@ -6,6 +6,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
+  correlationAbsent,
+  correlationErrorReply,
+  correlationMalformed,
+  correlationQueueWake,
+  correlationSupplied,
   pipelineRefusals,
   pipelineStream,
   pipelineStreamCancel,
@@ -349,6 +354,9 @@ export async function checkpointRestart(
     scope,
     jobId,
     eventId: randomUUID(),
+    // The private slice request requires the chain's identity and its cause (CLOUD.69).
+    correlationId: randomUUID(),
+    causationId: randomUUID(),
     maxItems: 100,
     maxMilliseconds: 20_000,
   });
@@ -767,6 +775,11 @@ export async function runScenarios(
       ["pipeline-stream", () => pipelineStream(target)],
       ["pipeline-stream-cancel", () => pipelineStreamCancel(target)],
       ["pipeline-stream-deadline", () => pipelineStreamDeadline(target)],
+      ["correlation-supplied", () => correlationSupplied(target)],
+      ["correlation-absent", () => correlationAbsent(target)],
+      ["correlation-malformed", () => correlationMalformed(target)],
+      ["correlation-error-reply", () => correlationErrorReply(target)],
+      ["correlation-queue-wake", () => correlationQueueWake(target)],
     );
   if (target.egressProbe) steps.push(["egress-blocked", () => egressProbe(target)]);
   if (target.helloIngress) steps.push(["hello-ingress", () => helloIngress(target)]);

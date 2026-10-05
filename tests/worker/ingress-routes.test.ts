@@ -93,6 +93,8 @@ interface HostPolicy {
   kind: "unary" | "serverStream";
   auth: "anonymous" | "session";
   maxRequestBytes: number;
+  /** The host reads a correlation id from a RequestMeta: every workspace-scoped method, or one that opts in. */
+  readsRequestMeta: boolean;
 }
 
 function hostPolicies(): Map<string, HostPolicy> {
@@ -104,7 +106,7 @@ function hostPolicies(): Map<string, HostPolicy> {
     constants.set(match[1] as string, match[2] as string);
   const policies = new Map<string, HostPolicy>();
   const call =
-    /RpcPolicy\.(Unary|ServerStream)\(\s*("[^"]+"|\w+)\s*,\s*RpcAuthentication\.(Anonymous|Session)\s*,\s*RpcScope\.(\w+)\s*(?:,\s*(\d+)\s*)?\)/gu;
+    /RpcPolicy\.(Unary|ServerStream)\(\s*("[^"]+"|\w+)\s*,\s*RpcAuthentication\.(Anonymous|Session)\s*,\s*RpcScope\.(\w+)\s*(?:,\s*(\d+)\s*)?(?:,\s*(carriesRequestMeta:\s*true)\s*)?\)/gu;
   for (const match of source.matchAll(call)) {
     const name = match[2] as string;
     const resolved = name.startsWith('"') ? name.slice(1, -1) : constants.get(name);
@@ -114,6 +116,7 @@ function hostPolicies(): Map<string, HostPolicy> {
       kind: match[1] === "Unary" ? "unary" : "serverStream",
       auth: match[3] === "Anonymous" ? "anonymous" : "session",
       maxRequestBytes: match[5] ? Number(match[5]) : 4096,
+      readsRequestMeta: match[4] === "Workspace" || match[6] !== undefined,
     });
   }
   return policies;
@@ -128,6 +131,7 @@ test("the Worker method table and the host policies list the same methods with t
     assert.equal(policy.kind, route.kind, name);
     assert.equal(policy.auth, route.auth, name);
     assert.equal(policy.maxRequestBytes, route.maxRequestBytes, name);
+    assert.equal(policy.readsRequestMeta, route.requestMeta, name);
   }
 });
 

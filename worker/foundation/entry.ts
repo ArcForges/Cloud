@@ -2,7 +2,7 @@
 // The Worker entry glue, kept free of Cloudflare-only imports so offline tests and the local
 // integration harness execute exactly the code the deployed Worker runs.
 import { routeRequest, type CloudBindings } from "../router.ts";
-import { postSigned } from "./container-client.ts";
+import { jobSliceBody, postSigned } from "./container-client.ts";
 import { handleProof, isProofPath } from "./proof-routes.ts";
 import { parsePoison, processDeadLetter, processPoison } from "./poison.ts";
 import { maxSliceItems, maxSliceMilliseconds, processWake, type MessageLike } from "./queue.ts";
@@ -49,15 +49,7 @@ export async function queueEntry(
         postSigned(
           proof,
           "job/slice",
-          new TextEncoder().encode(
-            JSON.stringify({
-              scope: wake.scope,
-              jobId: wake.jobId,
-              eventId: wake.eventId,
-              maxItems: maxSliceItems,
-              maxMilliseconds: maxSliceMilliseconds,
-            }),
-          ),
+          jobSliceBody(wake, { maxItems: maxSliceItems, maxMilliseconds: maxSliceMilliseconds }),
           { requestId: crypto.randomUUID() },
         ),
     });

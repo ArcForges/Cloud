@@ -159,6 +159,7 @@ test("only the validated credential headers reach the Container, built by the Wo
     "cookie",
     "grpc-timeout",
     "origin",
+    "traceparent",
     "x-af-csrf",
     "x-grpc-web",
   ]);

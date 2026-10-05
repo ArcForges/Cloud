@@ -117,6 +117,57 @@ one trailer frame) with a stable message key; no plan, store write or business c
 `IBearerTokenVerifier` has no implementation yet: a bearer is refused as `UNAUTHENTICATED` until the identity module
 provides one. The browser verifier over the guarded session plans exists only in the proof environment.
 
+## Correlation (CLOUD.69)
+
+One correlation identity per call (Design CR-01, CR-03, CR-06, HP-06) is accepted or created at the edge, joined to one
+W3C `traceparent` from the Worker to the host, returned in the replies the host builds, and carried with a causation id
+in the job wake message and the private job-slice call. It uses only fields the wire registry already defines
+(`RequestMeta.correlationId` tag 3, `ResponseMeta.correlationId` tag 4, `ArcError.correlationId` tag 6) and the standard
+`traceparent` request header between the Worker and the host. It adds no wire field, no client-visible header and no
+contract meaning, and it is never an authorization input.
+
+| Hop                    | What happens                                                                                                                                                                                                                                                                      | Where                                                                                    |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Client to Worker       | A route that declares `requestMeta` has the client's `RequestMeta.correlationId` read from the request message. Only a canonical `Id` (exactly 16 bytes, not all zero, stated once) is accepted; an absent value is created (`crypto.randomUUID`); a malformed one is refused.    | `worker/ingress/correlation.ts`, `worker/ingress/pipeline.ts`                            |
+| Worker to host         | The Worker builds `traceparent: 00-<correlation id without hyphens>-<new span>-01`. A UUID is exactly the 128 bits of a trace id, so the identifier alone joins the hops. Nothing the client sent (its own `traceparent`, `tracestate`, `baggage`, request ids) is forwarded.     | `worker/ingress/pipeline.ts`                                                             |
+| Host admission         | The pipeline reads the envelope strictly (`RequestEnvelopeReader`), validates the same `Id`, and binds a `CorrelationContext` to the call: the stated value, else the trace id of a strict single `traceparent`, else a new identity. The host's span is a child of the Worker's. | `src/ArcForges.Cloud/Ingress/Correlation.cs`, `IngressPipeline.cs`, `Caller.cs`          |
+| Host replies           | `ResponseMeta.correlationId` and `ArcError.correlationId` are built from the call's context by `CorrelationReplies`; the proof probe's replies use them.                                                                                                                          | `Correlation.cs`, `PipelineProbe.cs`                                                     |
+| Queue wake             | A wake message carries `correlationId` and `causationId` (the originating request, or the previous wake event of a continuation) as part of its closed key set. A wake queued before this change (no correlation) is still accepted and takes its own event id for both.          | `worker/foundation/queue.ts`, `types.ts`, `proof-routes.ts`                              |
+| Private job-slice call | The consumer sends both identifiers inside the signed JSON body (`jobSliceBody`). The host's request is closed and requires both as canonical UUIDs; the slice carries them in its call context, echoes them and stores them in the `job.slice` outbox payload.                   | `worker/foundation/container-client.ts`, `FoundationOperations.cs`, `JobSliceService.cs` |
+
+Rules the code and the tests pin:
+
+- **Malformed is refused, never repaired.** A repeated field, an `Id` of 15 or 17 bytes, an all-zero `Id`, a wrong wire
+  type, an `Id` that is text, or a truncated field is `INVALID_ARGUMENT` with the registered key
+  `validation.invalid_request`, before any handler, plan or store write runs. The Worker refuses it before the Container
+  wakes; the host refuses it when it reads the envelope, before the current-owner decision. A message the Worker cannot read
+  as protobuf at all is passed on with a created identity and left to the host, whose reader is equally strict.
+- **No authorization effect.** The decisions of the pipeline (credential, Origin, CSRF, session, current owner, recovery
+  generation) never read the correlation. A test states six different identities (including none and values equal to the
+  session id, the workspace id and a workspace the caller does not own) across eight admission cases and requires identical
+  outcomes. Credential validation still comes first: an unauthenticated request with a malformed identity is
+  `UNAUTHENTICATED`, exactly as with a valid one.
+- **Method-declared.** Only a method that declares a `RequestMeta` has its body read for an identity: a workspace-scoped
+  method always does, an account-scoped method opts in with `carriesRequestMeta`. The anonymous Hello request has no
+  `RequestMeta` (its field 1 is the name), so it is never interpreted; its call still gets a trace.
+- **No injection.** Every value that becomes a header, a log field or a message member is produced from 16 validated bytes
+  or from the platform's random source, in canonical lowercase UUID or hex form. A client's own trace headers are dropped by
+  the Worker; the host ignores any `traceparent` that is not exactly one strict W3C value (version 00, lowercase hex,
+  nonzero ids) and never reflects one.
+- **Where the identity is returned.** In `ResponseMeta` and `ArcError` of the replies the host builds. A refusal of the
+  pipeline or the Worker itself is a trailers-only gRPC status with no message, which the wire registry treats as a
+  transport failure without a fabricated result, so it carries no identity and no new header was added to carry one. The
+  anonymous Hello reply has no `ResponseMeta` in its contract.
+- **Trace flags.** The `01` trace flag only marks the trace as joinable; it states no sampling decision. Sampling and
+  retention belong to the telemetry policy (PLT.50), not to this seam.
+- **One seam.** `CorrelationContext` (host) and `worker/ingress/correlation.ts` (Worker) are what later hop owners reuse:
+  the stream and publication owners (CLOUD.33 and the stream tasks) populate `Event.correlationId` from them, and provider
+  owners (AIR.04) a provider request's correlation. Neither the realtime nor the provider hop exists here.
+
+The proof probe shows the replies: every unary reply and every stream frame carries a `ResponseMeta` in field 10, and
+`Whoami` with request field 10 set to 1 returns an acknowledged domain refusal (gRPC OK) with an `ArcError` in field 11
+(`state.not_found`) that carries the identity.
+
 ## Known limits
 
 - **Revocation and a running stream.** A session and its owner are validated when a call is admitted, not again while a stream runs.
@@ -133,7 +184,9 @@ provides one. The browser verifier over the guarded session plans exists only in
 ## Adding a public method
 
 A module appends its method in its own section, in two places that a test compares: its `RpcPolicy` in the module's
-`RpcPolicies` (host) and its `ApiRoute` in `worker/ingress/routes.ts`. A generated service mapped without a policy fails
+`RpcPolicies` (host) and its `ApiRoute` in `worker/ingress/routes.ts`. Both state whether the request carries a
+`RequestMeta` (`carriesRequestMeta` on the policy, always true for a workspace-scoped method; `requestMeta` on the
+route): the test compares that too, and it decides whether the correlation of a call is read from the body. A generated service mapped without a policy fails
 `EveryMappedGrpcMethodHasAnIngressPolicyAndEveryPolicyHasAnEndpoint`. The host composition only lists modules
 (RES-cloud-host-composition).
 
@@ -143,7 +196,7 @@ The probe lets the deployed ingress be observed without a business service. `arc
 registered only when the foundation proof is enabled; production does not contain it in the host or in the Worker table.
 Its messages are hand-framed proof bytes, not Contracts records: the pinned generated surface carries no authenticated
 unary or server-streaming method that fits, and no wire meaning is invented for product use. Requests carry the envelope
-convention (field 1 is `RequestMeta`).
+convention (field 1 is `RequestMeta`). Every reply the probe builds carries the call's correlation (see Correlation).
 
 | Method        | Kind          | Reply                                                                                                                                                                                     |
 | ------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -160,6 +213,9 @@ convention (field 1 is `RequestMeta`).
 | Linux Native AOT image (trim and AOT warnings as errors)             | `npm run candidate`                                                   | hosted CI (needs Docker)                                           |
 | Real AOT host behind the real Worker modules in workerd, real HTTP   | `FOUNDATION_HOST_EXE=<host executable> npm run test:foundation:local` | explicit local opt-in only                                         |
 | The same scenarios against the deployed proof environment            | `npm run test:foundation:live` (the `pipeline-*` rows)                | explicit local opt-in only, under the lease `RES-cloud-deployment` |
+
+The `correlation-*` scenarios (CLOUD.69) run with them on both targets: `correlation-supplied`, `correlation-absent`,
+`correlation-malformed`, `correlation-error-reply` and `correlation-queue-wake` (see Correlation validation below).
 
 The `pipeline-*` scenarios run on both targets and write one evidence row each:
 
@@ -195,7 +251,42 @@ emulation, a Node SQLite bridge standing in for D1, and real HTTP between worker
 external service binding, so that closing a response closes the connection as the platform's Container stub does). The harness's
 earlier function-binding proxy collected every reply and did not propagate cancellation, which is why it was replaced.
 
-### Unobserved
+### Correlation validation actually performed (CLOUD.69)
+
+Claimant-reported (ArcForges delivery worker w-c20261005-cloud69, Windows 11, until independent review and the hosted exact-head
+run confirm them):
+
+| Check                                         | Command                                                                                                                          | Observed                                                                                                                                                                                                                                                        |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host and architecture tests, format           | `dotnet build`, `dotnet test --solution` and `dotnet format --verify-no-changes` of `Cloud.slnx`, Release, under the build slot  | 0 warnings; 528 passed, 0 failed (the first run of the architecture gate needed a clean checkout and a fresh `npm run policy` naming report); format clean                                                                                                      |
+| Worker tests and static checks                | `npm test`, `tsc` for both projects, `biome lint`, `prettier --check .`                                                          | all pass (the new file `tests/worker/ingress-correlation.test.ts` is in the explicit test list)                                                                                                                                                                 |
+| Dependency review, provenance, release bundle | `node tooling/dependency-policy.ts`, `node tooling/project.ts provenance`, `node --test tests/worker/release-provenance.test.ts` | pass with receipt `cloud-69-r1`, profile `cloud-release-r27`, Worker bundle `fc790066839d420b24a9d3a888681742b4498610e17671539df4fe97b3268f92` (191,309 bytes, 102 inputs); no coordinate, integrity value, lock or closure entry changed                       |
+| Mutation checks (Worker)                      | seven deliberate mutations of the Worker code, run against the Worker tests                                                      | 7 of 7 killed: no refusal of a malformed value, a repeated field accepted, no 16-byte check, no causation on a continuation, a client `traceparent` forwarded, no causation in the slice body, the origin request replaced by the correlation as the cause      |
+| Native AOT                                    | local `dotnet publish -r win-x64` of the host                                                                                    | linked with trim and AOT warnings as errors, no diagnostics                                                                                                                                                                                                     |
+| Cross-process local integration               | `FOUNDATION_HOST_EXE=<that executable> npm run test:foundation:local` (nineteen scenarios)                                       | all passed, including `correlation-supplied`, `correlation-absent`, `correlation-malformed` (five forms, each on Whoami and Stream), `correlation-error-reply` and `correlation-queue-wake` (a 120-item job finished by the queue wake alone, one host restart) |
+
+The local run found one real defect before the first hosted run: the earlier `checkpoint-restart` scenario called the
+private job-slice route without the identifiers the host now requires (HTTP 400); the scenario was corrected and the
+nineteen scenarios then passed.
+
+What a correlation scenario proves and what it does not:
+
+- `correlation-supplied`, `correlation-absent`, `correlation-malformed` and `correlation-error-reply` observe the public
+  binary gRPC-Web path through the real Worker modules and the real AOT host: the identity returned in `ResponseMeta`
+  (unary reply and first stream frame) and in `ArcError` equals what the client stated, an absent one is a canonical new
+  UUID per call, and each malformed form is `INVALID_ARGUMENT` with `validation.invalid_request`, no message frame and no
+  handler (the probe's started-stream counter does not move).
+- `correlation-queue-wake` starts a job with a stated chain identity and lets the queue wake run it to completion. The
+  host's job-slice request is closed and requires both identifiers as canonical UUIDs, so a finished job proves the wake
+  carried both through the consumer and the signed call. A direct slice call also shows the host echoing exactly the
+  identifiers it was given, and a nil identity is refused. The identity stored in the outbox row is covered by the host
+  tests; no public surface reads it back.
+- The Worker and the host share the identity by the trace id of one `traceparent`: the Worker tests assert what the Worker
+  builds and the host tests assert what the host binds from it. The local run exercises the two as separate processes. No
+  external trace store exists, so "one connected trace" is established by identifier equality at each hop, not by a
+  collected trace.
+
+### Unobserved (CLOUD.01 and earlier)
 
 - Anything on the deployed platform: the deployed `pipeline-*` scenarios have not been run by this document's author unless
   the task record says so. Provider behavior of the Durable Object stub's streaming, Cloudflare's own cancellation and
@@ -208,3 +299,16 @@ earlier function-binding proxy collected every reply and did not propagate cance
   session store over the plan bridge.
 - Absence of a directly reachable Container port is established by configuration and by the static tests (no route, no
   published port, one binding caller), not by an external port scan.
+
+### Unobserved (CLOUD.69)
+
+- Correlation on the deployed platform: the `correlation-*` scenarios are part of the explicit opt-in deployed run
+  (`npm run test:foundation:live`, lease `RES-cloud-deployment`), which this change did not perform. The deployed Worker,
+  Container, Queue and Durable Object behavior with the new wake shape is not observed.
+- Realtime and provider hops: they do not exist yet (`Event.correlationId` belongs to the publication and stream owners, a
+  provider request identifier to the provider owners); the anonymous Hello reply has no `ResponseMeta`, and the pipeline's
+  own trailers-only refusals have no message to carry the identity.
+- The C# origin of PLT.48 that attaches a typed correlation to a generated request and the connected trace across owners
+  are not exercised here.
+- Host-side mutation checks were not run (each needs a full build); the host tests were reviewed against the Worker
+  mutations only.

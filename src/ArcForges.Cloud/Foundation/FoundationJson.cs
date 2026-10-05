@@ -19,7 +19,7 @@ internal sealed record RoundtripRequest(string WorkspaceId, string ResourceId, i
 
 internal sealed record JobStartRequest(string Scope, int Total);
 
-internal sealed record JobSliceRequest(string Scope, string JobId, string EventId, int MaxItems, int MaxMilliseconds);
+internal sealed record JobSliceRequest(string Scope, string JobId, string EventId, string CorrelationId, string CausationId, int MaxItems, int MaxMilliseconds);
 
 internal sealed record JobStatusRequest(string Scope, string JobId);
 
@@ -54,7 +54,8 @@ internal sealed record EgressProbeResponse(bool Blocked, bool ControlOk, EgressA
 
 internal sealed record JobStartResponse(string JobId, string Scope, int Total);
 
-internal sealed record JobSliceResponse(string State, string Cursor, string Processed, string Fence, string Checksum, bool JobComplete);
+internal sealed record JobSliceResponse(string State, string Cursor, string Processed, string Fence, string Checksum, bool JobComplete,
+    string CorrelationId, string CausationId);
 
 internal sealed record JobStatusResponse(string State, string Total, string Cursor, string Fence, string Checksum, string ItemCount,
     string ItemSum, string ExpectedChecksum, bool Matches);
@@ -68,7 +69,7 @@ internal sealed record TransferEventPayload(string From, string To, string Amoun
 
 internal sealed record JobStartedPayload(string JobId, string Total);
 
-internal sealed record JobSlicePayload(string JobId, string Cursor, string Processed);
+internal sealed record JobSlicePayload(string JobId, string Cursor, string Processed, string CorrelationId, string CausationId);
 
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,

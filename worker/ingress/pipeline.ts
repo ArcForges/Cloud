@@ -5,6 +5,12 @@
 // function is the only caller of the Container binding for public requests, and it forwards only
 // headers it builds itself. Unary replies are bounded and buffered; a server stream is passed through
 // frame by frame (see frames.ts) and never buffered.
+import {
+  newCorrelationId,
+  readRequestCorrelation,
+  singleMessage,
+  traceparentFor,
+} from "./correlation.ts";
 import { edgeCredentials } from "./edge-caller.ts";
 import {
   bodySizeError,
@@ -44,7 +50,11 @@ const healthRoute: ApiRoute = {
   maxUnaryResponseBytes: 8192,
   maxDurationMs: 15_000,
   instance: "hello",
+  requestMeta: false,
 };
+
+/** The stable message key of the registered refusal for a request that cannot be admitted as stated. */
+export const invalidRequestKey = "validation.invalid_request";
 
 function timeoutMs(value: string | null, cap: number): number | null {
   if (value === null) return cap;
@@ -147,6 +157,18 @@ export async function handleApiRequest(request: Request, env: IngressEnv): Promi
       }
       if (body[0] === 1) return reject(415, "Compressed requests are not supported.");
     }
+    // One correlation identity per call (CR-01, CR-03): a client's value is validated, an absent one is created here.
+    // A malformed value is refused before the Container is woken and before any authorization decision, and no value
+    // the client sent is ever copied into a header: the traceparent below is built from the validated identity.
+    let correlationId: string | undefined;
+    if (!health && route.requestMeta) {
+      const message = singleMessage(body as Uint8Array);
+      const stated = message ? readRequestCorrelation(message) : ({ kind: "unreadable" } as const);
+      if (stated.kind === "malformed")
+        return rpcError(grpcStatus.invalidArgument, invalidRequestKey);
+      if (stated.kind === "valid") correlationId = stated.id;
+    }
+    if (!health) headers.set("traceparent", traceparentFor(correlationId ?? newCorrelationId()));
     const remaining = Math.floor(budget - (performance.now() - started));
     if (remaining <= 0) throw deadlineError;
     if (!health) {

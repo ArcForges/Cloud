@@ -23,6 +23,11 @@ export interface ApiRoute {
   readonly maxDurationMs: number;
   /** The Container instance (Durable Object name) that serves the method. */
   readonly instance: string;
+  /**
+   * The request message starts with a RequestMeta (field 1, wire registry 04). Only then does the edge read the client's
+   * correlation id from it; a method whose field 1 means something else (the Hello name) is never interpreted.
+   */
+  readonly requestMeta: boolean;
 }
 
 export const helloPath = "/api/arcforges.hello.v1.HelloService/SayHello";
@@ -42,6 +47,7 @@ const helloRoute: ApiRoute = {
   maxUnaryResponseBytes: 8192,
   maxDurationMs: 10_000,
   instance: "hello",
+  requestMeta: false,
 };
 
 /** The methods the production Worker serves. */
@@ -55,6 +61,7 @@ const probeBase = {
   maxFrameBytes: 65_536,
   maxUnaryResponseBytes: 8192,
   instance: "foundation",
+  requestMeta: true,
 } as const;
 
 export const proofRoutes: readonly ApiRoute[] = [

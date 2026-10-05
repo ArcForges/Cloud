@@ -74,6 +74,8 @@ const wake = (n = 1): WakeMessage => ({
   jobId: event(900),
   scope: "proof/run-1",
   eventId: event(n),
+  correlationId: event(800),
+  causationId: event(801),
 });
 
 test("wake messages are a closed shape carrying identifiers only", () => {
@@ -91,8 +93,38 @@ test("wake messages are a closed shape carrying identifiers only", () => {
     { ...wake(), scope: "proof/" },
     { ...wake(), scope: `proof/${"x".repeat(201)}` },
     { v: 1, kind: "job.wake", jobId: event(900), scope: "proof/run-1" },
+    // The correlation identity and the causation id are both required, canonical and nonzero when present.
+    { ...wake(), correlationId: undefined },
+    { ...wake(), causationId: undefined },
+    { ...wake(), correlationId: "not-a-uuid" },
+    { ...wake(), causationId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA" },
+    { ...wake(), correlationId: "00000000-0000-0000-0000-000000000000" },
+    { ...wake(), causationId: "00000000-0000-0000-0000-000000000000" },
+    {
+      ...wake(),
+      correlationId: `${event(800)}\r\nx-injected: 1`,
+    },
+    { ...wake(), correlationId: 7 },
+    { ...wake(), traceparent: "00-x" },
   ])
     assert.equal(parseWake(bad), null, JSON.stringify(bad));
+});
+
+test("a wake queued before correlation existed is still accepted, with a deterministic identity", () => {
+  const legacy = {
+    v: 1,
+    kind: "job.wake",
+    jobId: event(900),
+    scope: "proof/run-1",
+    eventId: event(5),
+  };
+  const first = parseWake(legacy);
+  assert.deepEqual(first, { ...legacy, correlationId: event(5), causationId: event(5) });
+  // Every redelivery of the same message carries the same identity.
+  assert.deepEqual(parseWake(legacy), first);
+  // A half-correlated message is not a legacy message.
+  assert.equal(parseWake({ ...legacy, correlationId: event(800) }), null);
+  assert.equal(parseWake({ ...legacy, causationId: event(800) }), null);
 });
 
 test("slice replies are parsed strictly", () => {
@@ -191,7 +223,8 @@ test("a running job enqueues a continuation with a new event id, then completes 
   assert.equal(await processWake(h.message, h.deps), "continued");
   assert.equal(h.messages.acked, 1);
   assert.deepEqual(h.messages.retried, []);
-  assert.deepEqual(h.sent, [{ ...wake(), eventId: event(100) }]);
+  // The continuation keeps the chain's correlation and is caused by the wake event that just ran.
+  assert.deepEqual(h.sent, [{ ...wake(), eventId: event(100), causationId: event(1) }]);
   assert.deepEqual(h.calls.complete, [event(1)]);
   assert.deepEqual(h.calls.release, []);
 });
