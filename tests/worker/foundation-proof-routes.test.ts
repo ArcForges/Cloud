@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { containerEnvironment } from "../../worker/foundation/container-env.ts";
+import { isCorrelationId } from "../../worker/ingress/correlation.ts";
 import {
   handleProof,
   isProofPath,
@@ -212,20 +213,29 @@ test("starting a job enqueues exactly one wake hint that carries identifiers onl
     env,
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), {
+  const started = (await response.json()) as { correlationId: string };
+  assert.deepEqual(started, {
     jobId: job,
     scope: "proof/run-1",
     total: "5",
     wakeEnqueued: true,
+    correlationId: started.correlationId,
   });
+  assert.equal(isCorrelationId(started.correlationId), true);
   assert.equal(sent.length, 1);
   assert.deepEqual(Object.keys(sent[0] as WakeMessage).sort(), [
+    "causationId",
+    "correlationId",
     "eventId",
     "jobId",
     "kind",
     "scope",
     "v",
   ]);
+  // The wake carries the chain's identity that the reply names, and the request that started it as its cause.
+  assert.equal(sent[0]?.correlationId, started.correlationId);
+  assert.equal(isCorrelationId(sent[0]?.causationId), true);
+  assert.notEqual(sent[0]?.causationId, sent[0]?.eventId);
   assert.equal(sent[0]?.jobId, job);
   // A failed start enqueues nothing; an unusable reply is reported, not hidden.
   const failed = environment({ status: 409, body: '{"error":"conflict"}' });
@@ -244,7 +254,11 @@ test("a wake can be requested only for a well-formed job and scope", async () =>
     200,
   );
   assert.equal(sent.length, 1);
+  assert.equal(isCorrelationId(sent[0]?.correlationId), true);
   for (const body of [
+    { scope: "proof/r", jobId: job, correlationId: "not-a-uuid" },
+    { scope: "proof/r", jobId: job, correlationId: "00000000-0000-0000-0000-000000000000" },
+    { scope: "proof/r", jobId: job, correlationId: 7 },
     { scope: "other", jobId: job },
     { scope: "proof/r", jobId: "x" },
     { scope: 1, jobId: job },
@@ -252,6 +266,72 @@ test("a wake can be requested only for a well-formed job and scope", async () =>
   ])
     assert.equal((await handleProof(operator("/proof/v1/job/wake", body), env)).status, 400);
   assert.equal(sent.length, 1);
+});
+
+test("a stated correlation identity starts the chain, never reaches the host, and is validated like a client's", async () => {
+  const chain = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const { env, sent, recorded } = environment({
+    body: JSON.stringify({ jobId: job, scope: "proof/run-1", total: "5" }),
+  });
+  const response = await handleProof(
+    operator("/proof/v1/job/start", {
+      scope: "proof/run-1",
+      total: "5",
+      autoWake: true,
+      correlationId: chain,
+    }),
+    env,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(((await response.json()) as { correlationId: string }).correlationId, chain);
+  assert.equal(sent[0]?.correlationId, chain);
+  // The host's job-start request is closed: the Worker interprets the chain's identity and strips it.
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(recorded[0]?.body)), {
+    scope: "proof/run-1",
+    total: "5",
+  });
+  // Without autoWake the chain is still named in the reply, and nothing is queued.
+  const quiet = environment({ body: JSON.stringify({ jobId: job, scope: "proof/run-1" }) });
+  const named = await handleProof(
+    operator("/proof/v1/job/start", {
+      scope: "proof/run-1",
+      autoWake: false,
+      correlationId: chain,
+    }),
+    quiet.env,
+  );
+  assert.equal(((await named.json()) as { correlationId: string }).correlationId, chain);
+  assert.equal(quiet.sent.length, 0);
+  for (const bad of [
+    "x",
+    chain.toUpperCase(),
+    "00000000-0000-0000-0000-000000000000",
+    chain.replaceAll("-", ""),
+    `${chain}\r\ninjected: 1`,
+    7,
+    null,
+  ]) {
+    const refused = environment();
+    assert.equal(
+      (
+        await handleProof(
+          operator("/proof/v1/job/start", { scope: "proof/run-1", total: "5", correlationId: bad }),
+          refused.env,
+        )
+      ).status,
+      400,
+    );
+    assert.equal(refused.recorded.length, 0);
+    assert.equal(refused.sent.length, 0);
+  }
+  const wake = environment();
+  const woken = await handleProof(
+    operator("/proof/v1/job/wake", { scope: "proof/r", jobId: job, correlationId: chain }),
+    wake.env,
+  );
+  assert.deepEqual(await woken.json(), { wakeEnqueued: true, correlationId: chain });
+  assert.equal(wake.sent[0]?.correlationId, chain);
+  assert.notEqual(wake.sent[0]?.causationId, chain);
 });
 
 test("the Container can be stopped to prove restart, and only by the operator", async () => {
@@ -409,12 +489,15 @@ test("a job can be started without its automatic wake, and autoWake never reache
     env,
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), {
+  const quiet = (await response.json()) as { correlationId: string };
+  assert.deepEqual(quiet, {
     jobId: job,
     scope: "proof/run-1",
     total: 5,
     wakeEnqueued: false,
+    correlationId: quiet.correlationId,
   });
+  assert.equal(isCorrelationId(quiet.correlationId), true);
   assert.equal(sent.length, 0);
   assert.deepEqual(JSON.parse(new TextDecoder().decode((recorded[0] as Recorded).body)), {
     scope: "proof/run-1",

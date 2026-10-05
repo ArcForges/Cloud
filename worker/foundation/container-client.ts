@@ -3,7 +3,7 @@
 import { sha256Hex } from "../private/encoding.ts";
 import { loadKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import { newNonce, sign } from "../private/signing.ts";
-import type { ContainerNamespaceLike } from "./types.ts";
+import type { ContainerNamespaceLike, WakeMessage } from "./types.ts";
 import { foundationContainerName } from "./types.ts";
 
 export const foundationRoutePrefix = "/internal/foundation/v1/";
@@ -14,6 +14,28 @@ export interface ContainerClientEnv extends PrivateKeyEnv {
 }
 
 export class ContainerCallError extends Error {}
+
+/**
+ * The body of the private job-slice call. It carries the wake's correlation identity and causation id next to the
+ * identifiers it already had (CLOUD.69), as members of the signed JSON body: the signature covers them and the host
+ * refuses any value that is not a canonical lowercase UUID. The slice's own direct cause is `eventId`.
+ */
+export function jobSliceBody(
+  wake: WakeMessage,
+  limits: { maxItems: number; maxMilliseconds: number },
+): Uint8Array {
+  return new TextEncoder().encode(
+    JSON.stringify({
+      scope: wake.scope,
+      jobId: wake.jobId,
+      eventId: wake.eventId,
+      correlationId: wake.correlationId,
+      causationId: wake.causationId,
+      maxItems: limits.maxItems,
+      maxMilliseconds: limits.maxMilliseconds,
+    }),
+  );
+}
 
 export async function postSigned(
   env: ContainerClientEnv,

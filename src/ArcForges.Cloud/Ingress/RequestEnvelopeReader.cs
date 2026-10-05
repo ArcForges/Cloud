@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 namespace ArcForges.Cloud.Ingress;
 
-/// <summary>What the pipeline needs from the request envelope: the addressed workspace and the caller-stated recovery generation.</summary>
-internal readonly record struct RequestEnvelope(string? WorkspaceId, ulong? RecoveryGeneration);
+/// <summary>
+/// What the pipeline needs from the request envelope: the addressed workspace, the caller-stated recovery generation and the caller-stated
+/// correlation id (canonical lowercase UUID, validated). The correlation id is diagnostic only and never an input to the owner decision.
+/// </summary>
+internal readonly record struct RequestEnvelope(string? WorkspaceId, ulong? RecoveryGeneration, string? CorrelationId = null);
 
 /// <summary>
 /// Reads <c>RequestMeta</c> (field 1 of every generated request message, wire registry 04) straight from the protobuf bytes, so the
 /// owner gate needs no per-method generated type and no reflection. It is strict: a repeated meta, a repeated workspace or generation,
-/// an <c>Id</c> that is not exactly 16 nonzero bytes, a group, a truncated field or a wrong wire type is malformed. Other fields are skipped.
+/// a repeated correlation id, an <c>Id</c> that is not exactly 16 nonzero bytes, a group, a truncated field or a wrong wire type is malformed.
+/// Other fields are skipped.
 /// </summary>
 internal static class RequestEnvelopeReader
 {
     private const int MetaField = 1;
+    private const int CorrelationField = 3;
     private const int WorkspaceField = 4;
     private const int RecoveryGenerationField = 7;
     private const int IdValueField = 1;
@@ -49,6 +54,7 @@ internal static class RequestEnvelopeReader
     {
         envelope = default;
         string? workspace = null;
+        string? correlation = null;
         ulong? generation = null;
         var position = 0;
         while (position < meta.Length)
@@ -56,6 +62,9 @@ internal static class RequestEnvelopeReader
             if (!ProtoWire.TryReadTag(meta, ref position, out var field, out var wire)) return false;
             switch (field)
             {
+                case CorrelationField:
+                    if (wire != 2 || correlation is not null || !ProtoWire.TryReadLengthDelimited(meta, ref position, out var correlationId) || !TryReadId(correlationId, out correlation)) return false;
+                    break;
                 case WorkspaceField:
                     if (wire != 2 || workspace is not null || !ProtoWire.TryReadLengthDelimited(meta, ref position, out var id) || !TryReadId(id, out workspace)) return false;
                     break;
@@ -69,7 +78,7 @@ internal static class RequestEnvelopeReader
             }
         }
 
-        envelope = new RequestEnvelope(workspace, generation);
+        envelope = new RequestEnvelope(workspace, generation, correlation);
         return true;
     }
 

@@ -25,7 +25,7 @@ using Xunit;
 namespace ArcForges.Cloud.Tests;
 
 /// <summary>The public ingress pipeline on the real Kestrel host, the real gRPC-Web adapter and the plan model for sessions.</summary>
-public sealed class IngressPipelineTests
+public sealed partial class IngressPipelineTests
 {
     private const string Origin = "https://app.example.test";
     private const string GrpcWeb = "application/grpc-web+proto";
@@ -61,7 +61,7 @@ public sealed class IngressPipelineTests
         }
     }
 
-    private static async Task<Running> StartAsync(IBearerTokenVerifier? bearer = null, bool proof = true)
+    private static async Task<Running> StartAsync(IBearerTokenVerifier? bearer = null, bool proof = true, IHostModule? extra = null)
     {
         var storage = new FakeStorage();
         var time = new FakeTime(Start);
@@ -79,6 +79,7 @@ public sealed class IngressPipelineTests
         [
             new HelloModule(BuildIdentity.FromAssembly(typeof(HelloEndpoint).Assembly)),
             proof ? new FoundationModule(options) : new FoundationModule(_ => null),
+            .. extra is null ? Array.Empty<IHostModule>() : [extra],
         ];
         IHostModule[] modules = [new IngressModule(served), .. served];
         foreach (var module in modules) module.Register(builder);

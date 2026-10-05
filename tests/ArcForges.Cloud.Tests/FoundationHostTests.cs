@@ -532,14 +532,16 @@ public sealed class FoundationHostTests
         var started = await Operation(host, "job/start", new { scope, total = 150 });
         var job = started.Json.GetProperty("jobId").GetString()!;
         var eventId = T.Uuid();
-        var first = await Operation(host, "job/slice", new { scope, jobId = job, eventId, maxItems = 100, maxMilliseconds = 20000 });
+        var correlationId = T.Uuid();
+        var causationId = T.Uuid();
+        var first = await Operation(host, "job/slice", new { scope, jobId = job, eventId, correlationId, causationId, maxItems = 100, maxMilliseconds = 20000 });
         Assert.Equal("running", first.Json.GetProperty("state").GetString());
         Assert.Equal("100", first.Json.GetProperty("cursor").GetString());
         Assert.False(first.Json.GetProperty("jobComplete").GetBoolean());
-        var repeat = await Operation(host, "job/slice", new { scope, jobId = job, eventId, maxItems = 100, maxMilliseconds = 20000 });
+        var repeat = await Operation(host, "job/slice", new { scope, jobId = job, eventId, correlationId, causationId, maxItems = 100, maxMilliseconds = 20000 });
         Assert.Equal("duplicate", repeat.Json.GetProperty("state").GetString());
         Assert.Equal("100", repeat.Json.GetProperty("cursor").GetString());
-        var last = await Operation(host, "job/slice", new { scope, jobId = job, eventId = T.Uuid(), maxItems = 100, maxMilliseconds = 20000 });
+        var last = await Operation(host, "job/slice", new { scope, jobId = job, eventId = T.Uuid(), correlationId, causationId, maxItems = 100, maxMilliseconds = 20000 });
         Assert.Equal("complete", last.Json.GetProperty("state").GetString());
         Assert.True(last.Json.GetProperty("jobComplete").GetBoolean());
         var status = await Operation(host, "job/status", new { scope, jobId = job });
@@ -548,13 +550,13 @@ public sealed class FoundationHostTests
         Assert.True(status.Json.GetProperty("matches").GetBoolean());
         foreach (var bad in new object[]
         {
-            new { scope, jobId = job, eventId = T.Uuid(), maxItems = 101, maxMilliseconds = 1000 },
-            new { scope, jobId = job, eventId = T.Uuid(), maxItems = 0, maxMilliseconds = 1000 },
-            new { scope, jobId = job, eventId = T.Uuid(), maxItems = 10, maxMilliseconds = 20001 },
-            new { scope, jobId = job, eventId = "x", maxItems = 10, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId, causationId, maxItems = 101, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId, causationId, maxItems = 0, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId, causationId, maxItems = 10, maxMilliseconds = 20001 },
+            new { scope, jobId = job, eventId = "x", correlationId, causationId, maxItems = 10, maxMilliseconds = 1000 },
         })
             Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/slice", bad)).Status);
-        Assert.Equal(HttpStatusCode.NotFound, (await Operation(host, "job/slice", new { scope, jobId = T.Uuid(), eventId = T.Uuid(), maxItems = 5, maxMilliseconds = 1000 })).Status);
+        Assert.Equal(HttpStatusCode.NotFound, (await Operation(host, "job/slice", new { scope, jobId = T.Uuid(), eventId = T.Uuid(), correlationId, causationId, maxItems = 5, maxMilliseconds = 1000 })).Status);
         Assert.Equal(HttpStatusCode.NotFound, (await Operation(host, "job/status", new { scope, jobId = T.Uuid() })).Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/start", new { scope, total = 1001 })).Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/start", new { scope = "../x", total = 5 })).Status);
@@ -577,6 +579,53 @@ public sealed class FoundationHostTests
         app.MapMethods("/{**path}", ["HEAD", "GET"], () => Results.Ok());
         await app.StartAsync();
         return (app, new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()));
+    }
+
+    [Fact]
+    public async Task AJobSliceCarriesTheWakesCorrelationAndCausationIntoItsCallContextAndItsOutboxRow()
+    {
+        await using var host = await StartAsync();
+        var scope = "proof/job-correlation";
+        var job = (await Operation(host, "job/start", new { scope, total = 30 })).Json.GetProperty("jobId").GetString()!;
+        var correlationId = T.Uuid();
+        var causationId = T.Uuid();
+        var eventId = T.Uuid();
+        var slice = await Operation(host, "job/slice", new { scope, jobId = job, eventId, correlationId, causationId, maxItems = 10, maxMilliseconds = 1000 });
+        Assert.Equal(HttpStatusCode.OK, slice.Status);
+        Assert.Equal(correlationId, slice.Json.GetProperty("correlationId").GetString());
+        Assert.Equal(causationId, slice.Json.GetProperty("causationId").GetString());
+        var row = Assert.Single(host.Storage.Outbox, o => o.Command == "job.slice");
+        using var payload = System.Text.Json.JsonDocument.Parse(row.Payload);
+        Assert.Equal(correlationId, payload.RootElement.GetProperty("correlationId").GetString());
+        Assert.Equal(causationId, payload.RootElement.GetProperty("causationId").GetString());
+        // A replayed event is a duplicate whatever identity it carries: the identity is diagnostic and never decides the outcome.
+        var replay = await Operation(host, "job/slice", new { scope, jobId = job, eventId, correlationId = T.Uuid(), causationId = T.Uuid(), maxItems = 10, maxMilliseconds = 1000 });
+        Assert.Equal("duplicate", replay.Json.GetProperty("state").GetString());
+        Assert.Single(host.Storage.Outbox, o => o.Command == "job.slice");
+    }
+
+    [Fact]
+    public async Task AJobSliceRefusesAMissingMalformedOrUnknownCorrelationOrCausation()
+    {
+        await using var host = await StartAsync();
+        var scope = "proof/job-correlation-bad";
+        var job = (await Operation(host, "job/start", new { scope, total = 5 })).Json.GetProperty("jobId").GetString()!;
+        var good = T.Uuid();
+        var nil = "00000000-0000-0000-0000-000000000000";
+        foreach (var bad in new object[]
+        {
+            new { scope, jobId = job, eventId = T.Uuid(), maxItems = 5, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId = good, maxItems = 5, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), causationId = good, maxItems = 5, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId = good.ToUpperInvariant(), causationId = good, maxItems = 5, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId = good, causationId = nil, maxItems = 5, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId = nil, causationId = good, maxItems = 5, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId = good + "\r\nx", causationId = good, maxItems = 5, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId = good.Replace("-", "", StringComparison.Ordinal), causationId = good, maxItems = 5, maxMilliseconds = 1000 },
+            new { scope, jobId = job, eventId = T.Uuid(), correlationId = good, causationId = good, traceparent = "x", maxItems = 5, maxMilliseconds = 1000 },
+        })
+            Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/slice", bad)).Status);
+        Assert.Empty(host.Storage.Outbox.Where(o => o.Command == "job.slice"));
     }
 
     [Fact]

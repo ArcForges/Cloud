@@ -3,6 +3,7 @@
 // Contracts exception schema and an operator-gated driver surface. Production answers none of it.
 import { BodyTooLarge, jsonResponse, readBounded, refusal } from "../private/bounded-body.ts";
 import { sha256, sha256Hex } from "../private/encoding.ts";
+import { isCorrelationId, newCorrelationId } from "../ingress/correlation.ts";
 import { poisonName } from "./poison.ts";
 import { isOperatorAuthorization, verifyOperatorSignature } from "./operator-signature.ts";
 import { ContainerCallError, postSigned } from "./container-client.ts";
@@ -97,8 +98,14 @@ async function forwardSession(request: Request, env: FoundationEnv): Promise<Res
   return new Response(reply as BodyInit, { status: response.status, headers: out });
 }
 
-export function newWake(jobId: string, scope: string, eventId: string): WakeMessage {
-  return { v: 1, kind: "job.wake", jobId, scope, eventId };
+export function newWake(
+  jobId: string,
+  scope: string,
+  eventId: string,
+  correlationId: string,
+  causationId: string,
+): WakeMessage {
+  return { v: 1, kind: "job.wake", jobId, scope, eventId, correlationId, causationId };
 }
 
 async function operatorOperation(request: Request, env: FoundationEnv): Promise<Response> {
@@ -177,8 +184,11 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
     if (typeof probeId !== "string" || !uuid.test(probeId)) return refusal(400);
     return jsonResponse(200, await env.JOB_COORDINATOR.getByName(poisonName(probeId)).readPoison());
   }
+  // The operator request is the origin of a job's call chain: it is the cause of the first wake, and it either states
+  // the chain's correlation identity (validated like a client's) or the Worker creates one here.
+  const originRequestId = crypto.randomUUID();
   if (wake) {
-    let parsed: { scope?: unknown; jobId?: unknown };
+    let parsed: { scope?: unknown; jobId?: unknown; correlationId?: unknown };
     try {
       parsed = JSON.parse(new TextDecoder().decode(body)) as typeof parsed;
     } catch {
@@ -188,30 +198,44 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
       typeof parsed.scope !== "string" ||
       !scopePattern.test(parsed.scope) ||
       typeof parsed.jobId !== "string" ||
-      !uuid.test(parsed.jobId)
+      !uuid.test(parsed.jobId) ||
+      (parsed.correlationId !== undefined && !isCorrelationId(parsed.correlationId))
     )
       return refusal(400);
-    await env.WAKE_QUEUE.send(newWake(parsed.jobId, parsed.scope, crypto.randomUUID()));
-    return jsonResponse(200, { wakeEnqueued: true });
+    const correlationId = parsed.correlationId ?? newCorrelationId();
+    await env.WAKE_QUEUE.send(
+      newWake(parsed.jobId, parsed.scope, crypto.randomUUID(), correlationId, originRequestId),
+    );
+    return jsonResponse(200, { wakeEnqueued: true, correlationId });
   }
   // Only the Worker interprets autoWake (a job start normally queues its first wake); it never reaches the host.
   let autoWake = true;
+  let correlationId = newCorrelationId();
   if (operation === "job/start") {
     try {
       const parsed = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
+      let rewritten = false;
       if ("autoWake" in parsed) {
         if (typeof parsed.autoWake !== "boolean") return refusal(400);
         autoWake = parsed.autoWake;
         delete parsed.autoWake;
-        body = new TextEncoder().encode(JSON.stringify(parsed));
+        rewritten = true;
       }
+      if ("correlationId" in parsed) {
+        // Only the Worker interprets the chain's identity; it never reaches the host's closed job-start request.
+        if (!isCorrelationId(parsed.correlationId)) return refusal(400);
+        correlationId = parsed.correlationId;
+        delete parsed.correlationId;
+        rewritten = true;
+      }
+      if (rewritten) body = new TextEncoder().encode(JSON.stringify(parsed));
     } catch {
       return refusal(400);
     }
   }
   let reply: { status: number; body: Uint8Array };
   try {
-    reply = await postSigned(env, operation, body, { requestId: crypto.randomUUID() });
+    reply = await postSigned(env, operation, body, { requestId: originRequestId });
   } catch (error) {
     if (error instanceof ContainerCallError) return jsonResponse(502, { error: "unavailable" });
     return jsonResponse(503, { error: "unavailable" });
@@ -219,7 +243,7 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
   if (operation === "job/start" && reply.status === 200 && !autoWake) {
     try {
       const started = JSON.parse(new TextDecoder().decode(reply.body)) as Record<string, unknown>;
-      return jsonResponse(200, { ...started, wakeEnqueued: false });
+      return jsonResponse(200, { ...started, wakeEnqueued: false, correlationId });
     } catch {
       return jsonResponse(502, { error: "unavailable" });
     }
@@ -236,8 +260,16 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
         typeof started.scope === "string" &&
         scopePattern.test(started.scope)
       ) {
-        await env.WAKE_QUEUE.send(newWake(started.jobId, started.scope, crypto.randomUUID()));
-        return new Response(JSON.stringify({ ...started, wakeEnqueued: true }), {
+        await env.WAKE_QUEUE.send(
+          newWake(
+            started.jobId,
+            started.scope,
+            crypto.randomUUID(),
+            correlationId,
+            originRequestId,
+          ),
+        );
+        return new Response(JSON.stringify({ ...started, wakeEnqueued: true, correlationId }), {
           status: 200,
           headers: { "content-type": "application/json", "cache-control": "no-store" },
         });

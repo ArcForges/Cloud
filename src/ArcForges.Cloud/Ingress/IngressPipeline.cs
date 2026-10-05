@@ -16,6 +16,9 @@ internal static class IngressPipeline
 {
     public const string SessionCookieName = "__Host-af_session";
     public const string CsrfHeader = "X-AF-CSRF";
+
+    /// <summary>The W3C trace context header the Worker builds for every call; the host reads it, never a client's.</summary>
+    public const string TraceparentHeader = "traceparent";
     public const int MaxBearerLength = 4096;
     private const int MinBearerLength = 16;
 
@@ -92,7 +95,8 @@ internal static class IngressPipeline
 
             SetBodyLimit(context, policy.MaxRequestBytes);
             CurrentOwner? owner = null;
-            if (policy.Scope == RpcScope.Workspace)
+            string? statedCorrelation = null;
+            if (policy.ReadsRequestMeta)
             {
                 var buffered = await ReadBoundedAsync(context, policy.MaxRequestBytes, cancellation);
                 if (buffered is null)
@@ -101,7 +105,7 @@ internal static class IngressPipeline
                     return;
                 }
 
-                var gate = AuthorizeOwner(outcome.Caller, buffered);
+                var gate = AuthorizeOwner(policy, outcome.Caller, buffered);
                 if (gate.Status != 0)
                 {
                     await RefuseAsync(context, gate.Status, gate.Key!);
@@ -109,10 +113,14 @@ internal static class IngressPipeline
                 }
 
                 owner = gate.Owner;
+                statedCorrelation = gate.Correlation;
                 request.Body = new MemoryStream(buffered, writable: false);
             }
 
-            context.Features.Set(new IngressCall(policy, outcome.Caller, owner));
+            // One correlation identity per call: the client's validated value, else the Worker's traceparent trace id, else a new one.
+            // It is bound after every admission decision above and read by none of them.
+            var correlation = CorrelationContext.ForRequest(request.Headers[TraceparentHeader], statedCorrelation);
+            context.Features.Set(new IngressCall(policy, outcome.Caller, owner, correlation));
             context.Response.OnStarting(static state =>
             {
                 var headers = ((HttpContext)state).Response.Headers;
@@ -163,18 +171,25 @@ internal static class IngressPipeline
 
     private static Admission Refused(int status, string key) => new(CallerContext.Anonymous, status, key);
 
-    private readonly record struct Gate(CurrentOwner? Owner, int Status, string? Key);
+    private readonly record struct Gate(CurrentOwner? Owner, int Status, string? Key, string? Correlation = null);
 
-    /// <summary>The caller addressed one workspace, owns it now and is in the generation of its own session; nothing else is admitted.</summary>
-    private static Gate AuthorizeOwner(CallerContext caller, byte[] body)
+    /// <summary>
+    /// The envelope is read strictly: a malformed one, including a repeated, short, long or all-zero correlation id, is
+    /// <c>validation.invalid_request</c> before the owner decision is made. For a workspace-scoped method the caller must also have
+    /// addressed one workspace, own it now and be in the generation of its own session; nothing else is admitted. The correlation id
+    /// is carried out of the envelope but never consulted by the decisions.
+    /// </summary>
+    private static Gate AuthorizeOwner(RpcPolicy policy, CallerContext caller, byte[] body)
     {
-        if (!GrpcWebFraming.TryReadSingleMessage(body, out var message) || !RequestEnvelopeReader.TryRead(message, out var envelope) || envelope.WorkspaceId is null)
+        if (!GrpcWebFraming.TryReadSingleMessage(body, out var message) || !RequestEnvelopeReader.TryRead(message, out var envelope))
             return new Gate(null, GrpcWebFraming.InvalidArgument, "validation.invalid_request");
+        if (policy.Scope != RpcScope.Workspace) return new Gate(null, 0, null, envelope.CorrelationId);
+        if (envelope.WorkspaceId is null) return new Gate(null, GrpcWebFraming.InvalidArgument, "validation.invalid_request");
         if (!caller.WorkspaceIds.Contains(envelope.WorkspaceId, StringComparer.Ordinal) || caller.UserId is null)
             return new Gate(null, GrpcWebFraming.PermissionDenied, "perm.resource_denied");
         if (envelope.RecoveryGeneration is { } stated && stated != caller.RecoveryGeneration)
             return new Gate(null, GrpcWebFraming.FailedPrecondition, "state.stale_generation");
-        return new Gate(new CurrentOwner(envelope.WorkspaceId, caller.UserId, caller.DeviceId, caller.RecoveryGeneration), 0, null);
+        return new Gate(new CurrentOwner(envelope.WorkspaceId, caller.UserId, caller.DeviceId, caller.RecoveryGeneration), 0, null, envelope.CorrelationId);
     }
 
     /// <summary>The unique session cookie value; absent, repeated or empty cookies are no credential.</summary>

@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Storage;
 using ArcForges.Contracts.CloudInternal.Storage.V1;
 
@@ -94,8 +95,10 @@ internal sealed class JobSliceService(IPlanExecutor executor, TimeProvider time,
     }
 
     /// <summary>One bounded slice: at most 100 items and 20 seconds, and always at least one item so progress is guaranteed.</summary>
-    public async Task<SliceResult> SliceAsync(string scope, string jobId, string eventId, int maxItems, int maxMilliseconds, CancellationToken cancellationToken)
+    public async Task<SliceResult> SliceAsync(string scope, string jobId, string eventId, int maxItems, int maxMilliseconds, CorrelationContext correlation,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(correlation);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxItems, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maxItems, MaxItemsPerSlice);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxMilliseconds, 1);
@@ -144,7 +147,8 @@ internal sealed class JobSliceService(IPlanExecutor executor, TimeProvider time,
 
         items.Append(']');
         var payload = JsonSerializer.Serialize(
-            new JobSlicePayload(jobId, cursor.ToString(CultureInfo.InvariantCulture), processed.ToString(CultureInfo.InvariantCulture)),
+            new JobSlicePayload(jobId, cursor.ToString(CultureInfo.InvariantCulture), processed.ToString(CultureInfo.InvariantCulture),
+                correlation.CorrelationId, correlation.CausationId ?? ""),
             FoundationJsonContext.Default.JobSlicePayload);
         var command = Guid.NewGuid().ToString("D");
         try

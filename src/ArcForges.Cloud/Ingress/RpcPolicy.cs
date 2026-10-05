@@ -38,22 +38,31 @@ internal sealed partial record RpcPolicy(string FullName, RpcKind Kind, RpcAuthe
 {
     public const int AbsoluteMaxRequestBytes = 262_144;
 
-    public static RpcPolicy Unary(string fullName, RpcAuthentication authentication, RpcScope scope, int maxRequestBytes = 4096) =>
-        Create(fullName, RpcKind.Unary, authentication, scope, maxRequestBytes);
+    /// <summary>
+    /// The request message starts with a <c>RequestMeta</c> (field 1, wire registry 04) whose correlation id the pipeline reads and validates.
+    /// A workspace-scoped method always does; an account-scoped method whose request carries the meta opts in. A method whose field 1 means
+    /// something else (the Hello name) never does, so its body is not interpreted.
+    /// </summary>
+    public bool CarriesRequestMeta { get; init; }
 
-    public static RpcPolicy ServerStream(string fullName, RpcAuthentication authentication, RpcScope scope, int maxRequestBytes = 4096) =>
-        Create(fullName, RpcKind.ServerStream, authentication, scope, maxRequestBytes);
+    public bool ReadsRequestMeta => Scope == RpcScope.Workspace || CarriesRequestMeta;
+
+    public static RpcPolicy Unary(string fullName, RpcAuthentication authentication, RpcScope scope, int maxRequestBytes = 4096, bool carriesRequestMeta = false) =>
+        Create(fullName, RpcKind.Unary, authentication, scope, maxRequestBytes, carriesRequestMeta);
+
+    public static RpcPolicy ServerStream(string fullName, RpcAuthentication authentication, RpcScope scope, int maxRequestBytes = 4096, bool carriesRequestMeta = false) =>
+        Create(fullName, RpcKind.ServerStream, authentication, scope, maxRequestBytes, carriesRequestMeta);
 
     /// <summary><c>/package.Service/Method</c>: a lowercase dotted proto package, a service and a method in PascalCase.</summary>
     public static bool IsValidName(string path) => NamePattern().IsMatch(path);
 
-    private static RpcPolicy Create(string fullName, RpcKind kind, RpcAuthentication authentication, RpcScope scope, int maxRequestBytes)
+    private static RpcPolicy Create(string fullName, RpcKind kind, RpcAuthentication authentication, RpcScope scope, int maxRequestBytes, bool carriesRequestMeta)
     {
         if (!IsValidName(fullName)) throw new ArgumentException("Invalid RPC name.", nameof(fullName));
         if (maxRequestBytes is < 1 or > AbsoluteMaxRequestBytes) throw new ArgumentOutOfRangeException(nameof(maxRequestBytes));
         if (authentication == RpcAuthentication.Anonymous && scope != RpcScope.None)
             throw new ArgumentException("An anonymous method has no owner scope.", nameof(scope));
-        return new RpcPolicy(fullName, kind, authentication, scope, maxRequestBytes);
+        return new RpcPolicy(fullName, kind, authentication, scope, maxRequestBytes) { CarriesRequestMeta = carriesRequestMeta };
     }
 
     [GeneratedRegex(@"^/[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.[A-Z][A-Za-z0-9]*/[A-Z][A-Za-z0-9]*\z")]

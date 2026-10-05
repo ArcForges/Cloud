@@ -23,8 +23,12 @@ internal sealed record CallerContext(CredentialKind Credential, string? SessionI
 /// </summary>
 internal sealed record CurrentOwner(string WorkspaceId, string UserId, string? DeviceId, ulong RecoveryGeneration);
 
-/// <summary>Everything the pipeline decided about one admitted request; business handlers read it and never re-derive authority.</summary>
-internal sealed record IngressCall(RpcPolicy Policy, CallerContext Caller, CurrentOwner? Owner);
+/// <summary>
+/// Everything the pipeline decided about one admitted request; business handlers read it and never re-derive authority. The
+/// <see cref="Correlation"/> is the call-scoped identity that handlers return in <c>ResponseMeta</c> and <c>ArcError</c> and hand to the
+/// hops they start; it is not an authorization input.
+/// </summary>
+internal sealed record IngressCall(RpcPolicy Policy, CallerContext Caller, CurrentOwner? Owner, CorrelationContext Correlation);
 
 /// <summary>A resolved browser session: the caller, and the check of the CSRF token that belongs to exactly this session.</summary>
 internal sealed record BrowserCredential(CallerContext Caller, Func<string?, bool> VerifyCsrf);

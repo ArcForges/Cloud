@@ -35,6 +35,10 @@ export interface WakeMessage {
   jobId: string;
   scope: string;
   eventId: string;
+  /** The one correlation identity of the call chain that led to this wake (CR-01); canonical lowercase UUID. */
+  correlationId: string;
+  /** What caused this wake: the originating request, or the previous wake event of a continuation (CR-02). */
+  causationId: string;
 }
 export interface PoisonMessage {
   v: 1;

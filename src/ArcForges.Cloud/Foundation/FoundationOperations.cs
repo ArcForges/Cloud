@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using ArcForges.Cloud.Hmac;
+using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Storage;
 using ArcForges.Contracts.CloudInternal.Storage.V1;
 
@@ -361,8 +362,11 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
     {
         if (!TryParse(body, FoundationJsonContext.Default.JobSliceRequest, out var request) || !FoundationIds.IsScope(request.Scope) || !FoundationIds.IsUuid(request.JobId)
             || !FoundationIds.IsUuid(request.EventId) || request.MaxItems is < 1 or > JobSliceService.MaxItemsPerSlice
-            || request.MaxMilliseconds is < 1 or > JobSliceService.MaxMillisecondsPerSlice) return OperationReply.Invalid;
-        var slice = await jobs.SliceAsync(request.Scope, request.JobId, request.EventId, request.MaxItems, request.MaxMilliseconds, cancellationToken);
+            || request.MaxMilliseconds is < 1 or > JobSliceService.MaxMillisecondsPerSlice
+            || !CorrelationContext.IsValidId(request.CorrelationId) || !CorrelationContext.IsValidId(request.CausationId)) return OperationReply.Invalid;
+        // The wake's identity is carried into the call context of the slice; it never decides whether the slice may run.
+        var correlation = CorrelationContext.Continue(request.CorrelationId, request.CausationId);
+        var slice = await jobs.SliceAsync(request.Scope, request.JobId, request.EventId, request.MaxItems, request.MaxMilliseconds, correlation, cancellationToken);
         if (slice.State == SliceState.NotFound) return OperationReply.NotFound;
         var state = slice.State switch
         {
@@ -373,7 +377,8 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
             _ => "stale",
         };
         return OperationReply.Json(StatusCodes.Status200OK,
-            new JobSliceResponse(state, Text(slice.Cursor), Text(slice.Processed), Text(slice.Fence), slice.Checksum.ToString(CultureInfo.InvariantCulture), slice.JobComplete),
+            new JobSliceResponse(state, Text(slice.Cursor), Text(slice.Processed), Text(slice.Fence), slice.Checksum.ToString(CultureInfo.InvariantCulture), slice.JobComplete,
+                correlation.CorrelationId, correlation.CausationId!),
             FoundationJsonContext.Default.JobSliceResponse);
     }
 

@@ -37,9 +37,22 @@ function uuidBytes(uuid: string): number[] {
   return [...Buffer.from(uuid.replaceAll("-", ""), "hex")];
 }
 
-/** RequestMeta at field 1 of the request: the workspace (field 4, an Id message) and an optional generation (field 7). */
-export function envelope(workspaceId: string | null, generation?: number): number[] {
+/**
+ * RequestMeta at field 1 of the request: the correlation id (field 3, an Id message), the workspace (field 4, an Id message)
+ * and an optional generation (field 7). A string `correlation` is encoded as a valid Id; an array is already-encoded bytes
+ * stated in its place (a scenario's malformed value).
+ */
+export function envelope(
+  workspaceId: string | null,
+  generation?: number,
+  correlation?: string | number[],
+): number[] {
   const meta = [
+    ...(correlation === undefined
+      ? []
+      : typeof correlation === "string"
+        ? lengthDelimited(3, lengthDelimited(1, uuidBytes(correlation)))
+        : correlation),
     ...(workspaceId === null ? [] : lengthDelimited(4, lengthDelimited(1, uuidBytes(workspaceId)))),
     ...(generation === undefined ? [] : [...varint(7 << 3), ...varint(generation)]),
   ];
@@ -466,5 +479,238 @@ export async function pipelineStreamDeadline(target: Target): Promise<Evidence> 
     scenario: "pipeline-stream-deadline",
     ok: true,
     detail: { dataFrames: data, trailerStatus: 4, totalMs: Math.round(end.atMs) },
+  };
+}
+
+// ---- CLOUD.69: correlation acceptance and propagation ----
+
+const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const metaField = 10;
+const errorField = 11;
+
+function formatId(bytes: Uint8Array): string {
+  assert.equal(bytes.length, 16, "an Id is exactly 16 bytes");
+  const hex = Buffer.from(bytes).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** The correlation id inside a ResponseMeta (tag 4) or an ArcError (tag 6), each an Id message. */
+function correlationOf(message: Uint8Array, tag: number): string {
+  const id = field(message, tag);
+  assert.ok(id instanceof Uint8Array, "a correlation id is present");
+  return formatId(field(id, 1) as Uint8Array);
+}
+
+function dataMessage(reply: Reply): Uint8Array {
+  const message = reply.frames.find((item) => item.flag === 0)?.payload;
+  assert.ok(message, "a data frame");
+  return message;
+}
+
+export async function correlationSupplied(target: Target): Promise<Evidence> {
+  const session = await issueSession(target);
+  const supplied = randomUUID();
+  const reply = await unary(
+    target,
+    whoamiPath,
+    authorized(target, session),
+    envelope(session.workspace, undefined, supplied),
+  );
+  assert.equal(grpcStatus(reply), 0);
+  const message = dataMessage(reply);
+  const meta = field(message, metaField) as Uint8Array;
+  assert.equal(correlationOf(meta, 4), supplied, "ResponseMeta returns the client's identity");
+  assert.equal(text(field(message, 3)), session.workspace);
+  // The same identity on the other methods of the probe: the unary observation and the first stream frame.
+  const observed = await unary(
+    target,
+    observationPath,
+    authorized(target, session),
+    envelope(session.workspace, undefined, supplied),
+  );
+  assert.equal(correlationOf(field(dataMessage(observed), metaField) as Uint8Array, 4), supplied);
+  const stream = await unary(target, streamPath, authorized(target, session), [
+    ...envelope(session.workspace, undefined, supplied),
+    ...varint(10 << 3),
+    ...varint(2),
+    ...varint(11 << 3),
+    ...varint(0),
+  ]);
+  assert.equal(grpcStatus(stream), 0);
+  assert.equal(correlationOf(field(dataMessage(stream), metaField) as Uint8Array, 4), supplied);
+  // No new header carries it, and the reply does not reflect the identity anywhere else.
+  assert.equal(reply.headers.get("traceparent"), null);
+  assert.equal(
+    [...reply.headers.values()].some((value) => value.includes(supplied)),
+    false,
+  );
+  return {
+    scenario: "correlation-supplied",
+    ok: true,
+    detail: { echoedInResponseMeta: true, methods: ["Whoami", "Observation", "Stream"] },
+  };
+}
+
+export async function correlationAbsent(target: Target): Promise<Evidence> {
+  const session = await issueSession(target);
+  const seen = new Set<string>();
+  for (let index = 0; index < 3; index++) {
+    const reply = await unary(
+      target,
+      whoamiPath,
+      authorized(target, session),
+      envelope(session.workspace),
+    );
+    assert.equal(grpcStatus(reply), 0);
+    const created = correlationOf(field(dataMessage(reply), metaField) as Uint8Array, 4);
+    assert.match(created, canonicalUuid);
+    assert.notEqual(created, "00000000-0000-0000-0000-000000000000");
+    seen.add(created);
+  }
+  assert.equal(seen.size, 3, "every call without an identity gets its own");
+  return {
+    scenario: "correlation-absent",
+    ok: true,
+    detail: { createdAtTheEdge: seen.size, canonical: true },
+  };
+}
+
+export async function correlationMalformed(target: Target): Promise<Evidence> {
+  const session = await issueSession(target);
+  const before = await observation(target, session);
+  const good = randomUUID();
+  const variants: Record<string, number[]> = {
+    allZero: lengthDelimited(3, lengthDelimited(1, new Array<number>(16).fill(0))),
+    fifteenBytes: lengthDelimited(3, lengthDelimited(1, uuidBytes(good).slice(0, 15))),
+    seventeenBytes: lengthDelimited(3, lengthDelimited(1, [...uuidBytes(good), 1])),
+    repeated: [
+      ...lengthDelimited(3, lengthDelimited(1, uuidBytes(good))),
+      ...lengthDelimited(3, lengthDelimited(1, uuidBytes(randomUUID()))),
+    ],
+    uuidText: lengthDelimited(3, lengthDelimited(1, [...Buffer.from(good)])),
+  };
+  const results: Record<string, number> = {};
+  for (const [name, raw] of Object.entries(variants)) {
+    for (const path of [whoamiPath, streamPath]) {
+      const reply = await unary(
+        target,
+        path,
+        authorized(target, session),
+        envelope(session.workspace, undefined, raw),
+      );
+      assert.equal(reply.status, 200, name);
+      assert.equal(grpcStatus(reply), 3, `${name}: INVALID_ARGUMENT`);
+      const trailer = reply.frames.find((item) => item.flag === 0x80);
+      assert.equal(
+        decodeURIComponent(trailers(trailer?.payload ?? new Uint8Array())["grpc-message"] ?? ""),
+        "validation.invalid_request",
+        name,
+      );
+      assert.equal(
+        reply.frames.filter((item) => item.flag === 0).length,
+        0,
+        `${name}: no message accompanies the refusal`,
+      );
+    }
+    results[name] = 3;
+  }
+  const after = await observation(target, session);
+  assert.equal(after.started, before.started, "a refused stream never reached its handler");
+  // The identity decided nothing else: the same session still works with a valid one.
+  const control = await unary(
+    target,
+    whoamiPath,
+    authorized(target, session),
+    envelope(session.workspace, undefined, good),
+  );
+  assert.equal(grpcStatus(control), 0);
+  return { scenario: "correlation-malformed", ok: true, detail: { refusals: results } };
+}
+
+export async function correlationErrorReply(target: Target): Promise<Evidence> {
+  const session = await issueSession(target);
+  const supplied = randomUUID();
+  const refusal = (correlation?: string) => [
+    ...envelope(session.workspace, undefined, correlation),
+    ...varint(10 << 3),
+    ...varint(1),
+  ];
+  const reply = await unary(target, whoamiPath, authorized(target, session), refusal(supplied));
+  // gRPC OK with an outcome error is an acknowledged domain refusal; it carries the identity in its ArcError.
+  assert.equal(grpcStatus(reply), 0);
+  const message = dataMessage(reply);
+  const error = field(message, errorField) as Uint8Array;
+  assert.equal(text(field(error, 1)), "state.not_found");
+  assert.equal(correlationOf(error, 6), supplied, "ArcError returns the client's identity");
+  assert.equal(correlationOf(field(message, metaField) as Uint8Array, 4), supplied);
+  assert.equal(field(message, 1), undefined, "a refusal carries no session data");
+  const created = await unary(target, whoamiPath, authorized(target, session), refusal());
+  const createdMessage = dataMessage(created);
+  const createdId = correlationOf(field(createdMessage, errorField) as Uint8Array, 6);
+  assert.match(createdId, canonicalUuid);
+  assert.equal(correlationOf(field(createdMessage, metaField) as Uint8Array, 4), createdId);
+  return {
+    scenario: "correlation-error-reply",
+    ok: true,
+    detail: { code: "state.not_found", echoedInArcError: true, createdWhenAbsent: true },
+  };
+}
+
+/**
+ * A job started with a stated chain identity is run to completion by the queue wake alone. The host's private job-slice request is
+ * closed and requires a canonical correlation id and causation id, so a completed job proves the wake message carried both through
+ * the Worker's consumer and the signed call. A direct slice call also states its identities and the host echoes exactly them. Not
+ * observed: the identity stored in the outbox row (no public surface reads it).
+ */
+export async function correlationQueueWake(target: Target): Promise<Evidence> {
+  const scope = `proof/corr-${randomUUID()}`;
+  const total = 120;
+  const chain = randomUUID();
+  const started = await operator(target, "job/start", { scope, total, correlationId: chain });
+  assert.equal(started.status, 200, JSON.stringify(started.json));
+  assert.equal(started.json.wakeEnqueued, true);
+  assert.equal(started.json.correlationId, chain, "the start names the chain it began");
+  const jobId = String(started.json.jobId);
+  const deadline = Date.now() + (target.jobTimeoutMs ?? 180_000);
+  let status: Record<string, unknown> = {};
+  while (Date.now() < deadline) {
+    await sleep(target.pollIntervalMs ?? 2_000);
+    status = (await operator(target, "job/status", { scope, jobId })).json;
+    if (status.state === "complete") break;
+  }
+  assert.equal(status.state, "complete", "the wake chain did not finish the job in time");
+  assert.equal(status.matches, true);
+  const cause = randomUUID();
+  const echoed = await operator(target, "job/slice", {
+    scope,
+    jobId,
+    eventId: randomUUID(),
+    correlationId: chain,
+    causationId: cause,
+    maxItems: 10,
+    maxMilliseconds: 1000,
+  });
+  assert.equal(echoed.status, 200, JSON.stringify(echoed.json));
+  assert.equal(echoed.json.correlationId, chain);
+  assert.equal(echoed.json.causationId, cause);
+  const refused = await operator(target, "job/slice", {
+    scope,
+    jobId,
+    eventId: randomUUID(),
+    correlationId: "00000000-0000-0000-0000-000000000000",
+    causationId: cause,
+    maxItems: 10,
+    maxMilliseconds: 1000,
+  });
+  assert.equal(refused.status, 400, "a nil correlation is refused by the host");
+  return {
+    scenario: "correlation-queue-wake",
+    ok: true,
+    detail: {
+      total,
+      completedByWake: true,
+      hostEchoedChain: true,
+      nilRefusedStatus: refused.status,
+    },
   };
 }

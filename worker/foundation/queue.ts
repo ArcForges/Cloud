@@ -2,6 +2,7 @@
 // Queue consumer for job wake hints. A message carries only identifiers: D1 stays the business
 // authority and a duplicate, late or lost delivery can never change business truth because the
 // commit itself is guarded by lease, fence and inbox rows (contracts 05 and D1 profile section 5).
+import { isCorrelationId } from "../ingress/correlation.ts";
 import type { CoordinatorLike, CoordinatorNamespaceLike, QueueLike, WakeMessage } from "./types.ts";
 
 export interface MessageLike {
@@ -16,21 +17,43 @@ export const maxSliceMilliseconds = 20_000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const scopePattern = /^proof\/[A-Za-z0-9._/-]{1,200}$/u;
 
+const legacyKeys = "eventId,jobId,kind,scope,v";
+const correlatedKeys = "causationId,correlationId,eventId,jobId,kind,scope,v";
+
+/**
+ * Parses the closed key set of a job wake. A wake carries its correlation identity and its causation id (CLOUD.69); a
+ * message queued by an earlier revision (the legacy key set, no correlation) is still accepted and takes its own event
+ * id as correlation and causation, so a deploy never turns queued wakes into poison. Nothing else is accepted:
+ * the keys are closed and every identifier is a canonical lowercase UUID, so no free text can reach a log or a header.
+ */
 export function parseWake(body: unknown): WakeMessage | null {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
   const record = body as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-  if (keys.join(",") !== "eventId,jobId,kind,scope,v") return null;
+  const keys = Object.keys(record).sort().join(",");
+  if (keys !== legacyKeys && keys !== correlatedKeys) return null;
   if (record.v !== 1 || record.kind !== "job.wake") return null;
   if (typeof record.jobId !== "string" || !uuid.test(record.jobId)) return null;
   if (typeof record.eventId !== "string" || !uuid.test(record.eventId)) return null;
   if (typeof record.scope !== "string" || !scopePattern.test(record.scope)) return null;
+  let correlationId: string;
+  let causationId: string;
+  if (keys === correlatedKeys) {
+    if (!isCorrelationId(record.correlationId) || !isCorrelationId(record.causationId)) return null;
+    correlationId = record.correlationId;
+    causationId = record.causationId;
+  } else {
+    // Deterministic, so every redelivery of the same legacy message carries the same identity.
+    correlationId = record.eventId;
+    causationId = record.eventId;
+  }
   return {
     v: 1,
     kind: "job.wake",
     jobId: record.jobId,
     scope: record.scope,
     eventId: record.eventId,
+    correlationId,
+    causationId,
   };
 }
 
@@ -106,7 +129,8 @@ export async function processWake(message: MessageLike, deps: ConsumerDeps): Pro
   }
   if (!reply.jobComplete) {
     try {
-      await deps.queue.send({ ...wake, eventId: deps.newEventId() });
+      // The continuation keeps the correlation of the chain and is caused by the wake event that just ran (CR-01, CR-02).
+      await deps.queue.send({ ...wake, eventId: deps.newEventId(), causationId: wake.eventId });
     } catch {
       // The slice (or its duplicate) is committed, but the continuation is not queued: retry the
       // message so the continuation is attempted again. The duplicate reply is harmless.
