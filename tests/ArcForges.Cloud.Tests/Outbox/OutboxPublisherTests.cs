@@ -238,7 +238,9 @@ public sealed class OutboxPublisherTests
         Assert.True(await publisher.PurgeAsync(Key, 40, NowMicros, TestContext.Current.CancellationToken));
         var call = Assert.Single(storage.Calls);
         Assert.Equal("platform.outbox-purge", call.Plan.Id);
-        Assert.Equal([40L, 40L, NowMicros], new[] { Int(call.Arguments[0][2]), Int(call.Arguments[1][1]), Int(call.Arguments[1][2]) });
+        Assert.Equal([40L, 40L, NowMicros], new[] { Int(call.Arguments[0][2]), Int(call.Arguments[1][1]), Int(call.Arguments[1][3]) });
+        // The DELETE is clamped to the stream's own watermark in SQL, so its stream key is bound again.
+        Assert.Equal(Key, Text(call.Arguments[1][2]));
         Assert.Equal(NowMicros, Int(call.Arguments[2][0]));
         Assert.Equal(Text(call.Arguments[0][0]), Text(call.Arguments[3][0]));
         storage.Handler = _ => throw Fail(PlanFailureKind.Precondition);
