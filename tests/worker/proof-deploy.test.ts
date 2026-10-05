@@ -15,7 +15,12 @@ import {
   type CandidateConfig,
 } from "../../eng/verification/proof-deploy.ts";
 import {
+  deployedRevision,
+  egressProbe,
   expectedJobChecksum,
+  helloIngress,
+  queueRetryDeadLetter,
+  sessionExpiry,
   runAll,
   runScenarios,
 } from "../../eng/verification/foundation-scenarios.ts";
@@ -228,6 +233,8 @@ test("a failing scenario never hides the others and its evidence row names the c
         "guard-rollback",
         "session-csrf-revoke",
         "r2-objects",
+        "session-expiry",
+        "queue-retry-dlq",
         "checkpoint-restart",
         "public-denial",
       ],
@@ -247,6 +254,308 @@ test("a failing scenario never hides the others and its evidence row names the c
       ),
       /Scenario failures: readiness/u,
     );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("the egress scenario passes on no HTTP response for every attempt and fails on any answer", async () => {
+  const original = globalThis.fetch;
+  const target = {
+    baseUrl: "https://proof.example",
+    origin: "https://proof.example",
+    operatorToken: "t".repeat(40),
+  };
+  const observed = {
+    blocked: true,
+    controlOk: true,
+    attempts: [
+      { host: "example.com", outcome: "timeout", elapsedMs: 8002 },
+      { host: "1.1.1.1", outcome: "reached_then_failed", elapsedMs: 1 },
+    ],
+  };
+  const answer = (value: unknown, status = 200) => {
+    globalThis.fetch = (async () => Response.json(value, { status })) as typeof fetch;
+  };
+  try {
+    // The platform's observed behavior (timeout and accepted-then-dropped) is the accepted block, as is a refusal.
+    answer(observed);
+    assert.equal((await egressProbe(target)).scenario, "egress-blocked");
+    answer({
+      ...observed,
+      attempts: [
+        { host: "example.com", outcome: "connection_failed" },
+        { host: "1.1.1.1", outcome: "connection_failed" },
+      ],
+    });
+    assert.equal((await egressProbe(target)).scenario, "egress-blocked");
+    const answered = (status: number) => ({
+      ...observed,
+      blocked: true,
+      attempts: [observed.attempts[0], { host: "1.1.1.1", outcome: "http_response", status }],
+    });
+    const failing = [
+      { ...observed, controlOk: false },
+      { ...observed, blocked: false },
+      { ...observed, attempts: [observed.attempts[0]] },
+      {
+        ...observed,
+        attempts: [observed.attempts[0], { host: "example.org", outcome: "timeout" }],
+      },
+      { ...observed, attempts: [observed.attempts[0], { host: "1.1.1.1", outcome: "unknown" }] },
+      answered(200),
+      answered(404),
+      answered(520),
+    ];
+    for (const reply of failing) {
+      answer(reply);
+      await assert.rejects(egressProbe(target));
+    }
+    answer({ error: "unavailable" }, 502);
+    await assert.rejects(egressProbe(target));
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("the runner waits for the Hello signal, then verifies the restarted foundation instance and fails closed", async () => {
+  const original = globalThis.fetch;
+  const expected = "a".repeat(40);
+  const stale = "b".repeat(40);
+  const target = {
+    baseUrl: "https://proof.example",
+    origin: "https://proof.example",
+    operatorToken: "t".repeat(40),
+    expectedRevision: expected,
+    revisionWaitMs: 600,
+    revisionPollMs: 10,
+    queueWaitMs: 30,
+    pollIntervalMs: 5,
+  };
+  const calls: string[] = [];
+  interface Script {
+    hello: { container: string; worker: string | null }[];
+    stopStatus: number;
+    foundation: (string | null)[];
+  }
+  const serve = (script: Script) => {
+    let hello = 0;
+    let foundation = 0;
+    calls.length = 0;
+    globalThis.fetch = (async (input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/api/healthz")) {
+        const step = script.hello[
+          Math.min(hello++, script.hello.length - 1)
+        ] as Script["hello"][number];
+        return Response.json(
+          { revision: step.container },
+          { headers: step.worker === null ? {} : { "x-arcforges-worker-revision": step.worker } },
+        );
+      }
+      if (url.endsWith("/proof/v1/container/stop"))
+        return Response.json({ stopped: true }, { status: script.stopStatus });
+      const revision = script.foundation[Math.min(foundation++, script.foundation.length - 1)];
+      return revision === null
+        ? Response.json({ error: "unavailable" }, { status: 500 })
+        : Response.json({ ready: true, revision });
+    }) as typeof fetch;
+  };
+  try {
+    // Stale and half-updated Hello answers are waited out; the stop must succeed; the restarted foundation instance must report
+    // the expected revision (a stale or unavailable instance is polled again).
+    serve({
+      hello: [
+        { container: stale, worker: stale },
+        { container: expected, worker: stale },
+        { container: expected, worker: null },
+        { container: expected, worker: expected },
+      ],
+      stopStatus: 200,
+      foundation: [null, stale, expected],
+    });
+    const row = await deployedRevision(target);
+    assert.equal(row.scenario, "deployed-revision");
+    assert.equal(row.detail.foundationRevision, expected);
+    assert(calls.some((call) => call.endsWith("/proof/v1/container/stop")));
+    // The stop must be delivered: a failing stop fails the row (the Hello signal alone is not enough).
+    serve({
+      hello: [{ container: expected, worker: expected }],
+      stopStatus: 500,
+      foundation: [expected],
+    });
+    await assert.rejects(deployedRevision(target), /could not be stopped/u);
+    // A foundation instance that keeps reporting another revision fails, even though Hello reports the expected one.
+    serve({
+      hello: [{ container: expected, worker: expected }],
+      stopStatus: 200,
+      foundation: [stale],
+    });
+    await assert.rejects(deployedRevision(target), /did not report revision/u);
+    // Hello never reaches the expected revision.
+    serve({
+      hello: [{ container: stale, worker: stale }],
+      stopStatus: 200,
+      foundation: [expected],
+    });
+    await assert.rejects(deployedRevision(target), /did not serve revision/u);
+    await assert.rejects(
+      deployedRevision({ ...target, expectedRevision: "short" }),
+      /expected revision/u,
+    );
+    // Every scenario run starts with the wait when a revision is expected, and records its failure.
+    const rows = await runScenarios(target, "0".repeat(64), { stopContainer: false });
+    assert.equal(rows[0]?.scenario, "deployed-revision");
+    assert.equal(rows[0]?.ok, false);
+    assert.equal(rows.length, 10);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("the Hello ingress scenario retries thrown errors within its deadline", async () => {
+  const original = globalThis.fetch;
+  let healthCalls = 0;
+  globalThis.fetch = (async (input: unknown) => {
+    const url = String(input);
+    if (url.endsWith("/api/healthz")) {
+      healthCalls++;
+      if (healthCalls < 3) throw new TypeError("fetch failed");
+      return new Response("{}", { status: 200 });
+    }
+    return new Response(new TextEncoder().encode("\u0000Hello, proof!"), {
+      status: 200,
+      headers: { "x-arcforges-worker-revision": "r" },
+    });
+  }) as typeof fetch;
+  try {
+    const row = await helloIngress({
+      baseUrl: "https://proof.example",
+      origin: "https://proof.example",
+      helloPollMs: 5,
+    });
+    assert.equal(row.detail.attempts, 3);
+    assert.equal(row.detail.sayHelloStatus, 200);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("only the proof environment may run two Container instances", () => {
+  const top = wrangler as unknown as { containers: { max_instances: number }[] };
+  assert.equal(top.containers[0]?.max_instances, 1, "production keeps one instance");
+  assert.equal(
+    (wrangler.env.proof.containers[0] as { max_instances?: number }).max_instances,
+    2,
+    "the proof Hello instance and the foundation instance must not contend for one slot",
+  );
+});
+
+test("the queue scenario passes only after one delivery plus six retries and a later dead letter", async () => {
+  const original = globalThis.fetch;
+  const target = {
+    baseUrl: "https://proof.example",
+    origin: "https://proof.example",
+    operatorToken: "t".repeat(40),
+    queueWaitMs: 150,
+    pollIntervalMs: 5,
+  };
+  const attempts = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({ attempt: index + 1, atMs: 100 + index }));
+  const serve = (observations: unknown[]) => {
+    let polled = 0;
+    globalThis.fetch = (async (input: unknown) => {
+      if (String(input).endsWith("/queue/poison"))
+        return Response.json({ probeId: "00000000-0000-4000-8000-0000000000cc" });
+      return Response.json(observations[Math.min(polled++, observations.length - 1)]);
+    }) as typeof fetch;
+  };
+  try {
+    serve([
+      { attempts: attempts(2), deadLetter: null },
+      { attempts: attempts(7), deadLetter: { attempt: 1, atMs: 200 } },
+    ]);
+    const row = await queueRetryDeadLetter(target);
+    assert.equal(row.detail.deliveries, 7);
+    assert.equal(row.detail.retries, 6);
+    // Too few retries, an out-of-order record, a dead letter before the last attempt and no dead letter all fail.
+    serve([{ attempts: attempts(3), deadLetter: { attempt: 1, atMs: 200 } }]);
+    await assert.rejects(queueRetryDeadLetter(target), /max_retries/u);
+    serve([{ attempts: attempts(7).reverse(), deadLetter: { attempt: 1, atMs: 200 } }]);
+    await assert.rejects(queueRetryDeadLetter(target), /max_retries/u);
+    serve([{ attempts: attempts(7), deadLetter: { attempt: 1, atMs: 50 } }]);
+    await assert.rejects(queueRetryDeadLetter(target), /follows the last retry/u);
+    serve([{ attempts: attempts(7), deadLetter: null }]);
+    await assert.rejects(queueRetryDeadLetter(target), /not dead-lettered in time/u);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("the session scenario passes only when both expiries and the default lifetime behave", async () => {
+  const original = globalThis.fetch;
+  const target = {
+    baseUrl: "https://proof.example",
+    origin: "https://proof.example",
+    operatorToken: "t".repeat(40),
+    sessionIdleSeconds: 0.2,
+    sessionAbsoluteSeconds: 0.5,
+    sessionSlackSeconds: 0.1,
+  };
+  interface Session {
+    handle: string;
+    idleUntil: number;
+    absoluteUntil: number;
+    revoked: boolean;
+  }
+  const serve = (honor: { idle: boolean; absolute: boolean }) => {
+    const sessions = new Map<string, Session>();
+    let counter = 0;
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      const now = Date.now();
+      if (url.endsWith("/proof/v1/session/issue")) {
+        const body = JSON.parse(String(init?.body)) as {
+          idleSeconds?: number;
+          absoluteSeconds?: number;
+        };
+        const handle = `h${counter++}`;
+        const absolute = now + (body.absoluteSeconds ?? 1e6) * 1_000;
+        const idle = now + (body.idleSeconds ?? 1e6) * 1_000;
+        sessions.set(handle, {
+          handle,
+          idleUntil: honor.idle ? idle : 1e15,
+          absoluteUntil: honor.absolute ? absolute : 1e15,
+          revoked: false,
+        });
+        return Response.json({ handle, csrfToken: `c-${handle}` });
+      }
+      const headers = new Headers(init?.headers);
+      const session = sessions.get((headers.get("cookie") ?? "").split("=")[1] ?? "");
+      const live =
+        session && !session.revoked && now < session.idleUntil && now < session.absoluteUntil;
+      if (url.endsWith("/session/v1/bootstrap")) {
+        // An authenticated bootstrap renews the idle window (here: leaves it as issued, capped by absolute).
+        return Response.json({ authenticated: Boolean(live) });
+      }
+      if (url.endsWith("/session/v1/logout")) {
+        if (!live || !session) return new Response(null, { status: 401 });
+        session.revoked = true;
+        return Response.json({ effect: "happened" });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+  };
+  try {
+    serve({ idle: true, absolute: true });
+    // The stub does not renew idle windows on bootstrap, so the in-use session needs an idle window longer than
+    // its absolute lifetime for the scenario's active-use step: the scenario passes it a long idle window by default.
+    assert.equal((await sessionExpiry(target)).scenario, "session-expiry");
+    serve({ idle: false, absolute: true });
+    await assert.rejects(sessionExpiry(target), /unused idle session must have expired/u);
+    serve({ idle: true, absolute: false });
+    await assert.rejects(sessionExpiry(target), /absolute lifetime/u);
   } finally {
     globalThis.fetch = original;
   }

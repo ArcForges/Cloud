@@ -68,7 +68,7 @@
         {
           "class_name": "FoundationContainer",
           "image": "./Dockerfile",
-          "max_instances": 1,
+          "max_instances": 2,
           "instance_type": "lite"
         }
       ],
@@ -117,6 +117,12 @@
             "max_batch_timeout": 1,
             "max_retries": 6,
             "dead_letter_queue": "arcforges-proof-wake-dlq"
+          },
+          {
+            "queue": "arcforges-proof-wake-dlq",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            "max_retries": 3
           }
         ]
       },

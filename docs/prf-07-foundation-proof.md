@@ -150,7 +150,7 @@ with the C# tests and the format check) and `Dependency audit and repository che
 inspection), then `Verify`. Only a successful main build deploys. It deploys the default Worker and the production Hello container: the
 default Container class is unchanged (no outbound interception, no environment hook, pinned by
 `tests/worker/container-classes.test.ts`), the default configuration is unchanged, and the Worker bundle is larger
-(61,990 bytes in Hello, 168,111 bytes now) because it now contains the dormant foundation modules, which answer nothing without
+(61,990 bytes in Hello, 172,071 bytes now) because it now contains the dormant foundation modules, which answer nothing without
 `FOUNDATION_PROOF=enabled`. The image likewise contains the dormant host module. The proof environment is never
 deployed by a push or a pull request; it is deployed only by the manually dispatched jobs described
 under Deploying below, and no CI job connects to the deployed service.
@@ -245,10 +245,63 @@ hand-framed `SayHello`), which only shows that the same Worker serves `/api` nex
 exposes no generated gRPC-Web service that carries int64, uint64 and decimal values: that needs a new Contracts service
 and published packages, so PRF.05's exact-value gRPC-Web scenario is not served here.
 
+### Blocked egress
+
+The proof Container keeps Internet access disabled (`enableInternet = false`); its only outbound paths are the interception
+hosts `storage.internal` and `objects.internal`. The operator operation `egress/probe` makes the host attempt a harmless
+`HEAD` to `http://example.com/` and to the literal address `http://1.1.1.1/` (no body, no redirect, response body never
+read, 8 second limit each) and reports only host, outcome and elapsed time.
+
+**What blocked means on this platform.** The first live probe showed that Cloudflare does not refuse the connection: the
+hostname attempt timed out after the whole window (8,002 ms) and the literal address was accepted and dropped within about
+1 ms (`reached_then_failed`), while the allowed control path answered in the same call. The accepted criterion is therefore
+**no HTTP response at all** (no status line of any code, including a 520 from a proxy), not "connection refused". The
+scenario `egress-blocked` passes only when every attempt got no response (`connection_failed`, `timeout` and
+`reached_then_failed` all count), both a hostname and a literal address were attempted, and the control path, the host's
+storage readiness through the interception, answered in the same call, so a broken probe cannot pass vacuously. Any status
+line, a failed control or fewer than two attempts fails it. The platform's own accept-then-drop behavior is the reason a
+peer that accepts and then closes counts as no response here; the limits of that criterion are that it cannot distinguish a
+silent drop from a very slow open route (the elapsed times are recorded, and the hostname attempt is seen to use its whole
+window) and that it proves the absence of an answer, not the mechanism. A timeout is not required to use the whole window, so a slow open route can false-pass; a peer that answers with something other than HTTP (a banner or a TLS alert) is also "no response" here, since only a status line counts as an answer. The C# tests run the real HTTP stack and host route
+against a closed port, a silent listener, peers that accept and then close or reset, and answering servers with status 200,
+404 and 520 (all answering cases fail), and a failed control. Production does not serve the operation.
+
+### Rollout and instance limits of the live run
+
+After a deployment a Container instance that was started before the rollout finished can still run the previous image (the
+first run after the second deployment answered a new operation with 404 from the old host). The live runner therefore first
+waits, for at most twelve minutes (a fresh deployment needs about ten to provision), until both the Worker revision header and the Hello instance's health revision equal the
+expected revision (the checked-out commit, or `PROOF_EXPECTED_REVISION`); that instance is only a signal that the platform now
+starts the new image. It then stops the foundation instance (the stop must succeed) and restarts it with a readiness call whose
+reply carries the host's own compiled revision, which must equal the expected one; the exact-value and egress scenarios run
+against that foundation instance. The proof environment (and only it) allows two Container instances, because the Hello
+`/api` instance and the foundation instance are separate Durable Object instances of one class and contended for the single
+slot with `max_instances: 1`; production keeps one instance. The Hello scenario retries thrown errors within its 150 second deadline; each request is bounded by the remaining time, so it cannot overrun the deadline by an iteration.
+
+### Queue loss and retry, and session expiry
+
+Two cases of the WP-06.04 testing text (loss and retry, expiry) are observed on the deployment by proof-only scenarios.
+
+**`queue-retry-dlq`.** The operator route `queue/poison` enqueues a message that carries only a random probe id. The wake consumer
+(`worker/foundation/poison.ts`) records every delivery attempt of such a message in a Durable Object addressed by the probe id and
+always asks for a retry (one second delay), so the queue's own limit (`max_retries` 6, that is one delivery and six retries) runs out
+and the platform delivers the message to the dead-letter queue `arcforges-proof-wake-dlq`, which has its own consumer that records the
+delivery. The route `queue/observation` reads the record back. The scenario passes only when exactly seven attempts were recorded in
+order and a dead letter followed the last one. Nothing touches D1, the Container or business state; the routes exist only behind the
+operator signature and only when `FOUNDATION_PROOF=enabled`, and production binds no queue. The offline tests run the real operator
+routes, queue entry and consumers against a simulated platform that applies the retry rule (the Durable Object wrapper is a one-line
+delegate to the same pure state functions and is exercised only live).
+
+**`session-expiry`.** The proof-only `session/issue` operation accepts optional `idleSeconds` and `absoluteSeconds` (2 to 300; omitted,
+the twelve hour and thirty minute defaults apply). The stored expiries are enforced by the same code as the defaults, so the scenario
+observes the rules themselves: an unused session with a short idle window is refused after it, a session in active use is still refused
+after its absolute lifetime, a default session outlives both, and an expired session is refused on bootstrap and on logout (401). This
+does not prove that the constants are twelve hours and thirty minutes (the offline session tests do).
+
 ## Not claimed
 
-- No live Cloudflare result of any kind: no deployed D1, R2, Queue, Durable Object or Container behavior, no outbound
-  handler interception, no blocked-egress or public-denial proof on a real deployment, no provider limits.
+- Live results exist for the scenarios above (the task record holds them); this repository document does not repeat them.
+  Not observed on Cloudflare at all: provider limits and the production Container image executing.
 - The outbound handlers use plain HTTP to the two virtual hosts inside the platform; HTTPS interception (HP-01) needs the
   Cloudflare CA to be installed in the image and is not configured here.
 - No nonce replay ledger, passkey ceremony, WP-22 identity flow, object grants of contracts 05 section 9, EventFeed or
@@ -260,22 +313,21 @@ and published packages, so PRF.05's exact-value gRPC-Web scenario is not served 
   contracts 05 section 2 do not.
 - The R2 facade (`/internal/objects/v1/probe/...`) and `worker/proof-migrations/0001_foundation_probe.sql` are
   proof-only. They are not the CON.15 job-object ports and are not part of the global D1 migration sequence.
-- The CI proof jobs (`access`, `provision`, `deploy`) are exercised offline only (fake Cloudflare API, configuration
-  and secret generation); their first run on the real account is recorded in the ledger, not here.
-- The proof environment binds `FoundationContainer`; its container start path with outbound interception has not been
-  observed on Cloudflare. The production class does not register any.
+- The proof environment binds `FoundationContainer` and not the production class; only the proof environment runs two Container
+  instances (`max_instances: 2`).
 
 ## Validation actually performed
 
-All results below were observed on the claimant's Windows 11 machine (ArcForges delivery worker w-c20261002-prf07) and
-are claimant-reported until the independent review and hosted CI confirm them. Nothing here is a live Cloudflare result.
+The offline results below were observed on the first delivery's Windows 11 machine (ArcForges delivery worker
+w-c20261002-prf07) and are claimant-reported until the independent review and hosted CI confirm them. They are not live
+Cloudflare results; the live results are in the task record.
 
 | Check                                   | Command                                                                                                      | Observed                                                                                                                                     |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Worker and tooling tests                | `npm test`                                                                                                   | 176 tests passed, 0 failed                                                                                                                   |
 | Dependency policy                       | `npm run test:dependencies`, `node tooling/dependency-policy.ts`                                             | 18 passed; policy and receipt `prf-07-r1` verify                                                                                             |
 | Licence, provenance                     | `node tooling/project.ts licence`, `node tooling/project.ts provenance`                                      | pass                                                                                                                                         |
-| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 168111 bytes)                                                                                                        |
+| Real bundle against the release profile | `node tooling/project.ts prepare-provenance-test` then `node --test tests/worker/release-provenance.test.ts` | 10 of 10 passed (bundle 172071 bytes)                                                                                                        |
 | Plan generator drift                    | `npm run check:plans`                                                                                        | 19 plans, manifest hash matches the generated TS and C#                                                                                      |
 | Formatting, lint, types                 | `prettier --check .`, `biome lint`, `tsc` for both projects                                                  | clean                                                                                                                                        |
 | C# build and tests                      | `dotnet build` and `dotnet test` of `Cloud.slnx`, Release, under the build slot                              | 0 warnings, 159 tests passed                                                                                                                 |
@@ -288,14 +340,14 @@ Queue emulation, and a Node SQLite bridge standing in for D1.
 
 ### Unobserved
 
-- Any deployed Cloudflare behavior: D1, R2, Queue, Durable Object, Container, outbound handlers, blocked egress,
-  public-surface denial, provider limits. `npm run test:foundation:live` has not been run against a deployment as of this document.
-- The Linux Native AOT image and the Docker build (no Docker here); they are exercised only by hosted CI.
+- Provider limits, the dead-letter and retry behavior under load, and the production Container image executing.
 - The local Node and npm are newer than the pinned toolchain; the pinned toolchain check runs only in hosted CI.
-- SQLite and workerd are emulation, not the provider.
+- SQLite and workerd are emulation, not the provider; the live scenarios are the provider evidence.
 
-### What the live evidence needs
+### What a live run needs
 
-The deployed proof environment (dispatch `CI` with `proof` = `deploy`, see above), the operator key file on the
-workstation that runs the scenarios, and the `RES-cloud-deployment` lease for that run. Until the scenarios have run
-against the deployment and their evidence is recorded, PRF.07 cannot be complete.
+The deployed proof environment (dispatch `CI` with `proof` = `deploy`, see above), the operator key file on the workstation that runs
+the scenarios, and the `RES-cloud-deployment` lease for that run. A fresh deployment needs about ten minutes before its Containers
+serve the new image (a run that started 8 minutes 25 seconds after a deploy still waited 140 seconds); the runner waits for up to
+twelve minutes and says so when it is still provisioning. Until the scenarios have run against the deployment and their evidence is
+recorded in the task record, PRF.07 cannot be complete.

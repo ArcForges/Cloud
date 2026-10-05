@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "cloud-release-r18",
+  "id": "cloud-release-r21",
   "ownerCommit": "51d793dee88c122c4a57ed6faf140bb4107a7083",
   "worker": {
     "sha256": "e036c4923dad87e0e810edd5b7ddf8eb16674d1b8a8bc17d5614e63f3346d0ac",
@@ -205,8 +205,8 @@
       "src/ArcForges.Cloud/Foundation/BrowserSessionEndpoints.cs": "abacb9219cf9967385c1e364bb84168815b4a32831b15f9da7eda4e93f02d877",
       "src/ArcForges.Cloud/Foundation/FoundationEndpoints.cs": "4b8f0ecf736172239800f19eeecbddda8df85448f2bfd85ae3a5c7872940f6c7",
       "src/ArcForges.Cloud/Foundation/FoundationHttp.cs": "39cf53a9ef00adb61a7b3cbf208651f6672e15200fd64ac85f3899430fadfb88",
-      "src/ArcForges.Cloud/Foundation/FoundationJson.cs": "1eb64bbe9e9b7916ed1e0b69ffb9018eb39f0691ae36b4c14bbbd8c79f0f6b07",
-      "src/ArcForges.Cloud/Foundation/FoundationOperations.cs": "4e6ac375049a75d1b0d121930b37b649ff5e402f69a69b255f2020e5533e5545",
+      "src/ArcForges.Cloud/Foundation/FoundationJson.cs": "2985a02a4e3fee01556f90b56631461e94d60b1e2c3842adb648b3291c25afed",
+      "src/ArcForges.Cloud/Foundation/FoundationOperations.cs": "8470b059a37445096751cda68eb594357ba8f23a4dfbaf05f9518bc6efe3818f",
       "src/ArcForges.Cloud/Foundation/FoundationOptions.cs": "d2d0d79786bd41ca3665861502f35d9a44298d2a699b1b369be55e980934c4fe",
       "src/ArcForges.Cloud/Foundation/JobSliceService.cs": "9072902c011d1e737e5d1fed4f8e0cf62b26e920b0645d8549c60d12bffd2eec",
       "src/ArcForges.Cloud/Foundation/ObjectsClient.cs": "942f5afbb4fc8aec5fd435af648cf8d12abb87742eeb5f2e6e55d77ff7ac558b",

@@ -19,6 +19,19 @@ export interface Target {
   jobTimeoutMs?: number;
   /** Also observe the anonymous Hello ingress (`/api`) on the target; only a deployed Worker serves it. */
   helloIngress?: boolean;
+  helloPollMs?: number;
+  queueWaitMs?: number;
+  /** Proof-only session lifetimes of the expiry scenario, in seconds (defaults 4 and 10). */
+  sessionIdleSeconds?: number;
+  sessionAbsoluteSeconds?: number;
+  /** Margin after each lifetime before the expiry is checked, in seconds (default 2.5). */
+  sessionSlackSeconds?: number;
+  /** Also run the blocked-egress probe; only a deployed Container with Internet access disabled can pass it. */
+  egressProbe?: boolean;
+  /** The revision that was just deployed; the run first waits (bounded) until the origin serves exactly it. */
+  expectedRevision?: string;
+  revisionWaitMs?: number;
+  revisionPollMs?: number;
 }
 
 type Json = Record<string, unknown>;
@@ -409,6 +422,242 @@ export async function negatives(target: Target): Promise<Evidence> {
 }
 
 /**
+ * Blocked egress of the proof Container. With Internet access disabled the platform does not refuse connections: a hostname times out and
+ * a literal address is accepted and dropped within about a millisecond (both observed on the deployed proof). The accepted criterion is
+ * therefore that no HTTP response at all (no status line of any code, including a 520 from a proxy) came back for any attempt, that both a
+ * hostname and a literal address were attempted, and that the allowed control path (private storage through the outbound interception)
+ * answered in the same call, so a broken probe cannot pass vacuously. This cannot distinguish a silent drop from a very slow open route;
+ * the elapsed times are recorded so the hostname attempt can be seen to have used its whole window.
+ */
+export async function egressProbe(target: Target): Promise<Evidence> {
+  const reply = await operator(target, "egress/probe", {});
+  assert.equal(reply.status, 200, JSON.stringify(reply.json));
+  const attempts = (reply.json.attempts ?? []) as {
+    host: string;
+    outcome: string;
+    status?: number;
+    elapsedMs?: number;
+  }[];
+  assert.equal(reply.json.controlOk, true, "the allowed control path did not answer");
+  assert(attempts.length >= 2, "the probe made too few attempts");
+  const literal = (host: string) => /^\d{1,3}(\.\d{1,3}){3}$/u.test(host);
+  assert(
+    attempts.some((attempt) => literal(attempt.host)) &&
+      attempts.some((attempt) => !literal(attempt.host)),
+    "the probe must attempt a hostname and a literal address",
+  );
+  const known = new Set(["connection_failed", "timeout", "reached_then_failed"]);
+  for (const attempt of attempts) {
+    assert.notEqual(
+      attempt.outcome,
+      "http_response",
+      `egress to ${attempt.host} got an HTTP response (${String(attempt.status ?? "")})`,
+    );
+    assert(known.has(attempt.outcome), `unknown egress outcome ${attempt.outcome}`);
+  }
+  assert.equal(reply.json.blocked, true);
+  return {
+    scenario: "egress-blocked",
+    ok: true,
+    detail: { controlOk: true, criterion: "no HTTP response for any attempt", attempts },
+  };
+}
+
+/**
+ * Waits (bounded) until the instances the scenarios run against serve exactly the deployed revision, so an instance that was started
+ * before the rollout finished and still runs the previous image cannot answer a new operation with 404. First the Worker revision header
+ * and the Hello instance's health revision must equal the expected value (the Hello instance is only a signal that the platform now starts
+ * the new image). Then the FOUNDATION instance, the one the exact-value and egress scenarios use, is stopped (the stop must succeed) and
+ * restarted by a readiness call whose reply must carry the expected host revision; any other revision, or a failed stop, fails the row.
+ */
+export async function deployedRevision(target: Target): Promise<Evidence> {
+  const expected = target.expectedRevision ?? "";
+  assert.match(expected, /^[0-9a-f]{40}$/u, "an expected revision is required");
+  const deadline = Date.now() + (target.revisionWaitMs ?? 720_000);
+  let attempts = 0;
+  let last = "";
+  let helloReady = false;
+  while (!helloReady && Date.now() < deadline) {
+    attempts++;
+    try {
+      const response = await fetch(`${target.baseUrl}/api/healthz`, {
+        redirect: "error",
+        signal: AbortSignal.timeout(20_000),
+      });
+      const health =
+        response.status === 200 ? ((await response.json()) as { revision?: string }) : {};
+      const header = response.headers.get("x-arcforges-worker-revision");
+      last = `status ${response.status}${response.status === 503 ? " (provisioning)" : ""}, container ${String(health.revision)}, worker ${String(header)}`;
+      helloReady = health.revision === expected && header === expected;
+    } catch (error) {
+      last = error instanceof Error ? error.name : "error";
+    }
+    if (!helloReady) await sleep(target.revisionPollMs ?? 5_000);
+  }
+  assert(
+    helloReady,
+    `The proof origin did not serve revision ${expected} in time (${last}). A fresh deployment needs about ten minutes to provision its Containers.`,
+  );
+  const stop = await operator(target, "container/stop", {});
+  assert.equal(stop.status, 200, `The foundation instance could not be stopped (${stop.status}).`);
+  let foundationRevision = "";
+  while (Date.now() < deadline) {
+    attempts++;
+    try {
+      const ready = await operator(target, "readiness", {});
+      foundationRevision = String(ready.json.revision ?? "");
+      last = `readiness ${ready.status}${ready.status === 503 ? " (provisioning)" : ""}, foundation ${foundationRevision || "none"}`;
+      if (ready.status === 200 && foundationRevision === expected)
+        return {
+          scenario: "deployed-revision",
+          ok: true,
+          detail: {
+            attempts,
+            revision: expected,
+            foundationRevision,
+            foundationStopStatus: stop.status,
+          },
+        };
+    } catch (error) {
+      last = error instanceof Error ? error.name : "error";
+    }
+    await sleep(target.revisionPollMs ?? 5_000);
+  }
+  assert.fail(
+    `The restarted foundation instance did not report revision ${expected} (${last}). A fresh deployment needs about ten minutes to provision its Containers.`,
+  );
+}
+
+/**
+ * Queue loss and retry (WP-06.04 testing text). An operator-signed route enqueues a poison message carrying a random probe id; the wake
+ * consumer records every delivery attempt and always asks for a retry, so the queue's own retry limit (max_retries 6, that is one delivery
+ * and six retries) runs out and the message is delivered to the dead-letter queue, whose consumer records the delivery. The operator reads
+ * the observation back. Nothing touches D1, the Container or business state.
+ */
+export async function queueRetryDeadLetter(target: Target): Promise<Evidence> {
+  const maxRetries = 6;
+  const issued = await operator(target, "queue/poison", {});
+  assert.equal(issued.status, 200, JSON.stringify(issued.json));
+  const probeId = String(issued.json.probeId);
+  const deadline = Date.now() + (target.queueWaitMs ?? 180_000);
+  let observed: Json = {};
+  while (Date.now() < deadline) {
+    await sleep(target.pollIntervalMs ?? 3_000);
+    const reply = await operator(target, "queue/observation", { probeId });
+    assert.equal(reply.status, 200, JSON.stringify(reply.json));
+    observed = reply.json;
+    if (observed.deadLetter) break;
+  }
+  const attempts = (observed.attempts ?? []) as { attempt: number; atMs: number }[];
+  const deadLetter = observed.deadLetter as { attempt: number; atMs: number } | null;
+  assert(
+    deadLetter,
+    `the message was not dead-lettered in time (${attempts.length} attempts seen)`,
+  );
+  assert.deepEqual(
+    attempts.map((entry) => entry.attempt),
+    Array.from({ length: maxRetries + 1 }, (_, index) => index + 1),
+    "one delivery plus max_retries retries, in order",
+  );
+  const last = attempts.at(-1);
+  assert(last && deadLetter.atMs >= last.atMs, "the dead letter follows the last retry");
+  return {
+    scenario: "queue-retry-dlq",
+    ok: true,
+    detail: {
+      probeId,
+      deliveries: attempts.length,
+      retries: attempts.length - 1,
+      deadLetterAfterMs: deadLetter.atMs - (attempts[0]?.atMs ?? deadLetter.atMs),
+    },
+  };
+}
+
+/**
+ * Session expiry (WP-06.04 testing text). The proof-only issue route accepts short idle and absolute lifetimes (2 to 300 seconds); the
+ * stored expiry is enforced by the same code as the twelve hour and thirty minute defaults, so this observes the rules themselves on the
+ * deployment: an idle session that is not used ends, a session in active use still ends at its absolute lifetime, a default session
+ * outlives both, and an expired session is refused on bootstrap and on logout.
+ */
+export async function sessionExpiry(target: Target): Promise<Evidence> {
+  const issue = async (extra: Json) => {
+    const reply = await operator(target, "session/issue", {
+      userId: randomUUID(),
+      deviceId: randomUUID(),
+      workspaceIds: [randomUUID()],
+      ...extra,
+    });
+    assert.equal(reply.status, 200, JSON.stringify(reply.json));
+    return {
+      cookie: `__Host-af_session=${String(reply.json.handle)}`,
+      csrf: String(reply.json.csrfToken),
+    };
+  };
+  const call = (method: string, path: string, headers: Record<string, string>) =>
+    fetch(`${target.baseUrl}${path}`, {
+      method,
+      headers,
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+  const authenticated = async (cookie: string) =>
+    (
+      (await (
+        await call("GET", "/session/v1/bootstrap", { cookie, origin: target.origin })
+      ).json()) as { authenticated: boolean }
+    ).authenticated;
+  const logoutStatus = async (session: { cookie: string; csrf: string }) =>
+    (
+      await call("POST", "/session/v1/logout", {
+        cookie: session.cookie,
+        origin: target.origin,
+        "x-af-csrf": session.csrf,
+      })
+    ).status;
+  const idleSeconds = target.sessionIdleSeconds ?? 4;
+  const absoluteSeconds = target.sessionAbsoluteSeconds ?? 10;
+  const slack = target.sessionSlackSeconds ?? 2.5;
+  const started = Date.now();
+  // The default session and the absolute-rule session are used while the idle-rule session sits unused.
+  const idle = await issue({ idleSeconds, absoluteSeconds: 300 });
+  const absolute = await issue({ absoluteSeconds });
+  const normal = await issue({});
+  assert.equal(await authenticated(absolute.cookie), true, "a fresh session authenticates");
+  await sleep(Math.max(0, (idleSeconds + slack) * 1_000 - (Date.now() - started)));
+  assert.equal(await authenticated(idle.cookie), false, "an unused idle session must have expired");
+  assert.equal(await logoutStatus(idle), 401, "an expired session cannot log out");
+  // The absolute session is still within its lifetime and keeps authenticating (and renewing its idle window).
+  assert.equal(
+    await authenticated(absolute.cookie),
+    true,
+    "a session in use stays valid until its absolute lifetime",
+  );
+  await sleep(Math.max(0, (absoluteSeconds + 2 * slack) * 1_000 - (Date.now() - started)));
+  assert.equal(
+    await authenticated(absolute.cookie),
+    false,
+    "no activity extends a session past its absolute lifetime",
+  );
+  assert.equal(await logoutStatus(absolute), 401);
+  assert.equal(
+    await authenticated(normal.cookie),
+    true,
+    "a default session outlives the short ones",
+  );
+  assert.equal(await logoutStatus(normal), 200);
+  return {
+    scenario: "session-expiry",
+    ok: true,
+    detail: {
+      idleRefused: true,
+      absoluteRefused: true,
+      defaultSessionAlive: true,
+      ms: Date.now() - started,
+    },
+  };
+}
+
+/**
  * The existing anonymous Hello ingress (`/api/healthz` and the generated-service path) on the proof
  * origin, observed with a hand-framed binary gRPC-Web request: this only shows that the same Worker
  * serves `/api` next to the proof surface, it is not the generated-client test of PRF.05.
@@ -419,47 +668,55 @@ export async function helloIngress(target: Target): Promise<Evidence> {
   const frame = new Uint8Array(5 + message.length);
   new DataView(frame.buffer).setUint32(1, message.length);
   frame.set(message, 5);
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + 150_000;
+  const within = () =>
+    AbortSignal.timeout(Math.max(1_000, Math.min(30_000, deadline - Date.now())));
   let attempts = 0;
   let last = "";
   while (Date.now() < deadline) {
     attempts++;
-    // Readiness polling of a possibly cold Container; SayHello is idempotent and read-only.
-    const health = await fetch(`${target.baseUrl}/api/healthz`, {
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    });
-    const healthBody = await health.text();
-    last = `healthz ${health.status}`;
-    if (health.status === 200) {
-      const response = await fetch(
-        `${target.baseUrl}/api/arcforges.hello.v1.HelloService/SayHello`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/grpc-web+proto", "grpc-timeout": "10S" },
-          body: frame,
-          redirect: "error",
-          signal: AbortSignal.timeout(30_000),
-        },
-      );
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      const text = new TextDecoder().decode(bytes);
-      last = `sayhello ${response.status}`;
-      if (response.status === 200 && text.includes("Hello, proof!")) {
-        return {
-          scenario: "hello-ingress",
-          ok: true,
-          detail: {
-            attempts,
-            healthStatus: health.status,
-            healthBytes: healthBody.length,
-            sayHelloStatus: response.status,
-            workerRevisionHeader: response.headers.get("x-arcforges-worker-revision"),
+    // Readiness polling of a possibly cold Container; SayHello is idempotent and read-only. A thrown error (reset, timeout,
+    // another instance holding the slot) is retried within the overall deadline.
+    try {
+      const health = await fetch(`${target.baseUrl}/api/healthz`, {
+        redirect: "error",
+        signal: within(),
+      });
+      const healthBody = await health.text();
+      last = `healthz ${health.status}`;
+      if (health.status === 200) {
+        const response = await fetch(
+          `${target.baseUrl}/api/arcforges.hello.v1.HelloService/SayHello`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/grpc-web+proto", "grpc-timeout": "10S" },
+            body: frame,
+            redirect: "error",
+            signal: within(),
           },
-        };
+        );
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const text = new TextDecoder().decode(bytes);
+        last = `sayhello ${response.status}`;
+        if (response.status === 200 && text.includes("Hello, proof!")) {
+          return {
+            scenario: "hello-ingress",
+            ok: true,
+            detail: {
+              attempts,
+              healthStatus: health.status,
+              healthBytes: healthBody.length,
+              sayHelloStatus: response.status,
+              workerRevisionHeader: response.headers.get("x-arcforges-worker-revision"),
+            },
+          };
+        }
       }
+    } catch (error) {
+      last = `${error instanceof Error ? error.name : "error"} on attempt ${attempts}`;
     }
-    await sleep(5_000);
+    if (Date.now() + (target.helloPollMs ?? 5_000) >= deadline) break;
+    await sleep(target.helloPollMs ?? 5_000);
   }
   assert.fail(`The Hello ingress did not answer on the proof origin (${last}).`);
 }
@@ -476,14 +733,23 @@ export async function runScenarios(
 ): Promise<Evidence[]> {
   const evidence: Evidence[] = [];
   const steps: [string, () => Promise<Evidence>][] = [
+    ...(target.expectedRevision
+      ? ([["deployed-revision", () => deployedRevision(target)]] as [
+          string,
+          () => Promise<Evidence>,
+        ][])
+      : []),
     ["readiness", () => readiness(target, manifestHash)],
     ["exact-values", () => exactValues(target)],
     ["guard-rollback", () => guardedRollback(target)],
     ["session-csrf-revoke", () => sessionLifecycle(target)],
     ["r2-objects", () => objectRoundTrip(target)],
+    ["session-expiry", () => sessionExpiry(target)],
+    ["queue-retry-dlq", () => queueRetryDeadLetter(target)],
     ["checkpoint-restart", () => checkpointRestart(target, options)],
     ["public-denial", () => negatives(target)],
   ];
+  if (target.egressProbe) steps.push(["egress-blocked", () => egressProbe(target)]);
   if (target.helloIngress) steps.push(["hello-ingress", () => helloIngress(target)]);
   for (const [name, step] of steps) {
     const started = Date.now();

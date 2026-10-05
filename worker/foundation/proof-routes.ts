@@ -3,6 +3,7 @@
 // Contracts exception schema and an operator-gated driver surface. Production answers none of it.
 import { BodyTooLarge, jsonResponse, readBounded, refusal } from "../private/bounded-body.ts";
 import { sha256, sha256Hex } from "../private/encoding.ts";
+import { poisonName } from "./poison.ts";
 import { isOperatorAuthorization, verifyOperatorSignature } from "./operator-signature.ts";
 import { ContainerCallError, postSigned } from "./container-client.ts";
 import {
@@ -22,6 +23,7 @@ const operations = new Set([
   "guard",
   "session/issue",
   "objects/roundtrip",
+  "egress/probe",
   "job/start",
   "job/slice",
   "job/status",
@@ -145,7 +147,8 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
     return jsonResponse(200, { stopped: true });
   }
   const wake = operation === "job/wake";
-  if (!wake && !operations.has(operation)) return refusal(404);
+  const queueProbe = operation === "queue/poison" || operation === "queue/observation";
+  if (!wake && !queueProbe && !operations.has(operation)) return refusal(404);
   if (
     (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase() !==
     "application/json"
@@ -157,6 +160,22 @@ async function operatorOperation(request: Request, env: FoundationEnv): Promise<
   } catch (error) {
     if (error instanceof BodyTooLarge) return refusal(413);
     throw error;
+  }
+  if (queueProbe) {
+    // Worker-only operations: nothing reaches the Container or D1. The poison message carries a random id only.
+    if (operation === "queue/poison") {
+      const probeId = crypto.randomUUID();
+      await env.WAKE_QUEUE.send({ v: 1, kind: "proof.poison", probeId });
+      return jsonResponse(200, { probeId });
+    }
+    let probeId: unknown;
+    try {
+      probeId = (JSON.parse(new TextDecoder().decode(body)) as { probeId?: unknown }).probeId;
+    } catch {
+      return refusal(400);
+    }
+    if (typeof probeId !== "string" || !uuid.test(probeId)) return refusal(400);
+    return jsonResponse(200, await env.JOB_COORDINATOR.getByName(poisonName(probeId)).readPoison());
   }
   if (wake) {
     let parsed: { scope?: unknown; jobId?: unknown };

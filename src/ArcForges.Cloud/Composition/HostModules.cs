@@ -76,6 +76,7 @@ internal sealed class FoundationModule : IHostModule
         services.TryAddSingleton(provider => new ObjectsClient(NewClient(), configured.ObjectsBaseUrl, configured.SigningKeyC2w, provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton(provider => new SessionService(provider.GetRequiredService<IPlanExecutor>(), configured, provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton(provider => new JobSliceService(provider.GetRequiredService<IPlanExecutor>(), provider.GetRequiredService<TimeProvider>(), configured.RecoveryGeneration));
+        services.TryAddSingleton(provider => new EgressProbe(NewClient, EgressProbe.PublicTargets, provider.GetRequiredService<SessionService>().IsReadyAsync));
         services.TryAddSingleton<FoundationOperations>();
     }
 

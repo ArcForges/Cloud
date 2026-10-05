@@ -57,7 +57,7 @@ function environment(
     OBJECTS: createFakeR2(),
     WAKE_QUEUE: {
       send(message) {
-        sent.push(message);
+        sent.push(message as WakeMessage);
         return Promise.resolve();
       },
     },
@@ -450,4 +450,23 @@ test("a single slice can be driven by the operator through the signed path", asy
     new URL((recorded[0] as Recorded).request.url).pathname,
     "/internal/foundation/v1/job/slice",
   );
+});
+
+test("the egress probe is an operator operation signed toward the Container and nothing else is", async () => {
+  const { env, recorded } = environment({ body: '{"blocked":true}' });
+  const response = await handleProof(operator("/proof/v1/egress/probe", {}), env);
+  assert.equal(response.status, 200);
+  assert.equal(
+    new URL((recorded[0] as Recorded).request.url).pathname,
+    "/internal/foundation/v1/egress/probe",
+  );
+  // Without the operator credential the probe is refused like every other operation.
+  const anonymous = new Request("https://proof.example/proof/v1/egress/probe", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal((await handleProof(anonymous, env)).status, 401);
+  assert.equal(recorded.length, 1);
+  assert.equal((await handleProof(operator("/proof/v1/egress/other", {}), env)).status, 404);
 });

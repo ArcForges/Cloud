@@ -145,6 +145,9 @@ function harness(options: {
       calls.release.push(id);
       return Promise.resolve();
     },
+    recordPoisonAttempt: () => Promise.reject(new Error("not a poison probe")),
+    recordDeadLetter: () => Promise.reject(new Error("not a poison probe")),
+    readPoison: () => Promise.reject(new Error("not a poison probe")),
   };
   let counter = 100;
   const deps: ConsumerDeps = {
@@ -152,7 +155,7 @@ function harness(options: {
     queue: {
       send(message) {
         if (options.sendFails) return Promise.reject(new Error("queue down"));
-        sent.push(message);
+        sent.push(message as WakeMessage);
         return Promise.resolve();
       },
     },

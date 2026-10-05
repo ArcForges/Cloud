@@ -161,6 +161,7 @@ export async function main() {
           maxRetries: 6,
           deadLetterQueue: "proof-wake-dlq",
         },
+        "proof-wake-dlq": { maxBatchSize: 1, maxBatchTimeout: 1, maxRetries: 3 },
       },
       serviceBindings: { CONTAINER_SERVICE: proxy as never },
       bindings: {

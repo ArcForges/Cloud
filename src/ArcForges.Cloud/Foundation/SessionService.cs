@@ -48,7 +48,10 @@ internal sealed class SessionService(IPlanExecutor executor, FoundationOptions o
     public long NowMicros() => Micros(time.GetUtcNow());
 
     /// <summary>Proof-only issue: there is no passkey ceremony in this task, so the internal route mints a session directly.</summary>
-    public async Task<IssuedSession> IssueAsync(string userId, string deviceId, IReadOnlyList<string> workspaceIds, CancellationToken cancellationToken)
+    /// <param name="absoluteLifetime">Proof-only override of the twelve hour absolute lifetime (the stored expiry is enforced exactly as for the default).</param>
+    /// <param name="idleWindow">Proof-only override of the thirty minute idle window.</param>
+    public async Task<IssuedSession> IssueAsync(string userId, string deviceId, IReadOnlyList<string> workspaceIds, CancellationToken cancellationToken,
+        TimeSpan? absoluteLifetime = null, TimeSpan? idleWindow = null)
     {
         if (!FoundationIds.IsUuid(userId) || !FoundationIds.IsUuid(deviceId) || workspaceIds.Count > MaxWorkspaces || !workspaceIds.All(FoundationIds.IsUuid))
             throw new ArgumentException("Invalid session identity.", nameof(userId));
@@ -56,8 +59,8 @@ internal sealed class SessionService(IPlanExecutor executor, FoundationOptions o
         var hash = SHA256.HashData(handle);
         var sessionId = Guid.NewGuid().ToString("D");
         var now = NowMicros();
-        var absolute = now + (long)options.AbsoluteLifetime.TotalMicroseconds;
-        var idle = Math.Min(now + (long)options.IdleWindow.TotalMicroseconds, absolute);
+        var absolute = now + (long)(absoluteLifetime ?? options.AbsoluteLifetime).TotalMicroseconds;
+        var idle = Math.Min(now + (long)(idleWindow ?? options.IdleWindow).TotalMicroseconds, absolute);
         var workspaces = JsonSerializer.Serialize([.. workspaceIds], FoundationJsonContext.Default.StringArray);
         var payload = JsonSerializer.Serialize(new SessionEventPayload(sessionId), FoundationJsonContext.Default.SessionEventPayload);
         await executor.ExecuteAsync(Call(PlanManifest.SessionCreate,

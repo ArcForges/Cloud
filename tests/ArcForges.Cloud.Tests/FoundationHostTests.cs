@@ -40,7 +40,7 @@ public sealed class FoundationHostTests
         }
     }
 
-    private static async Task<Running> StartAsync(bool enabled = true)
+    private static async Task<Running> StartAsync(bool enabled = true, EgressProbe? probe = null)
     {
         var storage = new FakeStorage();
         var time = new FakeTime(Start);
@@ -53,6 +53,7 @@ public sealed class FoundationHostTests
         });
         builder.Services.AddSingleton<IPlanExecutor>(storage);
         builder.Services.AddSingleton<TimeProvider>(time);
+        if (probe is not null) builder.Services.AddSingleton(probe);
         IHostModule[] modules =
         [
             new HelloModule(BuildIdentity.FromAssembly(typeof(HelloEndpoint).Assembly)),
@@ -271,6 +272,9 @@ public sealed class FoundationHostTests
         var ok = await Send(host, Signed(host, "/internal/foundation/v1/readiness", json));
         Assert.True(ok.Json.GetProperty("ready").GetBoolean());
         Assert.Equal(PlanManifest.Hash, ok.Json.GetProperty("manifestHash").GetString());
+        // The host reports its own compiled revision, which the live runner compares with the deployed one.
+        Assert.Equal(HostRevision.Current, ok.Json.GetProperty("revision").GetString());
+        Assert.Matches("^[0-9a-f]{40}(-dirty)?$", HostRevision.Current);
         // The host-wide bound of 4096 bytes protects Hello; the foundation routes raise only their own bound.
         var padded = Encoding.UTF8.GetBytes("{" + new string(' ', 5000) + "}");
         Assert.Equal(HttpStatusCode.OK, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", padded))).Status);
@@ -475,6 +479,51 @@ public sealed class FoundationHostTests
         Assert.DoesNotContain(host.Storage.Sessions, s => Encoding.UTF8.GetString(s.Hash).Contains(issued.Json.GetProperty("handle").GetString()!, StringComparison.Ordinal));
     }
 
+    private static async Task<(string Cookie, string Csrf)> IssueShort(Running host, int? idle, int? absolute)
+    {
+        var issued = await Operation(host, "session/issue", new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = new[] { T.Uuid() }, idleSeconds = idle, absoluteSeconds = absolute });
+        Assert.Equal(HttpStatusCode.OK, issued.Status);
+        return ("__Host-af_session=" + issued.Json.GetProperty("handle").GetString(), issued.Json.GetProperty("csrfToken").GetString()!);
+    }
+
+    private static async Task<bool> IsAuthenticated(Running host, string cookie) =>
+        (await Send(host, Browser("GET", "/session/v1/bootstrap", cookie, Origin))).Json.GetProperty("authenticated").GetBoolean();
+
+    [Fact]
+    public async Task ShortProofLifetimesExpireTheSessionByTheIdleAndByTheAbsoluteRuleAndAreRefusedEverywhere()
+    {
+        await using var host = await StartAsync();
+        // Idle rule: no activity for longer than the idle window ends the session; a refused logout follows.
+        var idle = await IssueShort(host, idle: 3, absolute: 60);
+        host.Time.Advance(TimeSpan.FromSeconds(2));
+        host.Time.Advance(TimeSpan.FromSeconds(2));
+        Assert.False(await IsAuthenticated(host, idle.Cookie));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(host, Browser("POST", "/session/v1/logout", idle.Cookie, Origin, idle.Csrf))).Status);
+        // Absolute rule: a long idle window and active use cannot outlive the absolute lifetime.
+        var absolute = await IssueShort(host, idle: null, absolute: 6);
+        host.Time.Advance(TimeSpan.FromSeconds(2));
+        Assert.True(await IsAuthenticated(host, absolute.Cookie));
+        host.Time.Advance(TimeSpan.FromSeconds(3));
+        Assert.True(await IsAuthenticated(host, absolute.Cookie));
+        host.Time.Advance(TimeSpan.FromSeconds(2));
+        Assert.False(await IsAuthenticated(host, absolute.Cookie));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(host, Browser("POST", "/session/v1/logout", absolute.Cookie, Origin, absolute.Csrf))).Status);
+        // Without overrides the configured defaults apply (30 minute idle window stays valid after a minute).
+        var normal = await IssueShort(host, idle: null, absolute: null);
+        host.Time.Advance(TimeSpan.FromMinutes(1));
+        Assert.True(await IsAuthenticated(host, normal.Cookie));
+        // The overrides are bounded and typed on the internal route.
+        foreach (var bad in new object[]
+        {
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), idleSeconds = 1 },
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), idleSeconds = 301 },
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), absoluteSeconds = 0 },
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), absoluteSeconds = 86400 },
+            new { userId = T.Uuid(), deviceId = T.Uuid(), workspaceIds = Array.Empty<string>(), idleSeconds = "3" },
+        })
+            Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "session/issue", bad)).Status);
+    }
+
     [Fact]
     public async Task JobRoutesRunBoundedSlicesToACompleteExactChecksum()
     {
@@ -509,5 +558,155 @@ public sealed class FoundationHostTests
         Assert.Equal(HttpStatusCode.NotFound, (await Operation(host, "job/status", new { scope, jobId = T.Uuid() })).Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/start", new { scope, total = 1001 })).Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/start", new { scope = "../x", total = 5 })).Status);
+    }
+
+    private static Uri ClosedLoopbackAddress()
+    {
+        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return new Uri($"http://127.0.0.1:{port}/");
+    }
+
+    private static async Task<(WebApplication App, Uri Address)> StartAnsweringServerAsync()
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http1));
+        var app = builder.Build();
+        app.MapMethods("/{**path}", ["HEAD", "GET"], () => Results.Ok());
+        await app.StartAsync();
+        return (app, new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()));
+    }
+
+    [Fact]
+    public async Task TheEgressProbeReportsBlockedOnlyWhenNoTargetAnswersAndTheControlAnswers()
+    {
+        var closedA = ClosedLoopbackAddress();
+        var closedB = ClosedLoopbackAddress();
+        // The real HTTP stack and the real host route: a refused connection is the blocked outcome.
+        await using var blocked = await StartAsync(probe: new EgressProbe(FoundationModule.NewClient, [closedA, closedB], _ => Task.FromResult(true)));
+        var reply = await Operation(blocked, "egress/probe", new { });
+        Assert.Equal(HttpStatusCode.OK, reply.Status);
+        Assert.True(reply.Json.GetProperty("blocked").GetBoolean());
+        Assert.True(reply.Json.GetProperty("controlOk").GetBoolean());
+        var attempts = reply.Json.GetProperty("attempts").EnumerateArray().ToArray();
+        Assert.Equal(2, attempts.Length);
+        Assert.All(attempts, attempt => Assert.Equal("connection_failed", attempt.GetProperty("outcome").GetString()));
+        Assert.Equal(["127.0.0.1", "127.0.0.1"], attempts.Select(attempt => attempt.GetProperty("host").GetString()));
+        // The default route also exercises the production wiring: the control is the host's own storage readiness.
+        var (server, open) = await StartAnsweringServerAsync();
+        try
+        {
+            // One answering target, whatever its status, is an open route: never "blocked", whatever else was refused.
+            await using var leaking = await StartAsync(probe: new EgressProbe(FoundationModule.NewClient, [closedA, open], _ => Task.FromResult(true)));
+            var leak = await Operation(leaking, "egress/probe", new { });
+            Assert.False(leak.Json.GetProperty("blocked").GetBoolean());
+            var outcomes = leak.Json.GetProperty("attempts").EnumerateArray().Select(a => a.GetProperty("outcome").GetString()).ToArray();
+            Assert.Equal(["connection_failed", "http_response"], outcomes);
+            Assert.Equal(200, leak.Json.GetProperty("attempts")[1].GetProperty("status").GetInt32());
+        }
+        finally
+        {
+            await server.StopAsync(T.Ct);
+            await server.DisposeAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await Operation(blocked, "egress/probe", new { extra = 1 })).Status);
+    }
+
+    [Fact]
+    public async Task TheEgressProbeFailsClosedWithoutTheControlTargetsOrAnyAnswerAndCountsSilenceAsNoResponse()
+    {
+        var closed = ClosedLoopbackAddress();
+        // A broken control path means the probe proves nothing: never blocked.
+        // Two targets, so the two-attempt rule cannot mask a control that was dropped from the verdict.
+        var noControl = await new EgressProbe(FoundationModule.NewClient, [closed, ClosedLoopbackAddress()], _ => Task.FromResult(false)).RunAsync(T.Ct);
+        Assert.False(noControl.Blocked);
+        Assert.False(noControl.ControlOk);
+        Assert.False((await new EgressProbe(FoundationModule.NewClient, [], _ => Task.FromResult(true)).RunAsync(T.Ct)).Blocked);
+        // One attempt is not enough: the proof needs the name and the address.
+        Assert.False((await new EgressProbe(FoundationModule.NewClient, [closed], _ => Task.FromResult(true)).RunAsync(T.Ct)).Blocked);
+        // The platform's observed behavior: a silent target (timeout) and peers that accept and drop (close or reset) are "no response".
+        var silentA = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        var silentB = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        silentA.Start();
+        silentB.Start();
+        try
+        {
+            var addresses = new[] { silentA, silentB }.Select(listener => new Uri($"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}/")).ToArray();
+            var result = await new EgressProbe(FoundationModule.NewClient, addresses, _ => Task.FromResult(true), TimeSpan.FromMilliseconds(300)).RunAsync(T.Ct);
+            Assert.True(result.Blocked);
+            Assert.Equal(["timeout", "timeout"], result.Attempts.Select(attempt => attempt.Outcome));
+            Assert.All(result.Attempts, attempt => Assert.True(attempt.ElapsedMs >= 250, "the silent target used its whole window"));
+        }
+        finally
+        {
+            silentA.Stop();
+            silentB.Stop();
+        }
+
+        foreach (var reset in new[] { false, true })
+        {
+            var peer = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            peer.Start();
+            // Every connection is accepted and dropped at once, so a transparent retry of the HEAD on Linux meets the same peer.
+            using var stop = new CancellationTokenSource();
+            var accepting = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!stop.IsCancellationRequested)
+                    {
+                        using var accepted = await peer.AcceptTcpClientAsync(stop.Token);
+                        if (reset) accepted.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+                    }
+                }
+                catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException or System.Net.Sockets.SocketException or OperationCanceledException)
+                {
+                    // The test stopped the listener.
+                }
+            }, T.Ct);
+            try
+            {
+                var address = new Uri($"http://127.0.0.1:{((IPEndPoint)peer.LocalEndpoint).Port}/");
+                var result = await new EgressProbe(FoundationModule.NewClient, [address, closed], _ => Task.FromResult(true)).RunAsync(T.Ct);
+                // Accepted-then-dropped without a status line is no response: blocked. Windows reports the distinct outcome, Linux
+                // reports the reset as a connection error; either way no status line came back.
+                Assert.True(result.Blocked);
+                Assert.Contains(result.Attempts[0].Outcome, new[] { "reached_then_failed", "connection_failed" });
+                Assert.Null(result.Attempts[0].Status);
+            }
+            finally
+            {
+                await stop.CancelAsync();
+                peer.Stop();
+                await Task.WhenAny(accepting, Task.Delay(TimeSpan.FromSeconds(5), T.Ct));
+            }
+        }
+
+        // Any status line is an answer from the network, including a proxy error.
+        foreach (var status in new[] { 200, 404, 520 })
+        {
+            var builder = WebApplication.CreateSlimBuilder();
+            builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http1));
+            var app = builder.Build();
+            app.MapMethods("/{**path}", ["HEAD", "GET"], () => Results.StatusCode(status));
+            await app.StartAsync(T.Ct);
+            try
+            {
+                var address = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
+                var result = await new EgressProbe(FoundationModule.NewClient, [closed, address], _ => Task.FromResult(true)).RunAsync(T.Ct);
+                Assert.False(result.Blocked);
+                Assert.Equal(status, result.Attempts[1].Status);
+            }
+            finally
+            {
+                await app.StopAsync(T.Ct);
+                await app.DisposeAsync();
+            }
+        }
+
+        Assert.Equal(["example.com", "1.1.1.1"], EgressProbe.PublicTargets.Select(uri => uri.Host));
     }
 }

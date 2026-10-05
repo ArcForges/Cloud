@@ -4,6 +4,7 @@
 // obligation (python tools/delivery.py claim RES-cloud-deployment --worker W --task PRF.07, released
 // immediately afterwards). Never CI. The evidence file records results, never a secret.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,9 +37,13 @@ export async function main() {
   }
   const origin = process.env.PROOF_ALLOWED_ORIGIN ?? baseUrl;
 
+  // The scenarios must run against the revision that was just deployed: the checked-out commit by default.
+  const expectedRevision =
+    process.env.PROOF_EXPECTED_REVISION ??
+    execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const startedAt = new Date().toISOString();
   const evidence = await runScenarios(
-    { baseUrl, origin, helloIngress: true, ...auth },
+    { baseUrl, origin, helloIngress: true, egressProbe: true, expectedRevision, ...auth },
     manifestHash,
     {
       stopContainer: true,

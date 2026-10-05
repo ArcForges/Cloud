@@ -28,7 +28,19 @@ internal readonly record struct OperationReply(int Status, byte[] Body)
 /// The operations behind the signed internal proof routes. Every 64-bit and decimal value is an exact canonical string,
 /// all arithmetic is checked, and every failure maps to a closed error code.
 /// </summary>
-internal sealed class FoundationOperations(IPlanExecutor executor, SessionService sessions, JobSliceService jobs, ObjectsClient objects, FoundationOptions options)
+/// <summary>The source revision compiled into this host, formatted exactly like the health route's revision.</summary>
+internal static class HostRevision
+{
+    public static string Current { get; } = Compute();
+
+    private static string Compute()
+    {
+        var build = BuildIdentity.FromAssembly(typeof(HostRevision).Assembly)["build"]!.AsObject();
+        return build["sourceCommit"]!.GetValue<string>() + (build["dirty"]!.GetValue<bool>() ? "-dirty" : "");
+    }
+}
+
+internal sealed class FoundationOperations(IPlanExecutor executor, SessionService sessions, JobSliceService jobs, ObjectsClient objects, EgressProbe egress, FoundationOptions options)
 {
     public async Task<OperationReply> ExecuteAsync(string operation, byte[] body, CancellationToken cancellationToken)
     {
@@ -41,6 +53,7 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
                 "guard" => await GuardAsync(body, cancellationToken),
                 "session/issue" => await IssueAsync(body, cancellationToken),
                 "objects/roundtrip" => await RoundtripAsync(body, cancellationToken),
+                "egress/probe" => await EgressProbeAsync(body, cancellationToken),
                 "job/start" => await JobStartAsync(body, cancellationToken),
                 "job/slice" => await JobSliceAsync(body, cancellationToken),
                 "job/status" => await JobStatusAsync(body, cancellationToken),
@@ -83,7 +96,7 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
     {
         if (!TryParse(body, FoundationJsonContext.Default.ReadinessRequest, out _)) return OperationReply.Invalid;
         return await sessions.IsReadyAsync(cancellationToken)
-            ? OperationReply.Json(StatusCodes.Status200OK, new ReadinessResponse(true, PlanManifest.Hash, "1"), FoundationJsonContext.Default.ReadinessResponse)
+            ? OperationReply.Json(StatusCodes.Status200OK, new ReadinessResponse(true, PlanManifest.Hash, "1", HostRevision.Current), FoundationJsonContext.Default.ReadinessResponse)
             : OperationReply.Error(StatusCodes.Status503ServiceUnavailable, "unavailable");
     }
 
@@ -277,7 +290,10 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
     {
         if (!TryParse(body, FoundationJsonContext.Default.IssueRequest, out var request) || !FoundationIds.IsUuid(request.UserId) || !FoundationIds.IsUuid(request.DeviceId)
             || request.WorkspaceIds.Length > SessionService.MaxWorkspaces || !request.WorkspaceIds.All(FoundationIds.IsUuid)) return OperationReply.Invalid;
-        var issued = await sessions.IssueAsync(request.UserId, request.DeviceId, request.WorkspaceIds, cancellationToken);
+        // Proof-only short lifetimes (2 to 300 seconds) let the live run observe both expiries; omitted, the configured defaults apply.
+        if (request.IdleSeconds is < 2 or > 300 || request.AbsoluteSeconds is < 2 or > 300) return OperationReply.Invalid;
+        var issued = await sessions.IssueAsync(request.UserId, request.DeviceId, request.WorkspaceIds, cancellationToken,
+            request.AbsoluteSeconds is { } absolute ? TimeSpan.FromSeconds(absolute) : null, request.IdleSeconds is { } idle ? TimeSpan.FromSeconds(idle) : null);
         return OperationReply.Json(StatusCodes.Status200OK,
             new IssueResponse(issued.SessionId, issued.Handle, issued.CsrfToken, BrowserSessionEndpoints.Timestamp(issued.AbsoluteExpiresAt), BrowserSessionEndpoints.Timestamp(issued.IdleExpiresAt)),
             FoundationJsonContext.Default.IssueResponse);
@@ -322,6 +338,15 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
                 existingRejected && freshRejected, range.ContentRange,
                 put.StatusCode, whole.StatusCode, range.StatusCode, existingMismatch.StatusCode, freshMismatch.StatusCode, existingRejected, freshRejected),
             FoundationJsonContext.Default.RoundtripResponse);
+    }
+
+    private async Task<OperationReply> EgressProbeAsync(byte[] body, CancellationToken cancellationToken)
+    {
+        if (!TryParse(body, FoundationJsonContext.Default.EgressProbeRequest, out _)) return OperationReply.Invalid;
+        var (blocked, controlOk, attempts) = await egress.RunAsync(cancellationToken);
+        return OperationReply.Json(StatusCodes.Status200OK,
+            new EgressProbeResponse(blocked, controlOk, [.. attempts.Select(a => new EgressAttemptResponse(a.Host, a.Outcome, a.Status, a.ElapsedMs))]),
+            FoundationJsonContext.Default.EgressProbeResponse);
     }
 
     private async Task<OperationReply> JobStartAsync(byte[] body, CancellationToken cancellationToken)
