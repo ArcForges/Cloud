@@ -280,6 +280,30 @@ public sealed class FoundationHostTests
         Assert.Equal(HttpStatusCode.OK, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", padded))).Status);
     }
 
+    [Fact]
+    public async Task AFailedReadinessIsA503WithTheClosedReportNotAnOpaqueError()
+    {
+        await using var host = await StartAsync();
+        var ready = await Operation(host, "readiness", new { });
+        Assert.Equal(HttpStatusCode.OK, ready.Status);
+        Assert.Equal("ready", ready.Json.GetProperty("components").GetProperty("d1").GetProperty("state").GetString());
+
+        host.Storage.Fault = call => call.Plan.Id == "foundation.readiness" ? PlanFailureKind.ManifestMismatch : null;
+        var mismatch = await Operation(host, "readiness", new { });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, mismatch.Status);
+        Assert.False(mismatch.Json.GetProperty("ready").GetBoolean());
+        var d1 = mismatch.Json.GetProperty("components").GetProperty("d1");
+        Assert.Equal("misconfigured", d1.GetProperty("state").GetString());
+        Assert.Equal("plan_hash_mismatch", d1.GetProperty("reason").GetString());
+        Assert.Equal(PlanManifest.Hash, mismatch.Json.GetProperty("manifestHash").GetString());
+
+        host.Storage.Fault = call => call.Plan.Id == "foundation.readiness" ? PlanFailureKind.Unavailable : null;
+        var outage = await Operation(host, "readiness", new { });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, outage.Status);
+        Assert.Equal("unavailable", outage.Json.GetProperty("components").GetProperty("d1").GetProperty("state").GetString());
+        Assert.Equal(3, host.Storage.Executions("foundation.readiness"));
+    }
+
     /// <summary>A body with no known length, so the client sends it chunked and no Content-Length header exists.</summary>
     private sealed class ForwardOnlyStream(byte[] data) : Stream
     {

@@ -465,6 +465,85 @@ test("the cold start of a stream is bounded on its own, whatever the stream's li
   }
 });
 
+const libraryText = "text/plain;charset=UTF-8";
+const noInstance =
+  "There is no Container instance available at this time.\nThis is likely because you have reached your max concurrent instance count.";
+
+test("a Container the platform could not start is a retryable 503 with fixed text, never the library's", async () => {
+  const cases: [string, ResponseInit & { body: string }][] = [
+    ["no instance", { status: 503, body: noInstance, headers: { "content-type": libraryText } }],
+    [
+      "start failed",
+      {
+        status: 500,
+        body: "Failed to start container: secret detail",
+        headers: { "content-type": libraryText },
+      },
+    ],
+    ["rate limited", { status: 429, body: "slow", headers: { "content-type": "text/plain" } }],
+  ];
+  for (const path of [hello, whoami, stream]) {
+    for (const [name, init] of cases) {
+      const { env, seen } = bindings(async () => new Response(init.body, init));
+      const response = await routeRequest(call(path, path === hello ? {} : cookieHeaders), env);
+      assert.equal(response.status, 503, `${path} ${name}`);
+      assert.equal(response.headers.get("retry-after"), "2", `${path} ${name}`);
+      const text = await response.text();
+      assert.equal(text, "Cloud container is temporarily unavailable.", `${path} ${name}`);
+      assert.equal(seen.requests.length, 1, "one attempt, no replay");
+    }
+  }
+});
+
+test("a non-200 reply the host may have produced carries no retry guidance", async () => {
+  for (const init of [
+    {
+      status: 503,
+      body: '{"error":"unavailable"}',
+      headers: { "content-type": "application/json" },
+    },
+    { status: 503, body: noInstance, headers: { "content-type": "application/json" } },
+    {
+      status: 500,
+      body: "Failed to start container: x",
+      headers: { "content-type": "application/json" },
+    },
+    { status: 502, body: "bad gateway", headers: { "content-type": libraryText } },
+  ]) {
+    const { env } = bindings(async () => new Response(init.body, init));
+    const response = await routeRequest(call(whoami, cookieHeaders), env);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("retry-after"), null, `${init.status} ${init.body}`);
+  }
+});
+
+test("a Container that throws is an unavailable refusal without retry guidance and without the error text", async () => {
+  const { env } = bindings(async () => {
+    throw new Error("Network connection lost with internal detail");
+  });
+  const response = await routeRequest(call(whoami, cookieHeaders), env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("retry-after"), null);
+  assert.equal(await response.text(), "Cloud container is temporarily unavailable.");
+});
+
+test("a stream that ends at the cold-start bound carries no retry guidance: the call may have been forwarded", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    // A running Container that received the call but is slow to send its first byte looks exactly like this.
+    const { env, seen } = bindings(() => new Promise<Response>(() => {}));
+    const pending = routeRequest(call(stream, cookieHeaders), env);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    mock.timers.tick(coldStartBudgetMs + 1);
+    const response = await pending;
+    assert.equal(seen.requests.length, 1);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("retry-after"), null);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
 test("the rate limit applies to session and stream methods before a credential is read", async () => {
   const { env, seen } = bindings(async () => new Response(okReply), {
     HELLO_RATE_LIMITER: { limit: async () => ({ success: false }) },

@@ -21,6 +21,7 @@ import {
   grpcStatus,
 } from "./errors.ts";
 import { guardResponse } from "./frames.ts";
+import { classifyStartFailureResponse, containerUnavailable } from "../readiness/container.ts";
 import { bounded, readBytes, reject, rpcError } from "./io.ts";
 import {
   type ApiRoute,
@@ -196,8 +197,11 @@ export async function handleApiRequest(request: Request, env: IngressEnv): Promi
     const response = await bounded(operation, signal);
     if (coldTimer !== undefined) clearTimeout(coldTimer);
     if (response.status !== 200) {
+      // A Container the platform could not start never saw the request: that refusal is retryable and says so. Any
+      // other non-200 status came from a call that may have been forwarded, so it carries no retry guidance.
+      const startFailure = await classifyStartFailureResponse(response);
       void response.body?.cancel().catch(() => {});
-      return reject(503, "Cloud container is temporarily unavailable.");
+      return containerUnavailable(startFailure !== null);
     }
     const resultHeaders = new Headers({
       "content-type": health
@@ -219,8 +223,7 @@ export async function handleApiRequest(request: Request, env: IngressEnv): Promi
     }
     if (!response.body) {
       // A bodyless reply is a trailers-only status carried in the headers; without one it is no answer.
-      if (!resultHeaders.has("grpc-status"))
-        return reject(503, "Cloud container is temporarily unavailable.");
+      if (!resultHeaders.has("grpc-status")) return containerUnavailable(false);
       return new Response(null, { status: 200, headers: resultHeaders });
     }
     const guarded = guardResponse(response.body, {
@@ -252,8 +255,10 @@ export async function handleApiRequest(request: Request, env: IngressEnv): Promi
         : rpcError(grpcStatus.canceled, canceledError.message);
     if (error === bodyTimeoutError)
       return reject(408, "Request body could not be read within five seconds.");
-    // No restart loop or RPC replay. Readiness polling is separate from application calls.
-    return reject(503, "Cloud container is temporarily unavailable.");
+    // No restart loop or RPC replay; readiness polling is separate from application calls. No retry guidance here: the
+    // cold-start bound also ends a call that reached a running Container that is merely slow to send its first byte,
+    // so the Worker cannot tell that the call was not forwarded.
+    return containerUnavailable(false);
   } finally {
     if (!handedOver) cleanup();
   }

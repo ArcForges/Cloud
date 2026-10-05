@@ -42,7 +42,7 @@ export async function postSigned(
   operation: string,
   body: Uint8Array,
   options: { requestId: string; nowMs?: () => number; signal?: AbortSignal },
-): Promise<{ status: number; body: Uint8Array }> {
+): Promise<{ status: number; contentType: string | null; body: Uint8Array }> {
   const keys = loadKeys(env, "W2C");
   if (!keys) throw new ContainerCallError("The Container signing key is not configured.");
   const pathAndQuery = `${foundationRoutePrefix}${operation}`;
@@ -86,5 +86,9 @@ export async function postSigned(
     reply.set(chunk, offset);
     offset += chunk.length;
   }
-  return { status: response.status, body: reply };
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    body: reply,
+  };
 }

@@ -56,8 +56,8 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   shorter `grpc-timeout`, minus the time spent reading the body; the remainder is forwarded to the host. A server stream
   lives at most its route's duration (or the client's shorter deadline). Client cancellation aborts the Container request.
 - **Cold start.** A stream's Container start is bounded on its own (`coldStartBudgetMs`, fifteen seconds) so that a
-  long stream lifetime never makes an unavailable Container wait that long; the call then fails with HTTP 503. There is
-  no retry or replay of an application call.
+  long stream lifetime never makes an unavailable Container wait that long; the call then fails with HTTP 503 (no retry guidance: the
+  call may have reached a running Container that was slow to answer). There is no retry or replay of an application call.
 - **Credentials.** Only a session method reads a credential. A bearer (`Authorization: Bearer`, 16 to 4096 token
   characters) is forwarded as given. A browser session needs the one `__Host-af_session` cookie (43 base64url
   characters), the exact configured `Origin` (`ALLOWED_ORIGIN`) and a well-formed `X-AF-CSRF` token, because every RPC is
@@ -65,7 +65,10 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   malformed cookie, or no configured origin is refused. The Worker cannot prove a session: the host validates it.
 - **Reply.** Only `content-type`, `grpc-status`, `grpc-message` and the Worker's own headers (`cache-control: no-store`,
   `x-content-type-options`, the revision and build headers) are returned; cookies and any other Container header are
-  dropped. A non-200 Container status is HTTP 503 with a fixed text, never the Container's body.
+  dropped. A non-200 Container status is HTTP 503 with a fixed text, never the Container's body. When the Containers
+  platform could not start the Container (its own plain-text 503, 500 or 429, which proves the request never reached the
+  host), the 503 carries `Retry-After: 2`; any other non-200 status and any thrown error carries none, because the call
+  may have been forwarded ([cloud-readiness](cloud-readiness.md)).
 
 ## The frame guard
 
