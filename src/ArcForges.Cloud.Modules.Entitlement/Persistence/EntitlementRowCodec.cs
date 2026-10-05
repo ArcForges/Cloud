@@ -246,10 +246,4 @@ internal static class EntitlementRowCodec
 
         return System.Text.Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
-
-    /// <summary>The number of records kinds a commit unpacks; used to bound one append.</summary>
-    public static int Count(EntitlementAppend append) =>
-        append.Grants.Length + append.Revocations.Length + append.Activations.Length + append.Terms.Length + append.TermActions.Length + append.StatusFacts.Length;
-
-    public static ImmutableArray<T> Seal<T>(List<T> items) => [.. items];
 }

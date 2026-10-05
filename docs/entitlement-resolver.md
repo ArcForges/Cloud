@@ -41,6 +41,7 @@ A new record of a workspace is admitted at an instant strictly after the stored 
 - **Replay cost.** Every issue, revoke, refresh and expired read replays all points against all records (about 1.2 s for 1,700 records in Release on a development machine). History is bounded at 2000 records and there is no compaction path: a workspace at the bound returns `InvalidHistory` permanently until a compaction design exists. The D1 store stops reading a history at that bound and lets the resolver refuse it, so a read never pages without limit.
 - **Terms, status facts and feature releases have no owner admission yet.** The store appends them (below), but the admissions that decide them (COM.11 for terms, trust and safety for status facts, configuration for releases) and the published ports they call are later tasks. A status fact or definitions activation commits under the workspace revision with a snapshot; a feature release is global and a snapshot learns of it at its next refresh.
 - **One clock.** The single-clock assumption above still holds: the D1 store stamps its receipt with the instant the snapshot was computed for.
+- **Round trips.** A load is about eleven plan calls (the revision twice, the snapshot, one page per record kind and the feature releases) and a commit is one; every issue, revoke and refresh loads first. A single multi-statement read is a later optimisation; it would not change the fence, because the revision read before and after the pages is what makes a read consistent.
 
 ## The grant port and the durable store
 
