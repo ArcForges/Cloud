@@ -354,6 +354,9 @@ export async function checkpointRestart(
     scope,
     jobId,
     eventId: randomUUID(),
+    // The private slice request requires the chain's identity and its cause (CLOUD.69).
+    correlationId: randomUUID(),
+    causationId: randomUUID(),
     maxItems: 100,
     maxMilliseconds: 20_000,
   });
