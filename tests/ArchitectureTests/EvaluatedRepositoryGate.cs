@@ -32,7 +32,7 @@ public sealed class EvaluatedRepositoryGate
         bool hosted = HostedEvidence.IsHostedMode(Environment.GetEnvironmentVariable);
 
         var projects = CloudRepository.Classifications.Select(classification => ProjectGraph.Evaluate(root, classification, "Release")).ToArray();
-        var compilations = projects.ToDictionary(project => project.Classification.Path, ProjectGraph.ReadCompilation, StringComparer.Ordinal);
+        var compilations = projects.ToDictionary(project => project.Classification.Path, CloudRepository.ReadCompilation, StringComparer.Ordinal);
         string report = CloudRepository.Read(root, "artifacts/evidence/naming.json");
         var evidence = new[]
         {
@@ -49,7 +49,8 @@ public sealed class EvaluatedRepositoryGate
 
         var service = compilations[CloudRepository.Service];
         var serviceProject = projects.Single(project => project.Classification.Path == CloudRepository.Service);
-        findings.AddRange(CloudProviderPolicy.Scan(service, serviceProject.Classification));
+        // Banned-symbol findings inside the SDK's own generator output are not Cloud-authored (see CloudRepository.IsOfficialGeneratorOutput).
+        findings.RemoveAll(finding => finding.Rule.StartsWith("BAN-", StringComparison.Ordinal) && CloudRepository.IsOfficialGeneratorOutput(finding.Path));
         foreach (string problem in CloudAotPolicy.FindSuppressions(service))
         {
             findings.Add(new PolicyFinding("RP-07", CloudRepository.Service, "Trim or AOT suppression at " + problem));

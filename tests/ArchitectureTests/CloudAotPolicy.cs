@@ -8,13 +8,6 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace ArcForges.Cloud.ArchitectureTests;
 
-/// <summary>Cloud has no provider SDK adapter, so the shared provider ban applies to the whole service project.</summary>
-internal static class CloudProviderPolicy
-{
-    public static IReadOnlyList<PolicyFinding> Scan(CSharpCompilation compilation, ProjectClassification project) =>
-        [.. BannedSymbolScanner.Scan(compilation, project with { Role = ProjectRole.Shell }).Where(finding => finding.Rule == "BAN-PROVIDER")];
-}
-
 /// <summary>
 /// Native AOT posture beyond the shared RP-07 and banned-symbol rules: declared project settings, source-level suppressions and the
 /// JSON serialization path. Each check is a pure function so that a violating fixture can be asserted next to the real inputs.
@@ -81,7 +74,7 @@ internal static partial class CloudAotPolicy
     public static IReadOnlyList<string> FindSuppressions(Compilation compilation)
     {
         var findings = new List<string>();
-        foreach (var tree in compilation.SyntaxTrees)
+        foreach (var tree in compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath)))
         {
             var root = tree.GetRoot();
             foreach (var pragma in root.DescendantTrivia(descendIntoTrivia: true).Select(trivia => trivia.GetStructure())
@@ -117,7 +110,7 @@ internal static partial class CloudAotPolicy
     public static IReadOnlyList<string> FindUnregisteredJsonSerialization(Compilation compilation)
     {
         var findings = new List<string>();
-        foreach (var tree in compilation.SyntaxTrees)
+        foreach (var tree in compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath)))
         {
             var model = compilation.GetSemanticModel(tree);
             foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())

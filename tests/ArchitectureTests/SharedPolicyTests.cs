@@ -162,6 +162,38 @@ public sealed class SharedPolicyTests
         Assert.Contains(fixture.Check(), finding => finding.Rule == "RP-10");
     }
 
+    [Theory]
+    [InlineData("C:\\r\\src\\ArcForges.Cloud\\obj\\arcforges-policy\\Release\\generated\\System.Text.Json.SourceGeneration\\System.Text.Json.SourceGeneration.JsonSourceGenerator\\Ctx.g.cs", true)]
+    [InlineData("/r/src/ArcForges.Cloud/obj/arcforges-policy/Release/generated/Microsoft.AspNetCore.Http.RequestDelegateGenerator/X/Routes.g.cs", true)]
+    [InlineData("/r/src/ArcForges.Cloud/obj/arcforges-policy/Release/generated/Third.Party.Generator/X/Evil.g.cs", false)]
+    [InlineData("/r/src/ArcForges.Cloud/obj/Release/net10.0/generated/System.Text.Json.SourceGeneration/X/Stale.g.cs", false)]
+    [InlineData("/r/src/ArcForges.Cloud/Foundation/Authored.cs", false)]
+    [InlineData("/r/src/ArcForges.Cloud/System.Text.Json.SourceGeneration/Authored.cs", false)]
+    public void OnlyFirstPartyGeneratorOutputOfTheEvaluationIsExemptFromSourceScanning(string path, bool exempt)
+    {
+        Assert.Equal(exempt, CloudRepository.IsOfficialGeneratorOutput(path));
+    }
+    [Fact]
+    public void TheCloudCompilationReaderStaysFailClosed()
+    {
+        string file = Path.GetTempFileName();
+        try
+        {
+            var project = new ProjectFacts(new("subject.csproj", ProjectRole.Foundation, CloudRepository.Owner),
+                "net10.0", "Library", "AGPL-3.0-only", "AGPL", [], [file], [typeof(object).Assembly.Location],
+                new Dictionary<string, string> { ["AssemblyName"] = "Subject" }, new Dictionary<string, string>());
+            File.WriteAllText(file, "public class Api { public string Value => string.Empty; }");
+            Assert.NotNull(CloudRepository.ReadCompilation(project));
+            File.WriteAllText(file, "public class Api { public MissingType Value => null; }");
+            Assert.Throws<InvalidOperationException>(() => CloudRepository.ReadCompilation(project));
+            Assert.Throws<InvalidOperationException>(() => CloudRepository.ReadCompilation(project with { OutputType = "WinExe" }));
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
     [Fact]
     public void UnresolvedPublicTypesCannotPassSemanticProjectEvaluation()
     {

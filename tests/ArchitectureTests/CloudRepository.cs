@@ -6,6 +6,8 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using ArcForges.Build.Policy.Architecture;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace ArcForges.Cloud.ArchitectureTests;
 
@@ -19,15 +21,65 @@ internal static class CloudRepository
     public const string Host = "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj";
 
     /// <summary>
-    /// Cloud is one Native AOT host project: the public gRPC/gRPC-Web adapter and its composition root. Roles are declared here,
-    /// never inferred from names, so a new project fails the inventory test until its role is reviewed.
+    /// Cloud is one Native AOT host project and composition root. It is classified as the shell rather than an adapter on purpose: the
+    /// shared engine then rejects every provider SDK call in it (Cloud holds no provider adapter; Cloudflare is reached only through
+    /// the signed Worker facade) and does not apply the RPC-adapter entry-point rule to its implicitly declared record members.
+    /// Roles are declared here, never inferred from names, so a new project fails the inventory test until its role is reviewed.
     /// </summary>
     public static IReadOnlyList<ProjectClassification> Classifications { get; } =
     [
-        new(Service, ProjectRole.PublicApiAdapter, Owner, Production: true, Aot: true),
+        new(Service, ProjectRole.Shell, Owner, Production: true, Aot: true),
         new(ServiceTests, ProjectRole.Test, Owner, Production: false, Aot: false),
         new(Consumer, ProjectRole.Test, Owner, Production: false, Aot: false),
         new(Host, ProjectRole.Test, Owner, Production: false, Aot: false),
+    ];
+
+    /// <summary>
+    /// Reconstructs the semantic input of a completed build exactly as the shared producer does, with one addition the producer does
+    /// not know: ASP.NET Core's request-delegate generator emits C# interceptors, which the compiler only accepts for namespaces
+    /// named in the project's InterceptorsNamespaces. Every diagnostic still fails closed.
+    /// </summary>
+    public static CSharpCompilation ReadCompilation(ProjectFacts project)
+    {
+        if (project.Sources.Count == 0 || project.AssemblyReferences.Count == 0
+            || project.Sources.Concat(project.AssemblyReferences).Any(path => !File.Exists(path)))
+        {
+            throw new InvalidOperationException("Completed source/reference inputs are required: " + project.Classification.Path);
+        }
+
+        var options = new CSharpParseOptions(LanguageVersion.CSharp14,
+            preprocessorSymbols: project.Properties.GetValueOrDefault("DefineConstants", string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries))
+            .WithFeatures([new KeyValuePair<string, string>("InterceptorsNamespaces", "Microsoft.AspNetCore.Http.Generated")]);
+        var kind = project.OutputType switch
+        {
+            "Library" => OutputKind.DynamicallyLinkedLibrary,
+            "Exe" => OutputKind.ConsoleApplication,
+            _ => throw new InvalidOperationException("Unsupported managed output kind: " + project.OutputType),
+        };
+        var compilation = CSharpCompilation.Create(project.Properties["AssemblyName"],
+            project.Sources.Distinct(StringComparer.Ordinal).Select(path => CSharpSyntaxTree.ParseText(File.ReadAllText(path), options, path)),
+            project.AssemblyReferences.Distinct(StringComparer.Ordinal).Select(path => MetadataReference.CreateFromFile(path)),
+            new CSharpCompilationOptions(kind, allowUnsafe: true, nullableContextOptions: NullableContextOptions.Enable));
+        var errors = compilation.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToArray();
+        return errors.Length == 0 ? compilation
+            : throw new InvalidOperationException("Invalid owning compilation: " + project.Classification.Path + Environment.NewLine
+                + string.Join(Environment.NewLine, errors.Select(error => error.ToString())));
+    }
+    /// <summary>
+    /// Source emitted by the pinned SDK's own first-party generators into the evaluation-owned generated directory. It is
+    /// reconstructed so that authored code resolves against it, but it is not Cloud-authored: its AOT safety is enforced by the Native AOT
+    /// compiler with warnings as errors (the candidate build), not by source scanning. Output of any other generator is never exempt.
+    /// </summary>
+    public static bool IsOfficialGeneratorOutput(string path)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(path.Replace('\\', '/'), @"/obj/arcforges-policy/[^/]+/generated/(?<generator>[^/]+)/");
+        return match.Success && OfficialGenerators.Any(prefix => match.Groups["generator"].Value.StartsWith(prefix, StringComparison.Ordinal));
+    }
+
+    internal static readonly string[] OfficialGenerators =
+    [
+        "System.Text.Json.SourceGeneration", "Microsoft.AspNetCore.Http.RequestDelegateGenerator", "Microsoft.Extensions.Logging.Generators",
+        "System.Text.RegularExpressions.Generator", "Microsoft.Interop.LibraryImportGenerator",
     ];
 
     public static string FindRoot()

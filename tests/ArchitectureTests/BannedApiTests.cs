@@ -45,7 +45,7 @@ public sealed class BannedApiTests
     [InlineData("class C { object M(dynamic value) => value.Run(); }")]
     public void ReflectionIsRejectedOnTheNativeAotPath(string source)
     {
-        Assert.Contains(Scan(source, ProjectRole.PublicApiAdapter), finding => finding.Rule == "BAN-REFLECTION");
+        Assert.Contains(Scan(source, ProjectRole.Shell), finding => finding.Rule == "BAN-REFLECTION");
         Assert.Contains(Scan(source, ProjectRole.Shell), finding => finding.Rule == "BAN-REFLECTION");
     }
 
@@ -55,7 +55,7 @@ public sealed class BannedApiTests
     public void ReflectionIsOnlyAnAotPathRuleSoTheServiceMustStayClassifiedAsAot(string source)
     {
         // The engine reports reflection only for projects classified as AOT. The Cloud inventory therefore pins the service as AOT.
-        Assert.DoesNotContain(Scan(source, ProjectRole.PublicApiAdapter, aot: false), finding => finding.Rule == "BAN-REFLECTION");
+        Assert.DoesNotContain(Scan(source, ProjectRole.Shell, aot: false), finding => finding.Rule == "BAN-REFLECTION");
         var service = Assert.Single(CloudRepository.Classifications, project => project.Path == CloudRepository.Service);
         Assert.True(service.Aot && service.Production);
         Assert.All(CloudRepository.Classifications.Where(project => project.Path != CloudRepository.Service), project => Assert.False(project.Production));
@@ -68,8 +68,8 @@ public sealed class BannedApiTests
     [InlineData("class C { object M() => System.Linq.Expressions.Expression.Lambda(System.Linq.Expressions.Expression.Constant(1)).Compile(); }")]
     public void RuntimeCodeGenerationIsRejectedEverywhereInProduction(string source)
     {
-        Assert.Contains(Scan(source, ProjectRole.PublicApiAdapter), finding => finding.Rule == "BAN-CODEGEN");
-        Assert.Contains(Scan(source, ProjectRole.PublicApiAdapter, aot: false), finding => finding.Rule == "BAN-CODEGEN");
+        Assert.Contains(Scan(source, ProjectRole.Shell), finding => finding.Rule == "BAN-CODEGEN");
+        Assert.Contains(Scan(source, ProjectRole.Shell, aot: false), finding => finding.Rule == "BAN-CODEGEN");
     }
 
     [Theory]
@@ -79,7 +79,7 @@ public sealed class BannedApiTests
     [InlineData("class C { System.Type M() => typeof(string); }")]
     public void ExpressionTreesWithoutCompilationAndTextAreNotBannedSymbols(string source)
     {
-        Assert.Empty(Scan(source, ProjectRole.PublicApiAdapter));
+        Assert.Empty(Scan(source, ProjectRole.Shell));
     }
 
     [Theory]
@@ -91,14 +91,14 @@ public sealed class BannedApiTests
     [InlineData("class C { void Start() { async System.Threading.Tasks.Task Local() { await System.Threading.Tasks.Task.Yield(); System.Threading.Tasks.Task.Delay(1).Wait(); } _ = Local(); } }")]
     public void BlockingWaitsAreRejectedOnAsynchronousPaths(string source)
     {
-        Assert.Contains(Scan(source, ProjectRole.PublicApiAdapter), finding => finding.Rule == "BAN-BLOCKING");
+        Assert.Contains(Scan(source, ProjectRole.Shell), finding => finding.Rule == "BAN-BLOCKING");
     }
 
     [Fact]
     public void TheBlockingRuleIsLimitedToAsynchronousPathsAsTheEngineDefinesThem()
     {
         // Documented engine scope: a synchronous start-up path may still wait. The Cloud host has no such call (see the real graph gate).
-        Assert.Empty(Scan("class C { void M() { System.Threading.Tasks.Task.Delay(1).Wait(); } }", ProjectRole.PublicApiAdapter));
+        Assert.Empty(Scan("class C { void M() { System.Threading.Tasks.Task.Delay(1).Wait(); } }", ProjectRole.Shell));
     }
 
     [Theory]
@@ -106,15 +106,15 @@ public sealed class BannedApiTests
     [InlineData("Amazon")]
     [InlineData("OpenAI")]
     [InlineData("Cloudflare")]
-    public void ProviderSdkCallsAreRejectedForCloudEvenThoughTheServiceIsAnAdapter(string provider)
+    public void ProviderSdkCallsAndConstructionAreRejectedBecauseCloudIsTheShellNotAnAdapter(string provider)
     {
-        string source = $"namespace {provider}.Sdk {{ public static class Client {{ public static int Call() => 1; }} }} class C {{ int M() => {provider}.Sdk.Client.Call(); }}";
-        // The shared engine admits provider calls inside an adapter project; Cloud has no provider adapter, so it applies the strict classification.
-        Assert.DoesNotContain(Scan(source, ProjectRole.PublicApiAdapter), finding => finding.Rule == "BAN-PROVIDER");
-        Assert.Contains(CloudProviderPolicy.Scan(Compile(source), CloudRepository.Classifications[0]), finding => finding.Rule == "BAN-PROVIDER");
-        Assert.Empty(CloudProviderPolicy.Scan(Compile("class C { int M() => 1; }"), CloudRepository.Classifications[0]));
+        string call = $"namespace {provider}.Sdk {{ public static class Client {{ public static int Call() => 1; }} }} class C {{ int M() => {provider}.Sdk.Client.Call(); }}";
         string construction = $"namespace {provider}.Sdk {{ public sealed class Client {{ }} }} class C {{ object M() => new {provider}.Sdk.Client(); }}";
-        Assert.Contains(CloudProviderPolicy.Scan(Compile(construction), CloudRepository.Classifications[0]), finding => finding.Rule == "BAN-PROVIDER");
+        Assert.Equal(ProjectRole.Shell, Assert.Single(CloudRepository.Classifications, project => project.Path == CloudRepository.Service).Role);
+        Assert.Contains(Scan(call, ProjectRole.Shell), finding => finding.Rule == "BAN-PROVIDER");
+        Assert.Contains(Scan(construction, ProjectRole.Shell), finding => finding.Rule == "BAN-PROVIDER");
+        // The same code would be admitted inside an adapter project, which is why the service must not be classified as one.
+        Assert.DoesNotContain(Scan(call, ProjectRole.PublicApiAdapter), finding => finding.Rule == "BAN-PROVIDER");
     }
 
     [Theory]
@@ -125,7 +125,7 @@ public sealed class BannedApiTests
     [InlineData("class C { void M(string prompt) { System.Console.Write(prompt); } }")]
     public void SecretAndContentValuesCannotReachLoggingCalls(string source)
     {
-        Assert.Contains(Scan(source, ProjectRole.PublicApiAdapter), finding => finding.Rule == "BAN-LOGGING");
+        Assert.Contains(Scan(source, ProjectRole.Shell), finding => finding.Rule == "BAN-LOGGING");
     }
 
     [Theory]
@@ -134,7 +134,7 @@ public sealed class BannedApiTests
     [InlineData("class C { double CreditTotal(double a) => a; }")]
     public void BinaryFloatingPointIsRejectedInMoneyPaths(string source)
     {
-        Assert.Contains(Scan(source, ProjectRole.PublicApiAdapter), finding => finding.Rule == "BAN-MONEY");
+        Assert.Contains(Scan(source, ProjectRole.Shell), finding => finding.Rule == "BAN-MONEY");
     }
 
     [Theory]
@@ -142,7 +142,7 @@ public sealed class BannedApiTests
     [InlineData("class C { internal System.UIntPtr Handle; }")]
     public void RawNativePointerFieldsAreRejectedOutsideTheNativeLifetimeAdapter(string source)
     {
-        Assert.Contains(Scan(source, ProjectRole.PublicApiAdapter), finding => finding.Rule == "BAN-POINTER");
+        Assert.Contains(Scan(source, ProjectRole.Shell), finding => finding.Rule == "BAN-POINTER");
         Assert.Contains(Scan(source, ProjectRole.NativeAdapter), finding => finding.Rule == "BAN-POINTER");
     }
 

@@ -129,7 +129,7 @@ internal static partial class ContractConsumptionPolicy
     public static IReadOnlyList<string> CheckServiceBases(Compilation compilation)
     {
         var problems = new List<string>();
-        foreach (var tree in compilation.SyntaxTrees)
+        foreach (var tree in compilation.SyntaxTrees.Where(tree => !CloudRepository.IsOfficialGeneratorOutput(tree.FilePath)))
         {
             var model = compilation.GetSemanticModel(tree);
             foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
