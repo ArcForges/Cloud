@@ -14,10 +14,10 @@ public sealed class WorkerPlanExecutorTests
     private static readonly DateTimeOffset Start = new(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
 
     private static PlanCall Read(ulong generation = 0) =>
-        PlanCall.New(PlanManifest.AccountLoad, Scope, generation, [[D1Values.Text(Scope), D1Values.Text("a")]]);
+        PlanCall.New(PlanManifest.Foundation.AccountLoad, Scope, generation, [[D1Values.Text(Scope), D1Values.Text("a")]]);
 
     private static PlanCall Write() =>
-        PlanCall.New(PlanManifest.AccountSeed, Scope, 0, [[D1Values.Text(Scope), D1Values.Text("a"), D1Values.Int64(1)]]);
+        PlanCall.New(PlanManifest.Foundation.AccountSeed, Scope, 0, [[D1Values.Text(Scope), D1Values.Text("a"), D1Values.Int64(1)]]);
 
     private static HttpResponseMessage Json(byte[] body, HttpStatusCode status = HttpStatusCode.OK) =>
         new(status) { Content = new ByteArrayContent(body) };
@@ -163,7 +163,7 @@ public sealed class WorkerPlanExecutorTests
     public async Task InvalidArgumentsNeverReachTheNetwork()
     {
         var (executor, handler, _) = Create((_, body) => Task.FromResult(Json(Success(body))));
-        var plan = PlanManifest.AccountLoad;
+        var plan = PlanManifest.Foundation.AccountLoad;
         var bad = new PlanCall[]
         {
             Read() with { Arguments = [] },

@@ -53,8 +53,14 @@ const publicPackages = ["@arcforges/proto", "@arcforges/api-client"];
 const internalPackages = ["@arcforges/ai-internal"];
 // Only the production Worker runtime imports the private generated records (exact package root).
 const internalImportRoots = ["worker/"];
-// The private generated C# records are used by the Cloud host and its tests only.
-const privateCsharpRoots = ["src/ArcForges.Cloud/", "tests/ArcForges.Cloud.Tests/"];
+// The private generated C# records are used by the Cloud host, the D1 plan bridge it owns (Storage.D1, where the
+// bridge moved with its namespaces) and the tests only. No module project is a consumer: a module reaches storage
+// through its own named plans and the typed repository API of the bridge, never through the wire records.
+const privateCsharpRoots = [
+  "src/ArcForges.Cloud/",
+  "src/ArcForges.Cloud.Storage.D1/",
+  "tests/ArcForges.Cloud.Tests/",
+];
 const requiredChecks = [
   "locked-restore",
   "licence-provenance",

@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using ArcForges.Cloud.Composition;
 using ArcForges.Cloud.Foundation;
+using ArcForges.Cloud.Hmac;
 using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Storage;
 using ArcForges.Contracts.Foundation.V1;
@@ -770,6 +771,37 @@ public sealed class IngressPipelineTests
         Assert.Equal(404, (await RawAsync(off, "GET", "/session/v1/bootstrap")).Status);
         Assert.Equal(404, (await RawAsync(off, "POST", "/internal/foundation/v1/readiness", [("Content-Type", "application/json")], "{}"u8.ToArray())).Status);
         Assert.Equal(200, (await RawAsync(off, "GET", "/healthz")).Status);
+    }
+
+    [Fact]
+    public async Task TheHostServesNoStorageEndpointToAnyCallerAndExecutesNoPlanForOne()
+    {
+        // The plan bridge is answered by the Worker's outbound handler; the Container never serves it. Whatever a caller signs, the
+        // host has no such route, so it can neither execute a plan nor be asked to.
+        foreach (var proof in new[] { true, false })
+        {
+            await using var host = await StartAsync(proof: proof);
+            foreach (var target in new[]
+            {
+                WorkerPlanExecutor.ExecutePath, "/internal/storage/v1", "/internal/storage/v1/", WorkerPlanExecutor.ExecutePath + "/", WorkerPlanExecutor.ExecutePath + "?x=1",
+                "/api" + WorkerPlanExecutor.ExecutePath, "/storage/v1/execute-plan",
+            })
+            {
+                foreach (var method in new[] { "POST", "GET" })
+                {
+                    foreach (var key in new[] { host.Options.VerifyKeyW2c, host.Options.SigningKeyC2w })
+                    {
+                        var headers = new List<(string, string)> { ("Content-Type", "application/json") };
+                        PrivateRequestSigner.Sign(method, target, T.Sha256Hex("{}"u8.ToArray()), T.Uuid(), key, host.Time).CopyTo((name, value) => headers.Add((name, value)));
+                        var reply = await RawAsync(host, method, target, headers, "{}"u8.ToArray());
+                        Assert.Equal(404, reply.Status);
+                        Assert.DoesNotContain("manifest", reply.Reply, StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+            }
+
+            Assert.Empty(host.Storage.Calls);
+        }
     }
 
     [Fact]

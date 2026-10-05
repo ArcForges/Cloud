@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "owners": [
+    { "owner": "identity", "className": "Identity", "kind": "module", "tablePrefix": "identity_" },
+    {
+      "owner": "workspace",
+      "className": "Workspace",
+      "kind": "module",
+      "tablePrefix": "workspace_"
+    },
+    { "owner": "device", "className": "Devices", "kind": "module", "tablePrefix": "device_" },
+    {
+      "owner": "entitlement",
+      "className": "Entitlement",
+      "kind": "module",
+      "tablePrefix": "entitlement_"
+    },
+    { "owner": "commerce", "className": "Commerce", "kind": "module", "tablePrefix": "commerce_" },
+    { "owner": "chat", "className": "Chat", "kind": "module", "tablePrefix": "chat_" },
+    { "owner": "task", "className": "Task", "kind": "module", "tablePrefix": "task_" },
+    { "owner": "agent", "className": "Agent", "kind": "module", "tablePrefix": "agent_" },
+    { "owner": "sync", "className": "Sync", "kind": "module", "tablePrefix": "sync_" },
+    { "owner": "resource", "className": "Resource", "kind": "module", "tablePrefix": "resource_" },
+    { "owner": "search", "className": "Search", "kind": "module", "tablePrefix": "search_" },
+    {
+      "owner": "package-catalog",
+      "className": "PackageCatalog",
+      "kind": "module",
+      "tablePrefix": "package_catalog_"
+    },
+    {
+      "owner": "notification",
+      "className": "Notification",
+      "kind": "module",
+      "tablePrefix": "notification_"
+    },
+    { "owner": "policy", "className": "Policy", "kind": "module", "tablePrefix": "policy_" },
+    { "owner": "scope", "className": "Scope", "kind": "module", "tablePrefix": "scope_" },
+    { "owner": "config", "className": "Configuration", "kind": "module", "tablePrefix": "config_" },
+    { "owner": "audit", "className": "Audit", "kind": "module", "tablePrefix": "audit_" },
+    { "owner": "support", "className": "Support", "kind": "module", "tablePrefix": "support_" },
+    {
+      "owner": "trustsafety",
+      "className": "TrustSafety",
+      "kind": "module",
+      "tablePrefix": "trustsafety_"
+    },
+    {
+      "owner": "platform",
+      "className": "Platform",
+      "kind": "platform",
+      "tablePrefix": "platform_"
+    },
+    { "owner": "foundation", "className": "Foundation", "kind": "proof", "tablePrefix": "probe_" }
+  ]
+}

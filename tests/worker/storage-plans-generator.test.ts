@@ -10,12 +10,13 @@ import {
   generate,
   manifestHashOf,
   normalizePlanText,
+  ownerRegistry,
   parsePlanFile,
 } from "../../eng/verification/storage-plans.ts";
 import { manifestHash, plans } from "../../worker/storage/plans.generated.ts";
 import { repositoryRoot } from "./support/sqlite-d1.ts";
 
-const file = "src/ArcForges.Cloud/Storage/Plans/foundation/sample.sql";
+const file = "storage/plans/foundation/sample.sql";
 const read = `-- plan: foundation.sample
 -- version: 1
 -- access: read
@@ -156,25 +157,17 @@ test("the checked-in dictionary equals a fresh generation from the plan files", 
 test("stale or missing generated output fails the check and is repaired by generation", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "plans-"));
   try {
-    for (const relative of [
-      "src/ArcForges.Cloud/Storage/Plans",
-      "worker/storage",
-      "src/ArcForges.Cloud/Storage",
-    ])
+    for (const relative of ["storage/plans", "worker/storage", "src/ArcForges.Cloud.Storage.D1"])
       mkdirSync(path.join(root, relative), { recursive: true });
-    cpSync(
-      path.join(repositoryRoot, "src/ArcForges.Cloud/Storage/Plans"),
-      path.join(root, "src/ArcForges.Cloud/Storage/Plans"),
-      {
-        recursive: true,
-      },
-    );
+    cpSync(path.join(repositoryRoot, "storage/plans"), path.join(root, "storage/plans"), {
+      recursive: true,
+    });
     await assert.rejects(generate(root, true), /stale/u);
     const first = await generate(root, false);
     assert.equal(first.manifestHash, manifestHash);
     assert.equal((await generate(root, true)).rewritten.length, 0);
     // Editing a plan without regenerating is caught.
-    const target = path.join(root, "src/ArcForges.Cloud/Storage/Plans/foundation/readiness.sql");
+    const target = path.join(root, "storage/plans/foundation/readiness.sql");
     writeFileSync(
       target,
       readFileSync(target, "utf8").replace("probe_schema", "probe_schema WHERE 1 = 1"),
@@ -193,9 +186,10 @@ test("stale or missing generated output fails the check and is repaired by gener
 test("foreign files in the plan directory are refused", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "plans-"));
   try {
-    const directory = path.join(root, "src/ArcForges.Cloud/Storage/Plans/foundation");
+    const directory = path.join(root, "storage/plans/foundation");
     mkdirSync(directory, { recursive: true });
-    writeFileSync(path.join(directory, "sample.sql"), read);
+    cpSync(path.join(repositoryRoot, ownerRegistry), path.join(root, ownerRegistry));
+    writeFileSync(path.join(directory, "sample.sql"), read.replace("FROM t", "FROM probe_t"));
     writeFileSync(path.join(directory, "notes.txt"), "x");
     assert.throws(() => buildManifest(root), /end with \.sql/u);
     rmSync(path.join(directory, "notes.txt"));

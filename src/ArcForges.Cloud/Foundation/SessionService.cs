@@ -63,7 +63,7 @@ internal sealed class SessionService(IPlanExecutor executor, FoundationOptions o
         var idle = Math.Min(now + (long)(idleWindow ?? options.IdleWindow).TotalMicroseconds, absolute);
         var workspaces = JsonSerializer.Serialize([.. workspaceIds], FoundationJsonContext.Default.StringArray);
         var payload = JsonSerializer.Serialize(new SessionEventPayload(sessionId), FoundationJsonContext.Default.SessionEventPayload);
-        await executor.ExecuteAsync(Call(PlanManifest.SessionCreate,
+        await executor.ExecuteAsync(Call(PlanManifest.Foundation.SessionCreate,
             [[D1Values.Text(options.SessionScope), D1Values.Text(sessionId), D1Values.Bytes(hash), D1Values.Text(userId), D1Values.Text(deviceId),
                 D1Values.Text(workspaces), D1Values.Int64((long)options.RecoveryGeneration), D1Values.Int64(1), D1Values.Int64(now),
                 D1Values.Int64(absolute), D1Values.Int64(idle), D1Values.Int64(now)],
@@ -80,7 +80,7 @@ internal sealed class SessionService(IPlanExecutor executor, FoundationOptions o
     {
         if (!TryParseHandle(cookieValue, out var handle)) return SessionResolution.Unauthenticated;
         var hash = SHA256.HashData(handle);
-        var result = await executor.ExecuteAsync(Call(PlanManifest.SessionLoad, [[D1Values.Text(options.SessionScope), D1Values.Bytes(hash)]]), cancellationToken);
+        var result = await executor.ExecuteAsync(Call(PlanManifest.Foundation.SessionLoad, [[D1Values.Text(options.SessionScope), D1Values.Bytes(hash)]]), cancellationToken);
         if (result.Rows.Count == 0) return SessionResolution.Unauthenticated;
         var session = FromRow(result.Rows[0]);
         var now = NowMicros();
@@ -95,7 +95,7 @@ internal sealed class SessionService(IPlanExecutor executor, FoundationOptions o
         if (resolution.Session is not { } session || resolution.HandleHash is not { } hash) return resolution;
         var now = NowMicros();
         var idle = Math.Min(now + (long)options.IdleWindow.TotalMicroseconds, session.AbsoluteExpiresAt);
-        var result = await executor.ExecuteAsync(Call(PlanManifest.SessionTouch,
+        var result = await executor.ExecuteAsync(Call(PlanManifest.Foundation.SessionTouch,
             [[D1Values.Int64(now), D1Values.Int64(idle), D1Values.Text(options.SessionScope), D1Values.Bytes(hash), D1Values.Int64(now), D1Values.Int64(now)]]),
             cancellationToken);
         return result.Changes == 0 ? resolution : resolution with { Session = session with { IdleExpiresAt = idle, LastSeenAt = now } };
@@ -110,7 +110,7 @@ internal sealed class SessionService(IPlanExecutor executor, FoundationOptions o
         var effect = "happened";
         try
         {
-            await executor.ExecuteAsync(Call(PlanManifest.SessionRevoke,
+            await executor.ExecuteAsync(Call(PlanManifest.Foundation.SessionRevoke,
                 [[D1Values.Text(commandText), D1Values.Text(options.SessionScope), D1Values.Text(sessionId)],
                 [D1Values.Int64(NowMicros()), D1Values.Text("logout"), D1Values.Text(options.SessionScope), D1Values.Text(sessionId)],
                 [D1Values.Text(options.SessionScope), D1Values.Text(commandText), D1Values.Text("session.revoked"), D1Values.Text(payload)],
@@ -127,7 +127,7 @@ internal sealed class SessionService(IPlanExecutor executor, FoundationOptions o
 
         if (effect == "happened")
         {
-            var read = await executor.ExecuteAsync(Call(PlanManifest.SessionLoadById, [[D1Values.Text(options.SessionScope), D1Values.Text(sessionId)]]), cancellationToken);
+            var read = await executor.ExecuteAsync(Call(PlanManifest.Foundation.SessionLoadById, [[D1Values.Text(options.SessionScope), D1Values.Text(sessionId)]]), cancellationToken);
             if (read.Rows.Count == 0 || FromRow(read.Rows[0]).RevokedAt is null) effect = "unknown";
         }
 
@@ -139,7 +139,7 @@ internal sealed class SessionService(IPlanExecutor executor, FoundationOptions o
     {
         try
         {
-            var result = await executor.ExecuteAsync(Call(PlanManifest.Readiness, [[]]), cancellationToken);
+            var result = await executor.ExecuteAsync(Call(PlanManifest.Foundation.Readiness, [[]]), cancellationToken);
             return result.Rows.Count == 1 && D1Values.TryGetInt64(result.Rows[0][0], out var version) && version == 1;
         }
         catch (PlanFailureException)

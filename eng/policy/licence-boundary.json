@@ -9,6 +9,90 @@
       "kind": "npm"
     },
     {
+      "path": "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Audit/ArcForges.Cloud.Modules.Audit.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Chat/ArcForges.Cloud.Modules.Chat.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Commerce/ArcForges.Cloud.Modules.Commerce.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Configuration/ArcForges.Cloud.Modules.Configuration.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Devices/ArcForges.Cloud.Modules.Devices.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Notification/ArcForges.Cloud.Modules.Notification.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.PackageCatalog/ArcForges.Cloud.Modules.PackageCatalog.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Policy/ArcForges.Cloud.Modules.Policy.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Resource/ArcForges.Cloud.Modules.Resource.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Scope/ArcForges.Cloud.Modules.Scope.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Search/ArcForges.Cloud.Modules.Search.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Support/ArcForges.Cloud.Modules.Support.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Sync/ArcForges.Cloud.Modules.Sync.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Task/ArcForges.Cloud.Modules.Task.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.TrustSafety/ArcForges.Cloud.Modules.TrustSafety.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj",
+      "kind": "msbuild"
+    },
+    {
+      "path": "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj",
+      "kind": "msbuild"
+    },
+    {
       "path": "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
       "kind": "msbuild"
     },

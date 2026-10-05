@@ -128,6 +128,129 @@
         "resolved": "2.84.0",
         "contentHash": "SarjdfpQYU/mmdu/fWgSW8kEHQ54jiyG2+I4THu9eubtAud+QJf+1iJdGtoKTJ/ZRaI0qAG+7ttsK2WUTao2OQ=="
       },
+      "arcforges.cloud.modules.abstractions": {
+        "type": "Project"
+      },
+      "arcforges.cloud.modules.agent": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.audit": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.chat": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.commerce": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.configuration": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.devices": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.entitlement": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.identity": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.notification": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.packagecatalog": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.policy": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.resource": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.scope": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.search": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.support": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.sync": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.task": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.trustsafety": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.modules.workspace": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )"
+        }
+      },
+      "arcforges.cloud.storage.d1": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Contracts.CloudInternal": "[1.0.0-ci.287.1, )"
+        }
+      },
       "Grpc.Net.Client": {
         "type": "CentralTransitive",
         "requested": "[2.84.0, )",

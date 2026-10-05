@@ -3,6 +3,7 @@
 ## Layout
 
 - `src/ArcForges.Cloud`: ASP.NET Core slim host, generated gRPC service implementation and source-generated health JSON.
+- `src/ArcForges.Cloud.Modules.<Name>`: the nineteen module boundaries, one project per module, and `src/ArcForges.Cloud.Modules.Abstractions` with the shared boundary types. `src/ArcForges.Cloud.Storage.D1`: the named-plan binding mechanism. `storage/plans`: the reviewed plans, by owner. See [storage plans and module boundaries](storage-plans.md).
 - `tests/ArcForges.Cloud.Tests`: C# behavior tests using xUnit v3 and Microsoft.Testing.Platform.
 - `tests/ArcForges.Cloud.Consumer`: separately referenced, published C# client verifying native HTTP/2 against the running image.
 - `tests/kotlin-consumer`: JVM verification application using the published Maven Central Connect-Kotlin client. No proto generation or sibling sources.

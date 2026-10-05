@@ -58,7 +58,9 @@ public sealed class BannedApiTests
         Assert.DoesNotContain(Scan(source, ProjectRole.Shell, aot: false), finding => finding.Rule == "BAN-REFLECTION");
         var service = Assert.Single(CloudRepository.Classifications, project => project.Path == CloudRepository.Service);
         Assert.True(service.Aot && service.Production);
-        Assert.All(CloudRepository.Classifications.Where(project => project.Path != CloudRepository.Service), project => Assert.False(project.Production));
+        Assert.All(CloudRepository.Classifications.Where(project => project.Path.StartsWith("tests/", StringComparison.Ordinal)), project => Assert.False(project.Production));
+        // Every production project the Native AOT service reaches is itself classified as AOT (RP-07 closure rule).
+        Assert.All(CloudRepository.Classifications.Where(project => project.Production), project => Assert.True(project.Aot));
     }
 
     [Theory]

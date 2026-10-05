@@ -61,7 +61,7 @@ internal sealed class JobSliceService(IPlanExecutor executor, TimeProvider time,
         if (total is < 1 or > MaxTotal) throw new ArgumentOutOfRangeException(nameof(total));
         var jobId = Guid.NewGuid().ToString("D");
         var payload = JsonSerializer.Serialize(new JobStartedPayload(jobId, total.ToString(CultureInfo.InvariantCulture)), FoundationJsonContext.Default.JobStartedPayload);
-        await Execute(PlanManifest.JobStart, scope, cancellationToken,
+        await Execute(PlanManifest.Foundation.JobStart, scope, cancellationToken,
             [D1Values.Text(scope), D1Values.Text(jobId), D1Values.Int64(total)],
             [D1Values.Text(scope), D1Values.Text(Guid.NewGuid().ToString("D")), D1Values.Text("job.started"), D1Values.Text(payload)]);
         return jobId;
@@ -69,7 +69,7 @@ internal sealed class JobSliceService(IPlanExecutor executor, TimeProvider time,
 
     public async Task<JobRecord?> LoadAsync(string scope, string jobId, CancellationToken cancellationToken)
     {
-        var result = await Execute(PlanManifest.JobLoad, scope, cancellationToken, [D1Values.Text(scope), D1Values.Text(jobId)]);
+        var result = await Execute(PlanManifest.Foundation.JobLoad, scope, cancellationToken, [D1Values.Text(scope), D1Values.Text(jobId)]);
         if (result.Rows.Count == 0) return null;
         var row = result.Rows[0];
         long? leaseUntil = null;
@@ -87,7 +87,7 @@ internal sealed class JobSliceService(IPlanExecutor executor, TimeProvider time,
     public async Task<JobStatus?> StatusAsync(string scope, string jobId, CancellationToken cancellationToken)
     {
         if (await LoadAsync(scope, jobId, cancellationToken) is not { } job) return null;
-        var items = await Execute(PlanManifest.JobItems, scope, cancellationToken, [D1Values.Text(scope), D1Values.Text(jobId)]);
+        var items = await Execute(PlanManifest.Foundation.JobItems, scope, cancellationToken, [D1Values.Text(scope), D1Values.Text(jobId)]);
         if (items.Rows.Count != 1 || !D1Values.TryGetInt64(items.Rows[0][0], out var count) || !D1Values.TryGetInt64(items.Rows[0][1], out var sum))
             throw new PlanFailureException(PlanFailureKind.InvalidPlan);
         return new JobStatus(job.State, job.Total, job.Cursor, job.Fence, job.Checksum, count, sum, ExpectedChecksum(job.Cursor));
@@ -101,7 +101,7 @@ internal sealed class JobSliceService(IPlanExecutor executor, TimeProvider time,
         ArgumentOutOfRangeException.ThrowIfLessThan(maxMilliseconds, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maxMilliseconds, MaxMillisecondsPerSlice);
         var started = time.GetTimestamp();
-        var seen = await Execute(PlanManifest.InboxSeen, scope, cancellationToken,
+        var seen = await Execute(PlanManifest.Foundation.InboxSeen, scope, cancellationToken,
             [D1Values.Text(scope), D1Values.Text(eventId), D1Values.Int64((long)recoveryGeneration)]);
         if (seen.Rows.Count != 1 || !D1Values.TryGetInt64(seen.Rows[0][0], out var seenCount)) throw new PlanFailureException(PlanFailureKind.InvalidPlan);
         if (seenCount != 0) return await ReportAsync(scope, jobId, SliceState.Duplicate, cancellationToken);
@@ -112,7 +112,7 @@ internal sealed class JobSliceService(IPlanExecutor executor, TimeProvider time,
         try
         {
             var claim = Guid.NewGuid().ToString("D");
-            await Execute(PlanManifest.JobClaim, scope, cancellationToken,
+            await Execute(PlanManifest.Foundation.JobClaim, scope, cancellationToken,
                 [D1Values.Text(claim), D1Values.Text(scope), D1Values.Text(jobId), D1Values.Int64(Now()), D1Values.Text(owner)],
                 [D1Values.Text(owner), D1Values.Int64(Now() + LeaseMicroseconds), D1Values.Text(scope), D1Values.Text(jobId)],
                 [D1Values.Text(claim)]);
@@ -149,7 +149,7 @@ internal sealed class JobSliceService(IPlanExecutor executor, TimeProvider time,
         var command = Guid.NewGuid().ToString("D");
         try
         {
-            await Execute(PlanManifest.JobCommit, scope, cancellationToken,
+            await Execute(PlanManifest.Foundation.JobCommit, scope, cancellationToken,
                 [D1Values.Text(command), D1Values.Text(scope), D1Values.Text(jobId), D1Values.Int64(job.Fence), D1Values.Text(owner), D1Values.Int64(job.Cursor), D1Values.Int64(Now())],
                 [D1Values.Text(scope), D1Values.Text(jobId), D1Values.Text(items.ToString())],
                 [D1Values.Int64(cursor), D1Values.Uint64(checksum), D1Values.Int64(cursor), D1Values.Text(scope), D1Values.Text(jobId), D1Values.Int64(job.Fence)],

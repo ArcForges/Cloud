@@ -187,11 +187,18 @@ test("the private generated package is importable only by Worker sources at its 
   ] as const)
     assert.throws(() => validateImports(root, file, source, policy), /[Ii]nternal/u);
 });
-test("private generated C# records are importable only by the Cloud host and its tests", () => {
+test("private generated C# records are importable only by the Cloud host, its plan bridge and its tests", () => {
   const source = "using ArcForges.Contracts.CloudInternal.Storage.V1;\n";
-  validateCsharpImports("src/ArcForges.Cloud/Storage/Example.cs", source);
+  validateCsharpImports("src/ArcForges.Cloud/Foundation/Example.cs", source);
+  validateCsharpImports("src/ArcForges.Cloud.Storage.D1/Example.cs", source);
   validateCsharpImports("tests/ArcForges.Cloud.Tests/Example.cs", source);
-  for (const file of ["tests/ArcForges.Cloud.Consumer/Program.cs", "src/Other/Example.cs"])
+  for (const file of [
+    "tests/ArcForges.Cloud.Consumer/Program.cs",
+    "src/Other/Example.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Example.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/Example.cs",
+    "src/ArcForges.Cloud.Storage.D1Other/Example.cs",
+  ])
     assert.throws(() => validateCsharpImports(file, source), /Unadmitted private/u);
   assert.throws(
     () =>

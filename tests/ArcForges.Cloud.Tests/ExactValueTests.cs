@@ -143,7 +143,7 @@ public sealed partial class ExactValueTests
     [Fact]
     public void PlanManifestMatchesAnIndependentRecomputationFromThePlanFiles()
     {
-        var directory = Path.Combine(T.RepoRoot().FullName, "src", "ArcForges.Cloud", "Storage", "Plans");
+        var directory = Path.Combine(T.RepoRoot().FullName, "storage", "plans");
         var lines = new List<(string Id, int Version, string Line)>();
         foreach (var file in Directory.GetFiles(directory, "*.sql", SearchOption.AllDirectories))
         {
@@ -162,7 +162,7 @@ public sealed partial class ExactValueTests
     [Fact]
     public void EveryPlanDefinitionMatchesItsSqlPlaceholdersAndExactCasts()
     {
-        var directory = Path.Combine(T.RepoRoot().FullName, "src", "ArcForges.Cloud", "Storage", "Plans");
+        var directory = Path.Combine(T.RepoRoot().FullName, "storage", "plans");
         foreach (var plan in PlanManifest.All)
         {
             var file = Directory.GetFiles(directory, plan.Id[(plan.Id.IndexOf('.', StringComparison.Ordinal) + 1)..] + ".sql", SearchOption.AllDirectories).Single();

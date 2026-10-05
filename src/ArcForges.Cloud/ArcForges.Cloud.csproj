@@ -18,6 +18,29 @@
     <EmbeddedResource Include="../../package-lock.json" LogicalName="Cloud.NpmLock" />
     <EmbeddedResource Include="$(PkgArcForges_Contracts_PublicApi)/source.json" LogicalName="Cloud.ContractsSource" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Devices/ArcForges.Cloud.Modules.Devices.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Commerce/ArcForges.Cloud.Modules.Commerce.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Chat/ArcForges.Cloud.Modules.Chat.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Task/ArcForges.Cloud.Modules.Task.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Sync/ArcForges.Cloud.Modules.Sync.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Resource/ArcForges.Cloud.Modules.Resource.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Search/ArcForges.Cloud.Modules.Search.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.PackageCatalog/ArcForges.Cloud.Modules.PackageCatalog.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Notification/ArcForges.Cloud.Modules.Notification.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Policy/ArcForges.Cloud.Modules.Policy.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Scope/ArcForges.Cloud.Modules.Scope.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Configuration/ArcForges.Cloud.Modules.Configuration.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Audit/ArcForges.Cloud.Modules.Audit.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.Support/ArcForges.Cloud.Modules.Support.csproj" />
+    <ProjectReference Include="../ArcForges.Cloud.Modules.TrustSafety/ArcForges.Cloud.Modules.TrustSafety.csproj" />
+  </ItemGroup>
   <PropertyGroup>
     <LicenceBoundary>AGPL</LicenceBoundary>
     <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
