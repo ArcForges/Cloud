@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import test from "node:test";
+import { trailerFrame } from "../../worker/ingress/io.ts";
 import {
   healthPath,
   helloPath,
@@ -8,6 +9,9 @@ import {
   routeRequest,
   type CloudBindings,
 } from "../../worker/router.ts";
+
+// What the host answers for an empty reply: one empty data frame and the OK status trailer.
+const okReply = new Uint8Array([0, 0, 0, 0, 0, ...trailerFrame(0)]);
 
 function fixture(allowed = true) {
   const received: Request[] = [];
@@ -21,7 +25,7 @@ function fixture(allowed = true) {
         return {
           async fetch(request) {
             received.push(request);
-            return new Response(new Uint8Array([0, 0, 0, 0, 0]), {
+            return new Response(okReply, {
               headers: { "content-type": "application/grpc-web+proto" },
             });
           },
@@ -64,7 +68,7 @@ test("preserves binary payload and uses one fixed container, stripping only /api
   assert.match(forwarded.headers.get("grpc-timeout") ?? "", /^\d+m$/);
   assert.ok(Number.parseInt(forwarded.headers.get("grpc-timeout") ?? "", 10) <= 10000);
   assert.deepEqual(new Uint8Array(await forwarded.arrayBuffer()), payload);
-  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), new Uint8Array([0, 0, 0, 0, 0]));
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), okReply);
 });
 
 test("unknown paths, verbs and content types never wake a container", async () => {

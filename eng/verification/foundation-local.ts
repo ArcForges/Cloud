@@ -121,27 +121,15 @@ export async function main() {
     await new Promise((resolve) => running.once("exit", resolve));
   };
   let restarts = 0;
-  const proxy = async (request: Request): Promise<Response> => {
-    const url = new URL(request.url);
-    if (url.pathname === "/__stop") {
-      await stopHost();
-      await startHost();
-      restarts++;
-      return new MiniflareResponse("restarted");
-    }
-    const body = ["GET", "HEAD"].includes(request.method)
-      ? undefined
-      : Buffer.from(await request.arrayBuffer());
-    const reply = await fetch(`http://127.0.0.1:${hostPort}${url.pathname}${url.search}`, {
-      method: request.method,
-      headers: Object.fromEntries(request.headers),
-      body,
-      redirect: "manual",
-    });
-    return new MiniflareResponse(Buffer.from(await reply.arrayBuffer()), {
-      status: reply.status,
-      headers: Object.fromEntries(reply.headers),
-    }) as unknown as Response;
+  // Only the harness control channel is a function binding: it restarts the host. Every request to the host goes
+  // over real HTTP (an external service), as the platform's Container stub does, so a closed response closes the connection.
+  const control = async (request: Request): Promise<Response> => {
+    if (new URL(request.url).pathname !== "/__stop")
+      return new MiniflareResponse("", { status: 404 });
+    await stopHost();
+    await startHost();
+    restarts++;
+    return new MiniflareResponse("restarted");
   };
 
   const mf = new Miniflare(
@@ -163,7 +151,10 @@ export async function main() {
         },
         "proof-wake-dlq": { maxBatchSize: 1, maxBatchTimeout: 1, maxRetries: 3 },
       },
-      serviceBindings: { CONTAINER_SERVICE: proxy as never },
+      serviceBindings: {
+        CONTAINER_SERVICE: { external: { address: `127.0.0.1:${hostPort}`, http: {} } },
+        CONTAINER_CONTROL: control as never,
+      },
       bindings: {
         FOUNDATION_PROOF: "enabled",
         REALM_ID: "proof",
@@ -237,6 +228,8 @@ export async function main() {
         origin,
         pollIntervalMs: 500,
         jobTimeoutMs: 120_000,
+        pipeline: true,
+        only: process.env.FOUNDATION_LOCAL_ONLY?.split(",").filter(Boolean),
       },
       manifestHash,
       { stopContainer: true },

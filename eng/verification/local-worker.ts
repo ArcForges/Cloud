@@ -12,7 +12,10 @@ import { handleExecutePlan } from "../../worker/storage/handler.ts";
 export { FoundationJobCoordinator } from "../../worker/foundation/durable.ts";
 
 interface LocalEnv {
+  /** The host process over real HTTP, as the platform's Container stub reaches it: closing a request closes the connection. */
   CONTAINER_SERVICE: { fetch(request: Request | string): Promise<Response> };
+  /** The harness's control channel: it stops and restarts the host process. */
+  CONTAINER_CONTROL: { fetch(request: Request | string): Promise<Response> };
 }
 
 // The host's virtual-host requests arrive under a path prefix and are handed to the handlers exactly
@@ -25,11 +28,13 @@ function asVirtualHost(request: Request, host: string, prefix: string): Request 
 function withContainer(env: WorkerEnv & LocalEnv): WorkerEnv {
   return {
     ...env,
+    // The rate limit binding is a deployed-only platform feature; locally every request passes it.
+    HELLO_RATE_LIMITER: { limit: async () => ({ success: true }) },
     CLOUD_CONTAINER: {
       getByName: () => ({
         fetch: (request: Request) => env.CONTAINER_SERVICE.fetch(request),
         stop: async () => {
-          await env.CONTAINER_SERVICE.fetch("http://container/__stop");
+          await env.CONTAINER_CONTROL.fetch("http://container/__stop");
         },
       }),
     },

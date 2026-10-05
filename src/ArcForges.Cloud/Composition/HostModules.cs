@@ -2,6 +2,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using ArcForges.Cloud.Foundation;
+using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Storage;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -13,11 +14,43 @@ internal interface IHostModule
     void Register(WebApplicationBuilder builder);
 
     void Map(WebApplication app);
+
+    /// <summary>The public gRPC-Web methods this module serves, each with its ingress policy. A method without a policy is refused.</summary>
+    IEnumerable<RpcPolicy> RpcPolicies => [];
+
+    /// <summary>Exact plain HTTP routes this module serves (they carry their own checks). Any path not declared is refused by the ingress pipeline.</summary>
+    IEnumerable<string> PlainPaths => [];
+
+    /// <summary>Path prefixes of plain HTTP routes this module serves; a path strictly under a prefix is admitted to its endpoint.</summary>
+    IEnumerable<string> PlainPrefixes => [];
 }
 
 internal static class HostModules
 {
-    public static IReadOnlyList<IHostModule> All(JsonObject identity) => [new HelloModule(identity), new FoundationModule()];
+    /// <summary>The ingress module comes first so its pipeline runs before the gRPC-Web adapter; it reads the other modules' policies when mapping.</summary>
+    public static IReadOnlyList<IHostModule> All(JsonObject identity)
+    {
+        IHostModule[] served = [new HelloModule(identity), new FoundationModule()];
+        return [new IngressModule(served), .. served];
+    }
+}
+
+/// <summary>
+/// The public ingress pipeline of the host: it composes the method policies of the listed modules into the deny-by-default table and
+/// installs the pipeline ahead of the gRPC-Web adapter. It serves no method of its own.
+/// </summary>
+internal sealed class IngressModule(IReadOnlyList<IHostModule> served) : IHostModule
+{
+    public void Register(WebApplicationBuilder builder)
+    {
+    }
+
+    public void Map(WebApplication app)
+    {
+        var routes = new IngressRoutes(RpcPolicyRegistry.Create(served.SelectMany(module => module.RpcPolicies)),
+            served.SelectMany(module => module.PlainPaths), served.SelectMany(module => module.PlainPrefixes));
+        app.Use((context, next) => IngressPipeline.InvokeAsync(context, next, routes));
+    }
 }
 
 /// <summary>The anonymous Hello gRPC service, its gRPC-Web adapter and the health route, unchanged from the bootstrap host.</summary>
@@ -30,6 +63,11 @@ internal sealed class HelloModule(JsonObject identity) : IHostModule
             options.MaxReceiveMessageSize = 4091;
             options.MaxSendMessageSize = 4091;
         });
+
+    public IEnumerable<RpcPolicy> RpcPolicies { get; } =
+        [RpcPolicy.Unary("/arcforges.hello.v1.HelloService/SayHello", RpcAuthentication.Anonymous, RpcScope.None)];
+
+    public IEnumerable<string> PlainPaths { get; } = ["/healthz"];
 
     public void Map(WebApplication app)
     {
@@ -78,13 +116,23 @@ internal sealed class FoundationModule : IHostModule
         services.TryAddSingleton(provider => new JobSliceService(provider.GetRequiredService<IPlanExecutor>(), provider.GetRequiredService<TimeProvider>(), configured.RecoveryGeneration));
         services.TryAddSingleton(provider => new EgressProbe(NewClient, EgressProbe.PublicTargets, provider.GetRequiredService<SessionService>().IsReadyAsync));
         services.TryAddSingleton<FoundationOperations>();
+        services.TryAddSingleton(new PipelineProbeState());
+        services.TryAddSingleton<IBrowserSessionVerifier>(provider =>
+            new BrowserSessionVerifier(provider.GetRequiredService<SessionService>(), configured));
     }
+
+    public IEnumerable<RpcPolicy> RpcPolicies => options is null ? Array.Empty<RpcPolicy>() : PipelineProbe.Policies;
+
+    public IEnumerable<string> PlainPaths => options is null ? Array.Empty<string>() : [BrowserSessionEndpoints.BootstrapPath, BrowserSessionEndpoints.LogoutPath];
+
+    public IEnumerable<string> PlainPrefixes => options is null ? Array.Empty<string>() : [FoundationEndpoints.Prefix];
 
     public void Map(WebApplication app)
     {
         if (options is null) return;
         BrowserSessionEndpoints.Map(app);
         FoundationEndpoints.Map(app);
+        PipelineProbe.Map(app);
     }
 
     /// <summary>No redirects (a signed request must never follow one), no automatic decompression; time limits are applied per call.</summary>
