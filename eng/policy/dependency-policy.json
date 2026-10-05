@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "912a851fca6f69928596967f560916386584b411",
+  "sourceCommit": "9b51f99d48e5281fb7a8ec71aa7b6a37eaa7f145",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -12,7 +12,7 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "b0581c303a7324b5038331dd7ba54cebf1fcd9bbdf1ab30bb042ae1173696f4e",
-    "package.json": "30c7b78be1fcf3b260825909bb6de06233fa2cc84b5464a2c0b56e945ec548ef",
+    "package.json": "a1a679679179f73c31ddf57b462ccca6acd25b5abab8bb1f8e4a01242112506e",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "e987c7c5f052759bb916bf9616d3a724430172c80ba3cc1a406c04231e6ee149",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -46,7 +46,7 @@
     "src/ArcForges.Cloud.Modules.Devices/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj": "dfb860b88c916ed63e242f740b52b4b7f1fc92cf7f05399756fd2e0eea947aeb",
     "src/ArcForges.Cloud.Modules.Entitlement/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
-    "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
+    "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj": "dfb860b88c916ed63e242f740b52b4b7f1fc92cf7f05399756fd2e0eea947aeb",
     "src/ArcForges.Cloud.Modules.Identity/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Modules.Notification/ArcForges.Cloud.Modules.Notification.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
     "src/ArcForges.Cloud.Modules.Notification/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
@@ -72,15 +72,15 @@
     "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "a3bdd02ca2bc05a26d60fe226faf2fdedb1c1388e78cd2a65f8f627562ea7d2f",
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "5ef3c196005caf9cddb702a0061fafd310d149f1326708b958d1381934f69313",
-    "eng/provenance/artifact-profiles/cloud-release-r33.json": "a33ced1368589fbf1524d9e9639e0dcb82cb0cdd4ffd67bb4b5132284ea4bfb6",
-    "eng/provenance/records/cloud-04b-cloud-runtime-notices-r1.json": "f1febb9a98ea9dda9cd723b29fbe89611d8ca37736410ec88b163d3f5b36fe67",
-    "eng/provenance/records/cloud-04b-cloud-worker-bundle-r1.json": "164d4050857262fc0826351e699392280437b74e205dc49e06ce89ca65dc4c0e"
+    "eng/provenance/artifact-profiles/cloud-release-r34.json": "c5871a2cca95918ac2d780efd2e159e56526ce1a39089e5b89397a07eb32fb1c",
+    "eng/provenance/records/cloud-11-cloud-runtime-notices-r1.json": "77cee36232abca61d9800940b092db079ece5a299fa42ec93c958442e2a588e7",
+    "eng/provenance/records/cloud-11-cloud-worker-bundle-r1.json": "36c10fa21ef301cc608f55df7d01321384a2159afe693b1e7e9a99239d2c0e7c"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-c20261005-cloud70 (CLOUD.70 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-c20261005-cloud11 (CLOUD.11 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "date": "2026-10-05",
-    "rationale": "CLOUD.70 adds the gated D1 migration step of the deployment jobs: one new Node tooling file (eng/migrations/deploy.ts, not shipped), a guard call in tooling/cloudflare.ts, two workflow steps in .github/workflows/ci.yml, one new test file, one npm script and one test list entry, and the factual document. package.json and .github/workflows/ci.yml are the hash-bound inputs that change and are re-bound here, with the first-party inventory; no Worker source, plan dictionary, Docker context, Native AOT source list or shipped artifact changes, so the release profile and artifact records are retained unchanged. No npm or NuGet coordinate, integrity value or closure entry changes, no project, reference or lock file changes, and no new native capability or broader source reuse permission is created.",
+    "rationale": "CLOUD.11 adds the core identity model: the Core folder of the existing Identity module project (domain, application and infrastructure layers) with an InternalsVisibleTo item in its project file, eight named identity plans and the account enrollment family plan (so the generated plan dictionary and the C# plan manifest change), their tests and shared vector, an opt-in workerd run (Node tooling, not shipped), one npm script and test list entries, the Docker context rules of the new source folders, one document and the print width of the generated family expansion JSON. package.json, the Identity project file, the Docker context rules, the first-party inventory and the release records are hash-bound inputs, so they are re-bound here; the release profile and both artifact records are re-bound by immutable successor records because the first-party source list and input hashes of the Native AOT closure and the Worker bundle bytes changed. No npm or NuGet coordinate, integrity value or closure entry changes, no lock file changes, and no new native capability or broader source reuse permission is created.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -90,7 +90,7 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "b0581c303a7324b5038331dd7ba54cebf1fcd9bbdf1ab30bb042ae1173696f4e",
-      "package.json": "30c7b78be1fcf3b260825909bb6de06233fa2cc84b5464a2c0b56e945ec548ef",
+      "package.json": "a1a679679179f73c31ddf57b462ccca6acd25b5abab8bb1f8e4a01242112506e",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "e987c7c5f052759bb916bf9616d3a724430172c80ba3cc1a406c04231e6ee149",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -124,7 +124,7 @@
       "src/ArcForges.Cloud.Modules.Devices/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj": "dfb860b88c916ed63e242f740b52b4b7f1fc92cf7f05399756fd2e0eea947aeb",
       "src/ArcForges.Cloud.Modules.Entitlement/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
-      "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
+      "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj": "dfb860b88c916ed63e242f740b52b4b7f1fc92cf7f05399756fd2e0eea947aeb",
       "src/ArcForges.Cloud.Modules.Identity/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Modules.Notification/ArcForges.Cloud.Modules.Notification.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
       "src/ArcForges.Cloud.Modules.Notification/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
@@ -150,9 +150,9 @@
       "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "a3bdd02ca2bc05a26d60fe226faf2fdedb1c1388e78cd2a65f8f627562ea7d2f",
       "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "5ef3c196005caf9cddb702a0061fafd310d149f1326708b958d1381934f69313",
-      "eng/provenance/artifact-profiles/cloud-release-r33.json": "a33ced1368589fbf1524d9e9639e0dcb82cb0cdd4ffd67bb4b5132284ea4bfb6",
-      "eng/provenance/records/cloud-04b-cloud-runtime-notices-r1.json": "f1febb9a98ea9dda9cd723b29fbe89611d8ca37736410ec88b163d3f5b36fe67",
-      "eng/provenance/records/cloud-04b-cloud-worker-bundle-r1.json": "164d4050857262fc0826351e699392280437b74e205dc49e06ce89ca65dc4c0e"
+      "eng/provenance/artifact-profiles/cloud-release-r34.json": "c5871a2cca95918ac2d780efd2e159e56526ce1a39089e5b89397a07eb32fb1c",
+      "eng/provenance/records/cloud-11-cloud-runtime-notices-r1.json": "77cee36232abca61d9800940b092db079ece5a299fa42ec93c958442e2a588e7",
+      "eng/provenance/records/cloud-11-cloud-worker-bundle-r1.json": "36c10fa21ef301cc608f55df7d01321384a2159afe693b1e7e9a99239d2c0e7c"
     },
     "checks": [
       "locked-restore",
@@ -983,7 +983,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-04b-cloud-runtime-notices-r1", "cloud-04b-cloud-worker-bundle-r1"],
+  "artifactRecords": ["cloud-11-cloud-runtime-notices-r1", "cloud-11-cloud-worker-bundle-r1"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -997,7 +997,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-70-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-11-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
