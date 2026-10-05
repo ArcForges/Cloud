@@ -104,8 +104,8 @@ public sealed class ModulePlanPortTests
         storage.Handler = _ => throw Fail(kind);
         var port = factory.For(Entitlement);
 
-        var read = await port.ReadAsync(new ModulePlanRead("entitlement.revision-load", "s", [PlanValue.FromText("w")]), T.Ct);
-        var write = await port.WriteAsync(new ModulePlanWrite("entitlement.feature-release-append", "entitlement", [[PlanValue.FromText("feature.ai"), PlanValue.FromInt64(5)]], null), T.Ct);
+        var read = await port.ReadAsync(new ModulePlanRead("entitlement.revision-load", "w", [PlanValue.FromText("w")]), T.Ct);
+        var write = await port.WriteAsync(new ModulePlanWrite("entitlement.feature-release-append", "feature.ai", [[PlanValue.FromText("feature.ai"), PlanValue.FromInt64(5)]], null), T.Ct);
 
         Assert.Equal(expected, read.Status);
         Assert.Equal(expected, write.Status);
@@ -118,7 +118,7 @@ public sealed class ModulePlanPortTests
         var (factory, storage) = Create();
         storage.Handler = _ => Rows([D1Values.Uint64(5)]);
 
-        var outcome = await factory.For(Entitlement).ReadAsync(new ModulePlanRead("entitlement.revision-load", "s", [PlanValue.FromText("w")]), T.Ct);
+        var outcome = await factory.For(Entitlement).ReadAsync(new ModulePlanRead("entitlement.revision-load", "w", [PlanValue.FromText("w")]), T.Ct);
 
         Assert.Equal(ModulePlanStatus.Rejected, outcome.Status);
     }
@@ -130,7 +130,7 @@ public sealed class ModulePlanPortTests
         var commit = new ModuleCommit(Samples.Id(1), null, "actor", "op", "hash", "{}", 1, Samples.NowMicros, Samples.NowMicros + 1000, [], 1, "{}");
 
         var outcome = await factory.For(Entitlement).WriteAsync(
-            new ModulePlanWrite("entitlement.feature-release-append", "entitlement", [[PlanValue.FromText("feature.ai"), PlanValue.FromInt64(5)]], commit), T.Ct);
+            new ModulePlanWrite("entitlement.feature-release-append", "feature.ai", [[PlanValue.FromText("feature.ai"), PlanValue.FromInt64(5)]], commit), T.Ct);
 
         Assert.Equal(ModulePlanStatus.Rejected, outcome.Status);
         Assert.Empty(storage.Calls);

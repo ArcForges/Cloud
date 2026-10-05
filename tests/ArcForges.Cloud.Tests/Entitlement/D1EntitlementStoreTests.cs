@@ -51,13 +51,13 @@ public sealed class D1EntitlementStoreTests
         harness.At(10);
         await harness.Issue(Fixtures.Capability("cloud.sync", 0, null, "order-1"));
 
-        Assert.Equal(1, await harness.Count("platform_command", "operation = 'entitlement.commit' AND status = 2 AND result_rev = 2"));
-        Assert.Equal(1, await harness.Count("platform_outbox", "event_type = 'entitlement.snapshot.changed' AND aggregate_id = '" + D1EntitlementHarness.Workspace + "' AND aggregate_rev = 2 AND state = 1"));
+        Assert.Equal(1, await harness.Count("platform_command", "operation = 'entitlement.commit' AND status = 2 AND result_rev = 1"));
+        Assert.Equal(1, await harness.Count("platform_outbox", "event_type = 'entitlement.snapshot.changed' AND aggregate_id = '" + D1EntitlementHarness.Workspace + "' AND aggregate_rev = 1 AND state = 1"));
         Assert.Equal(1, await harness.Count("platform_outbox_position", "stream_key = '" + D1EntitlementHarness.Workspace + "' AND sequence = 1"));
         Assert.Equal(1, await harness.Count("platform_change_archive"));
         Assert.Equal(0, await harness.Count("platform_command_guard"));
         var revision = await harness.Bridge.QueryAsync("SELECT rev, updated_at FROM entitlement_revision", T.Ct);
-        Assert.Equal(["2", await StoredComputedAt(harness)], revision.Single());
+        Assert.Equal(["1", await StoredComputedAt(harness)], revision.Single());
     }
 
     [Fact]
@@ -242,7 +242,7 @@ public sealed class D1EntitlementStoreTests
         Assert.Equal(WorkspaceStatus.Restricted, state.Records.StatusFacts.Single().Status);
         Assert.False(state.Records.StatusFacts.Single().AutoRenew);
         Assert.True(state.Records.StatusFacts.Single().PurchasePending);
-        Assert.Equal(await harness.Count("entitlement_service_term"), 2);
+        Assert.Equal(2, await harness.Count("entitlement_service_term"));
         Assert.Equal(["period-1", "period-2"], (await harness.Bridge.QueryAsync("SELECT period_ref FROM entitlement_service_term ORDER BY starts_at", T.Ct)).Select(r => r[0]!));
     }
 
@@ -252,7 +252,8 @@ public sealed class D1EntitlementStoreTests
         using var harness = await D1EntitlementHarness.CreateAsync();
         harness.At(10);
         var grant = await harness.Issue(Fixtures.Capability("cloud.sync", 0, null, "order-1"));
-        await harness.AddTerm(Fixtures.Term(Id(0x71), 0, 30 * Fixtures.Day, createdSeconds: 11));
+        await harness.AddTerm(Fixtures.Term(Id(0x71), 0, 30 * Fixtures.Day, createdSeconds: 5));
+        Assert.True(Fixtures.Capability(await harness.Read(), "cloud.sync").Granted);
         await harness.AssertRebuildEqual();
 
         await harness.Bridge.ExecAsync("UPDATE entitlement_snapshot SET capabilities = json_replace(capabilities, '$.\"cloud.sync\".granted', json('false'))", T.Ct);
@@ -307,6 +308,28 @@ public sealed class D1EntitlementStoreTests
         Assert.Equal(230, loaded.Records.Grants.Select(g => g.GrantId).Distinct().Count());
         Assert.Equal(3, loaded.Revision);
         Assert.True(harness.Bridge.Calls > 10);
+    }
+
+    [Fact]
+    public async Task RecordsStampedAtTheEpochItselfAreReadBackLikeAnyOtherInstant()
+    {
+        using var harness = await D1EntitlementHarness.CreateAsync();
+        var state = await harness.Store.LoadAsync(D1EntitlementHarness.Workspace, T.Ct);
+        var grant = AdminGrantWithReason(Id(0x91), "at zero") with { CreatedAt = Fixtures.T(0) };
+        var append = EntitlementAppend.None with
+        {
+            Grants = [grant],
+            Activations = [new DefinitionsActivation("bundle-1", Fixtures.T(0))],
+            StatusFacts = [new StatusFactRow(Id(0x82), "status-0", new WorkspaceStatusFact(Fixtures.T(0), WorkspaceStatus.Normal, true, false))],
+        };
+        Assert.Equal(CommitOutcome.Committed, await harness.Store.CommitAsync(D1EntitlementHarness.Workspace, 0, append, Snapshot(state, grant, 0), T.Ct));
+
+        var loaded = await harness.Store.LoadAsync(D1EntitlementHarness.Workspace, T.Ct);
+
+        Assert.Equal(grant, loaded.Records.Grants.Single());
+        Assert.Equal("bundle-1", loaded.Records.Activations.Single().Version);
+        Assert.Equal(Fixtures.T(0), loaded.Records.StatusFacts.Single().RecordedAt);
+        Assert.Equal(Fixtures.T(0), loaded.Snapshot!.ComputedAt);
     }
 
     [Fact]

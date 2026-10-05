@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "ea44a6fa364ca669e53db4ee35752a661e11683342eb74cec3cf1fe85bd31c78";
+    public const string Hash = "da57ac5d74917b54cc1e2ea577218008bfddde961752ef14accc892b756572f9";
 
     /// <summary>The reviewed plans of the entitlement owner (<c>storage/plans/entitlement</c>).</summary>
     internal static class Entitlement
@@ -53,7 +53,7 @@ internal static class PlanManifest
             PlanAccess.Write,
             0,
             [
-                new([new(PlanKind.Text), new(PlanKind.Int64)], null)
+                new([new(PlanKind.Scope), new(PlanKind.Int64)], null)
             ]);
 
         public static readonly PlanDefinition FeatureReleaseGet = new(
@@ -62,7 +62,7 @@ internal static class PlanManifest
             PlanAccess.Read,
             1,
             [
-                new([new(PlanKind.Text)], [new(PlanKind.Int64)])
+                new([new(PlanKind.Scope)], [new(PlanKind.Int64)])
             ]);
 
         public static readonly PlanDefinition FeatureReleasesLoad = new(
@@ -71,7 +71,7 @@ internal static class PlanManifest
             PlanAccess.Read,
             100,
             [
-                new([new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64)])
+                new([new(PlanKind.Scope), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64)])
             ]);
 
         public static readonly PlanDefinition GrantsLoad = new(

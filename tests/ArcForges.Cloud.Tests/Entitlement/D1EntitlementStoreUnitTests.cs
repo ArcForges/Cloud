@@ -7,6 +7,7 @@ using ArcForges.Cloud.Modules.Entitlement.Resolver.Domain;
 using ArcForges.Cloud.Storage;
 using ArcForges.Cloud.Storage.ModuleBinding;
 using ArcForges.Cloud.Tests.Receipts;
+using ArcForges.Contracts.CloudInternal.Storage.V1;
 using Xunit;
 using static ArcForges.Cloud.Tests.Receipts.ScriptedExecutor;
 
@@ -163,7 +164,7 @@ public sealed class D1EntitlementStoreUnitTests
                 case "entitlement.activations-load":
                     pages++;
                     var after = Int(call.Arguments[0][1]);
-                    var start = after == 0 ? 1 : after + 1;
+                    var start = after == long.MinValue ? 1 : after + 1;
                     var count = pages == 1 ? 100 : 5;
                     return new PlanResult([.. Enumerable.Range(0, count).Select(i => (IReadOnlyList<D1Scalar>)[D1Values.Text("bundle-1"), D1Values.Int64(start + i)])], 0);
                 default:
@@ -176,6 +177,32 @@ public sealed class D1EntitlementStoreUnitTests
         Assert.Equal(2, pages);
         Assert.Equal(105, state.Records.Activations.Length);
         Assert.Equal(Enumerable.Range(1, 105).Select(i => (long)i), state.Records.Activations.Select(a => a.ActivatedAt.Value));
+    }
+
+    [Fact]
+    public async Task AnEndlessHistoryStopsTheReadAtTheResolverBoundAndTheServiceReportsItAsInvalid()
+    {
+        var (store, storage) = Create();
+        var pages = 0;
+        storage.Handler = call =>
+        {
+            switch (call.Plan.Id)
+            {
+                case "entitlement.revision-load":
+                    return Rows([D1Values.Int64(2)]);
+                case "entitlement.activations-load":
+                    var page = ++pages;
+                    return new PlanResult([.. Enumerable.Range(0, 100).Select(i => (IReadOnlyList<D1Scalar>)[D1Values.Text("b"), D1Values.Int64((page * 1000L) + i + 1)])], 0);
+                default:
+                    return Rows();
+            }
+        };
+
+        var state = await store.LoadAsync(Workspace, T.Ct);
+
+        Assert.InRange(pages, 20, 22);
+        Assert.True(state.Records.Count > InputRules.MaxRecords);
+        Assert.Throws<ResolverInputException>(() => EntitlementResolver.Resolve(state.Records, Fixtures.Definitions(), Fixtures.T(10)));
     }
 
     [Fact]

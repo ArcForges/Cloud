@@ -23,7 +23,7 @@ internal sealed class UuidIds(int start = 0x1000) : IEntitlementIdSource
 /// SQLite oracle through the bridge (the same Worker plan code the signed executor reaches). One clock, one definitions source and one
 /// workspace, like <see cref="EntitlementHarness"/>, so the COM.05 scenarios can be repeated over D1-stored records.
 /// </summary>
-internal sealed class D1EntitlementHarness : IDisposable
+internal sealed class D1EntitlementHarness : IScenario, IDisposable
 {
     public static readonly string Workspace = Uuid(0xB1);
 
@@ -32,7 +32,7 @@ internal sealed class D1EntitlementHarness : IDisposable
         Bridge = new SqliteBridgeExecutor();
         Clock = new SettableTimeProvider(DateTimeOffset.UnixEpoch);
         Definitions = new FixedDefinitions(Fixtures.Definitions(selfHostRealm));
-        Port = new ModulePlanPortFactory(Bridge, Bridge.Generation, TimeProvider.System).For(EntitlementModule.Instance.Descriptor);
+        Port = new ModulePlanPortFactory(Bridge, Bridge.Generation, Clock).For(EntitlementModule.Instance.Descriptor);
         Store = new D1EntitlementStore(Port);
         Service = new EntitlementService(Store, Definitions, new UuidIds(), Clock);
     }
@@ -62,6 +62,41 @@ internal sealed class D1EntitlementHarness : IDisposable
     {
         Clock.SetSeconds(seconds);
         return this;
+    }
+
+    private readonly UuidIds rowIds = new(0x5000);
+    private int references;
+
+    public string WorkspaceId => Workspace;
+
+    IScenario IScenario.AtSeconds(long seconds) => At(seconds);
+
+    /// <summary>The scenarios name terms "t1" and "pass-t"; the physical schema needs canonical UUIDs, so a name maps to a stable one.</summary>
+    public static string Mapped(string name)
+    {
+        if (Guid.TryParseExact(name, "D", out var parsed) && parsed.ToString("D") == name) return name;
+        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("term:" + name));
+        return new Guid(bytes.AsSpan(0, 16)).ToString("D");
+    }
+
+    Task IScenario.AddTermFact(ServiceTermFact term) => AddTerm(term with { TermId = Mapped(term.TermId) }, "period-" + term.TermId);
+
+    async Task IScenario.AddActionFact(TermActionFact action)
+    {
+        var row = new TermActionRow(rowIds.NewId(), "action-" + Interlocked.Increment(ref references), action with { TermId = Mapped(action.TermId) }, null);
+        await AppendCommitted(EntitlementAppend.None with { TermActions = [row] }, Clock.GetUtcNow().ToUnixTimeSeconds());
+    }
+
+    async Task IScenario.AddStatusFact(WorkspaceStatusFact fact)
+    {
+        var row = new StatusFactRow(rowIds.NewId(), "status-" + Interlocked.Increment(ref references), fact);
+        await AppendCommitted(EntitlementAppend.None with { StatusFacts = [row] }, Clock.GetUtcNow().ToUnixTimeSeconds());
+    }
+
+    async Task IScenario.AddReleaseFact(FeatureReleaseFact release)
+    {
+        Assert.Equal(FeatureReleaseOutcome.Released, await Store.AppendFeatureReleaseAsync(release, T.Ct));
+        await Refresh();
     }
 
     public IssueGrantRequest ForWorkspace(IssueGrantRequest request) => request with { WorkspaceId = Workspace };

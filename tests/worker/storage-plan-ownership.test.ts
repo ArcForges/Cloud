@@ -546,6 +546,6 @@ test("every checked-in plan satisfies the ownership rule of its owner directory"
   for (const definition of manifest.plans) assertOwnership(definition, manifest.registry);
   assert.deepEqual(
     [...new Set(manifest.plans.map((entry) => entry.id.split(".")[0]))],
-    ["foundation", "platform"],
+    ["entitlement", "foundation", "platform"],
   );
 });

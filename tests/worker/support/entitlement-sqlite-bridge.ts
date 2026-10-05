@@ -28,7 +28,11 @@ const generation = process.argv[2] ?? "1";
 
 type Row = unknown[];
 const plain = (value: unknown): unknown =>
-  typeof value === "bigint" ? value.toString() : value instanceof Uint8Array ? Array.from(value) : value;
+  typeof value === "bigint"
+    ? value.toString()
+    : value instanceof Uint8Array
+      ? Array.from(value)
+      : value;
 
 async function answer(line: string): Promise<string> {
   const message = JSON.parse(line) as { kind: string; body?: string; sql?: string };

@@ -57,6 +57,8 @@ records and the sort-key columns of any table that a module orders by an exact d
 (`platform_sequence_stream`, `platform_outbox_position`, `platform_change_archive`, and the guard table `platform_command_guard` that CLOUD.06 defines) are defined in model 01 section 2 and added by migrations 0022 and 0023
 ([receipts and outbox](d1-receipts-outbox.md)). The cloud `search_retrieval_chunk` has no vector column: embeddings live in Vectorize.
 
+COM.16 adds three Entitlement-owned append-only records that the resolver reads and model 01 now lists (`entitlement_definitions_activation`, `entitlement_workspace_status_fact`, `entitlement_feature_release`; migration 0024), so the manifest holds 161 tables (158 before, counted from `Physical/manifest/*.json`). The `entitlement_snapshot` json columns hold the whole resolver output, and the `entitlement_grant.reason` column and the `entitlement_revision` fence were already in the manifest ([entitlement resolver](entitlement-resolver.md#the-grant-port-and-the-durable-store)).
+
 ## Typed exact adapters (C#)
 
 `ColumnCodec.Encode` turns a `PhysicalValue` into the generated D1 scalar for its column and refuses a value the column cannot hold (range, alphabet, length, JSON shape and

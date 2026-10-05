@@ -120,8 +120,41 @@ internal sealed class FixedDefinitions(EntitlementDefinitions definitions) : IEn
     public EntitlementDefinitions Current() => Definitions;
 }
 
+/// <summary>
+/// The operations a scenario of the rebuild-equivalence suite uses, so the same accounts run over the in-memory store of COM.05 and over
+/// the durable D1 store (COM.16). Facts are appended the way their owner admissions would, in one unit with a snapshot refresh.
+/// </summary>
+internal interface IScenario
+{
+    EntitlementService Service { get; }
+
+    FixedDefinitions Definitions { get; }
+
+    string WorkspaceId { get; }
+
+    IScenario AtSeconds(long seconds);
+
+    Task<EntitlementSnapshot> Read();
+
+    Task<EntitlementSnapshot> Refresh();
+
+    Task<Grant> Issue(IssueGrantRequest request);
+
+    Task<Revocation> Revoke(string grantId, long expectedVersion, long? effectiveSeconds = null, string reason = "refund");
+
+    Task AddTermFact(ServiceTermFact term);
+
+    Task AddActionFact(TermActionFact action);
+
+    Task AddStatusFact(WorkspaceStatusFact fact);
+
+    Task AddReleaseFact(FeatureReleaseFact release);
+
+    Task AssertRebuildEqual();
+}
+
 /// <summary>Everything a scenario needs: the definitions, the store, the one clock and the service under test.</summary>
-internal sealed class EntitlementHarness
+internal sealed class EntitlementHarness : IScenario
 {
     public const string Workspace = "ws1";
 
@@ -141,11 +174,23 @@ internal sealed class EntitlementHarness
 
     public EntitlementService Service { get; }
 
+    public string WorkspaceId => Workspace;
+
     public EntitlementHarness At(long seconds)
     {
         Clock.SetSeconds(seconds);
         return this;
     }
+
+    IScenario IScenario.AtSeconds(long seconds) => At(seconds);
+
+    Task IScenario.AddTermFact(ServiceTermFact term) => AddTerm(term);
+
+    Task IScenario.AddActionFact(TermActionFact action) => AddAction(action);
+
+    Task IScenario.AddStatusFact(WorkspaceStatusFact fact) => AddStatus(fact);
+
+    Task IScenario.AddReleaseFact(FeatureReleaseFact release) => AddRelease(release);
 
     public async Task<EntitlementSnapshot> Read()
     {

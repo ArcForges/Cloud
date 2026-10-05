@@ -12,13 +12,13 @@ checked into `storage/plans`, and no C# code, request field or module can name S
 
 ## Layout
 
-| Path                                              | Owner                               | Content                                                                                                                                                                    |
-| ------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/ArcForges.Cloud.Modules.<Name>`              | one module (19 projects)            | the module boundary: `<Name>Module` with its `ModuleDescriptor`; the module's Domain, Application and Infrastructure layers are folders and namespaces of this one project |
-| `src/ArcForges.Cloud.Modules.Abstractions`        | shared boundary types               | `ModuleDescriptor` (name, schema, plan owner, table prefix) and `IModuleBoundary` (descriptor, service registration, route fragment)                                       |
-| `src/ArcForges.Cloud.Storage.D1`                  | the bridge                          | plan definitions, exact D1 scalar values, the signed Worker executor, private request signing and the generated `PlanManifest`                                             |
-| `storage/plans/<owner>/<name>.sql`, `owners.json` | each module owns its plan directory | the reviewed plans and the owner registry                                                                                                                                  |
-| `src/ArcForges.Cloud`                             | the Native AOT host                 | lists the 19 boundaries in `Composition/ModuleBoundaries.cs`; nothing else changed                                                                                         |
+| Path                                              | Owner                               | Content                                                                                                                                                                                                      |
+| ------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/ArcForges.Cloud.Modules.<Name>`              | one module (19 projects)            | the module boundary: `<Name>Module` with its `ModuleDescriptor`; the module's Domain, Application and Infrastructure layers are folders and namespaces of this one project                                   |
+| `src/ArcForges.Cloud.Modules.Abstractions`        | shared boundary types               | `ModuleDescriptor` (name, schema, plan owner, table prefix), `IModuleBoundary` (descriptor, service registration, route fragment), the plan-execution port (COM.16) and the published Entitlement grant port |
+| `src/ArcForges.Cloud.Storage.D1`                  | the bridge                          | plan definitions, exact D1 scalar values, the signed Worker executor, private request signing and the generated `PlanManifest`                                                                               |
+| `storage/plans/<owner>/<name>.sql`, `owners.json` | each module owns its plan directory | the reviewed plans and the owner registry                                                                                                                                                                    |
+| `src/ArcForges.Cloud`                             | the Native AOT host                 | lists the 19 boundaries in `Composition/ModuleBoundaries.cs`; nothing else changed                                                                                                                           |
 
 The 19 modules are the domain owners of the Cloud schema map: Identity, Workspace, Devices, Entitlement, Commerce, Chat, Task,
 Agent, Sync, Resource, Search, PackageCatalog, Notification, Policy, Scope, Configuration, Audit, Support and TrustSafety.
@@ -135,7 +135,7 @@ build time, not correctness.
 
 ## Not claimed
 
-- **No module owns a plan yet.** The module projects are boundaries with a descriptor. The physical tables and the migration runner exist
+- **One module owns plans: Entitlement (COM.16).** `storage/plans/entitlement` holds its twelve plans (the guarded `entitlement.commit` with the commit tail, the keyset loads and the global feature release append); the other eighteen modules own none yet. The module reaches them through the generic plan-execution port of the Abstractions project (`IModulePlanPort`), implemented by `Storage.D1/ModuleBinding`, which refuses a plan whose owner is not the calling module ([entitlement resolver](entitlement-resolver.md#the-grant-port-and-the-durable-store)). The module projects are otherwise boundaries with a descriptor. The physical tables and the migration runner exist
   ([D1 physical schema and migrations](d1-physical-schema.md), CLOUD.03), so a module plan names real tables. The receipts, outbox, inbox and change
   archive mechanism exists ([receipts and outbox](d1-receipts-outbox.md), CLOUD.04): every module write plan declares its commit tail in its header
   and the generator verifies it; the platform owner's plans (`storage/plans/platform`) are the first plans of a registered owner other than the proof.
@@ -143,7 +143,7 @@ build time, not correctness.
   not a module implementation. The migration bookkeeping tables (`platform_schema_state`, `platform_migration_receipt`,
   `platform_backfill_checkpoint`) are written only by the migration runner: the ownership rule accepts any `platform_` table in a module plan,
   so a plan that names one of them is a review finding.
-- **The typed repository API for modules does not exist yet.** The bridge is internal to the host and `Storage.D1`.
+- **The typed repository API for modules is the plan-execution port.** A module project references only the Abstractions project and calls its own named plans through `IModulePlanPort` with exact typed values; the bridge itself (`PlanDefinition`, the executor, the exact scalars) stays internal to the host and `Storage.D1`.
 - **No new deployed observation.** CLOUD.02 changes where the proven bridge lives, not how it behaves; the manifest hash and the Worker
   dictionary are unchanged, and no deployment or live scenario was run for it. The PRF.07 live results apply to the same plans and the same
   executor.

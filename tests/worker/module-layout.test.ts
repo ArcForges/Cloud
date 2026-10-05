@@ -90,7 +90,13 @@ test("only the host project references the modules and nothing under src referen
     );
     if (!entry.startsWith("ArcForges.Cloud.Modules."))
       assert(
-        references.every((reference) => !reference.includes(".Modules.")),
+        // The plan bridge references the shared Abstractions project to implement the plan-execution port (COM.16), never a module.
+        references.every(
+          (reference) =>
+            !reference.includes(".Modules.") ||
+            (entry === "ArcForges.Cloud.Storage.D1" &&
+              reference.endsWith("/ArcForges.Cloud.Modules.Abstractions.csproj")),
+        ),
         `${entry} references a module`,
       );
   }

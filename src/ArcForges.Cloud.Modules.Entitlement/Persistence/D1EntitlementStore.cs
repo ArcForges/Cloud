@@ -43,8 +43,10 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
     /// <summary>How long a replay of a commit is answered from its receipt.</summary>
     public static readonly long ReceiptRetentionMicros = 7L * 86_400_000_000;
 
+    /// <summary>Rows per keyset page (the bound of the load plans). A page cursor starts at the smallest signed 64-bit value, never at zero: an instant may be zero.</summary>
     private const int PageSize = 100;
     private const int LoadAttempts = 3;
+    private const string GlobalScope = "entitlement.global";
     private const string Actor = "entitlement-module";
     private const string Operation = "entitlement.commit";
     private const string EventType = "entitlement.snapshot.changed";
@@ -60,15 +62,15 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
             var budget = new Budget();
             var grants = await Pages(EntitlementPlans.GrantsLoad, scope, [PlanValue.FromInt64(0), PlanValue.FromInt64(long.MinValue), PlanValue.FromText("")], budget,
                 row => EntitlementRowCodec.ReadGrant(scope, row), row => [row[1], row[6], row[0]], cancellationToken).ConfigureAwait(false);
-            var revocations = await Pages(EntitlementPlans.RevocationsLoad, scope, [PlanValue.FromInt64(0), PlanValue.FromText("")], budget,
+            var revocations = await Pages(EntitlementPlans.RevocationsLoad, scope, [PlanValue.FromInt64(long.MinValue), PlanValue.FromText("")], budget,
                 EntitlementRowCodec.ReadRevocation, row => [row[5], row[0]], cancellationToken).ConfigureAwait(false);
             var terms = await Pages(EntitlementPlans.TermsLoad, scope, [PlanValue.FromInt64(long.MinValue), PlanValue.FromText("")], budget,
                 EntitlementRowCodec.ReadTerm, row => [row[2], row[0]], cancellationToken).ConfigureAwait(false);
-            var actions = await Pages(EntitlementPlans.TermActionsLoad, scope, [PlanValue.FromInt64(0), PlanValue.FromText("")], budget,
+            var actions = await Pages(EntitlementPlans.TermActionsLoad, scope, [PlanValue.FromInt64(long.MinValue), PlanValue.FromText("")], budget,
                 EntitlementRowCodec.ReadTermAction, row => [row[4], row[0]], cancellationToken).ConfigureAwait(false);
-            var facts = await Pages(EntitlementPlans.StatusFactsLoad, scope, [PlanValue.FromInt64(0), PlanValue.FromText("")], budget,
+            var facts = await Pages(EntitlementPlans.StatusFactsLoad, scope, [PlanValue.FromInt64(long.MinValue), PlanValue.FromText("")], budget,
                 EntitlementRowCodec.ReadStatusFact, row => [row[1], row[0]], cancellationToken).ConfigureAwait(false);
-            var activations = await Pages(EntitlementPlans.ActivationsLoad, scope, [PlanValue.FromInt64(0)], budget,
+            var activations = await Pages(EntitlementPlans.ActivationsLoad, scope, [PlanValue.FromInt64(long.MinValue)], budget,
                 EntitlementRowCodec.ReadActivation, row => [row[1]], cancellationToken).ConfigureAwait(false);
             var releases = await Pages(EntitlementPlans.FeatureReleasesLoad, scope, [PlanValue.FromText("")], budget,
                 EntitlementRowCodec.ReadRelease, row => [row[0]], cancellationToken, scoped: false).ConfigureAwait(false);
@@ -136,8 +138,11 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
             writer.WriteNumber("entitlementVersion", columns.Version);
             writer.WriteEndObject();
         });
+        // The receipt is stamped with the instant the snapshot was computed for (a receipt needs a positive instant; only an instant at the
+        // Unix epoch itself, which a real clock never reports, is lifted to the first microsecond).
+        var created = Math.Max(snapshot.ComputedAt.Value, 1);
         var commit = new ModuleCommit(
-            commandId, workspace, Actor, Operation, hash, result, newRevision, snapshot.ComputedAt.Value, snapshot.ComputedAt.Value + ReceiptRetentionMicros,
+            commandId, workspace, Actor, Operation, hash, result, newRevision, created, created + ReceiptRetentionMicros,
             [new ModuleOutboxEvent(IdOf(hash, "outbox"), AggregateKind, workspace, newRevision, EventType, result, workspace, commandId, null)],
             1, ChangeRecord(scope, newRevision, columns.Version, append));
         var outcome = await plans.WriteAsync(new ModulePlanWrite(EntitlementPlans.Commit, scope, owner, commit), cancellationToken).ConfigureAwait(false);
@@ -156,7 +161,8 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
         ArgumentNullException.ThrowIfNull(release);
         if (!InputRules.IsKey(release.Feature)) throw new ArgumentException("A feature release names a malformed feature.", nameof(release));
         if (release.ReleasedAt.Value <= 0) throw new ArgumentException("A feature release has a positive instant.", nameof(release));
-        const string scope = "entitlement";
+        // The owner scope of a feature release is the feature itself, which the Worker checks against the scope argument of the plan.
+        var scope = release.Feature;
         var outcome = await plans.WriteAsync(new ModulePlanWrite(EntitlementPlans.FeatureReleaseAppend, scope,
             [[PlanValue.FromText(release.Feature), PlanValue.FromInt64(release.ReleasedAt.Value)]], null), cancellationToken).ConfigureAwait(false);
         switch (outcome.Status)
@@ -165,7 +171,7 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
                 return FeatureReleaseOutcome.Released;
             case ModulePlanStatus.ConstraintRefused:
                 // The feature already has a release: the same instant is a replay, any other is a conflict. Nothing was written either way.
-                var existing = await plans.ReadAsync(new ModulePlanRead(EntitlementPlans.FeatureReleaseGet, scope, [PlanValue.FromText(release.Feature)]), cancellationToken)
+                var existing = await plans.ReadAsync(new ModulePlanRead(EntitlementPlans.FeatureReleaseGet, scope, [PlanValue.FromText(scope)]), cancellationToken)
                     .ConfigureAwait(false);
                 Require(existing, "read the feature release");
                 if (existing.Rows.Count != 1 || existing.Rows[0].Count != 1) throw EntitlementRowCodec.Defect("A feature release constraint failed but no release exists.");
@@ -209,8 +215,10 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
         var cursor = start;
         while (true)
         {
-            var arguments = scoped ? new[] { PlanValue.FromText(scope) }.Concat(cursor).ToArray() : cursor;
-            var outcome = await plans.ReadAsync(new ModulePlanRead(planId, scope, arguments), cancellationToken).ConfigureAwait(false);
+            // The global feature release table has no workspace: its reads are called under the one global scope.
+            var owner = scoped ? scope : GlobalScope;
+            var arguments = new[] { PlanValue.FromText(owner) }.Concat(cursor).ToArray();
+            var outcome = await plans.ReadAsync(new ModulePlanRead(planId, owner, arguments), cancellationToken).ConfigureAwait(false);
             Require(outcome, "read " + planId);
             foreach (var row in outcome.Rows) items.Add(read(row));
             budget.Used += outcome.Rows.Count;

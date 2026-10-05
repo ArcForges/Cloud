@@ -33,6 +33,8 @@
 !src/ArcForges.Cloud.Storage.D1/Archive/*.cs
 !src/ArcForges.Cloud.Storage.D1/SharedFamilies/
 !src/ArcForges.Cloud.Storage.D1/SharedFamilies/*.cs
+!src/ArcForges.Cloud.Storage.D1/ModuleBinding/
+!src/ArcForges.Cloud.Storage.D1/ModuleBinding/*.cs
 !src/ArcForges.Cloud.Storage.D1/*.csproj
 !src/ArcForges.Cloud.Storage.D1/packages.lock.json
 !src/ArcForges.Cloud.Modules.*/
@@ -52,6 +54,12 @@
 !src/ArcForges.Cloud.Modules.*/Resolver/Application/*.cs
 !src/ArcForges.Cloud.Modules.*/Resolver/Infrastructure/
 !src/ArcForges.Cloud.Modules.*/Resolver/Infrastructure/*.cs
+!src/ArcForges.Cloud.Modules.*/Persistence/
+!src/ArcForges.Cloud.Modules.*/Persistence/*.cs
+!src/ArcForges.Cloud.Modules.Abstractions/Entitlement/
+!src/ArcForges.Cloud.Modules.Abstractions/Entitlement/*.cs
+!src/ArcForges.Cloud.Modules.Abstractions/Storage/
+!src/ArcForges.Cloud.Modules.Abstractions/Storage/*.cs
 !artifacts/
 !artifacts/image-notices/
 !artifacts/image-notices/**
