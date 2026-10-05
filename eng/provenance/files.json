@@ -78,6 +78,7 @@
     "eng/policy/dependency-reviews/cloud-01-r1.json",
     "eng/policy/dependency-reviews/ops-01-r1.json",
     "eng/policy/dependency-reviews/prf-07-r1.json",
+    "eng/policy/dependency-reviews/prf-07-r10.json",
     "eng/policy/dependency-reviews/prf-07-r2.json",
     "eng/policy/dependency-reviews/prf-07-r3.json",
     "eng/policy/dependency-reviews/prf-07-r4.json",
@@ -106,6 +107,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r21.json",
     "eng/provenance/artifact-profiles/cloud-release-r22.json",
     "eng/provenance/artifact-profiles/cloud-release-r23.json",
+    "eng/provenance/artifact-profiles/cloud-release-r24.json",
     "eng/provenance/artifact-profiles/cloud-release-r3.json",
     "eng/provenance/artifact-profiles/cloud-release-r4.json",
     "eng/provenance/artifact-profiles/cloud-release-r5.json",
@@ -134,6 +136,7 @@
     "eng/provenance/records/cloud-runtime-notices-r22.json",
     "eng/provenance/records/cloud-runtime-notices-r23.json",
     "eng/provenance/records/cloud-runtime-notices-r24.json",
+    "eng/provenance/records/cloud-runtime-notices-r25.json",
     "eng/provenance/records/cloud-runtime-notices-r3.json",
     "eng/provenance/records/cloud-runtime-notices-r4.json",
     "eng/provenance/records/cloud-runtime-notices-r5.json",
@@ -157,6 +160,7 @@
     "eng/provenance/records/cloud-worker-bundle-r21.json",
     "eng/provenance/records/cloud-worker-bundle-r22.json",
     "eng/provenance/records/cloud-worker-bundle-r23.json",
+    "eng/provenance/records/cloud-worker-bundle-r24.json",
     "eng/provenance/records/cloud-worker-bundle-r3.json",
     "eng/provenance/records/cloud-worker-bundle-r4.json",
     "eng/provenance/records/cloud-worker-bundle-r5.json",
@@ -355,5 +359,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["cloud-runtime-notices-r24", "cloud-worker-bundle-r23"]
+  "artifacts": ["cloud-runtime-notices-r25", "cloud-worker-bundle-r24"]
 }

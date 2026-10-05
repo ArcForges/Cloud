@@ -55,5 +55,16 @@ internal sealed class EgressProbe(Func<HttpClient> newClient, IReadOnlyList<Uri>
             var refused = exception.HttpRequestError is HttpRequestError.ConnectionError or HttpRequestError.NameResolutionError;
             return new EgressAttempt(target.Host, refused ? "connection_failed" : "reached_then_failed", null, timer.ElapsedMilliseconds);
         }
+        catch (Exception exception) when (exception is System.Net.Sockets.SocketException or System.IO.IOException)
+        {
+            // The HTTP stack can surface a socket error unwrapped when the peer resets a connection that was already established (seen on
+            // Linux as "Transport endpoint is not connected"). It is still no HTTP response, and it must never escape as a server error:
+            // only a refusal or an unreachable destination is "connection_failed", everything else was reached and then dropped.
+            var socket = exception as System.Net.Sockets.SocketException ?? exception.InnerException as System.Net.Sockets.SocketException;
+            var refused = socket?.SocketErrorCode is System.Net.Sockets.SocketError.ConnectionRefused or System.Net.Sockets.SocketError.HostUnreachable
+                or System.Net.Sockets.SocketError.NetworkUnreachable or System.Net.Sockets.SocketError.HostNotFound or System.Net.Sockets.SocketError.NoData
+                or System.Net.Sockets.SocketError.TryAgain;
+            return new EgressAttempt(target.Host, refused ? "connection_failed" : "reached_then_failed", null, timer.ElapsedMilliseconds);
+        }
     }
 }
