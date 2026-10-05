@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.mtp-v2" />
+    <PackageReference Update="ArcForges.Build.Policy" GeneratePathProperty="true" />
+  </ItemGroup>
+  <PropertyGroup>
+    <LicenceBoundary>AGPL</LicenceBoundary>
+    <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
+  </PropertyGroup>
+  <!-- The shared policy engine is one producer source file set inside the pinned ArcForges.Build.Policy package. It is linked explicitly into this offline test host. -->
+  <Import Project="$(PkgArcForges_Build_Policy)/tools/architecture/ArchitecturePolicy.props" />
+</Project>

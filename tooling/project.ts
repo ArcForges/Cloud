@@ -409,7 +409,47 @@ export async function verifyToolchain(nodeVersion: string, npmVersion: string) {
   assert.equal(`npm@${npmVersion}`, manifest.packageManager, "Select the pinned npm version.");
 }
 
+/**
+ * WP-05.02: the forbidden-term scan is the canonical published scanner of the exact @arcforges/proto candidate named by
+ * eng/policy/naming-candidate.json. Its identity and asset digests are verified before it runs, and its report is the
+ * source-policy evidence the architecture host binds to the source commit (RP-01, RP-08).
+ */
+export async function namingScan() {
+  const naming = await readJson<{
+    package: string;
+    version: string;
+    sourceCommit: string;
+    assets: Record<string, string>;
+  }>(path.join(root, "eng/policy/naming-candidate.json"));
+  const namingRoot = path.join(root, "node_modules", naming.package);
+  assert.equal(
+    (await readJson<{ version: string }>(path.join(namingRoot, "package.json"))).version,
+    naming.version,
+  );
+  assert.equal(
+    (await readJson<{ commit: string }>(path.join(namingRoot, "source.json"))).commit,
+    naming.sourceCommit,
+  );
+  for (const [asset, expected] of Object.entries(naming.assets))
+    assert.equal(
+      await sha256(path.join(namingRoot, asset)),
+      expected,
+      `Naming asset changed: ${asset}`,
+    );
+  await run("python", [
+    path.join(namingRoot, "tools/naming/eng/check_naming.py"),
+    "--repository",
+    `Cloud=${root}`,
+    "--report",
+    path.join(root, "artifacts/evidence/naming.json"),
+  ]);
+}
+
 async function main() {
+  if (process.argv[2] === "naming") {
+    await namingScan();
+    return;
+  }
   if (process.argv[2] === "toolchain") {
     assert(process.env.npm_execpath, "Run this check through npm run check.");
     await verifyToolchain(

@@ -1,0 +1,10 @@
+{
+  "package": "@arcforges/proto",
+  "version": "1.0.0-ci.287.1",
+  "sourceCommit": "ca45f36cccbdd31380f76b8f6cdecc958fdcb430",
+  "publication": "https://github.com/ArcForges/Contracts/actions/runs/36966686225",
+  "assets": {
+    "tools/naming/eng/check_naming.py": "7c4cd7041b8b53e1bfb6fc0016befcd50259ffaca512d389456e00d3c26d5eaf",
+    "tools/naming/eng/policy/product-names.json": "f5d596298ec50e3b116abc6df1b34efef93045ed52f6235b0a2aaaf97a1f4df5"
+  }
+}
