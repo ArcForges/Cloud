@@ -80,9 +80,10 @@ It then writes `worker/storage/plans.generated.ts` (the Worker dictionary) and `
 SHA-256 manifest identity. `--check` (part of `npm run check`) fails when either file is stale. After a rebase regenerate with
 `node eng/verification/storage-plans.ts` and commit the result (RES-cloud-storage-plans).
 
-A guarded cross-module transaction family (CLOUD.06) needs participants from several owners in one batch. This rule does not allow it
-and is not weakened here: the participant list is declared and changed only through the Architecture Owner, and the change belongs in the
-registry and the generator in a reviewed pull request.
+A guarded cross-module transaction family is not an owner plan, and this rule is not weakened for owner plans. CLOUD.06 added the closed family
+registry (`storage/plans/families.json`) and the family plan grammar (`storage/plans/families/`, id `families.<family>.<name>`), which the same generator
+checks statement by statement: every statement names the one module that owns its tables, the guards are generated from five primitives, and the order is
+the fixed SU-04 module order. The participant list is declared and changed only through the Architecture Owner. See [shared families](shared-families.md).
 
 ## What the bridge can and cannot send
 
@@ -134,7 +135,7 @@ build time, not correctness.
 
 - **No module owns a plan yet.** The module projects are boundaries with a descriptor. The physical tables and the migration runner exist
   ([D1 physical schema and migrations](d1-physical-schema.md), CLOUD.03), so a module plan names real tables; receipts, outbox and archive
-  (CLOUD.04), the shared families (CLOUD.06) and every module's behavior are later tasks. The checks above prove the boundary and the rule,
+  (CLOUD.04) and every module's behavior are later tasks; the shared-family engine exists ([shared families](shared-families.md), CLOUD.06). The checks above prove the boundary and the rule,
   not a module implementation. The migration bookkeeping tables (`platform_schema_state`, `platform_migration_receipt`,
   `platform_backfill_checkpoint`) are written only by the migration runner: the ownership rule accepts any `platform_` table in a module plan,
   so a plan that names one of them is a review finding.

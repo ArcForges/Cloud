@@ -26,7 +26,7 @@ public sealed partial class StoragePlanBoundaryTests
     internal static IReadOnlyList<PlanFile> ReadPlans()
     {
         var plans = new List<PlanFile>();
-        foreach (var directory in Directory.EnumerateDirectories(PlanRoot).Order(StringComparer.Ordinal))
+        foreach (var directory in Directory.EnumerateDirectories(PlanRoot).Where(directory => !string.Equals(Path.GetFileName(directory), "families", StringComparison.Ordinal)).Order(StringComparer.Ordinal))
         {
             foreach (var file in Directory.EnumerateFiles(directory, "*.sql").Order(StringComparer.Ordinal))
             {
@@ -46,10 +46,12 @@ public sealed partial class StoragePlanBoundaryTests
     }
 
     /// <summary>The manifest identity: the sorted <c>id@version:sha256(normalized text)</c> lines, hashed. Independent of the TypeScript generator.</summary>
-    internal static string ManifestHash(IEnumerable<(string Id, int Version, string Text)> plans)
+    internal static string ManifestHash(IEnumerable<(string Id, int Version, string Text)> plans, IEnumerable<(string Id, int Version, string Sha256)>? familyIdentities = null)
     {
-        var lines = plans.OrderBy(plan => plan.Id, StringComparer.Ordinal).ThenBy(plan => plan.Version)
-            .Select(plan => plan.Id + "@" + plan.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Normalize(plan.Text)))));
+        var identities = plans.Select(plan => (plan.Id, plan.Version, Sha256: Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Normalize(plan.Text))))))
+            .Concat(familyIdentities ?? []);
+        var lines = identities.OrderBy(plan => plan.Id, StringComparer.Ordinal).ThenBy(plan => plan.Version)
+            .Select(plan => plan.Id + "@" + plan.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + plan.Sha256);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', lines) + "\n")));
     }
 
@@ -57,11 +59,13 @@ public sealed partial class StoragePlanBoundaryTests
     public void TheManifestHashIsReproducedFromThePlanFilesAndAgreesWithTheWorkerDictionary()
     {
         var plans = ReadPlans();
-        var hash = ManifestHash(plans.Select(plan => (plan.Id, plan.Version, plan.Text)));
+        // A family plan's identity covers its generated statements; it is recomputed independently from the plan file and the listed SQL.
+        var families = SharedFamilies.FamilyExpansion.Identities();
+        var hash = ManifestHash(plans.Select(plan => (plan.Id, plan.Version, plan.Text)), families);
         Assert.Equal(PlanManifest.Hash, hash);
         var worker = File.ReadAllText(Path.Combine(T.RepoRoot().FullName, "worker", "storage", "plans.generated.ts"));
         Assert.Equal(hash, Regex.Match(worker, "manifestHash = \"([0-9a-f]{64})\"").Groups[1].Value);
-        Assert.Equal(plans.Count, PlanManifest.All.Count);
+        Assert.Equal(plans.Count + families.Count, PlanManifest.All.Count);
     }
 
     [Fact]
@@ -86,8 +90,10 @@ public sealed partial class StoragePlanBoundaryTests
     public void EveryGeneratedDefinitionEqualsItsReviewedPlanFile()
     {
         var files = ReadPlans().ToDictionary(plan => plan.Id + "@" + plan.Version);
-        Assert.Equal(files.Count, PlanManifest.All.Count);
-        foreach (var definition in PlanManifest.All)
+        // Family plans are described statement by statement by the shared-family checks (FamilyExpansionTests); this one covers the owner plans.
+        var ordinary = PlanManifest.All.Where(definition => !definition.Id.StartsWith("families.", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(files.Count, ordinary.Length);
+        foreach (var definition in ordinary)
         {
             var file = files[definition.Id + "@" + definition.Version];
             Assert.Equal(file.Access, definition.Access == PlanAccess.Read ? "read" : "write");

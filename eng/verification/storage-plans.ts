@@ -6,16 +6,19 @@
 // `--check` fails when either generated file is stale (RES-cloud-storage-plans).
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { format } from "prettier";
 import type { PlanKind, PlanParam } from "../../worker/storage/plan-types.ts";
+import { loadManifest, planKindOf, type PhysicalSchema } from "./physical-schema.ts";
 
 export interface PlanStatement {
   sql: string;
   params: PlanParam[];
   returns: PlanParam[] | null;
+  /** Only in a shared family plan: the role of the statement in the guarded batch (never sent to the Worker). */
+  family?: FamilyStatementMeta;
 }
 export interface PlanDefinition {
   id: string;
@@ -24,11 +27,14 @@ export interface PlanDefinition {
   maxRows: number;
   statements: PlanStatement[];
   sha256: string;
+  /** Only in a shared family plan: the family it belongs to. */
+  family?: string;
 }
 export interface PlanManifest {
   manifestHash: string;
   plans: PlanDefinition[];
   registry: OwnerRegistry;
+  families: FamilyRegistry;
 }
 
 export interface PlanOwner {
@@ -59,6 +65,11 @@ export function parseOwnerRegistry(text: string): OwnerRegistry {
       `owners.json: fields of ${entry.owner}`,
     );
     assert(ownerPattern.test(entry.owner), `owners.json: invalid owner ${entry.owner}`);
+    assert.notEqual(
+      entry.owner,
+      familyOwner,
+      `owners.json: ${familyOwner} is reserved for family plans`,
+    );
     assert(
       classPattern.test(entry.className),
       `owners.json: invalid class name ${entry.className}`,
@@ -342,6 +353,9 @@ const forbiddenSql =
 export const planDirectory = "storage/plans";
 export const ownerRegistry = "storage/plans/owners.json";
 const typeScriptOutput = "worker/storage/plans.generated.ts";
+/** The expanded statements of every family plan, generated for review and for the independent C# identity check. */
+const familyExpansionName = "families.expanded.json";
+const familyExpansionOutput = `${planDirectory}/${familyExpansionName}`;
 const csharpOutput = "src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs";
 // SQLite table-valued functions a plan may read from; every other FROM or JOIN target is a physical table.
 const tableFunctions = new Set(["json_each", "json_tree"]);
@@ -352,6 +366,497 @@ export function sha256Hex(text: string | Uint8Array) {
 export function normalizePlanText(text: string) {
   return `${text.replaceAll("\r\n", "\n").trimEnd()}\n`;
 }
+// ---------------------------------------------------------------------------------------------------------------
+// Shared family plans (Design D1 profile section 4, "Shared family plans and the guard table")
+// ---------------------------------------------------------------------------------------------------------------
+// A shared unit of work is one named plan whose statements belong to several module owners (Design SU-01 to SU-07).
+// The ownership rule above stays in force for every owner plan; a family plan is checked statement by statement
+// instead: each statement names the one module that owns every table it names, the guards come first, then the
+// mutations, in the fixed SU-04 module order, and the guard statements are generated from five primitives so that
+// the predicate of a guard is written once, expanded against the physical manifest and proven once.
+
+/** The reserved directory beside the owner directories: a family plan belongs to no single owner. */
+export const familyOwner = "families";
+export const familyRegistryFile = "storage/plans/families.json";
+export const familyDirectory = `${planDirectory}/${familyOwner}`;
+/** The table whose CHECK rolls a guarded batch back (Design model 01 platform.command_guard). */
+export const guardTable = "platform_command_guard";
+/** Receipts, outbox rows and leases: shared infrastructure, outside the SU-04 order. */
+export const platformModule = "platform";
+/** Design SU-04: the fixed order in which the modules of one guarded batch contribute their statements. */
+export const lockOrder = [
+  "config",
+  "identity",
+  "workspace",
+  "device",
+  "entitlement",
+  "commerce",
+  "policy",
+  "agent",
+  "chat",
+  "scope",
+  "task",
+  "search",
+  "package-catalog",
+  "notification",
+  "resource",
+  "sync",
+  "audit",
+] as const;
+/** Guard classes in their order within one module. */
+export const guardKinds = ["authorization", "revision", "policy", "balance", "lease"] as const;
+export type GuardKind = (typeof guardKinds)[number];
+/** Mutation classes in their order within one module: quota buckets before reservations (SU-04). */
+export const mutationClasses = ["bucket", "reservation", "record"] as const;
+export type FamilyPhase = "guard" | "mutation" | "release";
+export interface FamilyStatementMeta {
+  module: string;
+  phase: FamilyPhase;
+  class: string;
+  key: string;
+}
+export interface FamilyParticipant {
+  module: string;
+  requirement: "required" | "conditional";
+  /** The stated condition of a conditional participant; null for a required one. */
+  when: string | null;
+}
+export interface FamilyDefinition {
+  family: string;
+  title: string;
+  /** The Design rule or table row that lists the family (SU-01). */
+  source: string;
+  participants: FamilyParticipant[];
+}
+export interface FamilyRegistry {
+  families: FamilyDefinition[];
+}
+export interface FamilyParseContext {
+  registry: FamilyRegistry;
+  schema: () => PhysicalSchema;
+}
+
+const familyPattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+const stableKeyPattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+/** Tables only the migration runner writes; a family plan never names them. */
+const bookkeepingTables = new Set([
+  "platform_schema_state",
+  "platform_migration_receipt",
+  "platform_backfill_checkpoint",
+]);
+/** SQLite reserved words: a column with one of these names cannot be written without quoting, and plans never quote. */
+const reservedWords = new Set(
+  "add all alter and as autoincrement between case check collate commit constraint create default deferrable delete distinct drop else escape except exists foreign from group having in index insert intersect into is isnull join limit not notnull null on or order primary references select set table then to transaction union unique update using values when where".split(
+    " ",
+  ),
+);
+
+export const modulePrefix = (module: string) =>
+  module === platformModule ? sharedPrefix : `${module.replaceAll("-", "_")}_`;
+
+export function parseFamilyRegistry(text: string): FamilyRegistry {
+  const value = JSON.parse(text) as { schemaVersion?: number; families?: unknown };
+  assert.equal(value.schemaVersion, 1, `${familyRegistryFile}: schemaVersion`);
+  assert(Array.isArray(value.families), `${familyRegistryFile}: families`);
+  const seen = new Set<string>();
+  const families: FamilyDefinition[] = [];
+  for (const entry of value.families as Record<string, unknown>[]) {
+    assert.deepEqual(
+      Object.keys(entry).sort(),
+      ["family", "participants", "source", "title"],
+      `${familyRegistryFile}: fields of ${String(entry["family"])}`,
+    );
+    const family = String(entry["family"]);
+    assert(familyPattern.test(family), `${familyRegistryFile}: invalid family id ${family}`);
+    assert(!seen.has(family), `${familyRegistryFile}: duplicate family ${family}`);
+    seen.add(family);
+    for (const field of ["title", "source"] as const) {
+      const text = entry[field];
+      assert(
+        typeof text === "string" && text.length >= 1 && text.length <= 300,
+        `${familyRegistryFile}: ${family} ${field}`,
+      );
+    }
+    assert(
+      Array.isArray(entry["participants"]),
+      `${familyRegistryFile}: participants of ${family}`,
+    );
+    const participants: FamilyParticipant[] = [];
+    for (const raw of entry["participants"] as Record<string, unknown>[]) {
+      const module = String(raw["module"]);
+      assert(
+        (lockOrder as readonly string[]).includes(module),
+        `${familyRegistryFile}: ${family}: module ${module} has no position in the SU-04 order; the Architecture Owner must extend the order before it may participate`,
+      );
+      assert(
+        !participants.some((participant) => participant.module === module),
+        `${familyRegistryFile}: ${family}: duplicate participant ${module}`,
+      );
+      const requirement = raw["requirement"];
+      assert(
+        requirement === "required" || requirement === "conditional",
+        `${familyRegistryFile}: ${family}: requirement of ${module}`,
+      );
+      const when = raw["when"];
+      if (requirement === "conditional")
+        assert(
+          typeof when === "string" && when.length >= 1 && when.length <= 200,
+          `${familyRegistryFile}: ${family}: a conditional participant states when (${module})`,
+        );
+      else
+        assert(
+          when === undefined,
+          `${familyRegistryFile}: ${family}: ${module} is required, so it has no condition`,
+        );
+      assert.deepEqual(
+        Object.keys(raw)
+          .filter((field) => field !== "when")
+          .sort(),
+        ["module", "requirement"],
+        `${familyRegistryFile}: ${family}: fields of participant ${module}`,
+      );
+      participants.push({
+        module,
+        requirement,
+        when: typeof when === "string" ? when : null,
+      });
+    }
+    assert(
+      participants.length >= 2,
+      `${familyRegistryFile}: ${family} needs at least two participants`,
+    );
+    assert(
+      participants.some((participant) => participant.requirement === "required"),
+      `${familyRegistryFile}: ${family} needs a required participant`,
+    );
+    families.push({
+      family,
+      title: String(entry["title"]),
+      source: String(entry["source"]),
+      participants,
+    });
+  }
+  return { families };
+}
+
+const phaseRank: Record<FamilyPhase, number> = { guard: 0, mutation: 1, release: 2 };
+function moduleRank(meta: FamilyStatementMeta) {
+  if (meta.module === platformModule) return meta.phase === "guard" ? -1 : lockOrder.length;
+  return (lockOrder as readonly string[]).indexOf(meta.module);
+}
+function classRank(meta: FamilyStatementMeta) {
+  if (meta.phase === "guard") return (guardKinds as readonly string[]).indexOf(meta.class);
+  if (meta.phase === "mutation") return (mutationClasses as readonly string[]).indexOf(meta.class);
+  return meta.class === "release" ? 0 : -1;
+}
+const ordinal = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * Design SU-04 as a rule over the statement roles of one family plan: every guard, then every mutation, then the one
+ * release; inside a phase by module in the SU-04 order (`platform` first among guards and last among mutations), then
+ * by class, then by stable key ascending, each combination at most once. Returns one message per violation.
+ */
+export function familyOrderProblems(metas: readonly FamilyStatementMeta[]): string[] {
+  const problems: string[] = [];
+  metas.forEach((meta, index) => {
+    const where = `statement ${index + 1} (${meta.phase} ${meta.module}.${meta.key})`;
+    if (meta.module !== platformModule && !(lockOrder as readonly string[]).includes(meta.module))
+      problems.push(`${where}: module ${meta.module} has no position in the SU-04 order`);
+    if (classRank(meta) < 0)
+      problems.push(`${where}: class ${meta.class} does not belong to a ${meta.phase} statement`);
+    if (meta.phase === "release" && (index !== metas.length - 1 || meta.module !== platformModule))
+      problems.push(`${where}: the release is the one platform statement at the very end`);
+    if (index === 0) return;
+    const previous = metas[index - 1];
+    if (!previous) return;
+    if (phaseRank[meta.phase] < phaseRank[previous.phase]) {
+      problems.push(
+        `${where}: a ${meta.phase} statement may not follow a ${previous.phase} statement (guards, then mutations, then the release)`,
+      );
+      return;
+    }
+    if (meta.phase !== previous.phase) return;
+    if (moduleRank(meta) < moduleRank(previous))
+      problems.push(
+        `${where}: module ${meta.module} may not follow module ${previous.module} (SU-04 order)`,
+      );
+    else if (moduleRank(meta) === moduleRank(previous)) {
+      if (classRank(meta) < classRank(previous))
+        problems.push(
+          `${where}: class ${meta.class} may not follow class ${previous.class} within module ${meta.module}`,
+        );
+      else if (classRank(meta) === classRank(previous)) {
+        const order = ordinal(meta.key, previous.key);
+        if (order < 0)
+          problems.push(
+            `${where}: stable key ${meta.key} may not follow ${previous.key} (ascending within a class)`,
+          );
+        else if (order === 0)
+          problems.push(
+            `${where}: duplicate ${meta.class} key ${meta.key} in module ${meta.module}`,
+          );
+      }
+    }
+  });
+  return problems;
+}
+
+type Fields = Map<string, string>;
+function parseFields(header: string, allowed: readonly string[], where: string): Fields {
+  const fields: Fields = new Map();
+  for (const part of header.split(/\s+/u).filter(Boolean)) {
+    const pair = /^([a-z]+)=(.*)$/u.exec(part);
+    assert(pair && allowed.includes(pair[1] ?? ""), `${where}: unknown field '${part}'`);
+    assert(!fields.has(pair[1] ?? ""), `${where}: duplicate ${pair[1]}`);
+    fields.set(pair[1] ?? "", pair[2] ?? "");
+  }
+  return fields;
+}
+const guardFieldsOf: Record<GuardKind, readonly string[]> = {
+  authorization: ["match", "fresh"],
+  policy: ["match", "fresh"],
+  revision: ["rev"],
+  balance: ["rev", "exact"],
+  lease: ["holder", "fence", "until"],
+};
+
+/**
+ * Expands one `-- guard:` directive into the statement it stands for. The five primitives (Design model 04 section 4):
+ * `authorization` and `policy` (a row found by its key columns whose named columns equal what the caller decided on,
+ * optionally not past an expiry), `revision` (the row's revision equals the revision the caller read; absent equals zero),
+ * `balance` (that revision and the captured exact balance columns equal what the checked C# arithmetic used) and `lease`
+ * (holder, fence and an unexpired lease equal the caller's). Every column is read from the physical manifest, so a column
+ * that does not exist, a JSON column or a column whose name SQLite reserves is refused.
+ */
+export function expandGuard(
+  header: string,
+  schema: PhysicalSchema,
+  where: string,
+): { sql: string; params: PlanParam[]; meta: FamilyStatementMeta } {
+  const kindText = /(?:^|\s)kind=(\S+)/u.exec(header)?.[1] ?? "";
+  assert(
+    (guardKinds as readonly string[]).includes(kindText),
+    `${where}: guard kind must be one of ${guardKinds.join(", ")}`,
+  );
+  const kind = kindText as GuardKind;
+  const fields = parseFields(
+    header,
+    ["kind", "module", "key", "table", "by", ...guardFieldsOf[kind]],
+    where,
+  );
+  const need = (name: string) => {
+    const value = fields.get(name);
+    assert(value !== undefined && value !== "", `${where}: a ${kind} guard needs ${name}=`);
+    return value;
+  };
+  const module = need("module");
+  assert(
+    module === platformModule || (lockOrder as readonly string[]).includes(module),
+    `${where}: module ${module} has no position in the SU-04 order`,
+  );
+  const key = need("key");
+  assert(
+    stableKeyPattern.test(key),
+    `${where}: the stable key is lower-case words joined by hyphens`,
+  );
+  assert(`${module}.${key}`.length <= 128, `${where}: the guard key is at most 128 characters`);
+  const tableName = need("table");
+  const table = schema.tables.find((candidate) => candidate.name === tableName);
+  assert(table, `${where}: ${tableName} is not a table of the physical manifest`);
+  const column = (name: string, what: string, kinds?: readonly string[]) => {
+    const found = table.columns.find((candidate) => candidate.name === name);
+    assert(found, `${where}: ${what} ${name} is not a column of ${tableName}`);
+    assert(
+      !reservedWords.has(name),
+      `${where}: column ${name} is a reserved SQL word, plans never quote a name`,
+    );
+    assert(
+      found.kind !== "json" && found.kind !== "proto",
+      `${where}: ${what} ${name} is a ${found.kind} column`,
+    );
+    if (kinds)
+      assert(
+        kinds.includes(found.kind),
+        `${where}: ${what} ${name} must be ${kinds.join(" or ")}, not ${found.kind}`,
+      );
+    return found;
+  };
+  const used = new Set<string>();
+  const once = (name: string) => {
+    assert(!used.has(name), `${where}: column ${name} is used twice`);
+    used.add(name);
+  };
+  const compare = (name: string, what: string, kinds?: readonly string[]) => {
+    const found = column(name, what, kinds);
+    once(name);
+    const planKind = planKindOf(found.kind);
+    return {
+      sql: planKind === "int64" ? `${name} = CAST(? AS INTEGER)` : `${name} = ?`,
+      param: { kind: planKind, nullable: false } as PlanParam,
+    };
+  };
+  const list = (name: string) =>
+    need(name)
+      .split(",")
+      .map((item) => {
+        assert(item !== "", `${where}: empty item in ${name}=`);
+        return item;
+      });
+  const byParts = list("by");
+  assert(byParts.length <= 6, `${where}: at most 6 key columns`);
+  const conditions: string[] = [];
+  const params: PlanParam[] = [{ kind: "text", nullable: false }];
+  for (const item of byParts) {
+    const scoped = item.startsWith("scope:");
+    const name = scoped ? item.slice("scope:".length) : item;
+    const part = compare(name, "key column");
+    if (scoped) {
+      assert(
+        part.param.kind === "text",
+        `${where}: only a text key column can be the owner scope (${name})`,
+      );
+      part.param = { kind: "scope", nullable: false };
+    }
+    conditions.push(part.sql);
+    params.push(part.param);
+  }
+  const byConditions = [...conditions];
+  const add = (part: { sql: string; param: PlanParam }) => {
+    conditions.push(part.sql);
+    params.push(part.param);
+  };
+  const instant = (name: string, what: string) => {
+    const found = column(name, what, ["instant"]);
+    once(name);
+    return found.name;
+  };
+  let predicate: string;
+  switch (kind) {
+    case "authorization":
+    case "policy": {
+      for (const item of list("match")) add(compare(item, "match column"));
+      const fresh = fields.get("fresh");
+      if (fresh !== undefined) {
+        conditions.push(`${instant(fresh, "fresh column")} > CAST(? AS INTEGER)`);
+        params.push({ kind: "int64", nullable: false });
+      }
+      predicate = `EXISTS (SELECT 1 FROM ${tableName} WHERE ${conditions.join(" AND ")})`;
+      break;
+    }
+    case "revision": {
+      const rev = need("rev");
+      column(rev, "revision column", ["rev"]);
+      once(rev);
+      predicate = `COALESCE((SELECT ${rev} FROM ${tableName} WHERE ${byConditions.join(" AND ")}), 0) = CAST(? AS INTEGER)`;
+      params.push({ kind: "int64", nullable: false });
+      break;
+    }
+    case "balance": {
+      add(compare(need("rev"), "revision column", ["rev"]));
+      for (const item of list("exact")) add(compare(item, "exact column"));
+      predicate = `EXISTS (SELECT 1 FROM ${tableName} WHERE ${conditions.join(" AND ")})`;
+      break;
+    }
+    case "lease": {
+      add(compare(need("holder"), "holder column", ["id", "text", "key"]));
+      add(compare(need("fence"), "fence column", ["rev", "int", "int64"]));
+      conditions.push(`${instant(need("until"), "expiry column")} > CAST(? AS INTEGER)`);
+      params.push({ kind: "int64", nullable: false });
+      predicate = `EXISTS (SELECT 1 FROM ${tableName} WHERE ${conditions.join(" AND ")})`;
+      break;
+    }
+  }
+  const sql = `INSERT INTO ${guardTable} (command_id, guard_key, allowed)\nSELECT ?, '${module}.${key}', CASE WHEN ${predicate} THEN 1 ELSE 0 END;`;
+  return { sql, params, meta: { module, phase: "guard", class: kind, key } };
+}
+
+/**
+ * The identity of a family plan: the normalized authored text and every expanded statement, in order. A guard is generated from
+ * the physical manifest, so the authored text alone cannot identify the SQL the Worker runs; hashing the expansion too makes any
+ * change of a column, a type or the expansion rules change the plan hash and with it the manifest identity both sides compare.
+ */
+export function familyIdentity(normalizedText: string, statementSql: readonly string[]) {
+  return sha256Hex(`${normalizedText}\n-- expanded\n${statementSql.join("\n")}\n`);
+}
+
+/** The generated last statement of every family plan: no committed state holds a guard row. */
+export const releaseStatement: PlanStatement = {
+  sql: `DELETE FROM ${guardTable} WHERE command_id = ?;`,
+  params: [{ kind: "text", nullable: false }],
+  returns: null,
+  family: { module: platformModule, phase: "release", class: "release", key: "release" },
+};
+
+/** The checks that need the whole plan and the registry; the grammar of single statements is checked while parsing. */
+export function assertFamilyPlan(plan: PlanDefinition, registry: FamilyRegistry) {
+  const familyId = plan.id.split(".")[1] ?? "";
+  const definition = registry.families.find((candidate) => candidate.family === familyId);
+  assert(definition, `${plan.id}: family ${familyId} is not in ${familyRegistryFile}`);
+  const metas = plan.statements.map((statement) => {
+    assert(statement.family, `${plan.id}: a statement has no family role`);
+    return statement.family;
+  });
+  const problems = familyOrderProblems(metas);
+  assert.equal(problems.length, 0, `${plan.id}: ${problems.join("; ")}`);
+  assert(
+    metas.some((meta) => meta.phase === "guard"),
+    `${plan.id}: a family plan has at least one guard`,
+  );
+  assert(
+    metas.some((meta) => meta.phase === "mutation"),
+    `${plan.id}: a family plan has at least one mutation`,
+  );
+  const modules = new Set(
+    metas.filter((meta) => meta.module !== platformModule).map((meta) => meta.module),
+  );
+  for (const module of modules)
+    assert(
+      definition.participants.some((participant) => participant.module === module),
+      `${plan.id}: module ${module} is not a participant of family ${familyId} (a participant is added only through the Architecture Owner)`,
+    );
+  for (const participant of definition.participants)
+    if (participant.requirement === "required")
+      assert(
+        modules.has(participant.module),
+        `${plan.id}: required participant ${participant.module} has no statement`,
+      );
+  for (const module of modules) {
+    const own = metas.filter((meta) => meta.module === module);
+    if (own.some((meta) => meta.phase === "mutation"))
+      assert(
+        own.some((meta) => meta.phase === "guard"),
+        `${plan.id}: module ${module} writes without a guard of its own (guard every pre-read revision and authorization row, SU-04)`,
+      );
+  }
+  const guardKeys = new Set<string>();
+  plan.statements.forEach((statement, index) => {
+    const meta = statement.family;
+    if (!meta) return;
+    const where = `${plan.id} statement ${index + 1} (${meta.module}.${meta.key})`;
+    if (meta.phase === "guard") {
+      const guardKey = `${meta.module}.${meta.key}`;
+      assert(!guardKeys.has(guardKey), `${where}: duplicate guard key`);
+      guardKeys.add(guardKey);
+    }
+    const prefix = modulePrefix(meta.module);
+    for (const table of referencedTables(statement.sql, where)) {
+      assert(
+        table.startsWith(prefix) ||
+          (meta.module !== platformModule && table.startsWith(sharedPrefix)),
+        `${where}: table ${table} is not owned by module ${meta.module} (allowed prefixes: ${meta.module === platformModule ? sharedPrefix : `${prefix}, ${sharedPrefix}`})`,
+      );
+      assert(
+        !bookkeepingTables.has(table),
+        `${where}: ${table} is written only by the migration runner`,
+      );
+      assert(
+        table !== guardTable || meta.phase === "guard" || meta.phase === "release",
+        `${where}: only the generated guard and release statements name ${guardTable}`,
+      );
+    }
+  });
+}
+
 function parseKinds(list: string, where: string, allowScope: boolean): PlanParam[] {
   if (list === "") return [];
   return list.split(",").map((item) => {
@@ -379,7 +884,55 @@ function placeholderCasts(sql: string, where: string): boolean[] {
   }
   return wrapped;
 }
-export function parsePlanFile(text: string, file: string): PlanDefinition {
+/** The checks every authored statement passes, whether it is written in an owner plan or in a family plan. */
+function checkedStatement<T extends { params: PlanParam[] }>(
+  sql: string,
+  where: string,
+  resolve: () => T,
+): T {
+  assert(
+    sql.endsWith(";") && !stripLiterals(sql.slice(0, -1)).includes(";"),
+    `${where}: exactly one statement`,
+  );
+  const stripped = stripLiterals(sql);
+  assert(
+    !stripped.includes("--") && !stripped.includes("/*"),
+    `${where}: comments are not allowed in a statement`,
+  );
+  assert(!forbiddenSql.test(stripped), `${where}: forbidden SQL`);
+  assert(
+    /^(?:INSERT|UPDATE|DELETE|SELECT|WITH)\b/iu.test(stripped),
+    `${where}: only DML and SELECT are allowed`,
+  );
+  const resolved = resolve();
+  const { params } = resolved;
+  const wrapped = placeholderCasts(sql, where);
+  assert.equal(wrapped.length, params.length, `${where}: ? placeholder count differs from params`);
+  assert(params.length <= maxParameters, `${where}: too many parameters`);
+  params.forEach((param, index) => {
+    assert.equal(
+      wrapped[index],
+      param.kind === "int64",
+      `${where}: parameter ${index + 1} (${param.kind}) must ${param.kind === "int64" ? "be" : "not be"} wrapped as CAST(? AS INTEGER)`,
+    );
+    assert(
+      !(param.nullable && param.kind === "int64"),
+      `${where}: a nullable int64 parameter is not supported`,
+    );
+  });
+  return resolved;
+}
+
+/**
+ * Parses one plan file. A family plan (`families.<family>.<name>`, in `storage/plans/families`) is parsed with the
+ * family context: its statements carry a module, class and stable key, a `-- guard:` directive stands for a generated
+ * guard statement, and the generated release statement ends the plan.
+ */
+export function parsePlanFile(
+  text: string,
+  file: string,
+  context?: FamilyParseContext,
+): PlanDefinition {
   const normalized = normalizePlanText(text);
   const lines = normalized.split("\n");
   const header = new Map<string, string>();
@@ -393,20 +946,50 @@ export function parsePlanFile(text: string, file: string): PlanDefinition {
   }
   const id = header.get("plan") ?? "";
   assert(planIdPattern.test(id), `${file}: invalid plan id`);
-  assert.equal(
-    path.basename(file, ".sql"),
-    id.split(".").slice(1).join("."),
-    `${file}: file name must match the plan id`,
-  );
-  assert.equal(
-    path.basename(path.dirname(file)),
-    id.split(".")[0],
-    `${file}: directory must be the owning module`,
-  );
+  const segments = id.split(".");
+  let familyId: string | undefined;
+  if (context) {
+    assert(
+      segments.length === 3 && segments[0] === familyOwner,
+      `${file}: a family plan id is ${familyOwner}.<family>.<name>`,
+    );
+    familyId = segments[1];
+    assert.equal(
+      path.basename(file, ".sql"),
+      `${segments[1]}.${segments[2]}`,
+      `${file}: file name must be <family>.<name>`,
+    );
+    assert.equal(
+      path.basename(path.dirname(file)),
+      familyOwner,
+      `${file}: a family plan lives in ${familyDirectory}`,
+    );
+    assert(
+      context.registry.families.some((candidate) => candidate.family === familyId),
+      `${file}: family ${familyId} is not in ${familyRegistryFile}`,
+    );
+  } else {
+    assert.notEqual(
+      segments[0],
+      familyOwner,
+      `${file}: ${familyOwner} is reserved for family plans`,
+    );
+    assert.equal(
+      path.basename(file, ".sql"),
+      segments.slice(1).join("."),
+      `${file}: file name must match the plan id`,
+    );
+    assert.equal(
+      path.basename(path.dirname(file)),
+      segments[0],
+      `${file}: directory must be the owning module`,
+    );
+  }
   const version = Number(header.get("version"));
   assert(Number.isInteger(version) && version >= 1 && version <= 2147483647, `${file}: version`);
   const access = header.get("access");
   assert(access === "read" || access === "write", `${file}: access must be read or write`);
+  assert(!(context && access !== "write"), `${file}: a family plan is a write plan`);
   const maxRows = header.has("maxRows") ? Number(header.get("maxRows")) : 0;
   assert(
     Number.isInteger(maxRows) && maxRows >= 0 && maxRows <= 200,
@@ -417,59 +1000,70 @@ export function parsePlanFile(text: string, file: string): PlanDefinition {
   const finish = () => {
     if (!current) return;
     const where = `${file}: statement ${statements.length + 1}`;
+    const allowed = context
+      ? ["params", "returns", "module", "class", "key"]
+      : ["params", "returns"];
     const fields = new Map<string, string>();
     for (const part of current.header.split(/\s+/u).filter(Boolean)) {
-      const pair = /^(params|returns)=(.*)$/u.exec(part);
-      assert(pair, `${where}: unknown statement field '${part}'`);
+      const pair = /^([a-z]+)=(.*)$/u.exec(part);
+      assert(
+        pair && allowed.includes(pair[1] ?? ""),
+        `${where}: unknown statement field '${part}'`,
+      );
       assert(!fields.has(pair[1] ?? ""), `${where}: duplicate ${pair[1]}`);
       fields.set(pair[1] ?? "", pair[2] ?? "");
     }
     const sql = current.lines.join("\n").trim();
-    assert(
-      sql.endsWith(";") && !stripLiterals(sql.slice(0, -1)).includes(";"),
-      `${where}: exactly one statement`,
-    );
-    const stripped = stripLiterals(sql);
-    assert(
-      !stripped.includes("--") && !stripped.includes("/*"),
-      `${where}: comments are not allowed in a statement`,
-    );
-    assert(!forbiddenSql.test(stripped), `${where}: forbidden SQL`);
-    assert(
-      /^(?:INSERT|UPDATE|DELETE|SELECT|WITH)\b/iu.test(stripped),
-      `${where}: only DML and SELECT are allowed`,
-    );
-    const params = parseKinds(fields.get("params") ?? "", where, true);
-    const returns = fields.has("returns")
-      ? parseKinds(fields.get("returns") ?? "", where, false)
-      : null;
-    const wrapped = placeholderCasts(sql, where);
-    assert.equal(
-      wrapped.length,
-      params.length,
-      `${where}: ? placeholder count differs from params`,
-    );
-    assert(params.length <= maxParameters, `${where}: too many parameters`);
-    params.forEach((param, index) => {
-      assert.equal(
-        wrapped[index],
-        param.kind === "int64",
-        `${where}: parameter ${index + 1} (${param.kind}) must ${param.kind === "int64" ? "be" : "not be"} wrapped as CAST(? AS INTEGER)`,
+    const { params, returns } = checkedStatement(sql, where, () => ({
+      params: parseKinds(fields.get("params") ?? "", where, true),
+      returns: fields.has("returns") ? parseKinds(fields.get("returns") ?? "", where, false) : null,
+    }));
+    const statement: PlanStatement = { sql, params, returns };
+    if (context) {
+      const module = fields.get("module") ?? "";
+      const className = fields.get("class") ?? "";
+      const key = fields.get("key") ?? "";
+      assert(
+        module !== "" && className !== "" && key !== "",
+        `${where}: a family statement names module=, class= and key=`,
       );
       assert(
-        !(param.nullable && param.kind === "int64"),
-        `${where}: a nullable int64 parameter is not supported`,
+        stableKeyPattern.test(key),
+        `${where}: the stable key is lower-case words joined by hyphens`,
       );
-    });
-    statements.push({ sql, params, returns });
+      assert(
+        (mutationClasses as readonly string[]).includes(className),
+        `${where}: a hand-written family statement is a mutation of class ${mutationClasses.join(", ")} (guards are the generated primitives)`,
+      );
+      assert(
+        /^(?:INSERT|UPDATE|DELETE)\b/iu.test(sql),
+        `${where}: a family mutation is an INSERT, UPDATE or DELETE`,
+      );
+      statement.family = { module, phase: "mutation", class: className, key };
+    }
+    statements.push(statement);
     current = undefined;
   };
   for (; cursor < lines.length; cursor++) {
     const line = lines[cursor] ?? "";
     const marker = /^-- statement:(.*)$/u.exec(line);
+    const guard = /^-- guard:(.*)$/u.exec(line);
     if (marker) {
       finish();
       current = { header: marker[1] ?? "", lines: [] };
+    } else if (guard && context) {
+      finish();
+      const where = `${file}: statement ${statements.length + 1}`;
+      const expanded = expandGuard(guard[1] ?? "", context.schema(), where);
+      checkedStatement(expanded.sql, where, () => expanded);
+      statements.push({
+        sql: expanded.sql,
+        params: expanded.params,
+        returns: null,
+        family: expanded.meta,
+      });
+    } else if (!current && line === "" && cursor === lines.length - 1) {
+      // The end of the file after the last guard directive: nothing follows it.
     } else {
       assert(current, `${file}:${cursor + 1}: SQL outside a statement block`);
       assert(!line.startsWith("--"), `${file}:${cursor + 1}: unknown comment directive`);
@@ -477,6 +1071,7 @@ export function parsePlanFile(text: string, file: string): PlanDefinition {
     }
   }
   finish();
+  if (context) statements.push(releaseStatement);
   assert(statements.length >= 1 && statements.length <= maxStatements, `${file}: statement count`);
   if (access === "read") {
     assert.equal(statements.length, 1, `${file}: a read plan has exactly one statement`);
@@ -495,13 +1090,22 @@ export function parsePlanFile(text: string, file: string): PlanDefinition {
     );
     assert.equal(maxRows, 0, `${file}: a write plan has no maxRows`);
   }
+  // A family plan's statements are partly generated from the physical manifest, so its identity covers the expanded text too:
+  // a manifest change that alters a guard changes the plan hash and so the manifest identity both sides compare.
+  const identity = context
+    ? familyIdentity(
+        normalized,
+        statements.map((statement) => statement.sql),
+      )
+    : sha256Hex(normalized);
   return {
     id,
     version,
     access,
     maxRows,
     statements,
-    sha256: sha256Hex(normalized),
+    sha256: identity,
+    ...(familyId === undefined ? {} : { family: familyId }),
   };
 }
 export function manifestHashOf(plans: readonly PlanDefinition[]) {
@@ -510,13 +1114,45 @@ export function manifestHashOf(plans: readonly PlanDefinition[]) {
     .map((plan) => `${plan.id}@${plan.version}:${plan.sha256}`);
   return sha256Hex(`${lines.join("\n")}\n`);
 }
-export function buildManifest(root: string): PlanManifest {
+export interface BuildOptions {
+  /** The physical manifest directory the guard primitives are expanded against; the repository's own by default. */
+  physicalDirectory?: string;
+}
+export function buildManifest(root: string, options: BuildOptions = {}): PlanManifest {
   const base = path.join(root, planDirectory);
   const registry = parseOwnerRegistry(readFileSync(path.join(root, ownerRegistry), "utf8"));
+  const families = existsSync(path.join(root, familyRegistryFile))
+    ? parseFamilyRegistry(readFileSync(path.join(root, familyRegistryFile), "utf8"))
+    : { families: [] };
+  let schema: PhysicalSchema | undefined;
+  const physical = () => {
+    schema ??= options.physicalDirectory
+      ? loadManifest(options.physicalDirectory)
+      : loadManifest(path.join(root, "src/ArcForges.Cloud.Storage.D1/Physical/manifest"));
+    return schema;
+  };
   const plans: PlanDefinition[] = [];
   for (const owner of readdirSync(base, { withFileTypes: true })) {
     if (!owner.isDirectory()) {
-      assert.equal(owner.name, "owners.json", `${planDirectory}/${owner.name}: foreign file`);
+      assert(
+        owner.name === "owners.json" ||
+          owner.name === "families.json" ||
+          owner.name === familyExpansionName,
+        `${planDirectory}/${owner.name}: foreign file`,
+      );
+      continue;
+    }
+    if (owner.name === familyOwner) {
+      for (const file of readdirSync(path.join(base, owner.name)).sort()) {
+        assert(file.endsWith(".sql"), `${owner.name}/${file}: plan files end with .sql`);
+        const relative = `${familyDirectory}/${file}`;
+        const plan = parsePlanFile(readFileSync(path.join(root, relative), "utf8"), relative, {
+          registry: families,
+          schema: physical,
+        });
+        assertFamilyPlan(plan, families);
+        plans.push(plan);
+      }
       continue;
     }
     assert(
@@ -541,7 +1177,7 @@ export function buildManifest(root: string): PlanManifest {
   const ordered = plans.toSorted((a, b) =>
     a.id < b.id ? -1 : a.id > b.id ? 1 : a.version - b.version,
   );
-  return { manifestHash: manifestHashOf(ordered), plans: ordered, registry };
+  return { manifestHash: manifestHashOf(ordered), plans: ordered, registry, families };
 }
 
 export async function renderTypeScript(manifest: PlanManifest) {
@@ -550,7 +1186,8 @@ export async function renderTypeScript(manifest: PlanManifest) {
     version: plan.version,
     access: plan.access,
     maxRows: plan.maxRows,
-    statements: plan.statements,
+    // The family roles stay in the generator and the C# manifest; the Worker dictionary keeps the one shape of every plan.
+    statements: plan.statements.map(({ sql, params, returns }) => ({ sql, params, returns })),
   }));
   const source = `// SPDX-License-Identifier: AGPL-3.0-only
 // <auto-generated />
@@ -571,6 +1208,27 @@ const csharpKind: Record<PlanKind, string> = {
   bytes: "Bytes",
   bool: "Bool",
   scope: "Scope",
+};
+/** The C# enum member of each SU-04 module and of the platform pseudo-module (SharedFamilies/FamilyModule.cs). */
+const moduleEnum: Record<string, string> = {
+  config: "Configuration",
+  identity: "Identity",
+  workspace: "Workspace",
+  device: "Device",
+  entitlement: "Entitlement",
+  commerce: "Commerce",
+  policy: "Policy",
+  agent: "Agent",
+  chat: "Chat",
+  scope: "Scope",
+  task: "Task",
+  search: "Search",
+  "package-catalog": "PackageCatalog",
+  notification: "Notification",
+  resource: "Resource",
+  sync: "Sync",
+  audit: "Audit",
+  platform: "Platform",
 };
 const pascal = (text: string) =>
   text
@@ -617,15 +1275,58 @@ ${statements.replaceAll(/^/gmu, "    ")}
 ${own.map(member).join("\n\n")}
     }`;
   });
-  const all = owners.flatMap((entry) =>
-    manifest.plans
-      .filter((plan) => plan.id.startsWith(`${entry.owner}.`))
-      .map((plan) => `${entry.className}.${csharpName(plan.id)}`),
+  const familyPlans = manifest.plans.filter((plan) => plan.family !== undefined);
+  const familyNames = familyPlans.map((plan) => csharpName(plan.id));
+  assert.equal(
+    new Set(familyNames).size,
+    familyNames.length,
+    "two family plans share a member name",
   );
+  const familyClass =
+    familyPlans.length === 0
+      ? ""
+      : `
+
+    /// <summary>The reviewed shared family plans (<c>storage/plans/families</c>); <see cref="FamilyPlans"/> describes their statements.</summary>
+    internal static class Families
+    {
+${familyPlans.map(member).join("\n\n")}
+    }`;
+  const all = [
+    ...owners.flatMap((entry) =>
+      manifest.plans
+        .filter((plan) => plan.id.startsWith(`${entry.owner}.`))
+        .map((plan) => `${entry.className}.${csharpName(plan.id)}`),
+    ),
+    ...familyNames.map((name) => `Families.${name}`),
+  ];
+  const text = (value: string) => JSON.stringify(value);
+  const catalog = manifest.families.families.map(
+    (family) =>
+      `        new(${text(family.family)}, ${text(family.title)}, ${text(family.source)}, [${family.participants
+        .map(
+          (participant) =>
+            `new(FamilyModule.${moduleEnum[participant.module] ?? assert.fail(participant.module)}, ${participant.requirement === "required" ? "true" : "false"}, ${participant.when === null ? "null" : text(participant.when)})`,
+        )
+        .join(", ")}])`,
+  );
+  const roles = familyPlans.map(
+    (plan) => `        new(Families.${csharpName(plan.id)}, ${text(plan.family ?? "")}, [
+${plan.statements
+  .map((statement) => {
+    const meta = statement.family ?? assert.fail(`${plan.id}: a statement has no family role`);
+    return `            new(FamilyModule.${moduleEnum[meta.module] ?? assert.fail(meta.module)}, FamilyPhase.${pascal(meta.phase)}, FamilyClass.${pascal(meta.class)}, ${text(meta.key)})`;
+  })
+  .join(",\n")}
+        ])`,
+  );
+  const list2 = (items: string[]) => (items.length === 0 ? "[]" : `[\n${items.join(",\n")}\n    ]`);
   return `// SPDX-License-Identifier: AGPL-3.0-only
 // <auto-generated />
 // Generated by eng/verification/storage-plans.ts from the reviewed plan files; do not edit.
 #nullable enable
+using ArcForges.Cloud.Storage.SharedFamilies;
+
 namespace ArcForges.Cloud.Storage;
 
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
@@ -633,17 +1334,47 @@ internal static class PlanManifest
 {
     public const string Hash = "${manifest.manifestHash}";
 
-${classes.join("\n\n")}
+${classes.join("\n\n")}${familyClass}
 
     public static readonly IReadOnlyList<PlanDefinition> All = [${all.join(", ")}];
+
+    /// <summary>The closed registry of shared transaction families (<c>storage/plans/families.json</c>, Design SU-01).</summary>
+    public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = ${list2(catalog)};
+
+    /// <summary>The statement roles of every shared family plan, in plan order.</summary>
+    public static readonly IReadOnlyList<FamilyPlanDefinition> FamilyPlans = ${list2(roles)};
 }
 `;
 }
+/**
+ * Every family plan with its expanded statements (SQL, role and parameter kinds): what the Worker runs, readable in a review, and the
+ * input of an independent C# recomputation of the plan identities.
+ */
+export async function renderFamilyExpansion(manifest: PlanManifest) {
+  const plans = manifest.plans
+    .filter((plan) => plan.family !== undefined)
+    .map((plan) => ({
+      id: plan.id,
+      version: plan.version,
+      family: plan.family,
+      sha256: plan.sha256,
+      statements: plan.statements.map((statement) => ({
+        role: statement.family
+          ? `${statement.family.phase} ${statement.family.module} ${statement.family.class} ${statement.family.key}`
+          : "",
+        sql: statement.sql,
+        params: statement.params.map((param) => param.kind + (param.nullable ? "?" : "")),
+      })),
+    }));
+  return format(JSON.stringify({ schemaVersion: 1, plans }), { parser: "json" });
+}
+
 export async function generate(root: string, check: boolean) {
   const manifest = buildManifest(root);
   const outputs: [string, string][] = [
     [typeScriptOutput, await renderTypeScript(manifest)],
     [csharpOutput, renderCSharp(manifest)],
+    [familyExpansionOutput, await renderFamilyExpansion(manifest)],
   ];
   const stale: string[] = [];
   for (const [file, expected] of outputs) {

@@ -75,6 +75,19 @@
       ]
     },
     {
+      "name": "platform_command_guard",
+      "model": "01 section 2 platform.command_guard",
+      "columns": [
+        { "name": "command_id", "type": "id" },
+        { "name": "guard_key", "type": "key" },
+        { "name": "allowed", "type": "bool" }
+      ],
+      "primaryKey": ["command_id", "guard_key"],
+      "checks": [{ "name": "af_guard_failed", "sql": "\"allowed\" = 1" }],
+      "mutability": { "update": "none", "delete": "any" },
+      "note": "The guard rows of one guarded D1 batch (model 04 section 4): a guard statement inserts allowed = 1 when its predicate holds and 0 when it does not, the table check named af_guard_failed refuses 0 so the whole batch rolls back, and the batch's last statement deletes the command's rows, so no committed state holds one. The check name is the text the Worker classifies as a failed precondition."
+    },
+    {
       "name": "platform_outbox",
       "model": "01 section 2 platform.outbox",
       "columns": [
