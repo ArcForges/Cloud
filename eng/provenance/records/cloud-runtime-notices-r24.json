@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "gov-09-cloud-runtime-notices-r1",
+  "id": "cloud-runtime-notices-r24",
   "kind": "generated",
   "sourceRepository": "https://github.com/ArcForges/Cloud",
   "sourceCommit": "299bfded329f1a2c689959b5bee84181e117ff73",
@@ -62,7 +62,7 @@
       "package": "arcforges-cloud-container",
       "kind": "native-image-notices",
       "profile": "eng/provenance/artifact-profiles/cloud-release-r23.json",
-      "sha256": "e008c8f8a6bab0a7ac1e360275a4ca2a10d31e08a1a1dc61ff1bf1addeb6c2fc"
+      "sha256": "1bd39cdd8b62387a251fa568ef55cadeb8df7a858bc3f1d00d537e12af7d05a9"
     }
   ],
   "disposition": "Copy",
@@ -228,10 +228,10 @@
   },
   "review": {
     "owner": "Licensing and Provenance Owner",
-    "reviewer": "ArcForges delivery worker w-c20261004-gov09 (GOV.09; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-c20261004-prf07f (completion follow-up claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "reviewedOn": "2026-10-04",
     "decision": "approved",
-    "rationale": "GOV.09 moves the exact ArcForges.Build.Policy build-only pin and adds the Cloud architecture test host. The runtime image, its notices and legal files are unchanged; the successor re-binds the new release profile whose Directory.Packages.props, service lock and package-lock hashes changed. Previous immutable records are retained.",
+    "rationale": "PRF.07 completion follow-up changes only Worker source, deployment workflow and configuration; the runtime image, its notices and legal files are unchanged. The successor re-binds the new release profile that records the new Worker bundle. Previous immutable records are retained.",
     "baselineCommit": "299bfded329f1a2c689959b5bee84181e117ff73",
     "reconciliation": false
   },

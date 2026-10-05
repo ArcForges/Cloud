@@ -5,6 +5,13 @@
 // system under test. Operator and session secrets are never written to the evidence.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import {
+  pipelineRefusals,
+  pipelineStream,
+  pipelineStreamCancel,
+  pipelineStreamDeadline,
+  pipelineUnary,
+} from "./pipeline-scenarios.ts";
 
 export interface Target {
   baseUrl: string;
@@ -26,6 +33,10 @@ export interface Target {
   sessionAbsoluteSeconds?: number;
   /** Margin after each lifetime before the expiry is checked, in seconds (default 2.5). */
   sessionSlackSeconds?: number;
+  /** Run only the named scenarios (a debugging aid of the local harness); every scenario runs when absent. */
+  only?: string[];
+  /** Also run the CLOUD.01 ingress pipeline scenarios (authenticated unary, refusals, stream, cancel, deadline). */
+  pipeline?: boolean;
   /** Also run the blocked-egress probe; only a deployed Container with Internet access disabled can pass it. */
   egressProbe?: boolean;
   /** The revision that was just deployed; the run first waits (bounded) until the origin serves exactly it. */
@@ -46,7 +57,7 @@ const int64Min = -(2n ** 63n);
 const int64Max = 2n ** 63n - 1n;
 const uint64Max = 2n ** 64n - 1n;
 
-async function operator(target: Target, operation: string, body: Json) {
+export async function operator(target: Target, operation: string, body: Json) {
   const pathname = `/proof/v1/${operation}`;
   const bodyText = JSON.stringify(body);
   const authorization = target.authorize
@@ -749,9 +760,18 @@ export async function runScenarios(
     ["checkpoint-restart", () => checkpointRestart(target, options)],
     ["public-denial", () => negatives(target)],
   ];
+  if (target.pipeline)
+    steps.push(
+      ["pipeline-unary", () => pipelineUnary(target)],
+      ["pipeline-refusals", () => pipelineRefusals(target)],
+      ["pipeline-stream", () => pipelineStream(target)],
+      ["pipeline-stream-cancel", () => pipelineStreamCancel(target)],
+      ["pipeline-stream-deadline", () => pipelineStreamDeadline(target)],
+    );
   if (target.egressProbe) steps.push(["egress-blocked", () => egressProbe(target)]);
   if (target.helloIngress) steps.push(["hello-ingress", () => helloIngress(target)]);
   for (const [name, step] of steps) {
+    if (target.only && !target.only.includes(name)) continue;
     const started = Date.now();
     try {
       const row = await step();

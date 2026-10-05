@@ -24,6 +24,15 @@ Existing `test:live` and `test:kotlin:live` commands remain explicit local diagn
 
 See [validation policy](validation-policy.md) for the retained checks and post-merge stopping boundary.
 
+## Ingress pipeline
+
+Every public call crosses the deny-by-default method table of the Worker and the admission pipeline of the host before any
+business code runs; the Container port is never published and a server stream is passed through frame by frame, never
+buffered. The route table, credential and CSRF rules, the frame guard, the proof-only probe and the checks that exist are in
+[cloud ingress](cloud-ingress.md). Merging changes the production Worker bundle and Container image through this same
+pipeline, but the production route table still serves only the anonymous Hello method; the probe and every session method
+exist only in the `proof` environment, which is deployed only by the manual dispatch described in the PRF.07 document.
+
 ## Runtime configuration and cost
 
 Hello has no runtime secrets, database or AI calls. The deployment token is a GitHub CI credential, not an application credential and not forwarded into the C# process. Later database/session/AI secrets require a separate runtime configuration design.

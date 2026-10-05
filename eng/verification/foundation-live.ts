@@ -43,7 +43,15 @@ export async function main() {
     execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const startedAt = new Date().toISOString();
   const evidence = await runScenarios(
-    { baseUrl, origin, helloIngress: true, egressProbe: true, expectedRevision, ...auth },
+    {
+      baseUrl,
+      origin,
+      helloIngress: true,
+      egressProbe: true,
+      pipeline: true,
+      expectedRevision,
+      ...auth,
+    },
     manifestHash,
     {
       stopContainer: true,

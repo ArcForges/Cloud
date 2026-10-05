@@ -8,7 +8,7 @@ Plan bounded changes before implementation. This repository owns the C# Native A
 - Keep the executable Native AOT compatible. Do not suppress trimming/AOT diagnostics to pass a build. Keep the final Linux image build; runtime execution is local opt-in.
 - Commit NuGet/npm/Gradle locks and Gradle verification metadata; pin tools/base images/Actions. Dependency updates must pass locked restores and the relevant compilation and packaging checks.
 - PR code must not receive deployment secrets. Main deployment promotes the sealed candidate image and Worker; never rebuild during publication.
-- The current Hello is anonymous, bounded and stateless. Do not add authenticated/commercial/AI behavior implicitly.
+- The production Worker and host serve one public method, the anonymous bounded stateless Hello. The ingress pipeline ([cloud-ingress](docs/cloud-ingress.md)) is the deny-by-default boundary every later method registers against by appending its policy and route; never add authenticated, commercial or AI behavior implicitly or serve a method that has no policy.
 - Keep the API route separate from Web's apex Custom Domain. Preserve binary gRPC-Web responses and status trailers.
 - Run the checks in CONTRIBUTING.md. Distinguish unit, Docker, local Worker runtime, live Cloudflare and real browser evidence.
 - Never read or print local credential stores, log tokens, commit secrets or request secret values in chat. Describe missing environment configuration explicitly.

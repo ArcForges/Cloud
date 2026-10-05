@@ -13,6 +13,8 @@
 !src/ArcForges.Cloud/Composition/*.cs
 !src/ArcForges.Cloud/Foundation/
 !src/ArcForges.Cloud/Foundation/*.cs
+!src/ArcForges.Cloud/Ingress/
+!src/ArcForges.Cloud/Ingress/*.cs
 !src/ArcForges.Cloud/Hmac/
 !src/ArcForges.Cloud/Hmac/*.cs
 !src/ArcForges.Cloud/Storage/

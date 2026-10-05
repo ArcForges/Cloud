@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "gov-09-cloud-worker-bundle-r1",
+  "id": "cloud-worker-bundle-r23",
   "kind": "generated",
   "sourceRepository": "https://github.com/ArcForges/Cloud",
   "sourceCommit": "299bfded329f1a2c689959b5bee84181e117ff73",
@@ -25,7 +25,13 @@
     "worker/storage/handler.ts",
     "worker/foundation/coordination.ts",
     "worker/foundation/durable.ts",
-    "worker/index.ts"
+    "worker/index.ts",
+    "worker/ingress/errors.ts",
+    "worker/ingress/io.ts",
+    "worker/ingress/edge-caller.ts",
+    "worker/ingress/frames.ts",
+    "worker/ingress/routes.ts",
+    "worker/ingress/pipeline.ts"
   ],
   "licence": {
     "spdx": "AGPL-3.0-only",
@@ -50,7 +56,7 @@
       "package": "arcforges-cloud-worker",
       "kind": "worker-bundle",
       "profile": "eng/provenance/artifact-profiles/cloud-release-r23.json",
-      "sha256": "e008c8f8a6bab0a7ac1e360275a4ca2a10d31e08a1a1dc61ff1bf1addeb6c2fc"
+      "sha256": "1bd39cdd8b62387a251fa568ef55cadeb8df7a858bc3f1d00d537e12af7d05a9"
     }
   ],
   "disposition": "Rewrite",
@@ -147,7 +153,13 @@
           "worker/storage/handler.ts",
           "worker/foundation/coordination.ts",
           "worker/foundation/durable.ts",
-          "worker/index.ts"
+          "worker/index.ts",
+          "worker/ingress/errors.ts",
+          "worker/ingress/io.ts",
+          "worker/ingress/edge-caller.ts",
+          "worker/ingress/frames.ts",
+          "worker/ingress/routes.ts",
+          "worker/ingress/pipeline.ts"
         ],
         "spdx": "AGPL-3.0-only",
         "evidence": [
@@ -198,10 +210,10 @@
   },
   "review": {
     "owner": "Licensing and Provenance Owner",
-    "reviewer": "ArcForges delivery worker w-c20261004-gov09 (GOV.09; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-c20261005-cloud01 (CLOUD.01 claimant, maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "reviewedOn": "2026-10-04",
     "decision": "approved",
-    "rationale": "GOV.09 changes no Worker source, package, generator, legal file or export. The Worker bundle bytes and every bundled input hash are unchanged; the successor re-binds the new release profile because the shared profile is one immutable file. Previous immutable records are retained.",
+    "rationale": "CLOUD.01 adds the public ingress pipeline (worker/ingress/*: the deny-by-default method table, the credential edge checks and the frame-guarded streaming pass-through) and replaces the Hello-only router body. Superseded wording of the predecessor: PRF.07 completion follow-up adds the signed operator surface of the proof environment (worker/foundation/operator-auth.ts, verified with the Web Crypto Ed25519 API against a public key variable) to the foundation Worker modules. No package, generator, legal file or export changes. The successor binds every bundled input and the exact emitted bundle bytes. Previous immutable profiles and records are retained.",
     "baselineCommit": "299bfded329f1a2c689959b5bee84181e117ff73",
     "reconciliation": false
   },

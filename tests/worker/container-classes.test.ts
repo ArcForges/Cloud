@@ -92,3 +92,22 @@ test("only the proof class carries the two exact outbound hosts and the environm
   const enabled = new FoundationContainer(containerContext, { FOUNDATION_PROOF: "enabled" });
   assert.equal((enabled.envVars as Record<string, string>).ARCFORGES_FOUNDATION_PROOF, "enabled");
 });
+
+test("the 60 second sleep timer never stops a Container that has a request or a stream in flight", () => {
+  // A server stream may live longer than sleepAfter (streamLifetimeMs). The library counts every proxied
+  // request until its response body ends and treats the Container as active meanwhile; this pins that
+  // behavior of the exact locked @cloudflare/containers so an upgrade cannot silently end open streams.
+  const container = new CloudContainer(containerContext, {}) as Record<string, unknown> & {
+    inflightRequests: number;
+    sleepAfterMs: number;
+    isActivityExpired(): boolean;
+  };
+  assert.equal(container.sleepAfter, "60s");
+  container.sleepAfterMs = Date.now() - 1_000;
+  container.inflightRequests = 0;
+  assert.equal(container.isActivityExpired(), true, "an idle Container sleeps after sleepAfter");
+  container.sleepAfterMs = Date.now() - 1_000;
+  container.inflightRequests = 1;
+  assert.equal(container.isActivityExpired(), false, "an open request or stream keeps it awake");
+  assert.ok(container.sleepAfterMs > Date.now(), "and the sleep window is renewed");
+});
