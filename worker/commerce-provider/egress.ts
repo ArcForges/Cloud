@@ -296,6 +296,13 @@ export async function handleCommerceEgress(
           controller.signal.addEventListener("abort", streamAbort, { once: true });
         },
         pull(output) {
+          try {
+            checkLifetime();
+          } catch {
+            output.error(new Error("Commerce transport canceled"));
+            finish();
+            return;
+          }
           if (!reply) return;
           const end = Math.min(reply.length, offset + 64 * 1024);
           // A consumer-held chunk must not retain the complete bounded upstream allocation.

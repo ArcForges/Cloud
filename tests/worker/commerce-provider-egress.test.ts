@@ -424,3 +424,23 @@ test("downstream body cancellation and deadline release aggregate memory permits
   await assert.rejects(expiring.arrayBuffer(), /canceled/u);
   assert.equal((await handleCommerceEgress(request(), environment, fetcher)).status, 200);
 });
+
+test("elapsed downstream reads fail and release their permit even before timer tasks run", async () => {
+  const { calls, fetcher } = transport(() => new Response(new Uint8Array(128 * 1024)));
+  const first = await actualHandleCommerceEgress(request(), environment, fetcher, 100);
+  const second = await actualHandleCommerceEgress(request(), environment, fetcher, 100);
+  assert.equal((await actualHandleCommerceEgress(request(), environment, fetcher)).status, 429);
+  const actualNow = Date.now;
+  const expiredNow = actualNow() + 1000;
+  Date.now = () => expiredNow;
+  try {
+    await assert.rejects(first.arrayBuffer(), /canceled/u);
+    const replacement = await actualHandleCommerceEgress(request(), environment, fetcher);
+    assert.equal(replacement.status, 200, "expiry releases capacity before the timer task runs");
+    await replacement.arrayBuffer();
+    assert.equal(calls.length, 3, "expiry does not retry the original provider exchange");
+  } finally {
+    Date.now = actualNow;
+    await second.body?.cancel();
+  }
+});
