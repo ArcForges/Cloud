@@ -6,6 +6,7 @@ using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Storage;
 using ArcForges.Cloud.Storage.ModuleBinding;
+using ArcForges.Cloud.Storage.FamilyBinding;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ArcForges.Cloud.Composition;
@@ -92,9 +93,13 @@ internal sealed class HelloModule(JsonObject identity) : IHostModule
 /// </summary>
 internal sealed class ModulePlanBindingModule : IHostModule
 {
-    public void Register(WebApplicationBuilder builder) =>
+    public void Register(WebApplicationBuilder builder)
+    {
         builder.Services.TryAddSingleton<IModulePlanPortFactory>(provider => new ModulePlanPortFactory(
             provider.GetRequiredService<IPlanExecutor>(), provider.GetRequiredService<FoundationOptions>().RecoveryGeneration, provider.GetRequiredService<TimeProvider>()));
+        builder.Services.TryAddSingleton<IModuleFamilyPortFactory>(provider => new ModuleFamilyPortFactory(
+            provider.GetRequiredService<IPlanExecutor>(), provider.GetRequiredService<FoundationOptions>().RecoveryGeneration, provider.GetRequiredService<TimeProvider>()));
+    }
 
     public void Map(WebApplication app)
     {
