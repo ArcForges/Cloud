@@ -59,8 +59,12 @@ internal sealed class CapacityMeasurementProcessor(ICapacityJobPort jobs, TimePr
             var micros = Math.Max(0, checked((long)(Stopwatch.GetElapsedTime(started).TotalMilliseconds * 1000)));
             var bin = 0; while (bin < 31 && micros > (1L << bin)) bin++;
             progress.Histogram[bin]++;
-            progress = progress with { CompletedReads = progress.CompletedReads + 1,
-                TotalReadMicros = checked(progress.TotalReadMicros + micros), MaximumReadMicros = Math.Max(progress.MaximumReadMicros, micros) };
+            progress = progress with
+            {
+                CompletedReads = progress.CompletedReads + 1,
+                TotalReadMicros = checked(progress.TotalReadMicros + micros),
+                MaximumReadMicros = Math.Max(progress.MaximumReadMicros, micros)
+            };
             count++;
         }
         cancellationToken.ThrowIfCancellationRequested();

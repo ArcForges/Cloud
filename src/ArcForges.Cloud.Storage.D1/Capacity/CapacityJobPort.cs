@@ -83,9 +83,14 @@ internal sealed class CapacityJobPort : ICapacityJobPort
             || old.State is not (CapacityJobState.Ready or CapacityJobState.Leased) || old.State == CapacityJobState.Leased && old.LeasedUntilMicros > now)
             return new(CapacityJobStatus.Conflict);
         var exhausted = old.Attempts == old.Definition.MaximumAttempts;
-        var next = old with { Holder = exhausted ? null : claim.Holder, LeasedUntilMicros = exhausted ? null : claim.LeasedUntilMicros,
-            Attempts = exhausted ? old.Attempts : old.Attempts + 1, Fence = old.Fence + 1,
-            State = exhausted ? CapacityJobState.DeadLettered : CapacityJobState.Leased };
+        var next = old with
+        {
+            Holder = exhausted ? null : claim.Holder,
+            LeasedUntilMicros = exhausted ? null : claim.LeasedUntilMicros,
+            Attempts = exhausted ? old.Attempts : old.Attempts + 1,
+            Fence = old.Fence + 1,
+            State = exhausted ? CapacityJobState.DeadLettered : CapacityJobState.Leased
+        };
         IReadOnlyList<D1Scalar> values = [D1Values.Text(claim.JobId.ToString("D")), D1Values.Text(claim.Owner.RealmId.ToString("D")),
             D1Values.Int64(old.Fence), D1Values.Int64(old.Attempts), D1Values.Text(CapacityJobCodec.Envelope(old)), D1Values.Int64(claim.LeasedUntilMicros)];
         return await Commit(claim.CommandId, claim.Owner, operation, content, "platform.capacity-job-claim",

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-using System.Text.Json;
 using System.Net;
 using System.Text;
-using ArcForges.Cloud.Hmac;
+using System.Text.Json;
 using ArcForges.Cloud.Capacity;
+using ArcForges.Cloud.Hmac;
 using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Storage;
 using ArcForges.Cloud.Storage.Capacity;
@@ -297,8 +297,10 @@ public sealed class CapacityJobTests
         public Task<QuotaAuthorityStatus> AuthorizeCreateAsync(CapacityJobDefinition definition, CancellationToken cancellationToken)
         { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(Approved.GetValueOrDefault(definition.JobId) == definition ? Status : QuotaAuthorityStatus.Denied); }
         public Task<QuotaAuthorityStatus> AuthorizeAsync(CapacityJobOwner requested, Guid jobId, string operation, CancellationToken cancellationToken)
-        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(requested == owner && Approved.ContainsKey(jobId) && !DeniedJobs.Contains(jobId)
-            && operation is "read" or "platform.capacity-job-create" or "platform.capacity-job-claim" or "platform.capacity-job-checkpoint" ? Status : QuotaAuthorityStatus.Denied); }
+        {
+            cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(requested == owner && Approved.ContainsKey(jobId) && !DeniedJobs.Contains(jobId)
+            && operation is "read" or "platform.capacity-job-create" or "platform.capacity-job-claim" or "platform.capacity-job-checkpoint" ? Status : QuotaAuthorityStatus.Denied);
+        }
         public Task<CapacityRecoveryScopeResult> GetCurrentAsync(CancellationToken cancellationToken)
         { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(new CapacityRecoveryScopeResult(Status, new(owner.RealmId, 1))); }
     }

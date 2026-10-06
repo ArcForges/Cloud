@@ -161,8 +161,11 @@ internal sealed class QuotaKernel(IQuotaKernelStore store, IQuotaKernelAuthority
             var heldDebit = command.Complete ? remaining : measure.Quantity;
             if (budget.Held < heldDebit) return new(QuotaKernelStatus.Conflict);
             nextBudget = budget with { Used = budget.Used + measure.Quantity, Held = budget.Held - heldDebit, Revision = budget.Revision + 1 };
-            nextReservation = reservation with { Consumed = reservation.Consumed + measure.Quantity,
-                State = command.Complete || measure.Quantity == remaining ? QuotaReservationState.Settled : QuotaReservationState.Held };
+            nextReservation = reservation with
+            {
+                Consumed = reservation.Consumed + measure.Quantity,
+                State = command.Complete || measure.Quantity == remaining ? QuotaReservationState.Settled : QuotaReservationState.Held
+            };
         }
         else if (measure.Kind == QuotaEffectKind.Release)
         {
