@@ -123,7 +123,9 @@ async function boundedBytes(
   declared: string | null,
   maximum: number,
   signal: AbortSignal,
+  checkLifetime: () => void,
 ): Promise<Uint8Array> {
+  checkLifetime();
   if (
     declared !== null &&
     (declared.length > 20 ||
@@ -143,10 +145,10 @@ async function boundedBytes(
   };
   signal.addEventListener("abort", abort, { once: true });
   try {
-    signal.throwIfAborted();
+    checkLifetime();
     for (;;) {
       const part = await reader.read();
-      signal.throwIfAborted();
+      checkLifetime();
       if (part.done) break;
       const length = bytes + part.value.byteLength;
       if (length > maximum) throw new Error("Body bound");
@@ -208,6 +210,13 @@ export async function handleCommerceEgress(
   activeTransports++;
   const controller = new AbortController();
   const abort = () => controller.abort();
+  const deadline = Date.now() + durationMs;
+  const checkLifetime = () => {
+    // Resolved stream reads can keep the microtask queue busy; elapsed checks also enforce
+    // the deadline when the timer task cannot run between empty or very small fragments.
+    if (Date.now() >= deadline) abort();
+    controller.signal.throwIfAborted();
+  };
   request.signal.addEventListener("abort", abort, { once: true });
   if (request.signal.aborted) controller.abort();
   const timer = setTimeout(abort, durationMs);
@@ -232,6 +241,7 @@ export async function handleCommerceEgress(
       request.headers.get("content-length"),
       requestByteLimit,
       controller.signal,
+      checkLifetime,
     );
     if (mutating !== bytes.byteLength > 0) return failure(403);
     controller.signal.throwIfAborted();
@@ -263,6 +273,7 @@ export async function handleCommerceEgress(
       response.headers.get("content-length"),
       responseByteLimit,
       controller.signal,
+      checkLifetime,
     );
     const resultHeaders = new Headers({ "cache-control": "no-store" });
     const type = response.headers.get("content-type");

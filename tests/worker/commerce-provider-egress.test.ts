@@ -348,6 +348,16 @@ test("real request signals cancel before and after dispatch, without retries or 
   assert.equal(result.status, 504);
   assert.equal(dispatched, 1);
   assert(!String(await result.text()).includes(credential));
+  const late = new AbortController();
+  const lateReply = await handleCommerceEgress(
+    request("/adjustments", "POST", "{}", {}, late.signal),
+    environment,
+    async () => {
+      late.abort();
+      return new Response(null, { status: 204 });
+    },
+  );
+  assert.equal(lateReply.status, 504, "a canceled empty reply cannot become success");
 });
 
 test("transport deadlines include stalled response bodies and concurrent calls have independent lifetimes", async () => {
@@ -358,6 +368,26 @@ test("transport deadlines include stalled response bodies and concurrent calls h
     (await handleCommerceEgress(request(), environment, stalled.fetcher, 10)).status,
     504,
   );
+  let fragmentedCanceled = false;
+  const emptyFragments = transport(
+    () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(output) {
+            output.enqueue(new Uint8Array());
+          },
+          cancel() {
+            fragmentedCanceled = true;
+          },
+        }),
+      ),
+  );
+  assert.equal(
+    (await handleCommerceEgress(request(), environment, emptyFragments.fetcher, 10)).status,
+    504,
+    "elapsed checks terminate fragments that otherwise starve the timer task",
+  );
+  assert.equal(fragmentedCanceled, true);
   let calls = 0;
   const fetcher: typeof fetch = async () => {
     calls++;
