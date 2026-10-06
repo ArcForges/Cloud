@@ -2,6 +2,7 @@
 using ArcForges.Cloud.Foundation;
 using ArcForges.Cloud.Hmac;
 using ArcForges.Cloud.Storage;
+using ArcForges.Contracts.CloudInternal.Storage.V1;
 using Xunit;
 
 namespace ArcForges.Cloud.Tests;
@@ -281,6 +282,45 @@ public sealed class SessionServiceTests
             Assert.Equal(0, storage.Executions("foundation.session-touch"));
             Assert.Equal(row.Idle, storage.Sessions[0].Idle);
         }
+    }
+
+    /// <summary>A clock that moves forward on every read, so a second reading inside one renewal would be visible.</summary>
+    private sealed class SteppingTime(DateTimeOffset start, TimeSpan step) : TimeProvider
+    {
+        private DateTimeOffset now = start;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            var current = now;
+            now += step;
+            return current;
+        }
+    }
+
+    private static long Int(D1Scalar scalar) =>
+        D1Values.TryGetInt64(scalar, out var value) ? value : throw new InvalidOperationException("Not an int64 argument.");
+
+    [Fact]
+    public async Task ARenewalReadsTheClockOnceForLastSeenTheGuardAndTheNewExpiry()
+    {
+        var storage = new FakeStorage();
+        var service = new SessionService(storage, T.Options(), new SteppingTime(Start, TimeSpan.FromMilliseconds(1)));
+        var issued = await IssueShort(service, TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(120));
+        D1Scalar[]? captured = null;
+        storage.Before = call =>
+        {
+            if (call.Plan.Id == "foundation.session-touch") captured = call.Arguments[0];
+            return Task.CompletedTask;
+        };
+        await service.TouchAsync(await service.ResolveAsync(issued.Handle, T.Ct), T.Ct);
+        var touch = captured ?? throw new InvalidOperationException("No renewal was executed.");
+        // One reading: the last-seen time, both guard values and the new expiry come from the same instant, so the stored window
+        // stays exactly eight seconds however often the clock is read elsewhere.
+        var seen = Int(touch[0]);
+        Assert.Equal(seen + Micros(TimeSpan.FromSeconds(8)), Int(touch[1]));
+        Assert.Equal(seen, Int(touch[4]));
+        Assert.Equal(seen, Int(touch[5]));
+        Assert.Equal(Micros(TimeSpan.FromSeconds(8)), storage.Sessions[0].Idle - storage.Sessions[0].Seen);
     }
 
     [Fact]
