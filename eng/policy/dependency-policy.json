@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "247e63eebcd6fab14809ba740fcbd608115a9b1c",
+  "sourceCommit": "d967053d421ee1fa79256f3f01b621ba7260bdf0",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -78,15 +78,15 @@
     "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
     "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
     "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7",
-    "eng/provenance/artifact-profiles/cloud-release-r42.json": "be700f16c013fce1dbcaf3535d7d287b3027c62d68909885258035fed18f94de",
-    "eng/provenance/records/com-01-cloud-runtime-notices-r3.json": "d38cc8a9e7978bee489f3bd5fa15cc7e653d5698e5019ecf770d4c82888e2c3f",
-    "eng/provenance/records/com-01-cloud-worker-bundle-r3.json": "faa32381673bdc9d862abb4468efd7cb5b1166ec27f50b1bd6cf8eb046288d9a"
+    "eng/provenance/artifact-profiles/cloud-release-r43.json": "728e7c114e856c6387cd6746aa0a3cf7819bc75d23ac7be815588896d5372f5f",
+    "eng/provenance/records/cloud-72-cloud-runtime-notices-r2.json": "e015e1bd2c4210651349221387a0f6381db48a0d256eb1f0391209050de03c6b",
+    "eng/provenance/records/cloud-72-cloud-worker-bundle-r2.json": "62d00a109eeb3c7d1d241b196105c0d0558d05d022f946b398915aeab6fb21d2"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-codex-20261006-provider (maintainer-authorized; independent pull-request review is required before merge)",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-identity (maintainer-authorized; independent exact-head PR review recorded separately)",
     "date": "2026-10-06",
-    "rationale": "COM.01 adds first-party production Commerce adapter source only. No npm, NuGet, Maven, runtime, framework, generator, licence, native optional package, integrity or immutable coordinate changes. The complete admitted POL.01 patched closure is preserved unchanged. The reviewed release artifact positions follow the immutable cloud-release-r42 first-party source/input successor and its two exact new provenance records. Prior dependency and artifact receipts remain byte-identical; the new receipt binds the exact owned source-admission/artifact inputs, not a new package admission.",
+    "rationale": "CLOUD.72 supplies the production Identity store, cryptographic identifier source, complete scoped typed read projections, bounded credential keyset pages and real DI composition. The stable enrollment actor and caller-sensitive fingerprint bind all credential material while excluding attempt identifiers; retained receipt preflight precedes the existing-credential shortcut. Opaque owner-bound participant contributions compose through the existing closed family/lock/guard engine; only the exact reviewed personal-workspace enrollment write and two lookup reads are admitted as exceptions. All mutations use actual named guarded plans and atomic tails. Actual Core/store/family/SQLite component tests and one opt-in workerd D1 run cover mutations, realm isolation, receipt replay/reuse/expiry, outages, cancellation, bounded retries, pagination, concurrency and collision rollback. New production C# inputs and the changed generated plan manifest and actual dry-run Worker bytes bind this immutable successor. Dependency coordinates, integrities, lock closure, legal classification, provider/runtime pins and security gates are unchanged; every historical profile and record remains intact. This is reviewed first-party implementation/input admission, not hash-only refresh. This successor rebases onto actual accepted COM01 main and preserves its complete provider input closure and every historical CLOUD72/COM01 record. Default-host executor activation belongs to CLOUD.21; provider REST batch, live-provider authentication and OS isolation are not claimed.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -162,9 +162,9 @@
       "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
       "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
       "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7",
-      "eng/provenance/artifact-profiles/cloud-release-r42.json": "be700f16c013fce1dbcaf3535d7d287b3027c62d68909885258035fed18f94de",
-      "eng/provenance/records/com-01-cloud-runtime-notices-r3.json": "d38cc8a9e7978bee489f3bd5fa15cc7e653d5698e5019ecf770d4c82888e2c3f",
-      "eng/provenance/records/com-01-cloud-worker-bundle-r3.json": "faa32381673bdc9d862abb4468efd7cb5b1166ec27f50b1bd6cf8eb046288d9a"
+      "eng/provenance/artifact-profiles/cloud-release-r43.json": "728e7c114e856c6387cd6746aa0a3cf7819bc75d23ac7be815588896d5372f5f",
+      "eng/provenance/records/cloud-72-cloud-runtime-notices-r2.json": "e015e1bd2c4210651349221387a0f6381db48a0d256eb1f0391209050de03c6b",
+      "eng/provenance/records/cloud-72-cloud-worker-bundle-r2.json": "62d00a109eeb3c7d1d241b196105c0d0558d05d022f946b398915aeab6fb21d2"
     },
     "checks": [
       "locked-restore",
@@ -175,8 +175,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "The adapter uses existing HttpClient, source-generated System.Text.Json and HMAC/SHA primitives. Actual component tests exercise transport, authorization refusal, cancellation, bounded read retries, ambiguous writes, concurrency, disposal, exact financial normalization and signed verification. Existing source/class architecture, locked managed builds and hosted Native AOT image/Worker packaging apply. No merchant deployment or OS isolation is proved by transport fakes.",
-    "maintenance": "Retain the exact current patched dependency closure and all immutable receipts. Restricted production egress/trust is composed by CLOUD.74; COM.03/04/09 own approved configuration, durable fencing, replay and business delivery. Whole-series merchant acceptance stays with COM.14/WP50. Any future dependency or artifact change requires its own reviewed successor.",
+    "runtimeAssessment": "No framework/runtime/dependency coordinate changes. Real guarded named-plan composition and bounded typed reads are covered by managed components, actual Worker SQLite execution and one explicit local workerd binding run. Default production executor activation, provider network/REST semantics, account authentication and whole-series/OS acceptance remain owned by their implementation/acceptance tasks; no test double is registered in production.",
+    "maintenance": "Preserve exact coordinates, all immutable receipts, fixed family locks/ownership and mandatory CI. Future first-party, closure, legal or artifact changes require a new independently reviewed successor; production routes/data and workers.dev protections remain unchanged.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
   },
@@ -995,7 +995,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["com-01-cloud-runtime-notices-r3", "com-01-cloud-worker-bundle-r3"],
+  "artifactRecords": ["cloud-72-cloud-runtime-notices-r2", "cloud-72-cloud-worker-bundle-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1009,7 +1009,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/com-01-r3.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-72-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
