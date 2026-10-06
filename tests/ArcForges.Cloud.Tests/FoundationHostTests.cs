@@ -549,6 +549,28 @@ public sealed class FoundationHostTests
     }
 
     [Fact]
+    public async Task ARenewingBootstrapKeepsTheSessionsShortIdleWindowSoIdlenessIsStillRefusedOnBootstrapAndLogout()
+    {
+        await using var host = await StartAsync();
+        // The live script's Account stage: issue with an eight second idle window, the page's bootstrap renews it, eleven
+        // seconds without use, then sign out. The renewal keeps eight seconds, so the logout is refused.
+        var signedOut = await IssueShort(host, idle: 8, absolute: 120);
+        Assert.True(await IsAuthenticated(host, signedOut.Cookie));
+        host.Time.Advance(TimeSpan.FromSeconds(11));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(host, Browser("POST", "/session/v1/logout", signedOut.Cookie, Origin, signedOut.Csrf))).Status);
+        Assert.False(await IsAuthenticated(host, signedOut.Cookie));
+        // A session in use is renewed by its own window each time and ends once it is idle for longer than that window.
+        var used = await IssueShort(host, idle: 8, absolute: 120);
+        host.Time.Advance(TimeSpan.FromSeconds(5));
+        Assert.True(await IsAuthenticated(host, used.Cookie));
+        host.Time.Advance(TimeSpan.FromSeconds(6));
+        Assert.True(await IsAuthenticated(host, used.Cookie), "eleven seconds after issue, six after the renewal");
+        host.Time.Advance(TimeSpan.FromSeconds(9));
+        Assert.False(await IsAuthenticated(host, used.Cookie), "nine seconds after the last renewal");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(host, Browser("POST", "/session/v1/logout", used.Cookie, Origin, used.Csrf))).Status);
+    }
+
+    [Fact]
     public async Task JobRoutesRunBoundedSlicesToACompleteExactChecksum()
     {
         await using var host = await StartAsync();

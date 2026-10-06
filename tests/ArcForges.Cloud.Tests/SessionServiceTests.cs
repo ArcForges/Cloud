@@ -194,4 +194,110 @@ public sealed class SessionServiceTests
         storage.Fault = call => call.Plan.Id == "foundation.session-load" ? PlanFailureKind.Unavailable : null;
         await Assert.ThrowsAsync<PlanFailureException>(() => service.ResolveAsync(issued.Handle, T.Ct));
     }
+
+    private static Task<IssuedSession> IssueShort(SessionService service, TimeSpan idle, TimeSpan absolute) =>
+        service.IssueAsync(T.Uuid(), T.Uuid(), Workspaces, T.Ct, absoluteLifetime: absolute, idleWindow: idle);
+
+    private static long Micros(TimeSpan span) => (long)span.TotalMicroseconds;
+
+    [Fact]
+    public async Task ARenewalKeepsTheSessionsOwnShortIdleWindow()
+    {
+        var (service, storage, time) = Create();
+        var issued = await IssueShort(service, TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(120));
+        time.Advance(TimeSpan.FromSeconds(5));
+        var now = service.NowMicros();
+        var touched = await service.TouchAsync(await service.ResolveAsync(issued.Handle, T.Ct), T.Ct);
+        // The eight second window is kept: the new idle expiry is now + 8 s, not now + 30 min.
+        Assert.Equal(now + Micros(TimeSpan.FromSeconds(8)), touched.Session!.IdleExpiresAt);
+        Assert.Equal(now, touched.Session.LastSeenAt);
+        Assert.Equal((now, now + Micros(TimeSpan.FromSeconds(8))), (storage.Sessions[0].Seen, storage.Sessions[0].Idle));
+        time.Advance(TimeSpan.FromSeconds(7));
+        Assert.True((await service.ResolveAsync(issued.Handle, T.Ct)).IsAuthenticated, "within the renewed window");
+        time.Advance(TimeSpan.FromSeconds(1));
+        Assert.False((await service.ResolveAsync(issued.Handle, T.Ct)).IsAuthenticated, "idle past the renewed window");
+    }
+
+    [Fact]
+    public async Task ADefaultSessionRenewsWithTheConfiguredThirtyMinutesExactlyAsBefore()
+    {
+        var (service, storage, time) = Create();
+        var issued = await Issue(service);
+        for (var step = 0; step < 3; step++)
+        {
+            time.Advance(TimeSpan.FromMinutes(29));
+            var now = service.NowMicros();
+            var resolution = await service.ResolveAsync(issued.Handle, T.Ct);
+            var touched = await service.TouchAsync(resolution, T.Ct);
+            // The earlier rule, min(now + configured window, absolute expiry), gives the same value for a default session.
+            var expected = Math.Min(now + Micros(TimeSpan.FromMinutes(30)), resolution.Session!.AbsoluteExpiresAt);
+            Assert.Equal(expected, touched.Session!.IdleExpiresAt);
+            Assert.Equal(expected, storage.Sessions[0].Idle);
+        }
+    }
+
+    [Fact]
+    public async Task TheAbsoluteExpiryStillCapsARenewalOfAShortWindow()
+    {
+        var (service, storage, time) = Create();
+        var issued = await IssueShort(service, TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(10));
+        time.Advance(TimeSpan.FromSeconds(6));
+        var touched = await service.TouchAsync(await service.ResolveAsync(issued.Handle, T.Ct), T.Ct);
+        Assert.Equal(issued.AbsoluteExpiresAt, touched.Session!.IdleExpiresAt);
+        Assert.Equal(issued.AbsoluteExpiresAt, storage.Sessions[0].Idle);
+        time.Advance(TimeSpan.FromSeconds(4));
+        Assert.False((await service.ResolveAsync(issued.Handle, T.Ct)).IsAuthenticated, "absolute expiry");
+    }
+
+    [Fact]
+    public async Task AStoredWindowLongerThanTheConfiguredOneCannotLengthenARenewal()
+    {
+        var (service, storage, time) = Create();
+        var issued = await Issue(service);
+        // A row this service never writes: a ten hour gap between last seen and idle expiry.
+        storage.Sessions[0] = storage.Sessions[0] with { Idle = storage.Sessions[0].Seen + Micros(TimeSpan.FromHours(10)) };
+        time.Advance(TimeSpan.FromMinutes(45));
+        var now = service.NowMicros();
+        var touched = await service.TouchAsync(await service.ResolveAsync(issued.Handle, T.Ct), T.Ct);
+        Assert.Equal(now + Micros(TimeSpan.FromMinutes(30)), touched.Session!.IdleExpiresAt);
+        Assert.Equal(now + Micros(TimeSpan.FromMinutes(30)), storage.Sessions[0].Idle);
+    }
+
+    [Fact]
+    public async Task AZeroOrNegativeStoredWindowFailsClosedAndIsNeverRenewed()
+    {
+        foreach (var gap in new[] { TimeSpan.Zero, TimeSpan.FromSeconds(-1) })
+        {
+            var (service, storage, time) = Create();
+            var issued = await Issue(service);
+            time.Advance(TimeSpan.FromMinutes(1));
+            // A last-seen time at or after the idle expiry: a row this service never writes, still inside its stored expiries.
+            var row = storage.Sessions[0];
+            storage.Sessions[0] = row with { Seen = row.Idle - Micros(gap) };
+            var resolution = await service.ResolveAsync(issued.Handle, T.Ct);
+            Assert.True(resolution.IsAuthenticated);
+            var failure = await Assert.ThrowsAsync<PlanFailureException>(() => service.TouchAsync(resolution, T.Ct));
+            Assert.Equal(PlanFailureKind.InvalidPlan, failure.Kind);
+            Assert.Equal(0, storage.Executions("foundation.session-touch"));
+            Assert.Equal(row.Idle, storage.Sessions[0].Idle);
+        }
+    }
+
+    [Fact]
+    public async Task InterleavedRenewalsOfOneSessionKeepAConsistentPairOfLastSeenAndIdleExpiry()
+    {
+        var (service, storage, time) = Create();
+        var issued = await IssueShort(service, TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(120));
+        time.Advance(TimeSpan.FromSeconds(2));
+        // Two requests resolved the same stored session before either renewed it.
+        var first = await service.ResolveAsync(issued.Handle, T.Ct);
+        var second = await service.ResolveAsync(issued.Handle, T.Ct);
+        time.Advance(TimeSpan.FromSeconds(1));
+        await service.TouchAsync(first, T.Ct);
+        Assert.Equal(Micros(TimeSpan.FromSeconds(8)), storage.Sessions[0].Idle - storage.Sessions[0].Seen);
+        time.Advance(TimeSpan.FromSeconds(1));
+        var now = service.NowMicros();
+        await service.TouchAsync(second, T.Ct);
+        Assert.Equal((now, now + Micros(TimeSpan.FromSeconds(8))), (storage.Sessions[0].Seen, storage.Sessions[0].Idle));
+    }
 }
