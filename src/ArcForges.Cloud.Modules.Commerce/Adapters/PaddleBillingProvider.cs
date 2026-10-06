@@ -71,35 +71,35 @@ internal sealed class PaddleBillingProvider : IBillingProvider
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         try
         {
-        var price = await GetPriceAsync(request.Price, operation.Token).ConfigureAwait(false);
-        var amount = price.CountryPrices.SingleOrDefault(p => p.Countries.Contains(request.Country, StringComparer.Ordinal))?.Money ?? price.Money;
-        if (!price.Active || amount != request.ExpectedUnitPrice || price.TaxCategory != request.ExpectedTaxCategory || price.TaxTreatment != request.ExpectedTaxTreatment
-            || (price.Interval is null ? PurchaseKind.OneTime : PurchaseKind.Recurring) != request.Kind)
-            throw new BillingProviderException(ProviderFailureKind.Conflict);
-        var m = request.Metadata;
-        var body = new ApiCheckoutBody([new ApiItem(request.Price.Value, 1)], amount.Currency, "automatic",
-            new ApiMetadata(m.RealmId, m.BillingAccountId, m.WorkspaceId, m.PurchaseIntentId, m.CheckoutAttemptId, m.OfferId, m.PriceVersion, m.PolicyVersion),
-            new ApiCheckout(settings.CheckoutPage.AbsoluteUri));
-        return await Write(HttpMethod.Post, "transactions", JsonSerializer.SerializeToUtf8Bytes(body, PaddleJsonContext.Default.ApiCheckoutBody), data =>
-        {
-            var reference = PaddleNormalization.Reference(data, "id", "txn");
-            if (PaddleNormalization.Metadata(data) != request.Metadata) throw PaddleNormalization.Invalid();
-            if (PaddleNormalization.Text(data, "currency_code", 3) != amount.Currency) throw PaddleNormalization.Invalid();
-            var receiptItems = PaddleNormalization.Required(data, "items", JsonValueKind.Array);
-            if (receiptItems.GetArrayLength() != 1) throw PaddleNormalization.Invalid();
-            var item = receiptItems[0]; var receiptPrice = PaddleNormalization.Required(item, "price", JsonValueKind.Object);
-            if (PaddleNormalization.Reference(receiptPrice, "id", "pri") != request.Price || item.GetProperty("quantity").GetInt32() != 1)
-                throw PaddleNormalization.Invalid();
-            var receiptMoney = PaddleNormalization.Required(receiptPrice, "unit_price", JsonValueKind.Object);
-            // Region overrides remain in the price snapshot; the top-level transaction currency and the selected price override are bound together.
-            var receiptBase = PaddleNormalization.Money(receiptMoney, "amount", PaddleNormalization.Text(receiptMoney, "currency_code", 3));
-            if (receiptBase != price.Money || PaddleNormalization.TaxTreatment(receiptPrice) != request.ExpectedTaxTreatment) throw PaddleNormalization.Invalid();
-            var checkout = PaddleNormalization.Required(data, "checkout", JsonValueKind.Object);
-            var url = SafeUrl(PaddleNormalization.Text(checkout, "url"));
-            if (url.GetLeftPart(UriPartial.Path) != settings.CheckoutPage.GetLeftPart(UriPartial.Path)
-                || url.Query != "?_ptxn=" + reference.Value) throw PaddleNormalization.Invalid();
-            return new HostedCheckout(reference, url);
-        }, operation.Token).ConfigureAwait(false);
+            var price = await GetPriceAsync(request.Price, operation.Token).ConfigureAwait(false);
+            var amount = price.CountryPrices.SingleOrDefault(p => p.Countries.Contains(request.Country, StringComparer.Ordinal))?.Money ?? price.Money;
+            if (!price.Active || amount != request.ExpectedUnitPrice || price.TaxCategory != request.ExpectedTaxCategory || price.TaxTreatment != request.ExpectedTaxTreatment
+                || (price.Interval is null ? PurchaseKind.OneTime : PurchaseKind.Recurring) != request.Kind)
+                throw new BillingProviderException(ProviderFailureKind.Conflict);
+            var m = request.Metadata;
+            var body = new ApiCheckoutBody([new ApiItem(request.Price.Value, 1)], amount.Currency, "automatic",
+                new ApiMetadata(m.RealmId, m.BillingAccountId, m.WorkspaceId, m.PurchaseIntentId, m.CheckoutAttemptId, m.OfferId, m.PriceVersion, m.PolicyVersion),
+                new ApiCheckout(settings.CheckoutPage.AbsoluteUri));
+            return await Write(HttpMethod.Post, "transactions", JsonSerializer.SerializeToUtf8Bytes(body, PaddleJsonContext.Default.ApiCheckoutBody), data =>
+            {
+                var reference = PaddleNormalization.Reference(data, "id", "txn");
+                if (PaddleNormalization.Metadata(data) != request.Metadata) throw PaddleNormalization.Invalid();
+                if (PaddleNormalization.Text(data, "currency_code", 3) != amount.Currency) throw PaddleNormalization.Invalid();
+                var receiptItems = PaddleNormalization.Required(data, "items", JsonValueKind.Array);
+                if (receiptItems.GetArrayLength() != 1) throw PaddleNormalization.Invalid();
+                var item = receiptItems[0]; var receiptPrice = PaddleNormalization.Required(item, "price", JsonValueKind.Object);
+                if (PaddleNormalization.Reference(receiptPrice, "id", "pri") != request.Price || item.GetProperty("quantity").GetInt32() != 1)
+                    throw PaddleNormalization.Invalid();
+                var receiptMoney = PaddleNormalization.Required(receiptPrice, "unit_price", JsonValueKind.Object);
+                // Region overrides remain in the price snapshot; the top-level transaction currency and the selected price override are bound together.
+                var receiptBase = PaddleNormalization.Money(receiptMoney, "amount", PaddleNormalization.Text(receiptMoney, "currency_code", 3));
+                if (receiptBase != price.Money || PaddleNormalization.TaxTreatment(receiptPrice) != request.ExpectedTaxTreatment) throw PaddleNormalization.Invalid();
+                var checkout = PaddleNormalization.Required(data, "checkout", JsonValueKind.Object);
+                var url = SafeUrl(PaddleNormalization.Text(checkout, "url"));
+                if (url.GetLeftPart(UriPartial.Path) != settings.CheckoutPage.GetLeftPart(UriPartial.Path)
+                    || url.Query != "?_ptxn=" + reference.Value) throw PaddleNormalization.Invalid();
+                return new HostedCheckout(reference, url);
+            }, operation.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
         { throw new BillingProviderException(ProviderFailureKind.Transport); }
@@ -194,24 +194,24 @@ internal sealed class PaddleBillingProvider : IBillingProvider
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         try
         {
-        foreach (var subscription in subscriptions)
-        {
-            ProviderInput.RequireReference(subscription, "sub");
-            if ((await GetSubscriptionAsync(subscription, operation.Token).ConfigureAwait(false)).Customer != customer)
-                throw new BillingProviderException(ProviderFailureKind.Forbidden);
-        }
-        return await Write(HttpMethod.Post, "customers/" + customer.Value + "/portal-sessions",
-            JsonSerializer.SerializeToUtf8Bytes(new ApiPortalBody(subscriptions.Select(s => s.Value).ToArray()), PaddleJsonContext.Default.ApiPortalBody), data =>
+            foreach (var subscription in subscriptions)
             {
-                if (PaddleNormalization.Reference(data, "customer_id", "ctm") != customer) throw PaddleNormalization.Invalid();
-                var general = PaddleNormalization.Required(PaddleNormalization.Required(data, "urls", JsonValueKind.Object), "general", JsonValueKind.Object);
-                var url = SafeUrl(PaddleNormalization.Text(general, "overview", 4096));
-                var host = settings.Environment == BillingEnvironment.Production ? "customer-portal.paddle.com" : "sandbox-customer-portal.paddle.com";
-                var tokens = url.Query.TrimStart('?').Split('&').Where(p => p.StartsWith("token=", StringComparison.Ordinal)).ToArray();
-                if (url.Host != host || !ProviderInput.Reference(url.AbsolutePath.TrimStart('/'), "cpl")
-                    || tokens.Length != 1 || tokens[0].Length <= 6) throw PaddleNormalization.Invalid();
-                return new CustomerPortalLink(url, PaddleNormalization.Instant(data, "created_at"));
-            }, operation.Token).ConfigureAwait(false);
+                ProviderInput.RequireReference(subscription, "sub");
+                if ((await GetSubscriptionAsync(subscription, operation.Token).ConfigureAwait(false)).Customer != customer)
+                    throw new BillingProviderException(ProviderFailureKind.Forbidden);
+            }
+            return await Write(HttpMethod.Post, "customers/" + customer.Value + "/portal-sessions",
+                JsonSerializer.SerializeToUtf8Bytes(new ApiPortalBody(subscriptions.Select(s => s.Value).ToArray()), PaddleJsonContext.Default.ApiPortalBody), data =>
+                {
+                    if (PaddleNormalization.Reference(data, "customer_id", "ctm") != customer) throw PaddleNormalization.Invalid();
+                    var general = PaddleNormalization.Required(PaddleNormalization.Required(data, "urls", JsonValueKind.Object), "general", JsonValueKind.Object);
+                    var url = SafeUrl(PaddleNormalization.Text(general, "overview", 4096));
+                    var host = settings.Environment == BillingEnvironment.Production ? "customer-portal.paddle.com" : "sandbox-customer-portal.paddle.com";
+                    var tokens = url.Query.TrimStart('?').Split('&').Where(p => p.StartsWith("token=", StringComparison.Ordinal)).ToArray();
+                    if (url.Host != host || !ProviderInput.Reference(url.AbsolutePath.TrimStart('/'), "cpl")
+                        || tokens.Length != 1 || tokens[0].Length <= 6) throw PaddleNormalization.Invalid();
+                    return new CustomerPortalLink(url, PaddleNormalization.Instant(data, "created_at"));
+                }, operation.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
         { throw new BillingProviderException(ProviderFailureKind.Transport); }
@@ -355,10 +355,18 @@ internal sealed class PaddleBillingProvider : IBillingProvider
                     }
                     if (!response.IsSuccessStatusCode)
                     {
-                        var kind = status switch { 401 => ProviderFailureKind.Unauthorized, 403 => ProviderFailureKind.Forbidden,
-                            404 => ProviderFailureKind.NotFound, 409 => ProviderFailureKind.Conflict, 429 => ProviderFailureKind.RateLimited,
-                            >= 500 when mutation => ProviderFailureKind.UnknownOutcome, >= 500 => ProviderFailureKind.Transport,
-                            >= 400 and < 500 => ProviderFailureKind.Rejected, _ => mutation ? ProviderFailureKind.UnknownOutcome : ProviderFailureKind.Protocol };
+                        var kind = status switch
+                        {
+                            401 => ProviderFailureKind.Unauthorized,
+                            403 => ProviderFailureKind.Forbidden,
+                            404 => ProviderFailureKind.NotFound,
+                            409 => ProviderFailureKind.Conflict,
+                            429 => ProviderFailureKind.RateLimited,
+                            >= 500 when mutation => ProviderFailureKind.UnknownOutcome,
+                            >= 500 => ProviderFailureKind.Transport,
+                            >= 400 and < 500 => ProviderFailureKind.Rejected,
+                            _ => mutation ? ProviderFailureKind.UnknownOutcome : ProviderFailureKind.Protocol
+                        };
                         throw new BillingProviderException(kind, status, RetryAfter(response));
                     }
                     if (response.Content.Headers.ContentType?.MediaType != "application/json") throw PaddleNormalization.Invalid();

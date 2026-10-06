@@ -35,42 +35,80 @@ public sealed class ProviderAdapterTests
         => new(environment, Credential, (secrets ?? [Secret]).Select((s, i) => new ProviderNotificationKey("notification-v" + (i + 1), s)).ToArray(), "merchant-production-v1", new Uri("https://arcforges.com/billing/checkout"),
             capabilities ?? Capabilities, operationTimeout: timeout, maxResponseBytes: limit);
     private static string Json(object value) => JsonSerializer.Serialize(value);
-    private static object MetadataJson => new { realm_id = Metadata.RealmId, billing_account_id = Metadata.BillingAccountId, workspace_id = Metadata.WorkspaceId,
-        purchase_intent_id = Metadata.PurchaseIntentId, checkout_attempt_id = Metadata.CheckoutAttemptId, offer_id = Metadata.OfferId,
-        price_version = Metadata.PriceVersion, policy_version = Metadata.PolicyVersion };
+    private static object MetadataJson => new
+    {
+        realm_id = Metadata.RealmId,
+        billing_account_id = Metadata.BillingAccountId,
+        workspace_id = Metadata.WorkspaceId,
+        purchase_intent_id = Metadata.PurchaseIntentId,
+        checkout_attempt_id = Metadata.CheckoutAttemptId,
+        offer_id = Metadata.OfferId,
+        price_version = Metadata.PriceVersion,
+        policy_version = Metadata.PolicyVersion
+    };
     private static object[] Items => [new { price = new { id = PriceId.Value }, quantity = 1 }];
     private static object Price(string amount = "1000", string currency = "USD", string status = "active") => new
     {
-        id = PriceId.Value, product_id = "pro_" + Suffix, status, tax_mode = "internal", product = new { id = "pro_" + Suffix, status = "active", tax_category = "standard" },
-        unit_price = new { amount, currency_code = currency }, billing_cycle = new { interval = "month", frequency = 1 },
+        id = PriceId.Value,
+        product_id = "pro_" + Suffix,
+        status,
+        tax_mode = "internal",
+        product = new { id = "pro_" + Suffix, status = "active", tax_category = "standard" },
+        unit_price = new { amount, currency_code = currency },
+        billing_cycle = new { interval = "month", frequency = 1 },
         unit_price_overrides = new[] { new { country_codes = new[] { "DE" }, unit_price = new { amount = "900", currency_code = "EUR" } } },
     };
     private static object Transaction(string status = "completed", string amount = "1000", object? metadata = null) => new
     {
-        id = TransactionId.Value, customer_id = CustomerId.Value, subscription_id = SubscriptionId.Value, status, currency_code = "USD",
-        details = new { totals = new { total = amount, tax = "100", fee = "20", earnings = "980" },
+        id = TransactionId.Value,
+        customer_id = CustomerId.Value,
+        subscription_id = SubscriptionId.Value,
+        status,
+        currency_code = "USD",
+        details = new
+        {
+            totals = new { total = amount, tax = "100", fee = "20", earnings = "980" },
             line_items = new[] { new { id = "txnitm_" + Suffix, price_id = PriceId.Value, quantity = 1,
                 unit_totals = new { subtotal = "900", discount = "0", tax = "100", total = "1000" },
-                totals = new { subtotal = "900", discount = "0", tax = "100", total = "1000" }, product = new { tax_category = "standard" } } } },
-        custom_data = metadata ?? MetadataJson, items = Items, updated_at = Instant,
-        address = new { customer_id = CustomerId.Value, country_code = "US", first_line = "private not exported" }, revised_at = (string?)null,
+                totals = new { subtotal = "900", discount = "0", tax = "100", total = "1000" }, product = new { tax_category = "standard" } } }
+        },
+        custom_data = metadata ?? MetadataJson,
+        items = Items,
+        updated_at = Instant,
+        address = new { customer_id = CustomerId.Value, country_code = "US", first_line = "private not exported" },
+        revised_at = (string?)null,
         billing_period = new { starts_at = "2026-10-01T00:00:00Z", ends_at = "2026-11-01T00:00:00Z" },
         payments = new[] { new { method_details = new { card = new { last4 = "7777" } } } },
     };
     private static object Subscription(bool canceled = false, string customer = "") => new
     {
-        id = SubscriptionId.Value, customer_id = customer.Length == 0 ? CustomerId.Value : customer, status = "active", custom_data = MetadataJson,
-        items = Items, updated_at = Instant, scheduled_change = canceled ? new { action = "cancel", effective_at = "2026-11-01T00:00:00Z" } : null,
+        id = SubscriptionId.Value,
+        customer_id = customer.Length == 0 ? CustomerId.Value : customer,
+        status = "active",
+        custom_data = MetadataJson,
+        items = Items,
+        updated_at = Instant,
+        scheduled_change = canceled ? new { action = "cancel", effective_at = "2026-11-01T00:00:00Z" } : null,
         current_billing_period = new { starts_at = "2026-10-01T00:00:00Z", ends_at = "2026-11-01T00:00:00Z" },
     };
     private static object Adjustment(string status = "pending_approval", string action = "refund") => new
-    { id = AdjustmentId.Value, transaction_id = TransactionId.Value, subscription_id = SubscriptionId.Value, action, status,
-        currency_code = "USD", totals = new { total = "1000" }, updated_at = Instant };
+    {
+        id = AdjustmentId.Value,
+        transaction_id = TransactionId.Value,
+        subscription_id = SubscriptionId.Value,
+        action,
+        status,
+        currency_code = "USD",
+        totals = new { total = "1000" },
+        updated_at = Instant
+    };
     private static object Event(string type = "transaction.completed", object? data = null) => new
     { event_id = "evt_" + Suffix, event_type = type, occurred_at = Instant, data = data ?? Transaction() };
     private static object CheckoutReceipt(string currency = "USD", string amount = "1000", string url = "") => new
     {
-        id = TransactionId.Value, custom_data = MetadataJson, currency_code = currency,
+        id = TransactionId.Value,
+        custom_data = MetadataJson,
+        currency_code = currency,
         items = new[] { new { price = new { id = PriceId.Value, tax_mode = "internal", unit_price = new { amount, currency_code = "USD" } }, quantity = 1 } },
         checkout = new { url = url.Length == 0 ? "https://arcforges.com/billing/checkout?_ptxn=" + TransactionId.Value : url },
     };

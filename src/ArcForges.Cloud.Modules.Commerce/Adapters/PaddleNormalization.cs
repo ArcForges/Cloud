@@ -57,8 +57,10 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
     }
     internal static ProviderTaxTreatment TaxTreatment(JsonElement value) => Text(value, "tax_mode", 32) switch
     {
-        "internal" => ProviderTaxTreatment.Included, "external" => ProviderTaxTreatment.Excluded,
-        "account_setting" => ProviderTaxTreatment.AccountSetting, _ => throw Invalid(),
+        "internal" => ProviderTaxTreatment.Included,
+        "external" => ProviderTaxTreatment.Excluded,
+        "account_setting" => ProviderTaxTreatment.AccountSetting,
+        _ => throw Invalid(),
     };
     private static ProviderPeriod? Period(JsonElement value, string name)
     {
@@ -179,9 +181,15 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
     internal ProviderSubscription Subscription(JsonElement data)
     {
         var status = Text(data, "status", 32);
-        var state = status switch { "active" => ProviderSubscriptionState.Active, "trialing" => ProviderSubscriptionState.Pending,
-            "past_due" => ProviderSubscriptionState.PastDue, "paused" => ProviderSubscriptionState.Paused,
-            "canceled" => ProviderSubscriptionState.Canceled, _ => ProviderSubscriptionState.Unknown };
+        var state = status switch
+        {
+            "active" => ProviderSubscriptionState.Active,
+            "trialing" => ProviderSubscriptionState.Pending,
+            "past_due" => ProviderSubscriptionState.PastDue,
+            "paused" => ProviderSubscriptionState.Paused,
+            "canceled" => ProviderSubscriptionState.Canceled,
+            _ => ProviderSubscriptionState.Unknown
+        };
         DateTimeOffset? cancellation = null;
         if (data.TryGetProperty("scheduled_change", out var change) && change.ValueKind != JsonValueKind.Null)
         {
@@ -195,11 +203,25 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
     internal ProviderAdjustment Adjustment(JsonElement data)
     {
         var action = Text(data, "action", 32);
-        var kind = action switch { "refund" => ProviderAdjustmentKind.Refund, "credit" => ProviderAdjustmentKind.Credit, "credit_reverse" => ProviderAdjustmentKind.CreditReversal,
-            "chargeback" => ProviderAdjustmentKind.Dispute, "chargeback_reverse" => ProviderAdjustmentKind.DisputeReversal,
-            "chargeback_warning" => ProviderAdjustmentKind.Warning, "chargeback_warning_reverse" => ProviderAdjustmentKind.WarningReversal, _ => ProviderAdjustmentKind.Unknown };
-        var state = Text(data, "status", 32) switch { "pending_approval" => ProviderAdjustmentState.Pending, "approved" => ProviderAdjustmentState.Approved,
-            "rejected" => ProviderAdjustmentState.Rejected, "reversed" => ProviderAdjustmentState.Reversed, _ => ProviderAdjustmentState.Unknown };
+        var kind = action switch
+        {
+            "refund" => ProviderAdjustmentKind.Refund,
+            "credit" => ProviderAdjustmentKind.Credit,
+            "credit_reverse" => ProviderAdjustmentKind.CreditReversal,
+            "chargeback" => ProviderAdjustmentKind.Dispute,
+            "chargeback_reverse" => ProviderAdjustmentKind.DisputeReversal,
+            "chargeback_warning" => ProviderAdjustmentKind.Warning,
+            "chargeback_warning_reverse" => ProviderAdjustmentKind.WarningReversal,
+            _ => ProviderAdjustmentKind.Unknown
+        };
+        var state = Text(data, "status", 32) switch
+        {
+            "pending_approval" => ProviderAdjustmentState.Pending,
+            "approved" => ProviderAdjustmentState.Approved,
+            "rejected" => ProviderAdjustmentState.Rejected,
+            "reversed" => ProviderAdjustmentState.Reversed,
+            _ => ProviderAdjustmentState.Unknown
+        };
         var totals = Required(data, "totals", JsonValueKind.Object);
         return new ProviderAdjustment(Reference(data, "id", "adj"), Reference(data, "transaction_id", "txn"), OptionalReference(data, "subscription_id", "sub"),
             kind, state, Money(totals, "total", Text(data, "currency_code", 3)), Instant(data, "updated_at"));
