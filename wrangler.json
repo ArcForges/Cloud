@@ -74,7 +74,7 @@
         {
           "class_name": "FoundationContainer",
           "image": "./Dockerfile",
-          "max_instances": 2,
+          "max_instances": 4,
           "instance_type": "lite"
         }
       ],

@@ -157,14 +157,14 @@ under Deploying below, and no CI job connects to the deployed service.
 
 ## Running the checks
 
-| Check                                                                                    | Command                                                                     | Where it runs                                                                              |
-| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Plan manifest, Worker vectors and tests                                                  | `npm run check`                                                             | hosted CI and locally                                                                      |
-| C# build, tests, format                                                                  | `npm run check:dotnet`                                                      | hosted CI and locally                                                                      |
-| Linux Native AOT image and sealed Worker candidate                                       | `npm run candidate`                                                         | hosted CI (needs Docker)                                                                   |
-| Local cross-process integration (real host, workerd with local D1/R2/DO/Queue emulation) | `FOUNDATION_HOST_EXE=<host executable> npm run test:foundation:local`       | explicit local opt-in only                                                                 |
-| Proof token access, resources and deployment                                             | dispatch of `CI` on `main` with `proof` = `access`, `provision` or `deploy` | manually dispatched CI jobs in the `cloudflare` environment, never on push or pull request |
-| Live scenarios against the deployed proof environment                                    | `npm run test:foundation:live`                                              | explicit local opt-in only, under the lease `RES-cloud-deployment`                         |
+| Check                                                                                    | Command                                                                                | Where it runs                                                                              |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Plan manifest, Worker vectors and tests                                                  | `npm run check`                                                                        | hosted CI and locally                                                                      |
+| C# build, tests, format                                                                  | `npm run check:dotnet`                                                                 | hosted CI and locally                                                                      |
+| Linux Native AOT image and sealed Worker candidate                                       | `npm run candidate`                                                                    | hosted CI (needs Docker)                                                                   |
+| Local cross-process integration (real host, workerd with local D1/R2/DO/Queue emulation) | `FOUNDATION_HOST_EXE=<host executable> npm run test:foundation:local`                  | explicit local opt-in only                                                                 |
+| Proof token access, resources, deployment and observation                                | dispatch of `CI` on `main` with `proof` = `access`, `provision`, `deploy` or `observe` | manually dispatched CI jobs in the `cloudflare` environment, never on push or pull request |
+| Live scenarios against the deployed proof environment                                    | `npm run test:foundation:live`                                                         | explicit local opt-in only, under the lease `RES-cloud-deployment`                         |
 
 ### Deploying and exercising the proof environment
 
@@ -182,6 +182,15 @@ Cloudflare. Nothing is deployed by a push or a pull request.
      same run: pushes the sealed image, applies the proof migration to the proof database, deploys
      `--env proof` with `--containers-rollout immediate` and a configuration generated at deploy time (the real D1
      database id, the registry image digest, the revision), and attaches the custom domain `proof.arcforges.com`.
+   - `observe` runs `npm run observe:proof` in the same access job instead of the probes: a read-only report of the
+     proof Container application `arcforges-cloud-proof-foundationcontainer-proof` from the provider's own records
+     (CLOUD.71). It prints the configured `max_instances`, instance type, scheduling policy, version and image digest; the
+     listed instances by state, version and location; each named Durable Object (`hello`, `foundation`) with its
+     instance, state, version, location and times; allowlisted fields of the application, its status and its newest
+     rollouts; and whether the deployment token may query Workers Logs (one dry query whose answer is reduced to its
+     HTTP status). It creates, changes and deploys nothing, sends no request to the deployed service, and prints no
+     token, secret, environment value, image registry path or log line. A stopped or stopping instance that is still
+     listed, a single usable location and instances of an older version are therefore visible next to each other.
 2. **Secrets.** `HMAC_C2W_SECRET`, `HMAC_W2C_SECRET` and `CSRF_SECRET` are 256-bit random values generated inside the
    deploy step, written to a runner-local file that Wrangler uploads with the Worker version (`--secrets-file`), and
    removed immediately. They are never printed, committed or stored elsewhere, and a redeploy rotates them. There is
@@ -274,9 +283,16 @@ waits, for at most twelve minutes (a fresh deployment needs about ten to provisi
 expected revision (the checked-out commit, or `PROOF_EXPECTED_REVISION`); that instance is only a signal that the platform now
 starts the new image. It then stops the foundation instance (the stop must succeed) and restarts it with a readiness call whose
 reply carries the host's own compiled revision, which must equal the expected one; the exact-value and egress scenarios run
-against that foundation instance. The proof environment (and only it) allows two Container instances, because the Hello
-`/api` instance and the foundation instance are separate Durable Object instances of one class and contended for the single
-slot with `max_instances: 1`; production keeps one instance. The Hello scenario retries thrown errors within its 150 second deadline; each request is bounded by the remaining time, so it cannot overrun the deadline by an iteration.
+against that foundation instance. The proof environment (and only it) allows more than one Container instance, because the
+Hello `/api` instance and the foundation instance are separate Durable Object instances of one class and contended for the
+single slot with `max_instances: 1`; production keeps one instance. Raising the ceiling to 2 did not end the contention: a
+probe of 2026-10-06 (CLOUD.71's completion follow-up, under the lease) saw only one of the two named instances run at a time.
+While one held a container, every start of the other ended in the classified 503 after the library's retry loop (about 30
+seconds) for as long as the holder stayed active, ten minutes in one case, and the refused instance started within seconds
+after the holder's 60 second idle stop. The recurring "cold" Hello start of about 76 seconds in the earlier live runs is that
+idle time plus one retry loop; a start with a free instance took 1.6 to 14 seconds. The ceiling is therefore 4, a limit with
+headroom for the two names and not a minimum, and `npm run observe:proof` (above) reads which provider state caused the
+contention, before and after the change. The Hello scenario retries thrown errors within its 150 second deadline; each request is bounded by the remaining time, so it cannot overrun the deadline by an iteration.
 
 The operator `readiness` operation (CLOUD.08) reports the Container, D1, the Durable Object, R2, the Queue and the ingress
 separately, with a closed reason for each component that is not ready; the runner's progress text names them, so a wait that
@@ -327,8 +343,8 @@ does not prove that the constants are twelve hours and thirty minutes (the offli
   contracts 05 section 2 do not.
 - The R2 facade (`/internal/objects/v1/probe/...`) and `worker/proof-migrations/0001_foundation_probe.sql` are
   proof-only. They are not the CON.15 job-object ports and are not part of the global D1 migration sequence.
-- The proof environment binds `FoundationContainer` and not the production class; only the proof environment runs two Container
-  instances (`max_instances: 2`).
+- The proof environment binds `FoundationContainer` and not the production class; only the proof environment may run more than
+  one Container instance (`max_instances: 4` for its two named instances).
 
 ## Validation actually performed
 

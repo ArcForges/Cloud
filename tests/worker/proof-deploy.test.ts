@@ -442,13 +442,15 @@ test("the Hello ingress scenario retries thrown errors within its deadline", asy
   }
 });
 
-test("only the proof environment may run two Container instances", () => {
+test("only the proof environment may run more than one Container instance", () => {
   const top = wrangler as unknown as { containers: { max_instances: number }[] };
   assert.equal(top.containers[0]?.max_instances, 1, "production keeps one instance");
+  // CLOUD.71: with a ceiling of 2 the provider ran only one of the two named instances (hello, foundation) at a
+  // time; the ceiling leaves headroom so both can run at once. It is a ceiling, not a minimum: two names exist.
   assert.equal(
     (wrangler.env.proof.containers[0] as { max_instances?: number }).max_instances,
-    2,
-    "the proof Hello instance and the foundation instance must not contend for one slot",
+    4,
+    "the proof Hello instance and the foundation instance must be able to run at the same time",
   );
 });
 
