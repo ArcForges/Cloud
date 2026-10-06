@@ -26,7 +26,7 @@
           "subject": "ada@example.test",
           "label": null,
           "passkey": null,
-          "password": null,
+          "passwordHash": null,
           "createdAt": 1790000000123456
         },
         "displayName": "Ada Lovelace",
@@ -390,7 +390,7 @@
             "transports": "[\"internal\",\"hybrid\"]",
             "signCount": 0
           },
-          "password": null,
+          "passwordHash": null,
           "createdAt": 1790000003123456
         },
         "displayName": "Bob",
@@ -753,7 +753,7 @@
           "subject": "ada",
           "label": "Café ключ 😀",
           "passkey": null,
-          "password": "verifier-example",
+          "passwordHash": "verifier-example",
           "createdAt": 1790000001123456
         }
       },
@@ -1025,7 +1025,7 @@
           "subject": "https://issuer.example.test|sub-42",
           "label": "Corporate sign-in",
           "passkey": null,
-          "password": null,
+          "passwordHash": null,
           "createdAt": 1790000002123456
         }
       },

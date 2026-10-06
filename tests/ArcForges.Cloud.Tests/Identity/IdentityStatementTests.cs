@@ -54,7 +54,7 @@ public sealed class IdentityStatementTests
 
         return new AuthIdentity(
             AuthIdentityId.Parse(S(input, "credentialId")), UserId.Parse(S(input, "user")), RealmId.Parse(S(input, "realm")),
-            S(input, "provider"), (AuthMethod)input.GetProperty("method").GetInt32(), S(input, "subject"), N(input, "label"), passkey, N(input, "password"),
+            S(input, "provider"), (AuthMethod)input.GetProperty("method").GetInt32(), S(input, "subject"), N(input, "label"), passkey, N(input, "passwordHash"),
             new UtcMicros(L(input, "createdAt")), null, null, 1);
     }
 

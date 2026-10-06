@@ -48,7 +48,8 @@ export interface CredentialInput {
   subject: string;
   label: string | null;
   passkey: PasskeyInput | null;
-  password: string | null;
+  /** Stored versioned salted password verifier, matching password_hash; never a plaintext password. */
+  passwordHash: string | null;
   createdAt: number;
 }
 
@@ -88,7 +89,7 @@ export function credentialRow(c: CredentialInput): D1Scalar[] {
     i64(c.createdAt),
     txt(c.realm),
     txt(c.provider),
-    maybeText(c.password),
+    maybeText(c.passwordHash),
   ];
 }
 
@@ -187,7 +188,7 @@ export function enrollArguments(e: EnrollInputs): D1Scalar[][] {
     String(c.method),
     c.subject,
     c.label,
-    c.password,
+    c.passwordHash,
     p ? Buffer.from(mustDecode(p.publicKey)).toString("base64") : null,
     p ? Buffer.from(mustDecode(p.userHandle)).toString("base64") : null,
     p?.backupEligible == null ? null : p.backupEligible ? "True" : "False",
@@ -590,7 +591,7 @@ export function credential(
     subject,
     label: null,
     passkey: null,
-    password: null,
+    passwordHash: null,
     createdAt: nowMicros,
     ...overrides,
   };

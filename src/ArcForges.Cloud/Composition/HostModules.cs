@@ -5,8 +5,8 @@ using ArcForges.Cloud.Foundation;
 using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Storage;
-using ArcForges.Cloud.Storage.ModuleBinding;
 using ArcForges.Cloud.Storage.FamilyBinding;
+using ArcForges.Cloud.Storage.ModuleBinding;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ArcForges.Cloud.Composition;

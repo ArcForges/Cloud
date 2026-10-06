@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-using ArcForges.Cloud.Modules.Identity.Core.Domain;
 using System.Text;
+using ArcForges.Cloud.Modules.Identity.Core.Domain;
 
 namespace ArcForges.Cloud.Modules.Identity.Core.Application;
 
