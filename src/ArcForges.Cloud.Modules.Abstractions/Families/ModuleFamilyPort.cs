@@ -5,7 +5,11 @@ namespace ArcForges.Cloud.Modules;
 public sealed record ModuleFamilyContribution(string Owner, string Class, string Key, IReadOnlyList<PlanValue> Arguments);
 
 /// <summary>A complete family transaction: registered plan, typed owner contributions and the shared commit tail. No SQL or storage types cross this boundary.</summary>
-public sealed record ModuleFamilyWrite(string FamilyId, string PlanId, string OwnerScope, IReadOnlyList<ModuleFamilyContribution> Contributions, ModuleCommit Commit);
+public sealed record ModuleFamilyWrite(string FamilyId, string PlanId, string OwnerScope, IReadOnlyList<ModuleFamilyContribution> Contributions, ModuleCommit Commit,
+    IReadOnlyList<IModuleFamilyContributionSet>? Participants = null);
+
+/// <summary>Opaque owner-bound contributions. Only the storage adapter's issuing factory can create a set it will accept; a caller cannot assert a foreign owner.</summary>
+public interface IModuleFamilyContributionSet;
 
 /// <summary>The stable command identity used to check a receipt before deciding whether an enrollment creates anything.</summary>
 public sealed record ModuleCommandIdentity(Guid CommandId, Guid? WorkspaceId, string ActorRef, string Operation, string RequestHash);
@@ -13,6 +17,9 @@ public sealed record ModuleCommandIdentity(Guid CommandId, Guid? WorkspaceId, st
 /// <summary>A module's capability to execute registered families. Foreign contributions and non-participants are refused before execution.</summary>
 public interface IModuleFamilyPort
 {
+    /// <summary>Seals this module's contributions for one exact registered family plan. A coordinator combines the resulting capabilities without seeing or changing their content.</summary>
+    IModuleFamilyContributionSet Contribute(string familyId, string planId, IReadOnlyList<ModuleFamilyContribution> contributions);
+
     /// <summary>Succeeded means no receipt was seen; every other status follows the same vocabulary as plan execution. A replay returns its stored result.</summary>
     Task<ModulePlanOutcome> InspectAsync(string familyId, ModuleCommandIdentity identity, CancellationToken cancellationToken);
 

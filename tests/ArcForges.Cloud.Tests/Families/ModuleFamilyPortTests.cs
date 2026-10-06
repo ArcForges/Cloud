@@ -50,4 +50,76 @@ public sealed class ModuleFamilyPortTests
         executor.Handler = _ => throw new PlanFailureException(PlanFailureKind.Unavailable);
         Assert.Equal(ModulePlanStatus.Unavailable, (await port.InspectAsync("account-enrollment", Identity, TestContext.Current.CancellationToken)).Status);
     }
+
+    [Theory]
+    [InlineData("hash", 2, 1000, ModulePlanStatus.Replayed)]
+    [InlineData("different", 2, 1000, ModulePlanStatus.ReusedIdentifier)]
+    [InlineData("hash", 2, 0, ModulePlanStatus.ReceiptExpired)]
+    [InlineData("hash", 3, 1000, ModulePlanStatus.ReplayedFailure)]
+    [InlineData("hash", 1, 1000, ModulePlanStatus.UnknownOutcome)]
+    public async Task EveryReceiptOutcomeIsTypedAndRefusalsNeverExposeStoredResults(string hash, int status, long expiresAfter, ModulePlanStatus expected)
+    {
+        var executor = new ScriptedExecutor
+        {
+            Handler = _ => ScriptedExecutor.Rows([
+                D1Values.Text(hash), D1Values.Int64(status), D1Values.Text("{\"original\":true}"), D1Values.Int64(1), D1Values.Null(),
+                D1Values.Int64(Samples.NowMicros + expiresAfter), D1Values.Text(Identity.ActorRef), D1Values.Text(Identity.Operation), D1Values.Null(),
+            ]),
+        };
+        var port = new ModuleFamilyPortFactory(executor, 9, new Clock()).For(ModuleDescriptor.Create("Identity", "identity"));
+        var outcome = await port.InspectAsync("account-enrollment", Identity, TestContext.Current.CancellationToken);
+        Assert.Equal(expected, outcome.Status);
+        if (expected is ModulePlanStatus.ReusedIdentifier or ModulePlanStatus.ReceiptExpired) Assert.Null(outcome.StoredResultJson);
+        Assert.Single(executor.Calls);
+    }
+
+    [Fact]
+    public async Task CancellationBeforeInspectionNeverCallsAnExecutor()
+    {
+        var executor = new ScriptedExecutor();
+        var port = new ModuleFamilyPortFactory(executor, 9, new Clock()).For(ModuleDescriptor.Create("Identity", "identity"));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => port.InspectAsync("account-enrollment", Identity, cancellation.Token));
+        Assert.Empty(executor.Calls);
+    }
+
+    [Fact]
+    public async Task OwnerCapabilitiesCombineAcrossModulesAndCannotBeForgedOrCrossFactories()
+    {
+        var storage = new ScriptedExecutor { Handler = call => call.Plan.Access == PlanAccess.Read ? ScriptedExecutor.Rows() : ScriptedExecutor.Changed() };
+        var factory = new ModuleFamilyPortFactory(storage, 1, new Clock());
+        var identity = factory.For(ModuleDescriptor.Create("Identity", "identity"));
+        var workspace = factory.For(ModuleDescriptor.Create("Workspace", "workspace"));
+        var write = FamilyPortFixture.Enrollment();
+        var workspaceItems = write.Contributions.Where(item => item.Owner == "workspace").ToArray();
+        var combined = write with
+        {
+            Contributions = write.Contributions.Where(item => item.Owner == "identity").ToArray(),
+            Participants = [workspace.Contribute(write.FamilyId, write.PlanId, workspaceItems)],
+        };
+        Assert.Equal(ModulePlanStatus.Succeeded, (await identity.WriteAsync(combined, TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(["platform.command-load", write.PlanId], storage.PlanIds);
+
+        storage.Calls.Clear();
+        var another = new ModuleFamilyPortFactory(storage, 1, new Clock()).For(ModuleDescriptor.Create("Workspace", "workspace"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => identity.WriteAsync(combined with { Participants = [another.Contribute(write.FamilyId, write.PlanId, workspaceItems)] }, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => identity.WriteAsync(combined with { Participants = [new ForgedSet()] }, TestContext.Current.CancellationToken));
+        Assert.Empty(storage.Calls);
+    }
+
+    private sealed class ForgedSet : IModuleFamilyContributionSet;
+
+    [Fact]
+    public async Task UnknownFamilyOutcomeReconcilesReceiptsAndNeverRetriesTheBatch()
+    {
+        var storage = new ScriptedExecutor
+        {
+            Handler = call => call.Plan.Access == PlanAccess.Read ? ScriptedExecutor.Rows() : throw new PlanFailureException(PlanFailureKind.UnknownOutcome),
+        };
+        var port = new ModuleFamilyPortFactory(storage, 1, new Clock()).For(ModuleDescriptor.Create("Identity", "identity"));
+        var write = FamilyPortFixture.Enrollment();
+        Assert.Equal(ModulePlanStatus.UnknownOutcome, (await port.WriteAsync(write, TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(["platform.command-load", write.PlanId, "platform.command-load"], storage.PlanIds);
+    }
 }
