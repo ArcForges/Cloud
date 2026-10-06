@@ -1,0 +1,12 @@
+title = "ArcForges Cloud exact public fixture allowance"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Reviewed public session codec bytes 0..31 golden vector; never an issued credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^tests/ArcForges\.Cloud\.Tests/Sessions/SessionTokenCodecTests\.cs$''']
+regexTarget = "line"
+regexes = ['''(?s)^\s*private const string Token = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";\s*$''']

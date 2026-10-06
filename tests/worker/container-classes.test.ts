@@ -51,6 +51,7 @@ const containerContext = {
 test("the production Container registers only exact closed commerce hosts", () => {
   assert.deepEqual(Object.keys(CloudContainer.outboundByHost ?? {}).sort(), [
     "api.paddle.com",
+    "capacity.internal",
     "sandbox-api.paddle.com",
   ]);
   assert.equal(CloudContainer.outboundHandlers, undefined);
@@ -88,6 +89,7 @@ test("the production Container keeps the Hello settings and no environment varia
 test("only the proof class carries private storage/object hosts alongside closed commerce", () => {
   assert.deepEqual(Object.keys(FoundationContainer.outboundByHost ?? {}).sort(), [
     "api.paddle.com",
+    "capacity.internal",
     "objects.internal",
     "sandbox-api.paddle.com",
     "storage.internal",
@@ -95,6 +97,7 @@ test("only the proof class carries private storage/object hosts alongside closed
   assert.equal(Object.getPrototypeOf(FoundationContainer), CloudContainer);
   assert.deepEqual(Object.keys(CloudContainer.outboundByHost ?? {}).sort(), [
     "api.paddle.com",
+    "capacity.internal",
     "sandbox-api.paddle.com",
   ]);
 
@@ -142,8 +145,10 @@ test("the locked SDK applies only exact-host HTTPS/HTTP interception without all
   await instance.applyOutboundInterception();
   assert.deepEqual(intercepted.sort(), [
     "http:api.paddle.com",
+    "http:capacity.internal",
     "http:sandbox-api.paddle.com",
     "https:api.paddle.com",
+    "https:capacity.internal",
     "https:sandbox-api.paddle.com",
   ]);
   assert.equal(properties[0]?.enableInternet, false);

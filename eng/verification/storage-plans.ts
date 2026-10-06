@@ -121,7 +121,7 @@ export function parseOwnerRegistry(text: string): OwnerRegistry {
 }
 
 interface SqlToken {
-  kind: "word" | "string" | "number" | "punct";
+  kind: "word" | "string" | "number" | "punct" | "column";
   /** Words are ASCII-lower-cased (SQLite folds only ASCII); everything else is kept as written. */
   value: string;
 }
@@ -134,8 +134,9 @@ const asciiLower = (text: string) => text.replaceAll(/[A-Z]+/gu, (match) => matc
 /**
  * Splits one SQL statement the way SQLite does for the constructs this check cares about: comments are
  * whitespace, string literals are single tokens, and every character at or above U+0080 belongs to a word.
- * Double-quoted, backtick and bracket identifiers are refused outright because they would name a table
- * without being a word; an unterminated literal or comment is refused too.
+ * Quoted identifiers remain closed except the exact reserved column "limit", emitted as a column
+ * token so it can never become a table, alias, CTE name or FROM-clause ender. Ownership additionally
+ * requires the real entitlement_quota_budget table. Unterminated literals/comments are refused.
  */
 export function tokenizeSql(sql: string, where: string): SqlToken[] {
   const tokens: SqlToken[] = [];
@@ -165,6 +166,32 @@ export function tokenizeSql(sql: string, where: string): SqlToken[] {
       }
       tokens.push({ kind: "string", value: sql.slice(index, end) });
       index = end;
+    } else if (char === '"' && sql.slice(index, index + 7) === '"limit"') {
+      const previous = tokens.at(-1);
+      assert(
+        previous &&
+          ((previous.kind === "punct" &&
+            ["(", ".", ",", "+", "-", "*", "/", "%", "=", "<", ">", "!", "|"].includes(
+              previous.value,
+            )) ||
+            (previous.kind === "word" &&
+              [
+                "select",
+                "set",
+                "where",
+                "and",
+                "or",
+                "when",
+                "then",
+                "else",
+                "distinct",
+                "by",
+              ].includes(previous.value))),
+        `${where}: quoted identifiers are not allowed in table or alias positions`,
+      );
+      assert(sql.charAt(index + 7) !== ".", `${where}: a quoted column cannot qualify a table`);
+      tokens.push({ kind: "column", value: "limit" });
+      index += 7;
     } else if (char === '"' || char === "`" || char === "[" || char === "]") {
       assert.fail(`${where}: quoted identifiers are not allowed`);
     } else if (isWordStart(code)) {
@@ -183,6 +210,12 @@ export function tokenizeSql(sql: string, where: string): SqlToken[] {
       index++;
     }
   }
+  for (let at = 0; at < tokens.length; at++)
+    if (tokens[at]?.kind === "column")
+      assert(
+        !(tokens[at + 1]?.kind === "punct" && tokens[at + 1]?.value === "."),
+        `${where}: a quoted column cannot qualify a table`,
+      );
   return tokens;
 }
 
@@ -329,6 +362,10 @@ export function referencedTables(sql: string, where: string): string[] {
     if (!tables.includes(target.value)) tables.push(target.value);
   }
   assert.equal(depth, 0, `${where}: unbalanced parentheses`);
+  assert(
+    !tokens.some((token) => token.kind === "column") || tables.includes("entitlement_quota_budget"),
+    `${where}: quoted limit column requires the real entitlement_quota_budget table`,
+  );
   return tables;
 }
 /** A plan of `owner` may touch only its own tables, and the shared platform tables unless it is a proof owner. */

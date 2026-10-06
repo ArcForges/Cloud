@@ -216,9 +216,9 @@ public sealed class CatalogueTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Publisher.PublishAsync(request, duringSource.Token));
         h.Authority.Block = false;
         h.Authority.Approve(request);
-        var unavailable = new FaultPort(h.Port, ModulePlanStatus.Unavailable);
+        using var duringRetry = new CancellationTokenSource();
+        var unavailable = new FaultPort(h.Port, ModulePlanStatus.Unavailable, onRefusal: duringRetry.Cancel);
         var publisher = new CataloguePublisher(new D1CatalogueStore(unavailable), h.Authority, h.Clock, TimeSpan.FromDays(7));
-        using var duringRetry = new CancellationTokenSource(TimeSpan.FromMilliseconds(10));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => publisher.PublishAsync(request, duringRetry.Token));
         Assert.Single(unavailable.Writes);
         Assert.Equal(0, await h.Count("platform_command"));
@@ -396,7 +396,7 @@ public sealed class CatalogueTests
     }
 
     // Fault injection only at unavailable transport/outcome boundary; all successful calls use the actual plans and receipt adapter.
-    private sealed class FaultPort(IModulePlanPort inner, ModulePlanStatus fault, bool applyFirst = false) : IModulePlanPort
+    private sealed class FaultPort(IModulePlanPort inner, ModulePlanStatus fault, bool applyFirst = false, Action? onRefusal = null) : IModulePlanPort
     {
         internal List<ModulePlanWrite> Writes { get; } = [];
         public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken cancellationToken) => inner.ReadAsync(read, cancellationToken);
@@ -404,7 +404,11 @@ public sealed class CatalogueTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Writes.Add(write);
-            if (!applyFirst) return ModulePlanOutcome.Of(fault);
+            if (!applyFirst)
+            {
+                onRefusal?.Invoke();
+                return ModulePlanOutcome.Of(fault);
+            }
             if (Writes.Count == 1)
             {
                 Assert.Equal(ModulePlanStatus.Succeeded, (await inner.WriteAsync(write, cancellationToken)).Status);

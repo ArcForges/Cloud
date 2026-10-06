@@ -5,6 +5,9 @@
   "compatibility_date": "2026-09-15",
   "workers_dev": false,
   "preview_urls": false,
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "routes": [
     {
       "pattern": "arcforges.com/api/*",
@@ -24,6 +27,10 @@
       {
         "name": "CLOUD_CONTAINER",
         "class_name": "CloudContainer"
+      },
+      {
+        "name": "CAPACITY_PACER",
+        "class_name": "CapacityJobPacer"
       }
     ]
   },
@@ -31,6 +38,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["CloudContainer"]
+    },
+    {
+      "tag": "capacity-pacer-v1",
+      "new_sqlite_classes": ["CapacityJobPacer"]
     }
   ],
   "ratelimits": [
@@ -59,6 +70,9 @@
       "name": "arcforges-cloud-proof",
       "workers_dev": false,
       "preview_urls": false,
+      "triggers": {
+        "crons": ["* * * * *"]
+      },
       "routes": [
         {
           "pattern": "proof.arcforges.com",
@@ -88,6 +102,10 @@
           {
             "name": "JOB_COORDINATOR",
             "class_name": "FoundationJobCoordinator"
+          },
+          {
+            "name": "CAPACITY_PACER",
+            "class_name": "CapacityJobPacer"
           }
         ]
       },
@@ -95,6 +113,10 @@
         {
           "tag": "v1",
           "new_sqlite_classes": ["FoundationContainer", "FoundationJobCoordinator"]
+        },
+        {
+          "tag": "capacity-pacer-v1",
+          "new_sqlite_classes": ["CapacityJobPacer"]
         }
       ],
       "d1_databases": [

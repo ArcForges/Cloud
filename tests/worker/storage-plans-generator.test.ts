@@ -7,6 +7,8 @@ import path from "node:path";
 import test from "node:test";
 import {
   buildManifest,
+  assertOwnership,
+  parseOwnerRegistry,
   generate,
   manifestHashOf,
   normalizePlanText,
@@ -255,4 +257,42 @@ test("every checked-in plan is DML-only, scoped and exact", () => {
         `${plan.id} is not scoped`,
       );
   }
+});
+
+test("exact reserved quota limit column parses while other quotes and alias/table uses stay closed", () => {
+  const text = `-- plan: entitlement.quota-column-test
+-- version: 1
+-- access: read
+-- maxRows: 1
+-- statement: params=scope returns=int64
+SELECT CAST("limit" AS TEXT) FROM entitlement_quota_budget WHERE scope_id = ?;
+`;
+  const owningFile = "storage/plans/entitlement/quota-column-test.sql";
+  const owningRegistry = parseOwnerRegistry(
+    readFileSync(path.join(repositoryRoot, ownerRegistry), "utf8"),
+  );
+  const checked = (value: string) => {
+    const plan = parsePlanFile(value, owningFile);
+    assertOwnership(plan, owningRegistry);
+    return plan;
+  };
+  const parsed = checked(text);
+  assert.equal(parsed.statements[0]?.returns?.[0]?.kind, "int64");
+  assertOwnership(
+    parsed,
+    parseOwnerRegistry(readFileSync(path.join(repositoryRoot, ownerRegistry), "utf8")),
+  );
+  for (const quoted of ['"Limit"', '"li""mit"', "`limit`", "[limit]", '"limit'])
+    assert.throws(() => checked(text.replace('"limit"', quoted)), /quoted identifiers/u);
+  for (const sql of [
+    'SELECT 1 FROM "limit" WHERE scope_id = ?;',
+    'SELECT 1 FROM entitlement_quota_budget AS "limit" WHERE scope_id = ?;',
+    'SELECT 1 FROM entitlement_quota_budget "limit" WHERE scope_id = ?;',
+    'SELECT scope_id "limit" FROM entitlement_quota_budget WHERE scope_id = ?;',
+    'SELECT "limit" . scope_id FROM entitlement_quota_budget WHERE scope_id = ?;',
+  ])
+    assert.throws(
+      () => checked(text.replace(/SELECT[\s\S]*;/u, sql)),
+      /quoted (?:identifiers|column)/u,
+    );
 });
