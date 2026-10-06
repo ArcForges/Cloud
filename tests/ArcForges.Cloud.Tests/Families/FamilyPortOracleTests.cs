@@ -56,4 +56,21 @@ public sealed class FamilyPortOracleTests
         Assert.Equal(1, await executor.CountAsync("platform_command", cancellationToken: cancellation));
         Assert.Equal(0, await executor.CountAsync("platform_command_guard", cancellationToken: cancellation));
     }
+
+    [Fact]
+    public async Task ConcurrentSameCommandHasOneCommittedEffectAndEveryOtherWriterReplays()
+    {
+        using var executor = new SqliteBridgeExecutor();
+        var factory = new ModuleFamilyPortFactory(executor, executor.Generation, new Clock());
+        var write = FamilyPortFixture.Enrollment();
+        var cancellation = TestContext.Current.CancellationToken;
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ =>
+            factory.For(ModuleDescriptor.Create("Identity", "identity")).WriteAsync(write, cancellation)));
+        Assert.Equal(1, results.Count(result => result.Status == ModulePlanStatus.Succeeded));
+        Assert.Equal(7, results.Count(result => result.Status == ModulePlanStatus.Replayed));
+        Assert.Equal(1, await executor.CountAsync("identity_user", cancellationToken: cancellation));
+        Assert.Equal(1, await executor.CountAsync("platform_outbox", cancellationToken: cancellation));
+        Assert.Equal(1, await executor.CountAsync("platform_change_archive", cancellationToken: cancellation));
+        Assert.Equal(0, await executor.CountAsync("platform_command_guard", cancellationToken: cancellation));
+    }
 }
