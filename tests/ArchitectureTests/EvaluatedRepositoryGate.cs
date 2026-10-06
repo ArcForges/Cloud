@@ -16,6 +16,26 @@ public sealed class EvaluatedRepositoryGate
     /// <summary>The public Cloud API and the real test methods that exercise each member. A new public member fails RP-10 until mapped here.</summary>
     private static readonly (string Api, string Method, string TestType, string[] Tests)[] ApiTests =
     [
+        ("ArcForges.Cloud.Modules.Commerce.Adapters.BillingProviderFactory", "Create", "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
+            ["FactoryUsesFixedEnvironmentAuthenticationAndNormalizesPriceAndRegions", "TimeoutAndDisposalCancelActualInFlightOperationsAndDisposalIsIdempotent"]),
+        ("ArcForges.Cloud.Modules.Commerce.Adapters.CustomerPortalLink", "ToString", "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
+            ["CustomerPortalIsBoundToCustomerAndItsTemporaryTokenIsNotInDiagnostics"]),
+        ("ArcForges.Cloud.Modules.Commerce.Adapters.IBillingProvider", "GetPriceAsync", "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
+            ["FactoryUsesFixedEnvironmentAuthenticationAndNormalizesPriceAndRegions"]),
+        ("ArcForges.Cloud.Modules.Commerce.Adapters.IBillingProvider", "CreateCheckoutAsync", "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
+            ["CheckoutBindsCapturedTermsAndServerMetadataBeforeOneRealMutation", "RegionTermsApprovalAndRenewalCapsAreRealAdmissionChecks", "CapturedRegionalCurrencyCanCheckoutWithoutCurrencyFallback"]),
+        .. new[] { "GetTransactionAsync", "ListTransactionsAsync", "GetSubscriptionAsync", "ListSubscriptionsAsync", "GetAdjustmentAsync", "ListAdjustmentsAsync", "ListEventsAsync" }
+            .Select(member => ("ArcForges.Cloud.Modules.Commerce.Adapters.IBillingProvider", member, "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
+                new[] { "TransactionsSubscriptionsAdjustmentsAndEventPagesAreNormalizedWithoutInstrumentData" })),
+        .. new[] { "CancelSubscriptionAsync", "ReactivateScheduledCancellationAsync" }
+            .Select(member => ("ArcForges.Cloud.Modules.Commerce.Adapters.IBillingProvider", member, "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
+                new[] { "CancelAtPeriodEndAndReactivationUseExactMutationContracts" })),
+        ("ArcForges.Cloud.Modules.Commerce.Adapters.IBillingProvider", "CreateRefundAsync", "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
+            ["FullAndPartialRefundReturnPendingApprovalRatherThanClaimingSuccess"]),
+        ("ArcForges.Cloud.Modules.Commerce.Adapters.IBillingProvider", "CreateCustomerPortalAsync", "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
+            ["CustomerPortalIsBoundToCustomerAndItsTemporaryTokenIsNotInDiagnostics", "CrossCustomerPortalRequestIsRefusedBeforeMutation"]),
+        ("ArcForges.Cloud.Modules.Commerce.Adapters.IBillingProvider", "VerifyWebhook", "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
+            ["RawBodySignaturesRotationFreshnessAndStableReplayIdentityAreVerified", "AuthenticatedMalformedPayloadIsQuarantinedAndUnknownEventStaysUnsupported"]),
         ("ArcForges.Cloud.HelloEndpoint", "SayHello", "ArcForges.Cloud.Tests.HelloEndpointTests",
             ["PreservesThePublishedGreeting", "EmptyNameHasThePublishedStatus", "OversizedNameIsResourceExhausted"]),
         ("ArcForges.Cloud.BuildIdentity", "Resolve", "ArcForges.Cloud.Tests.BuildIdentityTests",
