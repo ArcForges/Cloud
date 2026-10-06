@@ -14,6 +14,8 @@ import {
   type RecoveryState,
 } from "../../worker/capacity/recovery.ts";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { repositoryRoot } from "./support/sqlite-d1.ts";
 import test from "node:test";
 import {
   CapacityPacer,
@@ -635,4 +637,58 @@ test("schedule body has bounded copied storage and refuses starvation or caller 
   });
   assert.equal((await handleCapacitySchedule(cancelledRequest, env)).status, 503);
   assert.equal(calls, 0);
+});
+
+test("the exact public session-vector exception cannot suppress changed or neighboring credentials", () => {
+  const result = spawnSync(
+    "python",
+    ["-c", "import json,tomllib;print(json.dumps(tomllib.load(open('.gitleaks.toml','rb'))))"],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const config = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(config).sort(), ["allowlists", "extend", "title"]);
+  assert.deepEqual(config.extend, { useDefault: true });
+  assert.equal(config.allowlists.length, 1);
+  const allowance = config.allowlists[0];
+  assert.deepEqual(Object.keys(allowance).sort(), [
+    "condition",
+    "description",
+    "paths",
+    "regexTarget",
+    "regexes",
+    "targetRules",
+  ]);
+  assert.deepEqual(allowance.targetRules, ["generic-api-key"]);
+  assert.equal(allowance.condition, "AND");
+  assert.equal(allowance.regexTarget, "line");
+  const file = "tests/ArcForges.Cloud.Tests/Sessions/SessionTokenCodecTests.cs";
+  const value = Buffer.from(Array.from({ length: 32 }, (_, index) => index)).toString("base64url");
+  const line = `    private const string Token = "${value}";`;
+  assert.deepEqual(allowance.paths, [
+    String.raw`^tests/ArcForges\.Cloud\.Tests/Sessions/SessionTokenCodecTests\.cs$`,
+  ]);
+  assert.deepEqual(allowance.regexes, [
+    String.raw`(?s)^\s*private const string Token = "${value}";\s*$`,
+  ]);
+  const source = spawnSync("git", ["show", `e665ab63306e0f124d743f8fc29661b21633d128:${file}`], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  });
+  assert.equal(source.status, 0, source.stderr);
+  assert.equal(source.stdout.split(/\r?\n/u)[8], line); // Observed generic-api-key line9, immutable introducing checkpoint.
+  const pathPattern = new RegExp(allowance.paths[0], "u");
+  const linePattern = new RegExp(allowance.regexes[0].replace(/^\(\?s\)/u, ""), "su");
+  const allowed = (rule: string, path: string, content: string) =>
+    allowance.targetRules.includes(rule) && pathPattern.test(path) && linePattern.test(content);
+  assert(allowed("generic-api-key", file, line));
+  assert(!allowed("other-rule", file, line));
+  assert(!allowed("generic-api-key", "tests/OtherToken.cs", line));
+  assert(!allowed("generic-api-key", `${file}.bak`, line));
+  assert(!allowed("generic-api-key", file, line.replace(value, `${value.slice(0, -1)}9`)));
+  assert(!allowed("generic-api-key", file, `${line} private const string ApiKey = "other";`));
+  assert(!allowed("generic-api-key", file, `private const string ApiKey = "other";\n${line}`));
 });
