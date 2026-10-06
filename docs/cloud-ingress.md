@@ -171,6 +171,10 @@ The proof probe shows the replies: every unary reply and every stream frame carr
 `Whoami` with request field 10 set to 1 returns an acknowledged domain refusal (gRPC OK) with an `ArcError` in field 11
 (`state.not_found`) that carries the identity.
 
+## Static profile assets on the proof origin (CLOUD.71)
+
+On the proof origin only, static assets answer the two Web profile paths (`/account/`, `/chat/`) and the shared `/assets/`, `/favicon.svg` and `/robots.txt`. Every route family of this document (`/api/*`, `/session/v1/*`, `/proof/v1/*`) is configured Worker-first, so no asset can shadow or answer them, and the pipeline's deny-by-default admission is unchanged: the assets add no method, policy or credential. Production serves no assets. See [prf-07-foundation-proof](prf-07-foundation-proof.md#serving-the-built-web-profiles-cloud71) for the pinned bundle, its verification and what was and was not observed.
+
 ## Known limits
 
 - **Revocation and a running stream.** A session and its owner are validated when a call is admitted, not again while a stream runs.
