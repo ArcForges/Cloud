@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "162ee0b984a7a0d759f976b7e3c1c9e02c791b63",
+  "sourceCommit": "91448a4a9a41b0a3f73548719c7ff244fe0acc7e",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -89,7 +89,7 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "ArcForges delivery worker w-codex-20261006-catalog (maintainer admission; independent exact-head PR review required)",
     "date": "2026-10-06",
-    "rationale": "CLOUD.07 delivers real persistent Entitlement quota Used/Held and reservation lifecycle, infrastructure-owned Platform jobs, bounded primary recovery, lease/fence guarded slices, strict approved capacity admission, private signed pacing and a complete bounded load runner with durable predispatch intent journaling. Actual owner SQL/Worker SQLite and managed components cover concurrency, expiry/takeover, immutable input capture, safe receipt reconciliation, cancellation, transient reconnect, definite-refusal pagination fairness, and cleanup. The complete focused managed suite55 and Worker/generator41 cases passed without skips on the actual accepted CLOUD.75 baseline. This immutable r49/cloud07r1 successor binds the real locked Wrangler bundle (370554 bytes), 114 parsed/45 emitted Worker inputs and 207 Native AOT build inputs. Only authored AGPL first-party capacity/quota code and its generated named-plan dictionary are added; existing packages, dependency coordinates, external imports, pinned images and complete legal grants are unchanged. All accepted and historical immutable records/profiles remain unchanged; these records supersede actual accepted r48/cloud75r2. CLOUD.21 signed production executor/current authority and CLOUD.76 approved operator profile/inventory/fixture/load authority composition remain required completion producers; absent sources fail closed and never grant fake business or operator authorization. This is implementation source delivery, separate from producer-complete acceptance and the full60-minute launch series. Component fakes only model unavailable external sources/transport; they prove neither deployment, real provider limits nor OS isolation. Production routes/data, workers.dev=false, preview protection and default-disabled capacity behavior remain preserved. Final independent exact-head review and all applicable CI are required before merge.",
+    "rationale": "CLOUD.07 retains the independently reviewed complete capacity/quota/job/pacing/load implementation and production fail-closed authority contracts. Hosted exact 60597589371e1a55cb2db3e77d31515145f68a03 run 37546515566 compiled successfully and passed all 1304 managed tests with zero skips; Windows Source, dependency/security audit, dependency review and every CodeQL language gate passed. Linux Source refused five owned C# files solely for whitespace/import ordering. The pinned SDK 10.0.401 scoped formatter corrected those files without changing business logic; the corrected source is resealed and must pass fresh applicable CI plus independent exact-head delta review. This additive r50/cloud07r2 binds four reformatted shipping image inputs and the unchanged real 370554-byte Worker (114 parsed/45 emitted inputs), with the same 207 image inputs and full existing dependency/legal closure. All r49/cloud07r1 and accepted r48/cloud75r2 immutable profiles/records/receipts remain byte-identical; this successor supersedes r49/cloud07r1 linearly. The reviewed precise public fixed bytes 0..31 session vector scanner exception and hostile-path/hash/adjacent-credential maintenance controls remain enforced; no actual credentials are exempted. Required CLOUD.21/CLOUD.76 real executor/current-generation/operator profile authority composition and CLOUD.70 whole-series acceptance remain separate mandatory completion work. Missing authorities refuse operations; these contracts do not simulate successful authorization. Production routes/data, workers.dev=false and default-disabled capacity settings are preserved. This is implementation delivery, with no mocked deployment, merchant/account, OS isolation or full 60-minute system acceptance claim.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -1001,7 +1001,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-07-cloud-worker-bundle-r1", "cloud-07-cloud-runtime-notices-r1"],
+  "artifactRecords": ["cloud-07-cloud-worker-bundle-r2", "cloud-07-cloud-runtime-notices-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1015,7 +1015,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-07-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-07-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
