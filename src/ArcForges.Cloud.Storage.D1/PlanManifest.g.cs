@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "141e11a1bba4e93727a66e83ba1e9942f56d721dc1527be7c74e860b3572593d";
+    public const string Hash = "a04a78fea1954bf0fa625ff4b39ce80e925fad92c9ebb0f72938bd88f2578606";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity
@@ -245,6 +245,61 @@ internal static class PlanManifest
             100,
             [
                 new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+    }
+
+    /// <summary>The reviewed plans of the commerce owner (<c>storage/plans/commerce</c>).</summary>
+    internal static class Commerce
+    {
+        public static readonly PlanDefinition CatalogueEffective = new(
+            "commerce.catalogue-effective",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bool), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Text)])
+            ]);
+
+        public static readonly PlanDefinition CatalogueList = new(
+            "commerce.catalogue-list",
+            1,
+            PlanAccess.Read,
+            101,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bool), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Text)])
+            ]);
+
+        public static readonly PlanDefinition CataloguePrice = new(
+            "commerce.catalogue-price",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bool), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Text)])
+            ]);
+
+        public static readonly PlanDefinition CataloguePublish = new(
+            "commerce.catalogue-publish",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bool), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bool), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition CatalogueState = new(
+            "commerce.catalogue-state",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bool), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
             ]);
     }
 
@@ -636,7 +691,7 @@ internal static class PlanManifest
             ]);
     }
 
-    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.UserLoad, Identity.UserRename, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser];
+    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.UserLoad, Identity.UserRename, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Commerce.CatalogueEffective, Commerce.CatalogueList, Commerce.CataloguePrice, Commerce.CataloguePublish, Commerce.CatalogueState, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser];
 
     /// <summary>The closed registry of shared transaction families (<c>storage/plans/families.json</c>, Design SU-01).</summary>
     public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = [
