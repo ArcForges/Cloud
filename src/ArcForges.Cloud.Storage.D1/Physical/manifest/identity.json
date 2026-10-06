@@ -29,6 +29,10 @@
     "identity.recovery_flow_state": {
       "source": "model 01 section 3 identity.recovery_flow.state (inline, listed order)",
       "values": ["pending", "proved", "completed", "expired", "denied"]
+    },
+    "identity.deletion_state": {
+      "source": "model 01 section 3 identity.account_deletion.state (reviewed immutable deletion lifecycle producer)",
+      "values": ["pending", "cancelled", "purging", "purged"]
     }
   },
   "tables": [
@@ -534,6 +538,113 @@
       ],
       "primaryKey": ["action_id"],
       "note": "state is text per the model's own field list (the OperatorProposalState registry enum exists but model 01 types this column text). Dual-control (different active subjects, exact proposal hash) is guarded-plan logic: it applies only to dual-control operations, so no row-level approver <> proposer check is written."
+    },
+    {
+      "name": "identity_account_deletion",
+      "model": "01 section 3 identity.account_deletion",
+      "columns": [
+        {
+          "name": "deletion_id",
+          "type": "id"
+        },
+        {
+          "name": "realm_id",
+          "type": "id"
+        },
+        {
+          "name": "user_id",
+          "type": "id"
+        },
+        {
+          "name": "requested_at",
+          "type": "instant"
+        },
+        {
+          "name": "grace_ends_at",
+          "type": "instant"
+        },
+        {
+          "name": "policy_version",
+          "type": "key"
+        },
+        {
+          "name": "grace_seconds",
+          "type": "int64"
+        },
+        {
+          "name": "previous_user_state",
+          "type": "enum",
+          "enum": "identity.user_state"
+        },
+        {
+          "name": "state",
+          "type": "enum",
+          "enum": "identity.deletion_state"
+        },
+        {
+          "name": "cancelled_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "completed_at",
+          "type": "instant",
+          "nullable": true
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["deletion_id"],
+      "indexes": [
+        {
+          "columns": ["user_id"],
+          "unique": true,
+          "where": "\"state\" IN (1, 3)",
+          "path": "one active pending or purging lifecycle per user"
+        },
+        {
+          "columns": ["state", "grace_ends_at"],
+          "path": "bounded deadline purge scheduling"
+        },
+        {
+          "columns": ["user_id", "requested_at"],
+          "path": "retained user lifecycle history"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": ["user_id"],
+          "references": {
+            "table": "identity_user",
+            "columns": ["user_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "deadline_duration",
+          "sql": "\"grace_seconds\" > 0 AND \"grace_seconds\" <= 9223372036854 AND \"requested_at\" >= 0 AND \"requested_at\" <= 9223372036854775807 - \"grace_seconds\" * 1000000 AND \"grace_ends_at\" = \"requested_at\" + \"grace_seconds\" * 1000000 AND \"grace_ends_at\" > \"requested_at\""
+        },
+        {
+          "name": "previous_state",
+          "sql": "\"previous_user_state\" IN (1, 2, 3)"
+        },
+        {
+          "name": "terminal_facts",
+          "sql": "(\"state\" IN (1, 3) AND \"cancelled_at\" IS NULL AND \"completed_at\" IS NULL) OR (\"state\" = 2 AND \"cancelled_at\" IS NOT NULL AND \"cancelled_at\" >= \"requested_at\" AND \"cancelled_at\" < \"grace_ends_at\" AND \"completed_at\" IS NULL) OR (\"state\" = 4 AND \"completed_at\" IS NOT NULL AND \"completed_at\" >= \"grace_ends_at\" AND \"cancelled_at\" IS NULL)"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": ["state", "cancelled_at", "completed_at", "rev"],
+          "when": "OLD.\"state\" IN (1, 3)"
+        },
+        "delete": "none"
+      },
+      "note": "Original disclosure, duration and previous user state are immutable; cancelled history is retained, re-request uses a new deletion_id, and user tombstone identity is never reused. Final full deletion coordination belongs to CLOUD17; this table does not assert external purge success."
     }
   ]
 }
