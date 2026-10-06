@@ -14,7 +14,9 @@ const read = (db: ReturnType<typeof commitDatabase>, id = realm) =>
   execute(db, "platform.recovery-current", [[txt(id)]], "platform");
 
 test("recovery authority has exactly one bounded Platform-owned read and no mutation", () => {
-  const plan = buildManifest(repositoryRoot).plans.find((candidate) => candidate.id === "platform.recovery-current");
+  const plan = buildManifest(repositoryRoot).plans.find(
+    (candidate) => candidate.id === "platform.recovery-current",
+  );
   assert(plan);
   assert.equal(plan.access, "read");
   assert.equal(plan.maxRows, 1);
@@ -25,21 +27,27 @@ test("recovery authority has exactly one bounded Platform-owned read and no muta
 test("current authority is realm-scoped, absent is empty, every durable state and version is freshly visible", async () => {
   const db = commitDatabase();
   assert.deepEqual((await read(db)).rows, []);
-  db.database.exec(`INSERT INTO platform_recovery_epoch VALUES ('${realm}',0,'fixture',zeroblob(32),4,1,1)`);
+  db.database.exec(
+    `INSERT INTO platform_recovery_epoch VALUES ('${realm}',0,'fixture',zeroblob(32),4,1,1)`,
+  );
   assert.deepEqual((await read(db)).rows, [[realm, "0", "4", "1"]]);
   assert.deepEqual((await read(db, other)).rows, []);
   for (const state of [1, 2, 3, 4]) {
     db.database.exec(`UPDATE platform_recovery_epoch SET state=${state}, rev=rev+1`);
     assert.deepEqual((await read(db)).rows, [[realm, "0", String(state), String(state + 1)]]);
   }
-  db.database.exec("UPDATE platform_recovery_epoch SET recovery_generation=9223372036854775807, rev=6");
+  db.database.exec(
+    "UPDATE platform_recovery_epoch SET recovery_generation=9223372036854775807, rev=6",
+  );
   assert.deepEqual((await read(db)).rows, [[realm, "9223372036854775807", "4", "6"]]);
   db.database.close();
 });
 
 test("concurrent read calls are side-effect free and return exact current authority", async () => {
   const db = commitDatabase();
-  db.database.exec(`INSERT INTO platform_recovery_epoch VALUES ('${realm}',7,'fixture',zeroblob(32),4,1,2)`);
+  db.database.exec(
+    `INSERT INTO platform_recovery_epoch VALUES ('${realm}',7,'fixture',zeroblob(32),4,1,2)`,
+  );
   const outcomes = await Promise.all(Array.from({ length: 12 }, () => read(db)));
   for (const outcome of outcomes) {
     assert.equal(outcome.ok, true);

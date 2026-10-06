@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "75eb666811a4496e1a61c638e830267e9f3e97273743157a2c2cfe310b9f19e4";
+    public const string Hash = "38dede9d91324fa358ec1c11e96c14aa26eb596a356dc28ddc0eb29128bbff02";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity
@@ -479,6 +479,15 @@ internal static class PlanManifest
                 new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64)], [new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
             ]);
 
+        public static readonly PlanDefinition RecoveryCurrent = new(
+            "platform.recovery-current",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+
         public static readonly PlanDefinition StreamFence = new(
             "platform.stream-fence",
             1,
@@ -722,7 +731,7 @@ internal static class PlanManifest
             ]);
     }
 
-    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.RecoveryActive, Identity.UserLoad, Identity.UserRename, Workspace.WorkspaceByOwner, Workspace.WorkspaceLoad, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Commerce.CatalogueEffective, Commerce.CatalogueList, Commerce.CataloguePrice, Commerce.CataloguePublish, Commerce.CatalogueState, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser];
+    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.RecoveryActive, Identity.UserLoad, Identity.UserRename, Workspace.WorkspaceByOwner, Workspace.WorkspaceLoad, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Commerce.CatalogueEffective, Commerce.CatalogueList, Commerce.CataloguePrice, Commerce.CataloguePublish, Commerce.CatalogueState, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.RecoveryCurrent, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser];
 
     /// <summary>The closed registry of shared transaction families (<c>storage/plans/families.json</c>, Design SU-01).</summary>
     public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = [

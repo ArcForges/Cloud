@@ -21,14 +21,14 @@ public sealed class RealmAuthorityTests
         using var database = new SqliteBridgeExecutor(0);
         var reader = new RecoveryEpochReader(new ModulePlanPortFactory(database, 0, TimeProvider.System), TimeProvider.System);
         var authority = Authority(reader);
-        Assert.Equal(RealmAuthorityFailure.MissingRecovery, (await authority.ResolveAsync(default)).Failure);
+        Assert.Equal(RealmAuthorityFailure.MissingRecovery, (await authority.ResolveAsync(TestContext.Current.CancellationToken)).Failure);
         await Seed(database);
-        var current = Assert.IsType<RealmAuthoritySnapshot>((await authority.ResolveAsync(default)).Snapshot);
+        var current = Assert.IsType<RealmAuthoritySnapshot>((await authority.ResolveAsync(TestContext.Current.CancellationToken)).Snapshot);
         Assert.Equal(new RealmAuthoritySnapshot(Realm, 7, 0, 1), current);
-        await database.ExecAsync("UPDATE platform_recovery_epoch SET state=1, rev=2", default);
-        Assert.Equal(RealmAuthorityFailure.ClosedRecovery, (await authority.ResolveAsync(default)).Failure);
-        await database.ExecAsync("UPDATE platform_recovery_epoch SET state=4, recovery_generation=1, rev=3", default);
-        Assert.Equal(RealmAuthorityFailure.StaleGeneration, (await authority.ResolveAsync(default)).Failure);
+        await database.ExecAsync("UPDATE platform_recovery_epoch SET state=1, rev=2", TestContext.Current.CancellationToken);
+        Assert.Equal(RealmAuthorityFailure.ClosedRecovery, (await authority.ResolveAsync(TestContext.Current.CancellationToken)).Failure);
+        await database.ExecAsync("UPDATE platform_recovery_epoch SET state=4, recovery_generation=1, rev=3", TestContext.Current.CancellationToken);
+        Assert.Equal(RealmAuthorityFailure.StaleGeneration, (await authority.ResolveAsync(TestContext.Current.CancellationToken)).Failure);
         Assert.Equal(4, database.Calls);
     }
 
@@ -38,11 +38,11 @@ public sealed class RealmAuthorityTests
         using var database = new SqliteBridgeExecutor(0);
         await Seed(database);
         var reader = new RecoveryEpochReader(new ModulePlanPortFactory(database, 0, TimeProvider.System), TimeProvider.System);
-        Assert.Equal(RecoveryEpochFailure.Missing, (await reader.ReadAsync(Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), default)).Failure);
-        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Authority(reader).ResolveAsync(default)));
+        Assert.Equal(RecoveryEpochFailure.Missing, (await reader.ReadAsync(Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), TestContext.Current.CancellationToken)).Failure);
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Authority(reader).ResolveAsync(TestContext.Current.CancellationToken)));
         Assert.All(results, result => Assert.Equal(1, Assert.IsType<RealmAuthoritySnapshot>(result.Snapshot).RecoveryRevision));
-        await database.ExecAsync("UPDATE platform_recovery_epoch SET rev=2", default);
-        Assert.Equal(2, Assert.IsType<RecoveryEpochSnapshot>((await reader.ReadAsync(Realm, default)).Snapshot).Revision);
+        await database.ExecAsync("UPDATE platform_recovery_epoch SET rev=2", TestContext.Current.CancellationToken);
+        Assert.Equal(2, Assert.IsType<RecoveryEpochSnapshot>((await reader.ReadAsync(Realm, TestContext.Current.CancellationToken)).Snapshot).Revision);
         Assert.Equal(10, database.Calls);
     }
 
@@ -67,7 +67,7 @@ public sealed class RealmAuthorityTests
         environment[key] = value;
         var factoryCalls = 0;
         var authority = new ConfiguredRealmAuthority(name => environment.GetValueOrDefault(name), _ => { factoryCalls++; return null; });
-        Assert.Equal(failure, (await authority.ResolveAsync(default)).Failure);
+        Assert.Equal(failure, (await authority.ResolveAsync(TestContext.Current.CancellationToken)).Failure);
         Assert.Equal(0, factoryCalls);
     }
 
@@ -78,9 +78,9 @@ public sealed class RealmAuthorityTests
         var reads = 0;
         var authority = new ConfiguredRealmAuthority(name => { reads++; return environment.GetValueOrDefault(name); }, _ => null);
         Assert.Equal(0, reads);
-        Assert.Equal(RealmAuthorityFailure.Unavailable, (await authority.ResolveAsync(default)).Failure);
+        Assert.Equal(RealmAuthorityFailure.Unavailable, (await authority.ResolveAsync(TestContext.Current.CancellationToken)).Failure);
         environment["AF_REALM_ID"] = "invalid";
-        Assert.Equal(RealmAuthorityFailure.Unavailable, (await authority.ResolveAsync(default)).Failure);
+        Assert.Equal(RealmAuthorityFailure.Unavailable, (await authority.ResolveAsync(TestContext.Current.CancellationToken)).Failure);
         Assert.Equal(3, reads);
     }
 
@@ -96,7 +96,7 @@ public sealed class RealmAuthorityTests
         using var services = builder.Services.BuildServiceProvider();
         var authority = services.GetRequiredService<IRealmAuthorityPort>();
         // The real environment need not contain this task's configuration, and no executor is configured in this fixture.
-        Assert.Null((await authority.ResolveAsync(default)).Snapshot);
+        Assert.Null((await authority.ResolveAsync(TestContext.Current.CancellationToken)).Snapshot);
         Assert.Null(services.GetService<ArcForges.Cloud.Storage.IPlanExecutor>());
     }
 
@@ -107,7 +107,7 @@ public sealed class RealmAuthorityTests
     public async Task PermanentReadFailuresDoNotBecomeMissingOrRetry(ModulePlanStatus status, RecoveryEpochFailure failure)
     {
         var plans = new FakePlans(ModulePlanOutcome.Of(status));
-        Assert.Equal(failure, (await Reader(plans).ReadAsync(Realm, default)).Failure);
+        Assert.Equal(failure, (await Reader(plans).ReadAsync(Realm, TestContext.Current.CancellationToken)).Failure);
         Assert.Equal(1, plans.Calls);
     }
 
@@ -115,10 +115,10 @@ public sealed class RealmAuthorityTests
     public async Task TransientReadsRetryBoundedlyAndCallerCancellationStopsBackoff()
     {
         var plans = new FakePlans(ModulePlanOutcome.Of(ModulePlanStatus.UnknownOutcome), ModulePlanOutcome.Of(ModulePlanStatus.Unavailable), Row());
-        Assert.NotNull((await Reader(plans).ReadAsync(Realm, default)).Snapshot);
+        Assert.NotNull((await Reader(plans).ReadAsync(Realm, TestContext.Current.CancellationToken)).Snapshot);
         Assert.Equal(3, plans.Calls);
         var exhausted = new FakePlans(ModulePlanOutcome.Of(ModulePlanStatus.Unavailable));
-        Assert.Equal(RecoveryEpochFailure.Unavailable, (await Reader(exhausted).ReadAsync(Realm, default)).Failure);
+        Assert.Equal(RecoveryEpochFailure.Unavailable, (await Reader(exhausted).ReadAsync(Realm, TestContext.Current.CancellationToken)).Failure);
         Assert.Equal(3, exhausted.Calls);
         using var cancel = new CancellationTokenSource();
         var cancelling = new FakePlans(ModulePlanOutcome.Of(ModulePlanStatus.Unavailable)) { AfterRead = cancel.Cancel };
@@ -134,7 +134,7 @@ public sealed class RealmAuthorityTests
     {
         var hanging = new FakePlans(Row()) { DuringRead = async token => { await Task.Delay(Timeout.InfiniteTimeSpan, token); return Row(); } };
         var reader = new RecoveryEpochReader(hanging, new FastDeadlineTime());
-        Assert.Equal(RecoveryEpochFailure.Unavailable, (await reader.ReadAsync(Realm, default)).Failure);
+        Assert.Equal(RecoveryEpochFailure.Unavailable, (await reader.ReadAsync(Realm, TestContext.Current.CancellationToken)).Failure);
         Assert.Equal(3, hanging.Calls);
         using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
         var cancelled = new FakePlans(Row()) { DuringRead = async token => { await Task.Delay(Timeout.InfiniteTimeSpan, token); return Row(); } };
@@ -146,7 +146,7 @@ public sealed class RealmAuthorityTests
     public async Task MalformedRowsInvalidRealmAndClosedStatesFailClosed()
     {
         var invalid = new FakePlans(Row());
-        Assert.Equal(RecoveryEpochFailure.InvalidRealm, (await Reader(invalid).ReadAsync(Guid.Empty, default)).Failure);
+        Assert.Equal(RecoveryEpochFailure.InvalidRealm, (await Reader(invalid).ReadAsync(Guid.Empty, TestContext.Current.CancellationToken)).Failure);
         Assert.Equal(0, invalid.Calls);
         var malformed = new[]
         {
@@ -156,8 +156,8 @@ public sealed class RealmAuthorityTests
             new ModulePlanOutcome(ModulePlanStatus.Succeeded, [[PlanValue.FromText(Realm.ToString("D")), PlanValue.FromText("0"), PlanValue.FromInt64(4), PlanValue.FromInt64(1)]]),
             new ModulePlanOutcome(ModulePlanStatus.Succeeded, [[PlanValue.FromText(Guid.Empty.ToString("D")), PlanValue.FromInt64(0), PlanValue.FromInt64(4), PlanValue.FromInt64(1)]]),
         };
-        foreach (var outcome in malformed) Assert.Equal(RecoveryEpochFailure.Defect, (await Reader(new FakePlans(outcome)).ReadAsync(Realm, default)).Failure);
-        foreach (var state in new[] { 1, 2, 3 }) Assert.Equal(RecoveryEpochFailure.Closed, (await Reader(new FakePlans(Row(state: state))).ReadAsync(Realm, default)).Failure);
+        foreach (var outcome in malformed) Assert.Equal(RecoveryEpochFailure.Defect, (await Reader(new FakePlans(outcome)).ReadAsync(Realm, TestContext.Current.CancellationToken)).Failure);
+        foreach (var state in new[] { 1, 2, 3 }) Assert.Equal(RecoveryEpochFailure.Closed, (await Reader(new FakePlans(Row(state: state))).ReadAsync(Realm, TestContext.Current.CancellationToken)).Failure);
     }
 
     [Fact]
@@ -168,16 +168,16 @@ public sealed class RealmAuthorityTests
         Assert.Null(RealmAuthorityResult.Refused(RealmAuthorityFailure.Defect).Snapshot);
         Assert.Null(RecoveryEpochResult.Refused(RecoveryEpochFailure.Defect).Snapshot);
         var mismatched = new SnapshotPort(new RecoveryEpochSnapshot(Guid.Empty, 0, 1));
-        Assert.Equal(RealmAuthorityFailure.Defect, (await Authority(mismatched).ResolveAsync(default)).Failure);
+        Assert.Equal(RealmAuthorityFailure.Defect, (await Authority(mismatched).ResolveAsync(TestContext.Current.CancellationToken)).Failure);
         var maximum = ValidEnvironment();
         maximum["AF_AUTH_EPOCH"] = long.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
         maximum["AF_RECOVERY_GENERATION"] = long.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var authority = new ConfiguredRealmAuthority(maximum.GetValueOrDefault, generation => new SnapshotPort(new RecoveryEpochSnapshot(Realm, generation, 1)));
-        Assert.Equal(long.MaxValue, Assert.IsType<RealmAuthoritySnapshot>((await authority.ResolveAsync(default)).Snapshot).AuthEpoch);
+        Assert.Equal(long.MaxValue, Assert.IsType<RealmAuthoritySnapshot>((await authority.ResolveAsync(TestContext.Current.CancellationToken)).Snapshot).AuthEpoch);
     }
 
     private static Task Seed(SqliteBridgeExecutor database) => database.ExecAsync(
-        "INSERT INTO platform_recovery_epoch VALUES ('" + Realm.ToString("D") + "',0,'fixture',zeroblob(32),4,1,1)", default);
+        "INSERT INTO platform_recovery_epoch VALUES ('" + Realm.ToString("D") + "',0,'fixture',zeroblob(32),4,1,1)", TestContext.Current.CancellationToken);
 
     private static Dictionary<string, string?> ValidEnvironment() => new(StringComparer.Ordinal)
     {
