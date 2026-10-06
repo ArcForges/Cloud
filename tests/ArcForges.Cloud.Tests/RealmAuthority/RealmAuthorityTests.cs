@@ -196,7 +196,9 @@ public sealed class RealmAuthorityTests
 
     private static Dictionary<string, string?> ValidEnvironment() => new(StringComparer.Ordinal)
     {
-        ["AF_REALM_ID"] = Realm.ToString("D"), ["AF_AUTH_EPOCH"] = "7", ["AF_RECOVERY_GENERATION"] = "0",
+        ["AF_REALM_ID"] = Realm.ToString("D"),
+        ["AF_AUTH_EPOCH"] = "7",
+        ["AF_RECOVERY_GENERATION"] = "0",
     };
 
     private static ConfiguredRealmAuthority Authority(IRecoveryEpochPort reader) => new(ValidEnvironment().GetValueOrDefault, _ => reader);
