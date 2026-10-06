@@ -236,7 +236,7 @@ export interface VerifiedBundle {
 
 function inlineScriptHashes(html: string): string[] {
   const hashes: string[] = [];
-  for (const match of html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script>/gu)) {
+  for (const match of html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script\s*>/giu)) {
     const attributes = match[1] ?? "";
     const body = match[2] ?? "";
     if (/(?:^|\s)src\s*=/u.test(attributes) || body === "") continue;

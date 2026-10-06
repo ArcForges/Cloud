@@ -342,6 +342,12 @@ test("pages use LF line ends and reference only their own origin", () => {
 test("each profile's policy must cover its own inline scripts and stay restrictive", () => {
   // The Chat policy applied to the Account page does not cover the Account inline script.
   refuses({ csp: { account: csp("chat") } }, /does not cover an inline script/u);
+  // An inline script in any letter case or with a spaced closing tag must be covered as well.
+  for (const tag of ["SCRIPT", "Script"])
+    refuses(
+      { pages: { "chat/index.html": page("chat", `<${tag}>window.other = 1;</${tag} >`) } },
+      /does not cover an inline script/u,
+    );
   refuses({ csp: { account: csp("account", " 'unsafe-inline'") } }, /not restrictive/u);
   refuses({ csp: { chat: csp("chat", " *") } }, /not restrictive/u);
   refuses(
