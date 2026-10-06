@@ -518,6 +518,8 @@ export async function runPlan(
   args: D1Scalar[][],
   ownerScope: string,
 ): Promise<RunOutcome> {
+  const plan = plans.find((candidate) => candidate.id === planId);
+  if (plan === undefined) throw new Error(`Unknown identity plan: ${planId}`);
   const deps: ExecuteDeps = {
     db,
     plans: identityPlans,
@@ -528,7 +530,7 @@ export async function runPlan(
   const response = await executePlan(
     {
       planId,
-      planVersion: plans.find((plan) => plan.id === planId)!.version,
+      planVersion: plan.version,
       manifestHash,
       requestId: uid(),
       recoveryGeneration: "0",

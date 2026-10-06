@@ -719,14 +719,14 @@ test("the read plans are scoped by realm: a credential list or a lookup of anoth
   const own = await runPlan(
     db,
     "identity.credential-list",
-    [[txt(realmA), txt(account.user)]],
+    [[txt(realmA), txt(account.user), i64("-9223372036854775808"), txt("")]],
     realmA,
   );
   assert.equal(own.ok && own.rows.length, 1);
   const foreign = await runPlan(
     db,
     "identity.credential-list",
-    [[txt(realmB), txt(account.user)]],
+    [[txt(realmB), txt(account.user), i64("-9223372036854775808"), txt("")]],
     realmB,
   );
   assert.deepEqual(foreign.ok && foreign.rows, []);
