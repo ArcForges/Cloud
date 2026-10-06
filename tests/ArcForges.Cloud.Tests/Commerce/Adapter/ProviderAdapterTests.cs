@@ -117,7 +117,8 @@ public sealed class ProviderAdapterTests
         id = TransactionId.Value,
         custom_data = MetadataJson,
         currency_code = currency,
-        items = new[] { new { price = new { id = PriceId.Value, tax_mode = "internal", billing_cycle = new { interval = "month", frequency = 1 }, trial_period = (object?)null, unit_price = new { amount, currency_code = "USD" } }, quantity = 1 } },
+        items = new[] { new { price = new { id = PriceId.Value, tax_mode = "internal", billing_cycle = new { interval = "month", frequency = 1 }, trial_period = (object?)null,
+            unit_price = new { amount, currency_code = "USD" }, unit_price_overrides = new[] { new { country_codes = new[] { "DE" }, unit_price = new { amount = "900", currency_code = "EUR" } } } }, quantity = 1 } },
         checkout = new { url = url.Length == 0 ? "https://arcforges.com/billing/checkout?_ptxn=" + TransactionId.Value : url },
     };
     private static HttpResponseMessage Response(object data, HttpStatusCode status = HttpStatusCode.OK) => Raw(Json(new { data }), status);
@@ -188,6 +189,22 @@ public sealed class ProviderAdapterTests
         using var provider = BillingProviderFactory.Create(Settings(), transport);
         await provider.CreateCheckoutAsync(Checkout with { Country = "DE", ExpectedUnitPrice = new("900", "EUR") }, CancellationToken.None);
         Assert.Contains("\"currency_code\":\"EUR\"", transport.Calls.Last().Body, StringComparison.Ordinal);
+    }
+    [Theory]
+    [InlineData("changed")]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    public async Task ChangedOrUnverifiableRegionalReceiptRequiresReconciliation(string change)
+    {
+        var receipt = JsonNode.Parse(Json(CheckoutReceipt(currency: "EUR")))!;
+        var overrides = receipt["items"]![0]!["price"]!["unit_price_overrides"]!.AsArray();
+        if (change == "changed") overrides[0]!["unit_price"]!["amount"] = "950";
+        else if (change == "missing") overrides.Clear();
+        else overrides.Add(overrides[0]!.DeepClone());
+        var transport = Handler(r => Response(r.Method == HttpMethod.Get ? Price() : receipt)); using var provider = BillingProviderFactory.Create(Settings(), transport);
+        Assert.Equal(ProviderFailureKind.UnknownOutcome, (await Assert.ThrowsAsync<BillingProviderException>(() => provider.CreateCheckoutAsync(
+            Checkout with { Country = "DE", ExpectedUnitPrice = new("900", "EUR") }, CancellationToken.None))).Kind);
+        Assert.Equal(1, transport.Calls.Count(c => c.Method == "POST"));
     }
     [Theory]
     [InlineData("USD", "1001", "https://arcforges.com/billing/checkout?_ptxn=txn_01grnn4zta5a1mf02jjze7y2ys")]

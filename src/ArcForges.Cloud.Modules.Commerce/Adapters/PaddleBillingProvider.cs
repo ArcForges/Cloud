@@ -120,7 +120,10 @@ internal sealed class PaddleBillingProvider : IBillingProvider
                 var receiptMoney = PaddleNormalization.Required(receiptPrice, "unit_price", JsonValueKind.Object);
                 // Region overrides remain in the price snapshot; the top-level transaction currency and the selected price override are bound together.
                 var receiptBase = PaddleNormalization.Money(receiptMoney, "amount", PaddleNormalization.Text(receiptMoney, "currency_code", 3));
+                var receiptCountryPrices = PaddleNormalization.CountryPrices(receiptPrice);
+                var receiptEffectivePrice = receiptCountryPrices.SingleOrDefault(p => p.Countries.Contains(request.Country, StringComparer.Ordinal))?.Money ?? receiptBase;
                 if (receiptBase != price.Money || PaddleNormalization.TaxTreatment(receiptPrice) != request.ExpectedTaxTreatment
+                    || receiptEffectivePrice != request.ExpectedUnitPrice
                     || !SameTerms(PaddleNormalization.PricingTerms(receiptPrice), expectedTerms)) throw PaddleNormalization.Invalid();
                 var checkout = PaddleNormalization.Required(data, "checkout", JsonValueKind.Object);
                 var url = SafeUrl(PaddleNormalization.Text(checkout, "url"));

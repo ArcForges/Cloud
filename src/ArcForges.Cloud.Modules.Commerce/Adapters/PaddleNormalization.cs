@@ -160,12 +160,12 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
         if (interval is not ("day" or "week" or "month" or "year") || !value.GetProperty("frequency").TryGetInt32(out var count) || count <= 0) throw Invalid();
         return new ProviderBillingCycle(interval, count);
     }
-    private static IReadOnlyList<CountryPrice> CountryPrices(JsonElement data)
+    internal static IReadOnlyList<CountryPrice> CountryPrices(JsonElement data)
     {
         var overrides = new List<CountryPrice>();
         if (data.TryGetProperty("unit_price_overrides", out var regional))
         {
-            if (regional.ValueKind != JsonValueKind.Array) throw Invalid();
+            if (regional.ValueKind != JsonValueKind.Array || regional.GetArrayLength() > 250) throw Invalid();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var entry in regional.EnumerateArray())
             {
