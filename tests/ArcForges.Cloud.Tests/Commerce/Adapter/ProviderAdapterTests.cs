@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ArcForges.Cloud.Modules.Commerce.Adapters;
 using Xunit;
 
@@ -67,7 +68,7 @@ public sealed class ProviderAdapterTests
         currency_code = "USD",
         details = new
         {
-            totals = new { total = amount, tax = "100", fee = "20", earnings = "980" },
+            totals = new { subtotal = "900", discount = "0", total = amount, tax = "100", fee = "20", earnings = "980", credit = "0", credit_to_balance = "0", balance = "0", grand_total = amount, grand_total_tax = "100", currency_code = "USD" },
             line_items = new[] { new { id = "txnitm_" + Suffix, price_id = PriceId.Value, quantity = 1,
                 unit_totals = new { subtotal = "900", discount = "0", tax = "100", total = "1000" },
                 totals = new { subtotal = "900", discount = "0", tax = "100", total = "1000" }, product = new { tax_category = "standard" } } }
@@ -91,15 +92,21 @@ public sealed class ProviderAdapterTests
         scheduled_change = canceled ? new { action = "cancel", effective_at = "2026-11-01T00:00:00Z" } : null,
         current_billing_period = new { starts_at = "2026-10-01T00:00:00Z", ends_at = "2026-11-01T00:00:00Z" },
     };
-    private static object Adjustment(string status = "pending_approval", string action = "refund") => new
+    private static object Adjustment(string status = "pending_approval", string action = "refund", bool negative = false) => new
     {
         id = AdjustmentId.Value,
         transaction_id = TransactionId.Value,
         subscription_id = SubscriptionId.Value,
+        customer_id = CustomerId.Value,
         action,
         status,
+        type = "full",
         currency_code = "USD",
-        totals = new { total = "1000" },
+        totals = new { subtotal = negative ? "-900" : "900", tax = negative ? "-100" : "100", total = negative ? "-1000" : "1000", fee = "20", earnings = "880", retained_fee = "5", currency_code = "USD" },
+        items = new[] { new { id = "adjitm_" + Suffix, item_id = "txnitm_" + Suffix, type = "full", amount = (string?)null,
+            totals = new { subtotal = negative ? "-900" : "900", tax = negative ? "-100" : "100", total = negative ? "-1000" : "1000" } } },
+        payout_totals = new { subtotal = "810", tax = "90", total = "900", fee = "18", earnings = "882", retained_fee = "4", currency_code = "EUR", chargeback_fee = new { amount = "8", original = new { amount = "10", currency_code = "USD" } } },
+        credit_applied_to_balance = (bool?)null,
         updated_at = Instant
     };
     private static object Event(string type = "transaction.completed", object? data = null) => new
@@ -202,7 +209,6 @@ public sealed class ProviderAdapterTests
             "/transactions" => Page([Transaction()]),
             var p when p == "/subscriptions/" + SubscriptionId.Value => Response(Subscription()),
             "/subscriptions" => Page([Subscription()]),
-            var p when p == "/adjustments/" + AdjustmentId.Value => Response(Adjustment()),
             "/adjustments" => Page([Adjustment()]),
             "/events" => Page([Event()]),
             _ => throw new InvalidOperationException(),
@@ -219,8 +225,31 @@ public sealed class ProviderAdapterTests
         Assert.True((await provider.GetSubscriptionAsync(SubscriptionId, CancellationToken.None)).AutoRenew);
         Assert.Single((await provider.ListSubscriptionsAsync(null, CancellationToken.None)).Items);
         Assert.Equal(ProviderAdjustmentState.Pending, (await provider.GetAdjustmentAsync(AdjustmentId, CancellationToken.None)).State);
+        Assert.Contains("id=" + AdjustmentId.Value, transport.Calls.Last().Uri.Query, StringComparison.Ordinal);
         Assert.Single((await provider.ListAdjustmentsAsync(null, CancellationToken.None)).Items);
         Assert.Equal(ProviderEventKind.PaymentCompleted, (await provider.ListEventsAsync(null, CancellationToken.None)).Items.Single().Kind);
+    }
+    [Fact]
+    public async Task ProratedCreditLinesAndAdjustedPayoutSummariesRemainLossless()
+    {
+        var envelope = JsonNode.Parse(Json(new { data = Transaction(amount: "500") }))!;
+        var details = envelope["data"]!["details"]!;
+        details["totals"]!["subtotal"] = "400"; details["totals"]!["earnings"] = "480";
+        var lines = details["line_items"]!.AsArray(); var credit = lines[0]!.DeepClone();
+        credit["id"] = "txnitm_01grnn4zta5a1mf02jjze7y2yt";
+        foreach (var totals in new[] { "unit_totals", "totals" })
+        {
+            credit[totals]!["subtotal"] = "-500"; credit[totals]!["tax"] = "0"; credit[totals]!["total"] = "-500";
+        }
+        credit["proration"] = JsonNode.Parse("{\"rate\":\"0.5\",\"billing_period\":{\"starts_at\":\"2026-10-01T00:00:00Z\",\"ends_at\":\"2026-11-01T00:00:00Z\"}}"); lines.Add(credit);
+        details["adjusted_totals"] = details["totals"]!.DeepClone(); details["adjusted_totals"]!["total"] = "400";
+        details["payout_totals"] = JsonNode.Parse("{\"subtotal\":\"360\",\"tax\":\"90\",\"total\":\"450\",\"fee\":\"18\",\"earnings\":\"432\",\"currency_code\":\"EUR\"}");
+        var transport = Handler(_ => Raw(envelope.ToJsonString())); using var provider = BillingProviderFactory.Create(Settings(), transport);
+        var transaction = await provider.GetTransactionAsync(TransactionId, CancellationToken.None);
+        Assert.Equal(2, transaction.Items.Count); Assert.Equal(transaction.Items[0].Price, transaction.Items[1].Price);
+        Assert.Equal("-500", transaction.Items[1].Financials!.Total.MinorUnits); Assert.NotNull(transaction.Items[1].ProrationPeriod);
+        Assert.Equal("500", transaction.Total.MinorUnits); Assert.Equal("400", transaction.AdjustedFinancials!.Total.MinorUnits);
+        Assert.Equal("EUR", transaction.PayoutFinancials!.Total.Currency); Assert.Null(transaction.AdjustedPayoutFinancials);
     }
     [Fact]
     public async Task CancelAtPeriodEndAndReactivationUseExactMutationContracts()
@@ -254,6 +283,15 @@ public sealed class ProviderAdapterTests
         Assert.Equal(ProviderAdjustmentState.Pending, full.State); Assert.Equal(ProviderAdjustmentState.Pending, partial.State);
         Assert.Contains("\"type\":\"full\"", transport.Calls.First().Body, StringComparison.Ordinal);
         Assert.Contains("\"amount\":\"400\"", transport.Calls.Last().Body, StringComparison.Ordinal);
+    }
+    [Fact]
+    public async Task AdjustmentLookupUsesDocumentedIdFilterAndRefusesMissingOrUnboundResults()
+    {
+        var missing = Handler(_ => Page([])); using var provider = BillingProviderFactory.Create(Settings(), missing);
+        Assert.Equal(ProviderFailureKind.NotFound, (await Assert.ThrowsAsync<BillingProviderException>(() => provider.GetAdjustmentAsync(AdjustmentId, CancellationToken.None))).Kind);
+        Assert.Equal("/adjustments?per_page=1&id=" + AdjustmentId.Value, missing.Calls.Single().Uri.PathAndQuery);
+        var wrong = Handler(_ => Page([Adjustment()])); using var unbound = BillingProviderFactory.Create(Settings(), wrong);
+        Assert.Equal(ProviderFailureKind.Protocol, (await Assert.ThrowsAsync<BillingProviderException>(() => unbound.GetAdjustmentAsync(new("adj_01grnn4zta5a1mf02jjze7y2yt"), CancellationToken.None))).Kind);
     }
     [Fact]
     public async Task CustomerPortalIsBoundToCustomerAndItsTemporaryTokenIsNotInDiagnostics()
@@ -373,7 +411,7 @@ public sealed class ProviderAdapterTests
             "{\"data\":{},\"data\":{}}", new string('x', 1024 * 1024 + 1) })
         {
             var transport = Handler(_ => Raw(body)); using var provider = BillingProviderFactory.Create(Settings(), transport);
-            Assert.Equal(ProviderFailureKind.Protocol, (await Assert.ThrowsAsync<BillingProviderException>(() => provider.ListTransactionsAsync(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, null, CancellationToken.None))).Kind);
+            Assert.Equal(ProviderFailureKind.Protocol, (await Assert.ThrowsAsync<BillingProviderException>(() => provider.ListTransactionsAsync(DateTimeOffset.MinValue, DateTimeOffset.MaxValue.AddTicks(-9), null, CancellationToken.None))).Kind);
             Assert.Single(transport.Calls);
         }
         var redirect = Handler(_ => Raw("{}", HttpStatusCode.Found)); using var redirected = BillingProviderFactory.Create(Settings(), redirect);
@@ -386,16 +424,15 @@ public sealed class ProviderAdapterTests
         var next = "txn_01grnn4zta5a1mf02jjze7y2yt";
         var transport = Handler(r => r.RequestUri!.Query.Contains("after=", StringComparison.Ordinal) ? Page([Transaction()]) : Page([Transaction()], "https://api.paddle.com/transactions?per_page=30&after=" + next));
         using var provider = BillingProviderFactory.Create(Settings(), transport);
-        var first = await provider.ListTransactionsAsync(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, null, CancellationToken.None);
+        var first = await provider.ListTransactionsAsync(DateTimeOffset.MinValue, DateTimeOffset.MaxValue.AddTicks(-9), null, CancellationToken.None);
         Assert.Equal(next, first.NextCursor);
-        Assert.Null((await provider.ListTransactionsAsync(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, first.NextCursor, CancellationToken.None)).NextCursor);
+        Assert.Null((await provider.ListTransactionsAsync(DateTimeOffset.MinValue, DateTimeOffset.MaxValue.AddTicks(-9), first.NextCursor, CancellationToken.None)).NextCursor);
         Assert.Contains("updated_at", transport.Calls.Last().Uri.Query, StringComparison.Ordinal);
     }
     [Theory]
     [InlineData("01")]
     [InlineData("1.0")]
     [InlineData("1e3")]
-    [InlineData("-1")]
     [InlineData("10000000000000000000000000000")]
     public async Task MoneyIsCanonicalIntegerMinorUnitsWithoutFloatingPointCoercion(string amount)
     {
@@ -454,8 +491,12 @@ public sealed class ProviderAdapterTests
         Assert.Equal(WebhookVerdict.TooLarge, provider.VerifyWebhook(new byte[1024 * 1024 + 1], _ => throw new InvalidOperationException()).Verdict);
         foreach (var pair in new[] { ("credit_reverse", ProviderAdjustmentKind.CreditReversal), ("chargeback_warning_reverse", ProviderAdjustmentKind.WarningReversal), ("chargeback_reverse", ProviderAdjustmentKind.DisputeReversal) })
         {
-            var eventBytes = Encoding.UTF8.GetBytes(Json(Event("adjustment.updated", Adjustment(action: pair.Item1))));
-            Assert.Equal(pair.Item2, provider.VerifyWebhook(eventBytes, _ => Sign(eventBytes)).Event!.Adjustment!.Kind);
+            var eventBytes = Encoding.UTF8.GetBytes(Json(Event("adjustment.updated", Adjustment(action: pair.Item1, negative: true))));
+            var adjustment = provider.VerifyWebhook(eventBytes, _ => Sign(eventBytes)).Event!.Adjustment!;
+            Assert.Equal(pair.Item2, adjustment.Kind); Assert.Equal("-1000", adjustment.Total.MinorUnits);
+            Assert.Equal("-900", adjustment.Items.Single().Subtotal.MinorUnits);
+            Assert.Equal("EUR", adjustment.PayoutFinancials!.Total.Currency);
+            Assert.Equal("USD", adjustment.PayoutFinancials.OriginalChargebackFee!.Currency);
         }
     }
     [Fact]

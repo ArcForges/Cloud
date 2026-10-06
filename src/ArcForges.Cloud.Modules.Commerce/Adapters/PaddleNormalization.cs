@@ -85,37 +85,40 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
     private static IReadOnlyList<ProviderLineItem> Items(JsonElement value)
     {
         var result = new List<ProviderLineItem>();
-        var seenPrices = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in Required(value, "items", JsonValueKind.Array).EnumerateArray())
         {
             if (result.Count == 100 || item.ValueKind != JsonValueKind.Object) throw Invalid();
             var price = Reference(Required(item, "price", JsonValueKind.Object), "id", "pri");
-            if (!seenPrices.Add(price.Value)) throw Invalid();
             if (!item.TryGetProperty("quantity", out var quantity) || !quantity.TryGetInt32(out var count) || count is < 1 or > 999999999) throw Invalid();
-            ProviderReference? transactionItem = null;
-            ProviderLineFinancials? financials = null;
-            if (TryObject(value, "details", out var details) && details.TryGetProperty("line_items", out var lines) && lines.ValueKind == JsonValueKind.Array)
-            {
-                if (lines.GetArrayLength() > 100) throw Invalid();
-                foreach (var line in lines.EnumerateArray())
-                {
-                    if (line.TryGetProperty("price_id", out var id) && id.GetString() == price.Value)
-                    {
-                        if (transactionItem is not null) throw Invalid();
-                        transactionItem = Reference(line, "id", "txnitm");
-                        var currency = Text(value, "currency_code", 3);
-                        var unit = Required(line, "unit_totals", JsonValueKind.Object);
-                        var totals = Required(line, "totals", JsonValueKind.Object);
-                        if (line.GetProperty("quantity").GetInt32() != count) throw Invalid();
-                        financials = new ProviderLineFinancials(Money(unit, "subtotal", currency), Money(unit, "discount", currency),
-                            Money(unit, "tax", currency), Money(unit, "total", currency), Money(totals, "subtotal", currency), Money(totals, "discount", currency),
-                            Money(totals, "tax", currency), Money(totals, "total", currency), Text(Required(line, "product", JsonValueKind.Object), "tax_category", 64));
-                    }
-                }
-            }
-            result.Add(new ProviderLineItem(price, transactionItem, count, financials));
+            result.Add(new ProviderLineItem(price, null, count, null));
         }
         if (result.Count == 0) throw Invalid();
+        if (TryObject(value, "details", out var details) && details.TryGetProperty("line_items", out var lines))
+        {
+            if (lines.ValueKind != JsonValueKind.Array || lines.GetArrayLength() > 100) throw Invalid();
+            if (lines.GetArrayLength() != 0)
+            {
+                // Calculated line items are the supplier's financial source of truth. Multiple prorated lines may share a price.
+                result.Clear(); var ids = new HashSet<string>(StringComparer.Ordinal); var currency = Text(value, "currency_code", 3);
+                foreach (var line in lines.EnumerateArray())
+                {
+                    var reference = Reference(line, "id", "txnitm"); if (!ids.Add(reference.Value)) throw Invalid();
+                    var count = line.GetProperty("quantity").GetInt32(); if (count is < 1 or > 999999999) throw Invalid();
+                    var unit = Required(line, "unit_totals", JsonValueKind.Object); var totals = Required(line, "totals", JsonValueKind.Object);
+                    var financials = new ProviderLineFinancials(Money(unit, "subtotal", currency, signed: true), Money(unit, "discount", currency, signed: true),
+                        Money(unit, "tax", currency, signed: true), Money(unit, "total", currency, signed: true), Money(totals, "subtotal", currency, signed: true),
+                        Money(totals, "discount", currency, signed: true), Money(totals, "tax", currency, signed: true), Money(totals, "total", currency, signed: true),
+                        Text(Required(line, "product", JsonValueKind.Object), "tax_category", 64));
+                    ProviderPeriod? period = null;
+                    if (line.TryGetProperty("proration", out var proration) && proration.ValueKind != JsonValueKind.Null)
+                    {
+                        if (proration.ValueKind != JsonValueKind.Object) throw Invalid();
+                        period = Period(proration, "billing_period"); if (period is null) throw Invalid();
+                    }
+                    result.Add(new ProviderLineItem(Reference(line, "price_id", "pri"), reference, count, financials, period));
+                }
+            }
+        }
         return result.AsReadOnly();
     }
     internal ProviderPriceSnapshot Price(JsonElement data)
@@ -152,7 +155,8 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
     internal ProviderTransaction Transaction(JsonElement data)
     {
         var currency = Text(data, "currency_code", 3);
-        var totals = Required(Required(data, "details", JsonValueKind.Object), "totals", JsonValueKind.Object);
+        var details = Required(data, "details", JsonValueKind.Object);
+        var totals = Required(details, "totals", JsonValueKind.Object);
         var status = Text(data, "status", 32);
         var state = status switch
         {
@@ -162,7 +166,7 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
             "draft" or "ready" or "billed" or "paid" => ProviderPaymentState.Pending,
             _ => throw Invalid(),
         };
-        ProviderMoney? OptionalMoney(string field, bool signed = false) => !totals.TryGetProperty(field, out var amount)
+        ProviderMoney? OptionalMoney(string field, bool signed = true) => !totals.TryGetProperty(field, out var amount)
             || amount.ValueKind == JsonValueKind.Null ? null : Money(totals, field, currency, signed);
         if (totals.TryGetProperty("currency_code", out _) && Text(totals, "currency_code", 3) != currency) throw Invalid();
         var items = Items(data);
@@ -174,9 +178,16 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
             country = Text(address, "country_code", 2);
             if (!ProviderInput.Country(country) || Reference(address, "customer_id", "ctm") != OptionalReference(data, "customer_id", "ctm")) throw Invalid();
         }
+        ProviderFinancialTotals? OptionalTotals(string field, string? expectedCurrency)
+        {
+            if (!details.TryGetProperty(field, out var amount) || amount.ValueKind == JsonValueKind.Null) return null;
+            if (amount.ValueKind != JsonValueKind.Object) throw Invalid();
+            return Totals(amount, expectedCurrency ?? Text(amount, "currency_code", 3));
+        }
         return new ProviderTransaction(Reference(data, "id", "txn"), OptionalReference(data, "customer_id", "ctm"), OptionalReference(data, "subscription_id", "sub"),
-            state, status, Money(totals, "total", currency), OptionalMoney("tax"), OptionalMoney("fee"), OptionalMoney("earnings", signed: true),
-            Metadata(data), items, Period(data, "billing_period"), Instant(data, "updated_at"), country, OptionalInstant(data, "revised_at"));
+            state, status, Money(totals, "total", currency, signed: true), OptionalMoney("tax"), OptionalMoney("fee"), OptionalMoney("earnings", signed: true),
+            Metadata(data), items, Period(data, "billing_period"), Instant(data, "updated_at"), country, OptionalInstant(data, "revised_at"),
+            Totals(totals, currency), OptionalTotals("payout_totals", null), OptionalTotals("adjusted_totals", currency), OptionalTotals("adjusted_payout_totals", null));
     }
     internal ProviderSubscription Subscription(JsonElement data)
     {
@@ -223,8 +234,65 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
             _ => ProviderAdjustmentState.Unknown
         };
         var totals = Required(data, "totals", JsonValueKind.Object);
+        var currency = Text(data, "currency_code", 3);
+        var items = new List<ProviderAdjustmentLine>(); var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in Required(data, "items", JsonValueKind.Array).EnumerateArray())
+        {
+            if (items.Count == 100) throw Invalid();
+            var reference = Reference(item, "id", "adjitm"); if (!seen.Add(reference.Value)) throw Invalid();
+            var itemTotals = Required(item, "totals", JsonValueKind.Object);
+            var scope = Scope(Text(item, "type", 32));
+            ProviderMoney? amount = !item.TryGetProperty("amount", out var rawAmount) || rawAmount.ValueKind == JsonValueKind.Null ? null : Money(item, "amount", currency, signed: true);
+            if (scope == ProviderAdjustmentScope.Partial && amount is null) throw Invalid();
+            ProviderPeriod? period = null;
+            if (item.TryGetProperty("proration", out var proration) && proration.ValueKind != JsonValueKind.Null)
+            {
+                if (proration.ValueKind != JsonValueKind.Object) throw Invalid();
+                period = Period(proration, "billing_period");
+                if (period is null) throw Invalid();
+            }
+            items.Add(new ProviderAdjustmentLine(reference, Reference(item, "item_id", "txnitm"), scope, amount,
+                Money(itemTotals, "subtotal", currency, signed: true), Money(itemTotals, "tax", currency, signed: true), Money(itemTotals, "total", currency, signed: true), period));
+        }
+        var adjustmentScope = Scope(Text(data, "type", 32));
+        if (items.Count == 0 && adjustmentScope != ProviderAdjustmentScope.Full) throw Invalid();
+        ProviderFinancialTotals? payout = null;
+        if (data.TryGetProperty("payout_totals", out var rawPayout) && rawPayout.ValueKind != JsonValueKind.Null)
+        {
+            if (rawPayout.ValueKind != JsonValueKind.Object) throw Invalid();
+            payout = Totals(rawPayout, Text(rawPayout, "currency_code", 3));
+        }
+        bool? balanceCredit = !data.TryGetProperty("credit_applied_to_balance", out var credit) || credit.ValueKind == JsonValueKind.Null ? null : credit.GetBoolean();
         return new ProviderAdjustment(Reference(data, "id", "adj"), Reference(data, "transaction_id", "txn"), OptionalReference(data, "subscription_id", "sub"),
-            kind, state, Money(totals, "total", Text(data, "currency_code", 3)), Instant(data, "updated_at"));
+            kind, state, Money(totals, "total", currency, signed: true), Instant(data, "updated_at"), Reference(data, "customer_id", "ctm"),
+            adjustmentScope, items.AsReadOnly(), Totals(totals, currency), payout, balanceCredit);
+    }
+    private static ProviderAdjustmentScope Scope(string value) => value switch
+    {
+        "full" => ProviderAdjustmentScope.Full,
+        "partial" => ProviderAdjustmentScope.Partial,
+        "tax" => ProviderAdjustmentScope.Tax,
+        "proration" => ProviderAdjustmentScope.Prorated,
+        _ => ProviderAdjustmentScope.Unknown,
+    };
+    private static ProviderFinancialTotals Totals(JsonElement value, string currency)
+    {
+        if (value.TryGetProperty("currency_code", out _) && Text(value, "currency_code", 3) != currency) throw Invalid();
+        ProviderMoney? Optional(string field) => !value.TryGetProperty(field, out var amount) || amount.ValueKind == JsonValueKind.Null ? null : Money(value, field, currency, signed: true);
+        ProviderMoney? chargeback = null; ProviderMoney? original = null;
+        if (value.TryGetProperty("chargeback_fee", out var fee) && fee.ValueKind != JsonValueKind.Null)
+        {
+            if (fee.ValueKind != JsonValueKind.Object) throw Invalid();
+            chargeback = Money(fee, "amount", currency, signed: true);
+            if (fee.TryGetProperty("original", out var rawOriginal) && rawOriginal.ValueKind != JsonValueKind.Null)
+            {
+                if (rawOriginal.ValueKind != JsonValueKind.Object) throw Invalid();
+                original = Money(rawOriginal, "amount", Text(rawOriginal, "currency_code", 3), signed: true);
+            }
+        }
+        return new ProviderFinancialTotals(Money(value, "subtotal", currency, signed: true), Money(value, "tax", currency, signed: true),
+            Money(value, "total", currency, signed: true), Optional("fee"), Optional("earnings"), Optional("retained_fee"), chargeback, original,
+            Optional("discount"), Optional("credit"), Optional("credit_to_balance"), Optional("balance"), Optional("grand_total"), Optional("grand_total_tax"));
     }
     internal VerifiedProviderEvent Event(JsonElement envelope)
     {
@@ -240,10 +308,15 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
             _ => ProviderEventKind.Unsupported,
         };
         var dedupe = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(type + "\n" + reference.Value)));
-        return new VerifiedProviderEvent(settings.Source, reference, dedupe, kind, occurred,
-            kind is ProviderEventKind.PaymentChanged or ProviderEventKind.PaymentCompleted ? Transaction(data) : null,
-            kind == ProviderEventKind.SubscriptionChanged ? Subscription(data) : null,
-            kind == ProviderEventKind.AdjustmentChanged ? Adjustment(data) : null);
+        var transaction = kind is ProviderEventKind.PaymentChanged or ProviderEventKind.PaymentCompleted ? Transaction(data) : null;
+        var subscription = kind == ProviderEventKind.SubscriptionChanged ? Subscription(data) : null;
+        var adjustment = kind == ProviderEventKind.AdjustmentChanged ? Adjustment(data) : null;
+        if (subscription?.State == ProviderSubscriptionState.Unknown || adjustment is { Kind: ProviderAdjustmentKind.Unknown }
+            || adjustment is { Scope: ProviderAdjustmentScope.Unknown } || adjustment?.Items.Any(i => i.Scope == ProviderAdjustmentScope.Unknown) == true)
+        {
+            kind = ProviderEventKind.Unsupported; transaction = null; subscription = null; adjustment = null;
+        }
+        return new VerifiedProviderEvent(settings.Source, reference, dedupe, kind, occurred, transaction, subscription, adjustment);
     }
     internal static void NoDuplicateProperties(JsonElement value)
     {

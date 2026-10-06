@@ -112,10 +112,10 @@ internal sealed class PaddleBillingProvider : IBillingProvider
     }
     public Task<ProviderPage<ProviderTransaction>> ListTransactionsAsync(DateTimeOffset updatedFrom, DateTimeOffset updatedTo, string? cursor, CancellationToken cancellationToken)
     {
-        if (updatedFrom > updatedTo) throw new ArgumentException("Invalid reconciliation window.");
+        if (updatedFrom > updatedTo || updatedFrom.UtcTicks % 10 != 0 || updatedTo.UtcTicks % 10 != 0) throw new ArgumentException("Invalid reconciliation window.");
         ProviderInput.RequireCursor(cursor, "txn");
-        var query = "per_page=30&include=address&updated_at[GTE]=" + Uri.EscapeDataString(updatedFrom.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture))
-            + "&updated_at[LTE]=" + Uri.EscapeDataString(updatedTo.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        var query = "per_page=30&include=address&updated_at[GTE]=" + Uri.EscapeDataString(updatedFrom.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFF'Z'", CultureInfo.InvariantCulture))
+            + "&updated_at[LTE]=" + Uri.EscapeDataString(updatedTo.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFF'Z'", CultureInfo.InvariantCulture));
         return List("transactions", query, cursor, "txn", 30, normalize.Transaction, cancellationToken);
     }
     public Task<ProviderSubscription> GetSubscriptionAsync(ProviderReference reference, CancellationToken cancellationToken)
@@ -174,10 +174,13 @@ internal sealed class PaddleBillingProvider : IBillingProvider
             return result;
         }, cancellationToken);
     }
-    public Task<ProviderAdjustment> GetAdjustmentAsync(ProviderReference reference, CancellationToken cancellationToken)
+    public async Task<ProviderAdjustment> GetAdjustmentAsync(ProviderReference reference, CancellationToken cancellationToken)
     {
         ProviderInput.RequireReference(reference, "adj");
-        return Read("adjustments/" + reference.Value, d => Bound(normalize.Adjustment(d), reference), cancellationToken);
+        var page = await List("adjustments", "per_page=1&id=" + reference.Value, null, "adj", 1, normalize.Adjustment, cancellationToken).ConfigureAwait(false);
+        if (page.Items.Count == 0) throw new BillingProviderException(ProviderFailureKind.NotFound);
+        if (page.NextCursor is not null) throw PaddleNormalization.Invalid();
+        return Bound(page.Items.Single(), reference);
     }
     public Task<ProviderPage<ProviderAdjustment>> ListAdjustmentsAsync(string? cursor, CancellationToken cancellationToken)
         => List("adjustments", "per_page=30", cursor, "adj", 30, normalize.Adjustment, cancellationToken);

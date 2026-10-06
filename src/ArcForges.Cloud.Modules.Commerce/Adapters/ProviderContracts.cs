@@ -10,6 +10,7 @@ public enum ProviderPaymentState { Pending, Completed, Failed, Canceled }
 public enum ProviderSubscriptionState { Pending, Active, PastDue, Paused, Canceled, Unknown }
 public enum ProviderAdjustmentKind { Refund, Credit, CreditReversal, Dispute, DisputeReversal, Warning, WarningReversal, Unknown }
 public enum ProviderAdjustmentState { Pending, Approved, Rejected, Reversed, Unknown }
+public enum ProviderAdjustmentScope { Full, Partial, Tax, Prorated, Unknown }
 public enum ProviderEventKind { PaymentChanged, PaymentCompleted, SubscriptionChanged, AdjustmentChanged, Unsupported }
 public enum WebhookVerdict { Verified, MissingSignature, InvalidSignature, ExpiredSignature, InvalidPayload, TooLarge }
 
@@ -37,20 +38,28 @@ public sealed record CheckoutRequest(ProviderReference Price, ProviderMoney Expe
 public sealed record HostedCheckout(ProviderReference Transaction, Uri Url);
 public sealed record ProviderLineFinancials(ProviderMoney UnitSubtotal, ProviderMoney UnitDiscount, ProviderMoney UnitTax, ProviderMoney UnitTotal,
     ProviderMoney Subtotal, ProviderMoney Discount, ProviderMoney Tax, ProviderMoney Total, string TaxCategory);
-public sealed record ProviderLineItem(ProviderReference Price, ProviderReference? TransactionItem, int Quantity, ProviderLineFinancials? Financials);
+public sealed record ProviderLineItem(ProviderReference Price, ProviderReference? TransactionItem, int Quantity, ProviderLineFinancials? Financials, ProviderPeriod? ProrationPeriod = null);
 public sealed record ProviderPeriod(DateTimeOffset StartsAt, DateTimeOffset EndsAt);
 public sealed record ProviderTransaction(ProviderReference Reference, ProviderReference? Customer, ProviderReference? Subscription,
     ProviderPaymentState State, string DiagnosticStatus, ProviderMoney Total, ProviderMoney? Tax, ProviderMoney? Fee,
     ProviderMoney? Earnings, PurchaseMetadata? Metadata, IReadOnlyList<ProviderLineItem> Items, ProviderPeriod? Period,
-    DateTimeOffset UpdatedAt, string? BillingCountry, DateTimeOffset? CustomerInformationRevisedAt);
+    DateTimeOffset UpdatedAt, string? BillingCountry, DateTimeOffset? CustomerInformationRevisedAt,
+    ProviderFinancialTotals Financials, ProviderFinancialTotals? PayoutFinancials, ProviderFinancialTotals? AdjustedFinancials, ProviderFinancialTotals? AdjustedPayoutFinancials);
 /// <summary>The provider's current period is evidence to reconcile; it is never paid-service or authorization authority.</summary>
 public sealed record ProviderSubscription(ProviderReference Reference, ProviderReference Customer, ProviderSubscriptionState State,
     string DiagnosticStatus, bool AutoRenew, DateTimeOffset? CancellationAt, ProviderPeriod? CurrentPeriod,
     PurchaseMetadata? Metadata, IReadOnlyList<ProviderLineItem> Items, DateTimeOffset UpdatedAt);
 public sealed record RefundItem(ProviderReference TransactionItem, string? PartialMinorUnits);
 public sealed record RefundRequest(ProviderReference Transaction, string Reason, IReadOnlyList<RefundItem> Items);
+public sealed record ProviderFinancialTotals(ProviderMoney Subtotal, ProviderMoney Tax, ProviderMoney Total,
+    ProviderMoney? Fee, ProviderMoney? Earnings, ProviderMoney? RetainedFee, ProviderMoney? ChargebackFee, ProviderMoney? OriginalChargebackFee,
+    ProviderMoney? Discount, ProviderMoney? Credit, ProviderMoney? CreditToBalance, ProviderMoney? Balance, ProviderMoney? GrandTotal, ProviderMoney? GrandTotalTax);
+public sealed record ProviderAdjustmentLine(ProviderReference Reference, ProviderReference TransactionItem, ProviderAdjustmentScope Scope,
+    ProviderMoney? Amount, ProviderMoney Subtotal, ProviderMoney Tax, ProviderMoney Total, ProviderPeriod? Period);
 public sealed record ProviderAdjustment(ProviderReference Reference, ProviderReference Transaction, ProviderReference? Subscription,
-    ProviderAdjustmentKind Kind, ProviderAdjustmentState State, ProviderMoney Total, DateTimeOffset UpdatedAt);
+    ProviderAdjustmentKind Kind, ProviderAdjustmentState State, ProviderMoney Total, DateTimeOffset UpdatedAt,
+    ProviderReference Customer, ProviderAdjustmentScope Scope, IReadOnlyList<ProviderAdjustmentLine> Items,
+    ProviderFinancialTotals Financials, ProviderFinancialTotals? PayoutFinancials, bool? CreditAppliedToBalance);
 public sealed record ProviderPage<T>(IReadOnlyList<T> Items, string? NextCursor);
 
 /// <summary>Only the adapter can construct a verified event; no provider JSON schema crosses this boundary.</summary>
