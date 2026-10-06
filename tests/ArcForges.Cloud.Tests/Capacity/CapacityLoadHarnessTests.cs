@@ -14,6 +14,18 @@ namespace ArcForges.Cloud.Tests.CapacityTests;
 public sealed class CapacityLoadHarnessTests
 {
     private static readonly CapacityLoadConfiguration Small = new(1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1);
+    [Fact]
+    public async Task InterruptedCommandIntentAbortsRunWithoutDispatchAndDisposesAlreadyOpenConnections()
+    {
+        using var artifact = new InterruptedCommandArtifact(); var session = new ConnectionOperation(CapacityLoadKind.Session);
+        var command = new Operation(CapacityLoadKind.Command, new(CapacityLoadStatus.Acknowledged, DurableVerified: true));
+        var harness = new CapacityLoadHarness([session, command,
+            new Operation(CapacityLoadKind.PrimaryRead, new(CapacityLoadStatus.Unavailable)),
+            new Operation(CapacityLoadKind.ColdStart, new(CapacityLoadStatus.Unavailable))], TimeProvider.System, new(artifact), new RunAuthority());
+        await Assert.ThrowsAsync<IOException>(() => Run(harness, Small with { DurationSeconds = 10, Streams = 0 }));
+        Assert.True(artifact.Interrupted); Assert.Equal(0, command.Executed);
+        Assert.Equal(1, session.Opened); Assert.Equal(1, session.Disposed);
+    }
     [Theory]
     [InlineData("open")]
     [InlineData("observe")]
@@ -134,9 +146,10 @@ public sealed class CapacityLoadHarnessTests
     }
     private sealed class Operation(CapacityLoadKind kind, CapacityLoadObservation observation) : ICapacityLoadOperation
     {
+        internal int Executed;
         public CapacityLoadKind Kind => kind;
         public Task<CapacityLoadObservation> ExecuteAsync(CapacityLoadCall call, CancellationToken cancellationToken)
-        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(observation); }
+        { cancellationToken.ThrowIfCancellationRequested(); Interlocked.Increment(ref Executed); return Task.FromResult(observation); }
     }
     private sealed class DefectiveOperation : ICapacityLoadOperation
     {
@@ -201,6 +214,24 @@ public sealed class CapacityLoadHarnessTests
         {
             cancellationToken.ThrowIfCancellationRequested(); Write(buffer.Span[..Math.Max(1, buffer.Length / 2)]);
             return ValueTask.FromException(new IOException("Injected interrupted artifact append"));
+        }
+    }
+    private sealed class InterruptedCommandArtifact : MemoryStream
+    {
+        internal bool Interrupted;
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (buffer.Length > 1)
+            {
+                using var document = JsonDocument.Parse(buffer);
+                if (document.RootElement.TryGetProperty("kind", out var kind) && kind.GetInt32() == (int)CapacityLoadKind.Command)
+                {
+                    Interrupted = true; Write(buffer.Span[..Math.Max(1, buffer.Length / 2)]);
+                    return ValueTask.FromException(new IOException("Injected command identity append interruption."));
+                }
+            }
+            return base.WriteAsync(buffer, cancellationToken);
         }
     }
     private sealed class RunAuthority : ICapacityLoadRunAuthority

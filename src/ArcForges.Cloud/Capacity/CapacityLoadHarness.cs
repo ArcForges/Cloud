@@ -131,9 +131,10 @@ internal sealed class CapacityLoadHarness
             var meter = metrics[call.Kind]; var started = Stopwatch.GetTimestamp();
             using var bounded = CancellationTokenSource.CreateLinkedTokenSource(token);
             if (!sustained) bounded.CancelAfter(TimeSpan.FromSeconds(configuration.OperationTimeoutSeconds));
+            // Artifact failure aborts the run; it is not an ambiguous business-owner result.
+            await journal.RecordAsync(call, bounded.Token).ConfigureAwait(false);
             try
             {
-                await journal.RecordAsync(call, bounded.Token).ConfigureAwait(false);
                 var observation = await operations[call.Kind].ExecuteAsync(call, bounded.Token).ConfigureAwait(false);
                 bounded.Token.ThrowIfCancellationRequested();
                 meter.Record(observation, Stopwatch.GetElapsedTime(started));
