@@ -2,7 +2,7 @@
 -- version: 1
 -- access: write
 -- tail: v1 events=0
--- statement: params=text,text,int64,text,text,bool,text,int64,text,int64,int64,int64
+-- statement: params=text,scope,int64,text,text,bool,text,int64,text,int64,int64,int64
 INSERT INTO platform_command_guard (command_id, guard_key, allowed)
 SELECT ?, 'commerce.catalogue-publish', CASE WHEN
 COALESCE(o.rev, 0) = c.expected_rev
@@ -14,11 +14,11 @@ THEN 1 ELSE 0 END
 FROM (SELECT ? AS offer_id, CAST(? AS INTEGER) AS kind, ? AS name, ? AS scope, ? AS active, ? AS term_profile,
 CAST(? AS INTEGER) AS expected_rev, ? AS price_id, CAST(? AS INTEGER) AS version, CAST(? AS INTEGER) AS starts_at, CAST(? AS INTEGER) AS now) c
 LEFT JOIN commerce_offer o ON o.offer_id = c.offer_id;
--- statement: params=text,int64,text,text,bool,text,int64,int64
+-- statement: params=scope,int64,text,text,bool,text,int64,int64
 INSERT INTO commerce_offer (offer_id, kind, name, scope, active, term_profile, created_at, rev)
 VALUES (?, CAST(? AS INTEGER), ?, ?, ?, ?, CAST(? AS INTEGER), CAST(? AS INTEGER) + 1)
 ON CONFLICT (offer_id) DO UPDATE SET name = excluded.name, active = excluded.active, rev = excluded.rev;
--- statement: params=text,text,int64,text,text,text,int64,int64,text
+-- statement: params=text,scope,int64,text,text,text,int64,int64,text
 INSERT INTO commerce_price_version (price_version_id, offer_id, version, amount, amount_currency, tax_category, starts_at, ends_at, config_revision_id)
 VALUES (?, ?, CAST(? AS INTEGER), ?, ?, ?, CAST(? AS INTEGER), NULLIF(CAST(? AS INTEGER), -1), ?);
 -- statement: params=text,text?,text,text,text,text,int64,int64,int64
