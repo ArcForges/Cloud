@@ -320,16 +320,20 @@ test("observe is a manual choice of the proof dispatch that reaches only the rea
   assert.equal((workflow.match(/observe:proof/gu) ?? []).length, 1, "only the access job runs it");
   const deploy =
     workflow.split(/^ {2}deploy-proof:\n/mu)[1]?.split(/^ {2}[a-z][a-z-]*:\n/mu)[0] ?? "";
-  assert.match(deploy, /inputs\.proof == 'deploy'/u, "an observation never deploys");
-  // A positive match alone would still pass a widened condition such as `|| inputs.proof == 'observe'`.
-  assert.doesNotMatch(deploy, /observe/u, "the deployment job never names observe");
-  const condition = deploy.split(/^ {4}needs:/mu)[0] ?? "";
-  assert.match(condition, /^ {4}if: >-\n/mu);
+  // Only the job's own `if:` condition decides: a step or comment elsewhere in the job cannot satisfy these
+  // checks, and a positive match alone would still pass a widened condition such as `|| inputs.proof == 'observe'`.
+  const condition = deploy.split(/^ {4}needs:/mu)[0]?.split(/^ {4}if: >-\n/mu)[1] ?? "";
+  assert.match(
+    condition,
+    /(?:^|&&)\s*inputs\.proof == 'deploy'\s*(?:&&|$)/mu,
+    "an observation never deploys",
+  );
   assert.doesNotMatch(
     condition,
-    /\|\||inputs\.proof\s*!=/u,
+    /\|\||inputs\.proof\s*!=|contains\(|fromJSON\(/u,
     "the deployment job runs for proof == 'deploy' only",
   );
+  assert.doesNotMatch(deploy, /observe/u, "the deployment job never names observe");
   const scripts = (
     JSON.parse(readFileSync(path.join(repository, "package.json"), "utf8")) as {
       scripts: Record<string, string>;

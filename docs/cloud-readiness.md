@@ -97,18 +97,20 @@ response only loses its retry hint and is never treated as a success.
 3. The operator readiness report names the same condition as `container: unavailable:no_instance_available`.
 4. The pattern seen from outside on 2026-10-06 (CLOUD.71): with `max_instances` 2 only one of the two named instances ran
    at a time. While Hello answered, every foundation call ended in that empty 503 with `Retry-After: 2` after 30 to 35
-   seconds, for as long as Hello stayed active. While the foundation held the instance, refused Hello calls ended at the
-   Worker's fifteen second bound instead (a 504 `RPC deadline exceeded.`, gRPC status 4 on `SayHello`, or the 503
-   `Cloud container is temporarily unavailable.` with `Retry-After: 2`). The refused instance started within seconds after
-   the other one's 60 second idle stop. The proof ceiling is therefore 4, a limit with headroom for the two names, not a
-   minimum.
+   seconds, for as long as Hello stayed active. While the foundation held the instance, refused Hello calls ended within the
+   Worker's own deadline instead (fifteen seconds for `/api/healthz`, ten for `SayHello`): a 504 `RPC deadline exceeded.` on
+   `/api/healthz` after 15.3 to 15.9 seconds, gRPC status 4 on `SayHello` after about 11 seconds, or, earlier, the 503
+   `Cloud container is temporarily unavailable.` with `Retry-After: 2` after 0.7 to 14.3 seconds. The refused instance
+   started within seconds after the other one's 60 second idle stop. The proof ceiling is therefore 4, a limit with headroom
+   for the two names, not a minimum.
 5. What a request cannot tell: whether a stopped or stopping instance still counts, only one location is usable, an older
    rollout left instances behind, or the application is still provisioning (about ten minutes after a deployment). The
    manual dispatch `proof=observe` (`npm run observe:proof`, read-only, [PRF.07 proof](prf-07-foundation-proof.md)) prints
    the provider's own view: the configured ceiling, every instance by state, version and location, the Durable Object each
    one serves, and the newest rollouts. On 2026-10-06 it showed the cause of point 4: with `max_instances` 2 the provider
-   kept a single instance for the application and the two names took turns on it, with no stopped instance still counted
-   and no instance of an older rollout left; with 4 it keeps four and served both names at the same time.
+   counted a single instance for the application and the two names took turns on it; no other instance, stopped or of an
+   older rollout, held the second slot. With 4 it keeps four and served both names at the same time. (Its derived instance
+   state reads stopped even for an instance in use, so that state alone does not mean stale.)
 
 ## The wait is bounded
 
