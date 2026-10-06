@@ -2,9 +2,7 @@
   "schemaVersion": 1,
   "repository": "Cloud",
   "sourceCommit": "9531af2219d686ec99769bcf431ff6767a73d924",
-  "manifests": [
-    "package.json"
-  ],
+  "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
     ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -997,10 +995,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": [
-    "com-02-cloud-runtime-notices-r1",
-    "com-02-cloud-worker-bundle-r1"
-  ],
+  "artifactRecords": ["com-02-cloud-runtime-notices-r1", "com-02-cloud-worker-bundle-r1"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
