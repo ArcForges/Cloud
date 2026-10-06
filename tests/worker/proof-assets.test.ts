@@ -344,8 +344,7 @@ test("each profile's policy must cover its own inline scripts and stay restricti
   refuses({ csp: { account: csp("chat") } }, /does not cover an inline script/u);
   // An inline script in any letter case or with a spaced closing tag must be covered as well.
   refuses(
-    { pages: { "chat/index.html": page("chat", "<script>window.other = 1;</script 	
- bar>") } },
+    { pages: { "chat/index.html": page("chat", "<script>window.other = 1;</script junk>") } },
     /does not cover an inline script/u,
   );
   for (const tag of ["SCRIPT", "Script"])
