@@ -16,9 +16,9 @@ internal static class PolicyBoundaryGuard
             var semantic = compilation.GetSemanticModel(tree);
             foreach (var node in tree.GetRoot().DescendantNodes())
             {
-                var declaration = node.AncestorsAndSelf().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault();
+                var declaration = node.AncestorsAndSelf().FirstOrDefault(candidate => candidate is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax);
                 var source = declaration is null ? Classify(semantic.GetEnclosingSymbol(node.SpanStart)?.ContainingNamespace?.ToDisplayString())
-                    : Classify(semantic.GetDeclaredSymbol(declaration));
+                    : Classify(semantic.GetDeclaredSymbol(declaration) as ITypeSymbol);
                 if (source == Boundary.Other) continue;
                 var symbol = node is ExpressionSyntax or TypeSyntax or AttributeSyntax
                     ? semantic.GetSymbolInfo(node).Symbol : null;

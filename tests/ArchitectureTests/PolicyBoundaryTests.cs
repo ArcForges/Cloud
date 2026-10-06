@@ -19,6 +19,7 @@ public sealed class PolicyBoundaryTests
             "public record Restriction(Alias? Value);",
             "public class Restriction : Alias;",
             "public class Outer { public record Restriction(System.Collections.Generic.List<Alias?[]> Values); }",
+            "public delegate Alias Restriction(Alias input);",
         })
         {
             string source = $$"""
