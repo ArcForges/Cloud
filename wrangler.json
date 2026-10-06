@@ -51,6 +51,7 @@
     "head_sampling_rate": 0.1
   },
   "vars": {
+    "COMMERCE_EGRESS": "production",
     "SOURCE_REVISION": "local"
   },
   "env": {
@@ -143,6 +144,7 @@
         }
       ],
       "vars": {
+        "COMMERCE_EGRESS": "sandbox",
         "SOURCE_REVISION": "local",
         "FOUNDATION_PROOF": "enabled",
         "REALM_ID": "proof",

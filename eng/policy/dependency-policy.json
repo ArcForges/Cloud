@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "9531af2219d686ec99769bcf431ff6767a73d924",
+  "sourceCommit": "fc829170a3fa51c01b863117a86dbbd2379182b0",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -12,7 +12,7 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-    "package.json": "2307d69c48dd472085f40a7d74dfd1dce1d5aac04f8f50fe5222f57457048979",
+    "package.json": "8e45824e4c047c9b96a439cc1b0d40bc8830d1bd273971f08a18f50ec8046eae",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -26,7 +26,7 @@
     "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
     "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
     "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-    "wrangler.json": "3c420485a30ea7a65994220c00414a566c61a298cb41bceb4cfaf20c5da437aa",
+    "wrangler.json": "b5b78970895480fcbd4d3f4e9e6f33fc55a1b76c556cdd63d454db4faefa528e",
     "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
     "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
     ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
@@ -78,15 +78,15 @@
     "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
     "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
     "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7",
-    "eng/provenance/artifact-profiles/cloud-release-r45.json": "5329c0833503c2ec3a64a6b5b0d19b1bfb5b56f73b0749a90a057473e5981f26",
-    "eng/provenance/records/com-02-cloud-runtime-notices-r1.json": "c571314af9d1835d35bb0ce5d4804a759c79d64cbb822909204045a344653eb4",
-    "eng/provenance/records/com-02-cloud-worker-bundle-r1.json": "6ba5e37eae1f23ac87fa62cffed920f8ee7624a10528fb61961446ac16c4253f"
+    "eng/provenance/artifact-profiles/cloud-release-r46.json": "4d5de5c8e3de8f84a9a017f3b6ab28a932e1fcbb8fe7ee65cd8d5b9f2d71d84e",
+    "eng/provenance/records/cloud-74-cloud-runtime-notices-r1.json": "58b5d301b894c74ed6aab0bb175b5d066fce3abc33f975cb7c4090d6eba50f31",
+    "eng/provenance/records/cloud-74-cloud-worker-bundle-r1.json": "d0b0ac9f38bff234fd34ea861c6e94b7baee8b5ed3b078655d8ea2e74b57a9e3"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-codex-20261006-catalog (maintainer-authorized; independent exact-head review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-provider (maintainer-authorized; independent exact-head PR review recorded separately)",
     "date": "2026-10-06",
-    "rationale": "COM.02 adds complete production catalogue validation/publication/query ports, trusted Configuration evidence verification, the Commerce immutable versioned D1 store and five real named plans. Native AOT inputs and exact Docker source inclusions are re-bound. The generated Worker plan dictionary and its actual dry-run bundle are sealed with unchanged input/output membership, exports, external imports, package identities and full legal obligations. No npm/NuGet closure, native capability, public route or provider format changes. Actual Configuration authority integration remains owned by POL.02; component SQLite evidence is not a real D1 deployment claim.",
+    "rationale": "CLOUD.74 composes the accepted COM.01 adapter with production HTTPS transport through the locked SDK's exact-host Container interception. The isolated first-party worker/commerce-provider/egress.ts supplies only configured production or sandbox destinations on HTTPS443, closed purpose/method/query/header admission, bounded request/reply storage and aggregate concurrency, lifecycle/cancellation/deadline handling and refusal of redirects with no retry or credential/body logs. The host's neutral keyed factory owns fresh bounded mounted-CA snapshots with CustomRootTrust, ordinary hostname/chain/time checks and no callbacks/system trust mutation/proxy/cookies/redirects. Global Internet, workers.dev and preview URLs remain disabled; existing class identities, ingress, private foundation handlers, routes and data are preserved. Actual HTTP/TLS components, COM.01 composition and the locked SDK registration are tested with only unavailable endpoints/platform calls replaced. Native AOT image source inclusion, complete actual emitted Worker closure and declared build inputs bind this successor. Dependency coordinates, integrities, lock closure, legal classification, provider/runtime pins and security gates are unchanged; every historical profile and record remains intact. This is reviewed first-party implementation/input admission, not hash-only refresh. COM.03 consumes the transport with approved merchant configuration; COM.14/WP50 own actual merchant/mounted-CA/OS isolation and whole-series acceptance. No live-provider or deployment claim follows from component doubles.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -96,7 +96,7 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-      "package.json": "2307d69c48dd472085f40a7d74dfd1dce1d5aac04f8f50fe5222f57457048979",
+      "package.json": "8e45824e4c047c9b96a439cc1b0d40bc8830d1bd273971f08a18f50ec8046eae",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -110,7 +110,7 @@
       "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
       "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
       "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-      "wrangler.json": "3c420485a30ea7a65994220c00414a566c61a298cb41bceb4cfaf20c5da437aa",
+      "wrangler.json": "b5b78970895480fcbd4d3f4e9e6f33fc55a1b76c556cdd63d454db4faefa528e",
       "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
       "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
       ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
@@ -162,9 +162,9 @@
       "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
       "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
       "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7",
-      "eng/provenance/artifact-profiles/cloud-release-r45.json": "5329c0833503c2ec3a64a6b5b0d19b1bfb5b56f73b0749a90a057473e5981f26",
-      "eng/provenance/records/com-02-cloud-runtime-notices-r1.json": "c571314af9d1835d35bb0ce5d4804a759c79d64cbb822909204045a344653eb4",
-      "eng/provenance/records/com-02-cloud-worker-bundle-r1.json": "6ba5e37eae1f23ac87fa62cffed920f8ee7624a10528fb61961446ac16c4253f"
+      "eng/provenance/artifact-profiles/cloud-release-r46.json": "4d5de5c8e3de8f84a9a017f3b6ab28a932e1fcbb8fe7ee65cd8d5b9f2d71d84e",
+      "eng/provenance/records/cloud-74-cloud-runtime-notices-r1.json": "58b5d301b894c74ed6aab0bb175b5d066fce3abc33f975cb7c4090d6eba50f31",
+      "eng/provenance/records/cloud-74-cloud-worker-bundle-r1.json": "d0b0ac9f38bff234fd34ea861c6e94b7baee8b5ed3b078655d8ea2e74b57a9e3"
     },
     "checks": [
       "locked-restore",
@@ -175,8 +175,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No framework/runtime/dependency coordinate changes. Real guarded named-plan composition and bounded typed reads are covered by managed components, actual Worker SQLite execution and one explicit local workerd binding run. Default production executor activation, provider network/REST semantics, account authentication and whole-series/OS acceptance remain owned by their implementation/acceptance tasks; no test double is registered in production.",
-    "maintenance": "Preserve exact coordinates, all immutable receipts, fixed family locks/ownership and mandatory CI. Future first-party, closure, legal or artifact changes require a new independently reviewed successor; production routes/data and workers.dev protections remain unchanged.",
+    "runtimeAssessment": "No framework/runtime/dependency coordinate changes. Real TLS host/provider composition, strict trust/name checks, actual HTTP/stream boundaries, cancellation, deadlines, concurrency and lifecycle are covered by owned components. The locked SDK registry is exercised with unavailable platform calls observed by spies. No test double is registered in production; real merchant/mounted-CA/OS isolation and whole-series acceptance remain COM.14/WP50 responsibilities.",
+    "maintenance": "Preserve exact coordinates, all immutable receipts, strict trust and closed transport boundaries and mandatory CI. Future first-party, closure, legal or artifact changes require a new independently reviewed successor; production routes/data and workers.dev protections remain unchanged.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
   },
@@ -995,7 +995,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["com-02-cloud-runtime-notices-r1", "com-02-cloud-worker-bundle-r1"],
+  "artifactRecords": ["cloud-74-cloud-runtime-notices-r1", "cloud-74-cloud-worker-bundle-r1"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1009,7 +1009,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/com-02-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-74-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

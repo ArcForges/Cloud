@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Pins that the production Container class is the unchanged Hello class and that the outbound
-// interception, the environment hook and the foundation handlers belong only to the proof class.
+// Pins actual closed commerce interception and preservation of the class identities, Internet
+// restriction and proof-only private handlers. The real locked SDK registry executes under Node.
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import test from "node:test";
@@ -48,8 +48,11 @@ const containerContext = {
   blockConcurrencyWhile: () => Promise.resolve(),
 };
 
-test("the production Container class registers no outbound interception", () => {
-  assert.equal(CloudContainer.outboundByHost, undefined);
+test("the production Container registers only exact closed commerce hosts", () => {
+  assert.deepEqual(Object.keys(CloudContainer.outboundByHost ?? {}).sort(), [
+    "api.paddle.com",
+    "sandbox-api.paddle.com",
+  ]);
   assert.equal(CloudContainer.outboundHandlers, undefined);
   assert.deepEqual(
     Object.getOwnPropertyNames(CloudContainer).filter((name) => /outbound/iu.test(name)),
@@ -57,10 +60,18 @@ test("the production Container class registers no outbound interception", () => 
   );
 });
 
-test("the production Container class has no constructor, environment hook or foundation import", () => {
+test("the production Container constructor forwards only neutral commerce enablement", () => {
   assert.deepEqual(Object.getOwnPropertyNames(CloudContainer.prototype), ["constructor"]);
   const source = CloudContainer.toString();
-  assert.doesNotMatch(source, /constructor|envVars|containerEnvironment|outbound|Foundation/u);
+  assert.doesNotMatch(source, /containerEnvironment|Foundation|HMAC_C2W_SECRET/u);
+  const configured = new CloudContainer(containerContext, {
+    COMMERCE_EGRESS: "production",
+    HMAC_C2W_SECRET: "never-forward",
+  });
+  assert.deepEqual(configured.envVars, { ARCFORGES_COMMERCE_EGRESS: "enabled" });
+  assert.equal(configured.interceptHttps, true);
+  assert.equal(configured.enableInternet, false);
+  assert.equal(configured.allowedHosts, undefined);
 });
 
 test("the production Container keeps the Hello settings and no environment variables", () => {
@@ -74,23 +85,70 @@ test("the production Container keeps the Hello settings and no environment varia
   assert.deepEqual(instance.envVars, {}, "no foundation variable reaches the production class");
 });
 
-test("only the proof class carries the two exact outbound hosts and the environment hook", () => {
+test("only the proof class carries private storage/object hosts alongside closed commerce", () => {
   assert.deepEqual(Object.keys(FoundationContainer.outboundByHost ?? {}).sort(), [
+    "api.paddle.com",
     "objects.internal",
+    "sandbox-api.paddle.com",
     "storage.internal",
   ]);
   assert.equal(Object.getPrototypeOf(FoundationContainer), CloudContainer);
-  assert.equal(
-    CloudContainer.outboundByHost,
-    undefined,
-    "registering the proof hosts leaves production alone",
-  );
+  assert.deepEqual(Object.keys(CloudContainer.outboundByHost ?? {}).sort(), [
+    "api.paddle.com",
+    "sandbox-api.paddle.com",
+  ]);
 
   const disabled = new FoundationContainer(containerContext, {});
   assert.deepEqual(disabled.envVars, {}, "without the proof flag the proof class passes nothing");
   assert.equal(disabled.enableInternet, false);
   const enabled = new FoundationContainer(containerContext, { FOUNDATION_PROOF: "enabled" });
   assert.equal((enabled.envVars as Record<string, string>).ARCFORGES_FOUNDATION_PROOF, "enabled");
+  const both = new FoundationContainer(containerContext, {
+    FOUNDATION_PROOF: "enabled",
+    COMMERCE_EGRESS: "sandbox",
+  });
+  assert.equal((both.envVars as Record<string, string>).ARCFORGES_COMMERCE_EGRESS, "enabled");
+  assert.equal(both.interceptHttps, true);
+});
+
+test("the locked SDK applies only exact-host HTTPS/HTTP interception without allowedHosts or a wildcard", async () => {
+  const intercepted: string[] = [];
+  const properties: Record<string, unknown>[] = [];
+  const context = {
+    ...containerContext,
+    id: { toString: () => "component-container" },
+    exports: {
+      ContainerProxy: (options: { props: Record<string, unknown> }) => {
+        properties.push(options.props);
+        return {};
+      },
+    },
+    container: {
+      running: false,
+      interceptOutboundHttp: async (host: string) => {
+        intercepted.push(`http:${host}`);
+      },
+      interceptOutboundHttps: async (host: string) => {
+        intercepted.push(`https:${host}`);
+      },
+      interceptAllOutboundHttp: async () => {
+        assert.fail("no global interception registration");
+      },
+    },
+  };
+  const instance = new CloudContainer(context, { COMMERCE_EGRESS: "production" }) as unknown as {
+    applyOutboundInterception(): Promise<void>;
+  };
+  await instance.applyOutboundInterception();
+  assert.deepEqual(intercepted.sort(), [
+    "http:api.paddle.com",
+    "http:sandbox-api.paddle.com",
+    "https:api.paddle.com",
+    "https:sandbox-api.paddle.com",
+  ]);
+  assert.equal(properties[0]?.enableInternet, false);
+  assert.equal(properties[0]?.interceptAll, false);
+  assert.equal(properties[0]?.allowedHosts, undefined);
 });
 
 test("the 60 second sleep timer never stops a Container that has a request or a stream in flight", () => {
