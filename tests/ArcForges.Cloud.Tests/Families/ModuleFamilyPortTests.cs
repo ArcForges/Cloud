@@ -122,4 +122,41 @@ public sealed class ModuleFamilyPortTests
         Assert.Equal(ModulePlanStatus.UnknownOutcome, (await port.WriteAsync(write, TestContext.Current.CancellationToken)).Status);
         Assert.Equal(["platform.command-load", write.PlanId, "platform.command-load"], storage.PlanIds);
     }
+
+    [Theory]
+    [InlineData(ModulePlanStatus.Replayed)]
+    [InlineData(ModulePlanStatus.ReceiptExpired)]
+    [InlineData(ModulePlanStatus.ReusedIdentifier)]
+    public async Task ExistingReceiptPreventsEveryMutationAndUnsafeResultDisclosure(ModulePlanStatus expected)
+    {
+        var write = FamilyPortFixture.Enrollment();
+        var commit = write.Commit;
+        var storage = new ScriptedExecutor
+        {
+            Handler = _ => ScriptedExecutor.Rows([
+                D1Values.Text(expected == ModulePlanStatus.ReusedIdentifier ? "different" : commit.RequestHash), D1Values.Int64(2), D1Values.Text("{\"original\":true}"),
+                D1Values.Int64(1), D1Values.Null(), D1Values.Int64(expected == ModulePlanStatus.ReceiptExpired ? Samples.NowMicros : commit.ExpiresAtMicros),
+                D1Values.Text(commit.ActorRef), D1Values.Text(commit.Operation), commit.WorkspaceId is { } workspace ? D1Values.Text(workspace.ToString("D")) : D1Values.Null(),
+            ]),
+        };
+        var port = new ModuleFamilyPortFactory(storage, 1, new Clock()).For(ModuleDescriptor.Create("Identity", "identity"));
+        var result = await port.WriteAsync(write, TestContext.Current.CancellationToken);
+        Assert.Equal(expected, result.Status);
+        if (expected != ModulePlanStatus.Replayed) Assert.Null(result.StoredResultJson);
+        Assert.Equal(["platform.command-load"], storage.PlanIds);
+    }
+
+    [Fact]
+    public async Task MalformedMissingAndDuplicateContributionsCannotTriggerAReceiptRead()
+    {
+        var write = FamilyPortFixture.Enrollment();
+        var storage = new ScriptedExecutor();
+        var port = new ModuleFamilyPortFactory(storage, 1, new Clock()).For(ModuleDescriptor.Create("Identity", "identity"));
+        var first = write.Contributions[0];
+        await Assert.ThrowsAnyAsync<Exception>(() => port.WriteAsync(write with { Contributions = [] }, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => port.WriteAsync(write with { Contributions = [first, first] }, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => port.WriteAsync(write with { Contributions = [first with { Arguments = [] }] }, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => port.WriteAsync(write with { Contributions = [first with { Class = "unregistered" }] }, TestContext.Current.CancellationToken));
+        Assert.Empty(storage.Calls);
+    }
 }
