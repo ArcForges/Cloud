@@ -3,7 +3,8 @@ namespace ArcForges.Cloud.Modules.Commerce.Adapters;
 
 public enum BillingEnvironment { Production, Sandbox }
 public enum PurchaseKind { OneTime, Recurring }
-public enum ProviderTaxTreatment { Included, Excluded, AccountSetting }
+public enum ProviderTaxTreatment { Included, Excluded, AccountSetting, LocationBased }
+public enum ProviderScheduledAction { None, Cancel, Pause, Resume, Unknown }
 public enum CommerceClientPlatform { DesktopWeb, MobileWeb, DesktopApplication }
 public enum ProviderFailureKind { Unsupported, Unauthorized, Forbidden, NotFound, Conflict, Rejected, RateLimited, Transport, Protocol, UnknownOutcome }
 public enum ProviderPaymentState { Pending, Completed, Failed, Canceled }
@@ -18,8 +19,11 @@ public enum WebhookVerdict { Verified, MissingSignature, InvalidSignature, Expir
 public sealed record ProviderReference(string Value);
 public sealed record ProviderMoney(string MinorUnits, string Currency);
 public sealed record CountryPrice(IReadOnlyList<string> Countries, ProviderMoney Money);
+public sealed record ProviderBillingCycle(string Interval, int Frequency);
+public sealed record ProviderTrialPeriod(ProviderBillingCycle Cycle, bool RequiresPaymentMethod, ProviderMoney? Money, IReadOnlyList<CountryPrice> CountryPrices);
+public sealed record ProviderPricingTerms(ProviderBillingCycle? BillingCycle, ProviderTrialPeriod? Trial);
 public sealed record ProviderPriceSnapshot(ProviderReference Reference, ProviderReference Product, bool Active, string TaxCategory, ProviderTaxTreatment TaxTreatment,
-    ProviderMoney Money, string? Interval, int? Frequency, IReadOnlyList<CountryPrice> CountryPrices);
+    ProviderMoney Money, string? Interval, int? Frequency, IReadOnlyList<CountryPrice> CountryPrices, ProviderPricingTerms Terms);
 
 public sealed record PaymentMethodCapability(string Key, bool OneTime, bool Recurring, IReadOnlyList<string> Currencies,
     IReadOnlyList<CommerceClientPlatform> Platforms, bool SeparateApprovalRequired, bool Approved, bool Chargebacks,
@@ -34,7 +38,7 @@ public sealed record PurchaseMetadata(string RealmId, string BillingAccountId, s
     string CheckoutAttemptId, string OfferId, string PriceVersion, string PolicyVersion);
 
 public sealed record CheckoutRequest(ProviderReference Price, ProviderMoney ExpectedUnitPrice, PurchaseKind Kind,
-    CommerceClientPlatform Platform, string Country, string ExpectedTaxCategory, ProviderTaxTreatment ExpectedTaxTreatment, PurchaseMetadata Metadata);
+    CommerceClientPlatform Platform, string Country, string ExpectedTaxCategory, ProviderTaxTreatment ExpectedTaxTreatment, PurchaseMetadata Metadata, ProviderPricingTerms ExpectedTerms);
 public sealed record HostedCheckout(ProviderReference Transaction, Uri Url);
 public sealed record ProviderLineFinancials(ProviderMoney UnitSubtotal, ProviderMoney UnitDiscount, ProviderMoney UnitTax, ProviderMoney UnitTotal,
     ProviderMoney Subtotal, ProviderMoney Discount, ProviderMoney Tax, ProviderMoney Total, string TaxCategory);
@@ -48,7 +52,7 @@ public sealed record ProviderTransaction(ProviderReference Reference, ProviderRe
 /// <summary>The provider's current period is evidence to reconcile; it is never paid-service or authorization authority.</summary>
 public sealed record ProviderSubscription(ProviderReference Reference, ProviderReference Customer, ProviderSubscriptionState State,
     string DiagnosticStatus, bool AutoRenew, DateTimeOffset? CancellationAt, ProviderPeriod? CurrentPeriod,
-    PurchaseMetadata? Metadata, IReadOnlyList<ProviderLineItem> Items, DateTimeOffset UpdatedAt);
+    PurchaseMetadata? Metadata, IReadOnlyList<ProviderLineItem> Items, DateTimeOffset UpdatedAt, ProviderScheduledAction ScheduledAction);
 public sealed record RefundItem(ProviderReference TransactionItem, string? PartialMinorUnits);
 public sealed record RefundRequest(ProviderReference Transaction, string Reason, IReadOnlyList<RefundItem> Items);
 public sealed record ProviderFinancialTotals(ProviderMoney Subtotal, ProviderMoney Tax, ProviderMoney Total,

@@ -48,6 +48,32 @@ internal sealed class PaddleBillingProvider : IBillingProvider
         webhookKeys = settings.WebhookKeys.Select(k => (k.Version, Encoding.UTF8.GetBytes(k.Secret))).ToArray();
     }
 
+    private static bool ValidTerms(ProviderPricingTerms? terms)
+    {
+        static bool ValidCycle(ProviderBillingCycle? cycle) => cycle is null || cycle.Frequency > 0 && cycle.Interval is "day" or "week" or "month" or "year";
+        if (terms is null || !ValidCycle(terms.BillingCycle)) return false;
+        if (terms.Trial is not { } trial) return true;
+        if (terms.BillingCycle is null || trial.Cycle is null || !ValidCycle(trial.Cycle) || trial.CountryPrices is null || trial.CountryPrices.Count > 250) return false;
+        static bool ValidMoney(ProviderMoney? money) => money is null || ProviderInput.Currency(money.Currency) && ProviderInput.Amount(money.MinorUnits);
+        if (!ValidMoney(trial.Money)) return false;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        return trial.CountryPrices.All(p => p is not null && p.Money is not null && ValidMoney(p.Money) && p.Countries is { Count: > 0 }
+            && p.Countries.All(c => ProviderInput.Country(c) && seen.Add(c)));
+    }
+    private static ProviderPricingTerms SnapshotTerms(ProviderPricingTerms terms) => terms with
+    {
+        Trial = terms.Trial is null ? null : terms.Trial with
+        { CountryPrices = Array.AsReadOnly(terms.Trial.CountryPrices.Select(p => p with { Countries = Array.AsReadOnly(p.Countries.ToArray()) }).ToArray()) }
+    };
+    private static bool SameTerms(ProviderPricingTerms left, ProviderPricingTerms right)
+    {
+        if (left.BillingCycle != right.BillingCycle) return false;
+        if (left.Trial is null || right.Trial is null) return left.Trial is null && right.Trial is null;
+        return left.Trial.Cycle == right.Trial.Cycle && left.Trial.RequiresPaymentMethod == right.Trial.RequiresPaymentMethod
+            && left.Trial.Money == right.Trial.Money
+            && left.Trial.CountryPrices.SelectMany(p => p.Countries.Select(c => (c, p.Money))).OrderBy(p => p.c, StringComparer.Ordinal)
+                .SequenceEqual(right.Trial.CountryPrices.SelectMany(p => p.Countries.Select(c => (c, p.Money))).OrderBy(p => p.c, StringComparer.Ordinal));
+    }
     public Task<ProviderPriceSnapshot> GetPriceAsync(ProviderReference reference, CancellationToken cancellationToken)
     {
         ProviderInput.RequireReference(reference, "pri");
@@ -61,7 +87,8 @@ internal sealed class PaddleBillingProvider : IBillingProvider
         if (!Enum.IsDefined(request.Kind) || !Enum.IsDefined(request.Platform) || !Enum.IsDefined(request.ExpectedTaxTreatment) || !ProviderInput.Country(request.Country)
             || request.ExpectedUnitPrice is null || !ProviderInput.Currency(request.ExpectedUnitPrice.Currency)
             || !ProviderInput.Amount(request.ExpectedUnitPrice.MinorUnits, positive: true) || !ProviderInput.Key(request.ExpectedTaxCategory)
-            || !ProviderInput.Metadata(request.Metadata)) throw new ArgumentException("Invalid captured checkout terms.", nameof(request));
+            || !ProviderInput.Metadata(request.Metadata) || !ValidTerms(request.ExpectedTerms)) throw new ArgumentException("Invalid captured checkout terms.", nameof(request));
+        var expectedTerms = SnapshotTerms(request.ExpectedTerms);
         if (!Capabilities.HostedCheckout || !Capabilities.PaymentMethods.Any(m => m.Approved && m.Currencies.Contains(request.ExpectedUnitPrice.Currency, StringComparer.Ordinal)
             && m.Platforms.Contains(request.Platform) && (request.Kind == PurchaseKind.OneTime ? m.OneTime : m.Recurring)
             && (request.Kind != PurchaseKind.Recurring || !m.RenewalCaps.TryGetValue(request.ExpectedUnitPrice.Currency, out var cap)
@@ -74,7 +101,7 @@ internal sealed class PaddleBillingProvider : IBillingProvider
             var price = await GetPriceAsync(request.Price, operation.Token).ConfigureAwait(false);
             var amount = price.CountryPrices.SingleOrDefault(p => p.Countries.Contains(request.Country, StringComparer.Ordinal))?.Money ?? price.Money;
             if (!price.Active || amount != request.ExpectedUnitPrice || price.TaxCategory != request.ExpectedTaxCategory || price.TaxTreatment != request.ExpectedTaxTreatment
-                || (price.Interval is null ? PurchaseKind.OneTime : PurchaseKind.Recurring) != request.Kind)
+                || (price.Interval is null ? PurchaseKind.OneTime : PurchaseKind.Recurring) != request.Kind || !SameTerms(price.Terms, expectedTerms))
                 throw new BillingProviderException(ProviderFailureKind.Conflict);
             var m = request.Metadata;
             var body = new ApiCheckoutBody([new ApiItem(request.Price.Value, 1)], amount.Currency, "automatic",
@@ -93,7 +120,8 @@ internal sealed class PaddleBillingProvider : IBillingProvider
                 var receiptMoney = PaddleNormalization.Required(receiptPrice, "unit_price", JsonValueKind.Object);
                 // Region overrides remain in the price snapshot; the top-level transaction currency and the selected price override are bound together.
                 var receiptBase = PaddleNormalization.Money(receiptMoney, "amount", PaddleNormalization.Text(receiptMoney, "currency_code", 3));
-                if (receiptBase != price.Money || PaddleNormalization.TaxTreatment(receiptPrice) != request.ExpectedTaxTreatment) throw PaddleNormalization.Invalid();
+                if (receiptBase != price.Money || PaddleNormalization.TaxTreatment(receiptPrice) != request.ExpectedTaxTreatment
+                    || !SameTerms(PaddleNormalization.PricingTerms(receiptPrice), expectedTerms)) throw PaddleNormalization.Invalid();
                 var checkout = PaddleNormalization.Required(data, "checkout", JsonValueKind.Object);
                 var url = SafeUrl(PaddleNormalization.Text(checkout, "url"));
                 if (url.GetLeftPart(UriPartial.Path) != settings.CheckoutPage.GetLeftPart(UriPartial.Path)
@@ -137,17 +165,29 @@ internal sealed class PaddleBillingProvider : IBillingProvider
                 return result;
             }, cancellationToken);
     }
-    public Task<ProviderSubscription> ReactivateScheduledCancellationAsync(ProviderReference reference, CancellationToken cancellationToken)
+    public async Task<ProviderSubscription> ReactivateScheduledCancellationAsync(ProviderReference reference, CancellationToken cancellationToken)
     {
         ProviderInput.RequireReference(reference, "sub");
         Require(Capabilities.ReactivateScheduledCancellation);
-        return Write(HttpMethod.Patch, "subscriptions/" + reference.Value,
-            JsonSerializer.SerializeToUtf8Bytes(new ApiReactivation(null), PaddleJsonContext.Default.ApiReactivation), data =>
-            {
-                var result = Bound(normalize.Subscription(data), reference);
-                if (!result.AutoRenew || result.CancellationAt is not null) throw PaddleNormalization.Invalid();
-                return result;
-            }, cancellationToken);
+        using var deadline = new CancellationTokenSource(settings.OperationTimeout, clock);
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+        try
+        {
+            var current = await GetSubscriptionAsync(reference, operation.Token).ConfigureAwait(false);
+            if (current.ScheduledAction != ProviderScheduledAction.Cancel || current.CancellationAt is null
+                || current.State is not (ProviderSubscriptionState.Active or ProviderSubscriptionState.PastDue or ProviderSubscriptionState.Pending))
+                throw new BillingProviderException(ProviderFailureKind.Conflict);
+            return await Write(HttpMethod.Patch, "subscriptions/" + reference.Value,
+                JsonSerializer.SerializeToUtf8Bytes(new ApiReactivation(null), PaddleJsonContext.Default.ApiReactivation), data =>
+                {
+                    var result = Bound(normalize.Subscription(data), reference);
+                    if (!result.AutoRenew || result.ScheduledAction != ProviderScheduledAction.None || result.CancellationAt is not null
+                        || result.Customer != current.Customer) throw PaddleNormalization.Invalid();
+                    return result;
+                }, operation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+        { throw new BillingProviderException(ProviderFailureKind.Transport); }
     }
     public Task<ProviderAdjustment> CreateRefundAsync(RefundRequest request, CancellationToken cancellationToken)
     {
@@ -164,13 +204,19 @@ internal sealed class PaddleBillingProvider : IBillingProvider
                 throw new ArgumentException("Invalid refund amount.", nameof(request));
         }
         if (request.Items.Count > 0) Require(Capabilities.PartialRefund);
-        var items = request.Items.Count == 0 ? null : request.Items.Select(i => new ApiRefundItem(i.TransactionItem.Value,
+        var requestedItems = request.Items.ToArray();
+        var items = requestedItems.Length == 0 ? null : requestedItems.Select(i => new ApiRefundItem(i.TransactionItem.Value,
             i.PartialMinorUnits is null ? "full" : "partial", i.PartialMinorUnits)).ToArray();
         var body = new ApiRefundBody("refund", items is null ? "full" : "partial", request.Transaction.Value, request.Reason, items);
         return Write(HttpMethod.Post, "adjustments", JsonSerializer.SerializeToUtf8Bytes(body, PaddleJsonContext.Default.ApiRefundBody), data =>
         {
             var result = normalize.Adjustment(data);
-            if (result.Transaction != request.Transaction || result.Kind != ProviderAdjustmentKind.Refund) throw PaddleNormalization.Invalid();
+            if (result.Transaction != request.Transaction || result.Kind != ProviderAdjustmentKind.Refund
+                || result.Scope != (items is null ? ProviderAdjustmentScope.Full : ProviderAdjustmentScope.Partial)
+                || items is not null && (result.Items.Count != items.Length || requestedItems.Any(expected =>
+                    !result.Items.Any(actual => actual.TransactionItem == expected.TransactionItem
+                        && actual.Scope == (expected.PartialMinorUnits is null ? ProviderAdjustmentScope.Full : ProviderAdjustmentScope.Partial)
+                        && actual.Amount?.MinorUnits == expected.PartialMinorUnits)))) throw PaddleNormalization.Invalid();
             return result;
         }, cancellationToken);
     }

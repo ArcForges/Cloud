@@ -60,6 +60,7 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
         "internal" => ProviderTaxTreatment.Included,
         "external" => ProviderTaxTreatment.Excluded,
         "account_setting" => ProviderTaxTreatment.AccountSetting,
+        "location" => ProviderTaxTreatment.LocationBased,
         _ => throw Invalid(),
     };
     private static ProviderPeriod? Period(JsonElement value, string name)
@@ -125,14 +126,42 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
     {
         var product = Required(data, "product", JsonValueKind.Object);
         var money = Required(data, "unit_price", JsonValueKind.Object);
-        string? interval = null; int? frequency = null;
-        if (data.TryGetProperty("billing_cycle", out var cycle) && cycle.ValueKind != JsonValueKind.Null)
+        var terms = PricingTerms(data);
+        var overrides = CountryPrices(data);
+        var productRef = Reference(data, "product_id", "pro");
+        if (Reference(product, "id", "pro") != productRef) throw Invalid();
+        return new ProviderPriceSnapshot(Reference(data, "id", "pri"), productRef,
+            Text(data, "status", 32) == "active" && Text(product, "status", 32) == "active", Text(product, "tax_category", 64), TaxTreatment(data),
+            Money(money, "amount", Text(money, "currency_code", 3)), terms.BillingCycle?.Interval, terms.BillingCycle?.Frequency, overrides, terms);
+    }
+    internal static ProviderPricingTerms PricingTerms(JsonElement data)
+    {
+        var rawCycle = data.GetProperty("billing_cycle");
+        var cycle = rawCycle.ValueKind == JsonValueKind.Null ? null : Cycle(rawCycle);
+        var rawTrial = data.GetProperty("trial_period");
+        ProviderTrialPeriod? trial = null;
+        if (rawTrial.ValueKind != JsonValueKind.Null)
         {
-            if (cycle.ValueKind != JsonValueKind.Object) throw Invalid();
-            interval = Text(cycle, "interval", 16);
-            if (interval is not ("day" or "week" or "month" or "year") || !cycle.GetProperty("frequency").TryGetInt32(out var count) || count <= 0) throw Invalid();
-            frequency = count;
+            if (cycle is null || rawTrial.ValueKind != JsonValueKind.Object) throw Invalid();
+            ProviderMoney? money = null;
+            if (rawTrial.TryGetProperty("unit_price", out var unit) && unit.ValueKind != JsonValueKind.Null)
+            {
+                if (unit.ValueKind != JsonValueKind.Object) throw Invalid();
+                money = Money(unit, "amount", Text(unit, "currency_code", 3));
+            }
+            trial = new ProviderTrialPeriod(Cycle(rawTrial), rawTrial.GetProperty("requires_payment_method").GetBoolean(), money, CountryPrices(rawTrial));
         }
+        return new ProviderPricingTerms(cycle, trial);
+    }
+    private static ProviderBillingCycle Cycle(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object) throw Invalid();
+        var interval = Text(value, "interval", 16);
+        if (interval is not ("day" or "week" or "month" or "year") || !value.GetProperty("frequency").TryGetInt32(out var count) || count <= 0) throw Invalid();
+        return new ProviderBillingCycle(interval, count);
+    }
+    private static IReadOnlyList<CountryPrice> CountryPrices(JsonElement data)
+    {
         var overrides = new List<CountryPrice>();
         if (data.TryGetProperty("unit_price_overrides", out var regional))
         {
@@ -146,11 +175,7 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
                 overrides.Add(new CountryPrice(Array.AsReadOnly(countries), Money(amount, "amount", Text(amount, "currency_code", 3))));
             }
         }
-        var productRef = Reference(data, "product_id", "pro");
-        if (Reference(product, "id", "pro") != productRef) throw Invalid();
-        return new ProviderPriceSnapshot(Reference(data, "id", "pri"), productRef,
-            Text(data, "status", 32) == "active" && Text(product, "status", 32) == "active", Text(product, "tax_category", 64), TaxTreatment(data),
-            Money(money, "amount", Text(money, "currency_code", 3)), interval, frequency, overrides.AsReadOnly());
+        return overrides.AsReadOnly();
     }
     internal ProviderTransaction Transaction(JsonElement data)
     {
@@ -201,15 +226,17 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
             "canceled" => ProviderSubscriptionState.Canceled,
             _ => ProviderSubscriptionState.Unknown
         };
-        DateTimeOffset? cancellation = null;
+        DateTimeOffset? cancellation = null; var action = ProviderScheduledAction.None;
         if (data.TryGetProperty("scheduled_change", out var change) && change.ValueKind != JsonValueKind.Null)
         {
             if (change.ValueKind != JsonValueKind.Object) throw Invalid();
-            if (Text(change, "action", 32) == "cancel") cancellation = Instant(change, "effective_at");
+            action = Text(change, "action", 32) switch
+            { "cancel" => ProviderScheduledAction.Cancel, "pause" => ProviderScheduledAction.Pause, "resume" => ProviderScheduledAction.Resume, _ => ProviderScheduledAction.Unknown };
+            if (action == ProviderScheduledAction.Cancel) cancellation = Instant(change, "effective_at");
         }
         return new ProviderSubscription(Reference(data, "id", "sub"), Reference(data, "customer_id", "ctm"), state, status,
-            (state is ProviderSubscriptionState.Active or ProviderSubscriptionState.PastDue or ProviderSubscriptionState.Pending) && cancellation is null,
-            cancellation, Period(data, "current_billing_period"), Metadata(data), Items(data), Instant(data, "updated_at"));
+            (state is ProviderSubscriptionState.Active or ProviderSubscriptionState.PastDue or ProviderSubscriptionState.Pending) && action == ProviderScheduledAction.None,
+            cancellation, Period(data, "current_billing_period"), Metadata(data), Items(data), Instant(data, "updated_at"), action);
     }
     internal ProviderAdjustment Adjustment(JsonElement data)
     {
@@ -311,7 +338,7 @@ internal sealed class PaddleNormalization(ProviderAdapterSettings settings)
         var transaction = kind is ProviderEventKind.PaymentChanged or ProviderEventKind.PaymentCompleted ? Transaction(data) : null;
         var subscription = kind == ProviderEventKind.SubscriptionChanged ? Subscription(data) : null;
         var adjustment = kind == ProviderEventKind.AdjustmentChanged ? Adjustment(data) : null;
-        if (subscription?.State == ProviderSubscriptionState.Unknown || adjustment is { Kind: ProviderAdjustmentKind.Unknown }
+        if (subscription?.State == ProviderSubscriptionState.Unknown || subscription?.ScheduledAction == ProviderScheduledAction.Unknown || adjustment is { Kind: ProviderAdjustmentKind.Unknown }
             || adjustment is { Scope: ProviderAdjustmentScope.Unknown } || adjustment?.Items.Any(i => i.Scope == ProviderAdjustmentScope.Unknown) == true)
         {
             kind = ProviderEventKind.Unsupported; transaction = null; subscription = null; adjustment = null;

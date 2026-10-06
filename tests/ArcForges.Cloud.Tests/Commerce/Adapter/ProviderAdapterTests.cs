@@ -30,7 +30,7 @@ public sealed class ProviderAdapterTests
         [new PaymentMethodCapability("approved-method", true, true, ["USD", "EUR"], [CommerceClientPlatform.DesktopWeb],
             true, true, true, true, new Dictionary<string, string> { ["USD"] = "5000" })]);
     private static readonly CheckoutRequest Checkout = new(PriceId, new ProviderMoney("1000", "USD"), PurchaseKind.Recurring,
-        CommerceClientPlatform.DesktopWeb, "US", "standard", ProviderTaxTreatment.Included, Metadata);
+        CommerceClientPlatform.DesktopWeb, "US", "standard", ProviderTaxTreatment.Included, Metadata, new(new("month", 1), null));
     private static ProviderAdapterSettings Settings(BillingProviderCapabilities? capabilities = null, TimeSpan? timeout = null, int limit = 1024 * 1024,
         IReadOnlyList<string>? secrets = null, BillingEnvironment environment = BillingEnvironment.Production)
         => new(environment, Credential, (secrets ?? [Secret]).Select((s, i) => new ProviderNotificationKey("notification-v" + (i + 1), s)).ToArray(), "merchant-production-v1", new Uri("https://arcforges.com/billing/checkout"),
@@ -57,6 +57,7 @@ public sealed class ProviderAdapterTests
         product = new { id = "pro_" + Suffix, status = "active", tax_category = "standard" },
         unit_price = new { amount, currency_code = currency },
         billing_cycle = new { interval = "month", frequency = 1 },
+        trial_period = (object?)null,
         unit_price_overrides = new[] { new { country_codes = new[] { "DE" }, unit_price = new { amount = "900", currency_code = "EUR" } } },
     };
     private static object Transaction(string status = "completed", string amount = "1000", object? metadata = null) => new
@@ -116,7 +117,7 @@ public sealed class ProviderAdapterTests
         id = TransactionId.Value,
         custom_data = MetadataJson,
         currency_code = currency,
-        items = new[] { new { price = new { id = PriceId.Value, tax_mode = "internal", unit_price = new { amount, currency_code = "USD" } }, quantity = 1 } },
+        items = new[] { new { price = new { id = PriceId.Value, tax_mode = "internal", billing_cycle = new { interval = "month", frequency = 1 }, trial_period = (object?)null, unit_price = new { amount, currency_code = "USD" } }, quantity = 1 } },
         checkout = new { url = url.Length == 0 ? "https://arcforges.com/billing/checkout?_ptxn=" + TransactionId.Value : url },
     };
     private static HttpResponseMessage Response(object data, HttpStatusCode status = HttpStatusCode.OK) => Raw(Json(new { data }), status);
@@ -254,7 +255,7 @@ public sealed class ProviderAdapterTests
     [Fact]
     public async Task CancelAtPeriodEndAndReactivationUseExactMutationContracts()
     {
-        var transport = Handler(r => Response(Subscription(r.Method == HttpMethod.Post)));
+        var transport = Handler(r => Response(Subscription(r.Method != HttpMethod.Patch)));
         using var provider = BillingProviderFactory.Create(Settings(), transport);
         var canceled = await provider.CancelSubscriptionAsync(SubscriptionId, CancellationToken.None);
         Assert.False(canceled.AutoRenew); Assert.NotNull(canceled.CancellationAt);
@@ -275,14 +276,97 @@ public sealed class ProviderAdapterTests
         Assert.Empty(transport.Calls);
     }
     [Fact]
+    public async Task LocationTaxModeAndCompleteRecurringTrialTermsAreBound()
+    {
+        var price = JsonNode.Parse(Json(Price()))!; var receipt = JsonNode.Parse(Json(CheckoutReceipt()))!;
+        var trial = JsonNode.Parse("{\"interval\":\"week\",\"frequency\":2,\"requires_payment_method\":false,\"unit_price\":{\"amount\":\"200\",\"currency_code\":\"USD\"},\"unit_price_overrides\":[{\"country_codes\":[\"DE\"],\"unit_price\":{\"amount\":\"180\",\"currency_code\":\"EUR\"}}]}")!;
+        price["tax_mode"] = "location"; price["trial_period"] = trial.DeepClone();
+        receipt["items"]![0]!["price"]!["tax_mode"] = "location"; receipt["items"]![0]!["price"]!["trial_period"] = trial.DeepClone();
+        var transport = Handler(r => Response(r.Method == HttpMethod.Get ? price : receipt)); using var provider = BillingProviderFactory.Create(Settings(), transport);
+        var captured = await provider.GetPriceAsync(PriceId, CancellationToken.None);
+        Assert.Equal(ProviderTaxTreatment.LocationBased, captured.TaxTreatment); Assert.False(captured.Terms.Trial!.RequiresPaymentMethod);
+        Assert.Equal("180", captured.Terms.Trial.CountryPrices.Single().Money.MinorUnits);
+        await provider.CreateCheckoutAsync(Checkout with { ExpectedTaxTreatment = captured.TaxTreatment, ExpectedTerms = captured.Terms }, CancellationToken.None);
+        Assert.Equal(1, transport.Calls.Count(c => c.Method == "POST"));
+    }
+    [Theory]
+    [InlineData("billing")]
+    [InlineData("trial")]
+    [InlineData("payment")]
+    [InlineData("trial-price")]
+    public async Task ChangedRecurringAndTrialTermsRefuseBeforeMutationOrRequireReconciliationAfterDispatch(string change)
+    {
+        var original = JsonNode.Parse(Json(Price()))!;
+        original["trial_period"] = JsonNode.Parse("{\"interval\":\"week\",\"frequency\":1,\"requires_payment_method\":true,\"unit_price\":{\"amount\":\"100\",\"currency_code\":\"USD\"}}");
+        var changed = original.DeepClone();
+        if (change == "billing") changed["billing_cycle"]!["interval"] = "year";
+        else if (change == "trial") changed["trial_period"] = null;
+        else if (change == "payment") changed["trial_period"]!["requires_payment_method"] = false;
+        else changed["trial_period"]!["unit_price"]!["amount"] = "200";
+        var reads = 0; var transport = Handler(_ => Response(Interlocked.Increment(ref reads) == 1 ? original : changed));
+        using var provider = BillingProviderFactory.Create(Settings(), transport);
+        var captured = await provider.GetPriceAsync(PriceId, CancellationToken.None); var request = Checkout with { ExpectedTerms = captured.Terms };
+        Assert.Equal(ProviderFailureKind.Conflict, (await Assert.ThrowsAsync<BillingProviderException>(() => provider.CreateCheckoutAsync(request, CancellationToken.None))).Kind);
+        Assert.DoesNotContain(transport.Calls, c => c.Method == "POST");
+        var receipt = JsonNode.Parse(Json(CheckoutReceipt()))!;
+        receipt["items"]![0]!["price"]!["billing_cycle"] = changed["billing_cycle"]!.DeepClone();
+        receipt["items"]![0]!["price"]!["trial_period"] = changed["trial_period"]?.DeepClone();
+        var writeTransport = Handler(r => Response(r.Method == HttpMethod.Get ? original : receipt)); using var writeProvider = BillingProviderFactory.Create(Settings(), writeTransport);
+        Assert.Equal(ProviderFailureKind.UnknownOutcome, (await Assert.ThrowsAsync<BillingProviderException>(() => writeProvider.CreateCheckoutAsync(request, CancellationToken.None))).Kind);
+        Assert.Equal(1, writeTransport.Calls.Count(c => c.Method == "POST"));
+    }
+    [Theory]
+    [InlineData("pause")]
+    [InlineData("resume")]
+    [InlineData("none")]
+    public async Task ReactivationRefusesAnyStateOtherThanScheduledCancellation(string action)
+    {
+        var subscription = JsonNode.Parse(Json(Subscription()))!;
+        if (action != "none") subscription["scheduled_change"] = JsonNode.Parse("{\"action\":\"" + action + "\",\"effective_at\":\"2026-11-01T00:00:00Z\"}");
+        var transport = Handler(_ => Response(subscription)); using var provider = BillingProviderFactory.Create(Settings(), transport);
+        Assert.Equal(ProviderFailureKind.Conflict, (await Assert.ThrowsAsync<BillingProviderException>(() => provider.ReactivateScheduledCancellationAsync(SubscriptionId, CancellationToken.None))).Kind);
+        Assert.Single(transport.Calls); Assert.Equal("GET", transport.Calls.Single().Method);
+    }
+    [Fact]
+    public async Task ReactivationReceiptCannotChangeCustomerBinding()
+    {
+        var transport = Handler(r => Response(r.Method == HttpMethod.Get ? Subscription(true) : Subscription(customer: "ctm_01grnn4zta5a1mf02jjze7y2yt")));
+        using var provider = BillingProviderFactory.Create(Settings(), transport);
+        Assert.Equal(ProviderFailureKind.UnknownOutcome, (await Assert.ThrowsAsync<BillingProviderException>(() => provider.ReactivateScheduledCancellationAsync(SubscriptionId, CancellationToken.None))).Kind);
+        Assert.Equal(1, transport.Calls.Count(c => c.Method == "PATCH"));
+    }
+    [Fact]
     public async Task FullAndPartialRefundReturnPendingApprovalRatherThanClaimingSuccess()
     {
-        var transport = Handler(_ => Response(Adjustment())); using var provider = BillingProviderFactory.Create(Settings(), transport);
+        var transport = Handler(r => r.Content!.ReadAsStringAsync().GetAwaiter().GetResult().Contains("\"amount\":\"400\"", StringComparison.Ordinal)
+            ? Response(PartialAdjustment()) : Response(Adjustment())); using var provider = BillingProviderFactory.Create(Settings(), transport);
         var full = await provider.CreateRefundAsync(new(TransactionId, "customer request", []), CancellationToken.None);
         var partial = await provider.CreateRefundAsync(new(TransactionId, "approved partial refund", [new(new("txnitm_" + Suffix), "400")]), CancellationToken.None);
         Assert.Equal(ProviderAdjustmentState.Pending, full.State); Assert.Equal(ProviderAdjustmentState.Pending, partial.State);
         Assert.Contains("\"type\":\"full\"", transport.Calls.First().Body, StringComparison.Ordinal);
         Assert.Contains("\"amount\":\"400\"", transport.Calls.Last().Body, StringComparison.Ordinal);
+    }
+    private static JsonNode PartialAdjustment()
+    {
+        var adjustment = JsonNode.Parse(Json(Adjustment()))!; adjustment["type"] = "partial";
+        adjustment["items"]![0]!["type"] = "partial"; adjustment["items"]![0]!["amount"] = "400";
+        adjustment["items"]![0]!["totals"] = JsonNode.Parse("{\"subtotal\":\"360\",\"tax\":\"40\",\"total\":\"400\"}");
+        adjustment["totals"]!["subtotal"] = "360"; adjustment["totals"]!["tax"] = "40"; adjustment["totals"]!["total"] = "400";
+        return adjustment;
+    }
+    [Theory]
+    [InlineData("full")]
+    [InlineData("item")]
+    [InlineData("amount")]
+    public async Task RefundReceiptMustMatchExactRequestedScopeItemAndAmount(string change)
+    {
+        var response = change == "full" ? JsonNode.Parse(Json(Adjustment()))! : PartialAdjustment();
+        if (change == "item") response["items"]![0]!["item_id"] = "txnitm_01grnn4zta5a1mf02jjze7y2yt";
+        if (change == "amount") response["items"]![0]!["amount"] = "500";
+        var transport = Handler(_ => Response(response)); using var provider = BillingProviderFactory.Create(Settings(), transport);
+        Assert.Equal(ProviderFailureKind.UnknownOutcome, (await Assert.ThrowsAsync<BillingProviderException>(() => provider.CreateRefundAsync(
+            new(TransactionId, "approved partial", [new(new("txnitm_" + Suffix), "400")]), CancellationToken.None))).Kind);
+        Assert.Single(transport.Calls);
     }
     [Fact]
     public async Task AdjustmentLookupUsesDocumentedIdFilterAndRefusesMissingOrUnboundResults()
