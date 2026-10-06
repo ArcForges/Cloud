@@ -94,10 +94,15 @@ response only loses its retry hint and is never treated as a success.
    (after about thirty seconds: the library tries to acquire one for eight seconds and waits up to twenty for the port). It is
    neither the Worker's own refusal (empty body) nor the host's (JSON).
 3. The operator readiness report names the same condition as `container: unavailable:no_instance_available`.
-4. What the repository cannot tell from outside: whether the instance limit of the environment is reached (`max_instances`
-   is 2 in the proof environment for the Hello and foundation instances, and an instance that is stopping may still count),
-   the application is still provisioning (about ten minutes after a deployment), or the platform has no capacity. Those need
-   the Cloudflare dashboard or API under the operator's own access.
+4. The pattern seen from outside on 2026-10-06 (CLOUD.71): with `max_instances` 2 only one of the two named instances ran
+   at a time. While Hello answered, every foundation call ended in this 503 after about thirty seconds, for as long as Hello
+   stayed active, and the reverse; the refused instance started within seconds after the other one's 60 second idle stop.
+   The proof ceiling is therefore 4, a limit with headroom for the two names, not a minimum.
+5. What a request cannot tell: whether a stopped or stopping instance still counts, only one location is usable, an older
+   rollout left instances behind, or the application is still provisioning (about ten minutes after a deployment). The
+   manual dispatch `proof=observe` (`npm run observe:proof`, read-only, [PRF.07 proof](prf-07-foundation-proof.md)) prints
+   the provider's own view: the configured ceiling, every instance by state, version and location, the Durable Object each
+   one serves, and the newest rollouts.
 
 ## The wait is bounded
 

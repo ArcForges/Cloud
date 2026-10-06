@@ -10,9 +10,10 @@ on:
           Isolated proof environment (main only). none: nothing. access: verify the deployment token's
           D1, R2, Queues, Workers and zone permissions. provision: access plus idempotent creation of the
           reserved proof D1 database, R2 bucket and queues. deploy: provision plus deployment of the
-          sealed candidate to the proof Worker on proof.arcforges.com.
+          sealed candidate to the proof Worker on proof.arcforges.com. observe: a read-only report of the
+          proof Container application, its instances and rollouts; nothing is created or changed.
         type: choice
-        options: [none, access, provision, deploy]
+        options: [none, access, provision, deploy, observe]
         default: none
   schedule:
     - cron: "43 6 * * 1"
@@ -321,11 +322,16 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
-      # Reads (and, for provision and deploy, idempotently creates) only the reserved proof resources.
-      # Output names capabilities and HTTP statuses; no token, secret or response body is printed.
-      - name: Verify token access and provision the reserved proof resources
+      # Reads (and, for provision and deploy, idempotently creates) only the reserved proof resources; observe
+      # only reads the proof Container application. Output names capabilities, states and HTTP statuses and,
+      # for observe, allowlisted provider fields; no token, secret, environment value or log line is printed.
+      - name: Verify token access and provision or observe the reserved proof resources
         run: |
-          if [ "$PROOF_ACTION" = access ]; then npm run access:proof; else npm run provision:proof; fi
+          case "$PROOF_ACTION" in
+            access) npm run access:proof ;;
+            observe) npm run observe:proof ;;
+            *) npm run provision:proof ;;
+          esac
         env:
           PROOF_ACTION: ${{ inputs.proof }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
