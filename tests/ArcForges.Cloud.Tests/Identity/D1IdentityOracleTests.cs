@@ -47,6 +47,28 @@ public sealed class D1IdentityOracleTests
         }
     }
 
+    private sealed class CollisionIds(string collision, SequentialIdentityIds remainder) : IIdentityIdSource
+    {
+        private int count;
+        public string NewId() => Interlocked.Increment(ref count) == 1 ? collision : remainder.NewId();
+    }
+
+    [Fact]
+    public async Task AForcedIdentifierCollisionRollsBackAndRetriesWithFreshIdentifiers()
+    {
+        using var fixture = new Fixture();
+        var ct = TestContext.Current.CancellationToken;
+        var first = (await fixture.Service.CompleteEnrollmentAsync(new EnrollmentRequest(IdentityHarness.RealmA, fixture.Ids.NewId(), "Ada", IdentityHarness.Email("first@example.test")), ct)).Value!;
+        var request = new EnrollmentRequest(IdentityHarness.RealmA, fixture.Ids.NewId(), "Grace", IdentityHarness.Email("second@example.test"));
+        var service = new IdentityService(fixture.Store, new CollisionIds(first.User.Id.Value, fixture.Ids), fixture.Clock);
+        var second = (await service.CompleteEnrollmentAsync(request, ct)).Value!;
+        Assert.NotEqual(first.User.Id, second.User.Id);
+        Assert.Equal(2, await fixture.Executor.CountAsync("identity_user", cancellationToken: ct));
+        Assert.Equal(2, await fixture.Executor.CountAsync("platform_command", cancellationToken: ct));
+        Assert.Equal(2, await fixture.Executor.CountAsync("platform_outbox", cancellationToken: ct));
+        Assert.Equal(0, await fixture.Executor.CountAsync("platform_command_guard", cancellationToken: ct));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -107,6 +129,10 @@ public sealed class D1IdentityOracleTests
         Assert.Equal(IdentityError.LastCredential, (await fixture.Service.RevokeCredentialAsync(principal, fixture.Ids.NewId(), added.Id, ct)).Error);
         Assert.Equal(IdentityError.CredentialUnavailable, (await fixture.Service.ResolveCredentialAsync(principal.Realm, "official-email", "ada@example.test", ct)).Error);
         Assert.Equal(5, await fixture.Executor.CountAsync("platform_command", cancellationToken: ct));
+        await fixture.Executor.ExecAsync($"INSERT INTO identity_recovery_code(code_hash,set_id,user_id,issued_at) VALUES(zeroblob(32),'{fixture.Ids.NewId()}','{principal.User.Value}',1)", ct);
+        Assert.True(await fixture.Store.HasActiveRecoveryPathAsync(principal.Realm, principal.User, ct));
+        Assert.False(await fixture.Store.HasActiveRecoveryPathAsync(IdentityHarness.RealmB, principal.User, ct));
+        Assert.True((await fixture.Service.RevokeCredentialAsync(principal, fixture.Ids.NewId(), added.Id, ct)).IsSuccess);
         Assert.Equal(0, await fixture.Executor.CountAsync("platform_command_guard", cancellationToken: ct));
     }
 
