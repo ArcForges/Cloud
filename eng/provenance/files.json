@@ -800,8 +800,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": [
-    "cloud-72-cloud-runtime-notices-r3",
-    "cloud-72-cloud-worker-bundle-r3"
-  ]
+  "artifacts": ["cloud-72-cloud-runtime-notices-r3", "cloud-72-cloud-worker-bundle-r3"]
 }
