@@ -515,3 +515,108 @@ test("page references are refused unless they are plain same-origin paths, in ev
   const built = bundle({ pages: { "account/index.html": page("account", ok) } });
   assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
 });
+
+test("slash-separated attributes, entities and every other url-bearing form stay on this origin", () => {
+  const other = /violates the same-origin rules/u;
+  const evil = "https://evil.example.test/x";
+  for (const tag of [
+    `<script/src=${evil}.js></script>`,
+    `<link/href=${evil}.css rel=stylesheet>`,
+    `<img/src=${evil}.png>`,
+    `<img\n/src=${evil}.png>`,
+    `<img / src='${evil}.png'>`,
+    `<a title="a>b" href="${evil}">x</a>`,
+    '<a href="/&#x2F;evil.example.test">x</a>',
+    '<a href="/&#92;evil.example.test">x</a>',
+    '<a href="/&sol;evil.example.test">x</a>',
+    '<a href="/a&amp;b">x</a>',
+    '<a href="#a&b">x</a>',
+    `<img srcset="${evil}.png 1x, /b.png 2x">`,
+    '<img srcset="/a.png 1x, //evil.example.test/b.png 2x">',
+    '<img srcset="/a&#x2F;b.png 1x">',
+    `<meta http-equiv=refresh content="0;url=${evil}">`,
+    '<meta http-equiv="Refresh" content="0;url=/ok">',
+    `<form action="${evil}"></form>`,
+    `<form><button formaction="${evil}">x</button></form>`,
+    `<object data="${evil}"></object>`,
+    `<video poster="${evil}.png"></video>`,
+    '<base href="/ok/">',
+    `<html manifest=${evil}></html>`,
+    `<a ping="${evil}">x</a>`,
+    `<blockquote cite="${evil}">x</blockquote>`,
+    `<table background="${evil}.png"></table>`,
+    // The first of two equal attributes is the one a browser uses.
+    `<img src=${evil}.png src=/ok.png>`,
+    `<style>@import url(${evil}.css);</style>`,
+    `<style>@import "${evil}.css";</style>`,
+    "<style>@import url('//evil.example.test/x.css');</style>",
+    '<STYLE>@IMPORT URL("https://evil.example.test/x.css")</STYLE >',
+  ])
+    refuses({ pages: { "account/index.html": page("account", tag) } }, other);
+  refuses({ extra: { "assets/x.css": `@import url(${evil}.css);` } }, /assets\/x\.css violates/u);
+  refuses({ extra: { "assets/x.css": '@import "//evil.example.test/x.css";' } }, /assets\/x\.css/u);
+  const ok = [
+    '<img src="/a.png" srcset="/a.png 1x, /b.png 2x"><form action="/ok"></form>',
+    "<style>@import url('/assets/x.css');</style>",
+    "<SCRIPT SRC=/assets/other.js></SCRIPT>",
+    // An external script's body text is not executed inline and needs no hash.
+    "<script src=/assets/a.js>not executed</script>",
+    // Text in a script body is not markup.
+    '<script type="module">const x = "<img src=https://evil.example.test/y.png>";</script>',
+  ];
+  for (const tag of ok) {
+    const built = bundle({
+      pages: { "account/index.html": page("account", tag) },
+      csp: {
+        account: csp("account").replace(
+          "script-src 'self'",
+          `script-src 'self' '${`sha256-${createHash("sha256")
+            .update(
+              tag.includes('type="module"')
+                ? `const x = "<img src=https://evil.example.test/y.png>";`
+                : "",
+            )
+            .digest("base64")}`}'`,
+        ),
+      },
+      extra: { "assets/x.css": "@import url(/assets/y.css); body{color:red}" },
+    });
+    assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest, tag);
+  }
+});
+
+test("script-src allows only 'self' and sha256 hashes", () => {
+  for (const source of [
+    "https:",
+    "data:",
+    "https://cdn.example.test",
+    "'strict-dynamic'",
+    "'nonce-abc123'",
+    "'sha256-short'",
+    `'sha384-${"A".repeat(64)}'`,
+    "blob:",
+    "'self'x",
+  ])
+    refuses(
+      { csp: { chat: csp("chat").replace("script-src 'self'", `script-src 'self' ${source}`) } },
+      /script-src allows a source other than/u,
+    );
+  // The legitimate policy still passes (its own hash is a sha256 source).
+  const built = bundle();
+  assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
+});
+
+test("a tag-like text in a covered script body neither hides a real tag after it nor counts as one", () => {
+  const body = "if (a<b) { run(); }";
+  const hash = `'sha256-${createHash("sha256").update(body).digest("base64")}'`;
+  const withHash = (html: string) => ({
+    pages: { "account/index.html": page("account", html) },
+    csp: { account: csp("account").replace("script-src 'self'", `script-src 'self' ${hash}`) },
+  });
+  refuses(
+    withHash(`<script>${body}</script><img src=https://evil.example.test/y.png>`),
+    /another origin/u,
+  );
+  const built = bundle(withHash(`<script>${body}</script><img src=/y.png>`));
+  assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
+});

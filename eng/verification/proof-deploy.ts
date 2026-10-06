@@ -234,26 +234,116 @@ export interface VerifiedBundle {
   files: BundleEntry[];
 }
 
-/** The attribute names of a start tag, so that a "src=" inside another attribute's value is not mistaken for one. */
-function attributeNames(attributes: string): string[] {
-  const names: string[] = [];
-  for (const match of attributes.matchAll(
-    /([^\s"'<>/=]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?/gu,
-  ))
-    names.push((match[1] ?? "").toLowerCase());
-  return names;
+interface StartTag {
+  name: string;
+  /** Attribute names (lower case) to their raw values; a valueless attribute has the empty string. */
+  attributes: Map<string, string>;
+  /** Where the tag ends, so a script body can be read from there. */
+  end: number;
+}
+
+/**
+ * Every start tag of a document with its attributes, by one tokenizer for all checks. A tag name ends at
+ * whitespace, a slash or the closing bracket; attributes are separated by whitespace or slashes, so
+ * `<script/src=x>` has a src attribute; quoted values may contain `>`.
+ */
+function startTags(html: string): StartTag[] {
+  const tags: StartTag[] = [];
+  const pattern = /<([A-Za-z][^\s/>]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/gu;
+  for (let tag = pattern.exec(html); tag !== null; tag = pattern.exec(html)) {
+    const attributes = new Map<string, string>();
+    for (const attribute of (tag[2] ?? "").matchAll(
+      /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/gu,
+    )) {
+      const name = (attribute[1] ?? "").toLowerCase();
+      // The first occurrence of an attribute wins, as in a browser.
+      if (!attributes.has(name))
+        attributes.set(name, attribute[2] ?? attribute[3] ?? attribute[4] ?? "");
+    }
+    const name = (tag[1] ?? "").toLowerCase();
+    const end = tag.index + tag[0].length;
+    tags.push({ name, attributes, end });
+    if (name === "script" || name === "style") {
+      // The body is text, not markup: continue after its closing tag so `a<b` in a script cannot start a phantom tag.
+      const close = new RegExp(`</${name}[^>]*>`, "giu");
+      close.lastIndex = end;
+      const found = close.exec(html);
+      pattern.lastIndex = found ? found.index + found[0].length : html.length;
+    }
+  }
+  return tags;
 }
 
 function inlineScriptHashes(html: string): string[] {
   const hashes: string[] = [];
-  // `<script/x>` is a start tag too: the name may be followed by whitespace, a slash or the closing bracket.
-  for (const match of html.matchAll(/<script(?=[\s/>])([^>]*)>([\s\S]*?)<\/script[^>]*>/giu)) {
-    const attributes = match[1] ?? "";
-    const body = match[2] ?? "";
-    if (attributeNames(attributes).includes("src") || body === "") continue;
+  for (const tag of startTags(html)) {
+    if (tag.name !== "script" || tag.attributes.has("src")) continue;
+    const close = /<\/script[^>]*>/giu;
+    close.lastIndex = tag.end;
+    const found = close.exec(html);
+    const body = html.slice(tag.end, found?.index ?? html.length);
+    if (body === "") continue;
     hashes.push(`'sha256-${createHash("sha256").update(body).digest("base64")}'`);
   }
   return hashes;
+}
+
+/** True for a plain same-origin absolute path (or a fragment); entities, backslashes and control characters never are. */
+function samePath(reference: string): boolean {
+  if (reference.startsWith("#")) return !/[&\\\t\n\r]/u.test(reference);
+  return (
+    reference.startsWith("/") && !reference.startsWith("//") && !/[&\\\t\n\r]/u.test(reference)
+  );
+}
+
+/** The url attributes whose value must stay on this origin. */
+const urlAttributes = [
+  "src",
+  "href",
+  "action",
+  "formaction",
+  "poster",
+  "data",
+  "ping",
+  "cite",
+  "background",
+  "manifest",
+];
+
+/** Everything in a page that could reach another origin or change its base; one message per violation. */
+function pageViolations(html: string): string[] {
+  const problems: string[] = [];
+  for (const tag of startTags(html)) {
+    for (const attribute of urlAttributes) {
+      const value = tag.attributes.get(attribute);
+      if (value !== undefined && !samePath(value))
+        problems.push(`references another origin: ${attribute}=${value}`);
+    }
+    const srcset = tag.attributes.get("srcset");
+    if (srcset !== undefined)
+      for (const candidate of srcset.split(",")) {
+        const url = candidate.trim().split(/\s+/u)[0] ?? "";
+        if (!samePath(url)) problems.push(`references another origin: srcset ${url}`);
+      }
+    if (tag.name === "base") problems.push("sets a base");
+    if (tag.name === "meta" && tag.attributes.has("http-equiv"))
+      problems.push(`has a meta http-equiv: ${tag.attributes.get("http-equiv")}`);
+  }
+  for (const style of html.matchAll(/<style[^>]*>([\s\S]*?)<\/style[^>]*>/giu))
+    problems.push(...cssViolations(style[1] ?? ""));
+  return problems;
+}
+
+/** A stylesheet may import only same-origin paths. */
+function cssViolations(css: string): string[] {
+  const problems: string[] = [];
+  for (const rule of css.matchAll(
+    /@import\s*(?:url\(\s*)?(?:"([^"]*)"|'([^']*)'|([^\s)"';]*))/giu,
+  )) {
+    const target = rule[1] ?? rule[2] ?? rule[3] ?? "";
+    if (!samePath(target)) problems.push(`imports another origin: ${target}`);
+  }
+  return problems;
 }
 
 /** A policy as directives (name to sources); a repeated directive name is refused. */
@@ -267,14 +357,6 @@ export function parsePolicy(policy: string): Map<string, string[]> {
     directives.set(key, sources);
   }
   return directives;
-}
-
-/** Every src or href value of a page, whichever way it is quoted. */
-function pageReferences(html: string): string[] {
-  const references: string[] = [];
-  for (const match of html.matchAll(/\s(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/giu))
-    references.push(match[1] ?? match[2] ?? match[3] ?? "");
-  return references;
 }
 
 /** The `_headers` rules by path pattern (a rule starts at a line that begins with "/"). */
@@ -360,23 +442,25 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
     );
     assert(!/unsafe-inline|unsafe-eval|\*/u.test(policy), `${name} policy is not restrictive.`);
     const scriptSources = directives.get("script-src") ?? [];
+    for (const source of scriptSources)
+      assert(
+        source === "'self'" || /^'sha256-[A-Za-z0-9+/]{43}='$/u.test(source),
+        `${name} script-src allows a source other than 'self' and sha256 hashes: ${source}`,
+      );
     for (const hash of inlineScriptHashes(html))
       assert(
         scriptSources.includes(hash),
         `${name} policy does not cover an inline script of its page in script-src.`,
       );
-    for (const reference of pageReferences(html)) {
-      if (reference.startsWith("#")) continue;
-      assert(
-        reference.startsWith("/") &&
-          !reference.startsWith("//") &&
-          !reference.includes("\\") &&
-          !reference.includes("\t") &&
-          !reference.includes("\n"),
-        `${name} page references another origin: ${reference}`,
-      );
-    }
+    assert.deepEqual(pageViolations(html), [], `${name} page violates the same-origin rules`);
   }
+  for (const entry of files)
+    if (entry.path.endsWith(".css"))
+      assert.deepEqual(
+        cssViolations(Buffer.from(entry.bytes).toString("utf8")),
+        [],
+        `${entry.path} violates the same-origin rules`,
+      );
   return { digest, manifest, files };
 }
 
