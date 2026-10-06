@@ -136,7 +136,7 @@ async function boundedBytes(
     return new Uint8Array();
   }
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
+  let buffer = new Uint8Array(Math.min(maximum, 64 * 1024));
   let bytes = 0;
   const abort = () => {
     void reader.cancel().catch(() => undefined);
@@ -148,18 +148,19 @@ async function boundedBytes(
       const part = await reader.read();
       signal.throwIfAborted();
       if (part.done) break;
-      bytes += part.value.byteLength;
-      if (bytes > maximum) throw new Error("Body bound");
-      chunks.push(part.value);
+      const length = bytes + part.value.byteLength;
+      if (length > maximum) throw new Error("Body bound");
+      if (length > buffer.length) {
+        const grown = new Uint8Array(Math.min(maximum, Math.max(length, buffer.length * 2)));
+        grown.set(buffer.subarray(0, bytes));
+        buffer = grown;
+      }
+      buffer.set(part.value, bytes);
+      bytes = length;
     }
     if (declared !== null && BigInt(declared) !== BigInt(bytes)) throw new Error("Body length");
-    const result = new Uint8Array(bytes);
-    let offset = 0;
-    for (const chunk of chunks) {
-      result.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return result;
+    // Fragment count and provider-owned backing buffers cannot inflate retained memory.
+    return buffer.slice(0, bytes);
   } catch (error) {
     void reader.cancel().catch(() => undefined);
     throw error;

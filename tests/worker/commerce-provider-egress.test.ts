@@ -274,6 +274,48 @@ test("declared and streamed response overflow or mismatch remains ambiguous afte
   }
 });
 
+test("fragmented exact-limit bodies retain only bounded copied chunks", async () => {
+  const upload = new Uint8Array(requestByteLimit).fill(120);
+  const { calls, fetcher } = transport(
+    () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(output) {
+            output.enqueue(new Uint8Array());
+            output.enqueue(new Uint8Array(65_537).fill(7));
+            output.enqueue(new Uint8Array(responseByteLimit - 65_537).fill(7));
+            output.close();
+          },
+        }),
+        { headers: { "content-length": String(responseByteLimit) } },
+      ),
+  );
+  const response = await actualHandleCommerceEgress(
+    request("/transactions", "POST", upload, { "content-length": String(upload.length) }),
+    environment,
+    fetcher,
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await calls[0]?.arrayBuffer())?.byteLength, requestByteLimit);
+  assert(response.body);
+  const reader = response.body.getReader();
+  let received = 0;
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    assert(chunk.value.byteLength <= 64 * 1024);
+    assert.equal(
+      chunk.value.buffer.byteLength,
+      chunk.value.byteLength,
+      "a retained consumer chunk cannot retain the complete upstream body",
+    );
+    assert(chunk.value.every((value) => value === 7));
+    received += chunk.value.byteLength;
+  }
+  reader.releaseLock();
+  assert.equal(received, responseByteLimit);
+});
+
 test("real request signals cancel before and after dispatch, without retries or credential diagnostics", async () => {
   const before = new AbortController();
   before.abort();
