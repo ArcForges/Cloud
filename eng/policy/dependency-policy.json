@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "526f2987f90d3052ab6dbb23492efb6e0432599a",
+  "sourceCommit": "247e63eebcd6fab14809ba740fcbd608115a9b1c",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -77,13 +77,16 @@
     "eng/provenance/records/pol-01-cloud-worker-bundle-r1.json": "5ea06cf0fd89706102c04da6e6f374e4ad866ae03378f33847af7b777e438e14",
     "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
     "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
-    "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7"
+    "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7",
+    "eng/provenance/artifact-profiles/cloud-release-r42.json": "be700f16c013fce1dbcaf3535d7d287b3027c62d68909885258035fed18f94de",
+    "eng/provenance/records/com-01-cloud-runtime-notices-r3.json": "d38cc8a9e7978bee489f3bd5fa15cc7e653d5698e5019ecf770d4c82888e2c3f",
+    "eng/provenance/records/com-01-cloud-worker-bundle-r3.json": "faa32381673bdc9d862abb4468efd7cb5b1166ec27f50b1bd6cf8eb046288d9a"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "ArcForges delivery worker w-codex-20261006-provider (maintainer-authorized; independent pull-request review is required before merge)",
     "date": "2026-10-06",
-    "rationale": "COM.01 adds first-party production Commerce adapter source only. No npm, NuGet, Maven, runtime, framework, generator, licence, native optional package, integrity or immutable coordinate changes. The complete admitted POL.01 patched closure is preserved unchanged. The reviewed release artifact positions follow the immutable cloud-release-r41 first-party source/input successor and its two exact new provenance records. Prior dependency and artifact receipts remain byte-identical; the new receipt binds the exact owned source-admission/artifact inputs, not a new package admission.",
+    "rationale": "COM.01 adds first-party production Commerce adapter source only. No npm, NuGet, Maven, runtime, framework, generator, licence, native optional package, integrity or immutable coordinate changes. The complete admitted POL.01 patched closure is preserved unchanged. The reviewed release artifact positions follow the immutable cloud-release-r42 first-party source/input successor and its two exact new provenance records. Prior dependency and artifact receipts remain byte-identical; the new receipt binds the exact owned source-admission/artifact inputs, not a new package admission.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -158,7 +161,10 @@
       "eng/provenance/records/pol-01-cloud-worker-bundle-r1.json": "5ea06cf0fd89706102c04da6e6f374e4ad866ae03378f33847af7b777e438e14",
       "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
       "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
-      "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7"
+      "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7",
+      "eng/provenance/artifact-profiles/cloud-release-r42.json": "be700f16c013fce1dbcaf3535d7d287b3027c62d68909885258035fed18f94de",
+      "eng/provenance/records/com-01-cloud-runtime-notices-r3.json": "d38cc8a9e7978bee489f3bd5fa15cc7e653d5698e5019ecf770d4c82888e2c3f",
+      "eng/provenance/records/com-01-cloud-worker-bundle-r3.json": "faa32381673bdc9d862abb4468efd7cb5b1166ec27f50b1bd6cf8eb046288d9a"
     },
     "checks": [
       "locked-restore",
@@ -989,7 +995,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["com-01-cloud-runtime-notices-r2", "com-01-cloud-worker-bundle-r2"],
+  "artifactRecords": ["com-01-cloud-runtime-notices-r3", "com-01-cloud-worker-bundle-r3"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1003,7 +1009,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/com-01-r2.json",
+  "reviewRecord": "eng/policy/dependency-reviews/com-01-r3.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
