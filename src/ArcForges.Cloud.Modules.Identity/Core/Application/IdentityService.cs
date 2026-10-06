@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using ArcForges.Cloud.Modules.Identity.Core.Domain;
+using System.Text;
 
 namespace ArcForges.Cloud.Modules.Identity.Core.Application;
 
@@ -22,20 +23,36 @@ internal sealed class IdentityService(IIdentityStore store, IIdentityIdSource id
     public async ValueTask<IdentityResult<EnrollmentOutcome>> CompleteEnrollmentAsync(EnrollmentRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!IdentifierText.IsCanonical(request.CommandId) || !IdentityRules.IsValidDisplayName(request.DisplayName)
             || request.Realm == default || !IsValid(request.Credential))
             return Fail<EnrollmentOutcome>(IdentityError.InvalidRequest);
+        try
+        {
+            var utf8 = new UTF8Encoding(false, true);
+            foreach (var value in new[] { request.DisplayName, request.Credential.ProviderId, request.Credential.Subject,
+                request.Credential.Label, request.Credential.Password, request.Credential.Passkey?.TransportsJson })
+                if (value is not null) _ = utf8.GetByteCount(value);
+        }
+        catch (EncoderFallbackException) { return Fail<EnrollmentOutcome>(IdentityError.InvalidRequest); }
         var credential = request.Credential;
         for (var attempt = 0; attempt < MaxAttempts; attempt++)
         {
+            var receipt = await store.InspectEnrollmentAsync(request, cancellationToken).ConfigureAwait(false);
+            if (receipt is not null && receipt.Outcome != CommitOutcome.Replayed)
+                return Fail<EnrollmentOutcome>(IdentityError.Conflict);
             var existing = await store.FindCredentialAsync(request.Realm, credential.ProviderId, credential.Subject, cancellationToken).ConfigureAwait(false);
+            if (receipt is not null && (existing is null || existing.User.Id != receipt.User || existing.Credential.Id != receipt.Credential))
+                return Fail<EnrollmentOutcome>(IdentityError.CredentialUnavailable);
             if (existing is not null)
             {
                 // The credential of an existing user signs that user in; a revoked credential or an unusable user is the same refusal as an unknown one.
                 if (existing.Credential.IsRevoked || existing.User.State is UserState.Suspended or UserState.Deleted)
                     return Fail<EnrollmentOutcome>(IdentityError.CredentialUnavailable);
-                var home = await store.FindWorkspaceByOwnerAsync(request.Realm, existing.User.Id, cancellationToken).ConfigureAwait(false);
-                return home is null
+                var home = receipt?.Workspace is { } original
+                    ? await store.FindWorkspaceAsync(request.Realm, original, cancellationToken).ConfigureAwait(false)
+                    : await store.FindWorkspaceByOwnerAsync(request.Realm, existing.User.Id, cancellationToken).ConfigureAwait(false);
+                return home is null || home.OwnerUserId != existing.User.Id
                     ? Fail<EnrollmentOutcome>(IdentityError.NotFound)
                     : IdentityResult<EnrollmentOutcome>.Success(new EnrollmentOutcome(existing.User, existing.Credential, home, false));
             }
@@ -44,9 +61,21 @@ internal sealed class IdentityService(IIdentityStore store, IIdentityIdSource id
             var user = new User(UserId.Parse(ids.NewId()), request.Realm, request.DisplayName, UserState.Active, now, null, 1);
             var created = Build(ids.NewId(), user.Id, request.Realm, credential, now);
             var workspace = IdentityRules.NewPersonalWorkspace(WorkspaceId.Parse(ids.NewId()), user);
-            var outcome = await store.CommitAsync(new IdentityCommit.Enroll(request.CommandId, user, created, workspace), cancellationToken).ConfigureAwait(false);
+            CommitOutcome outcome;
+            try
+            {
+                outcome = await store.CommitAsync(new IdentityCommit.Enroll(request.CommandId, user, created, workspace), cancellationToken).ConfigureAwait(false);
+            }
+            catch (IdentityStorageException failure) when (failure.Failure == IdentityStorageFailure.OutcomeUnknown && attempt + 1 < MaxAttempts)
+            {
+                // Reconcile the same command before any new write; no new command identity is allocated.
+                await Task.Delay(TimeSpan.FromMilliseconds(50 * (1 << attempt)), time, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
             if (outcome == CommitOutcome.Committed)
                 return IdentityResult<EnrollmentOutcome>.Success(new EnrollmentOutcome(user, created, workspace, true));
+            if (outcome is CommitOutcome.IdentifierConflict or CommitOutcome.ReceiptExpired or CommitOutcome.ReplayedFailure)
+                return Fail<EnrollmentOutcome>(IdentityError.Conflict);
         }
 
         return Fail<EnrollmentOutcome>(IdentityError.Conflict);
@@ -100,7 +129,7 @@ internal sealed class IdentityService(IIdentityStore store, IIdentityIdSource id
             var home = await store.FindWorkspaceByOwnerAsync(caller.Realm, caller.User, cancellationToken).ConfigureAwait(false);
             if (user is null || home is null) return Fail<AuthIdentity>(IdentityError.NotFound);
             var credentials = await store.ListCredentialsAsync(caller.Realm, caller.User, cancellationToken).ConfigureAwait(false);
-            var recovery = await store.HasActiveRecoveryPathAsync(caller.User, cancellationToken).ConfigureAwait(false);
+            var recovery = await store.HasActiveRecoveryPathAsync(caller.Realm, caller.User, cancellationToken).ConfigureAwait(false);
             if (IdentityRules.CheckRevocation(user, credentials, target, recovery) is { } refusal) return Fail<AuthIdentity>(refusal);
             var current = credentials.First(c => c.Id == target);
             var at = Now();

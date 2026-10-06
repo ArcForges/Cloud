@@ -11,6 +11,11 @@ internal static class EnrollmentReceiptIdentity
 {
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
+    public static ModuleCommandIdentity For(IdentityCommit.Enroll commit) => For(new EnrollmentRequest(
+        commit.User.Realm, commit.CommandId, commit.User.DisplayName,
+        new NewCredential(commit.Credential.ProviderId, commit.Credential.Method, commit.Credential.Subject,
+            commit.Credential.Label, commit.Credential.Passkey, commit.Credential.Password)));
+
     public static ModuleCommandIdentity For(EnrollmentRequest request)
     {
         var credential = request.Credential;

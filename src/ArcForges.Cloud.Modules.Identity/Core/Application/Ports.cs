@@ -12,7 +12,14 @@ internal enum CommitOutcome
 
     /// <summary>A guard was false: nothing was written, so the caller rereads and recalculates (the guarded-batch contract of CLOUD.06).</summary>
     Refused,
+    Replayed,
+    IdentifierConflict,
+    ReceiptExpired,
+    ReplayedFailure,
 }
+
+/// <summary>The persisted identities of the original enrollment result, or a typed receipt refusal. A missing receipt is represented by null.</summary>
+internal sealed record EnrollmentReceipt(CommitOutcome Outcome, UserId? User = null, AuthIdentityId? Credential = null, WorkspaceId? Workspace = null);
 
 /// <summary>
 /// One change of the core model, decided by the service and applied atomically by the store. Each variant corresponds to one named plan
@@ -43,11 +50,12 @@ internal abstract record IdentityCommit(string CommandId, WorkspaceId Scope)
 /// <summary>
 /// The persistence port of the core model. Every read is scoped by realm, so a row of another realm is never returned; one commit
 /// applies a whole <see cref="IdentityCommit"/> atomically or returns <see cref="CommitOutcome.Refused"/> and changes nothing. The D1
-/// implementation is the named plans under <c>storage/plans/identity</c> and the family <c>account-enrollment</c>; the Abstractions
-/// port that connects the two is owned by the plan-execution task, so no production implementation exists here.
+/// implementation uses the owner plan port and the bounded enrollment family port; those carry exact primitives and typed outcomes.
 /// </summary>
 internal interface IIdentityStore
 {
+    ValueTask<EnrollmentReceipt?> InspectEnrollmentAsync(EnrollmentRequest request, CancellationToken cancellationToken);
+
     ValueTask<User?> FindUserAsync(RealmId realm, UserId id, CancellationToken cancellationToken);
 
     ValueTask<CredentialLookup?> FindCredentialAsync(RealmId realm, string providerId, string subject, CancellationToken cancellationToken);
@@ -59,7 +67,7 @@ internal interface IIdentityStore
     ValueTask<Workspace?> FindWorkspaceByOwnerAsync(RealmId realm, UserId owner, CancellationToken cancellationToken);
 
     /// <summary>Whether the user has a live recovery-code set (an active recovery path that lets the last credential be removed).</summary>
-    ValueTask<bool> HasActiveRecoveryPathAsync(UserId id, CancellationToken cancellationToken);
+    ValueTask<bool> HasActiveRecoveryPathAsync(RealmId realm, UserId id, CancellationToken cancellationToken);
 
     ValueTask<CommitOutcome> CommitAsync(IdentityCommit commit, CancellationToken cancellationToken);
 }

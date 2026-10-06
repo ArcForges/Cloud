@@ -227,12 +227,11 @@
             "value": "00000000-0000-4000-8000-000000001001"
           },
           {
-            "kind": "text",
-            "value": "00000000-0000-4000-8000-000000000002"
+            "kind": "null"
           },
           {
             "kind": "text",
-            "value": "user:00000000-0000-4000-8000-000000000001"
+            "value": "enrollment:cdb1ac7fba82c4e140a743e55690faee00ce0a05f558662924fb45642acc1cb0"
           },
           {
             "kind": "text",
@@ -240,11 +239,11 @@
           },
           {
             "kind": "text",
-            "value": "34a5d6cace5c5bc9d6295b8aedd5780d1745561eaddbfc7267f29140d55c3668"
+            "value": "28237a8dd400f9b7b6625e85c2e494ca54b4a712fb78a2b58cf1293b597134a3"
           },
           {
             "kind": "text",
-            "value": "{\"ok\":true}"
+            "value": "{\"schemaVersion\":1,\"userId\":\"00000000-0000-4000-8000-000000000001\",\"authIdentityId\":\"00000000-0000-4000-8000-000000000003\",\"workspaceId\":\"00000000-0000-4000-8000-000000000002\"}"
           },
           {
             "kind": "int64",
@@ -596,12 +595,11 @@
             "value": "00000000-0000-4000-8000-000000001002"
           },
           {
-            "kind": "text",
-            "value": "00000000-0000-4000-8000-00000000000b"
+            "kind": "null"
           },
           {
             "kind": "text",
-            "value": "user:00000000-0000-4000-8000-00000000000a"
+            "value": "enrollment:6e8e5a1ab64635dd99f9b022c7691d771db74c1088250e8c9b126027982aaba2"
           },
           {
             "kind": "text",
@@ -609,11 +607,11 @@
           },
           {
             "kind": "text",
-            "value": "76a295db63c445358414d88c170ce9b89fce4ecd491ce0c39382019aad87a881"
+            "value": "7f4985a2e5d5f97e9481cab2f20df9ac306b1aa7b345987429389b0e3bf0375e"
           },
           {
             "kind": "text",
-            "value": "{\"ok\":true}"
+            "value": "{\"schemaVersion\":1,\"userId\":\"00000000-0000-4000-8000-00000000000a\",\"authIdentityId\":\"00000000-0000-4000-8000-00000000000c\",\"workspaceId\":\"00000000-0000-4000-8000-00000000000b\"}"
           },
           {
             "kind": "int64",

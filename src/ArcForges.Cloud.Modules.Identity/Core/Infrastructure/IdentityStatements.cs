@@ -233,8 +233,28 @@ internal static class IdentityStatements
 
         var record = Utf8.GetString(stream.ToArray());
         var result = "{\"ok\":true}";
+        string? receiptScope = commit.Scope.Value;
+        var actor = "user:" + caller.User.Value;
+        if (commit is IdentityCommit.Enroll enrollment)
+        {
+            var identity = EnrollmentReceiptIdentity.For(enrollment);
+            actor = identity.ActorRef;
+            hash = identity.RequestHash;
+            receiptScope = null;
+            using var resultStream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(resultStream))
+            {
+                writer.WriteStartObject();
+                writer.WriteNumber("schemaVersion", 1);
+                writer.WriteString("userId", enrollment.User.Id.Value);
+                writer.WriteString("authIdentityId", enrollment.Credential.Id.Value);
+                writer.WriteString("workspaceId", enrollment.Workspace.Id.Value);
+                writer.WriteEndObject();
+            }
+            result = Utf8.GetString(resultStream.ToArray());
+        }
         return new TailContent(
-            commit.CommandId, commit.Scope.Value, "user:" + caller.User.Value, operation, hash, result, resultRevision,
+            commit.CommandId, receiptScope, actor, operation, hash, result, resultRevision,
             context.Now.Value, context.Now.Value + CommitContext.ReceiptRetentionMicros, events, context.SchemaVersion, record);
     }
 

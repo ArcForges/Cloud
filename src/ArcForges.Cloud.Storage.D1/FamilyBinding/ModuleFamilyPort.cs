@@ -23,6 +23,7 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
     private readonly CommandReceiptStore receipts;
     private readonly FamilyExecutor families;
     private readonly object issuer;
+    private readonly IPlanExecutor executor;
 
     public ModuleFamilyPort(ModuleDescriptor module, IPlanExecutor executor, ulong generation, TimeProvider time, object issuer)
     {
@@ -31,9 +32,38 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
         receipts = new CommandReceiptStore(executor, generation, time);
         families = new FamilyExecutor(executor);
         this.issuer = issuer;
+        this.executor = executor;
     }
 
     private sealed record AuthorizedContributions(object Issuer, string FamilyId, string PlanId, IReadOnlyList<FamilyContribution> Items) : IModuleFamilyContributionSet;
+
+    public async Task<ModulePlanOutcome> ReadAsync(string familyId, ModulePlanRead read, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(read);
+        Participant(familyId);
+        if (module.PlanOwner != "identity" || familyId != "account-enrollment"
+            || read.PlanId is not ("workspace.workspace-load" or "workspace.workspace-by-owner"))
+            throw new InvalidOperationException("This participant-owned read is not admitted for the calling module and family.");
+        var plan = PlanManifest.All.Single(item => item.Id == read.PlanId);
+        if (plan.Access != PlanAccess.Read || plan.Statements.Count != 1)
+            throw new InvalidOperationException("The admitted participant plan must be a single-statement read.");
+        try
+        {
+            var call = PlanCall.New(plan, read.OwnerScope, generation, [[.. read.Arguments.Select(Scalar)]]);
+            PlanArguments.Validate(call);
+            var result = await executor.ExecuteAsync(call, cancellationToken).ConfigureAwait(false);
+            return new ModulePlanOutcome(ModulePlanStatus.Succeeded, [.. result.Rows.Select(row => (IReadOnlyList<PlanValue>)[.. row.Select(Value)])]);
+        }
+        catch (PlanFailureException failure)
+        {
+            return ModulePlanOutcome.Of(ModulePlanPort.Map(failure.Kind));
+        }
+        catch (FormatException)
+        {
+            return ModulePlanOutcome.Of(ModulePlanStatus.Rejected);
+        }
+    }
 
     public IModuleFamilyContributionSet Contribute(string familyId, string planId, IReadOnlyList<ModuleFamilyContribution> contributions)
     {
@@ -176,4 +206,14 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
         PlanValueKind.Bool => D1Values.Bool(value.AsBool()),
         _ => throw new ArgumentOutOfRangeException(nameof(value)),
     };
+
+    private static PlanValue Value(D1Scalar scalar)
+    {
+        if (D1Values.IsNull(scalar)) return PlanValue.Null;
+        if (D1Values.TryGetInt64(scalar, out var integer)) return PlanValue.FromInt64(integer);
+        if (D1Values.TryGetText(scalar, out var text)) return PlanValue.FromText(text);
+        if (D1Values.TryGetBytes(scalar, out var bytes)) return PlanValue.FromBytes(bytes);
+        if (D1Values.TryGetBool(scalar, out var flag)) return PlanValue.FromBool(flag);
+        throw new FormatException("The participant plan returned an unsupported scalar kind.");
+    }
 }

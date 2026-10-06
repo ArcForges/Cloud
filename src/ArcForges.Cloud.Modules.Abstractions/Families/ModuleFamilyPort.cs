@@ -17,6 +17,9 @@ public sealed record ModuleCommandIdentity(Guid CommandId, Guid? WorkspaceId, st
 /// <summary>A module's capability to execute registered families. Foreign contributions and non-participants are refused before execution.</summary>
 public interface IModuleFamilyPort
 {
+    /// <summary>Executes an explicitly admitted participant-owned read. The temporary enrollment ownership lookup admits exactly two named Workspace reads to Identity; all other foreign reads are refused.</summary>
+    Task<ModulePlanOutcome> ReadAsync(string familyId, ModulePlanRead read, CancellationToken cancellationToken);
+
     /// <summary>Seals this module's contributions for one exact registered family plan. A coordinator combines the resulting capabilities without seeing or changing their content.</summary>
     IModuleFamilyContributionSet Contribute(string familyId, string planId, IReadOnlyList<ModuleFamilyContribution> contributions);
 

@@ -66,6 +66,7 @@ public sealed class EvaluatedRepositoryGate
             ["APlanOfAnotherOwnerIsRefusedBeforeAnythingIsSent", "AnUnknownPlanAndAnAccessMismatchAreCallerDefectsThatNeverReachTheExecutor"]),
         ("ArcForges.Cloud.Modules.ModulePlanOutcome", "Of", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests", ["EveryPlanFailureBecomesATypedStatus"]),
         ("ArcForges.Cloud.Modules.IModuleFamilyPort", "InspectAsync", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["InspectionReturnsNotSeenAndPreservesTypedStorageFailures"]),
+        ("ArcForges.Cloud.Modules.IModuleFamilyPort", "ReadAsync", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["ParticipantReadsAreRestrictedToExactEnrollmentWorkspacePlans"]),
         ("ArcForges.Cloud.Modules.IModuleFamilyPort", "WriteAsync", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["ForeignContributionsAreRejectedBeforeAnyReceiptRead"]),
         ("ArcForges.Cloud.Modules.IModuleFamilyPort", "Contribute", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["OwnerCapabilitiesCombineAcrossModulesAndCannotBeForgedOrCrossFactories"]),
         ("ArcForges.Cloud.Modules.IModuleFamilyPortFactory", "For", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["UnknownFamiliesAndNonParticipantsNeverReachStorage"]),

@@ -111,6 +111,29 @@ public sealed class ModuleFamilyPortTests
     private sealed class ForgedSet : IModuleFamilyContributionSet;
 
     [Fact]
+    public async Task ParticipantReadsAreRestrictedToExactEnrollmentWorkspacePlans()
+    {
+        var storage = new ScriptedExecutor { Handler = _ => ScriptedExecutor.Rows() };
+        var factory = new ModuleFamilyPortFactory(storage, 1, new Clock());
+        var identity = factory.For(ModuleDescriptor.Create("Identity", "identity"));
+        var read = new ModulePlanRead("workspace.workspace-load", Samples.Id(13).ToString("D"),
+            [PlanValue.FromText(Samples.Id(10).ToString("D")), PlanValue.FromText(Samples.Id(13).ToString("D"))]);
+        Assert.Equal(ModulePlanStatus.Succeeded, (await identity.ReadAsync("account-enrollment", read, TestContext.Current.CancellationToken)).Status);
+        storage.Calls.Clear();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => identity.ReadAsync("account-enrollment", read with { PlanId = "identity.user-load" }, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => factory.For(ModuleDescriptor.Create("Workspace", "workspace")).ReadAsync("account-enrollment", read, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => identity.ReadAsync("unknown", read, TestContext.Current.CancellationToken));
+        Assert.Empty(storage.Calls);
+        storage.Handler = _ => throw new PlanFailureException(PlanFailureKind.Unavailable);
+        Assert.Equal(ModulePlanStatus.Unavailable, (await identity.ReadAsync("account-enrollment", read, TestContext.Current.CancellationToken)).Status);
+        storage.Calls.Clear();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => identity.ReadAsync("account-enrollment", read, cancellation.Token));
+        Assert.Empty(storage.Calls);
+    }
+
+    [Fact]
     public async Task UnknownFamilyOutcomeReconcilesReceiptsAndNeverRetriesTheBatch()
     {
         var storage = new ScriptedExecutor
