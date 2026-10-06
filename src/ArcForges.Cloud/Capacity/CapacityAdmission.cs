@@ -41,12 +41,18 @@ internal sealed class CapacityAdmission(IApprovedCapacityProfileSource profiles,
             or CapacityOperation.Settle or CapacityOperation.Restore;
         var source = await profiles.ReadCurrentAsync(cancellationToken).ConfigureAwait(false);
         if (source.Status != QuotaAuthorityStatus.Authorized || source.Profile is not { } approved
-            || approved.DimensionBudgets.Count != 7 || approved.ExpectedPolicyVersions.Count != 7
+            || approved.DimensionBudgets is null || approved.ExpectedPolicyVersions is null
+            || approved.DimensionBudgets.Count != 7 || approved.ExpectedPolicyVersions.Count != 7)
+            return new(reserved ? CapacityAdmissionStatus.Admitted : CapacityAdmissionStatus.Unavailable);
+        approved = approved with { DimensionBudgets = Array.AsReadOnly(approved.DimensionBudgets.ToArray()),
+            ExpectedPolicyVersions = Array.AsReadOnly(approved.ExpectedPolicyVersions.ToArray()) };
+        if (approved.DimensionBudgets.Distinct().Count() != 7
             || approved.Context.RealmId != approved.RealmId || !CapacityProfileCodec.TryDecode(approved.Json, approved.Hash,
                 approved.RealmId, approved.VerifiedProviderLimits, out var profile)) return new(reserved ? CapacityAdmissionStatus.Admitted : CapacityAdmissionStatus.Unavailable);
         var inventory = await physical.ReadAsync(approved.RealmId, cancellationToken).ConfigureAwait(false);
         if (inventory.Status != QuotaAuthorityStatus.Authorized || inventory.State is not { } observed
-            || observed.RealmId != approved.RealmId || observed.VerifiedD1MaximumBytes == 0 || !CapacityProfileCodec.Hash(observed.SourceSnapshotHash))
+            || observed.RealmId != approved.RealmId || observed.VerifiedD1MaximumBytes is 0 or > 10000000000
+            || !CapacityProfileCodec.Hash(observed.SourceSnapshotHash))
             return new(reserved ? CapacityAdmissionStatus.Admitted : CapacityAdmissionStatus.Unavailable);
         var limits = CapacityProfileCodec.Dimensions(profile!.RealmBudgets);
         List<CapacityPressure> pressures = [];

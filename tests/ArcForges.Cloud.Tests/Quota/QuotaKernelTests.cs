@@ -18,6 +18,28 @@ namespace ArcForges.Cloud.Tests.CapacityQuotaTests;
 public sealed class QuotaKernelTests
 {
     [Fact]
+    public async Task LoadAdapterMeasuresActualGuardedReservationAndVerifiesPrimaryPersistenceOnReplay()
+    {
+        using var h = new Harness(); await h.Budget(h.Storage, 100);
+        var fixture = new LoadFixture(new(h.Context, h.Storage, 1, 90, h.Now + 60000000, new('a', 64)));
+        var operation = new CapacityQuotaLoadOperation(fixture, h.Kernel, CapacityLoadKind.Command);
+        var call = new CapacityLoadCall(Id(700), Id(701), CapacityLoadKind.Command, 0, new('a', 64));
+        var first = await operation.ExecuteAsync(call, T.Ct);
+        Assert.Equal(CapacityLoadStatus.Acknowledged, first.Status); Assert.True(first.DurableVerified);
+        Assert.Equal(first, await operation.ExecuteAsync(call, T.Ct));
+        Assert.Equal(1, (await h.State(h.Storage)).Held); Assert.Equal(1, await h.Count("entitlement_quota_reservation"));
+        Assert.Equal(2, await h.Count("platform_command"));
+        fixture.Fixture = fixture.Fixture with { Bound = 2 };
+        Assert.Equal(CapacityLoadStatus.InvariantFailure, (await operation.ExecuteAsync(call, T.Ct)).Status);
+        fixture.Status = QuotaAuthorityStatus.Denied;
+        Assert.Equal(CapacityLoadStatus.Refused, (await operation.ExecuteAsync(call, T.Ct)).Status);
+        Assert.Equal(1, (await h.State(h.Storage)).Held);
+        var read = new CapacityQuotaLoadOperation(fixture, h.Kernel, CapacityLoadKind.PrimaryRead);
+        fixture.Status = QuotaAuthorityStatus.Authorized;
+        Assert.Equal(CapacityLoadStatus.Acknowledged, (await read.ExecuteAsync(call with { Kind = CapacityLoadKind.PrimaryRead }, T.Ct)).Status);
+    }
+
+    [Fact]
     public async Task CallerMutationCannotReplaceTermsBetweenCanonicalSnapshotAndAdmissionAuthority()
     {
         using var h = new Harness(); await h.Budget(h.Storage, 100);
@@ -75,6 +97,11 @@ public sealed class QuotaKernelTests
         Assert.Equal(CapacityAdmissionStatus.Admitted, initial.Status);
         Assert.True(initial.ThirtyDayHeadroom); Assert.True(initial.PartitionDecisionRequired);
         Assert.Equal(60, initial.Pressures!.Single(p => p.Dimension == "d1Bytes").Percent);
+        var originalInventory = source.State;
+        source.State = source.State with { VerifiedD1MaximumBytes = 20000000000 };
+        Assert.Equal(CapacityAdmissionStatus.Unavailable, (await gate.EvaluateAsync(CapacityOperation.Growth, T.Ct)).Status);
+        Assert.Equal(CapacityAdmissionStatus.Admitted, (await gate.EvaluateAsync(CapacityOperation.Read, T.Ct)).Status);
+        source.State = originalInventory;
         var hold = h.Admit([new(h.NewId(), keys[0], 1800000, 1, 1)]);
         Assert.Equal(QuotaKernelStatus.Succeeded, (await h.Kernel.ReserveAsync(hold, T.Ct)).Status);
         Assert.Equal(CapacityAdmissionStatus.Busy, (await gate.EvaluateAsync(CapacityOperation.Growth, T.Ct)).Status);
@@ -437,15 +464,24 @@ public sealed class QuotaKernelTests
     // substituted; CapacityAdmission queries the actual quota kernel/store/Worker plans below.
     private sealed class CapacitySources(ApprovedCapacityProfile profile, PhysicalCapacityState state) : IApprovedCapacityProfileSource, IPhysicalCapacitySource
     {
+        internal PhysicalCapacityState State = state;
         internal QuotaAuthorityStatus PhysicalStatus = QuotaAuthorityStatus.Authorized;
         public Task<ApprovedCapacityProfileResult> ReadCurrentAsync(CancellationToken cancellationToken)
         { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(new ApprovedCapacityProfileResult(QuotaAuthorityStatus.Authorized, profile)); }
         public Task<PhysicalCapacityResult> ReadAsync(Guid realmId, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new PhysicalCapacityResult(realmId == state.RealmId ? PhysicalStatus : QuotaAuthorityStatus.Denied,
-                PhysicalStatus == QuotaAuthorityStatus.Authorized ? state : null));
+            return Task.FromResult(new PhysicalCapacityResult(realmId == State.RealmId ? PhysicalStatus : QuotaAuthorityStatus.Denied,
+                PhysicalStatus == QuotaAuthorityStatus.Authorized ? State : null));
         }
+    }
+
+    private sealed class LoadFixture(CapacityQuotaFixture fixture) : ICapacityQuotaFixtureSource
+    {
+        internal CapacityQuotaFixture Fixture = fixture;
+        internal QuotaAuthorityStatus Status = QuotaAuthorityStatus.Authorized;
+        public Task<CapacityQuotaFixtureResult> ResolveAsync(CapacityLoadCall call, CancellationToken cancellationToken)
+        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(new CapacityQuotaFixtureResult(Status, Fixture)); }
     }
 
     private sealed class FaultPort(IModulePlanPort inner, ModulePlanStatus failure, bool applyFirst = false) : IModulePlanPort

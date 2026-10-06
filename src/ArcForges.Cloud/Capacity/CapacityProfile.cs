@@ -49,6 +49,7 @@ internal static class CapacityProfileCodec
         out CapacityProfile? profile)
     {
         profile = null;
+        if (string.IsNullOrEmpty(json) || verifiedProviderLimits is null) return false;
         try
         {
             var bytes = new UTF8Encoding(false, true).GetBytes(json);

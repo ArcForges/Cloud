@@ -37,6 +37,11 @@ internal sealed class CapacityModule(Func<string, string?> environment) : IHostM
         });
         builder.Services.TryAddSingleton<CapacityRecoveryService>();
         builder.Services.TryAddSingleton<CapacityMeasurementHarness>();
+        // The operator run owner supplies a retained artifact journal and actual operation adapters.
+        // The harness refuses absent full-system producers before dispatching any workload.
+        builder.Services.TryAddSingleton<CapacityLoadHarness>(provider => new(
+            provider.GetServices<ICapacityLoadOperation>(), provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<CapacityLoadJournal>(), provider.GetRequiredService<ICapacityLoadRunAuthority>()));
         builder.Services.TryAddSingleton<CapacityAdmission>();
         builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<ICapacityJobProcessor, CapacityMeasurementProcessor>());
         builder.Services.TryAddSingleton<ICapacityWakeScheduler>(provider => new CapacityWakeScheduler(
