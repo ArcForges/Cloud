@@ -18,8 +18,16 @@ public sealed class CatalogueTests
         using var h = new Harness();
         var first = h.Request();
         Assert.Equal(CataloguePublishStatus.Published, (await h.Publish(first)).Status);
-        var next = h.Request(first.Publication with { ExpectedOfferRevision = 1, PriceVersionId = Id(21), PriceVersion = 3,
-            Amount = "7.125", StartsAtMicros = 20_000_000, EndsAtMicros = 30_000_000, ConfigurationRevisionId = Id(22) });
+        var next = h.Request(first.Publication with
+        {
+            ExpectedOfferRevision = 1,
+            PriceVersionId = Id(21),
+            PriceVersion = 3,
+            Amount = "7.125",
+            StartsAtMicros = 20_000_000,
+            EndsAtMicros = 30_000_000,
+            ConfigurationRevisionId = Id(22)
+        });
         Assert.Equal(CataloguePublishStatus.Published, (await h.Publish(next)).Status);
         Assert.Equal(first.Publication.PriceVersionId, (await h.Reader.ReadEffectiveAsync(first.Publication.OfferId, T.Ct)).Value!.PriceVersionId);
         h.Clock.SetSeconds(20);
@@ -51,8 +59,15 @@ public sealed class CatalogueTests
         Assert.Equal(1, await h.Count("platform_command"));
         Assert.Equal(1, await h.Count("platform_change_archive"));
         Assert.Equal(0, await h.Count("platform_command_guard"));
-        var structural = h.Request(first.Publication with { ExpectedOfferRevision = 1, Kind = 2, PriceVersion = 2,
-            StartsAtMicros = 6_000_000, PriceVersionId = Id(27), ConfigurationRevisionId = Id(28) });
+        var structural = h.Request(first.Publication with
+        {
+            ExpectedOfferRevision = 1,
+            Kind = 2,
+            PriceVersion = 2,
+            StartsAtMicros = 6_000_000,
+            PriceVersionId = Id(27),
+            ConfigurationRevisionId = Id(28)
+        });
         Assert.Equal(CataloguePublishStatus.Conflict, (await h.Publish(structural)).Status);
         var state = (await h.Reader.ReadAsync(first.Publication.OfferId, T.Ct)).Value!;
         Assert.Equal(1, state.OfferRevision);
@@ -172,13 +187,36 @@ public sealed class CatalogueTests
     }
 
     [Fact]
+    public async Task CancellationAfterTheActualCommitDoesNotPretendRollbackAndRecoveryReplays()
+    {
+        using var h = new Harness();
+        var request = h.Request();
+        h.Authority.Approve(request);
+        using var cancelledResponse = new CancellationTokenSource();
+        var publisher = new CataloguePublisher(new D1CatalogueStore(new CancelledResponsePort(h.Port, cancelledResponse)), h.Authority, h.Clock, TimeSpan.FromDays(7));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => publisher.PublishAsync(request, cancelledResponse.Token));
+        Assert.Equal(1, await h.Count("commerce_price_version"));
+        Assert.Equal(1, await h.Count("platform_command"));
+        Assert.Equal(CataloguePublishStatus.Replayed, (await h.Publish(request)).Status);
+        Assert.Equal(1, await h.Count("platform_change_archive"));
+    }
+
+    [Fact]
     public async Task FutureMetadataChangeDefersUntilEffectiveTimeAndInactiveOfferKeepsHistoricalPrice()
     {
         using var h = new Harness();
         var first = h.Request();
         Assert.Equal(CataloguePublishStatus.Published, (await h.Publish(first)).Status);
-        var deactivate = h.Request(first.Publication with { ExpectedOfferRevision = 1, PriceVersionId = Id(44), ConfigurationRevisionId = Id(45),
-            PriceVersion = 2, StartsAtMicros = 20_000_000, Active = false, Name = "retired display" });
+        var deactivate = h.Request(first.Publication with
+        {
+            ExpectedOfferRevision = 1,
+            PriceVersionId = Id(44),
+            ConfigurationRevisionId = Id(45),
+            PriceVersion = 2,
+            StartsAtMicros = 20_000_000,
+            Active = false,
+            Name = "retired display"
+        });
         Assert.Equal(CataloguePublishStatus.Conflict, (await h.Publish(deactivate)).Status);
         Assert.True((await h.Reader.ReadAsync(first.Publication.OfferId, T.Ct)).Value!.Active);
         h.Clock.SetSeconds(25); // Late materialization is valid because approval preceded its effective start.
@@ -228,8 +266,17 @@ public sealed class CatalogueTests
             INSERT INTO commerce_provider_event VALUES ('{Id(75):D}','fixture-provider','fixture-event','fixture-paid','[]',1,2,2,0,NULL);
             INSERT INTO commerce_payment VALUES ('{Id(76):D}','{Id(74):D}','fixture-provider','fixture-payment','3.25','EUR',2,'{Id(75):D}',1,2,1);
             """, T.Ct);
-        var changed = h.Request(first.Publication with { ExpectedOfferRevision = 1, PriceVersion = 2, PriceVersionId = Id(77), ConfigurationRevisionId = Id(78),
-            StartsAtMicros = 6_000_000, Amount = "98.75", Currency = "JPY", TaxCategory = "later-tax" });
+        var changed = h.Request(first.Publication with
+        {
+            ExpectedOfferRevision = 1,
+            PriceVersion = 2,
+            PriceVersionId = Id(77),
+            ConfigurationRevisionId = Id(78),
+            StartsAtMicros = 6_000_000,
+            Amount = "98.75",
+            Currency = "JPY",
+            TaxCategory = "later-tax"
+        });
         Assert.Equal(CataloguePublishStatus.Published, (await h.Publish(changed)).Status);
         var order = Assert.Single(await h.Bridge.QueryAsync("SELECT price_version_id,amount,amount_currency FROM commerce_order;", T.Ct));
         Assert.Equal(new[] { first.Publication.PriceVersionId.ToString("D"), "3.25", "EUR" }, order);
@@ -333,5 +380,18 @@ public sealed class CatalogueTests
     {
         public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken cancellationToken) => System.Threading.Tasks.Task.FromResult(result);
         public Task<ModulePlanOutcome> WriteAsync(ModulePlanWrite write, CancellationToken cancellationToken) => throw new InvalidOperationException("Read test must not write.");
+    }
+
+    private sealed class CancelledResponsePort(IModulePlanPort inner, CancellationTokenSource responseCancellation) : IModulePlanPort
+    {
+        public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken cancellationToken) => inner.ReadAsync(read, cancellationToken);
+        public async Task<ModulePlanOutcome> WriteAsync(ModulePlanWrite write, CancellationToken cancellationToken)
+        {
+            var result = await inner.WriteAsync(write, cancellationToken);
+            Assert.Equal(ModulePlanStatus.Succeeded, result.Status);
+            responseCancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            return result;
+        }
     }
 }
