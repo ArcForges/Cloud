@@ -56,8 +56,10 @@ function fakeProvider(overrides: Partial<Fake> = {}) {
       return Promise.resolve(
         reply({
           id: applicationId,
+          account_id: account,
           name: proofContainerApplication,
           version: 7,
+          active_rollout_id: "rollout-new",
           max_instances: 2,
           scheduling_policy: "default",
           created_at: "2026-10-04T07:55:00Z",
@@ -195,6 +197,7 @@ test("the observation only reads, tells the instance models apart and prints no 
   assert(text.includes("Durable Object none"), text);
   // Provider fields come through the allowlist only; the newest rollout comes first.
   assert(text.includes("health.instances.scheduling = 1"), text);
+  assert(text.includes("active_rollout_id = rollout-new"), text);
   assert(text.includes("instances.stopping = 1"), text);
   assert(text.includes("rollouts (newest 2 of 2)"), text);
   assert(text.indexOf("rollout-new") < text.indexOf("rollout-old"), text);
