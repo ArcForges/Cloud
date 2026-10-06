@@ -16,6 +16,14 @@ public sealed class EvaluatedRepositoryGate
     /// <summary>The public Cloud API and the real test methods that exercise each member. A new public member fails RP-10 until mapped here.</summary>
     private static readonly (string Api, string Method, string TestType, string[] Tests)[] ApiTests =
     [
+        ("ArcForges.Cloud.Modules.Platform.IRealmAuthorityPort", "ResolveAsync", "ArcForges.Cloud.Tests.RealmAuthority.RealmAuthorityTests",
+            ["ActualOwnerReadAndConfiguredAuthorityFollowDurableCurrentStateWithoutAdoptingNewGeneration", "MissingInvalidOrNoncanonicalConfigurationRefusesBeforeStorage", "LazyImmutableConfigurationNeverUsesProofDefaultsAndUnavailableExecutorRefuses"]),
+        ("ArcForges.Cloud.Modules.Platform.IRecoveryEpochPort", "ReadAsync", "ArcForges.Cloud.Tests.RealmAuthority.RealmAuthorityTests",
+            ["ActualReadKeepsRealmsIsolatedAndConcurrentResolutionsRereadEachCurrentVersion", "TransientReadsRetryBoundedlyAndCallerCancellationStopsBackoff", "ReadDeadlineIsBoundedAndInFlightCallerCancellationIsPropagated", "MalformedRowsInvalidRealmAndClosedStatesFailClosed"]),
+        .. new[] { "Available", "Refused" }.Select(member => ("ArcForges.Cloud.Modules.Platform.RecoveryEpochResult", member,
+            "ArcForges.Cloud.Tests.RealmAuthority.RealmAuthorityTests", new[] { "SharedPortValidatesDependencySnapshotAndClosedResultContracts" })),
+        .. new[] { "Available", "Refused" }.Select(member => ("ArcForges.Cloud.Modules.Platform.RealmAuthorityResult", member,
+            "ArcForges.Cloud.Tests.RealmAuthority.RealmAuthorityTests", new[] { "SharedPortValidatesDependencySnapshotAndClosedResultContracts" })),
         ("ArcForges.Cloud.Modules.Commerce.Adapters.BillingProviderFactory", "Create", "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
             ["FactoryUsesFixedEnvironmentAuthenticationAndNormalizesPriceAndRegions", "TimeoutAndDisposalCancelActualInFlightOperationsAndDisposalIsIdempotent"]),
         ("ArcForges.Cloud.Modules.Commerce.Adapters.CustomerPortalLink", "ToString", "ArcForges.Cloud.Tests.Commerce.Adapter.ProviderAdapterTests",
