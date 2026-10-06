@@ -41,6 +41,8 @@
 !src/ArcForges.Cloud.Modules.*/*.cs
 !src/ArcForges.Cloud.Modules.*/*.csproj
 !src/ArcForges.Cloud.Modules.*/packages.lock.json
+!src/ArcForges.Cloud.Modules.Commerce/Adapters/
+!src/ArcForges.Cloud.Modules.Commerce/Adapters/*.cs
 !src/ArcForges.Cloud.Modules.*/Domain/
 !src/ArcForges.Cloud.Modules.*/Domain/*.cs
 !src/ArcForges.Cloud.Modules.*/Application/
