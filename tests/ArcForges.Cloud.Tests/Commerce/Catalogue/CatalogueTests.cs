@@ -92,6 +92,44 @@ public sealed class CatalogueTests
     }
 
     [Fact]
+    public async Task AcceptedPredecessorReplayCannotInvalidateCapturedSuccessorOrAdvanceItAfterCommit()
+    {
+        using var h = new Harness();
+        var predecessor = h.Request();
+        Assert.Equal(CataloguePublishStatus.Published, (await h.Publish(predecessor)).Status);
+        var accepted = (await h.Reader.ReadPriceAsync(predecessor.Publication.PriceVersionId, T.Ct)).Value!;
+        Assert.Equal(predecessor.Publication.ConfigurationRevisionId, accepted.ConfigurationRevisionId);
+        var captured = (await h.Reader.ReadAsync(predecessor.Publication.OfferId, T.Ct)).Value!;
+        var successor = h.Request(predecessor.Publication with
+        {
+            ExpectedOfferRevision = captured.OfferRevision,
+            PriceVersion = captured.LatestPriceVersion + 1,
+            PriceVersionId = Id(61),
+            ConfigurationRevisionId = Id(62),
+            StartsAtMicros = 6_000_000,
+            Amount = "8.75"
+        });
+
+        Assert.Equal(CataloguePublishStatus.Replayed, (await h.Publish(predecessor)).Status);
+        Assert.Equal(captured, (await h.Reader.ReadAsync(predecessor.Publication.OfferId, T.Ct)).Value);
+        Assert.Equal(1, await h.Count("commerce_price_version"));
+        Assert.Equal(CataloguePublishStatus.Published, (await h.Publish(successor)).Status);
+        var committed = (await h.Reader.ReadAsync(predecessor.Publication.OfferId, T.Ct)).Value!;
+        Assert.Equal(2, committed.OfferRevision);
+        Assert.Equal(2, committed.LatestPriceVersion);
+
+        Assert.Equal(CataloguePublishStatus.Replayed, (await h.Publish(predecessor)).Status);
+        Assert.Equal(committed, (await h.Reader.ReadAsync(predecessor.Publication.OfferId, T.Ct)).Value);
+        // Historical price facts remain immutable; the joined offer reports its current revision.
+        Assert.Equal(accepted with { OfferRevision = committed.OfferRevision },
+            (await h.Reader.ReadPriceAsync(predecessor.Publication.PriceVersionId, T.Ct)).Value);
+        Assert.Equal(successor.Publication.PriceVersionId, (await h.Reader.ReadEffectiveAsync(predecessor.Publication.OfferId, T.Ct)).Value!.PriceVersionId);
+        Assert.Equal(2, await h.Count("commerce_price_version"));
+        Assert.Equal(2, await h.Count("platform_command"));
+        Assert.Equal(2, await h.Count("platform_change_archive"));
+    }
+
+    [Fact]
     public async Task LostSuccessfulResponseRetriesSameReceiptAndTransientFailuresAreBounded()
     {
         using var h = new Harness();
