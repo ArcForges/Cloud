@@ -47,6 +47,8 @@
 !src/ArcForges.Cloud.Modules.*/Application/*.cs
 !src/ArcForges.Cloud.Modules.*/Infrastructure/
 !src/ArcForges.Cloud.Modules.*/Infrastructure/*.cs
+!src/ArcForges.Cloud.Modules.Policy/Boundaries/
+!src/ArcForges.Cloud.Modules.Policy/Boundaries/*.cs
 !src/ArcForges.Cloud.Modules.*/Resolver/
 !src/ArcForges.Cloud.Modules.*/Resolver/Domain/
 !src/ArcForges.Cloud.Modules.*/Resolver/Domain/*.cs
