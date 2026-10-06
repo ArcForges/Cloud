@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using ArcForges.Cloud.Modules.Identity.Core.Application;
+using ArcForges.Cloud.Modules.Identity.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -18,12 +19,16 @@ public sealed class IdentityModule : IModuleBoundary
     public ModuleDescriptor Descriptor { get; } = ModuleDescriptor.Create("Identity", "identity");
 
     /// <summary>
-    /// Lists the core identity service (CLOUD.11). It is created only when something asks for it, and it needs the store and the
-    /// identifier port, which no composition supplies until the plan-execution port exists: listing it serves no method and reads no table.
+    /// Binds the core service to the owner plan and family ports. The host supplies the executor and its generation configuration.
     /// </summary>
     void IModuleBoundary.Register(IServiceCollection services)
     {
         services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IIdentityIdSource, IdentityIdSource>();
+        services.TryAddSingleton<IIdentityStore>(provider => new D1IdentityStore(
+            provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor),
+            provider.GetRequiredService<IModuleFamilyPortFactory>().For(Descriptor),
+            provider.GetRequiredService<IIdentityIdSource>(), provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton(provider => new IdentityService(
             provider.GetRequiredService<IIdentityStore>(),
             provider.GetRequiredService<IIdentityIdSource>(),

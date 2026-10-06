@@ -54,7 +54,7 @@ public sealed class IdentityStatementTests
 
         return new AuthIdentity(
             AuthIdentityId.Parse(S(input, "credentialId")), UserId.Parse(S(input, "user")), RealmId.Parse(S(input, "realm")),
-            S(input, "provider"), (AuthMethod)input.GetProperty("method").GetInt32(), S(input, "subject"), N(input, "label"), passkey, N(input, "password"),
+            S(input, "provider"), (AuthMethod)input.GetProperty("method").GetInt32(), S(input, "subject"), N(input, "label"), passkey, N(input, "passwordHash"),
             new UtcMicros(L(input, "createdAt")), null, null, 1);
     }
 
@@ -100,13 +100,13 @@ public sealed class IdentityStatementTests
         _ => throw new InvalidOperationException(),
     };
 
-    private static CommitTailValues TailValues(TailContent tail)
+    private static CommitTailValues TailValues(TailContent tail, WorkspaceId eventScope)
     {
         var identity = new CommandIdentity(Guid.Parse(tail.CommandId), tail.WorkspaceId is null ? null : Guid.Parse(tail.WorkspaceId), tail.ActorRef, tail.Operation, tail.RequestHash);
         var receipt = new CommandReceipt(identity, tail.ResultPayloadJson, tail.ResultRevision, tail.CreatedAt, tail.ExpiresAt);
         var events = tail.Events.Select(e => new OutboxEvent(
             Guid.Parse(e.OutboxId), e.AggregateKind, Guid.Parse(e.AggregateId), e.AggregateRevision, e.EventType, e.PayloadJson,
-            tail.WorkspaceId is null ? null : Guid.Parse(tail.WorkspaceId), Guid.Parse(e.CorrelationId), e.CausationId is null ? null : Guid.Parse(e.CausationId))).ToArray();
+            Guid.Parse(eventScope.Value), Guid.Parse(e.CorrelationId), e.CausationId is null ? null : Guid.Parse(e.CausationId))).ToArray();
         return new CommitTailValues(receipt, events, new ChangeRecord(tail.SchemaVersion, tail.ChangeRecordJson));
     }
 
@@ -140,7 +140,7 @@ public sealed class IdentityStatementTests
         if (commit is IdentityCommit.Enroll enroll)
         {
             var call = IdentityStatements.Enroll(enroll, context);
-            var tail = TailValues(call.Tail);
+            var tail = TailValues(call.Tail, call.Scope);
             var plan = PlanManifest.FamilyPlans.Single(candidate => candidate.Plan.Id == IdentityStatements.EnrollmentPlan);
             var definition = PlanManifest.FamilyCatalog.Single(family => family.Id == plan.Family);
             var unit = FamilyUnitOfWork.Begin(plan, Guid.Parse(call.Tail.CommandId), call.Scope.Value, 0, definition);
@@ -174,7 +174,7 @@ public sealed class IdentityStatementTests
             var plan = Plan(call.PlanId);
             var own = call.OwnerStatements.Select(statement => statement.Select(Scalar).ToArray()).ToArray();
             // CommitTail.Bind refuses a plan whose statements do not have the canonical kinds or whose first guard names another command.
-            sealedArguments = CommitTail.Bind(plan, call.Scope.Value, own, TailValues(call.Tail));
+            sealedArguments = CommitTail.Bind(plan, call.Scope.Value, own, TailValues(call.Tail, call.Scope));
         }
 
         Assert.Equal(Expected(step), sealedArguments.Select(statement => statement.Select(Describe).ToArray()).ToArray());

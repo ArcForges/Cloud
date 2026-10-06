@@ -2,6 +2,7 @@
 using System.Collections.Immutable;
 using ArcForges.Cloud.Modules.Identity.Core.Application;
 using ArcForges.Cloud.Modules.Identity.Core.Domain;
+using ArcForges.Cloud.Modules.Identity.Core.Infrastructure;
 using Xunit;
 
 namespace ArcForges.Cloud.Tests.IdentityCore;
@@ -35,6 +36,7 @@ internal sealed class InMemoryIdentityStore : IIdentityStore
     private readonly Dictionary<AuthIdentityId, AuthIdentity> credentials = [];
     private readonly Dictionary<WorkspaceId, Workspace> workspaces = [];
     private readonly HashSet<UserId> recoveryPaths = [];
+    private readonly Dictionary<string, (string Hash, string Actor, EnrollmentReceipt Receipt)> receipts = [];
     private int refuseNext;
     private Action? beforeCommit;
 
@@ -118,15 +120,33 @@ internal sealed class InMemoryIdentityStore : IIdentityStore
         }
     }
 
-    public ValueTask<bool> HasActiveRecoveryPathAsync(UserId id, CancellationToken cancellationToken)
+    public ValueTask<EnrollmentReceipt?> InspectEnrollmentAsync(EnrollmentRequest request, CancellationToken cancellationToken)
     {
-        lock (gate) return ValueTask.FromResult(recoveryPaths.Contains(id));
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (gate)
+        {
+            var identity = EnrollmentReceiptIdentity.For(request);
+            if (!receipts.TryGetValue(request.CommandId, out var previous)) return ValueTask.FromResult<EnrollmentReceipt?>(null);
+            return ValueTask.FromResult<EnrollmentReceipt?>(previous.Hash == identity.RequestHash && previous.Actor == identity.ActorRef
+                ? previous.Receipt : new EnrollmentReceipt(CommitOutcome.IdentifierConflict));
+        }
+    }
+
+    public ValueTask<bool> HasActiveRecoveryPathAsync(RealmId realm, UserId id, CancellationToken cancellationToken)
+    {
+        lock (gate) return ValueTask.FromResult(users.TryGetValue(id, out var user) && user.Realm == realm && recoveryPaths.Contains(id));
     }
 
     public ValueTask<CommitOutcome> CommitAsync(IdentityCommit commit, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (gate)
         {
+            if (commit is IdentityCommit.Enroll retry && receipts.TryGetValue(commit.CommandId, out var receipt))
+            {
+                var identity = EnrollmentReceiptIdentity.For(retry);
+                return ValueTask.FromResult(receipt.Hash == identity.RequestHash && receipt.Actor == identity.ActorRef ? CommitOutcome.Replayed : CommitOutcome.IdentifierConflict);
+            }
             var hook = beforeCommit;
             beforeCommit = null;
             hook?.Invoke();
@@ -141,6 +161,12 @@ internal sealed class InMemoryIdentityStore : IIdentityStore
             {
                 Commits++;
                 committed.Add(commit);
+                if (commit is IdentityCommit.Enroll enrollment)
+                {
+                    var identity = EnrollmentReceiptIdentity.For(enrollment);
+                    receipts.Add(commit.CommandId, (identity.RequestHash, identity.ActorRef,
+                        new EnrollmentReceipt(CommitOutcome.Replayed, enrollment.User.Id, enrollment.Credential.Id, enrollment.Workspace.Id)));
+                }
             }
 
             return ValueTask.FromResult(outcome);

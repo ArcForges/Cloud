@@ -15,6 +15,7 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { loadCatalog } from "../migrations/catalog.ts";
 import { D1BindingMigrationClient, type D1BindingLike } from "../migrations/clients.ts";
 import { applyPending } from "../migrations/runner.ts";
+import { i64, txt } from "../../tests/worker/support/plan-calls.ts";
 import {
   addArguments,
   credential,
@@ -153,6 +154,46 @@ export async function main(): Promise<void> {
         assert.equal(await count(db, "platform_outbox"), 1);
         assert.equal(await count(db, "platform_change_archive"), 1);
         assert.equal(await count(db, "platform_command_guard"), 0, "the release left no guard row");
+        const found = await runPlan(
+          db as never,
+          "identity.credential-find",
+          [[txt(realmA), txt(account.credential.provider), txt(account.credential.subject)]],
+          realmA,
+        );
+        assert.equal(found.ok, true);
+        if (found.ok)
+          assert.equal(found.rows[0]?.length, 23, "the complete credential and user projection");
+        const listed = await runPlan(
+          db as never,
+          "identity.credential-list",
+          [[txt(realmA), txt(account.user), i64("-9223372036854775808"), txt("")]],
+          realmA,
+        );
+        assert.equal(listed.ok, true);
+        if (listed.ok)
+          assert.equal(listed.rows[0]?.length, 18, "the complete credential page projection");
+        const home = await runPlan(
+          db as never,
+          "workspace.workspace-load",
+          [[txt(realmA), txt(account.workspace)]],
+          account.workspace,
+        );
+        assert.equal(home.ok, true);
+        if (home.ok) assert.equal(home.rows[0]?.length, 8, "the complete workspace projection");
+        const foreign = await runPlan(
+          db as never,
+          "workspace.workspace-by-owner",
+          [[txt(realmB), txt(account.user)]],
+          realmB,
+        );
+        assert.deepEqual(foreign, { ok: true, changes: "0", rows: [] });
+        const recovery = await runPlan(
+          db as never,
+          "identity.recovery-active",
+          [[txt(realmA), txt(account.user)]],
+          realmA,
+        );
+        assert.deepEqual(recovery, { ok: true, changes: "0", rows: [["false"]] });
         const again = enrollInputs(realmA, "ada@example.test");
         assert.deepEqual(
           await runPlan(db as never, enrollmentPlan, enrollArguments(again), again.workspace),

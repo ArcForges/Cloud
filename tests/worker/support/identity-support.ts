@@ -48,7 +48,8 @@ export interface CredentialInput {
   subject: string;
   label: string | null;
   passkey: PasskeyInput | null;
-  password: string | null;
+  /** Stored versioned salted password verifier, matching password_hash; never a plaintext password. */
+  passwordHash: string | null;
   createdAt: number;
 }
 
@@ -88,7 +89,7 @@ export function credentialRow(c: CredentialInput): D1Scalar[] {
     i64(c.createdAt),
     txt(c.realm),
     txt(c.provider),
-    maybeText(c.password),
+    maybeText(c.passwordHash),
   ];
 }
 
@@ -127,15 +128,16 @@ function tail(
   resultRevision: number,
   events: EventInput[],
   changeFields: Record<string, unknown>,
+  enrollment?: { actor: string; result: string },
 ): D1Scalar[][] {
   const record = json({ operation, realmId: realm, userId: user, ...changeFields });
   return tailArguments(scope, {
     commandId: tailInputs.command,
-    workspaceId: scope,
-    actor: `user:${user}`,
+    workspaceId: enrollment ? null : scope,
+    actor: enrollment?.actor ?? `user:${user}`,
     operation,
     requestHash,
-    resultPayload: '{"ok":true}',
+    resultPayload: enrollment?.result ?? '{"ok":true}',
     resultRevision,
     createdAt: tailInputs.now,
     expiresAt: tailInputs.now + retention,
@@ -171,12 +173,28 @@ export interface EnrollInputs extends TailInputs {
 /** The sealed argument list of families.account-enrollment.create-user (the command identity in front of every guard and the release). */
 export function enrollArguments(e: EnrollInputs): D1Scalar[][] {
   const c = e.credential;
-  const hash = requestHash("identity.account.enroll", "Enroll", e.workspace, e.realm, e.user, [
-    e.user,
-    e.workspace,
-    c.credentialId,
+  const fingerprint = (fields: (string | null)[]) =>
+    sha256(
+      fields
+        .map((value) => (value === null ? "~" : Buffer.from(value, "utf8").toString("base64")))
+        .join("\n"),
+    ).toString("hex");
+  const p = c.passkey;
+  const hash = fingerprint([
+    "identity.account.enroll.v1",
+    e.realm,
+    e.displayName,
     c.provider,
+    String(c.method),
     c.subject,
+    c.label,
+    c.passwordHash,
+    p ? Buffer.from(mustDecode(p.publicKey)).toString("base64") : null,
+    p ? Buffer.from(mustDecode(p.userHandle)).toString("base64") : null,
+    p?.backupEligible == null ? null : p.backupEligible ? "True" : "False",
+    p?.backupState == null ? null : p.backupState ? "True" : "False",
+    p?.transports ?? null,
+    p?.signCount == null ? null : String(p.signCount),
   ]);
   const own: D1Scalar[][] = [
     [txt(e.command), txt(c.credentialId), i64(0)],
@@ -205,6 +223,15 @@ export function enrollArguments(e: EnrollInputs): D1Scalar[][] {
         workspaceId: e.workspace,
         authIdentityId: c.credentialId,
         method: c.method,
+      },
+      {
+        actor: "enrollment:" + fingerprint([e.realm, c.provider, c.subject]),
+        result: json({
+          schemaVersion: 1,
+          userId: e.user,
+          authIdentityId: c.credentialId,
+          workspaceId: e.workspace,
+        }),
       },
     ),
   ];
@@ -492,6 +519,8 @@ export async function runPlan(
   args: D1Scalar[][],
   ownerScope: string,
 ): Promise<RunOutcome> {
+  const plan = plans.find((candidate) => candidate.id === planId);
+  if (plan === undefined) throw new Error(`Unknown identity plan: ${planId}`);
   const deps: ExecuteDeps = {
     db,
     plans: identityPlans,
@@ -502,7 +531,7 @@ export async function runPlan(
   const response = await executePlan(
     {
       planId,
-      planVersion: 1,
+      planVersion: plan.version,
       manifestHash,
       requestId: uid(),
       recoveryGeneration: "0",
@@ -562,7 +591,7 @@ export function credential(
     subject,
     label: null,
     passkey: null,
-    password: null,
+    passwordHash: null,
     createdAt: nowMicros,
     ...overrides,
   };

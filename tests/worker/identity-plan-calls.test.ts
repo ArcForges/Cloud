@@ -60,7 +60,7 @@ const adaEmail: CredentialInput = {
   subject: "ada@example.test",
   label: null,
   passkey: null,
-  password: null,
+  passwordHash: null,
   createdAt: now,
 };
 const adaPassword: CredentialInput = {
@@ -70,7 +70,7 @@ const adaPassword: CredentialInput = {
   method: 3,
   subject: "ada",
   label: "Café ключ 😀",
-  password: "verifier-example",
+  passwordHash: "verifier-example",
   createdAt: now + 1_000_000,
 };
 const adaOidc: CredentialInput = {
@@ -99,7 +99,7 @@ const bobPasskey: CredentialInput = {
     transports: '["internal","hybrid"]',
     signCount: 0,
   },
-  password: null,
+  passwordHash: null,
   createdAt: now + 3_000_000,
 };
 
