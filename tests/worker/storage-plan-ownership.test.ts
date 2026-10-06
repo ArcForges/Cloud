@@ -555,3 +555,69 @@ test("every checked-in plan satisfies the ownership rule of its owner directory"
     ["families.account-enrollment.create-user"],
   );
 });
+
+test("quoted quota limit remains a column and cannot hide a foreign table or reset the comma guard", () => {
+  const owners = registry();
+  const make = (owner: string, sql: string) => {
+    const parsed = parsePlanFile(
+      `-- plan: ${owner}.quota-column-test
+-- version: 1
+-- access: read
+-- maxRows: 1
+-- statement: params=scope returns=int64
+${sql}
+`,
+      `storage/plans/${owner}/quota-column-test.sql`,
+    );
+    assertOwnership(parsed, owners);
+    return parsed;
+  };
+  const safe = make(
+    "entitlement",
+    'SELECT CAST(b."limit" AS TEXT) FROM entitlement_quota_budget b WHERE b.scope_id = ?;',
+  );
+  assertOwnership(safe, owners);
+  assert.throws(
+    () =>
+      assertOwnership(
+        make(
+          "chat",
+          'SELECT CAST("limit" AS TEXT) FROM entitlement_quota_budget WHERE scope_id = ?;',
+        ),
+        owners,
+      ),
+    /not owned by chat/u,
+  );
+  assert.throws(
+    () =>
+      make("entitlement", 'SELECT CAST("limit" AS TEXT) FROM platform_job_lease WHERE job_id = ?;'),
+    /real entitlement_quota_budget/u,
+  );
+  assert.throws(
+    () =>
+      make(
+        "entitlement",
+        'SELECT CAST(entitlement_quota_budget."limit" AS TEXT) FROM platform_job_lease AS entitlement_quota_budget WHERE job_id = ?;',
+      ),
+    /real entitlement_quota_budget/u,
+  );
+  assert.throws(
+    () =>
+      make(
+        "entitlement",
+        'SELECT CAST(b."limit" AS TEXT) FROM entitlement_quota_budget b, chat_message c WHERE b.scope_id = ?;',
+      ),
+    /comma join/u,
+  );
+  assert.throws(
+    () =>
+      assertOwnership(
+        make(
+          "entitlement",
+          'SELECT CAST(b."limit" AS TEXT) FROM entitlement_quota_budget b JOIN chat_message c ON c.workspace_id = b.scope_id WHERE b.scope_id = ?;',
+        ),
+        owners,
+      ),
+    /not owned by entitlement/u,
+  );
+});

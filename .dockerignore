@@ -17,6 +17,8 @@
 !src/ArcForges.Cloud/Ingress/*.cs
 !src/ArcForges.Cloud/Infrastructure/
 !src/ArcForges.Cloud/Infrastructure/*.cs
+!src/ArcForges.Cloud/Capacity/
+!src/ArcForges.Cloud/Capacity/*.cs
 !src/ArcForges.Cloud/Readiness/
 !src/ArcForges.Cloud/Readiness/*.cs
 !src/ArcForges.Cloud/*.csproj
@@ -41,6 +43,8 @@
 !src/ArcForges.Cloud.Storage.D1/FamilyBinding/*.cs
 !src/ArcForges.Cloud.Storage.D1/Platform/
 !src/ArcForges.Cloud.Storage.D1/Platform/*.cs
+!src/ArcForges.Cloud.Storage.D1/Capacity/
+!src/ArcForges.Cloud.Storage.D1/Capacity/*.cs
 !src/ArcForges.Cloud.Storage.D1/*.csproj
 !src/ArcForges.Cloud.Storage.D1/packages.lock.json
 !src/ArcForges.Cloud.Modules.*/
@@ -83,6 +87,18 @@
 !src/ArcForges.Cloud.Modules.Abstractions/Families/*.cs
 !src/ArcForges.Cloud.Modules.Abstractions/Platform/
 !src/ArcForges.Cloud.Modules.Abstractions/Platform/*.cs
+!src/ArcForges.Cloud.Modules.Abstractions/Capacity/
+!src/ArcForges.Cloud.Modules.Abstractions/Capacity/*.cs
+!src/ArcForges.Cloud.Modules.Abstractions/Quota/
+!src/ArcForges.Cloud.Modules.Abstractions/Quota/*.cs
+!src/ArcForges.Cloud.Modules.Entitlement/Quota/
+!src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/
+!src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Domain/
+!src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Domain/*.cs
+!src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Application/
+!src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Application/*.cs
+!src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Infrastructure/
+!src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Infrastructure/*.cs
 !src/ArcForges.Cloud.Modules.*/Core/
 !src/ArcForges.Cloud.Modules.*/Core/Domain/
 !src/ArcForges.Cloud.Modules.*/Core/Domain/*.cs

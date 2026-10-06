@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using ArcForges.Cloud.Modules.Entitlement.Persistence.Infrastructure;
+using ArcForges.Cloud.Modules.Entitlement.Quota.Kernel.Application;
+using ArcForges.Cloud.Modules.Entitlement.Quota.Kernel.Infrastructure;
 using ArcForges.Cloud.Modules.Entitlement.Resolver.Application;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -35,5 +37,9 @@ public sealed class EntitlementModule : IModuleBoundary
             provider.GetRequiredService<IEntitlementIdSource>(),
             provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IEntitlementGrantPort>(provider => new EntitlementGrantPortAdapter(provider.GetRequiredService<EntitlementService>()));
+        services.TryAddSingleton<IQuotaKernelStore>(provider => new D1QuotaKernelStore(provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor)));
+        services.TryAddSingleton<IQuotaKernelPort>(provider => new QuotaKernel(
+            provider.GetRequiredService<IQuotaKernelStore>(), provider.GetRequiredService<IQuotaKernelAuthority>(),
+            provider.GetRequiredService<IQuotaMeasurementAuthority>(), provider.GetRequiredService<TimeProvider>()));
     }
 }

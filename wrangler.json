@@ -24,6 +24,10 @@
       {
         "name": "CLOUD_CONTAINER",
         "class_name": "CloudContainer"
+      },
+      {
+        "name": "CAPACITY_PACER",
+        "class_name": "CapacityJobPacer"
       }
     ]
   },
@@ -31,6 +35,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["CloudContainer"]
+    },
+    {
+      "tag": "capacity-pacer-v1",
+      "new_sqlite_classes": ["CapacityJobPacer"]
     }
   ],
   "ratelimits": [
@@ -88,6 +96,10 @@
           {
             "name": "JOB_COORDINATOR",
             "class_name": "FoundationJobCoordinator"
+          },
+          {
+            "name": "CAPACITY_PACER",
+            "class_name": "CapacityJobPacer"
           }
         ]
       },
@@ -95,6 +107,10 @@
         {
           "tag": "v1",
           "new_sqlite_classes": ["FoundationContainer", "FoundationJobCoordinator"]
+        },
+        {
+          "tag": "capacity-pacer-v1",
+          "new_sqlite_classes": ["CapacityJobPacer"]
         }
       ],
       "d1_databases": [

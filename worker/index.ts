@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Container, ContainerProxy, type OutboundHandler } from "@cloudflare/containers";
+import { capacityEnvironment, type CapacityEnvironment } from "./capacity/environment.ts";
+import { handleCapacitySchedule } from "./capacity/handler.ts";
+import { recoverCapacity, type CapacityRecoveryEnv } from "./capacity/recovery.ts";
 import {
   commerceOutboundHosts,
   commerceTransportEnvironment,
@@ -12,9 +15,10 @@ import type { FoundationEnv } from "./foundation/types.ts";
 import { handleExecutePlan } from "./storage/handler.ts";
 
 export { ContainerProxy };
+export { CapacityJobPacer } from "./capacity/durable.ts";
 export { FoundationJobCoordinator } from "./foundation/durable.ts";
 
-type ContainerEnvironment = WorkerEnv & CommerceEgressEnvironment;
+type ContainerEnvironment = WorkerEnv & CommerceEgressEnvironment & CapacityEnvironment;
 
 // The public ingress and class identity are preserved. Only the explicitly configured,
 // exact-host commerce transport is added; global Internet access remains disabled.
@@ -24,7 +28,7 @@ export class CloudContainer extends Container {
   override enableInternet = false;
   constructor(ctx: ConstructorParameters<typeof Container>[0], env: ContainerEnvironment) {
     super(ctx, env);
-    this.envVars = commerceTransportEnvironment(env);
+    this.envVars = { ...commerceTransportEnvironment(env), ...capacityEnvironment(env) };
     this.interceptHttps = this.envVars.ARCFORGES_COMMERCE_EGRESS === "enabled";
   }
 }
@@ -46,9 +50,17 @@ const storageOutbound: OutboundHandler<WorkerEnv> = (request, env) =>
 const objectsOutbound: OutboundHandler<WorkerEnv> = (request, env) =>
   handleObjects(request, env as FoundationEnv);
 const commerceOutbound = commerceOutboundHosts as Record<string, OutboundHandler>;
-CloudContainer.outboundByHost = { ...commerceOutbound };
+const capacityOutbound: OutboundHandler<ContainerEnvironment> = (request, env) =>
+  env.CAPACITY_ENABLED === "enabled"
+    ? handleCapacitySchedule(request, env)
+    : Promise.resolve(new Response(null, { status: 503 }));
+CloudContainer.outboundByHost = {
+  ...commerceOutbound,
+  "capacity.internal": capacityOutbound as OutboundHandler,
+};
 FoundationContainer.outboundByHost = {
   ...commerceOutbound,
+  "capacity.internal": capacityOutbound as OutboundHandler,
   "storage.internal": storageOutbound as OutboundHandler,
   "objects.internal": objectsOutbound as OutboundHandler,
 };
@@ -57,4 +69,9 @@ export default {
   fetch: (request: Request, env: WorkerEnv, context: ExecutionContext) =>
     fetchEntry(request, env, context),
   queue: queueEntry,
+  scheduled: (
+    _event: ScheduledController,
+    env: WorkerEnv & CapacityRecoveryEnv,
+    context: ExecutionContext,
+  ) => context.waitUntil(recoverCapacity(env)),
 };
