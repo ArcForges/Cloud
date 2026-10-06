@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using ArcForges.Build.Policy.Architecture;
 using Xunit;
 
 namespace ArcForges.Cloud.ArchitectureTests;
@@ -45,6 +46,18 @@ public sealed class PolicyBoundaryTests
         var findings = PolicyBoundaryGuard.Check(FixtureCompiler.Create("Boundary", new Dictionary<string, string> { ["boundary.cs"] = source }));
         Assert.NotEmpty(findings);
         Assert.All(findings, finding => Assert.StartsWith(rule, finding, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheHistoricalRootNamespaceGrantPortCannotBypassCommercialSeparation()
+    {
+        const string source = """
+            namespace ArcForges.Cloud.Modules { public interface IEntitlementGrantPort { int Issue(); } }
+            namespace ArcForges.Cloud.Modules.Policy { public class Flag { public int Apply(ArcForges.Cloud.Modules.IEntitlementGrantPort port) => port.Issue(); } }
+            """;
+        var findings = PolicyBoundaryGuard.Check(FixtureCompiler.Create("Boundary", new Dictionary<string, string> { ["boundary.cs"] = source }));
+        Assert.NotEmpty(findings);
+        Assert.All(findings, finding => Assert.StartsWith("BD-01", finding, StringComparison.Ordinal));
     }
 
     [Fact]

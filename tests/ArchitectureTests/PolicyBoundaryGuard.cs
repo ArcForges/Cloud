@@ -22,9 +22,9 @@ internal static class PolicyBoundaryGuard
                 var symbol = node is ExpressionSyntax or TypeSyntax or AttributeSyntax
                     ? semantic.GetSymbolInfo(node).Symbol : null;
                 var type = node is ExpressionSyntax or TypeSyntax ? semantic.GetTypeInfo(node).Type : null;
-                foreach (var referenced in References(symbol).Concat(Types(type)).Distinct(SymbolEqualityComparer.Default))
+                foreach (var referenced in References(symbol).Concat(Types(type)).Distinct<ITypeSymbol>(SymbolEqualityComparer.Default))
                 {
-                    var target = Classify(referenced?.ContainingNamespace?.ToDisplayString());
+                    var target = Classify(referenced);
                     bool forbidden = source == Boundary.Policy && target is not (Boundary.Other or Boundary.Policy)
                         || target == Boundary.Policy && source is not (Boundary.Other or Boundary.Policy);
                     if (!forbidden) continue;
@@ -78,6 +78,18 @@ internal static class PolicyBoundaryGuard
         if (Under(value, "ArcForges.Cloud.Ingress") || Under(value, "ArcForges.Cloud.DataPlane")
             || Under(value, "Microsoft.AspNetCore.Http")) return Boundary.DataPlane;
         return Boundary.Other;
+    }
+
+    private static Boundary Classify(ITypeSymbol? type)
+    {
+        // COM.16's historical primitive port lives in the root Abstractions namespace. Preserve its public identity while
+        // preventing a Policy module from granting/revoking commercial authority through that otherwise neutral project.
+        if (type?.ContainingNamespace?.ToDisplayString() == "ArcForges.Cloud.Modules"
+            && type.Name is "IEntitlementGrantPort" or "EntitlementGrantKind" or "EntitlementGrantSource"
+                or "EntitlementGrantTerms" or "CapabilityGrantTerms" or "QuotaGrantTerms" or "AllowanceGrantTerms"
+                or "IssueGrantCommand" or "RevokeGrantCommand" or "EntitlementGrantRecord" or "EntitlementRevocationRecord"
+                or "EntitlementPortStatus" or "EntitlementPortResult") return Boundary.Entitlement;
+        return Classify(type?.ContainingNamespace?.ToDisplayString());
     }
 
     private enum Boundary { Other, Policy, Entitlement, Settings, Health, DataPlane }
