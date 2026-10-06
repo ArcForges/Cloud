@@ -225,7 +225,7 @@ public sealed class CatalogueTests
             INSERT INTO commerce_billing_account VALUES ('{Id(71):D}','{Id(72):D}',1,1);
             INSERT INTO commerce_purchase_intent VALUES ('{Id(73):D}','{Id(71):D}','{workspace:D}','{first.Publication.OfferId:D}','{first.Publication.PriceVersionId:D}',3,1,100);
             INSERT INTO commerce_order VALUES ('{Id(74):D}','{Id(73):D}','{Id(71):D}','{workspace:D}','{first.Publication.OfferId:D}','{first.Publication.PriceVersionId:D}','3.25','EUR',2,1,2,1);
-            INSERT INTO commerce_provider_event VALUES ('{Id(75):D}','fixture-provider','fixture-event','fixture-paid','{{}}',1,2,2,0,NULL);
+            INSERT INTO commerce_provider_event VALUES ('{Id(75):D}','fixture-provider','fixture-event','fixture-paid','[]',1,2,2,0,NULL);
             INSERT INTO commerce_payment VALUES ('{Id(76):D}','{Id(74):D}','fixture-provider','fixture-payment','3.25','EUR',2,'{Id(75):D}',1,2,1);
             """, T.Ct);
         var changed = h.Request(first.Publication with { ExpectedOfferRevision = 1, PriceVersion = 2, PriceVersionId = Id(77), ConfigurationRevisionId = Id(78),
