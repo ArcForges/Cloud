@@ -277,7 +277,7 @@ SELECT CAST("limit" AS TEXT) FROM entitlement_quota_budget WHERE scope_id = ?;
     return plan;
   };
   const parsed = checked(text);
-  assert.equal(parsed.statements[0]?.returns[0]?.kind, "int64");
+  assert.equal(parsed.statements[0]?.returns?.[0]?.kind, "int64");
   assertOwnership(
     parsed,
     parseOwnerRegistry(readFileSync(path.join(repositoryRoot, ownerRegistry), "utf8")),

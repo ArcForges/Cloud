@@ -45,7 +45,7 @@ test("the checked-in proof environment is isolated from the production Worker", 
   assert.equal(proof.vars.ALLOWED_ORIGIN, `https://${proofHostname}`);
   assert.match(String(proof.vars.PROOF_OPERATOR_VERIFIER), /^[A-Za-z0-9_-]{43}$/u);
   assert.equal(proof.vars.FOUNDATION_PROOF, "enabled");
-  // Production keeps the Hello-only bindings.
+  // Production keeps the unchanged Hello Container; capacity adds only its default-disabled DO.
   const top = wrangler as unknown as Record<string, unknown>;
   for (const key of ["d1_databases", "r2_buckets", "queues"])
     assert.equal(top[key], undefined, key);
@@ -54,8 +54,14 @@ test("the checked-in proof environment is isolated from the production Worker", 
   // subclass that registers outbound interception.
   const classes = (value: unknown) => JSON.stringify(value).match(/"class_name":"[^"]+"/gu);
   assert.deepEqual(classes(top.containers), ['"class_name":"CloudContainer"']);
-  assert.deepEqual(classes(top.durable_objects), ['"class_name":"CloudContainer"']);
-  assert.deepEqual(top.migrations, [{ tag: "v1", new_sqlite_classes: ["CloudContainer"] }]);
+  assert.deepEqual(classes(top.durable_objects), [
+    '"class_name":"CloudContainer"',
+    '"class_name":"CapacityJobPacer"',
+  ]);
+  assert.deepEqual(top.migrations, [
+    { tag: "v1", new_sqlite_classes: ["CloudContainer"] },
+    { tag: "capacity-pacer-v1", new_sqlite_classes: ["CapacityJobPacer"] },
+  ]);
   assert.deepEqual(classes(proof.containers), ['"class_name":"FoundationContainer"']);
   assert.deepEqual(
     JSON.stringify(proof.migrations).includes('"CloudContainer"'),

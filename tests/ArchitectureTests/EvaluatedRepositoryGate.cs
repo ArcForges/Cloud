@@ -92,6 +92,28 @@ public sealed class EvaluatedRepositoryGate
         .. new[] { "FromInt64", "FromBool", "FromText", "FromBytes", "FromOptionalText", "AsInt64", "AsBool", "AsText", "AsBytes", "AsOptionalText", "AsOptionalInt64", "Equals", "GetHashCode", "ToString" }
             .Select(member => ("ArcForges.Cloud.Modules.PlanValue", member, "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
                 new[] { "PlanValuesAreExactAndNeverDescribeTheirContent", "ARoundTripCarriesExactTypedValuesTheScopeAndTheRecoveryGeneration" })),
+        // CLOUD.07: actual owner stores and persistent guard/lifecycle cases exercise each primitive.
+        ("ArcForges.Cloud.Modules.ICapacityJobPort", "ReadAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["PersistentCreateReplayCompetingClaimsAndGuardedCheckpointSurviveAdapterRestart"]),
+        ("ArcForges.Cloud.Modules.ICapacityJobPort", "CreateAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["PersistentCreateReplayCompetingClaimsAndGuardedCheckpointSurviveAdapterRestart", "CurrentAuthorizationGenerationAndCancelledReadsDoNotExposeOrMutateAcceptedJob"]),
+        ("ArcForges.Cloud.Modules.ICapacityJobPort", "ClaimAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["PersistentCreateReplayCompetingClaimsAndGuardedCheckpointSurviveAdapterRestart"]),
+        ("ArcForges.Cloud.Modules.ICapacityJobPort", "CheckpointAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["PersistentCreateReplayCompetingClaimsAndGuardedCheckpointSurviveAdapterRestart"]),
+        ("ArcForges.Cloud.Modules.ICapacityJobPort", "ReconcileAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["LostClaimAndContinuationAcknowledgementsReconcileWithoutNewLeaseTermsOrDuplicateReadWork"]),
+        ("ArcForges.Cloud.Modules.ICapacityJobAuthority", "AuthorizeCreateAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["CurrentAuthorizationGenerationAndCancelledReadsDoNotExposeOrMutateAcceptedJob"]),
+        ("ArcForges.Cloud.Modules.ICapacityJobAuthority", "AuthorizeAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["CurrentAuthorizationGenerationAndCancelledReadsDoNotExposeOrMutateAcceptedJob"]),
+        ("ArcForges.Cloud.Modules.ICapacityJobRecoveryAuthority", "GetCurrentAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["RecoveryEnumeratesOnlyRegisteredCurrentRealmGenerationDueRowsWithBoundedKeyset"]),
+        ("ArcForges.Cloud.Modules.ICapacityJobRecoveryPort", "ReadDueAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["RecoveryEnumeratesOnlyRegisteredCurrentRealmGenerationDueRowsWithBoundedKeyset"]),
+        ("ArcForges.Cloud.Modules.ICapacityJobProcessor", "ProcessAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["ActualSignedPrivateWakeRunsRealMeasurementAndProducesBoundHistoricalReport", "LostClaimAndContinuationAcknowledgementsReconcileWithoutNewLeaseTermsOrDuplicateReadWork"]),
+        ("ArcForges.Cloud.Modules.ICapacityWakeScheduler", "ScheduleAsync", "ArcForges.Cloud.Tests.CapacityTests.CapacityJobTests", ["ActualSignedSchedulerRetriesSameDurableWakeAndKeepsCurrentAuthorizationBeforeDispatch", "SchedulerBoundsActiveAndQueuedRequestsAndShutdownDistinguishesForwardedHints"]),
+        .. new[] { "AuthorizeCommandAsync", "AuthorizeReadAsync", "AuthorizeBudgetAsync", "AuthorizeAdmissionAsync", "AuthorizeEffectAsync", "AuthorizeCleanupAsync" }
+            .Select(member => ("ArcForges.Cloud.Modules.IQuotaKernelAuthority", member, "ArcForges.Cloud.Tests.CapacityQuotaTests.QuotaKernelTests",
+                new[] { "ReplayRequiresCurrentPermissionButNotNewMeasurementAndExpiredIdentifierNeverWritesAgain", "MultiLimitAdmissionIsAtomicAndConcurrentStaleReservationCannotOverdraw", "ExpiryOnlySchedulesCleanupAndUnverifiedCleanupNeverFreesPhysicalBytes" })),
+        ("ArcForges.Cloud.Modules.IQuotaMeasurementAuthority", "VerifyAsync", "ArcForges.Cloud.Tests.CapacityQuotaTests.QuotaKernelTests", ["PositivePhysicalEvidenceAndDeletionReceiptsCannotBeCountedTwiceAcrossReservations", "ExpiryOnlySchedulesCleanupAndUnverifiedCleanupNeverFreesPhysicalBytes"]),
+        ("ArcForges.Cloud.Modules.IQuotaKernelPort", "ReadBudgetAsync", "ArcForges.Cloud.Tests.CapacityQuotaTests.QuotaKernelTests", ["MultiLimitAdmissionIsAtomicAndConcurrentStaleReservationCannotOverdraw"]),
+        ("ArcForges.Cloud.Modules.IQuotaKernelPort", "ReadReservationAsync", "ArcForges.Cloud.Tests.CapacityQuotaTests.QuotaKernelTests", ["ExpiryOnlySchedulesCleanupAndUnverifiedCleanupNeverFreesPhysicalBytes"]),
+        ("ArcForges.Cloud.Modules.IQuotaKernelPort", "PublishBudgetAsync", "ArcForges.Cloud.Tests.CapacityQuotaTests.QuotaKernelTests", ["DowngradePreservesMeasuredUseAndHoldsWhileNewAdmissionsFail"]),
+        ("ArcForges.Cloud.Modules.IQuotaKernelPort", "ReserveAsync", "ArcForges.Cloud.Tests.CapacityQuotaTests.QuotaKernelTests", ["MultiLimitAdmissionIsAtomicAndConcurrentStaleReservationCannotOverdraw", "CallerMutationCannotReplaceTermsBetweenCanonicalSnapshotAndAdmissionAuthority"]),
+        ("ArcForges.Cloud.Modules.IQuotaKernelPort", "ApplyAsync", "ArcForges.Cloud.Tests.CapacityQuotaTests.QuotaKernelTests", ["PositivePhysicalEvidenceAndDeletionReceiptsCannotBeCountedTwiceAcrossReservations", "JobTakeoverBetweenAuthorizationAndWriteRefusesOldFenceAndPreservesHolds"]),
+        ("ArcForges.Cloud.Modules.IQuotaKernelPort", "RequestCleanupAsync", "ArcForges.Cloud.Tests.CapacityQuotaTests.QuotaKernelTests", ["ExpiryOnlySchedulesCleanupAndUnverifiedCleanupNeverFreesPhysicalBytes"]),
     ];
 
     [Fact]

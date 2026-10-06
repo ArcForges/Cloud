@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 1,
+  "id": "cloud-07-cloud-worker-bundle-r1",
+  "kind": "generated",
+  "sourceRepository": "https://github.com/ArcForges/Cloud",
+  "sourceCommit": "162ee0b984a7a0d759f976b7e3c1c9e02c791b63",
+  "sourcePaths": [
+    "worker/capacity/environment.ts",
+    "worker/private/bounded-body.ts",
+    "worker/private/encoding.ts",
+    "worker/private/signing.ts",
+    "worker/private/hmac-settings.ts",
+    "worker/capacity/pacer.ts",
+    "worker/capacity/handler.ts",
+    "worker/capacity/container-client.ts",
+    "worker/capacity/recovery.ts",
+    "worker/commerce-provider/egress.ts",
+    "worker/foundation/types.ts",
+    "worker/foundation/container-env.ts",
+    "worker/ingress/errors.ts",
+    "worker/ingress/io.ts",
+    "worker/ingress/correlation.ts",
+    "worker/ingress/edge-caller.ts",
+    "worker/ingress/frames.ts",
+    "worker/readiness/model.ts",
+    "worker/readiness/container.ts",
+    "worker/ingress/routes.ts",
+    "worker/ingress/pipeline.ts",
+    "worker/router.ts",
+    "worker/foundation/container-client.ts",
+    "worker/foundation/poison.ts",
+    "worker/foundation/operator-signature.ts",
+    "worker/storage/plans.generated.ts",
+    "worker/readiness/bindings.ts",
+    "worker/readiness/evaluate.ts",
+    "worker/readiness/http.ts",
+    "worker/foundation/proof-routes.ts",
+    "worker/foundation/queue.ts",
+    "worker/foundation/entry.ts",
+    "worker/foundation/objects.ts",
+    "worker/storage/scalars.ts",
+    "worker/storage/execute-plan.ts",
+    "worker/storage/handler.ts",
+    "worker/capacity/durable.ts",
+    "worker/foundation/coordination.ts",
+    "worker/foundation/durable.ts",
+    "worker/index.ts"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+      }
+    ],
+    "scope": "Current Worker bundle includes reviewed Cloudflare Containers, an esbuild helper under MIT and the Apache-2.0 generated @arcforges/ai-internal validators alongside AGPL-owned routing, storage-plan, signing, object and queue code. Exact locks, all source inputs, closed output membership and full legal texts are required. Browser/client UI is not introduced.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. @arcforges/ai-internal generated validators: Copyright ArcForges contributors, Apache-2.0 (published Contracts NOTICE retained in third-party/Contracts.NOTICE.txt). Complete respective terms accompany the actual Worker bundle."
+  ],
+  "targets": [],
+  "artifactTargets": [
+    {
+      "project": "package.json",
+      "package": "arcforges-cloud-worker",
+      "kind": "worker-bundle",
+      "profile": "eng/provenance/artifact-profiles/cloud-release-r49.json",
+      "sha256": "1e78f60fe1bf02f8ba4d74651ade218b32160b3ea4dd188482b7ee0735ac4da8"
+    }
+  ],
+  "disposition": "Rewrite",
+  "verification": {
+    "kind": "regeneration",
+    "command": "Locked restore and wrangler deploy --dry-run --containers-rollout none --outdir artifacts/cloud-07-worker --metafile artifacts/cloud-07-worker/bundle-meta.json; exact r49 source/build/closure/legal verification, final independent review and retained applicable CI.",
+    "expected": "CLOUD.07 delivers real persistent Entitlement quota Used/Held and reservation lifecycle, infrastructure-owned Platform jobs, bounded primary recovery, lease/fence guarded slices, strict approved capacity admission, private signed pacing and a complete bounded load runner with durable predispatch intent journaling. Actual owner SQL/Worker SQLite and managed components cover concurrency, expiry/takeover, immutable input capture, safe receipt reconciliation, cancellation, transient reconnect, definite-refusal pagination fairness, and cleanup. The complete focused managed suite55 and Worker/generator41 cases passed without skips on the actual accepted CLOUD.75 baseline. This immutable r49/cloud07r1 successor binds the real locked Wrangler bundle (370554 bytes), 114 parsed/45 emitted Worker inputs and 207 Native AOT build inputs. Only authored AGPL first-party capacity/quota code and its generated named-plan dictionary are added; existing packages, dependency coordinates, external imports, pinned images and complete legal grants are unchanged. All accepted and historical immutable records/profiles remain unchanged; these records supersede actual accepted r48/cloud75r2. CLOUD.21 signed production executor/current authority and CLOUD.76 approved operator profile/inventory/fixture/load authority composition remain required completion producers; absent sources fail closed and never grant fake business or operator authorization. This is implementation source delivery, separate from producer-complete acceptance and the full60-minute launch series. Component fakes only model unavailable external sources/transport; they prove neither deployment, real provider limits nor OS isolation. Production routes/data, workers.dev=false, preview protection and default-disabled capacity behavior remain preserved. Final independent exact-head review and all applicable CI are required before merge.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. @arcforges/ai-internal generated validators: Copyright ArcForges contributors, Apache-2.0 (published Contracts NOTICE retained in third-party/Contracts.NOTICE.txt). Complete respective terms accompany the actual Worker bundle.",
+    "files": [
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Current Worker bundle includes reviewed Cloudflare Containers, an esbuild helper under MIT and the Apache-2.0 generated @arcforges/ai-internal validators alongside AGPL-owned routing, storage-plan, signing, object and queue code. Exact locks, all source inputs, closed output membership and full legal texts are required. Browser/client UI is not introduced."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": {
+    "generators": [
+      {
+        "repository": "https://github.com/cloudflare/workers-sdk",
+        "commit": "d866c0922b8973b38aac0eddf1fdd86a3ac0c7bd",
+        "paths": [
+          "packages/wrangler/src/deployment-bundle/bundle.ts"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE-MIT",
+            "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+            "finding": "Wrangler4.143.1 retains the MIT grant and unchanged LICENSE-MIT at its exact accepted release commit. Its bundle generator source remains byte-identical to the reviewed Wrangler4.135.0 release. CLOUD.75 Worker bytes are newly regenerated from the reviewed plan dictionary and bound to immutable r48; the build generator is not bundled runtime code."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/evanw/esbuild",
+        "commit": "bb9db84c02433fbe37b3509f53f9f3e3cc48725e",
+        "paths": [
+          "internal/runtime/runtime.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.md",
+            "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
+            "finding": "Only the actual generated __defProp/__name helper is inserted; its MIT licence accompanies the Worker."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/microsoft/TypeScript",
+        "commit": "050880ce59e30b356b686bd3144efe24f875ebc8",
+        "paths": [
+          "src/compiler/transformers/ts.ts"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE.txt",
+            "sha256": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47",
+            "finding": "Upstream exact lock selects 6.0.3. Independent transpilation reproduced all four Containers JavaScript files byte-for-byte; compiler implementation is not bundled."
+          }
+        ]
+      }
+    ],
+    "inputs": [
+      {
+        "repository": "https://github.com/ArcForges/Cloud",
+        "commit": "162ee0b984a7a0d759f976b7e3c1c9e02c791b63",
+        "paths": [
+          "worker/capacity/environment.ts",
+          "worker/private/bounded-body.ts",
+          "worker/private/encoding.ts",
+          "worker/private/signing.ts",
+          "worker/private/hmac-settings.ts",
+          "worker/capacity/pacer.ts",
+          "worker/capacity/handler.ts",
+          "worker/capacity/container-client.ts",
+          "worker/capacity/recovery.ts",
+          "worker/commerce-provider/egress.ts",
+          "worker/foundation/types.ts",
+          "worker/foundation/container-env.ts",
+          "worker/ingress/errors.ts",
+          "worker/ingress/io.ts",
+          "worker/ingress/correlation.ts",
+          "worker/ingress/edge-caller.ts",
+          "worker/ingress/frames.ts",
+          "worker/readiness/model.ts",
+          "worker/readiness/container.ts",
+          "worker/ingress/routes.ts",
+          "worker/ingress/pipeline.ts",
+          "worker/router.ts",
+          "worker/foundation/container-client.ts",
+          "worker/foundation/poison.ts",
+          "worker/foundation/operator-signature.ts",
+          "worker/storage/plans.generated.ts",
+          "worker/readiness/bindings.ts",
+          "worker/readiness/evaluate.ts",
+          "worker/readiness/http.ts",
+          "worker/foundation/proof-routes.ts",
+          "worker/foundation/queue.ts",
+          "worker/foundation/entry.ts",
+          "worker/foundation/objects.ts",
+          "worker/storage/scalars.ts",
+          "worker/storage/execute-plan.ts",
+          "worker/storage/handler.ts",
+          "worker/capacity/durable.ts",
+          "worker/foundation/coordination.ts",
+          "worker/foundation/durable.ts",
+          "worker/index.ts"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/cloudflare/containers",
+        "commit": "298169f4aaba82e7b712458b7c6b14fc3e40ad78",
+        "paths": [
+          "src/lib/helpers.ts",
+          "src/lib/container.ts",
+          "src/lib/utils.ts",
+          "src/index.ts"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE-MIT",
+            "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+            "finding": "Exact source files and generated npm package bytes reviewed; no subordinate licence override; MIT alternative selected, full copyright/terms retained."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/ArcForges/Contracts",
+        "commit": "ca45f36cccbdd31380f76b8f6cdecc958fdcb430",
+        "paths": [
+          "internal/storage-http/v1/schema.json",
+          "src/internal/ts/ai-internal/package.json"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "The published @arcforges/ai-internal 1.0.0-ci.287.1 package is Apache-2.0 generated TypeScript from the CON.15 D1 ExecutePlan schema; its exact bytes are bound by the lock integrity and the profile input hashes."
+          }
+        ]
+      }
+    ],
+    "command": "Restore the locked npm dependencies and regenerate the actual Worker using wrangler deploy --dry-run --containers-rollout none. Verify the current immutable r48 Worker hash and unchanged complete108 parsed/emitted input membership, retaining full accepted MIT/AGPL legal text. No public download, real provider or OS isolation acceptance is inferred.",
+    "outputSpdx": "AGPL-3.0-only"
+  },
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-catalog (maintainer admission; independent exact-head PR review required)",
+    "reviewedOn": "2026-10-06",
+    "decision": "approved",
+    "rationale": "CLOUD.07 delivers real persistent Entitlement quota Used/Held and reservation lifecycle, infrastructure-owned Platform jobs, bounded primary recovery, lease/fence guarded slices, strict approved capacity admission, private signed pacing and a complete bounded load runner with durable predispatch intent journaling. Actual owner SQL/Worker SQLite and managed components cover concurrency, expiry/takeover, immutable input capture, safe receipt reconciliation, cancellation, transient reconnect, definite-refusal pagination fairness, and cleanup. The complete focused managed suite55 and Worker/generator41 cases passed without skips on the actual accepted CLOUD.75 baseline. This immutable r49/cloud07r1 successor binds the real locked Wrangler bundle (370554 bytes), 114 parsed/45 emitted Worker inputs and 207 Native AOT build inputs. Only authored AGPL first-party capacity/quota code and its generated named-plan dictionary are added; existing packages, dependency coordinates, external imports, pinned images and complete legal grants are unchanged. All accepted and historical immutable records/profiles remain unchanged; these records supersede actual accepted r48/cloud75r2. CLOUD.21 signed production executor/current authority and CLOUD.76 approved operator profile/inventory/fixture/load authority composition remain required completion producers; absent sources fail closed and never grant fake business or operator authorization. This is implementation source delivery, separate from producer-complete acceptance and the full60-minute launch series. Component fakes only model unavailable external sources/transport; they prove neither deployment, real provider limits nor OS isolation. Production routes/data, workers.dev=false, preview protection and default-disabled capacity behavior remain preserved. Final independent exact-head review and all applicable CI are required before merge.",
+    "baselineCommit": "162ee0b984a7a0d759f976b7e3c1c9e02c791b63",
+    "reconciliation": false
+  },
+  "supersedes": "cloud-75-cloud-worker-bundle-r2"
+}
