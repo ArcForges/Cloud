@@ -65,6 +65,11 @@ public sealed class EvaluatedRepositoryGate
         ("ArcForges.Cloud.Modules.IModulePlanPortFactory", "For", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
             ["APlanOfAnotherOwnerIsRefusedBeforeAnythingIsSent", "AnUnknownPlanAndAnAccessMismatchAreCallerDefectsThatNeverReachTheExecutor"]),
         ("ArcForges.Cloud.Modules.ModulePlanOutcome", "Of", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests", ["EveryPlanFailureBecomesATypedStatus"]),
+        ("ArcForges.Cloud.Modules.IModuleFamilyPort", "InspectAsync", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["InspectionReturnsNotSeenAndPreservesTypedStorageFailures"]),
+        ("ArcForges.Cloud.Modules.IModuleFamilyPort", "ReadAsync", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["ParticipantReadsAreRestrictedToExactEnrollmentWorkspacePlans"]),
+        ("ArcForges.Cloud.Modules.IModuleFamilyPort", "WriteAsync", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["ForeignContributionsAreRejectedBeforeAnyReceiptRead"]),
+        ("ArcForges.Cloud.Modules.IModuleFamilyPort", "Contribute", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["OwnerCapabilitiesCombineAcrossModulesAndCannotBeForgedOrCrossFactories"]),
+        ("ArcForges.Cloud.Modules.IModuleFamilyPortFactory", "For", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests", ["UnknownFamiliesAndNonParticipantsNeverReachStorage"]),
         .. new[] { "FromInt64", "FromBool", "FromText", "FromBytes", "FromOptionalText", "AsInt64", "AsBool", "AsText", "AsBytes", "AsOptionalText", "AsOptionalInt64", "Equals", "GetHashCode", "ToString" }
             .Select(member => ("ArcForges.Cloud.Modules.PlanValue", member, "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
                 new[] { "PlanValuesAreExactAndNeverDescribeTheirContent", "ARoundTripCarriesExactTypedValuesTheScopeAndTheRecoveryGeneration" })),
