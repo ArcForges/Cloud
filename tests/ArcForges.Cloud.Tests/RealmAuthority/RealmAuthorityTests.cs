@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using ArcForges.Cloud.Composition;
 using ArcForges.Cloud.Modules;
-using ArcForges.Cloud.Modules.Platform;
 using ArcForges.Cloud.Storage.ModuleBinding;
 using ArcForges.Cloud.Storage.Platform;
 using ArcForges.Cloud.Tests.Entitlement;

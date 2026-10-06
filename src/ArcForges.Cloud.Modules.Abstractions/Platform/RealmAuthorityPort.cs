@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-namespace ArcForges.Cloud.Modules.Platform;
+namespace ArcForges.Cloud.Modules;
 
 /// <summary>Required deployment realm/authentication epoch bound to the real current/open persisted recovery authority.</summary>
 public sealed record RealmAuthoritySnapshot(Guid RealmId, long AuthEpoch, long RecoveryGeneration, long RecoveryRevision);

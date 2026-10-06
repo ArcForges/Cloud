@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using ArcForges.Cloud.Modules;
-using ArcForges.Cloud.Modules.Platform;
 
 namespace ArcForges.Cloud.Storage.Platform;
 

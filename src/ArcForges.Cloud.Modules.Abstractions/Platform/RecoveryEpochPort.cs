@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-namespace ArcForges.Cloud.Modules.Platform;
+namespace ArcForges.Cloud.Modules;
 
 /// <summary>The current open persisted Platform recovery authority, never a caller's expected generation.</summary>
 public sealed record RecoveryEpochSnapshot(Guid RealmId, long Generation, long Revision);
