@@ -84,6 +84,25 @@ public sealed class RealmAuthorityTests
     }
 
     [Fact]
+    public async Task SharedDeploymentCaptureHasNoStorageCycleAndRemainsImmutableAcrossConsumers()
+    {
+        var environment = ValidEnvironment();
+        var reads = 0;
+        var capture = new ConfiguredRealmOptionsCapture(name => { reads++; return environment.GetValueOrDefault(name); });
+        Assert.Equal(0, reads);
+        Assert.True(capture.TryGetConfigured(out var options));
+        Assert.Equal(new ConfiguredRealmOptions(Realm, 7, 0, null), options);
+        environment["AF_AUTH_EPOCH"] = "8";
+        Assert.Same(options, capture.Capture());
+        var authority = new ConfiguredRealmAuthority(capture, _ => new SnapshotPort(new RecoveryEpochSnapshot(Realm, 0, 1)));
+        Assert.Equal(7, Assert.IsType<RealmAuthoritySnapshot>((await authority.ResolveAsync(TestContext.Current.CancellationToken)).Snapshot).AuthEpoch);
+        Assert.Equal(3, reads);
+        var missing = new ConfiguredRealmOptionsCapture(_ => null);
+        Assert.False(missing.TryGetConfigured(out var refused));
+        Assert.Equal(RealmAuthorityFailure.MissingConfiguration, refused.Failure);
+    }
+
+    [Fact]
     public async Task RealHostModuleRegistrationAddsNoRouteAndKeepsMissingConfigurationLazy()
     {
         var builder = WebApplication.CreateBuilder();

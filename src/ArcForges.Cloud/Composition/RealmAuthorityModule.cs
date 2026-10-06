@@ -15,7 +15,8 @@ internal sealed class RealmAuthorityModule : IHostModule
     public void Register(WebApplicationBuilder builder)
     {
         builder.Services.TryAddSingleton(TimeProvider.System);
-        builder.Services.TryAddSingleton<IRealmAuthorityPort>(provider => new ConfiguredRealmAuthority(Environment.GetEnvironmentVariable,
+        builder.Services.TryAddSingleton(_ => new ConfiguredRealmOptionsCapture(Environment.GetEnvironmentVariable));
+        builder.Services.TryAddSingleton<IRealmAuthorityPort>(provider => new ConfiguredRealmAuthority(provider.GetRequiredService<ConfiguredRealmOptionsCapture>(),
             generation => provider.GetService<IPlanExecutor>() is { } executor
                 ? new RecoveryEpochReader(new ModulePlanPortFactory(executor, checked((ulong)generation), provider.GetRequiredService<TimeProvider>()),
                     provider.GetRequiredService<TimeProvider>())
@@ -35,24 +36,28 @@ internal sealed class RealmAuthorityModule : IHostModule
 /// </summary>
 internal sealed class ConfiguredRealmAuthority : IRealmAuthorityPort
 {
-    private readonly Lazy<Configuration> configuration;
+    private readonly ConfiguredRealmOptionsCapture configuration;
     private readonly Func<long, IRecoveryEpochPort?> recoveryFactory;
 
     public ConfiguredRealmAuthority(Func<string, string?> environment, Func<long, IRecoveryEpochPort?> recoveryFactory)
+        : this(new ConfiguredRealmOptionsCapture(environment), recoveryFactory)
     {
-        ArgumentNullException.ThrowIfNull(environment);
+    }
+
+    public ConfiguredRealmAuthority(ConfiguredRealmOptionsCapture configuration, Func<long, IRecoveryEpochPort?> recoveryFactory)
+    {
+        this.configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         this.recoveryFactory = recoveryFactory ?? throw new ArgumentNullException(nameof(recoveryFactory));
-        configuration = new Lazy<Configuration>(() => Parse(environment), LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public async Task<RealmAuthorityResult> ResolveAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var configured = configuration.Value;
+        var configured = configuration.Capture();
         if (configured.Failure is { } failure) return RealmAuthorityResult.Refused(failure);
-        var recovery = recoveryFactory(configured.Generation);
+        var recovery = recoveryFactory(configured.ExpectedRecoveryGeneration);
         if (recovery is null) return RealmAuthorityResult.Refused(RealmAuthorityFailure.Unavailable);
-        var result = await recovery.ReadAsync(configured.Realm, cancellationToken).ConfigureAwait(false);
+        var result = await recovery.ReadAsync(configured.RealmId, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (result.Snapshot is not { } current) return RealmAuthorityResult.Refused(result.Failure switch
         {
@@ -62,12 +67,35 @@ internal sealed class ConfiguredRealmAuthority : IRealmAuthorityPort
             RecoveryEpochFailure.Unavailable => RealmAuthorityFailure.Unavailable,
             _ => RealmAuthorityFailure.Defect,
         });
-        if (current.RealmId != configured.Realm || current.Generation < 0 || current.Revision <= 0) return RealmAuthorityResult.Refused(RealmAuthorityFailure.Defect);
-        if (current.Generation != configured.Generation) return RealmAuthorityResult.Refused(RealmAuthorityFailure.StaleGeneration);
-        return RealmAuthorityResult.Available(new RealmAuthoritySnapshot(configured.Realm, configured.AuthEpoch, current.Generation, current.Revision));
+        if (current.RealmId != configured.RealmId || current.Generation < 0 || current.Revision <= 0) return RealmAuthorityResult.Refused(RealmAuthorityFailure.Defect);
+        if (current.Generation != configured.ExpectedRecoveryGeneration) return RealmAuthorityResult.Refused(RealmAuthorityFailure.StaleGeneration);
+        return RealmAuthorityResult.Available(new RealmAuthoritySnapshot(configured.RealmId, configured.AuthEpoch, current.Generation, current.Revision));
     }
 
-    private static Configuration Parse(Func<string, string?> environment)
+}
+
+/// <summary>One lazy immutable deployment capture shared by authority reads and production transport composition.</summary>
+internal sealed record ConfiguredRealmOptions(Guid RealmId, long AuthEpoch, long ExpectedRecoveryGeneration, RealmAuthorityFailure? Failure);
+
+internal sealed class ConfiguredRealmOptionsCapture
+{
+    private readonly Lazy<ConfiguredRealmOptions> configuration;
+
+    public ConfiguredRealmOptionsCapture(Func<string, string?> environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        configuration = new Lazy<ConfiguredRealmOptions>(() => Parse(environment), LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    public ConfiguredRealmOptions Capture() => configuration.Value;
+
+    public bool TryGetConfigured(out ConfiguredRealmOptions options)
+    {
+        options = Capture();
+        return options.Failure is null;
+    }
+
+    private static ConfiguredRealmOptions Parse(Func<string, string?> environment)
     {
         var realm = environment("AF_REALM_ID");
         var epoch = environment("AF_AUTH_EPOCH");
@@ -83,7 +111,6 @@ internal sealed class ConfiguredRealmAuthority : IRealmAuthorityPort
         long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value) && value >= minimum
         && string.Equals(text, value.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
-    private sealed record Configuration(Guid Realm, long AuthEpoch, long Generation, RealmAuthorityFailure? Failure);
 }
 
 /// <summary>The real configured reader supplies facts; only the exact shared Storage factory can mint a bound capability.</summary>
