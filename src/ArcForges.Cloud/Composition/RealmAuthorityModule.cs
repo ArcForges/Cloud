@@ -2,6 +2,7 @@
 using System.Globalization;
 using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Storage;
+using ArcForges.Cloud.Storage.FamilyBinding;
 using ArcForges.Cloud.Storage.ModuleBinding;
 using ArcForges.Cloud.Storage.Platform;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -19,6 +20,8 @@ internal sealed class RealmAuthorityModule : IHostModule
                 ? new RecoveryEpochReader(new ModulePlanPortFactory(executor, checked((ulong)generation), provider.GetRequiredService<TimeProvider>()),
                     provider.GetRequiredService<TimeProvider>())
                 : null));
+        builder.Services.TryAddSingleton<IRealmAuthorityFamilyPort>(provider => new ConfiguredRealmAuthorityFamily(
+            provider.GetRequiredService<IRealmAuthorityPort>(), () => provider.GetService<IModuleFamilyPortFactory>() as ModuleFamilyPortFactory));
     }
 
     public void Map(WebApplication app)
@@ -81,4 +84,29 @@ internal sealed class ConfiguredRealmAuthority : IRealmAuthorityPort
         && string.Equals(text, value.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
     private sealed record Configuration(Guid Realm, long AuthEpoch, long Generation, RealmAuthorityFailure? Failure);
+}
+
+/// <summary>The real configured reader supplies facts; only the exact shared Storage factory can mint a bound capability.</summary>
+internal sealed class ConfiguredRealmAuthorityFamily(IRealmAuthorityPort authority, Func<ModuleFamilyPortFactory?> factory) : IRealmAuthorityFamilyPort
+{
+    public async Task<RealmAuthorityFamilyResult> PrepareAsync(string familyId, string planId, string ownerScope, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var current = await authority.ResolveAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (current.Snapshot is not { } snapshot) return RealmAuthorityFamilyResult.Refused(current.Failure ?? RealmAuthorityFailure.Defect);
+        ModuleFamilyPortFactory? shared;
+        try
+        {
+            shared = factory();
+        }
+        catch (InvalidOperationException)
+        {
+            // Microsoft's lazy DI factory reports absent required executor/options this way. Never fall back to a private issuer.
+            return RealmAuthorityFamilyResult.Refused(RealmAuthorityFailure.Unavailable);
+        }
+        if (shared is null) return RealmAuthorityFamilyResult.Refused(RealmAuthorityFailure.Unavailable);
+        cancellationToken.ThrowIfCancellationRequested();
+        return shared.PrepareRecoveryGuard(snapshot, familyId, planId, ownerScope);
+    }
 }

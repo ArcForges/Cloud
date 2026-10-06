@@ -10,8 +10,11 @@ import { repositoryRoot } from "./support/sqlite-d1.ts";
 
 const realm = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const other = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-const read = (db: ReturnType<typeof commitDatabase>, id = realm) =>
-  execute(db, "platform.recovery-current", [[txt(id)]], "platform");
+const read = async (db: ReturnType<typeof commitDatabase>, id = realm) => {
+  const outcome = await execute(db, "platform.recovery-current", [[txt(id)]], "platform");
+  assert(outcome.ok, "actual bounded authority read must succeed");
+  return outcome;
+};
 
 test("recovery authority has exactly one bounded Platform-owned read and no mutation", () => {
   const plan = buildManifest(repositoryRoot).plans.find(
@@ -21,7 +24,9 @@ test("recovery authority has exactly one bounded Platform-owned read and no muta
   assert.equal(plan.access, "read");
   assert.equal(plan.maxRows, 1);
   assert.equal(plan.statements.length, 1);
-  assert.deepEqual(referencedTables(plan.statements[0].sql, plan.id), ["platform_recovery_epoch"]);
+  const statement = plan.statements[0];
+  assert(statement);
+  assert.deepEqual(referencedTables(statement.sql, plan.id), ["platform_recovery_epoch"]);
 });
 
 test("current authority is realm-scoped, absent is empty, every durable state and version is freshly visible", async () => {

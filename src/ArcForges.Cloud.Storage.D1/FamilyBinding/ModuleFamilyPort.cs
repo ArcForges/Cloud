@@ -9,11 +9,73 @@ using ArcForges.Contracts.CloudInternal.Storage.V1;
 
 namespace ArcForges.Cloud.Storage.FamilyBinding;
 
-internal sealed class ModuleFamilyPortFactory(IPlanExecutor executor, ulong recoveryGeneration, TimeProvider time) : IModuleFamilyPortFactory
+internal sealed class ModuleFamilyPortFactory : IModuleFamilyPortFactory
 {
     private readonly object issuer = new();
+    private readonly IPlanExecutor executor;
+    private readonly ulong recoveryGeneration;
+    private readonly TimeProvider time;
+    private readonly IReadOnlyList<FamilyDefinition> catalog;
+    private readonly IReadOnlyList<FamilyPlanDefinition> plans;
 
-    public IModuleFamilyPort For(ModuleDescriptor module) => new ModuleFamilyPort(module, executor, recoveryGeneration, time, issuer);
+    public ModuleFamilyPortFactory(IPlanExecutor executor, ulong recoveryGeneration, TimeProvider time)
+        : this(executor, recoveryGeneration, time, PlanManifest.FamilyCatalog, PlanManifest.FamilyPlans)
+    {
+    }
+
+    // Internal closed fixture seam; production always selects the generated manifest above. Every nested collection is copied.
+    internal ModuleFamilyPortFactory(IPlanExecutor executor, ulong recoveryGeneration, TimeProvider time,
+        IReadOnlyList<FamilyDefinition> catalog, IReadOnlyList<FamilyPlanDefinition> plans)
+    {
+        this.executor = executor ?? throw new ArgumentNullException(nameof(executor));
+        this.recoveryGeneration = recoveryGeneration;
+        this.time = time ?? throw new ArgumentNullException(nameof(time));
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(plans);
+        this.catalog = Array.AsReadOnly(catalog.Select(item => item with { Participants = Array.AsReadOnly(item.Participants.ToArray()) }).ToArray());
+        this.plans = Array.AsReadOnly(plans.Select(item => item with
+        {
+            Roles = Array.AsReadOnly(item.Roles.ToArray()),
+            Plan = item.Plan with
+            {
+                Statements = Array.AsReadOnly(item.Plan.Statements.Select(statement => statement with
+                {
+                    Params = Array.AsReadOnly(statement.Params.ToArray()),
+                    Returns = statement.Returns is { } returns ? Array.AsReadOnly(returns.ToArray()) : null,
+                }).ToArray()),
+            },
+        }).ToArray());
+        if (FamilyCatalog.VerifyAll(this.catalog, this.plans).Count != 0
+            || this.plans.Select(item => item.Plan.Id).Distinct(StringComparer.Ordinal).Count() != this.plans.Count)
+            throw new InvalidOperationException("The closed family catalogue is invalid.");
+    }
+
+    public IModuleFamilyPort For(ModuleDescriptor module) => new ModuleFamilyPort(module, executor, recoveryGeneration, time, issuer, catalog, plans);
+
+    internal RealmAuthorityFamilyResult PrepareRecoveryGuard(RealmAuthoritySnapshot snapshot, string familyId, string planId, string ownerScope)
+    {
+        if (snapshot.RealmId == Guid.Empty || snapshot.AuthEpoch <= 0 || snapshot.RecoveryGeneration < 0 || snapshot.RecoveryRevision <= 0)
+            return RealmAuthorityFamilyResult.Refused(RealmAuthorityFailure.Defect);
+        if (checked((ulong)snapshot.RecoveryGeneration) != recoveryGeneration)
+            return RealmAuthorityFamilyResult.Refused(RealmAuthorityFailure.StaleGeneration);
+        if (string.IsNullOrEmpty(ownerScope) || ownerScope.Length > 256)
+            return RealmAuthorityFamilyResult.Refused(RealmAuthorityFailure.Defect);
+        var plan = plans.SingleOrDefault(item => item.Family == familyId && item.Plan.Id == planId);
+        if (plan is null) return RealmAuthorityFamilyResult.Refused(RealmAuthorityFailure.Defect);
+        var index = -1;
+        for (var position = 0; position < plan.Roles.Count; position++)
+        {
+            var role = plan.Roles[position];
+            if (role.Module != FamilyModule.Platform || role.Key != "recovery-current") continue;
+            if (index >= 0 || role.Phase != FamilyPhase.Guard || role.Class != FamilyClass.Authorization)
+                return RealmAuthorityFamilyResult.Refused(RealmAuthorityFailure.Defect);
+            index = position;
+        }
+        PlanParam[] shape = [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)];
+        if (index < 0 || !plan.Plan.Statements[index].Params.SequenceEqual(shape) || plan.Plan.Statements[index].Returns is not null)
+            return RealmAuthorityFamilyResult.Refused(RealmAuthorityFailure.Defect);
+        return RealmAuthorityFamilyResult.Available(snapshot, new PlatformRecoveryFamilyGuard(issuer, familyId, planId, ownerScope, snapshot));
+    }
 }
 
 internal sealed class ModuleFamilyPort : IModuleFamilyPort
@@ -24,8 +86,10 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
     private readonly FamilyExecutor families;
     private readonly object issuer;
     private readonly IPlanExecutor executor;
+    private readonly IReadOnlyList<FamilyDefinition> catalog;
+    private readonly IReadOnlyList<FamilyPlanDefinition> plans;
 
-    public ModuleFamilyPort(ModuleDescriptor module, IPlanExecutor executor, ulong generation, TimeProvider time, object issuer)
+    public ModuleFamilyPort(ModuleDescriptor module, IPlanExecutor executor, ulong generation, TimeProvider time, object issuer, IReadOnlyList<FamilyDefinition> catalog, IReadOnlyList<FamilyPlanDefinition> plans)
     {
         this.module = module ?? throw new ArgumentNullException(nameof(module));
         this.generation = generation;
@@ -33,6 +97,8 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
         families = new FamilyExecutor(executor);
         this.issuer = issuer;
         this.executor = executor;
+        this.catalog = catalog;
+        this.plans = plans;
     }
 
     private sealed record AuthorizedContributions(object Issuer, string FamilyId, string PlanId, IReadOnlyList<FamilyContribution> Items) : IModuleFamilyContributionSet;
@@ -91,10 +157,15 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(write);
         var definition = Definition(write.FamilyId, write.PlanId);
-        var unit = FamilyUnitOfWork.Begin(definition, write.Commit.CommandId, write.OwnerScope, generation);
+        var unit = FamilyUnitOfWork.Begin(definition, write.Commit.CommandId, write.OwnerScope, generation, FamilyCatalog.Find(write.FamilyId, catalog));
         foreach (var contribution in Own(definition, write.Contributions)) unit.Contribute(contribution);
         foreach (var bundle in write.Participants ?? [])
         {
+            if (bundle is PlatformRecoveryFamilyGuard recovery)
+            {
+                unit.Contribute(recovery.For(issuer, write, generation));
+                continue;
+            }
             if (bundle is not AuthorizedContributions authorized || !ReferenceEquals(authorized.Issuer, issuer)
                 || authorized.FamilyId != write.FamilyId || authorized.PlanId != write.PlanId)
                 throw new InvalidOperationException("The participant contribution capability is not valid for this factory and plan.");
@@ -130,7 +201,7 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
     private FamilyPlanDefinition Definition(string familyId, string planId)
     {
         Participant(familyId);
-        return PlanManifest.FamilyPlans.SingleOrDefault(plan => plan.Plan.Id == planId && plan.Family == familyId)
+        return plans.SingleOrDefault(plan => plan.Plan.Id == planId && plan.Family == familyId)
             ?? throw new InvalidOperationException("The family plan is not registered.");
     }
 
@@ -173,7 +244,7 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
 
     private FamilyModule Participant(string family)
     {
-        var registered = PlanManifest.FamilyCatalog.SingleOrDefault(item => item.Id == family)
+        var registered = catalog.SingleOrDefault(item => item.Id == family)
             ?? throw new InvalidOperationException("The family is not registered.");
         if (!ModuleLockOrder.TryFromOwner(module.PlanOwner, out var participant) || participant == FamilyModule.Platform
             || !registered.Participants.Any(item => item.Module == participant))

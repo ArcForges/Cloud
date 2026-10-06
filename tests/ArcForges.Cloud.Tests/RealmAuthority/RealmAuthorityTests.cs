@@ -97,6 +97,8 @@ public sealed class RealmAuthorityTests
         // The real environment need not contain this task's configuration, and no executor is configured in this fixture.
         Assert.Null((await authority.ResolveAsync(TestContext.Current.CancellationToken)).Snapshot);
         Assert.Null(services.GetService<ArcForges.Cloud.Storage.IPlanExecutor>());
+        var family = services.GetRequiredService<IRealmAuthorityFamilyPort>();
+        Assert.Null((await family.PrepareAsync("account-enrollment", "families.account-enrollment.create-user", "scope", TestContext.Current.CancellationToken)).Contribution);
     }
 
     [Theory]
