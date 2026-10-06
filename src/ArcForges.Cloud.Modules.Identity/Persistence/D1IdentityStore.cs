@@ -70,7 +70,14 @@ internal sealed class D1IdentityStore(IModulePlanPort plans, IModuleFamilyPort f
     public async ValueTask<EnrollmentReceipt?> InspectEnrollmentAsync(EnrollmentRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var result = await families.InspectAsync(EnrollmentFamily, EnrollmentReceiptIdentity.For(request), cancellationToken).ConfigureAwait(false);
+        var identity = EnrollmentReceiptIdentity.For(request);
+        ModulePlanOutcome result;
+        for (var attempt = 0; ; attempt++)
+        {
+            result = await families.InspectAsync(EnrollmentFamily, identity, cancellationToken).ConfigureAwait(false);
+            if (attempt + 1 >= ReadAttempts || result.Status is not (ModulePlanStatus.Unavailable or ModulePlanStatus.UnknownOutcome)) break;
+            await Task.Delay(TimeSpan.FromMilliseconds(50 * (1 << attempt)), time, cancellationToken).ConfigureAwait(false);
+        }
         if (result.Status == ModulePlanStatus.Succeeded) return null;
         var outcome = Outcome(result.Status);
         if (outcome != CommitOutcome.Replayed) return new EnrollmentReceipt(outcome);

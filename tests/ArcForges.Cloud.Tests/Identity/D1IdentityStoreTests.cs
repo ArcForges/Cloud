@@ -15,6 +15,7 @@ public sealed class D1IdentityStoreTests
         public Func<ModulePlanRead, ModulePlanOutcome> Read = _ => ModulePlanOutcome.Of(ModulePlanStatus.Succeeded);
         public ModulePlanStatus WriteStatus = ModulePlanStatus.Succeeded;
         public int Writes;
+        public int Inspections;
         public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested(); Reads.Add(read); return Task.FromResult(Read(read));
@@ -24,7 +25,8 @@ public sealed class D1IdentityStoreTests
         { cancellationToken.ThrowIfCancellationRequested(); Writes++; return Task.FromResult(ModulePlanOutcome.Of(WriteStatus)); }
         public Task<ModulePlanOutcome> WriteAsync(ModuleFamilyWrite write, CancellationToken cancellationToken)
         { cancellationToken.ThrowIfCancellationRequested(); Writes++; return Task.FromResult(ModulePlanOutcome.Of(WriteStatus)); }
-        public Task<ModulePlanOutcome> InspectAsync(string familyId, ModuleCommandIdentity identity, CancellationToken cancellationToken) => Task.FromResult(ModulePlanOutcome.Of(WriteStatus));
+        public Task<ModulePlanOutcome> InspectAsync(string familyId, ModuleCommandIdentity identity, CancellationToken cancellationToken)
+        { cancellationToken.ThrowIfCancellationRequested(); Inspections++; return Task.FromResult(ModulePlanOutcome.Of(WriteStatus)); }
         public IModuleFamilyContributionSet Contribute(string familyId, string planId, IReadOnlyList<ModuleFamilyContribution> contributions) => throw new NotSupportedException();
     }
     private static readonly RealmId Realm = IdentityHarness.RealmA;
@@ -103,5 +105,34 @@ public sealed class D1IdentityStoreTests
         var failure = await Assert.ThrowsAsync<IdentityStorageException>(() => Store(ports).CommitAsync(commit, TestContext.Current.CancellationToken).AsTask());
         Assert.Equal(IdentityStorageFailure.OutcomeUnknown, failure.Failure);
         Assert.Equal(1, ports.Writes);
+    }
+
+    [Theory]
+    [InlineData(ModulePlanStatus.ReusedIdentifier)]
+    [InlineData(ModulePlanStatus.ReceiptExpired)]
+    [InlineData(ModulePlanStatus.ReplayedFailure)]
+    public async Task RetainedReceiptRefusalsPrecedeEveryCredentialReadAndMutation(ModulePlanStatus status)
+    {
+        var ports = new Ports { WriteStatus = status };
+        var ids = new SequentialIdentityIds();
+        var service = new IdentityService(Store(ports), ids, TimeProvider.System);
+        var result = await service.CompleteEnrollmentAsync(new EnrollmentRequest(Realm, ids.NewId(), "Ada", IdentityHarness.Email("ada@example.test")), TestContext.Current.CancellationToken);
+        Assert.Equal(IdentityError.Conflict, result.Error);
+        Assert.Equal(1, ports.Inspections);
+        Assert.Empty(ports.Reads);
+        Assert.Equal(0, ports.Writes);
+    }
+
+    [Fact]
+    public async Task ReceiptInspectionOutageIsBoundedAndCannotTriggerANewEnrollment()
+    {
+        var ports = new Ports { WriteStatus = ModulePlanStatus.Unavailable };
+        var ids = new SequentialIdentityIds();
+        var service = new IdentityService(Store(ports), ids, TimeProvider.System);
+        var failure = await Assert.ThrowsAsync<IdentityStorageException>(() => service.CompleteEnrollmentAsync(new EnrollmentRequest(Realm, ids.NewId(), "Ada", IdentityHarness.Email("ada@example.test")), TestContext.Current.CancellationToken).AsTask());
+        Assert.Equal(IdentityStorageFailure.Unavailable, failure.Failure);
+        Assert.Equal(3, ports.Inspections);
+        Assert.Empty(ports.Reads);
+        Assert.Equal(0, ports.Writes);
     }
 }
