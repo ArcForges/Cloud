@@ -302,6 +302,12 @@ test("observe is a manual choice of the proof dispatch that reaches only the rea
   };
   assert.deepEqual(requireContext(good, "observe"), { account, token });
   assert.throws(() => requireContext({ ...good, GITHUB_EVENT_NAME: "pull_request" }, "observe"));
+  // An observation is held to main exactly like the other proof actions.
+  for (const ref of ["refs/heads/task/cloud-71", "refs/pull/62/merge", "refs/tags/main"])
+    assert.throws(
+      () => requireContext({ ...good, GITHUB_REF: ref }, "observe"),
+      /Only main may touch the proof environment/u,
+    );
   assert.throws(() => requireContext(good, "delete"));
 
   const workflow = readFileSync(path.join(repository, ".github/workflows/ci.yml"), "utf8");
@@ -314,7 +320,20 @@ test("observe is a manual choice of the proof dispatch that reaches only the rea
   assert.equal((workflow.match(/observe:proof/gu) ?? []).length, 1, "only the access job runs it");
   const deploy =
     workflow.split(/^ {2}deploy-proof:\n/mu)[1]?.split(/^ {2}[a-z][a-z-]*:\n/mu)[0] ?? "";
-  assert.match(deploy, /inputs\.proof == 'deploy'/u, "an observation never deploys");
+  // Only the job's own `if:` condition decides: a step or comment elsewhere in the job cannot satisfy these
+  // checks, and a positive match alone would still pass a widened condition such as `|| inputs.proof == 'observe'`.
+  const condition = deploy.split(/^ {4}needs:/mu)[0]?.split(/^ {4}if: >-\n/mu)[1] ?? "";
+  assert.match(
+    condition,
+    /(?:^|&&)\s*inputs\.proof == 'deploy'\s*(?:&&|$)/mu,
+    "an observation never deploys",
+  );
+  assert.doesNotMatch(
+    condition,
+    /\|\||inputs\.proof\s*!=|contains\(|fromJSON\(/u,
+    "the deployment job runs for proof == 'deploy' only",
+  );
+  assert.doesNotMatch(deploy, /observe/u, "the deployment job never names observe");
   const scripts = (
     JSON.parse(readFileSync(path.join(repository, "package.json"), "utf8")) as {
       scripts: Record<string, string>;

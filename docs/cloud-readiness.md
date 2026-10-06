@@ -89,20 +89,28 @@ response only loses its retry hint and is never treated as a success.
 
 1. `GET /api/healthz` answers from the Hello instance. A 200 there says the Worker, its Durable Object and one Container
    instance work, and nothing about the foundation instance, which is a separate Durable Object instance of the same class.
-2. `GET /session/v1/bootstrap` (anonymous) goes to the foundation instance. A 503 whose body begins with
-   `There is no Container instance available at this time.` is the platform's answer that it could not provide an instance
-   (after about thirty seconds: the library tries to acquire one for eight seconds and waits up to twenty for the port). It is
-   neither the Worker's own refusal (empty body) nor the host's (JSON).
+2. `GET /session/v1/bootstrap` (anonymous) goes to the foundation instance. When the platform could not provide an instance
+   (the library's `There is no Container instance available at this time.` after about thirty seconds: it tries to acquire
+   one for eight seconds and waits up to twenty for the port), the Worker classifies that answer and replies with an empty
+   503 and `Retry-After: 2`; the library's text is never passed on. An empty 503 without `Retry-After` is the Worker's refusal
+   of a call that failed in another way, and a 503 of the host itself carries a JSON body.
 3. The operator readiness report names the same condition as `container: unavailable:no_instance_available`.
 4. The pattern seen from outside on 2026-10-06 (CLOUD.71): with `max_instances` 2 only one of the two named instances ran
-   at a time. While Hello answered, every foundation call ended in this 503 after about thirty seconds, for as long as Hello
-   stayed active, and the reverse; the refused instance started within seconds after the other one's 60 second idle stop.
-   The proof ceiling is therefore 4, a limit with headroom for the two names, not a minimum.
+   at a time. While Hello answered, every foundation call ended in that empty 503 with `Retry-After: 2` after 30 to 35
+   seconds, for as long as Hello stayed active. While the foundation held the instance, refused Hello calls ended within the
+   Worker's own deadline instead (fifteen seconds for `/api/healthz`, ten for `SayHello`): a 504 `RPC deadline exceeded.` on
+   `/api/healthz` after 15.3 to 15.9 seconds, gRPC status 4 on `SayHello` after about 11 seconds, or, earlier, the 503
+   `Cloud container is temporarily unavailable.` with `Retry-After: 2` after 0.7 to 14.3 seconds. The refused instance
+   started within seconds after the other one's 60 second idle stop. The proof ceiling is therefore 4, a limit with headroom
+   for the two names, not a minimum.
 5. What a request cannot tell: whether a stopped or stopping instance still counts, only one location is usable, an older
    rollout left instances behind, or the application is still provisioning (about ten minutes after a deployment). The
    manual dispatch `proof=observe` (`npm run observe:proof`, read-only, [PRF.07 proof](prf-07-foundation-proof.md)) prints
    the provider's own view: the configured ceiling, every instance by state, version and location, the Durable Object each
-   one serves, and the newest rollouts.
+   one serves, and the newest rollouts. On 2026-10-06 it showed the cause of point 4: with `max_instances` 2 the provider
+   counted a single instance for the application and the two names took turns on it; no other instance, stopped or of an
+   older rollout, held the second slot. With 4 it keeps four and served both names at the same time. (Its derived instance
+   state reads stopped even for an instance in use, so that state alone does not mean stale.)
 
 ## The wait is bounded
 
