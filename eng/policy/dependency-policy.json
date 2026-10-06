@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "32ef3f74d7539ce975f836f1767690d89c949a4c",
+  "sourceCommit": "c8706e92d5c734798a5fc4aa0fc6f2cb6d7f3ed3",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -78,15 +78,15 @@
     "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
     "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
     "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7",
-    "eng/provenance/artifact-profiles/cloud-release-r47.json": "7990c5588e975fe12767dcdb41d0a0d5758cce04b7e397afef1e7b4b6af7f992",
-    "eng/provenance/records/cloud-75-cloud-runtime-notices-r1.json": "4d9f15699aab67f48e64f96d2587ea70ae4a9f95933d49332a683194eed9d856",
-    "eng/provenance/records/cloud-75-cloud-worker-bundle-r1.json": "ae86947d7cdf9b28b8f75515905f96739b8b3d3e84c997da3f9b34d743fb2b17"
+    "eng/provenance/artifact-profiles/cloud-release-r48.json": "0ef7d0c19a75c97bfae56ead754d0d3309fd95419e0156fdab82b53b9119199c",
+    "eng/provenance/records/cloud-75-cloud-runtime-notices-r2.json": "58b36c9bf8cdba867c62931c4a63b4c0f3b7da6607c737f36730ba0edb05e075",
+    "eng/provenance/records/cloud-75-cloud-worker-bundle-r2.json": "3c0a79d4221bede103de7788a399a378f641db791745c466156831ae2bbedc46"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "ArcForges delivery worker w-codex-20261006-identity (independent exact-head PR review recorded separately)",
     "date": "2026-10-06",
-    "rationale": "CLOUD.75 implements the required lazy canonical deployment realm/AuthEpoch/expected recovery generation and the actual Platform-owned current/open persisted recovery reader, with complete typed refusals, bounded read retry/deadline/cancellation and no default or generation adoption. The real shared family factory mints only an opaque registered recovery-current authorization contribution bound to the same issuer/family/plan/scope/generation and captured realm/state4/revision. Generic business Platform and receipt/outbox/archive/release authority remains denied; the internal fixture catalogue is deeply copied and immutable while production selects only the generated closed catalogue. Actual 330 managed component/regression cases, three Worker SQLite read cases and real future-consumer atomic rollback/replay/concurrency cases passed without skips, including post-read state/generation/revision/realm transitions and unknown late-tail failure reconciliation without mutation retry. The configured AuthEpoch-only stale-container activation/drain remains CLOUD.21-owned; no nonexistent D1 auth predicate is claimed. New owned C# inputs and the actual locked dry-run Worker bundle bind this immutable r47 successor after accepted r46. Dependency coordinates, integrities, lock closure, legal classes, provider/toolchain pins and mandatory gates are unchanged; all historical profiles/records and existing routes/data/workers.dev protections remain intact. Signed production transport activation, real account/session host composition and whole restore/provider/OS acceptance remain distinct; test doubles never prove deployed authority, provider network behavior or OS isolation.",
+    "rationale": "CLOUD.75 correction binds the actual Platform current/open read to the canonical signed realm owner scope, with exact generated Scope metadata and wrong-scope refusal before HTTP and in actual Worker execution. The three public family methods have explicit correspondence to actual capability and closed-result tests. The same lazy immutable required deployment capture is shared by authority reads and CLOUD.21 transport composition, without database/executor resolution cycles, defaults, or silent epoch/generation adoption. The prior complete opaque same-issuer/family/plan/scope/generation recovery-current guard remains intact. Actual 273 relevant managed regression cases and twelve focused Worker read/generator cases passed without skips; fresh current-head full CI remains mandatory. The new actual locked dry-run bundle binds corrected plan bytes. Worker108/image186 input membership, dependency132 closure and policy77 membership remain unchanged from immutable r47. All previous accepted and unmerged immutable records are preserved; r48/cloud75r2 supersedes r47/cloud75r1. Configured AuthEpoch-only stale-container drain remains CLOUD.21-owned; no nonexistent D1 AuthEpoch predicate is claimed. Signed production activation, account/session composition, provider/full-restore/OS acceptance remain distinct; no test double proves actual deployment or isolation. Production routes/data and workers.dev protections remain intact.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -162,9 +162,9 @@
       "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
       "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
       "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7",
-      "eng/provenance/artifact-profiles/cloud-release-r47.json": "7990c5588e975fe12767dcdb41d0a0d5758cce04b7e397afef1e7b4b6af7f992",
-      "eng/provenance/records/cloud-75-cloud-runtime-notices-r1.json": "4d9f15699aab67f48e64f96d2587ea70ae4a9f95933d49332a683194eed9d856",
-      "eng/provenance/records/cloud-75-cloud-worker-bundle-r1.json": "ae86947d7cdf9b28b8f75515905f96739b8b3d3e84c997da3f9b34d743fb2b17"
+      "eng/provenance/artifact-profiles/cloud-release-r48.json": "0ef7d0c19a75c97bfae56ead754d0d3309fd95419e0156fdab82b53b9119199c",
+      "eng/provenance/records/cloud-75-cloud-runtime-notices-r2.json": "58b36c9bf8cdba867c62931c4a63b4c0f3b7da6607c737f36730ba0edb05e075",
+      "eng/provenance/records/cloud-75-cloud-worker-bundle-r2.json": "3c0a79d4221bede103de7788a399a378f641db791745c466156831ae2bbedc46"
     },
     "checks": [
       "locked-restore",
@@ -175,7 +175,7 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No framework/runtime/dependency coordinate changes. Required configured authority, real bounded Platform read and opaque exact shared-issuer atomic recovery guard are covered by330 managed components and actual Worker SQLite execution, including rollback/replay/concurrency. Existing anonymous production health/routes stay unchanged. Signed executor/current realm activation and AuthEpoch stale-container drain remain CLOUD.21-owned; provider network, authentication/session host composition, full restore and OS acceptance are not claimed. No test double or fixture catalogue is registered in production.",
+    "runtimeAssessment": "No framework/runtime/dependency coordinate changes. Required configured authority, real bounded Platform read and opaque exact shared-issuer atomic recovery guard are covered by273 relevant managed components and twelve focused Worker/generator cases and actual Worker SQLite execution, including rollback/replay/concurrency. Existing anonymous production health/routes stay unchanged. Signed executor/current realm activation and AuthEpoch stale-container drain remain CLOUD.21-owned; provider network, authentication/session host composition, full restore and OS acceptance are not claimed. No test double or fixture catalogue is registered in production.",
     "maintenance": "Preserve exact coordinates, all immutable receipts, fixed family locks/ownership and mandatory CI. Future first-party, closure, legal or artifact changes require a new independently reviewed successor; production routes/data and workers.dev protections remain unchanged.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
@@ -995,7 +995,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-75-cloud-runtime-notices-r1", "cloud-75-cloud-worker-bundle-r1"],
+  "artifactRecords": ["cloud-75-cloud-runtime-notices-r2", "cloud-75-cloud-worker-bundle-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1009,7 +1009,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-75-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-75-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
