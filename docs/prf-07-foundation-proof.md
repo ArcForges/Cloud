@@ -113,7 +113,10 @@ exception schema (`BrowserBootstrapResponse`, `BrowserSessionProjection`, `Brows
 
 - The cookie is `__Host-af_session`, holding a random 256-bit handle. Only its SHA-256 is stored.
 - A session ends at twelve hours absolute, thirty minutes idle (renewed only by the explicit bootstrap, never
-  past the absolute limit), on revocation, or when its recovery generation differs from the configured one.
+  past the absolute limit), on revocation, or when its recovery generation differs from the configured one. A
+  renewal keeps the session's own idle window, the distance between its stored idle expiry and last-seen time,
+  never longer than the configured thirty minutes, so a proof session issued with a shorter window keeps it
+  (CLOUD.71); a stored window of zero or less fails closed and is never renewed.
 - The CSRF token is the HMAC of the session's handle hash under a deployment secret, so it needs no storage.
   The anonymous bootstrap token is a different value that never verifies on the unsafe route.
 - Logout needs the exact configured `Origin`, a valid session cookie and `X-AF-CSRF`, all checked before any
@@ -326,7 +329,10 @@ delegate to the same pure state functions and is exercised only live).
 the twelve hour and thirty minute defaults apply). The stored expiries are enforced by the same code as the defaults, so the scenario
 observes the rules themselves: an unused session with a short idle window is refused after it, a session in active use is still refused
 after its absolute lifetime, a default session outlives both, and an expired session is refused on bootstrap and on logout (401). This
-does not prove that the constants are twelve hours and thirty minutes (the offline session tests do).
+does not prove that the constants are twelve hours and thirty minutes (the offline session tests do). Until CLOUD.71's completion
+follow-up a renewing bootstrap gave a short-window session the configured thirty minutes, so a used short-window session could not
+expire by idleness within its override (a limit the PRF.07 record states); the renewal now keeps the session's own window, and the
+offline tests pin it (a renewed eight second window is refused after eleven idle seconds on bootstrap and on logout).
 
 ## Not claimed
 

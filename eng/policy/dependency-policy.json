@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "b5ff291cfd0a479fe9cb5fc03b8d0a32ffbc125e",
+  "sourceCommit": "99617b84c331cc76ff76ad47c102125fc99c564a",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -72,15 +72,15 @@
     "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "ac3a8660e4e99aed60247cffe8d43805610639c0efcd8c7e90d90c4f9002f280",
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
-    "eng/provenance/artifact-profiles/cloud-release-r35.json": "0616905eec15811cb619ca8571d0c696eae157c9c45f178f2a91b968003cd86c",
-    "eng/provenance/records/com-16-cloud-runtime-notices-r1.json": "203876d1150196e4665ae6d6f8b8f918cbe76931460cfd4c19bb212d164452e6",
-    "eng/provenance/records/com-16-cloud-worker-bundle-r1.json": "dd8de23c58f3fafbbef4ee298ceb38c49f9d0e283b999d57ac30f3f9f8066bfd"
+    "eng/provenance/artifact-profiles/cloud-release-r36.json": "b2647e54234fc2d077a142b997110e7af8d03d6c6fa3f203910016c407bda22d",
+    "eng/provenance/records/cloud-71-cloud-runtime-notices-r1.json": "d29395f03f726aa720496295c26ff9f5ec9bac320027b6d8681f7b691b95f34f",
+    "eng/provenance/records/cloud-71-cloud-worker-bundle-r1.json": "3f4be28e720e61fbe4c55a88b09e249663fa771bf120723fd4af9798b0748696"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "ArcForges delivery worker w-c20261006-cloud71b (maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "date": "2026-10-06",
-    "rationale": "CLOUD.71's completion follow-up found that the proof Container application ran only one of its two named instances at a time with max_instances 2. The proof environment of wrangler.json raises that ceiling to 4 (production stays at 1), the manual proof dispatch of .github/workflows/ci.yml gains the read-only observe choice, eng/verification/proof-cloudflare.ts gains the observe function, package.json gains the observe:proof script and the new test file, and the first-party inventory gains that test and this receipt. package.json, wrangler.json and the workflow are hash-bound inputs, so they are re-bound here by this immutable successor receipt. The Worker bundle, release profile and runtime notices are unchanged (no Worker or host source changes). No npm or NuGet coordinate, integrity value or closure entry changes, and no new native capability or broader source reuse permission is created.",
+    "rationale": "CLOUD.71's completion follow-up keeps a proof session's own idle window on renewal (src/ArcForges.Cloud/Foundation/SessionService.cs, TouchAsync, with new idle-renewal tests in tests/ArcForges.Cloud.Tests and the factual documentation in docs/prf-07-foundation-proof.md). The changed source file is a declared build input of the Native AOT image, so the release profile is re-bound by the immutable successor cloud-release-r36, the two shipped-artifact records follow it (cloud-71-cloud-runtime-notices-r1, cloud-71-cloud-worker-bundle-r1) with the regenerated deterministic NOTICE, and the first-party inventory gains them and this receipt. These records are hash-bound inputs, so they are re-bound here by this immutable successor receipt. The Worker bundle bytes are unchanged. No npm or NuGet coordinate, integrity value or closure entry changes, and no new native capability or broader source reuse permission is created.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -150,9 +150,9 @@
       "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "ac3a8660e4e99aed60247cffe8d43805610639c0efcd8c7e90d90c4f9002f280",
       "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
-      "eng/provenance/artifact-profiles/cloud-release-r35.json": "0616905eec15811cb619ca8571d0c696eae157c9c45f178f2a91b968003cd86c",
-      "eng/provenance/records/com-16-cloud-runtime-notices-r1.json": "203876d1150196e4665ae6d6f8b8f918cbe76931460cfd4c19bb212d164452e6",
-      "eng/provenance/records/com-16-cloud-worker-bundle-r1.json": "dd8de23c58f3fafbbef4ee298ceb38c49f9d0e283b999d57ac30f3f9f8066bfd"
+      "eng/provenance/artifact-profiles/cloud-release-r36.json": "b2647e54234fc2d077a142b997110e7af8d03d6c6fa3f203910016c407bda22d",
+      "eng/provenance/records/cloud-71-cloud-runtime-notices-r1.json": "d29395f03f726aa720496295c26ff9f5ec9bac320027b6d8681f7b691b95f34f",
+      "eng/provenance/records/cloud-71-cloud-worker-bundle-r1.json": "3f4be28e720e61fbe4c55a88b09e249663fa771bf120723fd4af9798b0748696"
     },
     "checks": [
       "locked-restore",
@@ -983,7 +983,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["com-16-cloud-runtime-notices-r1", "com-16-cloud-worker-bundle-r1"],
+  "artifactRecords": ["cloud-71-cloud-runtime-notices-r1", "cloud-71-cloud-worker-bundle-r1"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -997,7 +997,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-71-r2.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-71-r3.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

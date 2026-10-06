@@ -89,12 +89,20 @@ internal sealed class SessionService(IPlanExecutor executor, FoundationOptions o
         return new SessionResolution(session, hash);
     }
 
-    /// <summary>Idle renewal for an explicit active request: min(now + idle window, absolute expiry). Zero changes is not an error.</summary>
+    /// <summary>
+    /// Idle renewal for an explicit active request keeps the session's own idle window: the distance between its stored idle expiry
+    /// and last-seen time, which issue and every renewal write together and no request supplies, never longer than the configured
+    /// window. The renewal is min(now + that window, absolute expiry), and one clock reading is the last-seen time, the guard and the
+    /// new expiry. A stored window that is zero or negative is not a session this service wrote: it fails closed and is never
+    /// renewed. Zero changes is not an error.
+    /// </summary>
     public async Task<SessionResolution> TouchAsync(SessionResolution resolution, CancellationToken cancellationToken)
     {
         if (resolution.Session is not { } session || resolution.HandleHash is not { } hash) return resolution;
+        var window = Math.Min(session.IdleExpiresAt - session.LastSeenAt, (long)options.IdleWindow.TotalMicroseconds);
+        if (window <= 0) throw new PlanFailureException(PlanFailureKind.InvalidPlan);
         var now = NowMicros();
-        var idle = Math.Min(now + (long)options.IdleWindow.TotalMicroseconds, session.AbsoluteExpiresAt);
+        var idle = Math.Min(now + window, session.AbsoluteExpiresAt);
         var result = await executor.ExecuteAsync(Call(PlanManifest.Foundation.SessionTouch,
             [[D1Values.Int64(now), D1Values.Int64(idle), D1Values.Text(options.SessionScope), D1Values.Bytes(hash), D1Values.Int64(now), D1Values.Int64(now)]]),
             cancellationToken);
