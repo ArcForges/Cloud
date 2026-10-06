@@ -5,6 +5,9 @@
   "compatibility_date": "2026-09-15",
   "workers_dev": false,
   "preview_urls": false,
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "routes": [
     {
       "pattern": "arcforges.com/api/*",
@@ -67,6 +70,9 @@
       "name": "arcforges-cloud-proof",
       "workers_dev": false,
       "preview_urls": false,
+      "triggers": {
+        "crons": ["* * * * *"]
+      },
       "routes": [
         {
           "pattern": "proof.arcforges.com",

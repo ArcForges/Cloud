@@ -2,8 +2,8 @@
 using System.Text;
 using System.Text.Json;
 using ArcForges.Cloud.Capacity;
-using ArcForges.Cloud.Storage.Capacity;
 using ArcForges.Cloud.Modules;
+using ArcForges.Cloud.Storage.Capacity;
 using Xunit;
 
 namespace ArcForges.Cloud.Tests.CapacityTests;
@@ -14,6 +14,37 @@ namespace ArcForges.Cloud.Tests.CapacityTests;
 public sealed class CapacityLoadHarnessTests
 {
     private static readonly CapacityLoadConfiguration Small = new(1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1);
+    [Theory]
+    [InlineData("open")]
+    [InlineData("observe")]
+    [InlineData("deadline")]
+    public async Task TransientConnectionFailureReopensAfterDisposalAndCancellationClosesReplacement(string failure)
+    {
+        using var artifact = new MemoryStream(); using var cancellation = new CancellationTokenSource();
+        var session = new RecoveringConnectionOperation(failure);
+        var harness = new CapacityLoadHarness([session,
+            new Operation(CapacityLoadKind.Command, new(CapacityLoadStatus.Refused)),
+            new Operation(CapacityLoadKind.PrimaryRead, new(CapacityLoadStatus.Unavailable)),
+            new Operation(CapacityLoadKind.ColdStart, new(CapacityLoadStatus.Unavailable))], TimeProvider.System, new(artifact), new RunAuthority());
+        var run = Run(harness, Small with { DurationSeconds = 10, Streams = 0 }, cancellation.Token);
+        await session.ReplacementReading.Task.WaitAsync(TimeSpan.FromSeconds(5), T.Ct);
+        Assert.Equal(2, session.Opened);
+        Assert.Equal(failure == "open" ? 0 : 1, session.Disposed);
+        cancellation.Cancel(); await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+        Assert.Equal(failure == "open" ? 1 : 2, session.Disposed);
+    }
+
+    [Fact]
+    public async Task FailedConnectionTeardownAbortsInsteadOfOpeningAnotherHandle()
+    {
+        using var artifact = new MemoryStream(); var session = new RecoveringConnectionOperation("dispose");
+        var harness = new CapacityLoadHarness([session,
+            new Operation(CapacityLoadKind.Command, new(CapacityLoadStatus.Refused)),
+            new Operation(CapacityLoadKind.PrimaryRead, new(CapacityLoadStatus.Unavailable)),
+            new Operation(CapacityLoadKind.ColdStart, new(CapacityLoadStatus.Unavailable))], TimeProvider.System, new(artifact), new RunAuthority());
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(harness, Small with { DurationSeconds = 10, Streams = 0 }));
+        Assert.IsType<IOException>(error.InnerException); Assert.Equal(1, session.Opened); Assert.Equal(1, session.Disposed);
+    }
     [Fact]
     public async Task DefectiveOwnerAbortsRunAndDisposesConnectionsBeforeExclusiveAdmissionIsReusable()
     {
@@ -129,6 +160,39 @@ public sealed class CapacityLoadHarnessTests
             public async Task<CapacityLoadObservation> ObserveAsync(CancellationToken cancellationToken)
             { owner.ReadStarted.TrySetResult(); await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); return new(CapacityLoadStatus.Unavailable); }
             public ValueTask DisposeAsync() { Interlocked.Increment(ref owner.Disposed); return ValueTask.CompletedTask; }
+        }
+    }
+    private sealed class RecoveringConnectionOperation(string failure) : ICapacityLoadConnectionOperation
+    {
+        private string Failure => failure;
+        internal int Opened, Disposed;
+        internal TaskCompletionSource ReplacementReading = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public CapacityLoadKind Kind => CapacityLoadKind.Session;
+        public Task<CapacityLoadObservation> ExecuteAsync(CapacityLoadCall call, CancellationToken cancellationToken) => throw new InvalidOperationException();
+        public Task<CapacityLoadConnectionResult> OpenAsync(CapacityLoadCall call, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested(); var attempt = Interlocked.Increment(ref Opened);
+            if (attempt == 1 && failure == "open") throw new HttpRequestException("Injected transient open failure.");
+            if (attempt == 2 && Disposed != (failure == "open" ? 0 : 1)) throw new InvalidOperationException("Reopened before disposal.");
+            return Task.FromResult(new CapacityLoadConnectionResult(CapacityLoadStatus.Acknowledged, new Connection(this, attempt)));
+        }
+        private sealed class Connection(RecoveringConnectionOperation owner, int attempt) : ICapacityLoadConnection
+        {
+            public async Task<CapacityLoadObservation> ObserveAsync(CancellationToken cancellationToken)
+            {
+                if (attempt == 1)
+                {
+                    if (owner.Failure == "deadline") throw new OperationCanceledException("Injected external owner deadline.");
+                    throw new TimeoutException("Injected transient read failure.");
+                }
+                owner.ReplacementReading.TrySetResult(); await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return new(CapacityLoadStatus.Unavailable);
+            }
+            public ValueTask DisposeAsync()
+            {
+                Interlocked.Increment(ref owner.Disposed);
+                return owner.Failure == "dispose" ? ValueTask.FromException(new IOException("Injected teardown failure.")) : ValueTask.CompletedTask;
+            }
         }
     }
     private sealed class InterruptedArtifact : MemoryStream

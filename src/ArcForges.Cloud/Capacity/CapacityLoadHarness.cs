@@ -166,40 +166,54 @@ internal sealed class CapacityLoadHarness
                 while (!persistent.IsCancellationRequested)
                 {
                     if (!first) meter.Offer(); first = false;
-                    using var openBudget = CancellationTokenSource.CreateLinkedTokenSource(persistent.Token);
-                    openBudget.CancelAfter(TimeSpan.FromSeconds(10));
                     var started = Stopwatch.GetTimestamp();
-                    await journal.RecordAsync(call, openBudget.Token).ConfigureAwait(false);
-                    var opened = await owner.OpenAsync(call, openBudget.Token).ConfigureAwait(false);
-                    await using var connection = opened.Connection;
-                    openBudget.Token.ThrowIfCancellationRequested();
-                    meter.Record(new(opened.Status == CapacityLoadStatus.Acknowledged && connection is null
-                        ? CapacityLoadStatus.InvariantFailure : opened.Status), Stopwatch.GetElapsedTime(started));
-                    if (opened.Status != CapacityLoadStatus.Acknowledged || connection is null)
+                    // Journal failure is an artifact integrity defect, not a reconnectable owner
+                    // outage. No new connection may be dispatched without its durable identity.
+                    await journal.RecordAsync(call, persistent.Token).ConfigureAwait(false);
+                    ICapacityLoadConnection? connection = null;
+                    try
                     {
-                        await Task.Delay(TimeSpan.FromMilliseconds(250), time, persistent.Token).ConfigureAwait(false);
-                        continue;
+                        using var openBudget = CancellationTokenSource.CreateLinkedTokenSource(persistent.Token);
+                        openBudget.CancelAfter(TimeSpan.FromSeconds(10));
+                        var opened = await owner.OpenAsync(call, openBudget.Token).ConfigureAwait(false);
+                        connection = opened.Connection;
+                        openBudget.Token.ThrowIfCancellationRequested();
+                        meter.Record(new(opened.Status == CapacityLoadStatus.Acknowledged && connection is null
+                            ? CapacityLoadStatus.InvariantFailure : opened.Status), Stopwatch.GetElapsedTime(started));
+                        if (opened.Status == CapacityLoadStatus.Acknowledged && connection is not null)
+                        {
+                            while (!persistent.IsCancellationRequested)
+                            {
+                                using var readBudget = CancellationTokenSource.CreateLinkedTokenSource(persistent.Token);
+                                readBudget.CancelAfter(TimeSpan.FromSeconds(30));
+                                started = Stopwatch.GetTimestamp();
+                                var observation = await connection.ObserveAsync(readBudget.Token).ConfigureAwait(false);
+                                readBudget.Token.ThrowIfCancellationRequested();
+                                meter.Record(observation, Stopwatch.GetElapsedTime(started));
+                                if (observation.Complete || observation.Status != CapacityLoadStatus.Acknowledged) break;
+                                await Task.Delay(TimeSpan.FromMilliseconds(100), time, persistent.Token).ConfigureAwait(false);
+                            }
+                        }
                     }
-                    while (!persistent.IsCancellationRequested)
+                    catch (OperationCanceledException) when (!persistent.IsCancellationRequested)
+                    { meter.Record(new(CapacityLoadStatus.Unavailable), Stopwatch.GetElapsedTime(started)); }
+                    catch (Exception error) when (error is HttpRequestException or IOException or TimeoutException)
+                    { meter.Record(new(CapacityLoadStatus.Unavailable), Stopwatch.GetElapsedTime(started)); }
+                    finally
                     {
-                        using var readBudget = CancellationTokenSource.CreateLinkedTokenSource(persistent.Token);
-                        readBudget.CancelAfter(TimeSpan.FromSeconds(30));
-                        started = Stopwatch.GetTimestamp();
-                        var observation = await connection.ObserveAsync(readBudget.Token).ConfigureAwait(false);
-                        readBudget.Token.ThrowIfCancellationRequested();
-                        meter.Record(observation, Stopwatch.GetElapsedTime(started));
-                        if (observation.Complete || observation.Status != CapacityLoadStatus.Acknowledged) break;
-                        await Task.Delay(TimeSpan.FromMilliseconds(100), time, persistent.Token).ConfigureAwait(false);
+                        // Dispose before reopening. A failed teardown cannot prove the old owner
+                        // released its resources, so abort instead of multiplying live handles.
+                        if (connection is not null)
+                        {
+                            try { await connection.DisposeAsync().ConfigureAwait(false); }
+                            catch (Exception error) { throw new InvalidOperationException("Capacity connection teardown failed.", error); }
+                        }
                     }
                     await Task.Delay(TimeSpan.FromMilliseconds(250), time, persistent.Token).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                if (!persistent.IsCancellationRequested) meter.Record(new(CapacityLoadStatus.Unavailable), TimeSpan.FromSeconds(30));
-            }
-            catch (Exception error) when (error is HttpRequestException or IOException or TimeoutException)
-            { meter.Record(new(CapacityLoadStatus.Unavailable), TimeSpan.Zero); }
+            { }
             catch { active.Cancel(); throw; }
         }
         try
@@ -274,13 +288,13 @@ internal sealed class CapacityLoadHarness
                 if (!Enum.IsDefined(value.Status) || value.DuplicateDebits != 0 || value.AcknowledgedLoss != 0 || value.SkippedFeedSequences != 0
                     || value.Status == CapacityLoadStatus.Acknowledged && kind == CapacityLoadKind.Command && !value.DurableVerified) failed++;
                 else switch (value.Status)
-                {
-                    case CapacityLoadStatus.Acknowledged: acknowledged++; break;
-                    case CapacityLoadStatus.Refused: refused++; break;
-                    case CapacityLoadStatus.Unavailable: unavailable++; break;
-                    case CapacityLoadStatus.UnknownOutcome: unknown++; break;
-                    case CapacityLoadStatus.InvariantFailure: failed++; break;
-                }
+                    {
+                        case CapacityLoadStatus.Acknowledged: acknowledged++; break;
+                        case CapacityLoadStatus.Refused: refused++; break;
+                        case CapacityLoadStatus.Unavailable: unavailable++; break;
+                        case CapacityLoadStatus.UnknownOutcome: unknown++; break;
+                        case CapacityLoadStatus.InvariantFailure: failed++; break;
+                    }
                 observed++; histogram[Math.Min(3000, (int)Math.Ceiling(duration.TotalMilliseconds / 10))]++;
             }
         }
