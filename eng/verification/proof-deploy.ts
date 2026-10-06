@@ -234,15 +234,47 @@ export interface VerifiedBundle {
   files: BundleEntry[];
 }
 
+/** The attribute names of a start tag, so that a "src=" inside another attribute's value is not mistaken for one. */
+function attributeNames(attributes: string): string[] {
+  const names: string[] = [];
+  for (const match of attributes.matchAll(
+    /([^\s"'<>/=]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?/gu,
+  ))
+    names.push((match[1] ?? "").toLowerCase());
+  return names;
+}
+
 function inlineScriptHashes(html: string): string[] {
   const hashes: string[] = [];
-  for (const match of html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script[^>]*>/giu)) {
+  // `<script/x>` is a start tag too: the name may be followed by whitespace, a slash or the closing bracket.
+  for (const match of html.matchAll(/<script(?=[\s/>])([^>]*)>([\s\S]*?)<\/script[^>]*>/giu)) {
     const attributes = match[1] ?? "";
     const body = match[2] ?? "";
-    if (/(?:^|\s)src\s*=/u.test(attributes) || body === "") continue;
+    if (attributeNames(attributes).includes("src") || body === "") continue;
     hashes.push(`'sha256-${createHash("sha256").update(body).digest("base64")}'`);
   }
   return hashes;
+}
+
+/** A policy as directives (name to sources); a repeated directive name is refused. */
+export function parsePolicy(policy: string): Map<string, string[]> {
+  const directives = new Map<string, string[]>();
+  for (const part of policy.split(";")) {
+    const [name = "", ...sources] = part.trim().split(/\s+/u);
+    if (name === "") continue;
+    const key = name.toLowerCase();
+    assert(!directives.has(key), `The policy repeats the ${key} directive.`);
+    directives.set(key, sources);
+  }
+  return directives;
+}
+
+/** Every src or href value of a page, whichever way it is quoted. */
+function pageReferences(html: string): string[] {
+  const references: string[] = [];
+  for (const match of html.matchAll(/\s(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/giu))
+    references.push(match[1] ?? match[2] ?? match[3] ?? "");
+  return references;
 }
 
 /** The `_headers` rules by path pattern (a rule starts at a line that begins with "/"). */
@@ -315,16 +347,32 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
       policy,
       `The manifest policy of ${name} differs from its rule.`,
     );
-    assert(policy.includes("default-src 'self'"), `${name} policy must keep default-src 'self'.`);
-    assert(policy.includes("connect-src 'self'"), `${name} policy must keep connect-src 'self'.`);
+    const directives = parsePolicy(policy);
+    assert.deepEqual(
+      directives.get("default-src"),
+      ["'self'"],
+      `${name} default-src must be exactly 'self'.`,
+    );
+    assert.deepEqual(
+      directives.get("connect-src"),
+      ["'self'"],
+      `${name} connect-src must be exactly 'self'.`,
+    );
     assert(!/unsafe-inline|unsafe-eval|\*/u.test(policy), `${name} policy is not restrictive.`);
+    const scriptSources = directives.get("script-src") ?? [];
     for (const hash of inlineScriptHashes(html))
-      assert(policy.includes(hash), `${name} policy does not cover an inline script of its page.`);
-    for (const match of html.matchAll(/\s(?:src|href)="([^"]*)"/gu)) {
-      const reference = match[1] ?? "";
+      assert(
+        scriptSources.includes(hash),
+        `${name} policy does not cover an inline script of its page in script-src.`,
+      );
+    for (const reference of pageReferences(html)) {
       if (reference.startsWith("#")) continue;
       assert(
-        reference.startsWith("/") && !reference.startsWith("//"),
+        reference.startsWith("/") &&
+          !reference.startsWith("//") &&
+          !reference.includes("\\") &&
+          !reference.includes("\t") &&
+          !reference.includes("\n"),
         `${name} page references another origin: ${reference}`,
       );
     }

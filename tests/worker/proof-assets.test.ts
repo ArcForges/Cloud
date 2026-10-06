@@ -14,6 +14,7 @@ import {
   profileBundleAssetName,
   profileBundlePin,
   proofAssetsDirName,
+  parsePolicy,
   readBundleArchive,
   stageProfileAssets,
   verifyProfileBundle,
@@ -65,7 +66,7 @@ function page(profile: string, extra = "") {
   return `<!DOCTYPE html><html><head><link rel="modulepreload" href="/assets/entry.js"/></head><body>${extra}<script>window.p="${profile}";</script><script type="module" src="/assets/entry.js"></script></body></html>`;
 }
 const csp = (profile: string, tail = "") =>
-  `default-src 'self'; script-src 'self' '${`sha256-${createHash("sha256").update(`window.p="${profile}";`).digest("base64")}`}'; style-src 'self'; connect-src 'self'${tail}; object-src 'none'`;
+  `default-src 'self'; script-src 'self' '${`sha256-${createHash("sha256").update(`window.p="${profile}";`).digest("base64")}`}'; style-src 'self'${tail}; connect-src 'self'; object-src 'none'`;
 
 interface Spec {
   pages?: Record<string, string>;
@@ -417,4 +418,100 @@ test("staging writes the verified files without the manifest into a fresh direct
   } finally {
     await rm(parent, { recursive: true, force: true });
   }
+});
+
+test("an inline script is found in every start-tag form and must be covered in script-src itself", () => {
+  const uncovered = /does not cover an inline script/u;
+  refuses(
+    { pages: { "chat/index.html": page("chat", "<script/x>window.other = 1;</script>") } },
+    uncovered,
+  );
+  refuses(
+    { pages: { "chat/index.html": page("chat", "<script\n>window.other = 1;</script>") } },
+    uncovered,
+  );
+  // A src that only appears inside another attribute value or in a slash-separated form is not an external script.
+  refuses(
+    {
+      pages: {
+        "chat/index.html": page("chat", '<script data-x="src=1">window.other = 1;</script>'),
+      },
+    },
+    uncovered,
+  );
+  // An external script (a real src attribute, in any form) needs no hash; its body text is not executed inline.
+  for (const external of [
+    "<script src=/assets/a.js></script>",
+    "<script/src=/assets/a.js></script>",
+  ]) {
+    const built = bundle({ pages: { "chat/index.html": page("chat", external) } });
+    assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
+  }
+  // The hash must be in script-src: the same hash in style-src does not cover the script.
+  const hash = `'sha256-${createHash("sha256").update('window.p="chat";').digest("base64")}'`;
+  refuses(
+    {
+      csp: {
+        chat: `default-src 'self'; script-src 'self'; style-src 'self' ${hash}; connect-src 'self'; object-src 'none'`,
+      },
+    },
+    uncovered,
+  );
+  refuses(
+    {
+      csp: {
+        chat: `default-src 'self'; x-script-src 'self' ${hash}; connect-src 'self'; object-src 'none'`,
+      },
+    },
+    uncovered,
+  );
+});
+
+test("default-src and connect-src must be exactly 'self' and a directive may not repeat", () => {
+  const hash = `'sha256-${createHash("sha256").update('window.p="chat";').digest("base64")}'`;
+  const policy = (extra: string) => `${extra}; script-src 'self' ${hash}; object-src 'none'`;
+  const good = policy("default-src 'self'; connect-src 'self'");
+  const built = bundle({ csp: { chat: good } });
+  assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
+  for (const bad of [
+    "default-src 'self' https:; connect-src 'self'",
+    "default-src 'self'; connect-src 'self' https://other.example.test",
+    "default-src 'self'; x-connect-src 'self'",
+    "default-src 'self'; connect-src 'self'; connect-src 'self'",
+    "x-default-src 'self'; connect-src 'self'",
+    "default-src 'none'; connect-src 'self'",
+  ])
+    refuses({ csp: { chat: policy(bad) } }, /exactly 'self'|repeats the/u);
+  assert.deepEqual(
+    [...parsePolicy("a 'self' b; ;C  x y;")],
+    [
+      ["a", ["'self'", "b"]],
+      ["c", ["x", "y"]],
+    ],
+  );
+  assert.throws(() => parsePolicy("a x; A y"), /repeats the a directive/u);
+});
+
+test("page references are refused unless they are plain same-origin paths, in every quoting form", () => {
+  const other = /another origin/u;
+  for (const tag of [
+    "<a href='https://cdn.example.test/x'>x</a>",
+    "<img src=https://cdn.example.test/x.png>",
+    "<img src=//cdn.example.test/x.png>",
+    "<a href='//cdn.example.test/'>x</a>",
+    '<a href = "https://cdn.example.test/">x</a>',
+    '<A HREF="https://cdn.example.test/">x</A>',
+    '<a href="/\\cdn.example.test/x">x</a>',
+    "<a href=/\\cdn.example.test/x>x</a>",
+    '<a href="\\\\cdn.example.test/x">x</a>',
+    '<a href="/ok/\\x">x</a>',
+    '<a href="/\tcdn.example.test/">x</a>',
+    '<a href="data:text/html,x">x</a>',
+    '<a href="javascript:void(0)">x</a>',
+  ])
+    refuses({ pages: { "account/index.html": page("account", tag) } }, other);
+  // Plain absolute paths, fragments and all three quoting forms of them pass.
+  const ok = `<a href="/a">1</a><a href='/b'>2</a><a href=/c>3</a><a href="#x">4</a>`;
+  const built = bundle({ pages: { "account/index.html": page("account", ok) } });
+  assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
 });

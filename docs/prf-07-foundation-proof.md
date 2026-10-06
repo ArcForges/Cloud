@@ -357,6 +357,7 @@ Queue emulation, and a Node SQLite bridge standing in for D1.
 - Provider limits, the dead-letter and retry behavior under load, and the production Container image executing.
 - The local Node and npm are newer than the pinned toolchain; the pinned toolchain check runs only in hosted CI.
 - SQLite and workerd are emulation, not the provider; the live scenarios are the provider evidence.
+- Serving the Web profiles (CLOUD.71), as of the merge of its pull request and before the one proof deployment and live run: the real `gh release download` of the pinned bundle in the deploy job, `wrangler deploy` with the assets block, Cloudflare's own handling of `_headers` and of `run_worker_first` route precedence, the served pages on the deployed origin, and the behavior of a same-origin GET without an `Origin` header at the session edge (the host accepts an absent Origin on bootstrap, but the Worker edge was not exercised with a browser). The offline tests cover the verifier and the configuration only. The live-run amendment records what was observed afterwards.
 
 ### What a live run needs
 
