@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "com-01-cloud-runtime-notices-r1",
+  "id": "pol-01-cloud-runtime-notices-r1",
   "kind": "generated",
   "sourceRepository": "https://github.com/ArcForges/Cloud",
-  "sourceCommit": "b81b87da4df4bca996abfb936e617d05df19f911",
+  "sourceCommit": "80401af997792ed1d363d5a3a9e68a3f2a933907",
   "sourcePaths": [
     "Directory.Build.props",
     "Directory.Build.targets",
@@ -158,11 +158,7 @@
     "src/ArcForges.Cloud.Modules.Entitlement/Persistence/SnapshotColumns.cs",
     "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/EntitlementGrantPortAdapter.cs",
     "src/ArcForges.Cloud.Storage.D1/ModuleBinding/ModulePlanPort.cs",
-    "src/ArcForges.Cloud.Modules.Commerce/Adapters/PaddleBillingProvider.cs",
-    "src/ArcForges.Cloud.Modules.Commerce/Adapters/PaddleJsonContext.cs",
-    "src/ArcForges.Cloud.Modules.Commerce/Adapters/PaddleNormalization.cs",
-    "src/ArcForges.Cloud.Modules.Commerce/Adapters/ProviderContracts.cs",
-    "src/ArcForges.Cloud.Modules.Commerce/Adapters/ProviderSettings.cs"
+    "src/ArcForges.Cloud.Modules.Policy/Boundaries/PolicyBoundary.cs"
   ],
   "licence": {
     "spdx": "AGPL-3.0-only",
@@ -186,8 +182,8 @@
       "project": "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
       "package": "arcforges-cloud-container",
       "kind": "native-image-notices",
-      "profile": "eng/provenance/artifact-profiles/cloud-release-r40.json",
-      "sha256": "2986293e3061902ebb1db869cb1413dabb2c871e45b50a26366d06b8343a8973"
+      "profile": "eng/provenance/artifact-profiles/cloud-release-r38.json",
+      "sha256": "d62e5377391450475eaa588514a779c426b694fc0879162c6149fb123c6b9bfe"
     }
   ],
   "disposition": "Copy",
@@ -237,7 +233,7 @@
     "inputs": [
       {
         "repository": "https://github.com/ArcForges/Cloud",
-        "commit": "b81b87da4df4bca996abfb936e617d05df19f911",
+        "commit": "80401af997792ed1d363d5a3a9e68a3f2a933907",
         "paths": [
           "Directory.Build.props",
           "Directory.Build.targets",
@@ -254,11 +250,7 @@
           "eng/version-sources.json",
           "package-lock.json",
           "src/ArcForges.Cloud/BuildIdentity.cs",
-          "src/ArcForges.Cloud.Modules.Commerce/Adapters/PaddleBillingProvider.cs",
-          "src/ArcForges.Cloud.Modules.Commerce/Adapters/PaddleJsonContext.cs",
-          "src/ArcForges.Cloud.Modules.Commerce/Adapters/PaddleNormalization.cs",
-          "src/ArcForges.Cloud.Modules.Commerce/Adapters/ProviderContracts.cs",
-          "src/ArcForges.Cloud.Modules.Commerce/Adapters/ProviderSettings.cs"
+          "src/ArcForges.Cloud.Modules.Policy/Boundaries/PolicyBoundary.cs"
         ],
         "spdx": "AGPL-3.0-only",
         "evidence": [
@@ -358,11 +350,11 @@
   },
   "review": {
     "owner": "Licensing and Provenance Owner",
-    "reviewer": "ArcForges delivery worker w-codex-20261006-provider (maintainer-authorized; independent pull-request review is required before merge)",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-policy (maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "reviewedOn": "2026-10-06",
     "decision": "approved",
-    "rationale": "COM.01 implements the complete typed billing-provider boundary and real HTTP/signature adapters without any dependency addition. Owned Commerce Adapters sources and their deny-default Docker source inclusion are bound in the Native AOT image inputs by immutable cloud-release-r40. Both shipped-artifact records use the same successor profile; current predecessor records remain unchanged. The Worker bundle, dependency coordinates/integrities, generators, legal files, exports and output membership remain unchanged. Independent exact-head implementation/provenance review and applicable CI are required before merge; mocked HTTP transport evidence is not live merchant or deployment acceptance.",
-    "baselineCommit": "b81b87da4df4bca996abfb936e617d05df19f911",
+    "rationale": "POL.01 implements the Policy control-plane marker and the semantic architecture gate for BD-01 through BD-04. The actual production image input closure adds one independently authored AGPL marker source and the exact Docker context inclusion. The test-host guard resolves symbols through aliases, inheritance, generic arguments, arrays and executable member references, including the historical primitive Entitlement grant port, with reciprocal boundary refusals and a positive neutral host-composition fixture. No dependency coordinate, integrity, external closure entry, framework/image pin, Worker byte/input/export, licence obligation, public route or paid-admission behavior changes. The source/artifact records and input-bound admission receipt are immutable successors of the actual GOV.22 main baseline; every predecessor remains retained. Independent exact-head PR review validates this contribution.",
+    "baselineCommit": "80401af997792ed1d363d5a3a9e68a3f2a933907",
     "reconciliation": false
   },
   "supersedes": "gov-22-cloud-runtime-notices-r1"
