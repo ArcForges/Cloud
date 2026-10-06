@@ -64,6 +64,12 @@
           "custom_domain": true
         }
       ],
+      "assets": {
+        "directory": "./artifacts/proof-assets",
+        "run_worker_first": ["/api/*", "/session/v1/*", "/proof/v1/*"],
+        "html_handling": "auto-trailing-slash",
+        "not_found_handling": "none"
+      },
       "containers": [
         {
           "class_name": "FoundationContainer",

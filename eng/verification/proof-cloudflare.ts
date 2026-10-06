@@ -8,7 +8,7 @@
 // No live service is called: the checks are provider metadata receipts, not runtime tests.
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -16,9 +16,14 @@ import {
   generateSecrets,
   proofBucketName,
   proofDatabaseName,
+  profileBundleAssetName,
+  profileBundlePin,
+  proofAssetsDirName,
   proofHostname,
   proofQueueNames,
   proofWorkerName,
+  stageProfileAssets,
+  verifyProfileBundle,
   type CandidateConfig,
 } from "./proof-deploy.ts";
 
@@ -408,6 +413,35 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   const imageDigest = digests.find((value) => value.startsWith(prefix));
   assert(imageDigest, "Cloudflare registry did not return the pushed image digest.");
 
+  // CLOUD.71: the Web profile bundle, the immutable release asset named by its digest. It is downloaded from the
+  // pinned release, verified against the pinned digest and staged as the proof assets; nothing is rebuilt, no Web
+  // source is read, and a mismatch stops the job before anything is deployed.
+  const bundleDir = path.join(root, "artifacts", "profile-bundle");
+  const assetName = profileBundleAssetName(profileBundlePin.digest);
+  await rm(bundleDir, { recursive: true, force: true });
+  await run("gh", [
+    "release",
+    "download",
+    profileBundlePin.release,
+    "--repo",
+    profileBundlePin.repository,
+    "--pattern",
+    assetName,
+    "--dir",
+    bundleDir,
+  ]);
+  const verifiedBundle = verifyProfileBundle(
+    await readFile(path.join(bundleDir, assetName)),
+    profileBundlePin.digest,
+  );
+  const stagedFiles = await stageProfileAssets(
+    verifiedBundle,
+    path.join(root, "artifacts", proofAssetsDirName),
+  );
+  console.log(
+    `Profile bundle ${profileBundlePin.release} ${verifiedBundle.digest}: ${stagedFiles} files verified and staged as the proof assets.`,
+  );
+
   await checkProofDomainFree(api);
   const config = buildProofConfig(
     await readJson<CandidateConfig>(path.join(candidateDir, "wrangler.json")),
@@ -466,6 +500,12 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
     baseUrl: `https://${proofHostname}`,
     d1DatabaseId: provisioned.d1DatabaseId,
     resources: provisioned.actions,
+    profileBundle: {
+      repository: profileBundlePin.repository,
+      release: profileBundlePin.release,
+      digest: verifiedBundle.digest,
+      files: stagedFiles,
+    },
     receipts: receipts.map((check) => ({ name: check.name, ok: check.ok })),
     deployedAt: new Date().toISOString(),
   });
