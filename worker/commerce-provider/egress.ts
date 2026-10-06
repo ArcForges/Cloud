@@ -243,7 +243,7 @@ export async function handleCommerceEgress(
     // Always build a fresh request from the validated fixed destination and closed headers.
     // Redirects never forward the bearer credential. No mutation or read is retried here.
     dispatched = true;
-    const response = (upstream = await fetcher(
+    const response = await fetcher(
       new Request(url, {
         method: request.method,
         headers,
@@ -251,7 +251,8 @@ export async function handleCommerceEgress(
         redirect: "manual",
         signal: controller.signal,
       }),
-    ));
+    );
+    upstream = response;
     if ((response.status >= 300 && response.status < 400) || response.redirected) {
       void response.body?.cancel().catch(() => undefined);
       return failure(502);

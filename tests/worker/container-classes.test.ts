@@ -126,10 +126,10 @@ test("the locked SDK applies only exact-host HTTPS/HTTP interception without all
     container: {
       running: false,
       interceptOutboundHttp: async (host: string) => {
-        intercepted.push("http:" + host);
+        intercepted.push(`http:${host}`);
       },
       interceptOutboundHttps: async (host: string) => {
-        intercepted.push("https:" + host);
+        intercepted.push(`https:${host}`);
       },
       interceptAllOutboundHttp: async () => {
         assert.fail("no global interception registration");
