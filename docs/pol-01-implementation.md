@@ -1,0 +1,5 @@
+# Policy boundary enforcement
+
+POL.01 introduces the Policy owner's control-plane value marker and a semantic architecture guard for BD-01–04. The guard runs over every actual evaluated production compilation in the existing architecture gate. Policy and Configuration types cannot consume entitlement decisions, settings, runtime readiness, or request-processing types. Those owners likewise cannot consume a policy type as their own authority. Host composition may collect independent decisions through neutral primitive ports.
+
+The guard resolves symbols rather than searching text. Aliases, signatures, generic arguments, arrays, inheritance and executable member references cannot hide a dependency. Four negative fixture families exercise each boundary in both directions. An independent composition fixture proves that the rule does not ban legitimate host composition or primitive owner ports. This is structural enforcement, not evidence of commercial activation or deployed policy resolution.

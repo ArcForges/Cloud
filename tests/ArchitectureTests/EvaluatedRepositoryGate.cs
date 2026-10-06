@@ -98,6 +98,11 @@ public sealed class EvaluatedRepositoryGate
             {
                 findings.Add(new PolicyFinding("AT-04", path, problem));
             }
+
+            foreach (string problem in PolicyBoundaryGuard.Check(compilation))
+            {
+                findings.Add(new PolicyFinding("BD", path, problem));
+            }
         }
 
         foreach (var unverified in evidence.Where(item => !item.Passed))

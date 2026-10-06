@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "6b7999fe7ee47d3801efe10b5ab4c3ce5efd5a5d",
+  "sourceCommit": "80401af997792ed1d363d5a3a9e68a3f2a933907",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -72,15 +72,15 @@
     "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "ac3a8660e4e99aed60247cffe8d43805610639c0efcd8c7e90d90c4f9002f280",
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
-    "eng/provenance/artifact-profiles/cloud-release-r37.json": "e7ca4750bd87740e185b3e4c9ecc5fe02001ae5ddc642fe34363931b69ad4395",
-    "eng/provenance/records/gov-22-cloud-runtime-notices-r1.json": "299a3b0c73b07a1ff86948c54fb46ef8bbe5157a7bd71e37bbbbb3708a3c8eb9",
-    "eng/provenance/records/gov-22-cloud-worker-bundle-r1.json": "1a55b03108883902cd325cc4a504da39cadafdfed4aa01fb02dabb8d82a24fe4"
+    "eng/provenance/artifact-profiles/cloud-release-r38.json": "d62e5377391450475eaa588514a779c426b694fc0879162c6149fb123c6b9bfe",
+    "eng/provenance/records/pol-01-cloud-runtime-notices-r1.json": "e179bef02dac0c49fcbe20025b6ebc68bfceb2dc75441b66365a72123cb35b72",
+    "eng/provenance/records/pol-01-cloud-worker-bundle-r1.json": "5ea06cf0fd89706102c04da6e6f374e4ad866ae03378f33847af7b777e438e14"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-codex-20261006-identity (maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-policy (maintainer-authorized; independent pull-request review is recorded on the pull request)",
     "date": "2026-10-06",
-    "rationale": "GOV.22 fixes high GHSA-wq5f-xc86-pv6w disclosed on 2026-10-06 by the exact nested Miniflare-to-Sharp 0.35.5 override. The actual regenerated lock changes only 27 existing Sharp and libvips platform package entries, adds or removes none, and preserves every licence expression, Wrangler 4.143.1, Miniflare 5.20260926.1-alpha, first-party coordinate, runtime/image pin and security gate. Sharp's complete Apache-2.0 licence is byte-identical to 0.35.4; optional native package licence expressions retain their existing LGPL/bundled positions. These are build/development dependencies, not newly shipped product code. The npm lock is a declared image build input, so the immutable cloud-release-r37 profile and both artifact records rebind it to the actual source commit, while all Worker inputs, expected bundle bytes, exports, legal files and package identities stay unchanged. The complete exact lock closure and changed inputs are admitted here, not by a hash-only refresh.",
+    "rationale": "POL.01 implements the Policy control-plane marker and the semantic architecture gate for BD-01 through BD-04. The actual production image input closure adds one independently authored AGPL marker source and the exact Docker context inclusion. The test-host guard resolves symbols through aliases, inheritance, generic arguments, arrays and executable member references, including the historical primitive Entitlement grant port, with reciprocal boundary refusals and a positive neutral host-composition fixture. No dependency coordinate, integrity, external closure entry, framework/image pin, Worker byte/input/export, licence obligation, public route or paid-admission behavior changes. The source/artifact records and input-bound admission receipt are immutable successors of the actual GOV.22 main baseline; every predecessor remains retained. Independent exact-head PR review validates this contribution.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -150,9 +150,9 @@
       "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "ac3a8660e4e99aed60247cffe8d43805610639c0efcd8c7e90d90c4f9002f280",
       "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
-      "eng/provenance/artifact-profiles/cloud-release-r37.json": "e7ca4750bd87740e185b3e4c9ecc5fe02001ae5ddc642fe34363931b69ad4395",
-      "eng/provenance/records/gov-22-cloud-runtime-notices-r1.json": "299a3b0c73b07a1ff86948c54fb46ef8bbe5157a7bd71e37bbbbb3708a3c8eb9",
-      "eng/provenance/records/gov-22-cloud-worker-bundle-r1.json": "1a55b03108883902cd325cc4a504da39cadafdfed4aa01fb02dabb8d82a24fe4"
+      "eng/provenance/artifact-profiles/cloud-release-r38.json": "d62e5377391450475eaa588514a779c426b694fc0879162c6149fb123c6b9bfe",
+      "eng/provenance/records/pol-01-cloud-runtime-notices-r1.json": "e179bef02dac0c49fcbe20025b6ebc68bfceb2dc75441b66365a72123cb35b72",
+      "eng/provenance/records/pol-01-cloud-worker-bundle-r1.json": "5ea06cf0fd89706102c04da6e6f374e4ad866ae03378f33847af7b777e438e14"
     },
     "checks": [
       "locked-restore",
@@ -163,8 +163,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No framework or runtime coordinate changes. Sharp 0.35.5 preserves the admitted Node compatibility and development class while updating its native optional platform packages. Actual locked Windows installation, source/type checks, generated Worker identity and existing CI compilation/Native AOT packaging are applicable; no new runtime/performance scenario, macOS/native platform execution or OS isolation result is asserted. Full provider/runtime acceptance remains separate.",
-    "maintenance": "Retain the exact nested override until a normally reviewed Miniflare release selects a patched Sharp closure. Mandatory high npm audit and dependency-review gates remain enabled. Preserve all earlier immutable receipts and source/licence records; any future version, closure, licence or artifact change needs its own reviewed successor.",
+    "runtimeAssessment": "No framework, runtime or dependency coordinate changes. Applicable validation is the semantic architecture test families, actual evaluated production compilation, locked build, Native AOT packaging and unchanged Worker closure gate. Structural enforcement does not establish deployed policy, commercial activation or whole-system acceptance.",
+    "maintenance": "Retain the four decision authorities independently; new owner ports must remain semantically classifiable. Preserve all immutable predecessors, dependency/security/licence gates and GOV.22 patched devtool closure. Future source or artifact changes require reviewed successor records.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
   },
@@ -983,7 +983,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["gov-22-cloud-runtime-notices-r1", "gov-22-cloud-worker-bundle-r1"],
+  "artifactRecords": ["pol-01-cloud-runtime-notices-r1", "pol-01-cloud-worker-bundle-r1"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -997,7 +997,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/gov-22-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/pol-01-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
