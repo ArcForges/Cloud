@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using ArcForges.Cloud.Capacity;
 using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Modules.Entitlement;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Kernel.Application;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Kernel.Domain;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Kernel.Infrastructure;
-using ArcForges.Cloud.Storage.ModuleBinding;
 using ArcForges.Cloud.Storage.Capacity;
+using ArcForges.Cloud.Storage.ModuleBinding;
 using ArcForges.Cloud.Tests.Entitlement;
-using ArcForges.Cloud.Capacity;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -113,6 +113,28 @@ public sealed class QuotaKernelTests
         var protectedWork = await gate.EvaluateAsync(CapacityOperation.Settle, T.Ct);
         Assert.Equal(CapacityAdmissionStatus.Admitted, protectedWork.Status); Assert.Null(protectedWork.Pressures);
         Assert.Equal(1800000, (await h.State(keys[0])).Held);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CancelledExternalCapacitySourceCannotTurnEssentialWorkFallbackIntoSuccess(bool cancelProfile)
+    {
+        using var h = new Harness(); using var cancellation = new CancellationTokenSource();
+        var profile = CapacityTests.CapacityProfileTests.Selected() with { RealmId = h.Context.RealmId };
+        var keys = Enumerable.Range(0, 7).Select(index => new QuotaBudgetKey(QuotaScopeKind.Deployment,
+            "capacity:" + h.Context.RealmId.ToString("D"), "dimension:" + index, index < 4 ? "gauge" : "2026-10-06")).ToArray();
+        var json = CapacityProfileCodec.Encode(profile);
+        var source = new CapacitySources(new(json, CapacityJobCodec.Hash(json), h.Context.RealmId, profile.RealmBudgets,
+            h.Context, keys, Enumerable.Repeat(1L, 7).ToArray()),
+            new(h.Context.RealmId, 0, 10000000000, 0, false, new('c', 64)))
+        {
+            CancelProfile = cancelProfile ? cancellation : null,
+            CancelPhysical = cancelProfile ? null : cancellation,
+            PhysicalStatus = QuotaAuthorityStatus.Unavailable
+        };
+        var gate = new CapacityAdmission(source, source, h.Kernel);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => gate.EvaluateAsync(CapacityOperation.Read, cancellation.Token));
     }
 
     [Fact]
@@ -464,13 +486,19 @@ public sealed class QuotaKernelTests
     // substituted; CapacityAdmission queries the actual quota kernel/store/Worker plans below.
     private sealed class CapacitySources(ApprovedCapacityProfile profile, PhysicalCapacityState state) : IApprovedCapacityProfileSource, IPhysicalCapacitySource
     {
+        internal CancellationTokenSource? CancelProfile, CancelPhysical;
         internal PhysicalCapacityState State = state;
         internal QuotaAuthorityStatus PhysicalStatus = QuotaAuthorityStatus.Authorized;
         public Task<ApprovedCapacityProfileResult> ReadCurrentAsync(CancellationToken cancellationToken)
-        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(new ApprovedCapacityProfileResult(QuotaAuthorityStatus.Authorized, profile)); }
+        {
+            cancellationToken.ThrowIfCancellationRequested(); CancelProfile?.Cancel();
+            return Task.FromResult(new ApprovedCapacityProfileResult(CancelProfile is null ? QuotaAuthorityStatus.Authorized : QuotaAuthorityStatus.Unavailable,
+                CancelProfile is null ? profile : null));
+        }
         public Task<PhysicalCapacityResult> ReadAsync(Guid realmId, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            CancelPhysical?.Cancel();
             return Task.FromResult(new PhysicalCapacityResult(realmId == State.RealmId ? PhysicalStatus : QuotaAuthorityStatus.Denied,
                 PhysicalStatus == QuotaAuthorityStatus.Authorized ? State : null));
         }

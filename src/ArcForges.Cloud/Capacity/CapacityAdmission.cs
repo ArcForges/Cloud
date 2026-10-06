@@ -40,16 +40,21 @@ internal sealed class CapacityAdmission(IApprovedCapacityProfileSource profiles,
         var reserved = operation is CapacityOperation.Read or CapacityOperation.Export or CapacityOperation.Cancel or CapacityOperation.Delete
             or CapacityOperation.Settle or CapacityOperation.Restore;
         var source = await profiles.ReadCurrentAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         if (source.Status != QuotaAuthorityStatus.Authorized || source.Profile is not { } approved
             || approved.DimensionBudgets is null || approved.ExpectedPolicyVersions is null
             || approved.DimensionBudgets.Count != 7 || approved.ExpectedPolicyVersions.Count != 7)
             return new(reserved ? CapacityAdmissionStatus.Admitted : CapacityAdmissionStatus.Unavailable);
-        approved = approved with { DimensionBudgets = Array.AsReadOnly(approved.DimensionBudgets.ToArray()),
-            ExpectedPolicyVersions = Array.AsReadOnly(approved.ExpectedPolicyVersions.ToArray()) };
+        approved = approved with
+        {
+            DimensionBudgets = Array.AsReadOnly(approved.DimensionBudgets.ToArray()),
+            ExpectedPolicyVersions = Array.AsReadOnly(approved.ExpectedPolicyVersions.ToArray())
+        };
         if (approved.DimensionBudgets.Distinct().Count() != 7
             || approved.Context.RealmId != approved.RealmId || !CapacityProfileCodec.TryDecode(approved.Json, approved.Hash,
                 approved.RealmId, approved.VerifiedProviderLimits, out var profile)) return new(reserved ? CapacityAdmissionStatus.Admitted : CapacityAdmissionStatus.Unavailable);
         var inventory = await physical.ReadAsync(approved.RealmId, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         if (inventory.Status != QuotaAuthorityStatus.Authorized || inventory.State is not { } observed
             || observed.RealmId != approved.RealmId || observed.VerifiedD1MaximumBytes is 0 or > 10000000000
             || !CapacityProfileCodec.Hash(observed.SourceSnapshotHash))
@@ -60,6 +65,7 @@ internal sealed class CapacityAdmission(IApprovedCapacityProfileSource profiles,
         for (var index = 0; index < 7; index++)
         {
             var read = await quota.ReadBudgetAsync(approved.Context, approved.DimensionBudgets[index], cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             if (read.Status != QuotaKernelStatus.Succeeded || read.Value is not { } budget || budget.PolicyVersion != approved.ExpectedPolicyVersions[index]
                 || budget.Used < 0 || budget.Held < 0 || budget.Limit < 0 || (ulong)budget.Limit != limits[index]
                 || budget.Key != approved.DimensionBudgets[index] || budget.Unit != (index is 2 or 6 ? "bytes" : "count"))
