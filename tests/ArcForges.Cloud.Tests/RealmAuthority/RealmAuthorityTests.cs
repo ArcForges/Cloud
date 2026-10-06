@@ -176,6 +176,21 @@ public sealed class RealmAuthorityTests
         Assert.Equal(long.MaxValue, Assert.IsType<RealmAuthoritySnapshot>((await authority.ResolveAsync(TestContext.Current.CancellationToken)).Snapshot).AuthEpoch);
     }
 
+    [Theory]
+    [InlineData(RecoveryEpochFailure.InvalidRealm, RealmAuthorityFailure.Defect)]
+    [InlineData(RecoveryEpochFailure.Missing, RealmAuthorityFailure.MissingRecovery)]
+    [InlineData(RecoveryEpochFailure.Closed, RealmAuthorityFailure.ClosedRecovery)]
+    [InlineData(RecoveryEpochFailure.StaleGeneration, RealmAuthorityFailure.StaleGeneration)]
+    [InlineData(RecoveryEpochFailure.Unavailable, RealmAuthorityFailure.Unavailable)]
+    [InlineData(RecoveryEpochFailure.Defect, RealmAuthorityFailure.Defect)]
+    public async Task DependencyFailureRemainsExplicitAndNeverReturnsAuthority(RecoveryEpochFailure dependency, RealmAuthorityFailure expected)
+    {
+        var authority = Authority(new FailedRecoveryPort(dependency));
+        var result = await authority.ResolveAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(expected, result.Failure);
+        Assert.Null(result.Snapshot);
+    }
+
     private static Task Seed(SqliteBridgeExecutor database) => database.ExecAsync(
         "INSERT INTO platform_recovery_epoch VALUES ('" + Realm.ToString("D") + "',0,'fixture',zeroblob(32),4,1,1)", TestContext.Current.CancellationToken);
 
@@ -194,6 +209,11 @@ public sealed class RealmAuthorityTests
     private sealed class SnapshotPort(RecoveryEpochSnapshot snapshot) : IRecoveryEpochPort
     {
         public Task<RecoveryEpochResult> ReadAsync(Guid realmId, CancellationToken cancellationToken) => Task.FromResult(RecoveryEpochResult.Available(snapshot));
+    }
+
+    private sealed class FailedRecoveryPort(RecoveryEpochFailure failure) : IRecoveryEpochPort
+    {
+        public Task<RecoveryEpochResult> ReadAsync(Guid realmId, CancellationToken cancellationToken) => Task.FromResult(RecoveryEpochResult.Refused(failure));
     }
 
     private sealed class FakePlans(params ModulePlanOutcome[] outcomes) : IModulePlanPortFactory, IModulePlanPort
