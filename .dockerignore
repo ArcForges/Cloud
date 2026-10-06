@@ -66,6 +66,15 @@
 !src/ArcForges.Cloud.Modules.Abstractions/Entitlement/*.cs
 !src/ArcForges.Cloud.Modules.Abstractions/Storage/
 !src/ArcForges.Cloud.Modules.Abstractions/Storage/*.cs
+!src/ArcForges.Cloud.Modules.Abstractions/Commerce/
+!src/ArcForges.Cloud.Modules.Abstractions/Commerce/*.cs
+!src/ArcForges.Cloud.Modules.Commerce/Catalogue/
+!src/ArcForges.Cloud.Modules.Commerce/Catalogue/Domain/
+!src/ArcForges.Cloud.Modules.Commerce/Catalogue/Domain/*.cs
+!src/ArcForges.Cloud.Modules.Commerce/Catalogue/Application/
+!src/ArcForges.Cloud.Modules.Commerce/Catalogue/Application/*.cs
+!src/ArcForges.Cloud.Modules.Commerce/Catalogue/Infrastructure/
+!src/ArcForges.Cloud.Modules.Commerce/Catalogue/Infrastructure/*.cs
 !src/ArcForges.Cloud.Modules.Abstractions/Families/
 !src/ArcForges.Cloud.Modules.Abstractions/Families/*.cs
 !src/ArcForges.Cloud.Modules.*/Core/

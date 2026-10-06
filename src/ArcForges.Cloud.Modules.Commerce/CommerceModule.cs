@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using ArcForges.Cloud.Modules.Commerce.Catalogue.Application;
+using ArcForges.Cloud.Modules.Commerce.Catalogue.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
 namespace ArcForges.Cloud.Modules.Commerce;
 
 /// <summary>
@@ -12,4 +17,16 @@ public sealed class CommerceModule : IModuleBoundary
     public static CommerceModule Instance { get; } = new();
 
     public ModuleDescriptor Descriptor { get; } = ModuleDescriptor.Create("Commerce", "commerce");
+
+    void IModuleBoundary.Register(IServiceCollection services)
+    {
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<ICatalogueStore>(provider => new D1CatalogueStore(provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor)));
+        services.TryAddSingleton<CatalogueReader>();
+        services.TryAddSingleton<ICatalogueStatePort>(provider => provider.GetRequiredService<CatalogueReader>());
+        services.TryAddSingleton<ICatalogueQueryPort>(provider => provider.GetRequiredService<CatalogueReader>());
+        // No permissive authority is installed here. POL.02 binds the actual dual-approved Configuration source.
+        services.TryAddSingleton<ICataloguePublicationPort>(provider => new CataloguePublisher(provider.GetRequiredService<ICatalogueStore>(),
+            provider.GetRequiredService<ICataloguePublicationAuthority>(), provider.GetRequiredService<TimeProvider>(), TimeSpan.FromDays(7)));
+    }
 }

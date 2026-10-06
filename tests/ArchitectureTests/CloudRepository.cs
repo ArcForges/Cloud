@@ -71,7 +71,7 @@ internal static class CloudRepository
     /// module project). Entitlement is first (COM.05) and Identity second (CLOUD.11). Adding a module here is a reviewed change: its layers must satisfy LayeringTests
     /// non-vacuously, and the role stays Abstractions until the engine gains a role that fits (deferred hardening, see the COM.05 record).
     /// </summary>
-    public static IReadOnlySet<string> LayeredModules { get; } = new HashSet<string>(StringComparer.Ordinal) { "Entitlement", "Identity" };
+    public static IReadOnlySet<string> LayeredModules { get; } = new HashSet<string>(StringComparer.Ordinal) { "Commerce", "Entitlement", "Identity" };
 
     /// <summary>
     /// Reconstructs the semantic input of a completed build exactly as the shared producer does, with one addition the producer does

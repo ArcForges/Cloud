@@ -225,6 +225,9 @@ const realmLevelIdentityPlans = new Set([
   "identity.credential-touch",
 ]);
 
+// Bounded catalogue discovery precedes selection of an offer identity. Every other catalogue plan retains its owner GUID scope.
+const globalDiscoveryPlans = new Set(["commerce.catalogue-list"]);
+
 test("every checked-in plan is DML-only, scoped and exact", () => {
   for (const plan of plans) {
     for (const statement of plan.statements) {
@@ -237,11 +240,13 @@ test("every checked-in plan is DML-only, scoped and exact", () => {
       );
     }
     // Every plan names the owner scope in at least one parameter, except the schema probe and the realm-level
-    // platform plans, whose rows are keyed by a command id, an inbox key or the one change archive and not by a scope.
+    // platform plans, whose rows are keyed by a command id, an inbox key or the one change archive and not by a scope,
+    // and the exact bounded global discovery plan.
     if (
       plan.id !== "foundation.readiness" &&
       !realmLevelPlatformPlans.has(plan.id) &&
-      !realmLevelIdentityPlans.has(plan.id)
+      !realmLevelIdentityPlans.has(plan.id) &&
+      !globalDiscoveryPlans.has(plan.id)
     )
       assert(
         plan.statements.some((statement) =>
