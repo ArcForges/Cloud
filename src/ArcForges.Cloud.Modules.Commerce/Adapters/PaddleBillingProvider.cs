@@ -397,6 +397,6 @@ internal sealed class PaddleBillingProvider : IBillingProvider
     {
         var header = response.Headers.RetryAfter; if (header is null) return null;
         var duration = header.Delta ?? (header.Date - clock.GetUtcNow());
-        return duration is null ? null : TimeSpan.FromMilliseconds(Math.Clamp(duration.Value.TotalMilliseconds, 0, 2000));
+        return duration is null ? null : TimeSpan.FromTicks(Math.Clamp(duration.Value.Ticks, 0, TimeSpan.FromSeconds(2).Ticks));
     }
 }
