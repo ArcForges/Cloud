@@ -11,6 +11,19 @@ public sealed record ModuleFamilyWrite(string FamilyId, string PlanId, string Ow
 /// <summary>Opaque owner-bound contributions. Only the storage adapter's issuing factory can create a set it will accept; a caller cannot assert a foreign owner.</summary>
 public interface IModuleFamilyContributionSet;
 
+/// <summary>A closed failure to mint an opaque owner capability. The exception carries no plan, SQL, subject or secret.</summary>
+public enum ModuleFamilyContributionFailure { Rejected, Unavailable }
+
+public sealed class ModuleFamilyContributionException : Exception
+{
+    public ModuleFamilyContributionException(ModuleFamilyContributionFailure failure) : base("Module family contribution refused.")
+    {
+        if (!Enum.IsDefined(failure)) throw new ArgumentOutOfRangeException(nameof(failure));
+        Failure = failure;
+    }
+    public ModuleFamilyContributionFailure Failure { get; }
+}
+
 /// <summary>The stable command identity used to check a receipt before deciding whether an enrollment creates anything.</summary>
 public sealed record ModuleCommandIdentity(Guid CommandId, Guid? WorkspaceId, string ActorRef, string Operation, string RequestHash);
 
