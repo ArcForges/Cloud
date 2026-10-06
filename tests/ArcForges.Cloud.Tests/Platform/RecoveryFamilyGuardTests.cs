@@ -180,4 +180,49 @@ public sealed class RecoveryFamilyGuardTests
     }
 
     private sealed class Forged : IModuleFamilyContributionSet;
+
+    [Fact]
+    public async Task FamilyResultContractsRemainClosedAndRejectMissingAuthorityOrCapability()
+    {
+        var storage = Storage();
+        var factory = Factory(storage);
+        var write = Write();
+        var prepared = await Authority(storage, factory).PrepareAsync(write.FamilyId, write.PlanId, write.OwnerScope, TestContext.Current.CancellationToken);
+        var snapshot = Assert.IsType<RealmAuthoritySnapshot>(prepared.Snapshot);
+        var capability = Assert.IsAssignableFrom<IModuleFamilyContributionSet>(prepared.Contribution);
+        Assert.Throws<ArgumentNullException>(() => RealmAuthorityFamilyResult.Available(null!, capability));
+        Assert.Throws<ArgumentNullException>(() => RealmAuthorityFamilyResult.Available(snapshot, null!));
+        var available = RealmAuthorityFamilyResult.Available(snapshot, capability);
+        Assert.Same(snapshot, available.Snapshot);
+        Assert.Same(capability, available.Contribution);
+        Assert.Null(available.Failure);
+        var refused = RealmAuthorityFamilyResult.Refused(RealmAuthorityFailure.StaleGeneration);
+        Assert.Null(refused.Snapshot);
+        Assert.Null(refused.Contribution);
+        Assert.Equal(RealmAuthorityFailure.StaleGeneration, refused.Failure);
+    }
+
+    [Fact]
+    public async Task MismatchedRealmScopeIsRejectedByActualProductionExecutorBeforeHttpDispatch()
+    {
+        using var handler = new UnexpectedTransport();
+        using var client = new HttpClient(handler);
+        var executor = new WorkerPlanExecutor(client, new Uri("https://storage.test"), new ArcForges.Cloud.Hmac.SigningKey("c2w-fixture", new byte[32]), TimeProvider.System);
+        var plans = new ArcForges.Cloud.Storage.ModuleBinding.ModulePlanPortFactory(executor, 0, TimeProvider.System).For(ModuleDescriptor.Create("Platform", "platform"));
+        var outcome = await plans.ReadAsync(new ModulePlanRead("platform.recovery-current", Samples.Id(99).ToString("D"),
+            [PlanValue.FromText(Samples.Id(10).ToString("D"))]), TestContext.Current.CancellationToken);
+        Assert.Equal(ModulePlanStatus.Rejected, outcome.Status);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    private sealed class UnexpectedTransport : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            throw new InvalidOperationException("A refused realm scope must never reach HTTP transport.");
+        }
+    }
 }

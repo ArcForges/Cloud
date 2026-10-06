@@ -11,7 +11,7 @@ import { repositoryRoot } from "./support/sqlite-d1.ts";
 const realm = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const other = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const read = async (db: ReturnType<typeof commitDatabase>, id = realm) => {
-  const outcome = await execute(db, "platform.recovery-current", [[txt(id)]], "platform");
+  const outcome = await execute(db, "platform.recovery-current", [[txt(id)]], id);
   assert(outcome.ok, "actual bounded authority read must succeed");
   return outcome;
 };
@@ -59,5 +59,12 @@ test("concurrent read calls are side-effect free and return exact current author
     assert.deepEqual(outcome.rows, [[realm, "7", "4", "2"]]);
   }
   assert.equal(db.database.prepare("SELECT COUNT(*) AS n FROM platform_command").get()?.n, 0);
+  db.database.close();
+});
+
+test("a mismatched signed owner scope cannot query another realm", async () => {
+  const db = commitDatabase();
+  const outcome = await execute(db, "platform.recovery-current", [[txt(realm)]], other);
+  assert.deepEqual(outcome, { ok: false, failure: "invalidPlan" });
   db.database.close();
 });

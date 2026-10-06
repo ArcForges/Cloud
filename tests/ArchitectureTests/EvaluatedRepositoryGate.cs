@@ -16,6 +16,10 @@ public sealed class EvaluatedRepositoryGate
     /// <summary>The public Cloud API and the real test methods that exercise each member. A new public member fails RP-10 until mapped here.</summary>
     private static readonly (string Api, string Method, string TestType, string[] Tests)[] ApiTests =
     [
+        ("ArcForges.Cloud.Modules.IRealmAuthorityFamilyPort", "PrepareAsync", "ArcForges.Cloud.Tests.Platform.RecoveryFamilyGuardTests",
+            ["RealReaderAndSameIssuerComposeExactRecoveryArgumentsWithoutPlatformPrivilege", "InvalidCapabilitiesNeverReadAReceiptOrMutate", "UnavailableStaleOrUnregisteredIssuerCannotProduceASuccessfulCapability", "CancellationBeforePrepareNeverCallsStorage"]),
+        .. new[] { "Available", "Refused" }.Select(member => ("ArcForges.Cloud.Modules.RealmAuthorityFamilyResult", member,
+            "ArcForges.Cloud.Tests.Platform.RecoveryFamilyGuardTests", new[] { "FamilyResultContractsRemainClosedAndRejectMissingAuthorityOrCapability" })),
         ("ArcForges.Cloud.Modules.IRealmAuthorityPort", "ResolveAsync", "ArcForges.Cloud.Tests.RealmAuthority.RealmAuthorityTests",
             ["ActualOwnerReadAndConfiguredAuthorityFollowDurableCurrentStateWithoutAdoptingNewGeneration", "MissingInvalidOrNoncanonicalConfigurationRefusesBeforeStorage", "LazyImmutableConfigurationNeverUsesProofDefaultsAndUnavailableExecutorRefuses"]),
         ("ArcForges.Cloud.Modules.IRecoveryEpochPort", "ReadAsync", "ArcForges.Cloud.Tests.RealmAuthority.RealmAuthorityTests",

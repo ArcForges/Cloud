@@ -31,7 +31,7 @@ internal sealed class RecoveryEpochReader : IRecoveryEpochPort
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
             try
             {
-                outcome = await plans.ReadAsync(new ModulePlanRead("platform.recovery-current", "platform",
+                outcome = await plans.ReadAsync(new ModulePlanRead("platform.recovery-current", realmId.ToString("D"),
                     [PlanValue.FromText(realmId.ToString("D"))]), linked.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)

@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "38dede9d91324fa358ec1c11e96c14aa26eb596a356dc28ddc0eb29128bbff02";
+    public const string Hash = "68a94e039b2c10bbf92b388734ac3ddb2a911da524c442861c0262ef9a0d962b";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity
@@ -485,7 +485,7 @@ internal static class PlanManifest
             PlanAccess.Read,
             1,
             [
-                new([new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
+                new([new(PlanKind.Scope)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
             ]);
 
         public static readonly PlanDefinition StreamFence = new(

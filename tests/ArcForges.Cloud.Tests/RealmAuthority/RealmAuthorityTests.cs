@@ -236,7 +236,7 @@ public sealed class RealmAuthorityTests
         public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken cancellationToken)
         {
             Assert.Equal("platform.recovery-current", read.PlanId);
-            Assert.Equal("platform", read.OwnerScope);
+            Assert.Equal(Realm.ToString("D"), read.OwnerScope);
             Assert.Single(read.Arguments);
             var result = outcomes[Math.Min(Calls++, outcomes.Length - 1)];
             AfterRead?.Invoke();
