@@ -15,6 +15,8 @@
 !src/ArcForges.Cloud/Foundation/*.cs
 !src/ArcForges.Cloud/Ingress/
 !src/ArcForges.Cloud/Ingress/*.cs
+!src/ArcForges.Cloud/Infrastructure/
+!src/ArcForges.Cloud/Infrastructure/*.cs
 !src/ArcForges.Cloud/Readiness/
 !src/ArcForges.Cloud/Readiness/*.cs
 !src/ArcForges.Cloud/*.csproj

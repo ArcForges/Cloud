@@ -33,7 +33,7 @@ internal static class HostModules
     /// <summary>The ingress module comes first so its pipeline runs before the gRPC-Web adapter; it reads the other modules' policies when mapping.</summary>
     public static IReadOnlyList<IHostModule> All(JsonObject identity)
     {
-        IHostModule[] served = [new HelloModule(identity), new FoundationModule(), new ModulePlanBindingModule(), .. ModuleBoundaries.All.Select(boundary => new ModuleBoundaryHost(boundary))];
+        IHostModule[] served = [new HelloModule(identity), new FoundationModule(), new ModulePlanBindingModule(), new CommerceTransportModule(), .. ModuleBoundaries.All.Select(boundary => new ModuleBoundaryHost(boundary))];
         return [new IngressModule(served), .. served];
     }
 }
