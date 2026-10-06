@@ -1,10 +1,8 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "80401af997792ed1d363d5a3a9e68a3f2a933907",
-  "manifests": [
-    "package.json"
-  ],
+  "sourceCommit": "526f2987f90d3052ab6dbb23492efb6e0432599a",
+  "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
     ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -76,13 +74,16 @@
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
     "eng/provenance/artifact-profiles/cloud-release-r38.json": "d62e5377391450475eaa588514a779c426b694fc0879162c6149fb123c6b9bfe",
     "eng/provenance/records/pol-01-cloud-runtime-notices-r1.json": "e179bef02dac0c49fcbe20025b6ebc68bfceb2dc75441b66365a72123cb35b72",
-    "eng/provenance/records/pol-01-cloud-worker-bundle-r1.json": "5ea06cf0fd89706102c04da6e6f374e4ad866ae03378f33847af7b777e438e14"
+    "eng/provenance/records/pol-01-cloud-worker-bundle-r1.json": "5ea06cf0fd89706102c04da6e6f374e4ad866ae03378f33847af7b777e438e14",
+    "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
+    "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
+    "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-codex-20261006-policy (maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-provider (maintainer-authorized; independent pull-request review is required before merge)",
     "date": "2026-10-06",
-    "rationale": "POL.01 implements the Policy control-plane marker and the semantic architecture gate for BD-01 through BD-04. The actual production image input closure adds one independently authored AGPL marker source and the exact Docker context inclusion. The test-host guard resolves symbols through aliases, inheritance, generic arguments, arrays and executable member references, including the historical primitive Entitlement grant port, with reciprocal boundary refusals and a positive neutral host-composition fixture. No dependency coordinate, integrity, external closure entry, framework/image pin, Worker byte/input/export, licence obligation, public route or paid-admission behavior changes. The source/artifact records and input-bound admission receipt are immutable successors of the actual GOV.22 main baseline; every predecessor remains retained. Independent exact-head PR review validates this contribution.",
+    "rationale": "COM.01 adds first-party production Commerce adapter source only. No npm, NuGet, Maven, runtime, framework, generator, licence, native optional package, integrity or immutable coordinate changes. The complete admitted POL.01 patched closure is preserved unchanged. The reviewed release artifact positions follow the immutable cloud-release-r41 first-party source/input successor and its two exact new provenance records. Prior dependency and artifact receipts remain byte-identical; the new receipt binds the exact owned source-admission/artifact inputs, not a new package admission.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -154,7 +155,10 @@
       "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
       "eng/provenance/artifact-profiles/cloud-release-r38.json": "d62e5377391450475eaa588514a779c426b694fc0879162c6149fb123c6b9bfe",
       "eng/provenance/records/pol-01-cloud-runtime-notices-r1.json": "e179bef02dac0c49fcbe20025b6ebc68bfceb2dc75441b66365a72123cb35b72",
-      "eng/provenance/records/pol-01-cloud-worker-bundle-r1.json": "5ea06cf0fd89706102c04da6e6f374e4ad866ae03378f33847af7b777e438e14"
+      "eng/provenance/records/pol-01-cloud-worker-bundle-r1.json": "5ea06cf0fd89706102c04da6e6f374e4ad866ae03378f33847af7b777e438e14",
+      "eng/provenance/artifact-profiles/cloud-release-r41.json": "f199e820fd51a14919b1cdeabeb89ece9c02da919109d6377a2b601b961435bb",
+      "eng/provenance/records/com-01-cloud-runtime-notices-r2.json": "26f5b66c4be1c5341f664b9e33b402cbba7cf892e348f05f553b35de2a48fdc4",
+      "eng/provenance/records/com-01-cloud-worker-bundle-r2.json": "71982797db66960e4acbe429e13bd7aed3f6de33b821252dd3f6ad58eafab7e7"
     },
     "checks": [
       "locked-restore",
@@ -165,8 +169,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No framework, runtime or dependency coordinate changes. Applicable validation is the semantic architecture test families, actual evaluated production compilation, locked build, Native AOT packaging and unchanged Worker closure gate. Structural enforcement does not establish deployed policy, commercial activation or whole-system acceptance.",
-    "maintenance": "Retain the four decision authorities independently; new owner ports must remain semantically classifiable. Preserve all immutable predecessors, dependency/security/licence gates and GOV.22 patched devtool closure. Future source or artifact changes require reviewed successor records.",
+    "runtimeAssessment": "The adapter uses existing HttpClient, source-generated System.Text.Json and HMAC/SHA primitives. Actual component tests exercise transport, authorization refusal, cancellation, bounded read retries, ambiguous writes, concurrency, disposal, exact financial normalization and signed verification. Existing source/class architecture, locked managed builds and hosted Native AOT image/Worker packaging apply. No merchant deployment or OS isolation is proved by transport fakes.",
+    "maintenance": "Retain the exact current patched dependency closure and all immutable receipts. Restricted production egress/trust is composed by CLOUD.74; COM.03/04/09 own approved configuration, durable fencing, replay and business delivery. Whole-series merchant acceptance stays with COM.14/WP50. Any future dependency or artifact change requires its own reviewed successor.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
   },
@@ -985,10 +989,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": [
-    "pol-01-cloud-runtime-notices-r1",
-    "pol-01-cloud-worker-bundle-r1"
-  ],
+  "artifactRecords": ["com-01-cloud-runtime-notices-r2", "com-01-cloud-worker-bundle-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1002,7 +1003,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/pol-01-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/com-01-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
