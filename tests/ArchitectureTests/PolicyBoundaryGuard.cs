@@ -16,8 +16,9 @@ internal static class PolicyBoundaryGuard
             var semantic = compilation.GetSemanticModel(tree);
             foreach (var node in tree.GetRoot().DescendantNodes())
             {
-                var owner = semantic.GetEnclosingSymbol(node.SpanStart)?.ContainingNamespace?.ToDisplayString();
-                var source = Classify(owner);
+                var declaration = node.AncestorsAndSelf().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault();
+                var source = declaration is null ? Classify(semantic.GetEnclosingSymbol(node.SpanStart)?.ContainingNamespace?.ToDisplayString())
+                    : Classify(semantic.GetDeclaredSymbol(declaration));
                 if (source == Boundary.Other) continue;
                 var symbol = node is ExpressionSyntax or TypeSyntax or AttributeSyntax
                     ? semantic.GetSymbolInfo(node).Symbol : null;
@@ -38,7 +39,10 @@ internal static class PolicyBoundaryGuard
 
     private static int Rule(Boundary boundary) => boundary switch
     {
-        Boundary.Entitlement => 1, Boundary.Settings => 2, Boundary.Health => 3, Boundary.DataPlane => 4,
+        Boundary.Entitlement => 1,
+        Boundary.Settings => 2,
+        Boundary.Health => 3,
+        Boundary.DataPlane => 4,
         _ => throw new InvalidOperationException("Not a founding boundary."),
     };
 
@@ -82,6 +86,13 @@ internal static class PolicyBoundaryGuard
 
     private static Boundary Classify(ITypeSymbol? type)
     {
+        if (type?.ContainingType is { } containing)
+        {
+            var enclosing = Classify(containing);
+            if (enclosing != Boundary.Other) return enclosing;
+        }
+        if (type?.ContainingNamespace?.ToDisplayString() == "ArcForges.Cloud" && type.Name == "HealthStatus")
+            return Boundary.Health;
         // COM.16's historical primitive port lives in the root Abstractions namespace. Preserve its public identity while
         // preventing a Policy module from granting/revoking commercial authority through that otherwise neutral project.
         if (type?.ContainingNamespace?.ToDisplayString() == "ArcForges.Cloud.Modules"
