@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "6b7999fe7ee47d3801efe10b5ab4c3ce5efd5a5d",
+  "sourceCommit": "b81b87da4df4bca996abfb936e617d05df19f911",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -74,13 +74,16 @@
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
     "eng/provenance/artifact-profiles/cloud-release-r37.json": "e7ca4750bd87740e185b3e4c9ecc5fe02001ae5ddc642fe34363931b69ad4395",
     "eng/provenance/records/gov-22-cloud-runtime-notices-r1.json": "299a3b0c73b07a1ff86948c54fb46ef8bbe5157a7bd71e37bbbbb3708a3c8eb9",
-    "eng/provenance/records/gov-22-cloud-worker-bundle-r1.json": "1a55b03108883902cd325cc4a504da39cadafdfed4aa01fb02dabb8d82a24fe4"
+    "eng/provenance/records/gov-22-cloud-worker-bundle-r1.json": "1a55b03108883902cd325cc4a504da39cadafdfed4aa01fb02dabb8d82a24fe4",
+    "eng/provenance/artifact-profiles/cloud-release-r40.json": "2986293e3061902ebb1db869cb1413dabb2c871e45b50a26366d06b8343a8973",
+    "eng/provenance/records/com-01-cloud-runtime-notices-r1.json": "011c83b577aa9987890e7585eadb80dbe552fedbb2b6bc11b2e5c1969321a58d",
+    "eng/provenance/records/com-01-cloud-worker-bundle-r1.json": "c73f3cc0032b5bebd680e924a7020d0934568e4d97d3b040a3910f45b7d33fdc"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-codex-20261006-identity (maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-provider (maintainer-authorized; independent pull-request review is required before merge)",
     "date": "2026-10-06",
-    "rationale": "GOV.22 fixes high GHSA-wq5f-xc86-pv6w disclosed on 2026-10-06 by the exact nested Miniflare-to-Sharp 0.35.5 override. The actual regenerated lock changes only 27 existing Sharp and libvips platform package entries, adds or removes none, and preserves every licence expression, Wrangler 4.143.1, Miniflare 5.20260926.1-alpha, first-party coordinate, runtime/image pin and security gate. Sharp's complete Apache-2.0 licence is byte-identical to 0.35.4; optional native package licence expressions retain their existing LGPL/bundled positions. These are build/development dependencies, not newly shipped product code. The npm lock is a declared image build input, so the immutable cloud-release-r37 profile and both artifact records rebind it to the actual source commit, while all Worker inputs, expected bundle bytes, exports, legal files and package identities stay unchanged. The complete exact lock closure and changed inputs are admitted here, not by a hash-only refresh.",
+    "rationale": "COM.01 adds first-party production Commerce adapter source only. No npm, NuGet, Maven, runtime, framework, generator, licence, native optional package, integrity or immutable coordinate changes. The complete admitted GOV.22 patched closure is preserved unchanged. The reviewed release artifact positions follow the immutable cloud-release-r40 first-party source/input successor and its two exact new provenance records. Prior dependency and artifact receipts remain byte-identical; the new receipt binds the exact owned source-admission/artifact inputs, not a new package admission.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -152,7 +155,10 @@
       "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
       "eng/provenance/artifact-profiles/cloud-release-r37.json": "e7ca4750bd87740e185b3e4c9ecc5fe02001ae5ddc642fe34363931b69ad4395",
       "eng/provenance/records/gov-22-cloud-runtime-notices-r1.json": "299a3b0c73b07a1ff86948c54fb46ef8bbe5157a7bd71e37bbbbb3708a3c8eb9",
-      "eng/provenance/records/gov-22-cloud-worker-bundle-r1.json": "1a55b03108883902cd325cc4a504da39cadafdfed4aa01fb02dabb8d82a24fe4"
+      "eng/provenance/records/gov-22-cloud-worker-bundle-r1.json": "1a55b03108883902cd325cc4a504da39cadafdfed4aa01fb02dabb8d82a24fe4",
+      "eng/provenance/artifact-profiles/cloud-release-r40.json": "2986293e3061902ebb1db869cb1413dabb2c871e45b50a26366d06b8343a8973",
+      "eng/provenance/records/com-01-cloud-runtime-notices-r1.json": "011c83b577aa9987890e7585eadb80dbe552fedbb2b6bc11b2e5c1969321a58d",
+      "eng/provenance/records/com-01-cloud-worker-bundle-r1.json": "c73f3cc0032b5bebd680e924a7020d0934568e4d97d3b040a3910f45b7d33fdc"
     },
     "checks": [
       "locked-restore",
@@ -163,8 +169,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No framework or runtime coordinate changes. Sharp 0.35.5 preserves the admitted Node compatibility and development class while updating its native optional platform packages. Actual locked Windows installation, source/type checks, generated Worker identity and existing CI compilation/Native AOT packaging are applicable; no new runtime/performance scenario, macOS/native platform execution or OS isolation result is asserted. Full provider/runtime acceptance remains separate.",
-    "maintenance": "Retain the exact nested override until a normally reviewed Miniflare release selects a patched Sharp closure. Mandatory high npm audit and dependency-review gates remain enabled. Preserve all earlier immutable receipts and source/licence records; any future version, closure, licence or artifact change needs its own reviewed successor.",
+    "runtimeAssessment": "The adapter uses existing HttpClient, source-generated System.Text.Json and HMAC/SHA primitives. Actual component tests exercise transport, authorization refusal, cancellation, bounded read retries, ambiguous writes, concurrency, disposal, exact financial normalization and signed verification. Existing source/class architecture, locked managed builds and hosted Native AOT image/Worker packaging apply. No merchant deployment or OS isolation is proved by transport fakes.",
+    "maintenance": "Retain the exact current patched dependency closure and all immutable receipts. Restricted production egress/trust is composed by CLOUD.74; COM.03/04/09 own approved configuration, durable fencing, replay and business delivery. Whole-series merchant acceptance stays with COM.14/WP50. Any future dependency or artifact change requires its own reviewed successor.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
   },
@@ -983,7 +989,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["gov-22-cloud-runtime-notices-r1", "gov-22-cloud-worker-bundle-r1"],
+  "artifactRecords": ["com-01-cloud-runtime-notices-r1", "com-01-cloud-worker-bundle-r1"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -997,7 +1003,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/gov-22-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/com-01-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
