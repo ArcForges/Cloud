@@ -46,8 +46,10 @@ test("scope metadata binds both generated identities and preserves the absent-fl
   try {
     const ordinary = buildManifest(ordinaryRoot, { physicalDirectory });
     const scoped = buildManifest(scopedRoot, { physicalDirectory });
-    const plainPlan = ordinary.plans.find((plan) => plan.id === scopedPlanId)!;
-    const boundPlan = scoped.plans.find((plan) => plan.id === scopedPlanId)!;
+    const plainPlan = ordinary.plans.find((plan) => plan.id === scopedPlanId);
+    const boundPlan = scoped.plans.find((plan) => plan.id === scopedPlanId);
+    assert(plainPlan);
+    assert(boundPlan);
     assert.equal(plainPlan.requiresScopedContributions, undefined);
     assert.equal(boundPlan.requiresScopedContributions, true);
     assert.notEqual(plainPlan.sha256, boundPlan.sha256);
