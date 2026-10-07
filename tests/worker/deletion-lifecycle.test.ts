@@ -157,6 +157,8 @@ test("actual active-state revision absence permits retained terminal history and
       "request-deletion",
     ),
   );
+  const [pendingEmpty, purgingEmpty] = empty;
+  assert(pendingEmpty && purgingEmpty);
   for (const state of [2, 1, 3]) {
     const db = database();
     try {
@@ -166,8 +168,8 @@ test("actual active-state revision absence permits retained terminal history and
       if (state === 3) db.exec("UPDATE identity_account_deletion SET state=3,rev=rev+1");
       db.exec("BEGIN IMMEDIATE");
       const run = () => {
-        db.prepare(empty[0].sql).run(nextDeletion, user, 1, 0);
-        db.prepare(empty[1].sql).run(nextDeletion, user, 3, 0);
+        db.prepare(pendingEmpty.sql).run(nextDeletion, user, 1, 0);
+        db.prepare(purgingEmpty.sql).run(nextDeletion, user, 3, 0);
       };
       if (state === 2) run();
       else assert.throws(run, /CHECK constraint failed/u);
