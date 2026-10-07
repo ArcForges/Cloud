@@ -538,7 +538,7 @@
     "src/ArcForges.Cloud.Storage.D1/Migrations/0025_identity__deletion-lifecycle.sql",
     "src/ArcForges.Cloud.Storage.D1/Migrations/0026_entitlement__resolver-definition-profile.sql",
     "src/ArcForges.Cloud.Storage.D1/Migrations/migrations.lock.json",
-    "src/ArcForges.Cloud.Storage.D1/Migrations/pending/entitlement__quota-definition-profile.sql",
+    "src/ArcForges.Cloud.Storage.D1/Migrations/0027_entitlement__quota-definition-profile.sql",
     "src/ArcForges.Cloud.Storage.D1/ModuleBinding/ModulePlanPort.cs",
     "src/ArcForges.Cloud.Storage.D1/Outbox/OutboxEvent.cs",
     "src/ArcForges.Cloud.Storage.D1/Outbox/OutboxPublisher.cs",
