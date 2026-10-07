@@ -243,9 +243,19 @@ export function buildAcceptedRow(
         ? null
         : valueFor(column, enums, serial * 100 + index, variant);
   });
+  const quotaProfile = JSON.stringify([
+    variant.boundary ? `${"中😀".repeat(9361)}aaaaa` : "典型😀",
+  ]);
+  const quotaProfileHash = bytes(32, serial);
   // Columns whose table check demands a shape no kind default can guess (a hex digest in a text column).
   const patterned: Record<string, Record<string, RowValue>> = {
     platform_migration_receipt: { checksum: "a".repeat(64) },
+    entitlement_quota_definition_profile: {
+      canonical_profile: quotaProfile,
+      artifact_length: BigInt(Buffer.byteLength(quotaProfile, "utf8")),
+      profile_hash: quotaProfileHash,
+      artifact_hash: quotaProfileHash,
+    },
   };
   for (const [name, value] of Object.entries(patterned[table.name] ?? {})) base[name] = value;
   const generatedColumns = table.columns.filter((column) => column.generated);
