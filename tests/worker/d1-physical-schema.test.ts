@@ -35,18 +35,53 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  buildAcceptedRow,
+  buildAcceptedRow as buildGenericAcceptedRow,
   bindRow,
   insertRow,
   insertStatement,
   readBack,
   rowsEqual,
   violatingValue,
+  uuid as physicalUuid,
   type Row,
 } from "./support/physical-rows.ts";
 
 const schema = loadManifest();
 const enums = enumMap(schema);
+
+// The new profile's byte length and two equal content hashes are correlated owner facts.
+// Preserve every old table's generic vectors; explicitly construct only this admitted table's valid row.
+function buildAcceptedRow(
+  ...args: Parameters<typeof buildGenericAcceptedRow>
+): ReturnType<typeof buildGenericAcceptedRow> {
+  const [database, , table, variant, serial] = args;
+  if (table.name !== "entitlement_quota_definition_profile")
+    return buildGenericAcceptedRow(...args);
+  const version = variant.boundary ? `v${"a".repeat(127)}` : `vector-${serial}`;
+  const canonical = JSON.stringify({
+    definitions: [],
+    definitionsVersion: version,
+    schemaVersion: "entitlement.quota-definitions.v1",
+  });
+  const hash = createHash("sha256").update(canonical, "utf8").digest();
+  const row: Row = {
+    realm_id: physicalUuid(serial),
+    definitions_version: version,
+    profile_hash: hash,
+    canonical_profile: canonical,
+    artifact_id: variant.boundary ? `a${"b".repeat(127)}` : `artifact-${serial}`,
+    artifact_hash: hash,
+    artifact_length: BigInt(Buffer.byteLength(canonical, "utf8")),
+    created_at: variant.boundary ? 253402300799999999n : 1790000000123456n,
+  };
+  database.exec("SAVEPOINT quota_profile_vector");
+  try {
+    insertRow(database, table, row);
+  } finally {
+    database.exec("ROLLBACK TO quota_profile_vector; RELEASE quota_profile_vector;");
+  }
+  return { row, attempts: 1 };
+}
 
 function migratedDatabase(foreignKeys: boolean): DatabaseSync {
   const database = new DatabaseSync(":memory:");
@@ -154,7 +189,7 @@ test("preserved insertion refuses unsupported mutability and unique-key conflict
 });
 
 test("the manifest covers every owner and keeps every table inside its owner's prefix", () => {
-  assert.equal(schema.tables.length, 163);
+  assert.equal(schema.tables.length, 165);
   for (const owner of schema.owners) {
     const tables = schema.tables.filter((table) => table.owner === owner.owner);
     assert(tables.length > 0, `owner ${owner.owner} has no table`);

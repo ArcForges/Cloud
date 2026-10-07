@@ -189,6 +189,13 @@
       "module": "entitlement",
       "mode": "expand",
       "sha256": "ca6aaa4e989700da3869978aa0570dfde0ee1a56989039959359ede31440c969"
+    },
+    {
+      "sequence": 27,
+      "file": "0027_entitlement__quota-definition-profile.sql",
+      "module": "entitlement",
+      "mode": "expand",
+      "sha256": "c3b4d8a6172aee36f64c5018c6e3b51b45f8412d57dd85ae8a86a294df1a144d"
     }
   ]
 }

@@ -249,8 +249,18 @@ export function buildAcceptedRow(
     variant.boundary ? `${"中😀".repeat(9361)}aaaaa` : "典型😀",
   ]);
   const resolverProfileHash = bytes(32, serial);
+  const quotaProfile = JSON.stringify([
+    variant.boundary ? `${"中😀".repeat(9361)}aaaaa` : "典型😀",
+  ]);
+  const quotaProfileHash = bytes(32, serial);
   const patterned: Record<string, Record<string, RowValue>> = {
     platform_migration_receipt: { checksum: "a".repeat(64) },
+    entitlement_quota_definition_profile: {
+      canonical_profile: quotaProfile,
+      artifact_length: BigInt(Buffer.byteLength(quotaProfile, "utf8")),
+      profile_hash: quotaProfileHash,
+      artifact_hash: quotaProfileHash,
+    },
     entitlement_resolver_definition_profile: {
       canonical_profile: resolverProfile,
       artifact_length: BigInt(Buffer.byteLength(resolverProfile, "utf8")),

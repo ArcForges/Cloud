@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "55d5155816a3b6b80c7994264bac73cea64672198f81de1af8f1b6a043e64937";
+    public const string Hash = "6028e8bd7536a6671cd3ee0f99f284c02d33e9364e3ad559b9f3fc326970673e";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity
@@ -251,6 +251,48 @@ internal static class PlanManifest
                 new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text, true)])
             ]);
 
+        public static readonly PlanDefinition QuotaDefinitionCommand = new(
+            "entitlement.quota-definition-command",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition QuotaDefinitionCompatible = new(
+            "entitlement.quota-definition-compatible",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Text), new(PlanKind.Text)], [new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition QuotaDefinitionGet = new(
+            "entitlement.quota-definition-get",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition QuotaDefinitionPublish = new(
+            "entitlement.quota-definition-publish",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
         public static readonly PlanDefinition QuotaKernelBudget = new(
             "entitlement.quota-kernel-budget",
             1,
@@ -336,6 +378,60 @@ internal static class PlanManifest
                 new([new(PlanKind.Int64)], null),
                 new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition QuotaPeriodActionText = new(
+            "entitlement.quota-period-action-text",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Int64), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64)], [new(PlanKind.Bytes)])
+            ]);
+
+        public static readonly PlanDefinition QuotaPeriodActions = new(
+            "entitlement.quota-period-actions",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition QuotaPeriodSnapshotText = new(
+            "entitlement.quota-period-snapshot-text",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], [new(PlanKind.Bytes)])
+            ]);
+
+        public static readonly PlanDefinition QuotaPeriodState = new(
+            "entitlement.quota-period-state",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Scope)], [new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition QuotaPeriodTermText = new(
+            "entitlement.quota-period-term-text",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Int64), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64)], [new(PlanKind.Bytes)])
+            ]);
+
+        public static readonly PlanDefinition QuotaPeriodTerms = new(
+            "entitlement.quota-period-terms",
+            1,
+            PlanAccess.Read,
+            100,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
             ]);
 
         public static readonly PlanDefinition ResolverDefinitionCommand = new(
@@ -964,7 +1060,7 @@ internal static class PlanManifest
             ]);
     }
 
-    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.DeletionCurrent, Identity.DeletionState, Identity.DeletionUser, Identity.RecoveryActive, Identity.UserLoad, Identity.UserRename, Workspace.WorkspaceByOwner, Workspace.WorkspaceLoad, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.QuotaKernelBudget, Entitlement.QuotaKernelCleanup, Entitlement.QuotaKernelCommand, Entitlement.QuotaKernelEffect, Entitlement.QuotaKernelPublish, Entitlement.QuotaKernelReservation, Entitlement.QuotaKernelReserve, Entitlement.ResolverDefinitionCommand, Entitlement.ResolverDefinitionGet, Entitlement.ResolverDefinitionPublish, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Commerce.CatalogueEffective, Commerce.CatalogueList, Commerce.CataloguePrice, Commerce.CataloguePublish, Commerce.CatalogueState, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CapacityJobCheckpoint, Platform.CapacityJobClaim, Platform.CapacityJobCreate, Platform.CapacityJobDue, Platform.CapacityJobLoad, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.RecoveryCurrent, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser, Families.EntitlementDefinitionResolutionCommitCurrent];
+    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.DeletionCurrent, Identity.DeletionState, Identity.DeletionUser, Identity.RecoveryActive, Identity.UserLoad, Identity.UserRename, Workspace.WorkspaceByOwner, Workspace.WorkspaceLoad, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.QuotaDefinitionCommand, Entitlement.QuotaDefinitionCompatible, Entitlement.QuotaDefinitionGet, Entitlement.QuotaDefinitionPublish, Entitlement.QuotaKernelBudget, Entitlement.QuotaKernelCleanup, Entitlement.QuotaKernelCommand, Entitlement.QuotaKernelEffect, Entitlement.QuotaKernelPublish, Entitlement.QuotaKernelReservation, Entitlement.QuotaKernelReserve, Entitlement.QuotaPeriodActionText, Entitlement.QuotaPeriodActions, Entitlement.QuotaPeriodSnapshotText, Entitlement.QuotaPeriodState, Entitlement.QuotaPeriodTermText, Entitlement.QuotaPeriodTerms, Entitlement.ResolverDefinitionCommand, Entitlement.ResolverDefinitionGet, Entitlement.ResolverDefinitionPublish, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Commerce.CatalogueEffective, Commerce.CatalogueList, Commerce.CataloguePrice, Commerce.CataloguePublish, Commerce.CatalogueState, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CapacityJobCheckpoint, Platform.CapacityJobClaim, Platform.CapacityJobCreate, Platform.CapacityJobDue, Platform.CapacityJobLoad, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.RecoveryCurrent, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser, Families.EntitlementDefinitionResolutionCommitCurrent];
 
     /// <summary>The closed registry of shared transaction families (<c>storage/plans/families.json</c>, Design SU-01).</summary>
     public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = [
