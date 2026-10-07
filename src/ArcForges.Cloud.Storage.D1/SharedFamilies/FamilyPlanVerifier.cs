@@ -59,6 +59,8 @@ internal static class FamilyPlanVerifier
         ArgumentNullException.ThrowIfNull(family);
         var problems = new List<string>();
         var plan = family.Plan;
+        if (family.RequiresScopedContributions && !PermitsScopedContributions(family.Family, plan.Id))
+            problems.Add("scope binding is admitted only for new closed security family plans");
         if (definition is null || !string.Equals(definition.Id, family.Family, StringComparison.Ordinal))
         {
             problems.Add("the family " + family.Family + " is not in the registry");
@@ -129,6 +131,10 @@ internal static class FamilyPlanVerifier
 
         return problems;
     }
+
+    private static bool PermitsScopedContributions(string family, string plan) => plan.StartsWith("families." + family + ".", StringComparison.Ordinal)
+        && (family is "account-enrollment" or "device-revocation" or "session-lifecycle" or "push-registration" or "account-security" or "token-issuance")
+        && plan != "families.account-enrollment.create-user";
 
     private static int ClassRank(FamilyStatementRole role) => role.Phase switch
     {

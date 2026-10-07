@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "4fc85a56a0ffc9492de157dc23aad97c02a88281",
+  "sourceCommit": "8380197628e5efd6131aac51276c8fde913c0591",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -83,13 +83,18 @@
     "eng/provenance/records/cloud-75-cloud-worker-bundle-r2.json": "3c0a79d4221bede103de7788a399a378f641db791745c466156831ae2bbedc46",
     "eng/provenance/artifact-profiles/cloud-release-r49.json": "1e78f60fe1bf02f8ba4d74651ade218b32160b3ea4dd188482b7ee0735ac4da8",
     "eng/provenance/records/cloud-07-cloud-runtime-notices-r1.json": "1c94fd4b081262e75ecc96711865ccde2d653b8572a5859ed1f533b3647137be",
-    "eng/provenance/records/cloud-07-cloud-worker-bundle-r1.json": "e86f6a033611c01bb1c948678498d3199ca5e9f05202570cdfa389ac39310009"
+    "eng/provenance/records/cloud-07-cloud-worker-bundle-r1.json": "e86f6a033611c01bb1c948678498d3199ca5e9f05202570cdfa389ac39310009",
+    "eng/provenance/artifact-profiles/cloud-release-r52.json": "f603b7fee528f529f81a2403d27b3ef8a6b6649a6f46b573c3e08a910865de65",
+    "eng/provenance/records/cloud-82-cloud-runtime-notices-r1.json": "2a31f94ec5d3ea1f3c16947ca79eeba59a73d20203dba80c6152adde7c58af48",
+    "eng/provenance/records/cloud-82-cloud-worker-bundle-r1.json": "bcdb5a612c96ac291cf8390e98c39c4b80619da865b20d58060061f937717e62",
+    "eng/provenance/records/cloud-82-cloud-worker-bundle-r2.json": "711131670c488d683ff72c918759c4443e98ba3d30298f503221151c2367ce4c",
+    "eng/provenance/records/cloud-82-cloud-runtime-notices-r2.json": "b2a6f4cbde7389c03bd82b332627d5c16813c1143f89fbee80569c2550f16733"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-codex-20261006-coord (maintainer admission; independent exact-head PR review required)",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-identity (maintainer-authorized; independent exact-head PR review is a separate final gate)",
     "date": "2026-10-07",
-    "rationale": "CLOUD.78 delivers a closed Identity securityExpiry/securityDue compiler, canonical immutable C# profile/role metadata and verification, and deep-frozen production family-port metadata. The actual SQLite statement clock bounds registered expiry by its UTC millisecond ceiling and the trusted captured observation; only exact deletion due roles/plans use the database floor with no caller clock. Complete profile columns, role/family/plan restrictions, integer and NULL refusal, and existing generic FRESH byte behavior are preserved. Lifetime predicates do not grant session/proof/ownership/recovery authority. Independent full source review approved the complete implementation and its boundary successor before a preserving rebase onto actual accepted CLOUD.07 main9891. Actual Families/SharedFamilies managed122 cases passed without skips using pinned SDK10.0.401; scoped formatter and both TypeScript projects passed. The actual rebased Node93 compiler/family/security cases pass, including real SQLite writer-lock and queued-batch expiry, rollback, stale concurrency, lost-reply receipt persistence on reopen, and same-statement VFS floor/ceiling one-microsecond boundaries. Only an unavailable clock and unavailable network reply are injected for dependency failures. The future C79 fixture hashes actual frozen owner DDL and does not activate that migration. This immutable r51/cloud78r1 binds the freshly produced actual locked 370554-byte Worker (114 parsed/45 emitted inputs) and 207 image build inputs; all five changed shipping C# files already belong to the accepted image inventory. The actual Worker bytes, complete npm/dependency/external import/image/tool/legal grants and coordinates remain unchanged. All inherited immutable profiles, records and dependency receipts are byte-preserved; this successor supersedes actual accepted r50/cloud07r2 linearly. C13/C15/C16/C79 must integrate their real owned SQL and opaque scoped authorities. Live D1 clock/session/browser/provider/purge and full-system acceptance remain separately owned checks; no fake proves deployment or OS isolation. Existing production routes/data and workers.dev=false are preserved. Final independent seal-delta review, applicable exact-head CI, normal production deployment and a factual ledger remain delivery gates.",
+    "rationale": "CLOUD.82 delivers the real same-factory canonical exact-scope opaque owner contribution producer, closed common Rejected/Unavailable refusal and registered new-security RequiresScopedContributions metadata. Wrong, foreign and legacy-null capabilities on required plans refuse before any receipt or executor call. The optional flag is bound into generated plan/manifest identities only when true; the accepted create-user/default expansion and source ownership remain unchanged. Actual migrated SQLite/Worker component tests cover scope refusal, same-command concurrency and replay, recovery races/fresh reread, cancellation and late-tail rollback; compiler tests cover malformed registrations, exact metadata digests and unchanged legacy bytes. This reviewed first-party/source-input admission preserves all accepted predecessor receipts, dependency coordinates, integrities, lock closure, runtime/provider pins, egress declarations and security gates. It grants no caller authentication or Platform/tail authority, does not alter SQL/clock/locks/production routes/data, and does not claim whole account acceptance or OS isolation. Evidence-only r2 corrects predecessor prose while preserving unchanged r52 profile and all committed/accepted history.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -170,7 +175,12 @@
       "eng/provenance/records/cloud-75-cloud-worker-bundle-r2.json": "3c0a79d4221bede103de7788a399a378f641db791745c466156831ae2bbedc46",
       "eng/provenance/artifact-profiles/cloud-release-r49.json": "1e78f60fe1bf02f8ba4d74651ade218b32160b3ea4dd188482b7ee0735ac4da8",
       "eng/provenance/records/cloud-07-cloud-runtime-notices-r1.json": "1c94fd4b081262e75ecc96711865ccde2d653b8572a5859ed1f533b3647137be",
-      "eng/provenance/records/cloud-07-cloud-worker-bundle-r1.json": "e86f6a033611c01bb1c948678498d3199ca5e9f05202570cdfa389ac39310009"
+      "eng/provenance/records/cloud-07-cloud-worker-bundle-r1.json": "e86f6a033611c01bb1c948678498d3199ca5e9f05202570cdfa389ac39310009",
+      "eng/provenance/artifact-profiles/cloud-release-r52.json": "f603b7fee528f529f81a2403d27b3ef8a6b6649a6f46b573c3e08a910865de65",
+      "eng/provenance/records/cloud-82-cloud-runtime-notices-r1.json": "2a31f94ec5d3ea1f3c16947ca79eeba59a73d20203dba80c6152adde7c58af48",
+      "eng/provenance/records/cloud-82-cloud-worker-bundle-r1.json": "bcdb5a612c96ac291cf8390e98c39c4b80619da865b20d58060061f937717e62",
+      "eng/provenance/records/cloud-82-cloud-worker-bundle-r2.json": "711131670c488d683ff72c918759c4443e98ba3d30298f503221151c2367ce4c",
+      "eng/provenance/records/cloud-82-cloud-runtime-notices-r2.json": "b2a6f4cbde7389c03bd82b332627d5c16813c1143f89fbee80569c2550f16733"
     },
     "checks": [
       "locked-restore",
@@ -181,8 +191,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No framework/runtime/dependency coordinate changes. Required configured authority, real bounded Platform read and opaque exact shared-issuer atomic recovery guard are covered by273 relevant managed components and twelve focused Worker/generator cases and actual Worker SQLite execution, including rollback/replay/concurrency. Existing anonymous production health/routes stay unchanged. Signed executor/current realm activation and AuthEpoch stale-container drain remain CLOUD.21-owned; provider network, authentication/session host composition, full restore and OS acceptance are not claimed. No test double or fixture catalogue is registered in production.",
-    "maintenance": "Preserve exact coordinates, all immutable receipts, fixed family locks/ownership and mandatory CI. Future first-party, closure, legal or artifact changes require a new independently reviewed successor; production routes/data and workers.dev protections remain unchanged.",
+    "runtimeAssessment": "Actual same-issuer/scoped owner composition and migrated SQLite/Worker transactions are tested. No framework/runtime/provider/dependency changes or new egress. Authentication, full account/provider behavior and OS isolation remain separate actual owners; no success-returning production test double is registered.",
+    "maintenance": "Preserve all immutable accepted receipts, exact coordinates and source closure; future changes require independently reviewed successors. Keep production routes/data and workers.dev protections unchanged.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
   },
@@ -1001,7 +1011,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-78-cloud-worker-bundle-r1", "cloud-78-cloud-runtime-notices-r1"],
+  "artifactRecords": ["cloud-82-cloud-worker-bundle-r2", "cloud-82-cloud-runtime-notices-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1015,7 +1025,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-78-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-82-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

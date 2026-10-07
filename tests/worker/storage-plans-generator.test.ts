@@ -14,11 +14,93 @@ import {
   normalizePlanText,
   ownerRegistry,
   parsePlanFile,
+  parseFamilyRegistry,
+  familyIdentity,
+  renderCSharp,
+  renderFamilyExpansion,
 } from "../../eng/verification/storage-plans.ts";
+import { fixtureRoot, physicalDirectory } from "./support/family-fixtures.ts";
 import { manifestHash, plans } from "../../worker/storage/plans.generated.ts";
 import { repositoryRoot } from "./support/sqlite-d1.ts";
 
 const file = "storage/plans/foundation/sample.sql";
+
+const scopedPlanId = "families.account-enrollment.scoped-fixture";
+const enrollmentRegistry = JSON.parse(
+  readFileSync(path.join(repositoryRoot, "storage/plans/families.json"), "utf8"),
+) as { schemaVersion: number; families: unknown[] };
+const scopedPlan = readFileSync(
+  path.join(repositoryRoot, "storage/plans/families/account-enrollment.create-user.sql"),
+  "utf8",
+).replace("families.account-enrollment.create-user", scopedPlanId);
+
+test("scope metadata binds both generated identities and preserves the absent-flag bytes", async () => {
+  const ordinaryRoot = fixtureRoot(
+    { "account-enrollment.scoped-fixture.sql": scopedPlan },
+    enrollmentRegistry,
+  );
+  const scopedRoot = fixtureRoot(
+    { "account-enrollment.scoped-fixture.sql": scopedPlan },
+    { ...enrollmentRegistry, scopedContributionPlans: [scopedPlanId] },
+  );
+  try {
+    const ordinary = buildManifest(ordinaryRoot, { physicalDirectory });
+    const scoped = buildManifest(scopedRoot, { physicalDirectory });
+    const plainPlan = ordinary.plans.find((plan) => plan.id === scopedPlanId);
+    const boundPlan = scoped.plans.find((plan) => plan.id === scopedPlanId);
+    assert(plainPlan);
+    assert(boundPlan);
+    assert.equal(plainPlan.requiresScopedContributions, undefined);
+    assert.equal(boundPlan.requiresScopedContributions, true);
+    assert.notEqual(plainPlan.sha256, boundPlan.sha256);
+    assert.notEqual(ordinary.manifestHash, scoped.manifestHash);
+    assert.deepEqual(plainPlan.statements, boundPlan.statements);
+    assert.equal(
+      familyIdentity("authored\n", ["SELECT 1;"], false),
+      familyIdentity("authored\n", ["SELECT 1;"]),
+    );
+    assert.notEqual(
+      familyIdentity("authored\n", ["SELECT 1;"], true),
+      familyIdentity("authored\n", ["SELECT 1;"]),
+    );
+    assert.match(await renderCSharp(scoped), /RequiresScopedContributions: true/u);
+    assert.doesNotMatch(await renderCSharp(ordinary), /RequiresScopedContributions/u);
+    assert.match(await renderFamilyExpansion(scoped), /"requiresScopedContributions": true/u);
+    assert.doesNotMatch(await renderFamilyExpansion(ordinary), /requiresScopedContributions/u);
+  } finally {
+    rmSync(ordinaryRoot, { recursive: true, force: true });
+    rmSync(scopedRoot, { recursive: true, force: true });
+  }
+});
+
+test("scope metadata rejects malformed, duplicate, unknown and accepted legacy registrations", () => {
+  for (const invalid of [
+    null,
+    true,
+    [],
+    [42],
+    [scopedPlanId, scopedPlanId],
+    ["families.unknown.commit"],
+    ["families.account-enrollment.create-user"],
+    ["families.account-enrollment.INVALID"],
+    ["families.account-enrollment.extra.segment"],
+  ]) {
+    assert.throws(() =>
+      parseFamilyRegistry(
+        JSON.stringify({ ...enrollmentRegistry, scopedContributionPlans: invalid }),
+      ),
+    );
+  }
+  const root = fixtureRoot(
+    { "account-enrollment.scoped-fixture.sql": scopedPlan },
+    { ...enrollmentRegistry, scopedContributionPlans: ["families.account-enrollment.missing"] },
+  );
+  try {
+    assert.throws(() => buildManifest(root, { physicalDirectory }), /unregistered plan/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 const read = `-- plan: foundation.sample
 -- version: 1
 -- access: read

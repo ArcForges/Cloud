@@ -28,6 +28,8 @@ public sealed class D1IdentityStoreTests
         public Task<ModulePlanOutcome> InspectAsync(string familyId, ModuleCommandIdentity identity, CancellationToken cancellationToken)
         { cancellationToken.ThrowIfCancellationRequested(); Inspections++; return Task.FromResult(ModulePlanOutcome.Of(WriteStatus)); }
         public IModuleFamilyContributionSet Contribute(string familyId, string planId, IReadOnlyList<ModuleFamilyContribution> contributions) => throw new NotSupportedException();
+        public IModuleFamilyContributionSet ContributeScoped(string familyId, string planId, string ownerScope, IReadOnlyList<ModuleFamilyContribution> contributions)
+            => throw new ModuleFamilyContributionException(ModuleFamilyContributionFailure.Unavailable);
     }
     private static readonly RealmId Realm = IdentityHarness.RealmA;
     private static readonly UserId User = UserId.Parse("00000000-0000-4000-8000-000000000001");
