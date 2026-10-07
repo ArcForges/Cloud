@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "1eec9370f8d88463350f4e12568ee9bb8d66d5f9",
+  "sourceCommit": "44e9c0625e28e5ef0a8373156709d41293161feb",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -97,7 +97,7 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "ArcForges delivery worker w-codex-20261006-catalog (maintainer admission; independent exact-head PR review required)",
     "date": "2026-10-07",
-    "rationale": "COM.20 delivers a complete independent canonical full resolver-definition producer, immutable persistent publication, current and exact asynchronous sources, captured production resolution and scoped Config/Platform/Entitlement commit composition. Actual owner plans, Worker and migrated SQLite cover immutable conflicts and replacement protection, exact approved historical recovery, receipt-safe retries, cancellation after genuine commit, current-head races, rebuild and trusted publisher rotation preserving first audit provenance. The accepted CLOUD.79 migration25 and all preceding migrations remain byte-identical; this producer owns only full-definition migration26. The accepted r53/CLOUD79r1 immutable source, dependency receipts and release profiles remain unchanged. The independently reviewed early neutral quota participant primitive compiles without pending COM.18 types or implementation; real factory tests reject caller-created success and foreign capabilities. Real Config quota and full-definition authority belongs to POL.02. The locked Wrangler dryrun binds actual 393467 emitted bytes, 114 parsed/45 emitted Worker inputs and 222 image build inputs. The existing dependency coordinates, transitive closure, generator materials, external imports, legal permissions and pinned toolchains are retained. Applicable exact-head independent review, hosted CI, normal publication and deployment remain mandatory gates. Unavailable Config/artifact sources refuse; component fixtures do not establish dual approval, live configuration activation, real D1 deployment, merchant acceptance or OS isolation. POL.02 and COM.18 production integration and whole commercial acceptance remain separately owned. Production routes and data are protected and workers.dev remains disabled.",
+    "rationale": "COM.20 additive r2 admission corrects only two actual shipping formatter findings from hosted CI37584256803: CurrentResolverDefinitionSource using order and ResolverDefinitionValidator switch-arm whitespace. That exact prior hosted source passed all1443 managed/architecture cases with zero skips, full npm, Windows, dependency and all4 CodeQL gates; the formatter failure blocked candidate/deployment, so no delivery was claimed. The correction preserves C# semantic tokens, immutable r54/r1 evidence, accepted C79 migration25 and owning resolver migration26. Actual Worker bytes393467/SHA5dadcb9caa72e39df598b52c511bca8fb9f63c12c14fd844af77feed563627ea, all114 parsed/45 emitted inputs and222 image inputs are retained; exactly two managed shipping input hashes change. Existing132 dependency coordinates/closure and88 inputs retain their legal materials and pins. Exact-head independent narrow review and fresh applicable hosted CI, normal publication/deployment/ledger remain mandatory. Real Config authority integration is separately POL.02; fixtures do not prove live dual approval, customer permission, merchant acceptance or OS isolation. Production routes/data are preserved and workers.dev stays disabled.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -1017,7 +1017,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["com-20-cloud-worker-bundle-r1", "com-20-cloud-runtime-notices-r1"],
+  "artifactRecords": ["com-20-cloud-worker-bundle-r2", "com-20-cloud-runtime-notices-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1031,7 +1031,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/com-20-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/com-20-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
