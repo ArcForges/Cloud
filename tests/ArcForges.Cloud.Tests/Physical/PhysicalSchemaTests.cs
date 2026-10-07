@@ -68,7 +68,7 @@ public sealed class PhysicalSchemaTests
     {
         var manifest = Manifest();
         Assert.Equal(manifest.Count, PhysicalSchema.Tables.Count);
-        Assert.Equal(161, PhysicalSchema.Tables.Count);
+        Assert.Equal(162, PhysicalSchema.Tables.Count);
         foreach (var (owner, name, columns, key) in manifest)
         {
             var table = PhysicalSchema.FindTable(name);

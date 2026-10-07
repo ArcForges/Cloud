@@ -246,6 +246,12 @@ export function buildAcceptedRow(
   // Columns whose table check demands a shape no kind default can guess (a hex digest in a text column).
   const patterned: Record<string, Record<string, RowValue>> = {
     platform_migration_receipt: { checksum: "a".repeat(64) },
+    // The actual owner CHECK links these fields; independent guesses are not valid dimensions.
+    identity_account_deletion: {
+      requested_at: variant.boundary ? 9223372036854775807n % 1_000_000n : instantBase,
+      grace_seconds: variant.boundary ? 9223372036854775807n / 1_000_000n : 1n,
+      grace_ends_at: variant.boundary ? 9223372036854775807n : instantBase + 1_000_000n,
+    },
   };
   for (const [name, value] of Object.entries(patterned[table.name] ?? {})) base[name] = value;
   const generatedColumns = table.columns.filter((column) => column.generated);
