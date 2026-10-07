@@ -8,13 +8,13 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "b03e924fa6bf3c46ea98e52d42ea9dd7cc73eb4dbbeae096ef601ab9a18d9d01";
+    public const string ManifestHash = "eb8cbcdebc7254992fff342a83bf1851d316760751cbe7a8b1c08db162a45049";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
-    public const int HighestMigration = 24;
+    public const int HighestMigration = 26;
 
     /// <summary>SHA-256 over the ordered sequence and checksum of every locked migration.</summary>
-    public const string MigrationLockHash = "53751e3f5bd780159f8cfa607c41b5d57fbd1f3e038b6e6ad0ac818229a362c9";
+    public const string MigrationLockHash = "a92af5e64e57a399fdb48fcc9a0f0e5c36513840f2b6bad41c5bd43e02b7260c";
 
     public static IReadOnlyList<PhysicalEnum> Enums { get; } =
     [
@@ -67,6 +67,7 @@ internal static partial class PhysicalSchema
         new("identity.auth_method", false, [new("passkey", 1), new("emailCode", 2), new("password", 3), new("oidc", 4)]),
         new("identity.browser_flow_method", false, [new("passkey", 1), new("emailCode", 2)]),
         new("identity.credential_kind", false, [new("nativeBearer", 1), new("browserCookie", 2)]),
+        new("identity.deletion_state", false, [new("pending", 1), new("cancelled", 2), new("purging", 3), new("purged", 4)]),
         new("identity.email_purpose", false, [new("primary", 1), new("recovery", 2), new("notification", 3)]),
         new("identity.recovery_flow_state", false, [new("pending", 1), new("proved", 2), new("completed", 3), new("expired", 4), new("denied", 5)]),
         new("identity.step_up_state", false, [new("pending", 1), new("proved", 2), new("consumed", 3), new("expired", 4), new("denied", 5)]),
@@ -1279,6 +1280,25 @@ internal static partial class PhysicalSchema
             new("source_ref", PhysicalKind.Text, false),
         ],
         ["status_fact_id"]);
+
+    public static PhysicalTable IdentityAccountDeletion { get; } = new(
+        "identity_account_deletion",
+        "identity",
+        [
+            new("deletion_id", PhysicalKind.Id, false),
+            new("realm_id", PhysicalKind.Id, false),
+            new("user_id", PhysicalKind.Id, false),
+            new("requested_at", PhysicalKind.Instant, false),
+            new("grace_ends_at", PhysicalKind.Instant, false),
+            new("policy_version", PhysicalKind.Key, false),
+            new("grace_seconds", PhysicalKind.Int64, false),
+            new("previous_user_state", PhysicalKind.Enum, false, EnumName: "identity.user_state"),
+            new("state", PhysicalKind.Enum, false, EnumName: "identity.deletion_state"),
+            new("cancelled_at", PhysicalKind.Instant, true),
+            new("completed_at", PhysicalKind.Instant, true),
+            new("rev", PhysicalKind.Rev, false),
+        ],
+        ["deletion_id"]);
 
     public static PhysicalTable IdentityApiToken { get; } = new(
         "identity_api_token",
@@ -2982,6 +3002,7 @@ internal static partial class PhysicalSchema
         EntitlementSnapshot,
         EntitlementUsageCounter,
         EntitlementWorkspaceStatusFact,
+        IdentityAccountDeletion,
         IdentityApiToken,
         IdentityAuthIdentity,
         IdentityBrowserAuthFlow,

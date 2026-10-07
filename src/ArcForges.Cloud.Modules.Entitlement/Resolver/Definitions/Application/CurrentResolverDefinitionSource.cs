@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-using ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Domain;
 using ArcForges.Cloud.Modules.Entitlement.Resolver.Application;
+using ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Domain;
 
 namespace ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Application;
 

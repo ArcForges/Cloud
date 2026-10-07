@@ -552,7 +552,10 @@ test("every checked-in plan satisfies the ownership rule of its owner directory"
   );
   assert.deepEqual(
     manifest.plans.filter((entry) => entry.family !== undefined).map((entry) => entry.id),
-    ["families.account-enrollment.create-user"],
+    [
+      "families.account-enrollment.create-user",
+      "families.entitlement-definition-resolution.commit-current",
+    ],
   );
 });
 

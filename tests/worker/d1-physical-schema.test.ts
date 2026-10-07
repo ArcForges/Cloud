@@ -160,13 +160,17 @@ test("preserved insertion rejects changed replacement and retains exact duplicat
 });
 
 test("preserved insertion refuses unsupported mutability and unique-key conflict models", () => {
-  const validate = (table: PhysicalTable) => validateSchema({ ...schema, tables: [table] }, true);
+  const validate = (table: PhysicalTable, refusal: RegExp) => {
+    assert.throws(() => validateSchema({ ...schema, tables: [table] }, true), refusal);
+    assert.throws(() => tableSql(table, enums), refusal);
+    assert.throws(() => triggerSql(table), refusal);
+  };
   const unsupported = structuredClone(tableOf("entitlement_resolver_definition_profile"));
   Object.assign(unsupported.mutability, { insert: "unsupported" });
-  assert.throws(() => validate(unsupported), /insertion mutability/u);
+  validate(unsupported, /insertion mutability/u);
   const mutable = structuredClone(tableOf("entitlement_resolver_definition_profile"));
   mutable.mutability.update = "any";
-  assert.throws(() => validate(mutable), /fully immutable row/u);
+  validate(mutable, /fully immutable row/u);
   const unique = structuredClone(tableOf("entitlement_resolver_definition_profile"));
   unique.indexes.push({
     name: "ux_entitlement_resolver_definition_profile__artifact_id",
@@ -174,7 +178,14 @@ test("preserved insertion refuses unsupported mutability and unique-key conflict
     path: "fixture",
     unique: true,
   });
-  assert.throws(() => validate(unique), /primary-key conflicts only/u);
+  validate(unique, /primary-key conflicts only/u);
+  const unknown = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  unknown.name = "entitlement_unregistered_immutable_profile";
+  validate(unknown, /not admitted for this owner and table/u);
+  const foreign = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  foreign.owner = "workspace";
+  foreign.name = "workspace_unregistered_immutable_profile";
+  validate(foreign, /not admitted for this owner and table/u);
 });
 
 test("the manifest covers every owner and keeps every table inside its owner's prefix", () => {
@@ -718,5 +729,142 @@ test("every closed enum accepts exactly its registered numbers and refuses zero,
         /CHECK constraint failed/u,
         `${entry.name} accepted ${number}`,
       );
+  }
+});
+
+test("deletion insertion invariant is omitted from every old table and emits only its fixed owner trigger", () => {
+  const table = tableOf("identity_account_deletion");
+  assert.equal(table.insertionInvariant, "deletionLifecycleOriginal");
+  for (const old of schema.tables.filter((entry) => entry !== table)) {
+    assert(!Object.hasOwn(old, "insertionInvariant"), old.name);
+    assert(!triggerSql(old).some((sql) => sql.includes("__original_insert")), old.name);
+  }
+  const absent = structuredClone(table);
+  delete absent.insertionInvariant;
+  assert.deepEqual(triggerSql(table).slice(1), triggerSql(absent));
+  const sql = triggerSql(table)[0];
+  assert(sql?.includes('WHERE "deletion_id" = NEW."deletion_id"'));
+  assert(sql?.includes('NEW."state" IN (1, 3)'));
+  assert(sql?.includes('WHERE "user_id" = NEW."user_id" AND "state" IN (1, 3)'));
+  const database = migratedDatabase(true);
+  try {
+    assert.deepEqual(compareShapes(readShape(database), expectedShape(schema)), []);
+  } finally {
+    database.close();
+  }
+});
+
+test("deletion insertion marker refuses unknown, foreign and every mismatched authority shape before SQL emission", () => {
+  const columnOf = (table: PhysicalTable, name: string) => {
+    const column = table.columns.find((entry) => entry.name === name);
+    assert(column);
+    return column;
+  };
+  const mutations: ((table: PhysicalTable) => void)[] = [
+    (table) => {
+      Object.assign(table, { insertionInvariant: "arbitrarySql" });
+    },
+    (table) => {
+      table.owner = "workspace";
+    },
+    (table) => {
+      table.name = "identity_foreign_table";
+    },
+    (table) => {
+      table.primaryKey = ["user_id"];
+    },
+    (table) => {
+      columnOf(table, "deletion_id").kind = "text";
+    },
+    (table) => {
+      columnOf(table, "user_id").nullable = true;
+    },
+    (table) => {
+      columnOf(table, "state").enumName = "identity.user_state";
+    },
+    (table) => {
+      columnOf(table, "state").sqlType = "TEXT";
+    },
+    (table) => {
+      columnOf(table, "state").generated = "1";
+    },
+    (table) => {
+      const index = table.indexes.find((entry) => entry.unique);
+      assert(index);
+      index.where = '"state" IN (1, 2)';
+    },
+    (table) => {
+      const index = table.indexes.find((entry) => entry.unique);
+      assert(index);
+      index.columns = ["realm_id"];
+    },
+    (table) => {
+      const index = table.indexes.find((entry) => entry.unique);
+      assert(index);
+      index.unique = false;
+    },
+    (table) => {
+      table.indexes.push({
+        name: "ux_identity_account_deletion__realm_id",
+        columns: ["realm_id"],
+        path: "hostile",
+        unique: true,
+      });
+    },
+    (table) => {
+      table.mutability.delete = "any";
+    },
+    (table) => {
+      table.mutability.update = "any";
+    },
+    (table) => {
+      const update = table.mutability.update;
+      assert(typeof update === "object");
+      update.columns.push("grace_ends_at");
+    },
+    (table) => {
+      const update = table.mutability.update;
+      assert(typeof update === "object");
+      update.when = "1";
+    },
+  ];
+  for (const mutate of mutations) {
+    const copy = structuredClone(schema);
+    const table = copy.tables.find((entry) => entry.name === "identity_account_deletion");
+    assert(table);
+    mutate(table);
+    assert.throws(() => validateSchema(copy), /invalid deletion lifecycle insertion invariant/u);
+    assert.throws(() => triggerSql(table), /invalid deletion lifecycle insertion invariant/u);
+  }
+  const copy = structuredClone(schema);
+  const state = copy.enums.find((entry) => entry.name === "identity.deletion_state");
+  assert(state);
+  const purging = state.members.find((entry) => entry.name === "purging");
+  assert(purging);
+  purging.number = 7;
+  assert.throws(() => validateSchema(copy), /invalid deletion lifecycle state profile/u);
+  assert.throws(
+    () => tableSql(tableOf("identity_account_deletion"), enumMap(copy)),
+    /invalid deletion lifecycle state profile/u,
+  );
+});
+
+test("strict physical drift refuses a missing or weakened original insertion trigger", () => {
+  for (const replace of [false, true]) {
+    const database = migratedDatabase(true);
+    database.exec('DROP TRIGGER "tr_identity_account_deletion__original_insert"');
+    if (replace)
+      database.exec(
+        `CREATE TRIGGER "tr_identity_account_deletion__original_insert" BEFORE INSERT ON "identity_account_deletion" WHEN 0 BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: af_immutable_identity_account_deletion'); END`,
+      );
+    const problems = compareShapes(readShape(database), expectedShape(schema));
+    assert(
+      problems.some(
+        (problem) =>
+          problem.includes("identity_account_deletion") && problem.includes("original_insert"),
+      ),
+      problems.join("\n"),
+    );
+    database.close();
   }
 });

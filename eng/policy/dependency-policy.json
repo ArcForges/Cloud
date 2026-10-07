@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "8380197628e5efd6131aac51276c8fde913c0591",
+  "sourceCommit": "44e9c0625e28e5ef0a8373156709d41293161feb",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -12,7 +12,7 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-    "package.json": "65fdaec912525d9de03dd83baeff22f3f4b9cb2c93a878be2df6326866d47254",
+    "package.json": "79a8e3c506bc8e8c72c99b37b6944fee8ad8ddd2f5c6e6b6ad88d915c76ad1a3",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -88,13 +88,16 @@
     "eng/provenance/records/cloud-82-cloud-runtime-notices-r1.json": "2a31f94ec5d3ea1f3c16947ca79eeba59a73d20203dba80c6152adde7c58af48",
     "eng/provenance/records/cloud-82-cloud-worker-bundle-r1.json": "bcdb5a612c96ac291cf8390e98c39c4b80619da865b20d58060061f937717e62",
     "eng/provenance/records/cloud-82-cloud-worker-bundle-r2.json": "711131670c488d683ff72c918759c4443e98ba3d30298f503221151c2367ce4c",
-    "eng/provenance/records/cloud-82-cloud-runtime-notices-r2.json": "b2a6f4cbde7389c03bd82b332627d5c16813c1143f89fbee80569c2550f16733"
+    "eng/provenance/records/cloud-82-cloud-runtime-notices-r2.json": "b2a6f4cbde7389c03bd82b332627d5c16813c1143f89fbee80569c2550f16733",
+    "eng/provenance/artifact-profiles/cloud-release-r53.json": "3d07812cf82731a4671413fcd15720ecc3bf26e7474e69dc066bf2783e14a843",
+    "eng/provenance/records/cloud-79-cloud-runtime-notices-r1.json": "a47f89c5f3e76bd35ed49ea873cc0bde17c749dae2829c8cf886dbf0365270bd",
+    "eng/provenance/records/cloud-79-cloud-worker-bundle-r1.json": "cbb80cfcd020a2359ae342f9855a251e6e9b2e95bfffa1daad37a87a3e8d7e82"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-codex-20261006-identity (maintainer-authorized; independent exact-head PR review is a separate final gate)",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-catalog (maintainer admission; independent exact-head PR review required)",
     "date": "2026-10-07",
-    "rationale": "CLOUD.82 delivers the real same-factory canonical exact-scope opaque owner contribution producer, closed common Rejected/Unavailable refusal and registered new-security RequiresScopedContributions metadata. Wrong, foreign and legacy-null capabilities on required plans refuse before any receipt or executor call. The optional flag is bound into generated plan/manifest identities only when true; the accepted create-user/default expansion and source ownership remain unchanged. Actual migrated SQLite/Worker component tests cover scope refusal, same-command concurrency and replay, recovery races/fresh reread, cancellation and late-tail rollback; compiler tests cover malformed registrations, exact metadata digests and unchanged legacy bytes. This reviewed first-party/source-input admission preserves all accepted predecessor receipts, dependency coordinates, integrities, lock closure, runtime/provider pins, egress declarations and security gates. It grants no caller authentication or Platform/tail authority, does not alter SQL/clock/locks/production routes/data, and does not claim whole account acceptance or OS isolation. Evidence-only r2 corrects predecessor prose while preserving unchanged r52 profile and all committed/accepted history.",
+    "rationale": "COM.20 additive r2 admission corrects only two actual shipping formatter findings from hosted CI37584256803: CurrentResolverDefinitionSource using order and ResolverDefinitionValidator switch-arm whitespace. That exact prior hosted source passed all1443 managed/architecture cases with zero skips, full npm, Windows, dependency and all4 CodeQL gates; the formatter failure blocked candidate/deployment, so no delivery was claimed. The correction preserves C# semantic tokens, immutable r54/r1 evidence, accepted C79 migration25 and owning resolver migration26. Actual Worker bytes393467/SHA5dadcb9caa72e39df598b52c511bca8fb9f63c12c14fd844af77feed563627ea, all114 parsed/45 emitted inputs and222 image inputs are retained; exactly two managed shipping input hashes change. Existing132 dependency coordinates/closure and88 inputs retain their legal materials and pins. Exact-head independent narrow review and fresh applicable hosted CI, normal publication/deployment/ledger remain mandatory. Real Config authority integration is separately POL.02; fixtures do not prove live dual approval, customer permission, merchant acceptance or OS isolation. Production routes/data are preserved and workers.dev stays disabled.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -104,7 +107,7 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-      "package.json": "65fdaec912525d9de03dd83baeff22f3f4b9cb2c93a878be2df6326866d47254",
+      "package.json": "79a8e3c506bc8e8c72c99b37b6944fee8ad8ddd2f5c6e6b6ad88d915c76ad1a3",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -180,7 +183,10 @@
       "eng/provenance/records/cloud-82-cloud-runtime-notices-r1.json": "2a31f94ec5d3ea1f3c16947ca79eeba59a73d20203dba80c6152adde7c58af48",
       "eng/provenance/records/cloud-82-cloud-worker-bundle-r1.json": "bcdb5a612c96ac291cf8390e98c39c4b80619da865b20d58060061f937717e62",
       "eng/provenance/records/cloud-82-cloud-worker-bundle-r2.json": "711131670c488d683ff72c918759c4443e98ba3d30298f503221151c2367ce4c",
-      "eng/provenance/records/cloud-82-cloud-runtime-notices-r2.json": "b2a6f4cbde7389c03bd82b332627d5c16813c1143f89fbee80569c2550f16733"
+      "eng/provenance/records/cloud-82-cloud-runtime-notices-r2.json": "b2a6f4cbde7389c03bd82b332627d5c16813c1143f89fbee80569c2550f16733",
+      "eng/provenance/artifact-profiles/cloud-release-r53.json": "3d07812cf82731a4671413fcd15720ecc3bf26e7474e69dc066bf2783e14a843",
+      "eng/provenance/records/cloud-79-cloud-runtime-notices-r1.json": "a47f89c5f3e76bd35ed49ea873cc0bde17c749dae2829c8cf886dbf0365270bd",
+      "eng/provenance/records/cloud-79-cloud-worker-bundle-r1.json": "cbb80cfcd020a2359ae342f9855a251e6e9b2e95bfffa1daad37a87a3e8d7e82"
     },
     "checks": [
       "locked-restore",
@@ -191,8 +197,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "Actual same-issuer/scoped owner composition and migrated SQLite/Worker transactions are tested. No framework/runtime/provider/dependency changes or new egress. Authentication, full account/provider behavior and OS isolation remain separate actual owners; no success-returning production test double is registered.",
-    "maintenance": "Preserve all immutable accepted receipts, exact coordinates and source closure; future changes require independently reviewed successors. Keep production routes/data and workers.dev protections unchanged.",
+    "runtimeAssessment": "No framework or dependency coordinates change. Actual immutable lifecycle/policy and real bounded named-plan adapters prepare only owner contributions; genuine scoped issuer and stored SQLite deadline compiler are consumed. Current54 deletion/19physical managed and12 lifecycle/163physical Worker/SQLite cases cover errors, cancellation, retry, races, persistence and rollback. Anonymous health remains lazy. CLOUD.17 final effects and actual provider/full-series acceptance remain separate; no fake commits or provider/OS claims.",
+    "maintenance": "Retain exact coordinates, every immutable history blob, original numbered migrations and closed owner/clock/scope authority. New source/closure/artifact/legal changes require independently reviewed immutable successors and applicable CI.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
   },
@@ -1011,7 +1017,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-82-cloud-worker-bundle-r2", "cloud-82-cloud-runtime-notices-r2"],
+  "artifactRecords": ["com-20-cloud-worker-bundle-r2", "com-20-cloud-runtime-notices-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1025,7 +1031,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-82-r2.json",
+  "reviewRecord": "eng/policy/dependency-reviews/com-20-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

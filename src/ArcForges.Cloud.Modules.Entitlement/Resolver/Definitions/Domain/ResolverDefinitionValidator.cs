@@ -112,7 +112,8 @@ internal sealed class ResolverDefinitionValidator : IResolverDefinitionValidator
                 _ => throw new ResolverInputException("The definition combination is invalid."),
             })).ToImmutableArray(), profile.Allowances.Select(d => new AllowanceDefinition(d.Key)).ToImmutableArray(), realmKind switch
             {
-                "official" => false, "selfHosted" => true,
+                "official" => false,
+                "selfHosted" => true,
                 _ => throw new ResolverInputException("The definition realm kind is invalid."),
             });
 

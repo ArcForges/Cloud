@@ -99,6 +99,7 @@ export interface ManifestTable {
   foreignKeys?: ManifestForeignKey[];
   checks?: ManifestCheck[];
   mutability?: ManifestMutability;
+  insertionInvariant?: "deletionLifecycleOriginal";
   fts5?: ManifestFts5;
   /** Created by the runner's bootstrap migration 0000, before any receipt can exist. */
   bootstrap?: boolean;
@@ -172,6 +173,7 @@ export interface PhysicalTable {
     update: "none" | "any" | { columns: string[]; when?: string };
     delete: "none" | "any";
   };
+  insertionInvariant?: "deletionLifecycleOriginal";
   fts5?: ManifestFts5;
   bootstrap: boolean;
 }
@@ -459,6 +461,9 @@ function toPhysicalTable(owner: string, prefix: string, table: ManifestTable): P
       update: table.mutability?.update ?? "any",
       delete: table.mutability?.delete ?? "any",
     },
+    ...(table.insertionInvariant === undefined
+      ? {}
+      : { insertionInvariant: table.insertionInvariant }),
     ...(table.fts5 === undefined ? {} : { fts5: table.fts5 }),
     bootstrap: table.bootstrap === true,
   };
@@ -466,12 +471,97 @@ function toPhysicalTable(owner: string, prefix: string, table: ManifestTable): P
 
 const indexColumnName = (entry: string) => entry.replace(/\s+(?:ASC|DESC)$/iu, "");
 
+/** A single fixed owner invariant; no table or SQL supplied by a marker is executable. */
+function validateInsertionInvariant(table: PhysicalTable): void {
+  if (table.insertionInvariant === undefined) return;
+  const message = `${table.name}: invalid deletion lifecycle insertion invariant`;
+  assert.equal(table.insertionInvariant, "deletionLifecycleOriginal", message);
+  assert.equal(table.owner, "identity", message);
+  assert.equal(table.name, "identity_account_deletion", message);
+  assert.deepEqual(table.primaryKey, ["deletion_id"], message);
+  for (const name of ["deletion_id", "user_id"]) {
+    const column = table.columns.find((entry) => entry.name === name);
+    assert(
+      column &&
+        column.kind === "id" &&
+        column.sqlType === "TEXT" &&
+        !column.nullable &&
+        column.generated === undefined,
+      message,
+    );
+  }
+  const state = table.columns.find((entry) => entry.name === "state");
+  assert(
+    state &&
+      state.kind === "enum" &&
+      state.sqlType === "INTEGER" &&
+      !state.nullable &&
+      state.enumName === "identity.deletion_state" &&
+      state.generated === undefined,
+    message,
+  );
+  const unique = table.indexes.filter((entry) => entry.unique);
+  assert.equal(unique.length, 1, message);
+  const index = unique[0];
+  assert(index && index.name === "ux_identity_account_deletion__user_id", message);
+  assert.deepEqual(index.columns, ["user_id"], message);
+  assert.equal(index.where, '"state" IN (1, 3)', message);
+  assert.equal(table.mutability.delete, "none", message);
+  const update = table.mutability.update;
+  assert(typeof update === "object", message);
+  assert.deepEqual(update.columns, ["state", "cancelled_at", "completed_at", "rev"], message);
+  assert.equal(update.when, 'OLD."state" IN (1, 3)', message);
+}
+
+function validatePreservedInsertion(table: PhysicalTable): void {
+  if (table.mutability.insert === undefined) return;
+  const where = `table ${table.name}`;
+  assert.equal(table.mutability.insert, "preserveExisting", `${where}: insertion mutability`);
+  assert(
+    table.owner === "entitlement" &&
+      [
+        "entitlement_resolver_definition_profile",
+        "entitlement_quota_definition_profile",
+        "entitlement_quota_definition_key",
+      ].includes(table.name),
+    `${where}: preserved insertion is not admitted for this owner and table`,
+  );
+  assert(
+    table.mutability.update === "none" && table.mutability.delete === "none",
+    `${where}: preserved insertion requires a fully immutable row`,
+  );
+  assert(
+    !table.indexes.some((index) => index.unique),
+    `${where}: preserved insertion supports primary-key conflicts only`,
+  );
+}
+
+function validateInsertionStateProfile(
+  table: PhysicalTable,
+  enums: Map<string, ResolvedEnum>,
+): void {
+  if (table.insertionInvariant === undefined) return;
+  assert.deepEqual(
+    enums.get("identity.deletion_state")?.members,
+    [
+      { name: "pending", number: 1 },
+      { name: "cancelled", number: 2 },
+      { name: "purging", number: 3 },
+      { name: "purged", number: 4 },
+    ],
+    `${table.name}: invalid deletion lifecycle state profile`,
+  );
+}
+
 export function validateSchema(schema: PhysicalSchema, partial = false): void {
   const enums = new Map(schema.enums.map((entry) => [entry.name, entry]));
   const tables = new Map(schema.tables.map((entry) => [entry.name, entry]));
   assert.equal(tables.size, schema.tables.length, "manifest: duplicate table name");
   const indexNames = new Set<string>();
   for (const table of schema.tables) {
+    validateInsertionInvariant(table);
+    validatePreservedInsertion(table);
+    validateInsertionStateProfile(table, enums);
     const where = `table ${table.name}`;
     assert(namePattern.test(table.name) && table.name.length <= maxName, `${where}: invalid name`);
     assert(table.columns.length > 0, `${where}: no columns`);
@@ -578,17 +668,6 @@ export function validateSchema(schema: PhysicalSchema, partial = false): void {
       checkNames.add(check.name);
     }
     const update = table.mutability.update;
-    if (table.mutability.insert !== undefined) {
-      assert.equal(table.mutability.insert, "preserveExisting", `${where}: insertion mutability`);
-      assert(
-        update === "none" && table.mutability.delete === "none",
-        `${where}: preserved insertion requires a fully immutable row`,
-      );
-      assert(
-        !table.indexes.some((index) => index.unique),
-        `${where}: preserved insertion supports primary-key conflicts only`,
-      );
-    }
     if (typeof update === "object")
       for (const name of update.columns)
         assert(columns.has(name), `${where}: mutability names unknown column ${name}`);
@@ -676,6 +755,9 @@ function groupChecks(table: PhysicalTable): ManifestCheck[] {
 }
 
 export function tableSql(table: PhysicalTable, enums: Map<string, ResolvedEnum>): string[] {
+  validateInsertionInvariant(table);
+  validatePreservedInsertion(table);
+  validateInsertionStateProfile(table, enums);
   const statements: string[] = [];
   const lines = table.columns.map((column) => columnDefinition(table, column, enums));
   lines.push(
@@ -715,7 +797,13 @@ export function tableSql(table: PhysicalTable, enums: Map<string, ResolvedEnum>)
 }
 
 export function triggerSql(table: PhysicalTable): string[] {
+  validateInsertionInvariant(table);
+  validatePreservedInsertion(table);
   const out: string[] = [];
+  if (table.insertionInvariant === "deletionLifecycleOriginal")
+    out.push(
+      `CREATE TRIGGER "tr_identity_account_deletion__original_insert" BEFORE INSERT ON "identity_account_deletion"\nWHEN EXISTS (SELECT 1 FROM "identity_account_deletion" WHERE "deletion_id" = NEW."deletion_id") OR (NEW."state" IN (1, 3) AND EXISTS (SELECT 1 FROM "identity_account_deletion" WHERE "user_id" = NEW."user_id" AND "state" IN (1, 3)))\nBEGIN\n  SELECT RAISE(ABORT, 'CHECK constraint failed: af_immutable_identity_account_deletion');\nEND`,
+    );
   const message = (kind: string) => `CHECK constraint failed: af_${kind}`;
   if (table.mutability.insert === "preserveExisting") {
     const key = table.primaryKey
