@@ -98,7 +98,7 @@ internal sealed class DeletionLifecycleService(IDeletionTransitionStore store, D
             if (target.Transition == DeletionTransition.BeginPurge && !lifecycle.MayBeginPurge(sampled)) return Refused(IdentityDeletionFailure.NotPending);
             if (target.Transition == DeletionTransition.CompletePurge && !lifecycle.MayCompletePurge(sampled)) return Refused(IdentityDeletionFailure.NotPending);
             var authorization = cancellation ? "deletion-current" : target.Transition == DeletionTransition.BeginPurge ? "deletion-due" : "deletion-purging";
-            PlanValue[] bindings = [T(lifecycle.DeletionId), T(target.RealmId), T(target.UserId), I(lifecycle.RequestedAtMicros), I(lifecycle.GraceEndsAtMicros),
+            PlanValue[] bindings = [T(lifecycle.DeletionId), T(target.RealmId), T(target.UserId), I(lifecycle.RequestedAtMicros),
                 PlanValue.FromText(lifecycle.PolicyVersion), I((long)lifecycle.State)];
             // Expiry fences also bind the captured server sample; due fences use only the actual database clock.
             if (cancellation) bindings = [.. bindings, I(sampled)];

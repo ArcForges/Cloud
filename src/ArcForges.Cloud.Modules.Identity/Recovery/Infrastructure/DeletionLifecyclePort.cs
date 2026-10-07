@@ -78,7 +78,7 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
         var contribution = families.Contribute(familyId, planId,
         [
             new("identity", "authorization", "deletion-current",
-                [T(snapshot.DeletionId), T(realmId), T(userId), I(snapshot.RequestedAtMicros), I(snapshot.GraceEndsAtMicros),
+                [T(snapshot.DeletionId), T(realmId), T(userId), I(snapshot.RequestedAtMicros),
                     PlanValue.FromText(snapshot.PolicyVersion), I((long)DeletionState.Pending), I(sampled)]),
             new("identity", "authorization", "deletion-user", [T(realmId), T(userId), I((long)UserState.PendingDeletion), I(snapshot.RequestedAtMicros), I(snapshot.UserRevision)]),
             new("identity", "revision", "deletion-revision", [T(snapshot.DeletionId), I(snapshot.LifecycleRevision)]),

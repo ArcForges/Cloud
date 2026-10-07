@@ -60,7 +60,7 @@ public sealed class DeletionTransitionTests
         Assert.Equal(Pending, Assert.IsType<DeletionTransitionPreparation>(result.Value).Lifecycle);
         Assert.Equal("families.account-security.cancel-deletion", fixture.Plan);
         Assert.Equal((long)UserState.Suspended, fixture.Items!.Single(item => item.Key == "deletion-user" && item.Class == "record").Arguments[0].AsInt64());
-        Assert.Equal(1_000_100, fixture.Items!.Single(item => item.Key == "deletion-current").Arguments[4].AsInt64());
+        Assert.Equal("original.v1", fixture.Items!.Single(item => item.Key == "deletion-current").Arguments[4].AsText());
         Assert.Empty(fixture.Executor.Calls);
     }
 
@@ -84,7 +84,7 @@ public sealed class DeletionTransitionTests
         Assert.Equal(expected is null, result.Value is not null);
         Assert.Equal(expected is null ? 1 : 0, fixture.Seals);
         if (expected is null)
-            Assert.Equal(transition == DeletionTransition.Cancel ? 8 : 7, fixture.Items!.Single(item => item.Key is "deletion-current" or "deletion-due" or "deletion-purging").Arguments.Count);
+            Assert.Equal(transition == DeletionTransition.Cancel ? 7 : 6, fixture.Items!.Single(item => item.Key is "deletion-current" or "deletion-due" or "deletion-purging").Arguments.Count);
         Assert.Empty(fixture.Executor.Calls);
         // These are request-time preparation checks, not a claim of transaction-time expiry/purge fencing.
     }
@@ -202,7 +202,7 @@ public sealed class DeletionTransitionTests
         Assert.NotNull(result.Contribution);
         Assert.Null(result.Failure);
         Assert.Equal(2, fixture.Items!.Single(item => item.Key == "deletion-revision").Arguments[1].AsInt64());
-        Assert.Equal(1, fixture.Items!.Single(item => item.Key == "deletion-current").Arguments[6].AsInt64());
+        Assert.Equal(1, fixture.Items!.Single(item => item.Key == "deletion-current").Arguments[5].AsInt64());
         Assert.Equal(7, fixture.Items!.Single(item => item.Key == "deletion-user" && item.Class == "authorization").Arguments[4].AsInt64());
         Assert.Single(fixture.Executor.Calls);
         Assert.Equal(PlanAccess.Read, fixture.Executor.Calls[0].Plan.Access);
@@ -297,9 +297,9 @@ public sealed class DeletionTransitionTests
             FamilyPlanDefinition[] plans =
             [
                 PlanFor("request-deletion", [("authorization", "deletion-request-user", "ttii"), ("revision", "deletion-pending-empty", "tii"), ("revision", "deletion-purging-empty", "tii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "tttiitii"), ("record", "deletion-user", "iti")]),
-                PlanFor("cancel-deletion", [("authorization", "deletion-current", "tttiitii"), ("authorization", "deletion-user", "ttiii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "iti"), ("record", "deletion-user", "iti")]),
-                PlanFor("begin-deletion-purge", [("authorization", "deletion-due", "tttiiti"), ("authorization", "deletion-user", "ttiii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "ti")]),
-                PlanFor("complete-deletion-purge", [("authorization", "deletion-purging", "tttiiti"), ("authorization", "deletion-user", "ttiii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "iti"), ("record", "deletion-user", "ti")]),
+                PlanFor("cancel-deletion", [("authorization", "deletion-current", "tttitii"), ("authorization", "deletion-user", "ttiii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "iti"), ("record", "deletion-user", "iti")]),
+                PlanFor("begin-deletion-purge", [("authorization", "deletion-due", "tttiti"), ("authorization", "deletion-user", "ttiii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "ti")]),
+                PlanFor("complete-deletion-purge", [("authorization", "deletion-purging", "tttiti"), ("authorization", "deletion-user", "ttiii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "iti"), ("record", "deletion-user", "ti")]),
             ];
             Factory = new ModuleFamilyPortFactory(Executor, 0, new Clock(), catalog, plans);
             port = Factory.For(IdentityModule.Instance.Descriptor);
