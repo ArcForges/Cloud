@@ -541,6 +541,7 @@
     },
     {
       "name": "identity_account_deletion",
+      "insertionInvariant": "deletionLifecycleOriginal",
       "model": "01 section 3 identity.account_deletion",
       "columns": [
         {
