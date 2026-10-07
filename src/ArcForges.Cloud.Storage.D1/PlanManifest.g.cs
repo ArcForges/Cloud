@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "ee8e24e2bedd90163e8c501bb641a8a3018ae758cee86b2e38adc8eebc2b4194";
+    public const string Hash = "2c54de32ab2b2b1d39c294224e7a610c169da00dc8ea29f9bff9d841a3c7a345";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity

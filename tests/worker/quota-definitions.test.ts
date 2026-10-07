@@ -74,6 +74,42 @@ const args = (realm: string, version: string, unit = 1, mode = 1, combination = 
   ];
 };
 
+test("recursive-trigger-disabled replacement cannot change accepted profile or stable key provenance", async () => {
+  const db = database();
+  const realm = uuid();
+  try {
+    assert.equal(
+      (await execute(db, "entitlement.quota-definition-publish", args(realm, "original"), realm))
+        .ok,
+      true,
+    );
+    db.database.exec("PRAGMA recursive_triggers=OFF");
+    assert.throws(
+      () =>
+        db.database.exec(`INSERT OR REPLACE INTO entitlement_quota_definition_profile
+      SELECT realm_id, definitions_version, profile_hash, canonical_profile, artifact_id, artifact_hash, artifact_length, created_at+1
+      FROM entitlement_quota_definition_profile`),
+      /af_immutable_entitlement_quota_definition_profile/u,
+    );
+    assert.throws(
+      () =>
+        db.database.exec(`INSERT OR REPLACE INTO entitlement_quota_definition_key
+      SELECT realm_id, quota_key, unit, mode, combination, 'different-first-version'
+      FROM entitlement_quota_definition_key`),
+      /af_immutable_entitlement_quota_definition_key/u,
+    );
+    assert.equal(
+      db.database
+        .prepare("SELECT first_definitions_version FROM entitlement_quota_definition_key")
+        .get()?.first_definitions_version,
+      "original",
+    );
+    assert.equal(count(db, "platform_change_archive"), 1);
+  } finally {
+    db.database.close();
+  }
+});
+
 test("actual atomic quota publication retains indexed first meanings and refuses unit/mode/combination drift", async () => {
   const db = database();
   const realm = uuid();
