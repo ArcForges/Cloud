@@ -8,6 +8,12 @@ internal sealed class DeletionPolicy
 {
     private readonly Lazy<DeletionPolicyCapture> capture;
 
+    public DeletionPolicy(IdentityDeletionPolicyInput input)
+        : this(key => key == "AF_IDENTITY_DELETION_POLICY_VERSION" ? input.PolicyVersion : input.GraceSeconds)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+    }
+
     public DeletionPolicy(Func<string, string?> environment)
     {
         ArgumentNullException.ThrowIfNull(environment);

@@ -16,6 +16,14 @@ public sealed class EvaluatedRepositoryGate
     /// <summary>The public Cloud API and the real test methods that exercise each member. A new public member fails RP-10 until mapped here.</summary>
     private static readonly (string Api, string Method, string TestType, string[] Tests)[] ApiTests =
     [
+        ("ArcForges.Cloud.Modules.IIdentityDeletionLifecyclePort", "ReadAsync", "ArcForges.Cloud.Tests.Deletion.DeletionReaderTests",
+            ["ExistingDisclosureIsIndependentOfNewRequestConfiguration", "MalformedShapeAndEnumOverflowNeverBecomeAuthority", "SampleAfterReadsEnforcesExactDeadlineAndCurrentUserState", "RetryIsBoundedAndCancellationStopsBeforeAnotherDispatch"]),
+        ("ArcForges.Cloud.Modules.IIdentityDeletionLifecyclePort", "PrepareAsync", "ArcForges.Cloud.Tests.Deletion.DeletionTransitionTests",
+            ["PersistedDeadlineCapabilityUsesActualOwnerFactoryAndFreshRevisionWithoutWriting"]),
+        .. new[] { "Available", "Refused" }.Select(member => ("ArcForges.Cloud.Modules.IdentityDeletionResult", member,
+            "ArcForges.Cloud.Tests.Deletion.DeletionTransitionTests", new[] { "PublicResultContractsRejectNullOrUndefinedAndMaintainExclusiveOutcomes" })),
+        .. new[] { "Available", "Refused" }.Select(member => ("ArcForges.Cloud.Modules.IdentityDeletionFamilyResult", member,
+            "ArcForges.Cloud.Tests.Deletion.DeletionTransitionTests", new[] { "PublicResultContractsRejectNullOrUndefinedAndMaintainExclusiveOutcomes" })),
         ("ArcForges.Cloud.Modules.IRealmAuthorityFamilyPort", "PrepareAsync", "ArcForges.Cloud.Tests.Platform.RecoveryFamilyGuardTests",
             ["RealReaderAndSameIssuerComposeExactRecoveryArgumentsWithoutPlatformPrivilege", "InvalidCapabilitiesNeverReadAReceiptOrMutate", "UnavailableStaleOrUnregisteredIssuerCannotProduceASuccessfulCapability", "CancellationBeforePrepareNeverCallsStorage"]),
         .. new[] { "Available", "Refused" }.Select(member => ("ArcForges.Cloud.Modules.RealmAuthorityFamilyResult", member,

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using ArcForges.Cloud.Modules.Identity.Core.Domain;
+using ArcForges.Cloud.Modules.Identity.Recovery.Application;
 using ArcForges.Cloud.Modules.Identity.Recovery.Domain;
 
 namespace ArcForges.Cloud.Modules.Identity.Recovery.Infrastructure;
 
 /// <summary>Identity owns the actual row read and contribution. A new-request policy is deliberately not a dependency.</summary>
 internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamilyPort families,
-    IRealmAuthorityPort authority, TimeProvider time) : IIdentityDeletionLifecyclePort
+    IRealmAuthorityPort authority, TimeProvider time) : IIdentityDeletionLifecyclePort, IDeletionTransitionStore
 {
     public async Task<IdentityDeletionResult> ReadAsync(Guid realmId, Guid userId, CancellationToken cancellationToken)
     {
@@ -26,20 +27,7 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
         var canonicalRealm = realmId.ToString("D");
         var read = new ModulePlanRead("identity.deletion-current", canonicalRealm,
             [PlanValue.FromText(canonicalRealm), PlanValue.FromText(userId.ToString("D"))]);
-        ModulePlanOutcome result;
-        for (var attempt = 0; ; attempt++)
-        {
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2), time);
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
-            try { result = await plans.ReadAsync(read, linked.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
-            {
-                result = ModulePlanOutcome.Of(ModulePlanStatus.Unavailable);
-            }
-            cancellationToken.ThrowIfCancellationRequested();
-            if (result.Status is not (ModulePlanStatus.Unavailable or ModulePlanStatus.UnknownOutcome) || attempt >= 2) break;
-            await Task.Delay(TimeSpan.FromMilliseconds(10 << attempt), time, cancellationToken).ConfigureAwait(false);
-        }
+        var result = await Read(read, cancellationToken).ConfigureAwait(false);
         if (result.Status != ModulePlanStatus.Succeeded) return IdentityDeletionResult.Refused(result.Status switch
         {
             ModulePlanStatus.Unavailable or ModulePlanStatus.UnknownOutcome => IdentityDeletionFailure.Unavailable,
@@ -105,4 +93,75 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
 
     private static PlanValue T(Guid value) => PlanValue.FromText(value.ToString("D"));
     private static PlanValue I(long value) => PlanValue.FromInt64(value);
+
+    public async Task<DeletionStoredResult<DeletionUserAuthority>> UserAsync(Guid realmId, Guid userId, CancellationToken cancellationToken)
+    {
+        var result = await Read(new("identity.deletion-user", realmId.ToString("D"), [T(realmId), T(userId)]), cancellationToken).ConfigureAwait(false);
+        if (Failure(result.Status) is { } failure) return new(null, failure);
+        if (result.Rows.Count == 0) return new(null, IdentityDeletionFailure.StaleAuthority);
+        if (result.Rows.Count != 1 || result.Rows[0].Count != 5) return new(null, IdentityDeletionFailure.Defect);
+        try
+        {
+            var row = result.Rows[0];
+            var state = row[2].AsInt64();
+            var rev = row[4].AsInt64();
+            if (Id(row[0]) != realmId || Id(row[1]) != userId || state is < 1 or > 5 || rev <= 0) return new(null, IdentityDeletionFailure.Defect);
+            return new(new((UserState)state, rev, row[3].AsOptionalInt64()), null);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or FormatException or OverflowException)
+        {
+            return new(null, IdentityDeletionFailure.Defect);
+        }
+    }
+
+    public async Task<DeletionStoredResult<StoredDeletionAuthority>> LifecycleAsync(Guid realmId, Guid userId, Guid deletionId, CancellationToken cancellationToken)
+    {
+        var result = await Read(new("identity.deletion-state", realmId.ToString("D"), [T(realmId), T(userId), T(deletionId)]), cancellationToken).ConfigureAwait(false);
+        if (Failure(result.Status) is { } failure) return new(null, failure);
+        if (result.Rows.Count == 0) return new(null, IdentityDeletionFailure.NotPending);
+        if (result.Rows.Count != 1 || result.Rows[0].Count != 14) return new(null, IdentityDeletionFailure.Defect);
+        try
+        {
+            var row = result.Rows[0];
+            var lifecycle = new DeletionLifecycle(Id(row[0]), Id(row[1]), Id(row[2]), row[3].AsInt64(), row[4].AsInt64(), row[5].AsText(),
+                row[6].AsInt64(), (UserState)checked((int)row[7].AsInt64()), (DeletionState)checked((int)row[8].AsInt64()),
+                row[9].AsOptionalInt64(), row[10].AsOptionalInt64(), row[11].AsInt64());
+            var state = row[12].AsInt64();
+            var revision = row[13].AsInt64();
+            if (!lifecycle.HasValidShape() || lifecycle.DeletionId != deletionId || lifecycle.RealmId != realmId || lifecycle.UserId != userId
+                || state is < 1 or > 5 || revision <= 0) return new(null, IdentityDeletionFailure.Defect);
+            return new(new(lifecycle, (UserState)state, revision), null);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or FormatException or OverflowException)
+        {
+            return new(null, IdentityDeletionFailure.Defect);
+        }
+    }
+
+    private async Task<ModulePlanOutcome> Read(ModulePlanRead read, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        for (var attempt = 0; ; attempt++)
+        {
+            ModulePlanOutcome result;
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2), time);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+            try { result = await plans.ReadAsync(read, linked.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+            {
+                result = ModulePlanOutcome.Of(ModulePlanStatus.Unavailable);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result.Status is not (ModulePlanStatus.Unavailable or ModulePlanStatus.UnknownOutcome) || attempt >= 2) return result;
+            await Task.Delay(TimeSpan.FromMilliseconds(10 << attempt), time, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static IdentityDeletionFailure? Failure(ModulePlanStatus status) => status switch
+    {
+        ModulePlanStatus.Succeeded => null,
+        ModulePlanStatus.Unavailable or ModulePlanStatus.UnknownOutcome => IdentityDeletionFailure.Unavailable,
+        ModulePlanStatus.StaleGeneration or ModulePlanStatus.GuardRefused => IdentityDeletionFailure.StaleAuthority,
+        _ => IdentityDeletionFailure.Defect,
+    };
 }

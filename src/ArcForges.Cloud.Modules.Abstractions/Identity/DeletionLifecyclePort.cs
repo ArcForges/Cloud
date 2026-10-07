@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 namespace ArcForges.Cloud.Modules;
 
+/// <summary>Raw required deployment settings for new requests only; null remains unavailable, never a default duration.</summary>
+public sealed record IdentityDeletionPolicyInput(string? PolicyVersion, string? GraceSeconds);
+
 /// <summary>The original permitted user state, captured before deletion; cancellation never upgrades it.</summary>
 public enum IdentityDeletionPreviousState { Active = 1, Restricted = 2, Suspended = 3 }
 

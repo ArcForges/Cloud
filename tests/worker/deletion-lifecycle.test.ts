@@ -7,6 +7,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { defaultMigrationsDirectory, loadCatalog } from "../../eng/migrations/catalog.ts";
+import { commitDatabase, execute } from "./support/commit-support.ts";
+import { txt } from "./support/plan-calls.ts";
 
 const realm = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const user = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -212,5 +214,147 @@ test("failed guarded transition rolls back both actual lifecycle and user state"
     );
   } finally {
     db.close();
+  }
+});
+
+test("actual registered Worker read is realm-scoped, typed, fresh and side-effect free under concurrent calls", async () => {
+  const db = commitDatabase();
+  try {
+    db.database
+      .prepare("INSERT INTO identity_user VALUES (?, ?, ?, 4, 0, 100, 7)")
+      .run(user, realm, "Original");
+    insert(db.database);
+    const read = () => execute(db, "identity.deletion-current", [[txt(realm), txt(user)]], realm);
+    const outcomes = await Promise.all(Array.from({ length: 12 }, read));
+    for (const outcome of outcomes) {
+      assert(outcome.ok);
+      assert.deepEqual(outcome.rows, [
+        [
+          deletion,
+          realm,
+          user,
+          "100",
+          "1000100",
+          "policy.v1",
+          "1",
+          "3",
+          "1",
+          "null",
+          "null",
+          "1",
+          "4",
+          "7",
+        ],
+      ]);
+    }
+    assert.equal(db.database.prepare("SELECT count(*) AS n FROM platform_command").get()?.n, 0);
+    db.database.exec("UPDATE identity_user SET rev=8");
+    const fresh = await read();
+    assert(fresh.ok);
+    assert.equal(fresh.rows[0]?.[13], "8");
+    db.database.exec("UPDATE identity_account_deletion SET state=3, rev=rev+1");
+    const purging = await read();
+    assert(purging.ok);
+    assert.equal(purging.rows[0]?.[8], "3");
+    assert.equal(purging.rows[0]?.[11], "2");
+  } finally {
+    db.database.close();
+  }
+});
+
+test("actual Worker refuses mismatched ownerScope and other-user or realm reads remain empty", async () => {
+  const db = commitDatabase();
+  try {
+    db.database
+      .prepare("INSERT INTO identity_user VALUES (?, ?, ?, 4, 0, 100, 7)")
+      .run(user, realm, "Original");
+    insert(db.database);
+    assert.deepEqual(
+      await execute(db, "identity.deletion-current", [[txt(realm), txt(user)]], nextDeletion),
+      { ok: false, failure: "invalidPlan" },
+    );
+    const anotherUser = await execute(
+      db,
+      "identity.deletion-current",
+      [[txt(realm), txt(nextDeletion)]],
+      realm,
+    );
+    assert(anotherUser.ok);
+    assert.deepEqual(anotherUser.rows, []);
+    const anotherRealm = await execute(
+      db,
+      "identity.deletion-current",
+      [[txt(nextDeletion), txt(user)]],
+      nextDeletion,
+    );
+    assert(anotherRealm.ok);
+    assert.deepEqual(anotherRealm.rows, []);
+  } finally {
+    db.database.close();
+  }
+});
+
+test("actual transition reads capture current user and immutable cancelled lifecycle without granting authority", async () => {
+  const db = commitDatabase();
+  try {
+    db.database
+      .prepare("INSERT INTO identity_user VALUES (?, ?, ?, 3, 0, NULL, 9)")
+      .run(user, realm, "Original");
+    insert(db.database);
+    db.database
+      .prepare(
+        "UPDATE identity_account_deletion SET state=2, cancelled_at=500, rev=rev+1 WHERE deletion_id=?",
+      )
+      .run(deletion);
+    const currentUser = await execute(
+      db,
+      "identity.deletion-user",
+      [[txt(realm), txt(user)]],
+      realm,
+    );
+    assert(currentUser.ok);
+    assert.deepEqual(currentUser.rows, [[realm, user, "3", "null", "9"]]);
+    const lifecycle = await execute(
+      db,
+      "identity.deletion-state",
+      [[txt(realm), txt(user), txt(deletion)]],
+      realm,
+    );
+    assert(lifecycle.ok);
+    assert.equal(lifecycle.rows.length, 1);
+    assert.deepEqual(lifecycle.rows[0].slice(7), ["3", "2", "500", "null", "2", "3", "9"]);
+    db.database.prepare("UPDATE identity_user SET rev=rev+1 WHERE user_id=?").run(user);
+    const reread = await execute(
+      db,
+      "identity.deletion-state",
+      [[txt(realm), txt(user), txt(deletion)]],
+      realm,
+    );
+    assert(reread.ok);
+    assert.deepEqual(reread.rows[0][13], "10");
+    assert.deepEqual(
+      await execute(db, "identity.deletion-user", [[txt(realm), txt(user)]], nextDeletion),
+      { ok: false, failure: "invalidPlan" },
+    );
+    assert.deepEqual(
+      await execute(
+        db,
+        "identity.deletion-state",
+        [[txt(realm), txt(user), txt(deletion)]],
+        nextDeletion,
+      ),
+      { ok: false, failure: "invalidPlan" },
+    );
+    const foreign = await execute(
+      db,
+      "identity.deletion-state",
+      [[txt(realm), txt(nextDeletion), txt(deletion)]],
+      realm,
+    );
+    assert(foreign.ok);
+    assert.deepEqual(foreign.rows, []);
+    assert.equal(db.database.prepare("SELECT COUNT(*) AS n FROM platform_command").get()?.n, 0);
+  } finally {
+    db.database.close();
   }
 });

@@ -10,7 +10,7 @@ boundaries are described in [storage plans](storage-plans.md).
 
 | Path                                                          | Content                                                                                                                                            |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/ArcForges.Cloud.Storage.D1/Physical/manifest/*.json`     | The checked-in physical manifest: one file per owner (19 modules and `platform`) and the closed enum registry `enums.json`. 161 tables.            |
+| `src/ArcForges.Cloud.Storage.D1/Physical/manifest/*.json`     | The checked-in physical manifest: one file per owner (19 modules and `platform`) and the closed enum registry `enums.json`. 162 tables.            |
 | `src/ArcForges.Cloud.Storage.D1/Physical/PhysicalSchema.g.cs` | Generated C# column maps, enum registry, manifest hash and migration-lock identity.                                                                |
 | `src/ArcForges.Cloud.Storage.D1/Physical/*.cs`                | The typed exact bind/result adapters: `ColumnCodec`, `PhysicalValue`, `RowShape`, `ExactOrderBytes`, `Fts5Query`, `SchemaCompatibility`.           |
 | `src/ArcForges.Cloud.Storage.D1/Migrations/`                  | The numbered, checksum-locked migrations (`NNNN_<module>__<slug>.sql`), `migrations.lock.json` and the `pending/` folder of unnumbered migrations. |
@@ -58,6 +58,8 @@ records and the sort-key columns of any table that a module orders by an exact d
 ([receipts and outbox](d1-receipts-outbox.md)). The cloud `search_retrieval_chunk` has no vector column: embeddings live in Vectorize.
 
 COM.16 adds three Entitlement-owned append-only records that the resolver reads and model 01 now lists (`entitlement_definitions_activation`, `entitlement_workspace_status_fact`, `entitlement_feature_release`; migration 0024), so the manifest holds 161 tables (158 before, counted from `Physical/manifest/*.json`). The `entitlement_snapshot` json columns hold the whole resolver output, and the `entitlement_grant.reason` column and the `entitlement_revision` fence were already in the manifest ([entitlement resolver](entitlement-resolver.md#the-grant-port-and-the-durable-store)).
+
+CLOUD.79 adds `identity_account_deletion` in the forward-only migration `0025_identity__deletion-lifecycle.sql`. The original request time, grace deadline, policy version, positive grace duration and previous permitted user state are immutable. A partial unique index permits one Pending/Purging lifecycle per user; terminal rows remain immutable history. Exact checked integer arithmetic and state-specific terminal timestamps are enforced by SQLite. Actual reads disclose the stored deadline without resolving current new-request policy. Complete request/cancel/purge transactions remain CLOUD.17 composition; component SQLite checks do not establish deployed provider acceptance.
 
 ## Typed exact adapters (C#)
 
