@@ -81,7 +81,7 @@ test("checked integer duration and exact terminal fact constraints refuse malfor
     const statement = db.prepare(
       "INSERT INTO identity_account_deletion VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
     );
-    const invalid = [
+    const invalid: [number, number, number, number, number, number | null, number | null][] = [
       [requested, deadline + 1, 1, 3, 1, null, null],
       [requested, deadline, 0, 3, 1, null, null],
       [requested, deadline, 1, 4, 1, null, null],
@@ -323,6 +323,7 @@ test("actual transition reads capture current user and immutable cancelled lifec
     );
     assert(lifecycle.ok);
     assert.equal(lifecycle.rows.length, 1);
+    assert(lifecycle.rows[0]);
     assert.deepEqual(lifecycle.rows[0].slice(7), ["3", "2", "500", "null", "2", "3", "9", "null"]);
     db.database.prepare("UPDATE identity_user SET rev=rev+1 WHERE user_id=?").run(user);
     const reread = await execute(
@@ -332,6 +333,7 @@ test("actual transition reads capture current user and immutable cancelled lifec
       realm,
     );
     assert(reread.ok);
+    assert(reread.rows[0]);
     assert.deepEqual(reread.rows[0][13], "10");
     assert.deepEqual(
       await execute(db, "identity.deletion-user", [[txt(realm), txt(user)]], nextDeletion),
