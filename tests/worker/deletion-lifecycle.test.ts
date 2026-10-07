@@ -343,7 +343,7 @@ test("purge records are not completed before deadline and preserve original disc
   try {
     insert(db);
     db.exec("UPDATE identity_account_deletion SET state=3, rev=rev+1");
-    assert.throws(() => insert(db, nextDeletion), /UNIQUE/);
+    assert.throws(() => insert(db, nextDeletion), /af_immutable_identity_account_deletion/);
     assert.throws(
       () =>
         db
