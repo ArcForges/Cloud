@@ -35,8 +35,10 @@ internal sealed class QuotaDefinitionService(IQuotaDefinitionStore store, IQuota
             || !QuotaDefinitionValidator.Version(approved.ArtifactId) || approved.RealmKind is not ("official" or "selfHosted")
             || approved.ResolverDefinitions.IsDefault || approved.ResolverDefinitions.Length > QuotaDefinitionValidator.MaximumDefinitions) return new(QuotaDefinitionStatus.Denied);
         var requestHash = RequestHash(request);
-        var receipt = await ReplayAsync(request, requestHash, cancellationToken).ConfigureAwait(false);
+        var receipt = await ReplayAsync(request, approved, requestHash, cancellationToken).ConfigureAwait(false);
         if (receipt.Status != QuotaDefinitionStatus.NotFound) return receipt;
+        var eligibility = await EligibilityAsync(approved, cancellationToken).ConfigureAwait(false);
+        if (eligibility != QuotaDefinitionStatus.Succeeded) return new(eligibility);
         var definitionSet = await resolver.ReadAsync(request.RealmId, approved.DefinitionsVersion, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (definitionSet.Status != QuotaDefinitionStatus.Succeeded || definitionSet.Value is not { } expected)
@@ -51,9 +53,12 @@ internal sealed class QuotaDefinitionService(IQuotaDefinitionStore store, IQuota
         var validation = validator.Validate(bytes, approved.DefinitionsVersion, expected.Quotas, cancellationToken);
         if (validation.Status != QuotaDefinitionStatus.Succeeded || validation.Profile is not { } profile) return new(validation.Status == QuotaDefinitionStatus.Succeeded ? QuotaDefinitionStatus.Defect : validation.Status);
         if (profile.Hash != approved.ArtifactHash) return new(QuotaDefinitionStatus.Conflict);
+        var publicationInstant = Now();
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            var outcome = await store.PublishAsync(request, approved, profile, requestHash, Now(), cancellationToken).ConfigureAwait(false);
+            eligibility = await EligibilityAsync(approved, cancellationToken).ConfigureAwait(false);
+            if (eligibility != QuotaDefinitionStatus.Succeeded) return new(eligibility);
+            var outcome = await store.PublishAsync(request, approved, profile, requestHash, publicationInstant, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             var status = QuotaDefinitionOutcomes.Status(outcome.Status);
             if (status == QuotaDefinitionStatus.Succeeded)
@@ -64,7 +69,7 @@ internal sealed class QuotaDefinitionService(IQuotaDefinitionStore store, IQuota
             }
             if (status is not (QuotaDefinitionStatus.Replayed or QuotaDefinitionStatus.UnknownOutcome or QuotaDefinitionStatus.Unavailable)) return new(status);
             // A lost response may have committed. Inspect the retained receipt before ever resending the identical command.
-            receipt = await ReplayAsync(request, requestHash, cancellationToken).ConfigureAwait(false);
+            receipt = await ReplayAsync(request, approved, requestHash, cancellationToken).ConfigureAwait(false);
             if (receipt.Status != QuotaDefinitionStatus.NotFound)
                 return status == QuotaDefinitionStatus.UnknownOutcome && receipt.Status == QuotaDefinitionStatus.Unavailable
                     ? new(QuotaDefinitionStatus.UnknownOutcome) : receipt;
@@ -75,7 +80,36 @@ internal sealed class QuotaDefinitionService(IQuotaDefinitionStore store, IQuota
         throw new InvalidOperationException("Bounded quota publication loop escaped.");
     }
 
-    private async Task<QuotaDefinitionResult> ReplayAsync(QuotaDefinitionPublishRequest request, string hash, CancellationToken cancellationToken)
+    private async Task<QuotaDefinitionStatus> EligibilityAsync(ApprovedQuotaConfiguration approved, CancellationToken cancellationToken)
+    {
+        var current = await configurations!.ReadCurrentAsync(approved.RealmId, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (current.Status != QuotaDefinitionStatus.Succeeded || current.Value is not { } head)
+            return current.Status is QuotaDefinitionStatus.NotFound or QuotaDefinitionStatus.UnknownOutcome ? QuotaDefinitionStatus.Unavailable
+                : current.Status == QuotaDefinitionStatus.Succeeded ? QuotaDefinitionStatus.Defect : current.Status;
+        if (head.RealmId != approved.RealmId || head.ConfigurationRevisionId == Guid.Empty || !Hash(head.DocumentHash)) return QuotaDefinitionStatus.Defect;
+        if (SameAssociation(head, approved)) return QuotaDefinitionStatus.Succeeded;
+        if (head.ConfigurationRevisionId == approved.ConfigurationRevisionId && head.DocumentHash == approved.DocumentHash) return QuotaDefinitionStatus.Defect;
+        var retained = await store.ReadAsync(approved.RealmId, approved.DefinitionsVersion, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (retained.Status == QuotaDefinitionStatus.NotFound) return QuotaDefinitionStatus.Stale;
+        if (retained.Status != QuotaDefinitionStatus.Succeeded || retained.Value is not { } accepted)
+            return retained.Status == QuotaDefinitionStatus.UnknownOutcome ? QuotaDefinitionStatus.Unavailable
+                : retained.Status == QuotaDefinitionStatus.Succeeded ? QuotaDefinitionStatus.Defect : retained.Status;
+        return Matches(approved, accepted) ? QuotaDefinitionStatus.Succeeded : QuotaDefinitionStatus.Stale;
+    }
+
+    private static bool SameAssociation(ApprovedQuotaConfiguration a, ApprovedQuotaConfiguration b)
+        => a.RealmId == b.RealmId && a.ConfigurationRevisionId == b.ConfigurationRevisionId && a.DocumentHash == b.DocumentHash
+            && a.ArtifactId == b.ArtifactId && a.ArtifactProfile == b.ArtifactProfile && a.ArtifactHash == b.ArtifactHash
+            && a.VerifiedLength == b.VerifiedLength && a.DefinitionsVersion == b.DefinitionsVersion && a.RealmKind == b.RealmKind
+            && a.PublisherRef == b.PublisherRef && !a.ResolverDefinitions.IsDefault && a.ResolverDefinitions.SequenceEqual(b.ResolverDefinitions);
+    private static bool Matches(ApprovedQuotaConfiguration approved, StoredQuotaSemanticProfile stored)
+        => stored.RealmId == approved.RealmId && stored.Profile.DefinitionsVersion == approved.DefinitionsVersion
+            && stored.Profile.Hash == approved.ArtifactHash && stored.ArtifactId == approved.ArtifactId && stored.ArtifactHash == approved.ArtifactHash
+            && stored.ArtifactLength == approved.VerifiedLength && stored.Profile.CanonicalBytes.Length == approved.VerifiedLength;
+
+    private async Task<QuotaDefinitionResult> ReplayAsync(QuotaDefinitionPublishRequest request, ApprovedQuotaConfiguration approved, string hash, CancellationToken cancellationToken)
     {
         var receipt = await store.ReceiptAsync(request, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
@@ -90,7 +124,8 @@ internal sealed class QuotaDefinitionService(IQuotaDefinitionStore store, IQuota
             if (root.GetProperty("realmId").GetString() != request.RealmId.ToString("D")) return new(QuotaDefinitionStatus.Defect);
             var read = await store.ReadAsync(request.RealmId, root.GetProperty("definitionsVersion").GetString()!, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            if (read.Status != QuotaDefinitionStatus.Succeeded || read.Value is not { } profile || profile.Profile.Hash != root.GetProperty("hash").GetString())
+            if (read.Status != QuotaDefinitionStatus.Succeeded || read.Value is not { } profile || profile.Profile.Hash != root.GetProperty("hash").GetString()
+                || !Matches(approved, profile))
                 return new(read.Status is QuotaDefinitionStatus.Unavailable ? QuotaDefinitionStatus.Unavailable : QuotaDefinitionStatus.Defect);
             return new(QuotaDefinitionStatus.Replayed, profile);
         }

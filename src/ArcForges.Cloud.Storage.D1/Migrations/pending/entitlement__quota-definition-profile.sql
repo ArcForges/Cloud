@@ -11,6 +11,12 @@ CREATE TABLE "entitlement_quota_definition_key" (
   CONSTRAINT "ck_entitlement_quota_definition_key__first_version_nonempty" CHECK (length("first_definitions_version") > 0)
 ) STRICT;
 
+CREATE TRIGGER "tr_entitlement_quota_definition_key__immutable_insert" BEFORE INSERT ON "entitlement_quota_definition_key"
+WHEN EXISTS (SELECT 1 FROM "entitlement_quota_definition_key" existing WHERE existing."realm_id" IS NEW."realm_id" AND existing."quota_key" IS NEW."quota_key")
+BEGIN
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM "entitlement_quota_definition_key" existing WHERE existing."realm_id" IS NEW."realm_id" AND existing."quota_key" IS NEW."quota_key" AND existing."realm_id" IS NEW."realm_id" AND existing."quota_key" IS NEW."quota_key" AND existing."unit" IS NEW."unit" AND existing."mode" IS NEW."mode" AND existing."combination" IS NEW."combination" AND existing."first_definitions_version" IS NEW."first_definitions_version") THEN RAISE(IGNORE) ELSE RAISE(ABORT, 'CHECK constraint failed: af_immutable_entitlement_quota_definition_key') END;
+END;
+
 CREATE TRIGGER "tr_entitlement_quota_definition_key__immutable_update" BEFORE UPDATE ON "entitlement_quota_definition_key"
 BEGIN
   SELECT RAISE(ABORT, 'CHECK constraint failed: af_immutable_entitlement_quota_definition_key');
@@ -36,6 +42,12 @@ CREATE TABLE "entitlement_quota_definition_profile" (
   CONSTRAINT "ck_entitlement_quota_definition_profile__artifact_length" CHECK ("artifact_length" BETWEEN 2 AND 65536 AND length(CAST("canonical_profile" AS BLOB)) = "artifact_length"),
   CONSTRAINT "ck_entitlement_quota_definition_profile__same_content_hash" CHECK ("profile_hash" = "artifact_hash")
 ) STRICT;
+
+CREATE TRIGGER "tr_entitlement_quota_definition_profile__immutable_insert" BEFORE INSERT ON "entitlement_quota_definition_profile"
+WHEN EXISTS (SELECT 1 FROM "entitlement_quota_definition_profile" existing WHERE existing."realm_id" IS NEW."realm_id" AND existing."definitions_version" IS NEW."definitions_version")
+BEGIN
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM "entitlement_quota_definition_profile" existing WHERE existing."realm_id" IS NEW."realm_id" AND existing."definitions_version" IS NEW."definitions_version" AND existing."realm_id" IS NEW."realm_id" AND existing."definitions_version" IS NEW."definitions_version" AND existing."profile_hash" IS NEW."profile_hash" AND existing."canonical_profile" IS NEW."canonical_profile" AND existing."artifact_id" IS NEW."artifact_id" AND existing."artifact_hash" IS NEW."artifact_hash" AND existing."artifact_length" IS NEW."artifact_length" AND existing."created_at" IS NEW."created_at") THEN RAISE(IGNORE) ELSE RAISE(ABORT, 'CHECK constraint failed: af_immutable_entitlement_quota_definition_profile') END;
+END;
 
 CREATE TRIGGER "tr_entitlement_quota_definition_profile__immutable_update" BEFORE UPDATE ON "entitlement_quota_definition_profile"
 BEGIN

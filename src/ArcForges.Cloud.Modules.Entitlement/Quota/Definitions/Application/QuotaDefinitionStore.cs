@@ -6,6 +6,7 @@ internal sealed record QuotaDefinitionReceiptResult(QuotaDefinitionStatus Status
 internal interface IQuotaDefinitionStore
 {
     Task<QuotaDefinitionResult> ReadAsync(Guid realmId, string version, CancellationToken cancellationToken);
+    Task<QuotaDefinitionStatus> CheckAsync(Guid realmId, QuotaSemanticProfile profile, CancellationToken cancellationToken);
     Task<QuotaDefinitionReceiptResult> ReceiptAsync(QuotaDefinitionPublishRequest request, CancellationToken cancellationToken);
     Task<ModulePlanOutcome> PublishAsync(QuotaDefinitionPublishRequest request, ApprovedQuotaConfiguration approved,
         QuotaSemanticProfile profile, string requestHash, long nowMicros, CancellationToken cancellationToken);

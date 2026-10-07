@@ -8,7 +8,7 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "9d90ba851c642532b4aa5a47c01fd13cabba9418ea03fb250c036ca9cbee7a70";
+    public const string ManifestHash = "b03e924fa6bf3c46ea98e52d42ea9dd7cc73eb4dbbeae096ef601ab9a18d9d01";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
     public const int HighestMigration = 24;

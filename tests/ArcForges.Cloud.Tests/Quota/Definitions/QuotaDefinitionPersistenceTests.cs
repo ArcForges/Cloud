@@ -15,6 +15,57 @@ namespace ArcForges.Cloud.Tests.QuotaDefinitions;
 public sealed class QuotaDefinitionPersistenceTests
 {
     [Fact]
+    public async Task SupersededUnpublishedAssociationCannotCreateAnUnacceptedProfile()
+    {
+        using var h = await Harness.Create();
+        var obsolete = h.Define("old", QuotaDefinitionUnit.Bytes);
+        var old = h.Authority.Approved!;
+        h.Define("current", QuotaDefinitionUnit.Bytes);
+        var authority = new Authority { Approved = old, Current = h.Authority.Approved };
+        Assert.Equal(QuotaDefinitionStatus.Stale, (await h.Service(authority: authority).PublishAsync(obsolete, T.Ct)).Status);
+        Assert.Equal(0, h.Artifacts.Reads);
+        Assert.Equal(0, await h.Count("platform_command"));
+        Assert.Equal(0, await h.Count("entitlement_quota_definition_profile"));
+    }
+
+    [Fact]
+    public async Task AcceptedHistoricalRecoveryBindsExactRetainedArtifactAndNeverChangesFirstProfile()
+    {
+        using var h = await Harness.Create();
+        var original = h.Define("old", QuotaDefinitionUnit.Bytes);
+        var old = h.Authority.Approved!; var bytes = h.Artifacts.Bytes; var definitions = h.Resolver.Value;
+        Assert.Equal(QuotaDefinitionStatus.Succeeded, (await h.Publish(original)).Status);
+        var next = h.Define("current", QuotaDefinitionUnit.Bytes);
+        Assert.Equal(QuotaDefinitionStatus.Succeeded, (await h.Publish(next)).Status);
+        var authority = new Authority { Approved = old, Current = h.Authority.Approved };
+        var artifacts = new Artifacts { Bytes = bytes }; var resolver = new Resolver { Value = definitions };
+        var retained = h.Service(authority, artifacts, resolver);
+        Assert.Equal(QuotaDefinitionStatus.Replayed, (await retained.PublishAsync(original, T.Ct)).Status);
+        Assert.Equal(0, artifacts.Reads);
+        Assert.Equal(QuotaDefinitionStatus.Succeeded, (await retained.PublishAsync(original with { CommandId = Guid.NewGuid() }, T.Ct)).Status);
+        Assert.Equal(2, await h.Count("entitlement_quota_definition_profile"));
+        Assert.Equal(3, await h.Count("platform_change_archive"));
+        authority.Approved = new(old.RealmId, old.ConfigurationRevisionId, old.DocumentHash, "artifact:changed", old.ArtifactProfile,
+            old.ArtifactHash, old.VerifiedLength, old.DefinitionsVersion, old.RealmKind, old.PublisherRef, old.ResolverDefinitions);
+        Assert.Equal(QuotaDefinitionStatus.Defect, (await retained.PublishAsync(original, T.Ct)).Status);
+        Assert.Equal(3, await h.Count("platform_command"));
+    }
+
+    [Fact]
+    public async Task DelayedArtifactHeadChangeRefusesBeforeAnyPublication()
+    {
+        using var h = await Harness.Create();
+        var request = h.Define("old", QuotaDefinitionUnit.Bytes);
+        var approved = h.Authority.Approved!;
+        h.Artifacts.AfterRead = () => h.Authority.Current = new(approved.RealmId, Guid.NewGuid(), new('b', 64), approved.ArtifactId,
+            approved.ArtifactProfile, approved.ArtifactHash, approved.VerifiedLength, approved.DefinitionsVersion, approved.RealmKind,
+            approved.PublisherRef, approved.ResolverDefinitions);
+        Assert.Equal(QuotaDefinitionStatus.Stale, (await h.Publish(request)).Status);
+        Assert.Equal(1, h.Artifacts.Reads);
+        Assert.Equal(0, await h.Count("platform_command"));
+    }
+
+    [Fact]
     public async Task ImmutableProfilesAndRemovedKeyMeaningsSurviveRestartAndReintroduction()
     {
         using var h = await Harness.Create();
@@ -121,11 +172,13 @@ public sealed class QuotaDefinitionPersistenceTests
     public async Task DefiniteTransportRefusalsRetryBoundedlyWithIdenticalCommandThenActualCommit()
     {
         using var h = await Harness.Create(); var request = h.Define("version-1", QuotaDefinitionUnit.Bytes);
-        var retry = new RetryPort(h.Port);
+        var retry = new RetryPort(h.Port, () => h.Clock.SetSeconds(100));
         Assert.Equal(QuotaDefinitionStatus.Succeeded, (await h.Service(port: retry).PublishAsync(request, T.Ct)).Status);
         Assert.Equal(3, retry.Writes.Count);
         Assert.Single(retry.Writes.Select(w => w.Commit!.CommandId).Distinct());
         Assert.Single(retry.Writes.Select(w => w.Commit!.RequestHash).Distinct());
+        Assert.Single(retry.Writes.Select(w => w.Commit!.CreatedAtMicros).Distinct());
+        Assert.Single(retry.Writes.Select(w => w.Commit!.ExpiresAtMicros).Distinct());
         Assert.Equal(1, await h.Count("platform_change_archive"));
     }
 
@@ -180,14 +233,16 @@ public sealed class QuotaDefinitionPersistenceTests
     // Only absent Config/artifact/resolver producers are substituted; persistence, Worker execution and commit receipts execute actual code.
     private sealed class Authority : IQuotaApprovedConfigurationSource
     {
-        internal ApprovedQuotaConfiguration? Approved; internal QuotaDefinitionStatus Status = QuotaDefinitionStatus.Succeeded;
+        internal ApprovedQuotaConfiguration? Approved; internal ApprovedQuotaConfiguration? Current;
+        internal QuotaDefinitionStatus Status = QuotaDefinitionStatus.Succeeded;
         public Task<QuotaConfigurationResult> ReadHistoricalAsync(Guid realmId, Guid revision, string hash, CancellationToken ct) => Task.FromResult(new QuotaConfigurationResult(Status, Approved));
-        public Task<QuotaConfigurationResult> ReadCurrentAsync(Guid realmId, CancellationToken ct) => Task.FromResult(new QuotaConfigurationResult(Status, Approved));
+        public Task<QuotaConfigurationResult> ReadCurrentAsync(Guid realmId, CancellationToken ct) => Task.FromResult(new QuotaConfigurationResult(Status, Current ?? Approved));
     }
     private sealed class Artifacts : IQuotaDefinitionArtifactPort
     {
         internal byte[] Bytes = []; internal QuotaDefinitionStatus Status = QuotaDefinitionStatus.Succeeded; internal int Reads;
-        public Task<QuotaDefinitionArtifactResult> ReadAsync(string id, string profile, string hash, CancellationToken ct) { Reads++; return Task.FromResult(new QuotaDefinitionArtifactResult(Status, Bytes)); }
+        internal Action? AfterRead;
+        public Task<QuotaDefinitionArtifactResult> ReadAsync(string id, string profile, string hash, CancellationToken ct) { Reads++; var result = new QuotaDefinitionArtifactResult(Status, Bytes); AfterRead?.Invoke(); return Task.FromResult(result); }
     }
     private sealed class Resolver : IQuotaResolverDefinitionSource
     {
@@ -204,13 +259,15 @@ public sealed class QuotaDefinitionPersistenceTests
             afterCommit?.Invoke(); return ModulePlanOutcome.Of(ModulePlanStatus.UnknownOutcome);
         }
     }
-    private sealed class RetryPort(IModulePlanPort inner) : IModulePlanPort
+    private sealed class RetryPort(IModulePlanPort inner, Action? afterRefusal = null) : IModulePlanPort
     {
         internal List<ModulePlanWrite> Writes { get; } = [];
         public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken ct) => inner.ReadAsync(read, ct);
         public Task<ModulePlanOutcome> WriteAsync(ModulePlanWrite write, CancellationToken ct)
         {
-            Writes.Add(write); return Writes.Count < 3 ? Task.FromResult(ModulePlanOutcome.Of(ModulePlanStatus.Unavailable)) : inner.WriteAsync(write, ct);
+            Writes.Add(write);
+            if (Writes.Count < 3) { afterRefusal?.Invoke(); return Task.FromResult(ModulePlanOutcome.Of(ModulePlanStatus.Unavailable)); }
+            return inner.WriteAsync(write, ct);
         }
     }
     private sealed class UnknownReceiptPort(IModulePlanPort inner) : IModulePlanPort

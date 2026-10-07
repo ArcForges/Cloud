@@ -1119,6 +1119,7 @@
         }
       ],
       "mutability": {
+        "insert": "preserveExisting",
         "update": "none",
         "delete": "none"
       },
@@ -1165,6 +1166,7 @@
         }
       ],
       "mutability": {
+        "insert": "preserveExisting",
         "update": "none",
         "delete": "none"
       },

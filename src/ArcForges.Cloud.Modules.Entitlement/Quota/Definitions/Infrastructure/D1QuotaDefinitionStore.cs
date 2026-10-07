@@ -10,6 +10,23 @@ namespace ArcForges.Cloud.Modules.Entitlement.Quota.Definitions.Infrastructure;
 internal sealed class D1QuotaDefinitionStore(IModulePlanPort plans) : IQuotaDefinitionStore
 {
     private static readonly UTF8Encoding Utf8 = new(false, true);
+    public async Task<QuotaDefinitionStatus> CheckAsync(Guid realmId, QuotaSemanticProfile profile, CancellationToken cancellationToken)
+    {
+        var outcome = await plans.ReadAsync(new("entitlement.quota-definition-compatible", realmId.ToString("D"),
+            [T(realmId.ToString("D")), T(profile.DefinitionsVersion), B(Convert.FromHexString(profile.Hash)),
+             T(Utf8.GetString(profile.CanonicalBytes.Span)), T(Entries(profile))]), cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (outcome.Status != ModulePlanStatus.Succeeded) return QuotaDefinitionOutcomes.Status(outcome.Status);
+        try
+        {
+            var row = outcome.Rows.Single();
+            return row.Count == 1 ? row[0].AsInt64() switch
+            { 1 => QuotaDefinitionStatus.Succeeded, 0 => QuotaDefinitionStatus.Conflict, _ => QuotaDefinitionStatus.Defect }
+                : QuotaDefinitionStatus.Defect;
+        }
+        catch (Exception error) when (error is FormatException or InvalidOperationException or OverflowException)
+        { cancellationToken.ThrowIfCancellationRequested(); return QuotaDefinitionStatus.Defect; }
+    }
     public async Task<QuotaDefinitionResult> ReadAsync(Guid realmId, string version, CancellationToken cancellationToken)
     {
         var outcome = await plans.ReadAsync(new("entitlement.quota-definition-get", realmId.ToString("D"), [T(realmId.ToString("D")), T(version)]), cancellationToken).ConfigureAwait(false);
@@ -55,16 +72,7 @@ internal sealed class D1QuotaDefinitionStore(IModulePlanPort plans) : IQuotaDefi
     public Task<ModulePlanOutcome> PublishAsync(QuotaDefinitionPublishRequest request, ApprovedQuotaConfiguration approved,
         QuotaSemanticProfile profile, string requestHash, long nowMicros, CancellationToken cancellationToken)
     {
-        var entries = Json(w =>
-        {
-            w.WriteStartArray();
-            foreach (var d in profile.Definitions)
-            {
-                w.WriteStartObject(); w.WriteString("key", d.Key); w.WriteNumber("unit", (int)d.Unit + 1);
-                w.WriteNumber("mode", (int)d.Mode + 1); w.WriteNumber("combination", (int)d.Combination + 1); w.WriteEndObject();
-            }
-            w.WriteEndArray();
-        });
+        var entries = Entries(profile);
         var canonical = Utf8.GetString(profile.CanonicalBytes.Span);
         var hash = Convert.FromHexString(profile.Hash);
         var artifactHash = Convert.FromHexString(approved.ArtifactHash);
@@ -94,6 +102,16 @@ internal sealed class D1QuotaDefinitionStore(IModulePlanPort plans) : IQuotaDefi
     private static PlanValue T(string value) => PlanValue.FromText(value);
     private static PlanValue I(long value) => PlanValue.FromInt64(value);
     private static PlanValue B(byte[] value) => PlanValue.FromBytes(value);
+    private static string Entries(QuotaSemanticProfile profile) => Json(w =>
+    {
+        w.WriteStartArray();
+        foreach (var d in profile.Definitions)
+        {
+            w.WriteStartObject(); w.WriteString("key", d.Key); w.WriteNumber("unit", (int)d.Unit + 1);
+            w.WriteNumber("mode", (int)d.Mode + 1); w.WriteNumber("combination", (int)d.Combination + 1); w.WriteEndObject();
+        }
+        w.WriteEndArray();
+    });
     private static string Json(Action<Utf8JsonWriter> write)
     {
         using var stream = new MemoryStream();

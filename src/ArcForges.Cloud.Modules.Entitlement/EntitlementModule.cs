@@ -64,9 +64,11 @@ public sealed class EntitlementModule : IModuleBoundary
             provider.GetRequiredService<IQuotaKernelStore>(), provider.GetRequiredService<IQuotaKernelAuthority>(),
             provider.GetRequiredService<IQuotaMeasurementAuthority>(), provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IQuotaDefinitionValidator, QuotaDefinitionValidator>();
-        services.TryAddSingleton<IQuotaResolverDefinitionSource>(provider => new CurrentQuotaResolverDefinitionSource(
-            provider.GetService<IEntitlementDefinitionSource>(), provider.GetService<IRealmAuthorityPort>()));
+        services.TryAddSingleton<IQuotaResolverDefinitionSource>(provider => new VersionedQuotaResolverDefinitionSource(
+            provider.GetService<IResolverDefinitionPort>(), provider.GetService<IRealmAuthorityPort>(), provider.GetRequiredService<IResolverDefinitionValidator>()));
         services.TryAddSingleton<IQuotaDefinitionStore>(provider => new D1QuotaDefinitionStore(provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor)));
+        services.TryAddSingleton<IQuotaDefinitionCompatibilityPort>(provider => new QuotaDefinitionCompatibilityPort(
+            provider.GetRequiredService<IQuotaDefinitionStore>(), provider.GetRequiredService<IQuotaDefinitionValidator>(), provider.GetService<IRealmAuthorityPort>()));
         services.TryAddSingleton<IQuotaDefinitionPort>(provider => new QuotaDefinitionService(provider.GetRequiredService<IQuotaDefinitionStore>(),
             provider.GetService<IQuotaApprovedConfigurationSource>(), provider.GetService<IQuotaDefinitionArtifactPort>(),
             provider.GetService<IQuotaResolverDefinitionSource>(), provider.GetRequiredService<IQuotaDefinitionValidator>(), provider.GetRequiredService<TimeProvider>()));

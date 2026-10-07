@@ -74,6 +74,46 @@ const args = (realm: string, version: string, unit = 1, mode = 1, combination = 
   ];
 };
 
+test("bounded indexed compatibility is read-only and refuses established meanings before publication", async () => {
+  const db = database();
+  const realm = uuid();
+  const compatible = async (version: string, unit = 1, mode = 1, combination = 1) => {
+    const [candidate] = args(realm, version, unit, mode, combination);
+    assert(candidate);
+    const entries = candidate.at(8);
+    assert(entries);
+    const result = await execute(
+      db,
+      "entitlement.quota-definition-compatible",
+      [[...candidate.slice(1, 5), entries]],
+      realm,
+    );
+    assert(result.ok);
+    assert.equal(result.changes, "0");
+    return result.rows;
+  };
+  try {
+    assert.deepEqual(await compatible("initial"), [["1"]]);
+    assert.equal(count(db, "platform_command"), 0);
+    assert.equal(
+      (await execute(db, "entitlement.quota-definition-publish", args(realm, "initial"), realm)).ok,
+      true,
+    );
+    for (const [unit, mode, combination] of [
+      [4, 1, 1],
+      [1, 2, 1],
+      [1, 1, 2],
+    ]) {
+      assert.deepEqual(await compatible("later", unit, mode, combination), [["0"]]);
+    }
+    assert.deepEqual(await compatible("later"), [["1"]]);
+    assert.equal(count(db, "entitlement_quota_definition_profile"), 1);
+    assert.equal(count(db, "platform_change_archive"), 1);
+  } finally {
+    db.database.close();
+  }
+});
+
 test("recursive-trigger-disabled replacement cannot change accepted profile or stable key provenance", async () => {
   const db = database();
   const realm = uuid();

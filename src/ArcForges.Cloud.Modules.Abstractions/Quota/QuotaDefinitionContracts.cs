@@ -48,6 +48,13 @@ public interface IQuotaDefinitionValidator
         IReadOnlyList<QuotaResolverDefinition> resolverDefinitions, CancellationToken cancellationToken);
 }
 
+/// <summary>Bounded owner conflict detection against accepted stable key meanings and same-version profile bytes.
+/// Successful compatibility is an observation; it confers no approval and cannot replace atomic publication guards.</summary>
+public interface IQuotaDefinitionCompatibilityPort
+{
+    Task<QuotaDefinitionStatus> CheckAsync(Guid realmId, QuotaSemanticProfile profile, CancellationToken cancellationToken);
+}
+
 /// <summary>Facts returned only by the real signed Configuration owner. RealmKind is the exact official/selfHosted document value.
 /// The immutable artifact tuple and resolver definitions are distinct from the artifact bytes and confer no caller authority.</summary>
 public sealed class ApprovedQuotaConfiguration
