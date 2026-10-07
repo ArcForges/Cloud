@@ -1,22 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Actual COM.18 owner SQL and Worker executor; SQLite is not Cloudflare D1 or operator approval.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import test from "node:test";
 import { commitDatabase, count, execute, sha256, tailArguments } from "./support/commit-support.ts";
 import { bytes, i64, txt, uuid } from "./support/plan-calls.ts";
-import { repositoryRoot } from "./support/sqlite-d1.ts";
 
-const database = () => {
-  const db = commitDatabase();
-  const pending = path.join(
-    repositoryRoot,
-    "src/ArcForges.Cloud.Storage.D1/Migrations/pending/entitlement__quota-definition-profile.sql",
-  );
-  if (existsSync(pending)) db.database.exec(readFileSync(pending, "utf8"));
-  return db;
-};
+// Integration assigned migration0027; the real complete numbered prefix owns these tables.
+const database = commitDatabase;
 const args = (realm: string, version: string, unit = 1, mode = 1, combination = 1) => {
   const command = uuid();
   const unitNames = ["bytes", "microseconds", "samples", "count"];
