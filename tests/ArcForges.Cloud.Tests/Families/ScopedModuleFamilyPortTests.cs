@@ -159,7 +159,7 @@ public sealed class ScopedModuleFamilyPortTests
         var accepted = PlanManifest.FamilyPlans.Single(item => item.Plan.Id == "families.account-enrollment.create-user");
         Assert.False(accepted.RequiresScopedContributions);
         var forbidden = accepted with { RequiresScopedContributions = true };
-        Assert.NotEmpty(FamilyPlanVerifier.Problems(forbidden, PlanManifest.FamilyCatalog.Single()));
+        Assert.NotEmpty(FamilyPlanVerifier.Problems(forbidden, PlanManifest.FamilyCatalog.Single(item => item.Id == "account-enrollment")));
         Assert.Throws<InvalidOperationException>(() => RecoveryFamilyGuardTests.Factory(new ScriptedExecutor(), fixture: forbidden));
     }
 
