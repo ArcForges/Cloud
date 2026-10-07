@@ -128,7 +128,12 @@ internal sealed class DeletionLifecycleService(IDeletionTransitionStore store, D
             own = list;
         }
         cancellationToken.ThrowIfCancellationRequested();
-        var contribution = families.Contribute("account-security", plan, own);
+        IModuleFamilyContributionSet contribution;
+        try { contribution = families.ContributeScoped("account-security", plan, target.OwnerScope, own); }
+        catch (ModuleFamilyContributionException exception)
+        {
+            return Refused(exception.Failure == ModuleFamilyContributionFailure.Unavailable ? IdentityDeletionFailure.Unavailable : IdentityDeletionFailure.StaleAuthority);
+        }
         cancellationToken.ThrowIfCancellationRequested();
         return new(new(lifecycle, userRevision, realm, contribution), null);
     }

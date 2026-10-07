@@ -184,6 +184,7 @@ public sealed class DeletionReaderTests
 
     private sealed class NoFamily : IModuleFamilyPort
     {
+        public IModuleFamilyContributionSet ContributeScoped(string familyId, string planId, string ownerScope, IReadOnlyList<ModuleFamilyContribution> contributions) => throw new InvalidOperationException("Reader must not seal a family.");
         public IModuleFamilyContributionSet Contribute(string familyId, string planId, IReadOnlyList<ModuleFamilyContribution> contributions) => throw new InvalidOperationException("Reader never seals.");
         public Task<ModulePlanOutcome> ReadAsync(string familyId, ModulePlanRead read, CancellationToken cancellationToken) => throw new InvalidOperationException();
         public Task<ModulePlanOutcome> InspectAsync(string familyId, ModuleCommandIdentity identity, CancellationToken cancellationToken) => throw new InvalidOperationException();

@@ -75,7 +75,10 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
         var sampled = UtcMicros.FromDateTimeOffset(time.GetUtcNow()).Value;
         if (sampled < snapshot.RequestedAtMicros) return IdentityDeletionFamilyResult.Refused(IdentityDeletionFailure.StaleAuthority);
         if (sampled >= snapshot.GraceEndsAtMicros) return IdentityDeletionFamilyResult.Refused(IdentityDeletionFailure.Expired);
-        var contribution = families.Contribute(familyId, planId,
+        IModuleFamilyContributionSet contribution;
+        try
+        {
+            contribution = families.ContributeScoped(familyId, planId, ownerScope,
         [
             new("identity", "authorization", "deletion-current",
                 [T(snapshot.DeletionId), T(realmId), T(userId), I(snapshot.RequestedAtMicros),
@@ -83,6 +86,11 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
             new("identity", "authorization", "deletion-user", [T(realmId), T(userId), I((long)UserState.PendingDeletion), I(snapshot.RequestedAtMicros), I(snapshot.UserRevision)]),
             new("identity", "revision", "deletion-revision", [T(snapshot.DeletionId), I(snapshot.LifecycleRevision)]),
         ]);
+        }
+        catch (ModuleFamilyContributionException exception)
+        {
+            return IdentityDeletionFamilyResult.Refused(exception.Failure == ModuleFamilyContributionFailure.Unavailable ? IdentityDeletionFailure.Unavailable : IdentityDeletionFailure.StaleAuthority);
+        }
         cancellationToken.ThrowIfCancellationRequested();
         return IdentityDeletionFamilyResult.Available(snapshot, contribution);
     }

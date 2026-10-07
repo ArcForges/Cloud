@@ -44,6 +44,7 @@ public sealed class DeletionTransitionTests
         Assert.Equal(1, prepared.Lifecycle.Revision);
         Assert.NotNull(prepared.Contribution);
         Assert.Equal("families.account-security.request-deletion", fixture.Plan);
+        Assert.Equal(Workspace.ToString("D"), fixture.OwnerScope);
         Assert.Equal(7, fixture.Items!.Single(item => item.Key == "deletion-request-user").Arguments[3].AsInt64());
         Assert.Equal(5_000_500, fixture.Items!.Single(item => item.Key == "deletion-lifecycle").Arguments[4].AsInt64());
         Assert.Equal(1, store.UserReads);
@@ -204,9 +205,12 @@ public sealed class DeletionTransitionTests
         Assert.Equal(2, fixture.Items!.Single(item => item.Key == "deletion-revision").Arguments[1].AsInt64());
         Assert.Equal(1, fixture.Items!.Single(item => item.Key == "deletion-current").Arguments[5].AsInt64());
         Assert.Equal(7, fixture.Items!.Single(item => item.Key == "deletion-user" && item.Class == "authorization").Arguments[4].AsInt64());
+        Assert.Equal(Workspace.ToString("D"), fixture.OwnerScope);
         Assert.Single(fixture.Executor.Calls);
         Assert.Equal(PlanAccess.Read, fixture.Executor.Calls[0].Plan.Access);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => reader.PrepareAsync(Realm, User, "account-security", "families.account-security.unknown", Workspace.ToString("D"), Cancellation));
+        var unknown = await reader.PrepareAsync(Realm, User, "account-security", "families.account-security.unknown", Workspace.ToString("D"), Cancellation);
+        Assert.Equal(IdentityDeletionFailure.StaleAuthority, unknown.Failure);
+        Assert.Null(unknown.Contribution);
         Assert.Equal(1, fixture.Seals);
     }
 
@@ -257,6 +261,18 @@ public sealed class DeletionTransitionTests
         Assert.Equal(PlanAccess.Read, fixture.Executor.Calls[0].Plan.Access);
     }
 
+    [Theory]
+    [InlineData(ModuleFamilyContributionFailure.Rejected)]
+    [InlineData(ModuleFamilyContributionFailure.Unavailable)]
+    public async Task RealScopedIssuerRefusalIsMappedWithoutPartialCommit(ModuleFamilyContributionFailure failure)
+    {
+        var fixture = new Fixture { Failure = failure };
+        var refused = await Service(new Store(), fixture).PrepareAsync(Target(DeletionTransition.Cancel), Cancellation);
+        Assert.Null(refused.Value);
+        Assert.Equal(failure == ModuleFamilyContributionFailure.Unavailable ? IdentityDeletionFailure.Unavailable : IdentityDeletionFailure.StaleAuthority, refused.Failure);
+        Assert.Empty(fixture.Executor.Calls);
+    }
+
     private static DeletionLifecycleService Service(Store store, Fixture fixture, Clock? clock = null, DeletionPolicy? policy = null, Authority? authority = null)
         => new(store, policy ?? new(new IdentityDeletionPolicyInput("new.v2", "5")), authority ?? new(RealmAuthorityResult.Available(new(Realm, 3, 0, 2))), fixture, clock ?? new Clock());
 
@@ -289,8 +305,10 @@ public sealed class DeletionTransitionTests
         public ModuleFamilyPortFactory Factory { get; }
         private readonly IModuleFamilyPort port;
         public string? Plan { get; private set; }
+        public string? OwnerScope { get; private set; }
         public IReadOnlyList<ModuleFamilyContribution>? Items { get; private set; }
         public int Seals { get; private set; }
+        public ModuleFamilyContributionFailure? Failure { get; init; }
         public Fixture()
         {
             var catalog = new[] { new FamilyDefinition("account-security", "Deletion fixture", "CLOUD79 test-owned future consumer", [new(FamilyModule.Identity, true, null)]) };
@@ -311,10 +329,12 @@ public sealed class DeletionTransitionTests
             var statements = own.Select(item => new PlanStatement([.. (item.Class == "record" ? "" : "t").Concat(item.Types).Select(type => new PlanParam(type == 't' ? PlanKind.Text : PlanKind.Int64))], null)).ToArray();
             return new(new("families.account-security." + name, 1, PlanAccess.Write, 0,
                 [.. statements, new PlanStatement([new(PlanKind.Text)], null)]), "account-security",
-                [.. roles, new(FamilyModule.Platform, FamilyPhase.Release, FamilyClass.Release, "release")]);
+                [.. roles, new(FamilyModule.Platform, FamilyPhase.Release, FamilyClass.Release, "release")], RequiresScopedContributions: true);
         }
         public IModuleFamilyContributionSet Contribute(string familyId, string planId, IReadOnlyList<ModuleFamilyContribution> contributions)
         { var sealedSet = port.Contribute(familyId, planId, contributions); Plan = planId; Items = contributions; Seals++; return sealedSet; }
+        public IModuleFamilyContributionSet ContributeScoped(string familyId, string planId, string ownerScope, IReadOnlyList<ModuleFamilyContribution> contributions)
+        { if (Failure is { } failure) throw new ModuleFamilyContributionException(failure); var sealedSet = port.ContributeScoped(familyId, planId, ownerScope, contributions); Plan = planId; OwnerScope = ownerScope; Items = contributions; Seals++; return sealedSet; }
         public Task<ModulePlanOutcome> ReadAsync(string familyId, ModulePlanRead read, CancellationToken cancellationToken) => throw new InvalidOperationException("No foreign reads in preparation.");
         public Task<ModulePlanOutcome> InspectAsync(string familyId, ModuleCommandIdentity identity, CancellationToken cancellationToken) => throw new InvalidOperationException("No commit preflight in preparation.");
         public Task<ModulePlanOutcome> WriteAsync(ModuleFamilyWrite write, CancellationToken cancellationToken) => throw new InvalidOperationException("Only CLOUD17 can assemble full deletion writes.");
