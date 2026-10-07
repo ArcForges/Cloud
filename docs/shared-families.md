@@ -105,3 +105,9 @@ The bounded personal-workspace exception permits Identity to contribute Workspac
 - **"Two Containers contend" with real Container processes**, "exact credits" (Commerce) and "sync cursor safety" (Sync) are the completion gate of WP-21.05 carried by CLOUD.63 and the module tasks; this task proves the generic mechanism they compose.
 - **Receipts, outbox and the change archive** (CLOUD.04) are not written here: a family plan's `platform` statements are authored by the module tasks.
 - A guard row is never retained by a batch that commits or rolls back; a provider path that were not atomic could leave rows of a crashed command behind. They are keyed by command and harmless to every other command, and a later sweep would need CLOUD.04's retention, which this task does not add.
+
+## Identity deletion lifecycle producer (CLOUD.79)
+
+The Identity producer reads actual user/lifecycle revisions and prepares only its own user and immutable lifecycle effects. A new request captures required policy exactly once; cancellation restores the saved Active, Restricted or Suspended state. Existing deadlines never depend on current deployment policy. Purge preparations distinguish Pending from Purging and retain terminal lifecycle history.
+
+The final CLOUD.17 coordinator supplies current Workspace ownership, real one-use action proof, Session/PAT/Device revocation, durable Notification and required cleanup receipts before the complete family commits. The lifecycle producer does not execute a partial security transaction or attest provider deletion. Its closed future-consumer test catalogue is not registered in production. Final owner-scope capabilities require CLOUD.82; transaction-time deadline predicates require CLOUD.78, including the separate due predicate for purge. Captured application time is only an early refusal check.

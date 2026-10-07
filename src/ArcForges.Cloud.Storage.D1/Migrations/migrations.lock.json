@@ -175,6 +175,13 @@
       "module": "entitlement",
       "mode": "expand",
       "sha256": "61c9b10c0e34ee223fad5ddd7ebba7027d92dab112e096c8dc753798ac01eff3"
+    },
+    {
+      "sequence": 25,
+      "file": "0025_identity__deletion-lifecycle.sql",
+      "module": "identity",
+      "mode": "expand",
+      "sha256": "4a51237e996b1b45799ffe3c14f97e5d6145b9ae5f9c0951b8a8a3ea23c0e643"
     }
   ]
 }

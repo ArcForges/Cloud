@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using ArcForges.Cloud.Modules.Identity.Core.Application;
 using ArcForges.Cloud.Modules.Identity.Persistence;
+using ArcForges.Cloud.Modules.Identity.Recovery.Application;
+using ArcForges.Cloud.Modules.Identity.Recovery.Configuration;
+using ArcForges.Cloud.Modules.Identity.Recovery.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -33,5 +36,15 @@ public sealed class IdentityModule : IModuleBoundary
             provider.GetRequiredService<IIdentityStore>(),
             provider.GetRequiredService<IIdentityIdSource>(),
             provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton(provider => new DeletionPolicy(provider.GetRequiredService<IdentityDeletionPolicyInput>()));
+        services.TryAddSingleton(provider => new DeletionLifecyclePort(
+            provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor),
+            provider.GetRequiredService<IModuleFamilyPortFactory>().For(Descriptor),
+            provider.GetRequiredService<IRealmAuthorityPort>(), provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IIdentityDeletionLifecyclePort>(provider => provider.GetRequiredService<DeletionLifecyclePort>());
+        services.TryAddSingleton<IDeletionTransitionStore>(provider => provider.GetRequiredService<DeletionLifecyclePort>());
+        services.TryAddSingleton(provider => new DeletionLifecycleService(provider.GetRequiredService<IDeletionTransitionStore>(),
+            provider.GetRequiredService<DeletionPolicy>(), provider.GetRequiredService<IRealmAuthorityPort>(),
+            provider.GetRequiredService<IModuleFamilyPortFactory>().For(Descriptor), provider.GetRequiredService<TimeProvider>()));
     }
 }
