@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-using ArcForges.Cloud.Modules.Entitlement.Persistence.Infrastructure;
 using ArcForges.Cloud.Modules.Entitlement.Resolver.Application;
 using ArcForges.Cloud.Modules.Entitlement.Resolver.Domain;
 
@@ -25,12 +24,12 @@ internal sealed class CurrentDefinitionEntitlementStore(IEntitlementStore reads,
         EntitlementSnapshot snapshot, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (configuration is null || recovery is null) throw Unavailable();
+        if (configuration is null || recovery is null || reads is not IEntitlementPreparedStore writer) throw Unavailable();
         var current = await source.RevalidateAsync(captured, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (current == ResolverDefinitionStatus.Stale) return CommitOutcome.RevisionConflict;
         if (current != ResolverDefinitionStatus.Succeeded) throw Unavailable();
-        var prepared = D1EntitlementStore.PrepareCommit(workspaceId, expectedRevision, append, snapshot);
+        var prepared = writer.Prepare(workspaceId, expectedRevision, append, snapshot);
         var commit = prepared.Commit!;
         var generation = await recovery.PrepareAsync(Family, Plan, prepared.OwnerScope, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
@@ -55,7 +54,7 @@ internal sealed class CurrentDefinitionEntitlementStore(IEntitlementStore reads,
             contributions.Add(new("entitlement", "record", RecordKeys[index], prepared.OwnerArguments[index + 1]));
         var outcome = await families.WriteAsync(new(Family, Plan, prepared.OwnerScope, contributions, commit, [generation.Contribution, guard.Contribution]), cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-        return D1EntitlementStore.CommitStatus(outcome);
+        return writer.Classify(outcome);
     }
 
     public ValueTask<FeatureReleaseOutcome> AppendFeatureReleaseAsync(FeatureReleaseFact release, CancellationToken cancellationToken)

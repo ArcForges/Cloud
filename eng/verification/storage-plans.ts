@@ -815,6 +815,7 @@ const scopedSecurityFamilies = new Set([
   "push-registration",
   "account-security",
   "token-issuance",
+  "entitlement-definition-resolution",
 ]);
 
 const phaseRank: Record<FamilyPhase, number> = { guard: 0, mutation: 1, release: 2 };

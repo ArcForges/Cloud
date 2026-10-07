@@ -60,6 +60,16 @@ internal sealed class EntitlementGrantPortAdapter(EntitlementService service) : 
 
     private static EntitlementPortResult<T> Refusal<T>(EntitlementPortStatus status, string? detail) where T : class => new(status, null, detail);
 
+    // The async production source validates the existing boundary before any authority I/O; the admission implementation stays shared.
+    internal static bool ValidBoundary(IssueGrantCommand command)
+        => WellFormed(command.WorkspaceId, command.Subject, command.SourceRef, command.IssuedByActor, command.Reason, (command.Terms as AllowanceGrantTerms)?.CapacityPlanRef)
+            && TryRequest(command, out var request) && GrantAdmission.Validate(request) is null;
+    internal static bool ValidBoundary(RevokeGrantCommand command)
+        => WellFormed(command.WorkspaceId, command.GrantId, command.ReasonCode, command.IssuedByActor)
+            && (command.EffectiveFrom is not { } from || IsWholeMicroseconds(from))
+            && InputRules.IsIdentifier(command.WorkspaceId) && InputRules.IsIdentifier(command.GrantId)
+            && InputRules.IsKey(command.ReasonCode) && InputRules.IsActor(command.IssuedByActor);
+
     private static bool TryRequest(IssueGrantCommand command, out IssueGrantRequest request)
     {
         request = null!;

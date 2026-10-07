@@ -6,6 +6,7 @@ using ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Application;
 using ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Domain;
 using ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Infrastructure;
 using ArcForges.Cloud.Storage.ModuleBinding;
+using ArcForges.Cloud.Storage.Receipts;
 using ArcForges.Cloud.Tests.Entitlement;
 using Xunit;
 
@@ -13,6 +14,98 @@ namespace ArcForges.Cloud.Tests.ResolverDefinitionAuthority;
 
 public sealed class ResolverDefinitionPersistenceTests
 {
+    [Fact]
+    public async Task ArtifactReadThatSupersedesUnpublishedHeadCannotMaterializeTheEarlierVersion()
+    {
+        using var h = await Harness.Create();
+        var old = h.Define("v1");
+        var approved = h.Authority.Approved!;
+        var bytes = h.Artifacts.Bytes;
+        h.Define("v2");
+        var later = h.Authority.Approved!;
+        h.Authority.Approved = approved;
+        h.Authority.CurrentApproved = approved;
+        h.Artifacts.Bytes = bytes;
+        h.Artifacts.AfterRead = () => h.Authority.CurrentApproved = later;
+        Assert.Equal(ResolverDefinitionStatus.Stale, (await h.Publish(old)).Status);
+        Assert.Equal(1, h.Artifacts.Reads);
+        Assert.Equal(0, await h.Count("entitlement_resolver_definition_profile"));
+        Assert.Equal(0, await h.Count("platform_command"));
+    }
+
+    [Theory]
+    [InlineData(ResolverDefinitionStatus.NotFound)]
+    [InlineData(ResolverDefinitionStatus.UnknownOutcome)]
+    [InlineData(ResolverDefinitionStatus.Unavailable)]
+    public async Task UnknownCurrentAuthorityCannotCreateAProfile(ResolverDefinitionStatus status)
+    {
+        using var h = await Harness.Create();
+        var request = h.Define("v1");
+        h.Authority.CurrentStatus = status;
+        Assert.Equal(ResolverDefinitionStatus.Unavailable, (await h.Publish(request)).Status);
+        Assert.Equal(0, h.Artifacts.Reads);
+        Assert.Equal(0, await h.Count("platform_command"));
+    }
+
+    [Fact]
+    public async Task StableReceiptCannotReplayAgainstADifferentRetainedArtifactAssociation()
+    {
+        using var h = await Harness.Create();
+        var request = h.Define("v1");
+        Assert.Equal(ResolverDefinitionStatus.Succeeded, (await h.Publish(request)).Status);
+        h.Authority.Approved = h.Authority.Approved! with { ArtifactId = "different:artifact" };
+        Assert.Equal(ResolverDefinitionStatus.Defect, (await h.Publish(request)).Status);
+        Assert.Equal(1, h.Artifacts.Reads);
+        Assert.Equal(1, await h.Count("platform_command"));
+        Assert.Equal(1, await h.Count("platform_change_archive"));
+    }
+
+    [Fact]
+    public async Task SupersededUnpublishedDefinitionRefusesButExactAcceptedHistoricalRecoveryRetainsProvenance()
+    {
+        using var h = await Harness.Create();
+        var old = h.Define("v1");
+        var oldAssociation = h.Authority.Approved!;
+        var oldBytes = h.Artifacts.Bytes;
+        var later = h.Define("v2");
+        var current = h.Authority.Approved!;
+        Assert.Equal(ResolverDefinitionStatus.Succeeded, (await h.Publish(later)).Status);
+        h.Authority.CurrentApproved = current;
+        h.Authority.Approved = oldAssociation;
+        h.Artifacts.Bytes = oldBytes;
+        var before = h.Artifacts.Reads;
+        Assert.Equal(ResolverDefinitionStatus.Stale, (await h.Publish(old)).Status);
+        Assert.Equal(before, h.Artifacts.Reads);
+        Assert.Equal(ResolverDefinitionStatus.NotFound, (await h.Publisher().ReadAsync(h.Realm, "v1", T.Ct)).Status);
+        // A real current activation accepts v1 first; after later supersession only its exact accepted immutable recovery remains admissible.
+        h.Authority.CurrentApproved = oldAssociation;
+        Assert.Equal(ResolverDefinitionStatus.Succeeded, (await h.Publish(old)).Status);
+        h.Authority.CurrentApproved = current;
+        Assert.Equal(ResolverDefinitionStatus.Replayed, (await h.Publish(old)).Status);
+        var recovery = await h.Publish(old with { CommandId = Guid.NewGuid() });
+        Assert.Equal(ResolverDefinitionStatus.Succeeded, recovery.Status);
+        Assert.Equal(old.ConfigurationRevisionId, recovery.Value!.FirstConfigurationRevisionId);
+        Assert.Equal(2, await h.Count("entitlement_resolver_definition_profile"));
+        Assert.Equal(3, await h.Count("platform_change_archive"));
+    }
+    [Fact]
+    public async Task PersistedStableFailureWithNullPayloadReplaysOnlyItsExactAuthorizedRealmIdentity()
+    {
+        using var h = await Harness.Create();
+        var request = h.Define("v1");
+        var receipts = new CommandReceiptStore(h.Bridge, h.Bridge.Generation, h.Clock);
+        Assert.True(await receipts.RecordFailureAsync(new(request.CommandId, null, request.PublisherRef,
+            ResolverDefinitionOutcomes.Operation, ResolverDefinitionPublisher.RequestHash(request)),
+            "validation.invalid_request", 10000000, 604810000000, T.Ct));
+        Assert.Equal(ResolverDefinitionStatus.Conflict, (await h.Publish(request)).Status);
+        Assert.Equal(0, h.Artifacts.Reads);
+        var otherRealm = Guid.NewGuid();
+        h.Authority.Approved = h.Authority.Approved! with { RealmId = otherRealm };
+        Assert.Equal(ResolverDefinitionStatus.ReusedIdentifier, (await h.Publish(request with { RealmId = otherRealm })).Status);
+        Assert.Equal(0, await h.Count("entitlement_resolver_definition_profile"));
+        Assert.Equal(0, await h.Count("platform_change_archive"));
+        Assert.Equal(1, await h.Count("platform_command"));
+    }
     [Fact]
     public async Task LaterApprovedIdenticalReusePreservesFirstProvenanceAndHistoricalDefinitions()
     {
@@ -195,19 +288,22 @@ public sealed class ResolverDefinitionPersistenceTests
     private sealed class Authority : IResolverApprovedConfigurationSource
     {
         internal ApprovedResolverConfiguration? Approved;
+        internal ApprovedResolverConfiguration? CurrentApproved;
         internal ResolverDefinitionStatus Status = ResolverDefinitionStatus.Succeeded;
+        internal ResolverDefinitionStatus? CurrentStatus;
         internal Queue<ApprovedResolverConfiguration>? Sequence;
         public Task<ResolverConfigurationResult> ReadHistoricalAsync(Guid realm, Guid revision, string hash, CancellationToken ct) => Task.FromResult(new ResolverConfigurationResult(Status, Approved));
         public Task<ResolverConfigurationResult> ReadCurrentAsync(Guid realm, CancellationToken ct)
-            => Task.FromResult(new ResolverConfigurationResult(Status, Sequence is { Count: > 0 } ? Sequence.Dequeue() : Approved));
+            => Task.FromResult(new ResolverConfigurationResult(CurrentStatus ?? Status, Sequence is { Count: > 0 } ? Sequence.Dequeue() : CurrentApproved ?? Approved));
     }
     private sealed class Artifacts : IResolverDefinitionArtifactPort
     {
         internal byte[] Bytes = [];
         internal ResolverDefinitionStatus Status = ResolverDefinitionStatus.Succeeded;
         internal int Reads;
+        internal Action? AfterRead;
         public Task<ResolverDefinitionArtifactResult> ReadAsync(string id, string profile, string hash, CancellationToken ct)
-        { Reads++; return Task.FromResult(new ResolverDefinitionArtifactResult(Status, Bytes)); }
+        { Reads++; AfterRead?.Invoke(); return Task.FromResult(new ResolverDefinitionArtifactResult(Status, Bytes)); }
     }
     private sealed class FaultPort(IModulePlanPort inner, Action? afterCommit = null, bool receiptUnavailable = false) : IModulePlanPort
     {

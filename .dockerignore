@@ -68,6 +68,13 @@
 !src/ArcForges.Cloud.Modules.*/Resolver/Application/*.cs
 !src/ArcForges.Cloud.Modules.*/Resolver/Infrastructure/
 !src/ArcForges.Cloud.Modules.*/Resolver/Infrastructure/*.cs
+!src/ArcForges.Cloud.Modules.Entitlement/Resolver/Definitions/
+!src/ArcForges.Cloud.Modules.Entitlement/Resolver/Definitions/Domain/
+!src/ArcForges.Cloud.Modules.Entitlement/Resolver/Definitions/Domain/*.cs
+!src/ArcForges.Cloud.Modules.Entitlement/Resolver/Definitions/Application/
+!src/ArcForges.Cloud.Modules.Entitlement/Resolver/Definitions/Application/*.cs
+!src/ArcForges.Cloud.Modules.Entitlement/Resolver/Definitions/Infrastructure/
+!src/ArcForges.Cloud.Modules.Entitlement/Resolver/Definitions/Infrastructure/*.cs
 !src/ArcForges.Cloud.Modules.*/Persistence/
 !src/ArcForges.Cloud.Modules.*/Persistence/*.cs
 !src/ArcForges.Cloud.Modules.Abstractions/Entitlement/

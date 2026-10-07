@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "a03ad04f8629723a29aa66d8db2455bf642366cd7a281090d4fa6b5d39d6d28c";
+    public const string Hash = "2f2e69161d60ae3a27c6160c1007b245af0ce7b1a90f86359a917119b0748ff5";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity
@@ -984,7 +984,7 @@ internal static class PlanManifest
             new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "e-archive-stream"),
             new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "f-archive"),
             new(FamilyModule.Platform, FamilyPhase.Release, FamilyClass.Release, "release")
-        ])
+        ], RequiresScopedContributions: true)
     ];
 
     /// <summary>Closed lifetime roles emitted by the canonical SQL compiler; no request can extend them.</summary>

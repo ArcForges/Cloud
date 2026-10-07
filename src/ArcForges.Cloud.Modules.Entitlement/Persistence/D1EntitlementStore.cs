@@ -35,8 +35,11 @@ internal static class EntitlementPlans
 /// creates the row, and a concurrent first commit fails its guard). The command identity of a commit is derived from its content, so a
 /// repeat after an unknown outcome is recognised by its receipt and never applied twice.
 /// </summary>
-internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementStore
+internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementPreparedStore
 {
+    ModulePlanWrite IEntitlementPreparedStore.Prepare(string workspaceId, long expectedRevision, EntitlementAppend append, EntitlementSnapshot snapshot)
+        => PrepareCommit(workspaceId, expectedRevision, append, snapshot);
+    CommitOutcome IEntitlementPreparedStore.Classify(ModulePlanOutcome outcome) => CommitStatus(outcome);
     /// <summary>Most records of one kind a single commit may carry; far above any admission and far below the 64 KiB change record and 256 KiB request bounds.</summary>
     public const int MaxAppendPerKind = 100;
 

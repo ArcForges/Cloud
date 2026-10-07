@@ -115,7 +115,8 @@
       "id": "families.entitlement-definition-resolution.commit-current",
       "version": 1,
       "family": "entitlement-definition-resolution",
-      "sha256": "c77aef71cb9bef39437c262ceda96b8d02bcdb6c333e67f836ab44b44d5cce83",
+      "sha256": "1da58bab18114204f923481fda93c4c126cce531fc2f4768a34858f9b3db2173",
+      "requiresScopedContributions": true,
       "statements": [
         {
           "role": "guard platform authorization recovery-current",

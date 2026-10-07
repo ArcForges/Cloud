@@ -21,8 +21,12 @@ CAST(? AS INTEGER) artifact_length, CAST(? AS INTEGER) realm_kind) c;
 INSERT INTO entitlement_resolver_definition_profile
 (realm_id, definitions_version, profile_hash, canonical_profile, artifact_id, artifact_hash, artifact_length,
  original_config_revision_id, original_config_document_hash, realm_kind, publisher_ref, created_at)
-VALUES (?, ?, ?, ?, ?, ?, CAST(? AS INTEGER), ?, ?, CAST(? AS INTEGER), ?, CAST(? AS INTEGER))
-ON CONFLICT (realm_id, definitions_version) DO NOTHING;
+SELECT c.realm_id, c.definitions_version, c.profile_hash, c.canonical_profile, c.artifact_id, c.artifact_hash, c.artifact_length,
+c.original_config_revision_id, c.original_config_document_hash, c.realm_kind, c.publisher_ref, c.created_at
+FROM (SELECT ? realm_id, ? definitions_version, ? profile_hash, ? canonical_profile, ? artifact_id, ? artifact_hash,
+CAST(? AS INTEGER) artifact_length, ? original_config_revision_id, ? original_config_document_hash,
+CAST(? AS INTEGER) realm_kind, ? publisher_ref, CAST(? AS INTEGER) created_at) c
+WHERE NOT EXISTS (SELECT 1 FROM entitlement_resolver_definition_profile p WHERE p.realm_id = c.realm_id AND p.definitions_version = c.definitions_version);
 -- statement: params=text,text?,text,text,text,text,int64,int64,int64
 INSERT INTO platform_command (command_id, workspace_id, actor_ref, operation, request_hash, status, result_payload, result_rev, error_code, created_at, expires_at)
 VALUES (?, ?, ?, ?, ?, 2, ?, NULLIF(CAST(? AS INTEGER), -1), NULL, CAST(? AS INTEGER), CAST(? AS INTEGER));

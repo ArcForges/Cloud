@@ -79,6 +79,34 @@ function args(n: number, paid = true, kind = 1): D1Scalar[][] {
   ];
 }
 
+test("replacement cannot alter accepted first provenance with recursive delete triggers disabled", async () => {
+  const db = database();
+  try {
+    assert.equal(
+      (await execute(db, "entitlement.resolver-definition-publish", args(1), realm)).ok,
+      true,
+    );
+    db.database.exec("PRAGMA recursive_triggers=OFF");
+    assert.throws(
+      () =>
+        db.database.exec(`INSERT OR REPLACE INTO entitlement_resolver_definition_profile
+        SELECT realm_id, definitions_version, profile_hash, canonical_profile, artifact_id, artifact_hash, artifact_length,
+        original_config_revision_id, original_config_document_hash, realm_kind, 'changed:publisher', created_at
+        FROM entitlement_resolver_definition_profile`),
+      /af_immutable_entitlement_resolver_definition_profile/u,
+    );
+    assert.equal(
+      db.database.prepare("SELECT publisher_ref FROM entitlement_resolver_definition_profile").get()
+        ?.publisher_ref,
+      "config:publisher",
+    );
+    assert.equal(count(db, "entitlement_resolver_definition_profile"), 1);
+    assert.equal(count(db, "platform_command"), 1);
+  } finally {
+    db.database.close();
+  }
+});
+
 test("later approved identical materialization retains first provenance and exact owner receipt", async () => {
   const db = database();
   try {
