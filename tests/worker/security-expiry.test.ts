@@ -162,8 +162,8 @@ test("unknown, weakened and caller-selected security roles fail at compilation",
       nativeHeader.replace("expires_at,access_expires_at", "expires_at,expires_at"),
       "session-lifecycle",
     ],
-    [nativeHeader + " fresh=expires_at", "session-lifecycle"],
-    [nativeHeader + " clock=caller", "session-lifecycle"],
+    [`${nativeHeader} fresh=expires_at`, "session-lifecycle"],
+    [`${nativeHeader} clock=caller`, "session-lifecycle"],
     [nativeHeader, "unknown-family"],
     [
       nativeHeader.replace("securityExpiry=expires_at,access_expires_at", "securityExpiry="),
@@ -173,8 +173,8 @@ test("unknown, weakened and caller-selected security roles fail at compilation",
       nativeHeader.replace("securityExpiry=expires_at,access_expires_at", "securityExpiry=rev"),
       "session-lifecycle",
     ],
-  ])
-    assert.throws(() => expandGuard(header!, schema, "closed component", family!));
+  ] as const)
+    assert.throws(() => expandGuard(header, schema, "closed component", family));
 });
 
 test("generic FRESH SQL remains byte-for-byte unchanged", () => {
@@ -334,13 +334,14 @@ test("actual SQLite writer lock delay does not authorize an expired access crede
       1,
     );
     const before = snapshot(db);
-    worker = new Worker(
+    const lockedWorker = new Worker(
       `const {parentPort,workerData}=require('node:worker_threads'); const {DatabaseSync}=require('node:sqlite'); const db=new DatabaseSync(workerData); db.exec('BEGIN IMMEDIATE'); parentPort.postMessage('locked'); setTimeout(()=>{db.exec('COMMIT');db.close();},1200);`,
       { eval: true, workerData: file },
     );
+    worker = lockedWorker;
     await new Promise<void>((resolve, reject) => {
-      worker!.once("message", () => resolve());
-      worker!.once("error", reject);
+      lockedWorker.once("message", () => resolve());
+      lockedWorker.once("error", reject);
     });
     assert.equal(
       (await runFamily(db, dictionary, argumentsFor(captured), ids.workspace, { planId })).ok,
@@ -695,7 +696,7 @@ test("concurrent stale snapshots refuse after a real commit with a lost transpor
       "UPDATE identity_session SET rev = rev + 1 WHERE session_id = ? AND user_id = ?;",
     );
     const root = fixtureRoot({ "session-lifecycle.security-expiry.sql": text }, registry);
-    let checked;
+    let checked: ReturnType<typeof buildManifest>;
     try {
       checked = buildManifest(root, { physicalDirectory });
     } finally {
@@ -703,7 +704,9 @@ test("concurrent stale snapshots refuse after a real commit with a lost transpor
     }
     const calls = (command: string) => {
       const values = argumentsFor(captured, command);
-      values[0]!.splice(4, 0, i64(1));
+      const authorization = values[0];
+      assert.ok(authorization);
+      authorization.splice(4, 0, i64(1));
       values[1] = [txt(session), txt(ids.user)];
       return values;
     };
