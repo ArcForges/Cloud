@@ -115,7 +115,8 @@ public sealed partial class ClockAndStructureTests
             foreach (var token in forbidden) Assert.False(code.Contains(token, StringComparison.Ordinal), path + " uses " + token);
             Assert.False(BinaryFloat().IsMatch(code), path + " uses binary floating point");
             var readsTime = code.Contains("GetUtcNow", StringComparison.Ordinal);
-            Assert.Equal(Path.GetFileName(path) == "EntitlementService.cs", readsTime);
+            Assert.Equal(Path.GetFileName(path) == "EntitlementService.cs"
+                || path.EndsWith(Path.Combine("Resolver", "Definitions", "Application", "ResolverDefinitionPublisher.cs"), StringComparison.Ordinal), readsTime);
         }
     }
 

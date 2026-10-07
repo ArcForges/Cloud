@@ -18,6 +18,8 @@ import {
   migrationsDirectory,
   readShape,
   tableSql,
+  triggerSql,
+  validateSchema,
   type PhysicalSchema,
   type PhysicalTable,
 } from "../../eng/verification/physical-schema.ts";
@@ -97,6 +99,83 @@ const tableOf = (name: string): PhysicalTable => {
   assert(table, name);
   return table;
 };
+
+test("preserved insertion rejects changed replacement and retains exact duplicates without replacement deletion", () => {
+  const table = tableOf("entitlement_resolver_definition_profile");
+  assert.equal(table.mutability.insert, "preserveExisting");
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec(tableSql(table, enums).join(";"));
+    db.exec("PRAGMA recursive_triggers=OFF");
+    const canonical = JSON.stringify({
+      allowances: [],
+      capabilities: [],
+      definitionsVersion: "v1",
+      quotas: [],
+      schemaVersion: "entitlement.resolver-definitions.v1",
+    });
+    const hash = createHash("sha256").update(canonical).digest();
+    const row = [
+      "a0000000-0000-4000-8000-000000000001",
+      "v1",
+      hash,
+      canonical,
+      "artifact:v1",
+      hash,
+      Buffer.byteLength(canonical),
+      "b0000000-0000-4000-8000-000000000001",
+      createHash("sha256").update("document").digest(),
+      1,
+      "config:publisher",
+      1,
+    ];
+    const columns = table.columns.map((column) => `"${column.name}"`).join(",");
+    db.prepare(
+      `INSERT INTO "${table.name}" (rowid,${columns}) VALUES (37,${row.map(() => "?").join(",")})`,
+    ).run(...row);
+    const replace = db.prepare(
+      `INSERT OR REPLACE INTO "${table.name}" VALUES (${row.map(() => "?").join(",")})`,
+    );
+    assert.equal(String(replace.run(...row).changes), "0");
+    assert.equal(db.prepare(`SELECT rowid FROM "${table.name}"`).get()?.rowid, 37);
+    const changed = [...row];
+    changed[10] = "changed:publisher";
+    assert.throws(
+      () => replace.run(...changed),
+      /af_immutable_entitlement_resolver_definition_profile/u,
+    );
+    assert.equal(
+      db.prepare(`SELECT publisher_ref FROM "${table.name}"`).get()?.publisher_ref,
+      "config:publisher",
+    );
+    const legacy = tableOf("entitlement_grant");
+    assert.equal(Object.hasOwn(legacy.mutability, "insert"), false);
+    assert.equal(
+      triggerSql(legacy).some((sql) => sql.includes("__immutable_insert")),
+      false,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("preserved insertion refuses unsupported mutability and unique-key conflict models", () => {
+  const validate = (table: PhysicalTable) => validateSchema({ ...schema, tables: [table] }, true);
+  const unsupported = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  Object.assign(unsupported.mutability, { insert: "unsupported" });
+  assert.throws(() => validate(unsupported), /insertion mutability/u);
+  const mutable = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  mutable.mutability.update = "any";
+  assert.throws(() => validate(mutable), /fully immutable row/u);
+  const unique = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  unique.indexes.push({
+    name: "ux_entitlement_resolver_definition_profile__artifact_id",
+    columns: ["artifact_id"],
+    path: "fixture",
+    unique: true,
+  });
+  assert.throws(() => validate(unique), /primary-key conflicts only/u);
+});
 
 test("the manifest covers every owner and keeps every table inside its owner's prefix", () => {
   assert.equal(schema.tables.length, 163);

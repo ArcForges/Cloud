@@ -132,9 +132,11 @@ internal static class FamilyPlanVerifier
         return problems;
     }
 
-    private static bool PermitsScopedContributions(string family, string plan) => plan.StartsWith("families." + family + ".", StringComparison.Ordinal)
-        && (family is "account-enrollment" or "device-revocation" or "session-lifecycle" or "push-registration" or "account-security" or "token-issuance")
-        && plan != "families.account-enrollment.create-user";
+    private static bool PermitsScopedContributions(string family, string plan) => family == "entitlement-definition-resolution"
+        ? plan == "families.entitlement-definition-resolution.commit-current"
+        : plan.StartsWith("families." + family + ".", StringComparison.Ordinal)
+            && (family is "account-enrollment" or "device-revocation" or "session-lifecycle" or "push-registration" or "account-security" or "token-issuance")
+            && plan != "families.account-enrollment.create-user";
 
     private static int ClassRank(FamilyStatementRole role) => role.Phase switch
     {
