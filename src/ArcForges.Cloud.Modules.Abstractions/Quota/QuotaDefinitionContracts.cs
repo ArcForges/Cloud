@@ -32,6 +32,15 @@ public sealed class QuotaSemanticProfile
 
 public sealed record QuotaDefinitionValidationResult(QuotaDefinitionStatus Status, QuotaSemanticProfile? Profile = null);
 
+public sealed record QuotaResolverDefinitionSet(string DefinitionsVersion, string RealmKind, ImmutableArray<QuotaResolverDefinition> Quotas);
+public sealed record QuotaResolverDefinitionResult(QuotaDefinitionStatus Status, QuotaResolverDefinitionSet? Value = null);
+
+/// <summary>Independent actual resolver definition facts for one realm/version. Never derive these expectations from the candidate semantic profile.</summary>
+public interface IQuotaResolverDefinitionSource
+{
+    Task<QuotaResolverDefinitionResult> ReadAsync(Guid realmId, string definitionsVersion, CancellationToken cancellationToken);
+}
+
 /// <summary>Pure complete semantic validation against the exact resolver definition set. Successful validation is not approval.</summary>
 public interface IQuotaDefinitionValidator
 {
