@@ -106,6 +106,17 @@
 !src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Application/*.cs
 !src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Infrastructure/
 !src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Infrastructure/*.cs
+!src/ArcForges.Cloud.Modules.Identity/Recovery/
+!src/ArcForges.Cloud.Modules.Identity/Recovery/Configuration/
+!src/ArcForges.Cloud.Modules.Identity/Recovery/Configuration/*.cs
+!src/ArcForges.Cloud.Modules.Identity/Recovery/Domain/
+!src/ArcForges.Cloud.Modules.Identity/Recovery/Domain/*.cs
+!src/ArcForges.Cloud.Modules.Identity/Recovery/Application/
+!src/ArcForges.Cloud.Modules.Identity/Recovery/Application/*.cs
+!src/ArcForges.Cloud.Modules.Identity/Recovery/Infrastructure/
+!src/ArcForges.Cloud.Modules.Identity/Recovery/Infrastructure/*.cs
+!src/ArcForges.Cloud.Modules.Abstractions/Identity/
+!src/ArcForges.Cloud.Modules.Abstractions/Identity/*.cs
 !src/ArcForges.Cloud.Modules.*/Core/
 !src/ArcForges.Cloud.Modules.*/Core/Domain/
 !src/ArcForges.Cloud.Modules.*/Core/Domain/*.cs
