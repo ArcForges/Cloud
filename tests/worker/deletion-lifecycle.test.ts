@@ -9,6 +9,175 @@ import test from "node:test";
 import { defaultMigrationsDirectory, loadCatalog } from "../../eng/migrations/catalog.ts";
 import { commitDatabase, execute } from "./support/commit-support.ts";
 import { txt } from "./support/plan-calls.ts";
+import { expandGuard } from "../../eng/verification/storage-plans.ts";
+import { loadManifest } from "../../eng/verification/physical-schema.ts";
+
+// Own future-consumer composition against the actual Git-merged CLOUD78 compiler.
+// No production family registration, standalone deletion commit or provider acceptance is implied.
+const ownSchema = loadManifest();
+const userLink = expandGuard(
+  "kind=authorization module=identity key=deletion-user table=identity_user by=realm_id,user_id match=state,deletion_requested_at,rev",
+  ownSchema,
+  "CLOUD79 original request",
+  "account-security",
+  "cancel-deletion",
+);
+const currentHeader =
+  "kind=authorization module=identity key=deletion-current table=identity_account_deletion by=deletion_id,realm_id,user_id match=requested_at,policy_version,state securityExpiry=grace_ends_at";
+
+test("actual original-request user linkage fences lifecycle cancellation and rolls back earlier owner effects", () => {
+  const lifecycleGuard = expandGuard(
+    currentHeader,
+    ownSchema,
+    "CLOUD79 cancel",
+    "account-security",
+    "cancel-deletion",
+  );
+  const lifecycleRevision = expandGuard(
+    "kind=revision module=identity key=deletion-revision table=identity_account_deletion by=deletion_id rev=rev",
+    ownSchema,
+    "CLOUD79 current lifecycle",
+    "account-security",
+    "cancel-deletion",
+  );
+  for (const changed of [
+    "none",
+    "request",
+    "revision",
+    "lifecycle-revision",
+    "state",
+    "expired",
+    "tail",
+  ] as const) {
+    const db = database();
+    const now = Date.now() * 1000;
+    const ends = now + (changed === "expired" ? -1_000_000 : 60_000_000);
+    const original = ends - 120_000_000;
+    try {
+      db.prepare(
+        "UPDATE identity_user SET state=4,deletion_requested_at=?,rev=7 WHERE user_id=?",
+      ).run(original, user);
+      db.prepare(
+        "INSERT INTO identity_account_deletion VALUES (?,?,?,?,?,'policy.v1',120,3,1,NULL,NULL,1)",
+      ).run(deletion, realm, user, original, ends);
+      if (changed === "request")
+        db.prepare("UPDATE identity_user SET deletion_requested_at=? WHERE user_id=?").run(
+          original + 1,
+          user,
+        );
+      if (changed === "revision") db.exec("UPDATE identity_user SET rev=8");
+      if (changed === "lifecycle-revision") db.exec("UPDATE identity_account_deletion SET rev=2");
+      if (changed === "state") db.exec("UPDATE identity_user SET state=3");
+      const beforeUser = db.prepare("SELECT * FROM identity_user").all();
+      const beforeLife = db.prepare("SELECT * FROM identity_account_deletion").all();
+      db.exec("BEGIN IMMEDIATE");
+      const apply = () => {
+        db.prepare(lifecycleGuard.sql).run(
+          nextDeletion,
+          deletion,
+          realm,
+          user,
+          original,
+          "policy.v1",
+          1,
+          changed === "expired" ? ends - 1 : now,
+        );
+        db.prepare(userLink.sql).run(nextDeletion, realm, user, 4, original, 7);
+        db.prepare(lifecycleRevision.sql).run(nextDeletion, deletion, 1);
+        db.prepare(
+          "UPDATE identity_account_deletion SET state=2,cancelled_at=?,rev=rev+1 WHERE deletion_id=?",
+        ).run(now, deletion);
+        db.prepare(
+          "UPDATE identity_user SET state=3,deletion_requested_at=NULL,rev=rev+1 WHERE user_id=?",
+        ).run(user);
+        if (changed === "tail")
+          db.prepare(
+            "INSERT INTO platform_command_guard VALUES (?, 'identity.deletion-user',1)",
+          ).run(nextDeletion);
+      };
+      if (changed === "none") {
+        apply();
+        db.exec("COMMIT");
+        assert.equal(db.prepare("SELECT state FROM identity_account_deletion").get()?.state, 2);
+        assert.equal(db.prepare("SELECT state FROM identity_user").get()?.state, 3);
+      } else {
+        assert.throws(apply);
+        db.exec("ROLLBACK");
+        assert.deepEqual(db.prepare("SELECT * FROM identity_user").all(), beforeUser);
+        assert.deepEqual(db.prepare("SELECT * FROM identity_account_deletion").all(), beforeLife);
+      }
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test("actual own due roles refuse a future immutable deadline without any caller clock parameter", () => {
+  for (const [key, plan, state] of [
+    ["deletion-due", "begin-deletion-purge", 1],
+    ["deletion-purging", "complete-deletion-purge", 3],
+  ] as const) {
+    const guard = expandGuard(
+      `kind=authorization module=identity key=${key} table=identity_account_deletion by=deletion_id,realm_id,user_id match=requested_at,policy_version,state securityDue=grace_ends_at`,
+      ownSchema,
+      "CLOUD79 due",
+      "account-security",
+      plan,
+    );
+    assert.equal(guard.meta.securityExpiry?.capturedParamIndex, null);
+    for (const due of [false, true]) {
+      const db = database();
+      const ends = Date.now() * 1000 + (due ? -1_000_000 : 60_000_000);
+      const original = ends - 120_000_000;
+      try {
+        db.prepare(
+          "INSERT INTO identity_account_deletion VALUES (?,?,?,?,?,'policy.v1',120,3,?,NULL,NULL,1)",
+        ).run(deletion, realm, user, original, ends, state);
+        const args = [nextDeletion, deletion, realm, user, original, "policy.v1", state];
+        db.exec("BEGIN IMMEDIATE");
+        if (due) db.prepare(guard.sql).run(...args);
+        else assert.throws(() => db.prepare(guard.sql).run(...args), /CHECK constraint failed/u);
+        assert.throws(() => db.prepare(guard.sql).run(...args, Number.MAX_SAFE_INTEGER));
+        db.exec("ROLLBACK");
+        assert.equal(db.prepare("SELECT count(*) AS n FROM platform_command_guard").get()?.n, 0);
+      } finally {
+        db.close();
+      }
+    }
+  }
+});
+
+test("actual active-state revision absence permits retained terminal history and denies pending or purging rows", () => {
+  const empty = ["deletion-pending-empty", "deletion-purging-empty"].map((key) =>
+    expandGuard(
+      `kind=revision module=identity key=${key} table=identity_account_deletion by=user_id,state rev=rev`,
+      ownSchema,
+      "CLOUD79 request",
+      "account-security",
+      "request-deletion",
+    ),
+  );
+  for (const state of [2, 1, 3]) {
+    const db = database();
+    try {
+      insert(db);
+      if (state === 2)
+        db.exec("UPDATE identity_account_deletion SET state=2,cancelled_at=500,rev=rev+1");
+      if (state === 3) db.exec("UPDATE identity_account_deletion SET state=3,rev=rev+1");
+      db.exec("BEGIN IMMEDIATE");
+      const run = () => {
+        db.prepare(empty[0].sql).run(nextDeletion, user, 1, 0);
+        db.prepare(empty[1].sql).run(nextDeletion, user, 3, 0);
+      };
+      if (state === 2) run();
+      else assert.throws(run, /CHECK constraint failed/u);
+      db.exec("ROLLBACK");
+      assert.equal(db.prepare("SELECT count(*) AS n FROM platform_command_guard").get()?.n, 0);
+    } finally {
+      db.close();
+    }
+  }
+});
 
 const realm = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const user = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
