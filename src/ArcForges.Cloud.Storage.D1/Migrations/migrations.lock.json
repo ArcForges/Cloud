@@ -182,6 +182,13 @@
       "module": "identity",
       "mode": "expand",
       "sha256": "4a51237e996b1b45799ffe3c14f97e5d6145b9ae5f9c0951b8a8a3ea23c0e643"
+    },
+    {
+      "sequence": 26,
+      "file": "0026_entitlement__resolver-definition-profile.sql",
+      "module": "entitlement",
+      "mode": "expand",
+      "sha256": "ca6aaa4e989700da3869978aa0570dfde0ee1a56989039959359ede31440c969"
     }
   ]
 }

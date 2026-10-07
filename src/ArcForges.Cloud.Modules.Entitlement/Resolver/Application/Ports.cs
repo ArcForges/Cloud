@@ -92,6 +92,13 @@ internal interface IEntitlementStore
     ValueTask<FeatureReleaseOutcome> AppendFeatureReleaseAsync(FeatureReleaseFact release, CancellationToken cancellationToken);
 }
 
+/// <summary>The existing owner's complete prepared mutation, reused by the closed current-definition family without another writer.</summary>
+internal interface IEntitlementPreparedStore : IEntitlementStore
+{
+    ModulePlanWrite Prepare(string workspaceId, long expectedRevision, EntitlementAppend append, EntitlementSnapshot snapshot);
+    CommitOutcome Classify(ModulePlanOutcome outcome);
+}
+
 /// <summary>Supplies the active definition set. The configuration module's activated revision stands behind it; the resolver never loads or validates configuration (CG-01).</summary>
 internal interface IEntitlementDefinitionSource
 {

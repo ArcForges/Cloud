@@ -5,6 +5,7 @@
 // and monotonic trigger fires. SQLite is the oracle: it proves the SQL, the constraints and the triggers, not Cloudflare's network
 // path or limits (the opt-in local D1 run repeats the type vectors against workerd's D1).
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
@@ -64,8 +65,96 @@ const tableOf = (name: string): PhysicalTable => {
   return table;
 };
 
+test("preserved insertion rejects changed replacement and retains exact duplicates without replacement deletion", () => {
+  const table = tableOf("entitlement_resolver_definition_profile");
+  assert.equal(table.mutability.insert, "preserveExisting");
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec(tableSql(table, enums).join(";"));
+    db.exec("PRAGMA recursive_triggers=OFF");
+    const canonical = JSON.stringify({
+      allowances: [],
+      capabilities: [],
+      definitionsVersion: "v1",
+      quotas: [],
+      schemaVersion: "entitlement.resolver-definitions.v1",
+    });
+    const hash = createHash("sha256").update(canonical).digest();
+    const row = [
+      "a0000000-0000-4000-8000-000000000001",
+      "v1",
+      hash,
+      canonical,
+      "artifact:v1",
+      hash,
+      Buffer.byteLength(canonical),
+      "b0000000-0000-4000-8000-000000000001",
+      createHash("sha256").update("document").digest(),
+      1,
+      "config:publisher",
+      1,
+    ];
+    const columns = table.columns.map((column) => `"${column.name}"`).join(",");
+    db.prepare(
+      `INSERT INTO "${table.name}" (rowid,${columns}) VALUES (37,${row.map(() => "?").join(",")})`,
+    ).run(...row);
+    const replace = db.prepare(
+      `INSERT OR REPLACE INTO "${table.name}" VALUES (${row.map(() => "?").join(",")})`,
+    );
+    assert.equal(String(replace.run(...row).changes), "0");
+    assert.equal(db.prepare(`SELECT rowid FROM "${table.name}"`).get()?.rowid, 37);
+    const changed = [...row];
+    changed[10] = "changed:publisher";
+    assert.throws(
+      () => replace.run(...changed),
+      /af_immutable_entitlement_resolver_definition_profile/u,
+    );
+    assert.equal(
+      db.prepare(`SELECT publisher_ref FROM "${table.name}"`).get()?.publisher_ref,
+      "config:publisher",
+    );
+    const legacy = tableOf("entitlement_grant");
+    assert.equal(Object.hasOwn(legacy.mutability, "insert"), false);
+    assert.equal(
+      triggerSql(legacy).some((sql) => sql.includes("__immutable_insert")),
+      false,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("preserved insertion refuses unsupported mutability and unique-key conflict models", () => {
+  const validate = (table: PhysicalTable, refusal: RegExp) => {
+    assert.throws(() => validateSchema({ ...schema, tables: [table] }, true), refusal);
+    assert.throws(() => tableSql(table, enums), refusal);
+    assert.throws(() => triggerSql(table), refusal);
+  };
+  const unsupported = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  Object.assign(unsupported.mutability, { insert: "unsupported" });
+  validate(unsupported, /insertion mutability/u);
+  const mutable = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  mutable.mutability.update = "any";
+  validate(mutable, /fully immutable row/u);
+  const unique = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  unique.indexes.push({
+    name: "ux_entitlement_resolver_definition_profile__artifact_id",
+    columns: ["artifact_id"],
+    path: "fixture",
+    unique: true,
+  });
+  validate(unique, /primary-key conflicts only/u);
+  const unknown = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  unknown.name = "entitlement_unregistered_immutable_profile";
+  validate(unknown, /not admitted for this owner and table/u);
+  const foreign = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  foreign.owner = "workspace";
+  foreign.name = "workspace_unregistered_immutable_profile";
+  validate(foreign, /not admitted for this owner and table/u);
+});
+
 test("the manifest covers every owner and keeps every table inside its owner's prefix", () => {
-  assert.equal(schema.tables.length, 162);
+  assert.equal(schema.tables.length, 163);
   for (const owner of schema.owners) {
     const tables = schema.tables.filter((table) => table.owner === owner.owner);
     assert(tables.length > 0, `owner ${owner.owner} has no table`);

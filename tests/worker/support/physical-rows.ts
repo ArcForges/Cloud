@@ -244,8 +244,19 @@ export function buildAcceptedRow(
         : valueFor(column, enums, serial * 100 + index, variant);
   });
   // Columns whose table check demands a shape no kind default can guess (a hex digest in a text column).
+  // The boundary JSON has exactly 65536 UTF8 bytes, including its four-byte array/string wrapper.
+  const resolverProfile = JSON.stringify([
+    variant.boundary ? `${"中😀".repeat(9361)}aaaaa` : "典型😀",
+  ]);
+  const resolverProfileHash = bytes(32, serial);
   const patterned: Record<string, Record<string, RowValue>> = {
     platform_migration_receipt: { checksum: "a".repeat(64) },
+    entitlement_resolver_definition_profile: {
+      canonical_profile: resolverProfile,
+      artifact_length: BigInt(Buffer.byteLength(resolverProfile, "utf8")),
+      profile_hash: resolverProfileHash,
+      artifact_hash: resolverProfileHash,
+    },
     // The actual owner CHECK links these fields; independent guesses are not valid dimensions.
     identity_account_deletion: {
       requested_at: variant.boundary ? 9223372036854775807n % 1_000_000n : instantBase,

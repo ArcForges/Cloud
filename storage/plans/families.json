@@ -24,6 +24,22 @@
           "when": "when the completion queues a security notification (CLOUD.12)"
         }
       ]
+    },
+    {
+      "family": "entitlement-definition-resolution",
+      "title": "Current immutable resolver definitions and existing Entitlement single writer",
+      "source": "model 00 section 6.1 and model 01 resolver_definition_profile (COM.20)",
+      "participants": [
+        {
+          "module": "config",
+          "requirement": "required"
+        },
+        {
+          "module": "entitlement",
+          "requirement": "required"
+        }
+      ]
     }
-  ]
+  ],
+  "scopedContributionPlans": ["families.entitlement-definition-resolution.commit-current"]
 }

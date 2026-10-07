@@ -12,6 +12,21 @@ namespace ArcForges.Cloud.ArchitectureTests;
 /// </summary>
 public sealed partial class EntitlementPortArchitectureTests
 {
+    [Fact]
+    public void EarlyQuotaConfigurationContractRemainsNeutralAndNotAWireOrQuotaImplementation()
+    {
+        var source = File.ReadAllText(Path.Combine(Src, "ArcForges.Cloud.Modules.Abstractions", "Quota", "QuotaAccountingContracts.cs"));
+        Assert.DoesNotMatch(ModuleNamespace(), source);
+        Assert.DoesNotMatch(EntitlementTable(), source);
+        Assert.DoesNotContain("ApprovedQuotaConfiguration", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("QuotaDefinitionStatus", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Google.Protobuf", source, StringComparison.Ordinal);
+        Assert.Contains("IModuleFamilyContributionSet", source, StringComparison.Ordinal);
+        Assert.Contains("ResolverQuotaDefinition", source, StringComparison.Ordinal);
+        var project = File.ReadAllText(Path.Combine(Src, "ArcForges.Cloud.Modules.Abstractions", "ArcForges.Cloud.Modules.Abstractions.csproj"));
+        Assert.DoesNotContain("ProjectReference", project, StringComparison.Ordinal);
+    }
+
     private static string Src => Path.Combine(CloudRepository.FindRoot(), "src");
 
     private static IEnumerable<string> Sources(string project) =>
@@ -74,6 +89,7 @@ public sealed partial class EntitlementPortArchitectureTests
         {
             var owner = Path.GetFileName(Path.GetDirectoryName(file))!;
             if (owner == "entitlement") continue;
+            if (owner == "families" && Path.GetFileName(file) == "entitlement-definition-resolution.commit-current.sql") continue;
             Assert.DoesNotMatch(EntitlementTable(), File.ReadAllText(file));
         }
     }

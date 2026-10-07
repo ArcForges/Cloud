@@ -78,6 +78,8 @@ export interface ManifestCheck {
   sql: string;
 }
 export interface ManifestMutability {
+  /** Preserve a fully immutable primary-key row on duplicate insertion, including INSERT OR REPLACE with recursive triggers disabled. */
+  insert?: "preserveExisting";
   /** none: the row can never be updated. An object limits updates to listed columns, optionally while a predicate over OLD holds. */
   update?: "none" | "any" | { columns: string[]; when?: string };
   delete?: "none" | "any";
@@ -167,6 +169,7 @@ export interface PhysicalTable {
   foreignKeys: Required<ManifestForeignKey>[];
   checks: ManifestCheck[];
   mutability: {
+    insert?: "preserveExisting";
     update: "none" | "any" | { columns: string[]; when?: string };
     delete: "none" | "any";
   };
@@ -454,6 +457,7 @@ function toPhysicalTable(owner: string, prefix: string, table: ManifestTable): P
     foreignKeys,
     checks: table.checks ?? [],
     mutability: {
+      ...(table.mutability?.insert === undefined ? {} : { insert: table.mutability.insert }),
       update: table.mutability?.update ?? "any",
       delete: table.mutability?.delete ?? "any",
     },
@@ -509,6 +513,29 @@ function validateInsertionInvariant(table: PhysicalTable): void {
   assert.equal(update.when, 'OLD."state" IN (1, 3)', message);
 }
 
+function validatePreservedInsertion(table: PhysicalTable): void {
+  if (table.mutability.insert === undefined) return;
+  const where = `table ${table.name}`;
+  assert.equal(table.mutability.insert, "preserveExisting", `${where}: insertion mutability`);
+  assert(
+    table.owner === "entitlement" &&
+      [
+        "entitlement_resolver_definition_profile",
+        "entitlement_quota_definition_profile",
+        "entitlement_quota_definition_key",
+      ].includes(table.name),
+    `${where}: preserved insertion is not admitted for this owner and table`,
+  );
+  assert(
+    table.mutability.update === "none" && table.mutability.delete === "none",
+    `${where}: preserved insertion requires a fully immutable row`,
+  );
+  assert(
+    !table.indexes.some((index) => index.unique),
+    `${where}: preserved insertion supports primary-key conflicts only`,
+  );
+}
+
 function validateInsertionStateProfile(
   table: PhysicalTable,
   enums: Map<string, ResolvedEnum>,
@@ -533,6 +560,7 @@ export function validateSchema(schema: PhysicalSchema, partial = false): void {
   const indexNames = new Set<string>();
   for (const table of schema.tables) {
     validateInsertionInvariant(table);
+    validatePreservedInsertion(table);
     validateInsertionStateProfile(table, enums);
     const where = `table ${table.name}`;
     assert(namePattern.test(table.name) && table.name.length <= maxName, `${where}: invalid name`);
@@ -728,6 +756,7 @@ function groupChecks(table: PhysicalTable): ManifestCheck[] {
 
 export function tableSql(table: PhysicalTable, enums: Map<string, ResolvedEnum>): string[] {
   validateInsertionInvariant(table);
+  validatePreservedInsertion(table);
   validateInsertionStateProfile(table, enums);
   const statements: string[] = [];
   const lines = table.columns.map((column) => columnDefinition(table, column, enums));
@@ -769,12 +798,24 @@ export function tableSql(table: PhysicalTable, enums: Map<string, ResolvedEnum>)
 
 export function triggerSql(table: PhysicalTable): string[] {
   validateInsertionInvariant(table);
+  validatePreservedInsertion(table);
   const out: string[] = [];
   if (table.insertionInvariant === "deletionLifecycleOriginal")
     out.push(
       `CREATE TRIGGER "tr_identity_account_deletion__original_insert" BEFORE INSERT ON "identity_account_deletion"\nWHEN EXISTS (SELECT 1 FROM "identity_account_deletion" WHERE "deletion_id" = NEW."deletion_id") OR (NEW."state" IN (1, 3) AND EXISTS (SELECT 1 FROM "identity_account_deletion" WHERE "user_id" = NEW."user_id" AND "state" IN (1, 3)))\nBEGIN\n  SELECT RAISE(ABORT, 'CHECK constraint failed: af_immutable_identity_account_deletion');\nEND`,
     );
   const message = (kind: string) => `CHECK constraint failed: af_${kind}`;
+  if (table.mutability.insert === "preserveExisting") {
+    const key = table.primaryKey
+      .map((name) => `existing.${quote(name)} IS NEW.${quote(name)}`)
+      .join(" AND ");
+    const equal = table.columns
+      .map((column) => `existing.${quote(column.name)} IS NEW.${quote(column.name)}`)
+      .join(" AND ");
+    out.push(
+      `CREATE TRIGGER ${quote(`tr_${table.name}__immutable_insert`)} BEFORE INSERT ON ${quote(table.name)}\nWHEN EXISTS (SELECT 1 FROM ${quote(table.name)} existing WHERE ${key})\nBEGIN\n  SELECT CASE WHEN EXISTS (SELECT 1 FROM ${quote(table.name)} existing WHERE ${key} AND ${equal}) THEN RAISE(IGNORE) ELSE RAISE(ABORT, ${sqlString(message(`immutable_${table.name}`))}) END;\nEND`,
+    );
+  }
   const update = table.mutability.update;
   if (update === "none") {
     out.push(

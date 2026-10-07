@@ -26,9 +26,14 @@ import { repositoryRoot } from "./support/sqlite-d1.ts";
 const file = "storage/plans/foundation/sample.sql";
 
 const scopedPlanId = "families.account-enrollment.scoped-fixture";
-const enrollmentRegistry = JSON.parse(
+const repositoryRegistry = JSON.parse(
   readFileSync(path.join(repositoryRoot, "storage/plans/families.json"), "utf8"),
 ) as { schemaVersion: number; families: unknown[] };
+// The isolated fixture owns only its synthetic enrollment plan, not the production registry's additional scoped plans.
+const enrollmentRegistry = {
+  schemaVersion: repositoryRegistry.schemaVersion,
+  families: repositoryRegistry.families,
+};
 const scopedPlan = readFileSync(
   path.join(repositoryRoot, "storage/plans/families/account-enrollment.create-user.sql"),
   "utf8",

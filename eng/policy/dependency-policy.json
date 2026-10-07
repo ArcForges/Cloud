@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "3add071de5dbe39c4feb9295785e214d97590e92",
+  "sourceCommit": "44e9c0625e28e5ef0a8373156709d41293161feb",
   "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -12,7 +12,7 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-    "package.json": "a640ac486b6f39198b9b6220ef5347fd06c4568c2926f8fdd8b5903a4acf9fa7",
+    "package.json": "79a8e3c506bc8e8c72c99b37b6944fee8ad8ddd2f5c6e6b6ad88d915c76ad1a3",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -95,9 +95,9 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-codex-20261006-identity (independent exact-head review recorded separately)",
+    "reviewer": "ArcForges delivery worker w-codex-20261006-catalog (maintainer admission; independent exact-head PR review required)",
     "date": "2026-10-07",
-    "rationale": "CLOUD.79 delivers required lazy immutable new-request deletion policy, actual persisted original disclosure, Identity-owned named current/user/lifecycle reads, and complete owner-only request/cancel/begin/complete-purge preparation. Migration0025 appends the genuine identity_account_deletion table with immutable original request/deadline/policy/duration/priorstate, typed terminal constraints and retained history. Existing numbered migrations and accepted source history are preserved. Current User requested_at/state/revision and lifecycle revision are independently fenced. Actual delivered CLOUD.78 predicates read the immutable stored deadline for expiry and due transitions, without caller due clocks; actual accepted CLOUD.82 seals exact Workspace scope. All54 managed deletion,19 managed physical and12 real migrated SQLite/Worker lifecycle plus163 full physical Worker component cases passed without skips, including malformed/foreign rows, bounded transient retries, cancellation, original-state restoration, concurrency, persistence, genuine active-state absence, current request/revision races, future due refusal and late-tail rollback. Actual locked solution restore and scoped formatter passed. This real locked bundle binds regenerated80-plan Worker bytes; parsed Worker114 membership is unchanged and image213 membership adds exactly six owned production CSharp sources. Dependency132 closure is unchanged. All committed immutable profiles, receipts and provenance records are preserved, including C82r1/r2. CLOUD.17 owns complete proof/session/PAT/device/notification/cleanup effects before the final family commit; this producer never commits an incomplete deletion request or declares provider purge acceptance. CLOUD.13 consumes real purpose5 disclosure separately. Deployed D1, provider cleanup, authenticated ingress and whole-series acceptance are distinct follow-ups; SQLite/fakes do not prove deployment or OS isolation. Applicable fresh CI, exact-head independent review and serialized normal publication/deployment remain mandatory. Production routes/data and workers.dev remain protected.",
+    "rationale": "COM.20 additive r2 admission corrects only two actual shipping formatter findings from hosted CI37584256803: CurrentResolverDefinitionSource using order and ResolverDefinitionValidator switch-arm whitespace. That exact prior hosted source passed all1443 managed/architecture cases with zero skips, full npm, Windows, dependency and all4 CodeQL gates; the formatter failure blocked candidate/deployment, so no delivery was claimed. The correction preserves C# semantic tokens, immutable r54/r1 evidence, accepted C79 migration25 and owning resolver migration26. Actual Worker bytes393467/SHA5dadcb9caa72e39df598b52c511bca8fb9f63c12c14fd844af77feed563627ea, all114 parsed/45 emitted inputs and222 image inputs are retained; exactly two managed shipping input hashes change. Existing132 dependency coordinates/closure and88 inputs retain their legal materials and pins. Exact-head independent narrow review and fresh applicable hosted CI, normal publication/deployment/ledger remain mandatory. Real Config authority integration is separately POL.02; fixtures do not prove live dual approval, customer permission, merchant acceptance or OS isolation. Production routes/data are preserved and workers.dev stays disabled.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -107,7 +107,7 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-      "package.json": "a640ac486b6f39198b9b6220ef5347fd06c4568c2926f8fdd8b5903a4acf9fa7",
+      "package.json": "79a8e3c506bc8e8c72c99b37b6944fee8ad8ddd2f5c6e6b6ad88d915c76ad1a3",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -1017,7 +1017,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-79-cloud-worker-bundle-r1", "cloud-79-cloud-runtime-notices-r1"],
+  "artifactRecords": ["com-20-cloud-worker-bundle-r2", "com-20-cloud-runtime-notices-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1031,7 +1031,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-79-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/com-20-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

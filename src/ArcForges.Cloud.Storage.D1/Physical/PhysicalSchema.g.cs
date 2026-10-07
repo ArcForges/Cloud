@@ -8,13 +8,13 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "b5c186e5ad3632ad4cc36b2975c054931aef6a05e6130330df25ab9af1f97a83";
+    public const string ManifestHash = "7eef0bcad4b69f52ca4dea6202b30066dd7ac4564923a692ff051532b43b1c06";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
-    public const int HighestMigration = 25;
+    public const int HighestMigration = 26;
 
     /// <summary>SHA-256 over the ordered sequence and checksum of every locked migration.</summary>
-    public const string MigrationLockHash = "e1396affb03529cad8700e2c071cb74af948db93b076cd1e4e5d4ecab1a30666";
+    public const string MigrationLockHash = "a92af5e64e57a399fdb48fcc9a0f0e5c36513840f2b6bad41c5bd43e02b7260c";
 
     public static IReadOnlyList<PhysicalEnum> Enums { get; } =
     [
@@ -56,6 +56,7 @@ internal static partial class PhysicalSchema
         new("entitlement.quota_event_kind", false, [new("consume", 1), new("release", 2), new("adjust", 3)]),
         new("entitlement.quota_reservation_state", false, [new("held", 1), new("settled", 2), new("releasing", 3), new("released", 4)]),
         new("entitlement.quota_scope_kind", false, [new("workspace", 1), new("deployment", 2)]),
+        new("entitlement.resolver_realm_kind", false, [new("official", 1), new("selfHosted", 2)]),
         new("entitlement.service_term_action_kind", false, [new("supersede", 1), new("revoke", 2)]),
         new("entitlement.service_term_kind", false, [new("subscription", 1), new("pass", 2), new("compensation", 3), new("selfHostGrant", 4)]),
         new("entitlement.workspace_status", false, [new("normal", 1), new("restricted", 2), new("suspended", 3)]),
@@ -1130,6 +1131,25 @@ internal static partial class PhysicalSchema
             new("fence", PhysicalKind.Int64, true),
         ],
         ["reservation_id"]);
+
+    public static PhysicalTable EntitlementResolverDefinitionProfile { get; } = new(
+        "entitlement_resolver_definition_profile",
+        "entitlement",
+        [
+            new("realm_id", PhysicalKind.Id, false),
+            new("definitions_version", PhysicalKind.Text, false, MaxBytes: 128),
+            new("profile_hash", PhysicalKind.Hash, false),
+            new("canonical_profile", PhysicalKind.Text, false, MaxBytes: 65536),
+            new("artifact_id", PhysicalKind.Text, false, MaxBytes: 128),
+            new("artifact_hash", PhysicalKind.Hash, false),
+            new("artifact_length", PhysicalKind.Int64, false),
+            new("original_config_revision_id", PhysicalKind.Id, false),
+            new("original_config_document_hash", PhysicalKind.Hash, false),
+            new("realm_kind", PhysicalKind.Enum, false, EnumName: "entitlement.resolver_realm_kind"),
+            new("publisher_ref", PhysicalKind.Text, false, MaxBytes: 256),
+            new("created_at", PhysicalKind.Instant, false),
+        ],
+        ["realm_id", "definitions_version"]);
 
     public static PhysicalTable EntitlementRevision { get; } = new(
         "entitlement_revision",
@@ -2941,6 +2961,7 @@ internal static partial class PhysicalSchema
         EntitlementQuotaBudget,
         EntitlementQuotaEvent,
         EntitlementQuotaReservation,
+        EntitlementResolverDefinitionProfile,
         EntitlementRevision,
         EntitlementRevocation,
         EntitlementServiceTerm,

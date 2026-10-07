@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "303fd7babc723ee717fc9226be991beb5d063c318ae750de0a305ebfda40ab1e";
+    public const string Hash = "55d5155816a3b6b80c7994264bac73cea64672198f81de1af8f1b6a043e64937";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity
@@ -332,6 +332,38 @@ internal static class PlanManifest
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope)], null),
                 new([new(PlanKind.Text), new(PlanKind.Text)], null),
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition ResolverDefinitionCommand = new(
+            "entitlement.resolver-definition-command",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text, true), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition ResolverDefinitionGet = new(
+            "entitlement.resolver-definition-get",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Scope), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64)])
+            ]);
+
+        public static readonly PlanDefinition ResolverDefinitionPublish = new(
+            "entitlement.resolver-definition-publish",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Int64)], null),
                 new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
@@ -903,13 +935,41 @@ internal static class PlanManifest
                 new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Text)], null)
             ]);
+
+        public static readonly PlanDefinition EntitlementDefinitionResolutionCommitCurrent = new(
+            "families.entitlement-definition-resolution.commit-current",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes)], null),
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Text)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Scope), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Scope)], null),
+                new([new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Bytes), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
     }
 
-    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.DeletionCurrent, Identity.DeletionState, Identity.DeletionUser, Identity.RecoveryActive, Identity.UserLoad, Identity.UserRename, Workspace.WorkspaceByOwner, Workspace.WorkspaceLoad, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.QuotaKernelBudget, Entitlement.QuotaKernelCleanup, Entitlement.QuotaKernelCommand, Entitlement.QuotaKernelEffect, Entitlement.QuotaKernelPublish, Entitlement.QuotaKernelReservation, Entitlement.QuotaKernelReserve, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Commerce.CatalogueEffective, Commerce.CatalogueList, Commerce.CataloguePrice, Commerce.CataloguePublish, Commerce.CatalogueState, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CapacityJobCheckpoint, Platform.CapacityJobClaim, Platform.CapacityJobCreate, Platform.CapacityJobDue, Platform.CapacityJobLoad, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.RecoveryCurrent, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser];
+    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.DeletionCurrent, Identity.DeletionState, Identity.DeletionUser, Identity.RecoveryActive, Identity.UserLoad, Identity.UserRename, Workspace.WorkspaceByOwner, Workspace.WorkspaceLoad, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.QuotaKernelBudget, Entitlement.QuotaKernelCleanup, Entitlement.QuotaKernelCommand, Entitlement.QuotaKernelEffect, Entitlement.QuotaKernelPublish, Entitlement.QuotaKernelReservation, Entitlement.QuotaKernelReserve, Entitlement.ResolverDefinitionCommand, Entitlement.ResolverDefinitionGet, Entitlement.ResolverDefinitionPublish, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Commerce.CatalogueEffective, Commerce.CatalogueList, Commerce.CataloguePrice, Commerce.CataloguePublish, Commerce.CatalogueState, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CapacityJobCheckpoint, Platform.CapacityJobClaim, Platform.CapacityJobCreate, Platform.CapacityJobDue, Platform.CapacityJobLoad, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.RecoveryCurrent, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser, Families.EntitlementDefinitionResolutionCommitCurrent];
 
     /// <summary>The closed registry of shared transaction families (<c>storage/plans/families.json</c>, Design SU-01).</summary>
     public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = [
-        new("account-enrollment", "Authentication/enrollment completion and default workspace provisioning", "data model 00 section 6.1.1 (SU-01 row 'Authentication/enrollment completion and default workspace provisioning'); Device, Entitlement and Notification are conditional here because their tasks append their own plans of this family (CLOUD.11 planning repair, Design #248)", [new(FamilyModule.Identity, true, null), new(FamilyModule.Workspace, true, null), new(FamilyModule.Device, false, "when the completion creates the first installation and session (CLOUD.12, CLOUD.13)"), new(FamilyModule.Entitlement, false, "when configured initial grants apply to a new user"), new(FamilyModule.Notification, false, "when the completion queues a security notification (CLOUD.12)")])
+        new("account-enrollment", "Authentication/enrollment completion and default workspace provisioning", "data model 00 section 6.1.1 (SU-01 row 'Authentication/enrollment completion and default workspace provisioning'); Device, Entitlement and Notification are conditional here because their tasks append their own plans of this family (CLOUD.11 planning repair, Design #248)", [new(FamilyModule.Identity, true, null), new(FamilyModule.Workspace, true, null), new(FamilyModule.Device, false, "when the completion creates the first installation and session (CLOUD.12, CLOUD.13)"), new(FamilyModule.Entitlement, false, "when configured initial grants apply to a new user"), new(FamilyModule.Notification, false, "when the completion queues a security notification (CLOUD.12)")]),
+        new("entitlement-definition-resolution", "Current immutable resolver definitions and existing Entitlement single writer", "model 00 section 6.1 and model 01 resolver_definition_profile (COM.20)", [new(FamilyModule.Configuration, true, null), new(FamilyModule.Entitlement, true, null)])
     ];
 
     /// <summary>The statement roles of every shared family plan, in plan order.</summary>
@@ -930,7 +990,28 @@ internal static class PlanManifest
             new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "e-archive-stream"),
             new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "f-archive"),
             new(FamilyModule.Platform, FamilyPhase.Release, FamilyClass.Release, "release")
-        ])
+        ]),
+        new(Families.EntitlementDefinitionResolutionCommitCurrent, "entitlement-definition-resolution", [
+            new(FamilyModule.Platform, FamilyPhase.Guard, FamilyClass.Authorization, "recovery-current"),
+            new(FamilyModule.Configuration, FamilyPhase.Guard, FamilyClass.Policy, "current-definitions-head"),
+            new(FamilyModule.Entitlement, FamilyPhase.Guard, FamilyClass.Revision, "workspace-revision"),
+            new(FamilyModule.Entitlement, FamilyPhase.Guard, FamilyClass.Policy, "resolver-profile"),
+            new(FamilyModule.Entitlement, FamilyPhase.Mutation, FamilyClass.Record, "a-revision"),
+            new(FamilyModule.Entitlement, FamilyPhase.Mutation, FamilyClass.Record, "b-grants"),
+            new(FamilyModule.Entitlement, FamilyPhase.Mutation, FamilyClass.Record, "c-revocations"),
+            new(FamilyModule.Entitlement, FamilyPhase.Mutation, FamilyClass.Record, "d-terms"),
+            new(FamilyModule.Entitlement, FamilyPhase.Mutation, FamilyClass.Record, "e-actions"),
+            new(FamilyModule.Entitlement, FamilyPhase.Mutation, FamilyClass.Record, "f-activations"),
+            new(FamilyModule.Entitlement, FamilyPhase.Mutation, FamilyClass.Record, "g-facts"),
+            new(FamilyModule.Entitlement, FamilyPhase.Mutation, FamilyClass.Record, "h-snapshot"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "a-receipt"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "b-stream"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "c-outbox"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "d-position"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "e-archive-stream"),
+            new(FamilyModule.Platform, FamilyPhase.Mutation, FamilyClass.Record, "f-archive"),
+            new(FamilyModule.Platform, FamilyPhase.Release, FamilyClass.Release, "release")
+        ], RequiresScopedContributions: true)
     ];
 
     /// <summary>Closed lifetime roles emitted by the canonical SQL compiler; no request can extend them.</summary>
