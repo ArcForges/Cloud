@@ -106,7 +106,7 @@
           {
             "path": "LICENSE-MIT",
             "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
-            "finding": "Wrangler4.143.1 retains the exact accepted MIT grant and unchanged LICENSE-MIT at its accepted release commit. Its bundle generator source remains byte-identical to the reviewed predecessor. Actual CLOUD.79 Worker bytes are newly regenerated from the reviewed80-plan dictionary and bound to r53; generator code is not bundled runtime."
+            "finding": "Wrangler4.143.1 retains the exact accepted MIT grant and unchanged LICENSE-MIT at its accepted release commit. Its bundle generator source remains byte-identical to the reviewed predecessor. Actual COM.18 Worker bytes are newly regenerated from the reviewed94-plan dictionary and bound to r56; generator code is not bundled runtime."
           }
         ]
       },
@@ -231,7 +231,7 @@
         ]
       }
     ],
-    "command": "Restore exact locked npm dependencies; wrangler deploy --dry-run --containers-rollout none --outdir artifacts/provenance-test-worker --metafile artifacts/provenance-test-worker/meta.json. Verify actual CLOUD.79 regenerated80-plan Worker bytes bound to r53, with unchanged114 parsed/45 emitted membership and all accepted legal text. This actual local dry-run is not provider or OS isolation acceptance.",
+    "command": "Restore exact locked npm dependencies; wrangler deploy --dry-run --containers-rollout none --outdir artifacts/com-18-worker --metafile artifacts/com-18-worker/bundle-meta.json. Verify actual COM.18 regenerated94-plan Worker bytes bound to r56, with unchanged114 parsed/45 emitted membership and all accepted legal text. This actual local dry-run is not provider or OS isolation acceptance.",
     "outputSpdx": "AGPL-3.0-only"
   },
   "review": {

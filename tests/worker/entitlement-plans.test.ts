@@ -37,6 +37,7 @@ test("the Entitlement owner has its named plans and each names only entitlement_
     "entitlement.feature-releases-load",
     "entitlement.grants-load",
     "entitlement.quota-definition-command",
+    "entitlement.quota-definition-compatible",
     "entitlement.quota-definition-get",
     "entitlement.quota-definition-publish",
     "entitlement.quota-kernel-budget",

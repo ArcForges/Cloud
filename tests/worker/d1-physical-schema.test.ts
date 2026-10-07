@@ -189,7 +189,7 @@ test("preserved insertion refuses unsupported mutability and unique-key conflict
 });
 
 test("the manifest covers every owner and keeps every table inside its owner's prefix", () => {
-  assert.equal(schema.tables.length, 163);
+  assert.equal(schema.tables.length, 165);
   for (const owner of schema.owners) {
     const tables = schema.tables.filter((table) => table.owner === owner.owner);
     assert(tables.length > 0, `owner ${owner.owner} has no table`);
