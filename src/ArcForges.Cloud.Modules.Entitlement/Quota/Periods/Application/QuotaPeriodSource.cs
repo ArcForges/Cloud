@@ -22,7 +22,7 @@ internal sealed class QuotaPeriodSource(IQuotaPeriodStore store, IQuotaDefinitio
             || current.ResolverDefinitions.Any(d => d is null) || current.ArtifactProfile != QuotaDefinitionValidator.ProfileName
             || !Hash(current.DocumentHash) || !Hash(current.ArtifactHash) || current.VerifiedLength is < 2 or > QuotaDefinitionValidator.MaximumBytes
             || !QuotaDefinitionValidator.Version(current.DefinitionsVersion) || !QuotaDefinitionValidator.Version(current.ArtifactId)
-            || !QuotaDefinitionValidator.Version(current.PublisherRef)) return new(QuotaDefinitionStatus.Defect);
+            || !QuotaDefinitionValidator.Publisher(current.PublisherRef)) return new(QuotaDefinitionStatus.Defect);
         var stored = await store.ReadAsync(realmId, workspaceId, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (stored.Status != QuotaDefinitionStatus.Succeeded || stored.Value is not { } value) return new(stored.Status == QuotaDefinitionStatus.Succeeded ? QuotaDefinitionStatus.Defect : stored.Status);

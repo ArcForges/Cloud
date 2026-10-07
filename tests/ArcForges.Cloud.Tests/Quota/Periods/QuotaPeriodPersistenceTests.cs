@@ -21,6 +21,40 @@ namespace ArcForges.Cloud.Tests.QuotaPeriods;
 
 public sealed class QuotaPeriodPersistenceTests
 {
+    [Theory]
+    [InlineData(128, false)]
+    [InlineData(129, false)]
+    [InlineData(256, false)]
+    [InlineData(257, false)]
+    [InlineData(128, true)]
+    [InlineData(129, true)]
+    [InlineData(256, true)]
+    [InlineData(257, true)]
+    public async Task CapturedMaterializerPublisherCurrentPeriodUsesSame256Utf8Bound(int byteLength, bool unicode)
+    {
+        using var h = await Harness.Create();
+        var publisher = unicode ? new string('中', byteLength / 3) + new string('a', byteLength % 3) : new string('a', byteLength);
+        Assert.Equal(byteLength, Encoding.UTF8.GetByteCount(publisher));
+        var original = h.Authority.Current!;
+        h.Authority.Current = new(original.RealmId, original.ConfigurationRevisionId, original.DocumentHash,
+            original.ArtifactId, original.ArtifactProfile, original.ArtifactHash, original.VerifiedLength,
+            original.DefinitionsVersion, original.RealmKind, publisher, original.ResolverDefinitions);
+        var calls = h.Bridge.Calls;
+        var result = await h.Source().ReadAsync(h.Realm, h.Workspace, T.Ct);
+        if (byteLength > 256)
+        {
+            Assert.Equal(QuotaDefinitionStatus.Defect, result.Status);
+            Assert.Null(result.Value);
+            Assert.Equal(calls, h.Bridge.Calls);
+            return;
+        }
+        Assert.Equal(QuotaDefinitionStatus.Succeeded, result.Status);
+        Assert.Equal("paid-original", result.Value!.SelectedPeriod!.Term.PeriodRef);
+        Assert.Equal(100, Assert.Single(result.Value.Quotas).Limit);
+        Assert.Equal(1, result.Value.EntitlementRevision);
+        Assert.Equal(1, result.Value.SnapshotVersion);
+    }
+
     [Fact]
     public async Task ActualOwnerRowsYieldSelectedPaidPeriodPositiveSnapshotAndRestartedHistory()
     {

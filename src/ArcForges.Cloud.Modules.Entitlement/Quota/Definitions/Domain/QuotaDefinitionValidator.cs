@@ -83,22 +83,32 @@ internal sealed class QuotaDefinitionValidator : IQuotaDefinitionValidator
         return buffer.WrittenSpan.ToArray();
     }
 
-    internal static bool Version(string? value)
+    internal static bool Version(string? value) => BoundedText(value, 128);
+    internal static bool Publisher(string? value) => BoundedText(value, 256);
+    private static bool BoundedText(string? value, int maximumBytes)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl)) return false;
-        try { return Utf8.GetByteCount(value) <= 128; }
+        try { return Utf8.GetByteCount(value) <= maximumBytes; }
         catch (EncoderFallbackException) { return false; }
     }
     internal static string UnitName(QuotaDefinitionUnit value) => value switch
     {
-        QuotaDefinitionUnit.Bytes => "bytes", QuotaDefinitionUnit.Microseconds => "microseconds",
-        QuotaDefinitionUnit.Samples => "samples", QuotaDefinitionUnit.Count => "count",
+        QuotaDefinitionUnit.Bytes => "bytes",
+        QuotaDefinitionUnit.Microseconds => "microseconds",
+        QuotaDefinitionUnit.Samples => "samples",
+        QuotaDefinitionUnit.Count => "count",
         _ => throw new ArgumentOutOfRangeException(nameof(value)),
     };
     private static bool Unit(string? value, out QuotaDefinitionUnit unit)
     {
-        unit = value switch { "bytes" => QuotaDefinitionUnit.Bytes, "microseconds" => QuotaDefinitionUnit.Microseconds,
-            "samples" => QuotaDefinitionUnit.Samples, "count" => QuotaDefinitionUnit.Count, _ => (QuotaDefinitionUnit)(-1) };
+        unit = value switch
+        {
+            "bytes" => QuotaDefinitionUnit.Bytes,
+            "microseconds" => QuotaDefinitionUnit.Microseconds,
+            "samples" => QuotaDefinitionUnit.Samples,
+            "count" => QuotaDefinitionUnit.Count,
+            _ => (QuotaDefinitionUnit)(-1)
+        };
         return Enum.IsDefined(unit);
     }
     private static bool Enumeration<T>(string? value, out T result) where T : struct, Enum

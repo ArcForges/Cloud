@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using System.Text;
 using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Modules.Entitlement;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Definitions.Application;
@@ -14,6 +15,65 @@ namespace ArcForges.Cloud.Tests.QuotaDefinitions;
 
 public sealed class QuotaDefinitionPersistenceTests
 {
+    [Theory]
+    [InlineData(128, false)]
+    [InlineData(129, false)]
+    [InlineData(256, false)]
+    [InlineData(257, false)]
+    [InlineData(128, true)]
+    [InlineData(129, true)]
+    [InlineData(256, true)]
+    [InlineData(257, true)]
+    public async Task CapturedMaterializerPublisherUsesExact256Utf8ByteBoundAndRetainedApproval(int byteLength, bool unicode)
+    {
+        using var h = await Harness.Create();
+        var request = h.Define("publisher-bound", QuotaDefinitionUnit.Bytes);
+        var publisher = unicode ? new string('中', byteLength / 3) + new string('a', byteLength % 3) : new string('a', byteLength);
+        Assert.Equal(byteLength, Encoding.UTF8.GetByteCount(publisher));
+        request = request with { PublisherRef = publisher };
+        var original = h.Authority.Approved!;
+        h.Authority.Approved = new(original.RealmId, original.ConfigurationRevisionId, original.DocumentHash,
+            original.ArtifactId, original.ArtifactProfile, original.ArtifactHash, original.VerifiedLength,
+            original.DefinitionsVersion, original.RealmKind, publisher, original.ResolverDefinitions);
+        var result = await h.Publish(request);
+        if (byteLength > 256)
+        {
+            Assert.Equal(QuotaDefinitionStatus.Invalid, result.Status);
+            Assert.Equal(0, h.Authority.Reads);
+            Assert.Equal(0, h.Artifacts.Reads);
+            Assert.Equal(0, h.Resolver.Reads);
+            Assert.Equal(0, await h.Count("entitlement_quota_definition_profile"));
+            Assert.Equal(0, await h.Count("platform_command"));
+            return;
+        }
+        Assert.Equal(QuotaDefinitionStatus.Succeeded, result.Status);
+        var receipt = await new D1QuotaDefinitionStore(h.Port).ReceiptAsync(request, T.Ct);
+        Assert.Equal(publisher, receipt.Value!.Actor);
+        Assert.Equal(QuotaDefinitionStatus.Replayed, (await h.Publish(request)).Status);
+        Assert.Equal(QuotaDefinitionStatus.Denied, (await h.Publish(request with { PublisherRef = "unapproved-materializer" })).Status);
+        Assert.Equal(1, await h.Count("entitlement_quota_definition_profile"));
+        Assert.Equal(1, await h.Count("platform_command"));
+        Assert.Equal(1, await h.Count("platform_change_archive"));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task MalformedCapturedMaterializerPublisherRefusesBeforeAnyAuthorityOrPersistence(int variant)
+    {
+        using var h = await Harness.Create();
+        var request = h.Define("publisher-invalid", QuotaDefinitionUnit.Bytes);
+        var publisher = variant switch { 0 => "", 1 => " ", 2 => "materializer\n", _ => "materializer\uD800" };
+        Assert.Equal(QuotaDefinitionStatus.Invalid, (await h.Publish(request with { PublisherRef = publisher })).Status);
+        Assert.Equal(0, h.Authority.Reads);
+        Assert.Equal(0, h.Artifacts.Reads);
+        Assert.Equal(0, h.Resolver.Reads);
+        Assert.Equal(0, await h.Count("entitlement_quota_definition_profile"));
+        Assert.Equal(0, await h.Count("platform_command"));
+    }
+
     [Fact]
     public async Task SupersededUnpublishedAssociationCannotCreateAnUnacceptedProfile()
     {
@@ -234,9 +294,12 @@ public sealed class QuotaDefinitionPersistenceTests
     private sealed class Authority : IQuotaApprovedConfigurationSource
     {
         internal ApprovedQuotaConfiguration? Approved; internal ApprovedQuotaConfiguration? Current;
+        internal int Reads;
         internal QuotaDefinitionStatus Status = QuotaDefinitionStatus.Succeeded;
-        public Task<QuotaConfigurationResult> ReadHistoricalAsync(Guid realmId, Guid revision, string hash, CancellationToken ct) => Task.FromResult(new QuotaConfigurationResult(Status, Approved));
-        public Task<QuotaConfigurationResult> ReadCurrentAsync(Guid realmId, CancellationToken ct) => Task.FromResult(new QuotaConfigurationResult(Status, Current ?? Approved));
+        public Task<QuotaConfigurationResult> ReadHistoricalAsync(Guid realmId, Guid revision, string hash, CancellationToken ct)
+        { Reads++; return Task.FromResult(new QuotaConfigurationResult(Status, Approved)); }
+        public Task<QuotaConfigurationResult> ReadCurrentAsync(Guid realmId, CancellationToken ct)
+        { Reads++; return Task.FromResult(new QuotaConfigurationResult(Status, Current ?? Approved)); }
     }
     private sealed class Artifacts : IQuotaDefinitionArtifactPort
     {

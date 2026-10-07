@@ -23,7 +23,7 @@ internal sealed class QuotaDefinitionService(IQuotaDefinitionStore store, IQuota
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (request is null || request.CommandId == Guid.Empty || request.RealmId == Guid.Empty || request.ConfigurationRevisionId == Guid.Empty
-            || !Hash(request.DocumentHash) || !QuotaDefinitionValidator.Version(request.PublisherRef)) return new(QuotaDefinitionStatus.Invalid);
+            || !Hash(request.DocumentHash) || !QuotaDefinitionValidator.Publisher(request.PublisherRef)) return new(QuotaDefinitionStatus.Invalid);
         if (configurations is null || artifacts is null || resolver is null) return new(QuotaDefinitionStatus.Unavailable);
         // Historical approved source is necessary for retained materialization commands. It is not current purchase authorization.
         var association = await configurations.ReadHistoricalAsync(request.RealmId, request.ConfigurationRevisionId, request.DocumentHash, cancellationToken).ConfigureAwait(false);
