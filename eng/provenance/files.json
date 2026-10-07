@@ -131,6 +131,7 @@
     "eng/policy/dependency-reviews/com-02-r1.json",
     "eng/policy/dependency-reviews/com-05-r1.json",
     "eng/policy/dependency-reviews/com-16-r1.json",
+    "eng/policy/dependency-reviews/com-20-r1.json",
     "eng/policy/dependency-reviews/gov-09-r1.json",
     "eng/policy/dependency-reviews/gov-22-r1.json",
     "eng/policy/dependency-reviews/ops-01-r1.json",
@@ -202,6 +203,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r51.json",
     "eng/provenance/artifact-profiles/cloud-release-r52.json",
     "eng/provenance/artifact-profiles/cloud-release-r53.json",
+    "eng/provenance/artifact-profiles/cloud-release-r54.json",
     "eng/provenance/artifact-profiles/cloud-release-r6.json",
     "eng/provenance/artifact-profiles/cloud-release-r7.json",
     "eng/provenance/artifact-profiles/cloud-release-r8.json",
@@ -309,6 +311,8 @@
     "eng/provenance/records/com-05-cloud-worker-bundle-r1.json",
     "eng/provenance/records/com-16-cloud-runtime-notices-r1.json",
     "eng/provenance/records/com-16-cloud-worker-bundle-r1.json",
+    "eng/provenance/records/com-20-cloud-runtime-notices-r1.json",
+    "eng/provenance/records/com-20-cloud-worker-bundle-r1.json",
     "eng/provenance/records/containers-mit-legal-r1.json",
     "eng/provenance/records/contracts-notice-legal-r1.json",
     "eng/provenance/records/contracts-notice-legal-r2.json",
@@ -513,8 +517,8 @@
     "src/ArcForges.Cloud.Storage.D1/Migrations/0023_platform__commit-tail.sql",
     "src/ArcForges.Cloud.Storage.D1/Migrations/0024_entitlement__resolver-inputs.sql",
     "src/ArcForges.Cloud.Storage.D1/Migrations/0025_identity__deletion-lifecycle.sql",
+    "src/ArcForges.Cloud.Storage.D1/Migrations/0026_entitlement__resolver-definition-profile.sql",
     "src/ArcForges.Cloud.Storage.D1/Migrations/migrations.lock.json",
-    "src/ArcForges.Cloud.Storage.D1/Migrations/pending/entitlement__resolver-definition-profile.sql",
     "src/ArcForges.Cloud.Storage.D1/ModuleBinding/ModulePlanPort.cs",
     "src/ArcForges.Cloud.Storage.D1/Outbox/OutboxEvent.cs",
     "src/ArcForges.Cloud.Storage.D1/Outbox/OutboxPublisher.cs",
@@ -958,8 +962,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": [
-    "cloud-79-cloud-worker-bundle-r1",
-    "cloud-79-cloud-runtime-notices-r1"
-  ]
+  "artifacts": ["com-20-cloud-worker-bundle-r1", "com-20-cloud-runtime-notices-r1"]
 }
