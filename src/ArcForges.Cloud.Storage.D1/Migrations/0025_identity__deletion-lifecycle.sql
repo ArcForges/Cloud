@@ -26,6 +26,12 @@ CREATE INDEX "ix_identity_account_deletion__state_grace_ends_at" ON "identity_ac
 
 CREATE INDEX "ix_identity_account_deletion__user_id_requested_at" ON "identity_account_deletion" ("user_id", "requested_at");
 
+CREATE TRIGGER "tr_identity_account_deletion__original_insert" BEFORE INSERT ON "identity_account_deletion"
+WHEN EXISTS (SELECT 1 FROM "identity_account_deletion" WHERE "deletion_id" = NEW."deletion_id") OR (NEW."state" IN (1, 3) AND EXISTS (SELECT 1 FROM "identity_account_deletion" WHERE "user_id" = NEW."user_id" AND "state" IN (1, 3)))
+BEGIN
+  SELECT RAISE(ABORT, 'CHECK constraint failed: af_immutable_identity_account_deletion');
+END;
+
 CREATE TRIGGER "tr_identity_account_deletion__limited_update" BEFORE UPDATE ON "identity_account_deletion"
 WHEN (OLD."deletion_id" IS NOT NEW."deletion_id" OR OLD."realm_id" IS NOT NEW."realm_id" OR OLD."user_id" IS NOT NEW."user_id" OR OLD."requested_at" IS NOT NEW."requested_at" OR OLD."grace_ends_at" IS NOT NEW."grace_ends_at" OR OLD."policy_version" IS NOT NEW."policy_version" OR OLD."grace_seconds" IS NOT NEW."grace_seconds" OR OLD."previous_user_state" IS NOT NEW."previous_user_state") OR NOT (OLD."state" IN (1, 3))
 BEGIN

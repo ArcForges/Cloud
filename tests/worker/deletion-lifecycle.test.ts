@@ -210,11 +210,46 @@ function insert(db: DatabaseSync, id = deletion, at = requested, duration = 1): 
   ).run(id, realm, user, at, at + duration * 1_000_000, "policy.v1", duration, 3, 1);
 }
 
+test("actual replacement insert cannot rewrite original disclosure or replace an active lifecycle", () => {
+  for (const recursive of [0, 1]) {
+    const db = database();
+    try {
+      db.exec(`PRAGMA recursive_triggers=${recursive}`);
+      insert(db);
+      const before = db.prepare("SELECT * FROM identity_account_deletion").all();
+      const replace = db.prepare(
+        "INSERT OR REPLACE INTO identity_account_deletion VALUES (?, ?, ?, ?, ?, 'policy.v2', 2, 1, 1, NULL, NULL, 1)",
+      );
+      for (const id of [deletion, nextDeletion]) {
+        assert.throws(
+          () => replace.run(id, realm, user, requested, requested + 2_000_000),
+          /constraint/i,
+        );
+        assert.deepEqual(db.prepare("SELECT * FROM identity_account_deletion").all(), before);
+      }
+      db.prepare(
+        "UPDATE identity_account_deletion SET state=2,cancelled_at=?,rev=rev+1 WHERE deletion_id=?",
+      ).run(999, deletion);
+      const terminal = db.prepare("SELECT * FROM identity_account_deletion").all();
+      assert.throws(
+        () => replace.run(deletion, realm, user, requested, requested + 2_000_000),
+        /constraint/i,
+      );
+      assert.deepEqual(db.prepare("SELECT * FROM identity_account_deletion").all(), terminal);
+      insert(db, nextDeletion, 2_000_000);
+      assert.equal(db.prepare("SELECT count(*) AS n FROM identity_account_deletion").get()?.n, 2);
+      assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    } finally {
+      db.close();
+    }
+  }
+});
+
 test("one active lifecycle, immutable disclosure, retained cancelled history and previous state", () => {
   const db = database();
   try {
     insert(db);
-    assert.throws(() => insert(db, nextDeletion), /UNIQUE/);
+    assert.throws(() => insert(db, nextDeletion), /af_immutable_identity_account_deletion/);
     for (const change of [
       "grace_ends_at=grace_ends_at+1",
       "policy_version='policy.v2'",
