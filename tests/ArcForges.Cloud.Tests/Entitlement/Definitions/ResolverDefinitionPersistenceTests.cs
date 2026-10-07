@@ -131,6 +131,34 @@ public sealed class ResolverDefinitionPersistenceTests
     }
 
     [Fact]
+    public async Task AuthorizedPublisherRotationReusesExactArtifactWithoutChangingFirstPublisherOrAuthorizingOldIdentity()
+    {
+        using var h = await Harness.Create();
+        var original = h.Define("v1");
+        var first = await h.Publish(original);
+        Assert.Equal(ResolverDefinitionStatus.Succeeded, first.Status);
+        var oldAssociation = h.Authority.Approved!;
+        var later = h.Define("v1") with { PublisherRef = "config:rotated-materializer" };
+        h.Authority.Approved = h.Authority.Approved! with { PublisherRef = later.PublisherRef };
+        var newAssociation = h.Authority.Approved;
+        Assert.Equal(ResolverDefinitionStatus.Denied, (await h.Publish(later with { PublisherRef = original.PublisherRef })).Status);
+        var reused = await h.Publish(later);
+        Assert.Equal(ResolverDefinitionStatus.Succeeded, reused.Status);
+        Assert.Equal(original.PublisherRef, reused.Value!.PublisherRef);
+        Assert.Equal(original.ConfigurationRevisionId, reused.Value.FirstConfigurationRevisionId);
+        var current = await new CurrentResolverDefinitionSource(h.Authority, h.Publisher()).ReadAsync(h.Realm, T.Ct);
+        Assert.Equal(ResolverDefinitionStatus.Succeeded, current.Status);
+        Assert.Equal(later.PublisherRef, current.Value!.Configuration.PublisherRef);
+        Assert.Equal(original.PublisherRef, current.Value.Definitions.PublisherRef);
+        h.Authority.CurrentApproved = newAssociation;
+        h.Authority.Approved = oldAssociation;
+        Assert.Equal(ResolverDefinitionStatus.Replayed, (await h.Publish(original)).Status);
+        Assert.Equal(1, await h.Count("entitlement_resolver_definition_profile"));
+        Assert.Equal(2, await h.Count("platform_command"));
+        Assert.Equal(2, await h.Count("platform_change_archive"));
+    }
+
+    [Fact]
     public async Task ConcurrentConflictingSameVersionRollsBackAllLosingEffects()
     {
         using var h = await Harness.Create();
