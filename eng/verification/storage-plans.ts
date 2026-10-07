@@ -508,7 +508,154 @@ export interface FamilyStatementMeta {
   phase: FamilyPhase;
   class: string;
   key: string;
+  /** Closed server-security annotation; never accepted from a Worker plan request. */
+  securityExpiry?: FamilySecurityExpiry;
 }
+export type SecurityExpiryProfile =
+  | "NativeSession"
+  | "BrowserSession"
+  | "NativeRefresh"
+  | "ActionChallenge"
+  | "NativeCode"
+  | "BrowserFlow"
+  | "DeletionGrace"
+  | "EnrollmentFlow"
+  | "PendingChallenge"
+  | "DeletionGraceDue";
+export interface FamilySecurityExpiry {
+  readonly profile: SecurityExpiryProfile;
+  readonly table: string;
+  readonly columns: readonly string[];
+  readonly capturedParamIndex: number | null;
+}
+
+/** SQLite's UTC millisecond ceiling, in integer microseconds: never truncate a lifetime. */
+export const securityNowLowerMicros =
+  "CAST(strftime('%s','now') AS INTEGER) * 1000000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER) * 1000";
+export const securityNowUpperMicros = `${securityNowLowerMicros} + 1000`;
+
+const actorFamilies = [
+  "session-lifecycle",
+  "device-revocation",
+  "push-registration",
+  "account-security",
+] as const;
+/** One closed registration: exact owner/class/key, family, physical table and complete expiry set. */
+const securityExpiryRegistrations: readonly {
+  profile: SecurityExpiryProfile;
+  table: string;
+  columns: readonly string[];
+  key: string;
+  families: readonly string[];
+  plans?: readonly string[];
+}[] = [
+  {
+    profile: "EnrollmentFlow",
+    table: "identity_security_flow",
+    columns: ["expires_at"],
+    key: "enrollment-flow-current",
+    families: ["account-enrollment"],
+  },
+  {
+    profile: "PendingChallenge",
+    table: "identity_step_up_challenge",
+    columns: ["expires_at"],
+    key: "challenge-pending",
+    families: ["account-security"],
+    plans: [
+      "step-up-prove-native",
+      "step-up-prove-browser",
+      "step-up-fail-native",
+      "step-up-fail-browser",
+    ],
+  },
+  {
+    profile: "DeletionGraceDue",
+    table: "identity_account_deletion",
+    columns: ["grace_ends_at"],
+    key: "deletion-due",
+    families: ["account-security"],
+    plans: ["begin-deletion-purge"],
+  },
+  {
+    profile: "DeletionGraceDue",
+    table: "identity_account_deletion",
+    columns: ["grace_ends_at"],
+    key: "deletion-purging",
+    families: ["account-security"],
+    plans: ["complete-deletion-purge"],
+  },
+  {
+    profile: "NativeSession",
+    table: "identity_session",
+    columns: ["expires_at", "access_expires_at"],
+    key: "actor-current",
+    families: actorFamilies,
+  },
+  {
+    profile: "BrowserSession",
+    table: "identity_session",
+    columns: ["expires_at", "idle_expires_at"],
+    key: "actor-current",
+    families: actorFamilies,
+  },
+  {
+    profile: "NativeSession",
+    table: "identity_session",
+    columns: ["expires_at", "access_expires_at"],
+    key: "c-session",
+    families: ["token-issuance"],
+  },
+  {
+    profile: "BrowserSession",
+    table: "identity_session",
+    columns: ["expires_at", "idle_expires_at"],
+    key: "c-session",
+    families: ["token-issuance"],
+  },
+  {
+    profile: "NativeRefresh",
+    table: "identity_session",
+    columns: ["expires_at"],
+    key: "refresh-current",
+    families: ["session-lifecycle"],
+  },
+  {
+    profile: "ActionChallenge",
+    table: "identity_step_up_challenge",
+    columns: ["expires_at"],
+    key: "action-proof",
+    families: ["device-revocation", "session-lifecycle", "account-security"],
+  },
+  {
+    profile: "ActionChallenge",
+    table: "identity_step_up_challenge",
+    columns: ["expires_at"],
+    key: "a-proof",
+    families: ["token-issuance"],
+  },
+  {
+    profile: "NativeCode",
+    table: "identity_native_authorization",
+    columns: ["expires_at", "code_expires_at"],
+    key: "native-code-current",
+    families: ["account-enrollment"],
+  },
+  {
+    profile: "BrowserFlow",
+    table: "identity_browser_auth_flow",
+    columns: ["expires_at"],
+    key: "browser-flow-current",
+    families: ["account-enrollment"],
+  },
+  {
+    profile: "DeletionGrace",
+    table: "identity_account_deletion",
+    columns: ["grace_ends_at"],
+    key: "deletion-current",
+    families: ["account-security"],
+  },
+];
 export interface FamilyParticipant {
   module: string;
   requirement: "required" | "conditional";
@@ -699,7 +846,7 @@ type Fields = Map<string, string>;
 function parseFields(header: string, allowed: readonly string[], where: string): Fields {
   const fields: Fields = new Map();
   for (const part of header.split(/\s+/u).filter(Boolean)) {
-    const pair = /^([a-z]+)=(.*)$/u.exec(part);
+    const pair = /^([a-z][a-zA-Z]*)=(.*)$/u.exec(part);
     assert(pair && allowed.includes(pair[1] ?? ""), `${where}: unknown field '${part}'`);
     assert(!fields.has(pair[1] ?? ""), `${where}: duplicate ${pair[1]}`);
     fields.set(pair[1] ?? "", pair[2] ?? "");
@@ -707,7 +854,7 @@ function parseFields(header: string, allowed: readonly string[], where: string):
   return fields;
 }
 const guardFieldsOf: Record<GuardKind, readonly string[]> = {
-  authorization: ["match", "fresh"],
+  authorization: ["match", "fresh", "securityExpiry", "securityDue"],
   policy: ["match", "fresh"],
   revision: ["rev"],
   balance: ["rev", "exact"],
@@ -726,6 +873,8 @@ export function expandGuard(
   header: string,
   schema: PhysicalSchema,
   where: string,
+  familyId?: string,
+  planName?: string,
 ): { sql: string; params: PlanParam[]; meta: FamilyStatementMeta } {
   const kindText = /(?:^|\s)kind=(\S+)/u.exec(header)?.[1] ?? "";
   assert(
@@ -825,11 +974,58 @@ export function expandGuard(
     return found.name;
   };
   let predicate: string;
+  let securityExpiry: FamilySecurityExpiry | undefined;
   switch (kind) {
     case "authorization":
     case "policy": {
       for (const item of list("match")) add(compare(item, "match column"));
       const fresh = fields.get("fresh");
+      if (fields.has("securityExpiry") || fields.has("securityDue")) {
+        const due = fields.has("securityDue");
+        assert(
+          !(due && fields.has("securityExpiry")),
+          `${where}: securityDue cannot be combined with securityExpiry`,
+        );
+        assert(fresh === undefined, `${where}: security lifetime cannot be combined with fresh`);
+        assert(
+          kind === "authorization" && module === "identity",
+          `${where}: securityExpiry is an Identity authorization role only`,
+        );
+        const columns = list(due ? "securityDue" : "securityExpiry");
+        assert(
+          new Set(columns).size === columns.length,
+          `${where}: duplicate securityExpiry column`,
+        );
+        const registered = securityExpiryRegistrations.find(
+          (candidate) =>
+            (candidate.profile === "DeletionGraceDue") === due &&
+            candidate.table === tableName &&
+            candidate.key === key &&
+            candidate.families.includes(familyId ?? "") &&
+            (!candidate.plans || candidate.plans.includes(planName ?? "")) &&
+            candidate.columns.length === columns.length &&
+            candidate.columns.every((item, index) => item === columns[index]),
+        );
+        assert(registered, `${where}: securityExpiry role/family/table/columns are not registered`);
+        for (const name of columns) {
+          instant(name, "security expiry column");
+          conditions.push(`typeof(${name}) = 'integer'`);
+        }
+        // Scalar MIN returns NULL when any required expiry is NULL. A single expiry is not an aggregate MIN.
+        const deadline = columns.length === 1 ? columns[0] : `MIN(${columns.join(", ")})`;
+        conditions.push(
+          due
+            ? `${deadline} <= ${securityNowLowerMicros}`
+            : `${deadline} > MAX(CAST(? AS INTEGER), ${securityNowUpperMicros})`,
+        );
+        securityExpiry = Object.freeze({
+          profile: registered.profile,
+          table: tableName,
+          columns: Object.freeze([...columns]),
+          capturedParamIndex: due ? null : params.length,
+        });
+        if (!due) params.push({ kind: "int64", nullable: false });
+      }
       if (fresh !== undefined) {
         conditions.push(`${instant(fresh, "fresh column")} > CAST(? AS INTEGER)`);
         params.push({ kind: "int64", nullable: false });
@@ -861,7 +1057,17 @@ export function expandGuard(
     }
   }
   const sql = `INSERT INTO ${guardTable} (command_id, guard_key, allowed)\nSELECT ?, '${module}.${key}', CASE WHEN ${predicate} THEN 1 ELSE 0 END;`;
-  return { sql, params, meta: { module, phase: "guard", class: kind, key } };
+  return {
+    sql,
+    params,
+    meta: {
+      module,
+      phase: "guard",
+      class: kind,
+      key,
+      ...(securityExpiry ? { securityExpiry } : {}),
+    },
+  };
 }
 
 /**
@@ -1148,7 +1354,13 @@ export function parsePlanFile(
     } else if (guard && context) {
       finish();
       const where = `${file}: statement ${statements.length + 1}`;
-      const expanded = expandGuard(guard[1] ?? "", context.schema(), where);
+      const expanded = expandGuard(
+        guard[1] ?? "",
+        context.schema(),
+        where,
+        familyId,
+        id.split(".")[2],
+      );
       checkedStatement(expanded.sql, where, () => expanded);
       statements.push({
         sql: expanded.sql,
@@ -1412,12 +1624,20 @@ ${familyPlans.map(member).join("\n\n")}
 ${plan.statements
   .map((statement) => {
     const meta = statement.family ?? assert.fail(`${plan.id}: a statement has no family role`);
-    return `            new(FamilyModule.${moduleEnum[meta.module] ?? assert.fail(meta.module)}, FamilyPhase.${pascal(meta.phase)}, FamilyClass.${pascal(meta.class)}, ${text(meta.key)})`;
+    const expiry = meta.securityExpiry;
+    const suffix = expiry
+      ? `, new FamilySecurityExpiry(FamilySecurityExpiryProfile.${expiry.profile}, ${text(expiry.table)}, [${expiry.columns.map(text).join(", ")}], ${expiry.capturedParamIndex})`
+      : "";
+    return `            new(FamilyModule.${moduleEnum[meta.module] ?? assert.fail(meta.module)}, FamilyPhase.${pascal(meta.phase)}, FamilyClass.${pascal(meta.class)}, ${text(meta.key)}${suffix})`;
   })
   .join(",\n")}
         ])`,
   );
   const list2 = (items: string[]) => (items.length === 0 ? "[]" : `[\n${items.join(",\n")}\n    ]`);
+  const expiryCatalog = securityExpiryRegistrations.map(
+    (registration) =>
+      `        new(FamilySecurityExpiryProfile.${registration.profile}, ${text(registration.table)}, [${registration.columns.map(text).join(", ")}], ${text(registration.key)}, [${registration.families.map(text).join(", ")}], ${registration.plans ? `[${registration.plans.map(text).join(", ")}]` : "null"})`,
+  );
   return `// SPDX-License-Identifier: AGPL-3.0-only
 // <auto-generated />
 // Generated by eng/verification/storage-plans.ts from the reviewed plan files; do not edit.
@@ -1440,6 +1660,9 @@ ${classes.join("\n\n")}${familyClass}
 
     /// <summary>The statement roles of every shared family plan, in plan order.</summary>
     public static readonly IReadOnlyList<FamilyPlanDefinition> FamilyPlans = ${list2(roles)};
+
+    /// <summary>Closed lifetime roles emitted by the canonical SQL compiler; no request can extend them.</summary>
+    public static readonly IReadOnlyList<FamilySecurityExpiryRegistration> SecurityExpiryCatalog = Array.AsReadOnly<FamilySecurityExpiryRegistration>(${list2(expiryCatalog)});
 }
 `;
 }
@@ -1461,6 +1684,9 @@ export async function renderFamilyExpansion(manifest: PlanManifest) {
           : "",
         sql: statement.sql,
         params: statement.params.map((param) => param.kind + (param.nullable ? "?" : "")),
+        ...(statement.family?.securityExpiry
+          ? { securityExpiry: statement.family.securityExpiry }
+          : {}),
       })),
     }));
   return format(JSON.stringify({ schemaVersion: 1, plans }), { parser: "json", printWidth: 100 });

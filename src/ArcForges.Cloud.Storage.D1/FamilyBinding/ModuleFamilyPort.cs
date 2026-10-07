@@ -35,7 +35,12 @@ internal sealed class ModuleFamilyPortFactory : IModuleFamilyPortFactory
         this.catalog = Array.AsReadOnly(catalog.Select(item => item with { Participants = Array.AsReadOnly(item.Participants.ToArray()) }).ToArray());
         this.plans = Array.AsReadOnly(plans.Select(item => item with
         {
-            Roles = Array.AsReadOnly(item.Roles.ToArray()),
+            Roles = Array.AsReadOnly(item.Roles.Select(role => role with
+            {
+                SecurityExpiry = role.SecurityExpiry is { } expiry
+                    ? new FamilySecurityExpiry(expiry.Profile, expiry.Table, expiry.Columns, expiry.CapturedParamIndex)
+                    : null,
+            }).ToArray()),
             Plan = item.Plan with
             {
                 Statements = Array.AsReadOnly(item.Plan.Statements.Select(statement => statement with

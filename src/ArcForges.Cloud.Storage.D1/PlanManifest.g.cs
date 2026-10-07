@@ -905,4 +905,22 @@ internal static class PlanManifest
             new(FamilyModule.Platform, FamilyPhase.Release, FamilyClass.Release, "release")
         ])
     ];
+
+    /// <summary>Closed lifetime roles emitted by the canonical SQL compiler; no request can extend them.</summary>
+    public static readonly IReadOnlyList<FamilySecurityExpiryRegistration> SecurityExpiryCatalog = Array.AsReadOnly<FamilySecurityExpiryRegistration>([
+        new(FamilySecurityExpiryProfile.EnrollmentFlow, "identity_security_flow", ["expires_at"], "enrollment-flow-current", ["account-enrollment"], null),
+        new(FamilySecurityExpiryProfile.PendingChallenge, "identity_step_up_challenge", ["expires_at"], "challenge-pending", ["account-security"], ["step-up-prove-native", "step-up-prove-browser", "step-up-fail-native", "step-up-fail-browser"]),
+        new(FamilySecurityExpiryProfile.DeletionGraceDue, "identity_account_deletion", ["grace_ends_at"], "deletion-due", ["account-security"], ["begin-deletion-purge"]),
+        new(FamilySecurityExpiryProfile.DeletionGraceDue, "identity_account_deletion", ["grace_ends_at"], "deletion-purging", ["account-security"], ["complete-deletion-purge"]),
+        new(FamilySecurityExpiryProfile.NativeSession, "identity_session", ["expires_at", "access_expires_at"], "actor-current", ["session-lifecycle", "device-revocation", "push-registration", "account-security"], null),
+        new(FamilySecurityExpiryProfile.BrowserSession, "identity_session", ["expires_at", "idle_expires_at"], "actor-current", ["session-lifecycle", "device-revocation", "push-registration", "account-security"], null),
+        new(FamilySecurityExpiryProfile.NativeSession, "identity_session", ["expires_at", "access_expires_at"], "c-session", ["token-issuance"], null),
+        new(FamilySecurityExpiryProfile.BrowserSession, "identity_session", ["expires_at", "idle_expires_at"], "c-session", ["token-issuance"], null),
+        new(FamilySecurityExpiryProfile.NativeRefresh, "identity_session", ["expires_at"], "refresh-current", ["session-lifecycle"], null),
+        new(FamilySecurityExpiryProfile.ActionChallenge, "identity_step_up_challenge", ["expires_at"], "action-proof", ["device-revocation", "session-lifecycle", "account-security"], null),
+        new(FamilySecurityExpiryProfile.ActionChallenge, "identity_step_up_challenge", ["expires_at"], "a-proof", ["token-issuance"], null),
+        new(FamilySecurityExpiryProfile.NativeCode, "identity_native_authorization", ["expires_at", "code_expires_at"], "native-code-current", ["account-enrollment"], null),
+        new(FamilySecurityExpiryProfile.BrowserFlow, "identity_browser_auth_flow", ["expires_at"], "browser-flow-current", ["account-enrollment"], null),
+        new(FamilySecurityExpiryProfile.DeletionGrace, "identity_account_deletion", ["grace_ends_at"], "deletion-current", ["account-security"], null)
+    ]);
 }
