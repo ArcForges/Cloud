@@ -84,8 +84,8 @@ internal static class QuotaPeriodSelector
     }
     private static bool Text(string? value)
     {
-        if (string.IsNullOrEmpty(value)) return false;
-        try { return Utf8.GetByteCount(value) <= 262144; }
+        if (string.IsNullOrEmpty(value) || value.Length > 262144) return false;
+        try { _ = Utf8.GetByteCount(value); return true; }
         catch (EncoderFallbackException) { return false; }
     }
     private static QuotaPeriodSelection Defect() => new(QuotaDefinitionStatus.Defect);

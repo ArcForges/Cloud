@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using ArcForges.Cloud.Modules;
@@ -10,8 +11,10 @@ using ArcForges.Cloud.Modules.Entitlement.Quota.Definitions.Infrastructure;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Periods.Application;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Periods.Infrastructure;
 using ArcForges.Cloud.Modules.Entitlement.Resolver.Domain;
+using ArcForges.Cloud.Storage;
 using ArcForges.Cloud.Storage.ModuleBinding;
 using ArcForges.Cloud.Tests.Entitlement;
+using ArcForges.Contracts.CloudInternal.Storage.V1;
 using Xunit;
 
 namespace ArcForges.Cloud.Tests.QuotaPeriods;
@@ -69,7 +72,7 @@ public sealed class QuotaPeriodPersistenceTests
             if (read.PlanId == "entitlement.quota-period-terms") await h.Bridge.ExecAsync("UPDATE entitlement_revision SET rev=rev+1;", T.Ct);
         });
         Assert.Equal(QuotaDefinitionStatus.Unavailable, (await new D1QuotaPeriodStore(race).ReadAsync(h.Realm, h.Workspace, T.Ct)).Status);
-        Assert.Equal(3, race.TermPages);
+        Assert.Equal(6, race.TermPages);
         Assert.Equal(QuotaDefinitionStatus.Defect, (await new D1QuotaPeriodStore(h.Port).ReadAsync(Guid.NewGuid(), h.Workspace, T.Ct)).Status);
         await h.Bridge.ExecAsync("UPDATE entitlement_revision SET rev=0;", T.Ct);
         Assert.Equal(QuotaDefinitionStatus.Defect, (await new D1QuotaPeriodStore(h.Port).ReadAsync(h.Realm, h.Workspace, T.Ct)).Status);
@@ -85,6 +88,124 @@ public sealed class QuotaPeriodPersistenceTests
         Assert.Equal(QuotaDefinitionStatus.Unavailable, (await missing.ReadAsync(h.Realm, h.Workspace, T.Ct)).Status);
         Assert.Equal(QuotaDefinitionStatus.Invalid, (await missing.ReadAsync(Guid.Empty, h.Workspace, T.Ct)).Status);
         Assert.Equal(QuotaDefinitionStatus.NotFound, (await new D1QuotaPeriodStore(h.Port).ReadAsync(h.Realm, Guid.NewGuid(), T.Ct)).Status);
+    }
+
+    [Fact]
+    public async Task ActualPublishedMaximumTextUsesBoundedPagesWithoutTruncatingHistory()
+    {
+        using var h = await Harness.Create();
+        for (var i = 0; i < 3; i++)
+        {
+            var term = Guid.NewGuid(); var text = new string('x', 262143) + i;
+            await h.AddTerm(term, text, 200_000_000 + i, 300_000_000 + i, i, T.Ct);
+            await h.Bridge.ExecAsync($"INSERT INTO entitlement_service_term_action VALUES ('{Guid.NewGuid():D}','{term:D}',2,250000000,{1000001 + i},{Sql(text)},NULL);", T.Ct);
+        }
+        var pageCounts = new List<int>(); var rowBytes = new List<long>();
+        var frames = new FrameObserver(h.Bridge);
+        var actual = new ModulePlanPortFactory(frames, h.Bridge.Generation, h.Clock).For(EntitlementModule.Instance.Descriptor);
+        var port = new PageObserver(actual, read =>
+        {
+            pageCounts.Add(read.Count);
+            rowBytes.Add(read.Sum(r => 2048L + 6L * Encoding.UTF8.GetByteCount(r.Count == 11 ? r[4].AsOptionalText() ?? "" : r[5].AsOptionalText() ?? "")));
+        });
+        var result = await new D1QuotaPeriodStore(port).ReadAsync(h.Realm, h.Workspace, T.Ct);
+        Assert.True(result.Status == QuotaDefinitionStatus.Succeeded, $"Status={result.Status}; pages={string.Join(",", pageCounts)}; bytes={string.Join(",", rowBytes)}"); Assert.Equal(4, result.Value!.Terms.Length); Assert.Equal(3, result.Value.Actions.Length);
+        Assert.Equal(3, result.Value.Terms.Count(t => Encoding.UTF8.GetByteCount(t.PeriodRef) == 262144));
+        Assert.All(result.Value.Actions, a => Assert.Equal(262144, Encoding.UTF8.GetByteCount(a.SourceRef)));
+        Assert.All(rowBytes, size => Assert.InRange(size, 0, 196608));
+        Assert.NotEmpty(frames.Lengths); Assert.All(frames.Lengths, length => Assert.InRange(length, 1, ExecutePlanResponseJson.MaxBytes));
+        Assert.True(frames.Slices >= 6 * 16);
+        Assert.Contains(4, pageCounts); Assert.Contains(3, pageCounts); Assert.Equal(2, pageCounts.Count(c => c == 0));
+        Assert.Equal("paid-original", (await h.Source().ReadAsync(h.Realm, h.Workspace, T.Ct)).Value!.SelectedPeriod!.Term.PeriodRef);
+    }
+
+    [Fact]
+    public async Task ActualUnicodeAndControlTextReconstructionPreservesPublishedBoundWithoutLargeFrames()
+    {
+        using var h = await Harness.Create(); var unicode = new string('中', 262143) + "0";
+        var control = new string((char)1, 262143) + "1";
+        await h.AddTerm(Guid.NewGuid(), unicode, 200_000_000, 300_000_000, 0, T.Ct);
+        await h.AddTerm(Guid.NewGuid(), control, 200_000_001, 300_000_001, 0, T.Ct);
+        var frames = new FrameObserver(h.Bridge);
+        var actual = new ModulePlanPortFactory(frames, h.Bridge.Generation, h.Clock).For(EntitlementModule.Instance.Descriptor);
+        var result = await new D1QuotaPeriodStore(actual).ReadAsync(h.Realm, h.Workspace, T.Ct);
+        Assert.Equal(QuotaDefinitionStatus.Succeeded, result.Status);
+        Assert.True(result.Value!.Terms.Any(t => string.Equals(t.PeriodRef, unicode, StringComparison.Ordinal)));
+        Assert.True(result.Value.Terms.Any(t => string.Equals(t.PeriodRef, control, StringComparison.Ordinal)));
+        Assert.All(frames.Lengths, size => Assert.InRange(size, 1, ExecutePlanResponseJson.MaxBytes));
+        var complete = new QuotaPeriodSource(new D1QuotaPeriodStore(actual), h.Profiles(), h.Authority, new QuotaDefinitionValidator(), h.Clock);
+        Assert.Equal(QuotaDefinitionStatus.Succeeded, (await complete.ReadAsync(h.Realm, h.Workspace, T.Ct)).Status);
+    }
+
+    [Fact]
+    public async Task SliceTransportFailureOrBufferedCancellationNeverReturnsPartialHistory()
+    {
+        using var h = await Harness.Create();
+        await h.AddTerm(Guid.NewGuid(), new string('x', 262144), 200_000_000, 300_000_000, 0, T.Ct);
+        var unavailable = new SliceFailure(h.Bridge);
+        var actual = new ModulePlanPortFactory(unavailable, h.Bridge.Generation, h.Clock).For(EntitlementModule.Instance.Descriptor);
+        var result = await new D1QuotaPeriodStore(actual).ReadAsync(h.Realm, h.Workspace, T.Ct);
+        Assert.Equal(QuotaDefinitionStatus.Unavailable, result.Status); Assert.Null(result.Value);
+        using var cancel = new CancellationTokenSource();
+        var port = new ReadIntercept(h.Port, read => { if (read.PlanId.EndsWith("-text", StringComparison.Ordinal)) cancel.Cancel(); return Task.CompletedTask; });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new D1QuotaPeriodStore(port).ReadAsync(h.Realm, h.Workspace, cancel.Token));
+        Assert.Equal(QuotaDefinitionStatus.Succeeded, (await new D1QuotaPeriodStore(h.Port).ReadAsync(h.Realm, h.Workspace, T.Ct)).Status);
+    }
+
+    [Fact]
+    public async Task ActualOversizedHistoryRefusesWithoutPartialProjectionAtPrivateWorkBudget()
+    {
+        using var h = await Harness.Create();
+        await h.Bridge.ExecAsync($"WITH RECURSIVE cte_rows(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM cte_rows WHERE n<65) " +
+            $"INSERT INTO entitlement_service_term SELECT '10000000-0000-0000-0000-' || printf('%012x',n),'{h.Workspace:D}','{h.Realm:D}',2,NULL," +
+            $"replace(hex(zeroblob(131071)),'0','x') || printf('%02d',n),200000000+n,300000000,NULL,NULL,'{Guid.NewGuid():D}','{Guid.NewGuid():D}',200000000+n,0,1000000 FROM cte_rows;", T.Ct);
+        var read = await new D1QuotaPeriodStore(h.Port).ReadAsync(h.Realm, h.Workspace, T.Ct);
+        Assert.Equal(QuotaDefinitionStatus.Unavailable, read.Status); Assert.Null(read.Value);
+        Assert.Equal(66, await h.Bridge.CountAsync("entitlement_service_term", cancellationToken: T.Ct));
+    }
+
+    [Fact]
+    public async Task CompleteSnapshotColumnsAreReconstructedWithinActualGeneratedReplyBudget()
+    {
+        using var h = await Harness.Create(); var columns = await LargeSnapshot(h);
+        Assert.True(columns.Capabilities.Length + columns.Quotas.Length + columns.Features.Length > ExecutePlanResponseJson.MaxBytes);
+        Assert.All(new[] { columns.Capabilities, columns.Quotas, columns.Features }, text => Assert.InRange(text.Length, 1, 262144));
+        var frames = new FrameObserver(h.Bridge);
+        var actual = new ModulePlanPortFactory(frames, h.Bridge.Generation, h.Clock).For(EntitlementModule.Instance.Descriptor);
+        var result = await new D1QuotaPeriodStore(actual).ReadAsync(h.Realm, h.Workspace, T.Ct);
+        Assert.Equal(QuotaDefinitionStatus.Succeeded, result.Status);
+        Assert.Equal(2200, Assert.Single(result.Value!.Snapshot.Content.Quotas).Contributions.Length);
+        Assert.Equal(1500, Assert.Single(result.Value.Snapshot.Content.Capabilities).SourceGrantIds.Length);
+        Assert.Equal(1000, result.Value.Snapshot.Content.UnrecognizedGrantIds.Length);
+        Assert.All(frames.Lengths, size => Assert.InRange(size, 1, ExecutePlanResponseJson.MaxBytes));
+        Assert.True(frames.Slices > 30);
+    }
+
+    [Fact]
+    public async Task MutableSnapshotChangingDuringSlicesNeverProducesMixedCurrentFacts()
+    {
+        using var h = await Harness.Create(); await LargeSnapshot(h); var changed = false;
+        var port = new ReadIntercept(h.Port, async read =>
+        {
+            if (!changed && read.PlanId == "entitlement.quota-period-snapshot-text")
+            {
+                changed = true; await h.Bridge.ExecAsync("UPDATE entitlement_snapshot SET computed_at=computed_at+1; UPDATE entitlement_revision SET rev=rev+1;", T.Ct);
+            }
+        });
+        var result = await new D1QuotaPeriodStore(port).ReadAsync(h.Realm, h.Workspace, T.Ct);
+        Assert.True(changed); Assert.Equal(QuotaDefinitionStatus.Unavailable, result.Status); Assert.Null(result.Value);
+    }
+
+    private static async Task<SnapshotColumns> LargeSnapshot(Harness h)
+    {
+        static ImmutableArray<string> Ids(int count) => Enumerable.Range(0, count).Select(_ => Guid.NewGuid().ToString("D")).Order(StringComparer.Ordinal).ToImmutableArray();
+        var contributors = Ids(2200).Select(id => new QuotaContribution(id, GrantSource.AdminGrant, 1)).ToImmutableArray();
+        var snapshot = new EntitlementSnapshot(h.Workspace.ToString("D"), 1, new(5_000_000), new("actual-definitions",
+            new(ServiceState.Active, new(100_000_000), null, true), [new("owner", true, EntitlementReason.Available, Ids(1500))],
+            [new("storage", 2200, EntitlementReason.Available, contributors)], [], [], Ids(1000), [], new(100_000_000)));
+        var columns = SnapshotMapper.ToColumns(snapshot);
+        await h.Bridge.ExecAsync($"UPDATE entitlement_snapshot SET capabilities={Sql(columns.Capabilities)},quotas={Sql(columns.Quotas)},features={Sql(columns.Features)};", T.Ct);
+        return columns;
     }
 
     [Fact]
@@ -144,6 +265,43 @@ public sealed class QuotaPeriodPersistenceTests
             var value = Current; if (++reads == 1) AfterFirstCurrent?.Invoke(); return Task.FromResult(new QuotaConfigurationResult(QuotaDefinitionStatus.Succeeded, value));
         }
         public Task<QuotaConfigurationResult> ReadHistoricalAsync(Guid realm, Guid revision, string hash, CancellationToken ct) => throw new InvalidOperationException("Read-only period source does not publish.");
+    }
+    private sealed class SliceFailure(IPlanExecutor inner) : IPlanExecutor
+    {
+        public Task<PlanResult> ExecuteAsync(PlanCall call, CancellationToken ct) => call.Plan.Id.EndsWith("-text", StringComparison.Ordinal)
+            ? throw new PlanFailureException(PlanFailureKind.Transport) : inner.ExecuteAsync(call, ct);
+    }
+    private sealed class FrameObserver(IPlanExecutor inner) : IPlanExecutor
+    {
+        internal readonly List<int> Lengths = []; internal int Slices;
+        public async Task<PlanResult> ExecuteAsync(PlanCall call, CancellationToken ct)
+        {
+            var result = await inner.ExecuteAsync(call, ct);
+            var frame = ExecutePlanResponseJson.Serialize(new ExecutePlanResponseExecutePlanSuccess(new ExecutePlanSuccess
+            {
+                RequestId = call.RequestId.ToString("D"),
+                ManifestHash = PlanManifest.Hash,
+                Rows = result.Rows.Select(r => r.ToArray()).ToArray(),
+                Changes = result.Changes.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            }));
+            Assert.InRange(frame.Length, 1, ExecutePlanResponseJson.MaxBytes); Lengths.Add(frame.Length);
+            if (call.Plan.Id.EndsWith("-text", StringComparison.Ordinal)) Slices++;
+            return result;
+        }
+    }
+    private sealed class PageObserver(IModulePlanPort inner, Action<IReadOnlyList<IReadOnlyList<PlanValue>>> observe) : IModulePlanPort
+    {
+        public async Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken ct)
+        {
+            var result = await inner.ReadAsync(read, ct);
+            if (read.PlanId is "entitlement.quota-period-terms" or "entitlement.quota-period-actions")
+            {
+                Assert.Equal(ModulePlanStatus.Succeeded, result.Status);
+                observe(result.Rows);
+            }
+            return result;
+        }
+        public Task<ModulePlanOutcome> WriteAsync(ModulePlanWrite write, CancellationToken ct) => throw new InvalidOperationException("Read-only fixture must not write.");
     }
     private sealed class ReadIntercept(IModulePlanPort inner, Func<ModulePlanRead, Task> afterRead) : IModulePlanPort
     {
