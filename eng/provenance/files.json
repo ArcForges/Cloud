@@ -358,6 +358,7 @@
     "src/ArcForges.Cloud.Modules.Abstractions/Platform/RealmAuthorityFamilyPort.cs",
     "src/ArcForges.Cloud.Modules.Abstractions/Platform/RealmAuthorityPort.cs",
     "src/ArcForges.Cloud.Modules.Abstractions/Platform/RecoveryEpochPort.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/Quota/QuotaAccountingContracts.cs",
     "src/ArcForges.Cloud.Modules.Abstractions/Quota/QuotaKernelContracts.cs",
     "src/ArcForges.Cloud.Modules.Abstractions/Storage/ModulePlanPort.cs",
     "src/ArcForges.Cloud.Modules.Abstractions/Storage/PlanValue.cs",
@@ -709,6 +710,7 @@
     "tests/ArcForges.Cloud.Tests/Entitlement/D1EntitlementStoreTests.cs",
     "tests/ArcForges.Cloud.Tests/Entitlement/D1EntitlementStoreUnitTests.cs",
     "tests/ArcForges.Cloud.Tests/Entitlement/D1RebuildEquivalenceTests.cs",
+    "tests/ArcForges.Cloud.Tests/Entitlement/Definitions/QuotaConfigurationContractTests.cs",
     "tests/ArcForges.Cloud.Tests/Entitlement/Definitions/ResolverDefinitionPersistenceTests.cs",
     "tests/ArcForges.Cloud.Tests/Entitlement/Definitions/ResolverDefinitionValidatorTests.cs",
     "tests/ArcForges.Cloud.Tests/Entitlement/Definitions/VersionedDefinitionCompositionTests.cs",
@@ -956,5 +958,8 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["cloud-79-cloud-worker-bundle-r1", "cloud-79-cloud-runtime-notices-r1"]
+  "artifacts": [
+    "cloud-79-cloud-worker-bundle-r1",
+    "cloud-79-cloud-runtime-notices-r1"
+  ]
 }

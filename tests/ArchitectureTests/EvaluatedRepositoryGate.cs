@@ -16,6 +16,10 @@ public sealed class EvaluatedRepositoryGate
     /// <summary>The public Cloud API and the real test methods that exercise each member. A new public member fails RP-10 until mapped here.</summary>
     private static readonly (string Api, string Method, string TestType, string[] Tests)[] ApiTests =
     [
+        // Early shared contract only: real Config authority/race tests belong to POL.02.
+        // The actual registered writer rejects observations/statuses without a factory-issued capability.
+        ("ArcForges.Cloud.Modules.IQuotaConfigurationParticipant", "PrepareCurrentAsync", "ArcForges.Cloud.Tests.ResolverDefinitionAuthority.QuotaConfigurationContractTests",
+            ["AssociationCapturesBoundedResolverFactsWithoutPendingQuotaImplementation", "ConstructedAssociationsAndSuccessStatusCannotAuthorizeAnActualScopedWriter"]),
         ("ArcForges.Cloud.Modules.IEntitlementGrantPort", "IssueGrantAsync", "ArcForges.Cloud.Tests.ResolverDefinitionAuthority.VersionedDefinitionCompositionTests",
             ["ProductionGrantBindingUsesCurrentAsyncDefinitionsAndHistoricalRebuildPinsStoredVersion", "CancellationAfterTheRealGrantCommitDoesNotReportSuccessOrUndoTheGrant"]),
         ("ArcForges.Cloud.Modules.IEntitlementGrantPort", "RevokeGrantAsync", "ArcForges.Cloud.Tests.ResolverDefinitionAuthority.VersionedDefinitionCompositionTests",

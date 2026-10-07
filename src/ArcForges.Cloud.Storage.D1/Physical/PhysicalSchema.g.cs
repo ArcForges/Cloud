@@ -11,10 +11,10 @@ internal static partial class PhysicalSchema
     public const string ManifestHash = "7eef0bcad4b69f52ca4dea6202b30066dd7ac4564923a692ff051532b43b1c06";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
-    public const int HighestMigration = 25;
+    public const int HighestMigration = 26;
 
     /// <summary>SHA-256 over the ordered sequence and checksum of every locked migration.</summary>
-    public const string MigrationLockHash = "e1396affb03529cad8700e2c071cb74af948db93b076cd1e4e5d4ecab1a30666";
+    public const string MigrationLockHash = "a92af5e64e57a399fdb48fcc9a0f0e5c36513840f2b6bad41c5bd43e02b7260c";
 
     public static IReadOnlyList<PhysicalEnum> Enums { get; } =
     [

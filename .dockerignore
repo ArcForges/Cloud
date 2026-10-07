@@ -98,6 +98,7 @@
 !src/ArcForges.Cloud.Modules.Abstractions/Capacity/*.cs
 !src/ArcForges.Cloud.Modules.Abstractions/Quota/
 !src/ArcForges.Cloud.Modules.Abstractions/Quota/*.cs
+!src/ArcForges.Cloud.Modules.Abstractions/Quota/QuotaAccountingContracts.cs
 !src/ArcForges.Cloud.Modules.Entitlement/Quota/
 !src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/
 !src/ArcForges.Cloud.Modules.Entitlement/Quota/Kernel/Domain/

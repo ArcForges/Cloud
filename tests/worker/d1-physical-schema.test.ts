@@ -140,10 +140,17 @@ test("preserved insertion refuses unsupported mutability and unique-key conflict
     unique: true,
   });
   assert.throws(() => validate(unique), /primary-key conflicts only/u);
+  const unknown = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  unknown.name = "entitlement_unregistered_immutable_profile";
+  assert.throws(() => validate(unknown), /not admitted for this owner and table/u);
+  const foreign = structuredClone(tableOf("entitlement_resolver_definition_profile"));
+  foreign.owner = "workspace";
+  foreign.name = "workspace_unregistered_immutable_profile";
+  assert.throws(() => validate(foreign), /not admitted for this owner and table/u);
 });
 
 test("the manifest covers every owner and keeps every table inside its owner's prefix", () => {
-  assert.equal(schema.tables.length, 162);
+  assert.equal(schema.tables.length, 163);
   for (const owner of schema.owners) {
     const tables = schema.tables.filter((table) => table.owner === owner.owner);
     assert(tables.length > 0, `owner ${owner.owner} has no table`);

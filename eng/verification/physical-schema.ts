@@ -647,6 +647,15 @@ export function validateSchema(schema: PhysicalSchema, partial = false): void {
     if (table.mutability.insert !== undefined) {
       assert.equal(table.mutability.insert, "preserveExisting", `${where}: insertion mutability`);
       assert(
+        table.owner === "entitlement" &&
+          [
+            "entitlement_resolver_definition_profile",
+            "entitlement_quota_definition_profile",
+            "entitlement_quota_definition_key",
+          ].includes(table.name),
+        `${where}: preserved insertion is not admitted for this owner and table`,
+      );
+      assert(
         update === "none" && table.mutability.delete === "none",
         `${where}: preserved insertion requires a fully immutable row`,
       );
