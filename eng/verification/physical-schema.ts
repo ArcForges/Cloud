@@ -513,6 +513,29 @@ function validateInsertionInvariant(table: PhysicalTable): void {
   assert.equal(update.when, 'OLD."state" IN (1, 3)', message);
 }
 
+function validatePreservedInsertion(table: PhysicalTable): void {
+  if (table.mutability.insert === undefined) return;
+  const where = `table ${table.name}`;
+  assert.equal(table.mutability.insert, "preserveExisting", `${where}: insertion mutability`);
+  assert(
+    table.owner === "entitlement" &&
+      [
+        "entitlement_resolver_definition_profile",
+        "entitlement_quota_definition_profile",
+        "entitlement_quota_definition_key",
+      ].includes(table.name),
+    `${where}: preserved insertion is not admitted for this owner and table`,
+  );
+  assert(
+    table.mutability.update === "none" && table.mutability.delete === "none",
+    `${where}: preserved insertion requires a fully immutable row`,
+  );
+  assert(
+    !table.indexes.some((index) => index.unique),
+    `${where}: preserved insertion supports primary-key conflicts only`,
+  );
+}
+
 function validateInsertionStateProfile(
   table: PhysicalTable,
   enums: Map<string, ResolvedEnum>,
@@ -537,6 +560,7 @@ export function validateSchema(schema: PhysicalSchema, partial = false): void {
   const indexNames = new Set<string>();
   for (const table of schema.tables) {
     validateInsertionInvariant(table);
+    validatePreservedInsertion(table);
     validateInsertionStateProfile(table, enums);
     const where = `table ${table.name}`;
     assert(namePattern.test(table.name) && table.name.length <= maxName, `${where}: invalid name`);
@@ -644,26 +668,6 @@ export function validateSchema(schema: PhysicalSchema, partial = false): void {
       checkNames.add(check.name);
     }
     const update = table.mutability.update;
-    if (table.mutability.insert !== undefined) {
-      assert.equal(table.mutability.insert, "preserveExisting", `${where}: insertion mutability`);
-      assert(
-        table.owner === "entitlement" &&
-          [
-            "entitlement_resolver_definition_profile",
-            "entitlement_quota_definition_profile",
-            "entitlement_quota_definition_key",
-          ].includes(table.name),
-        `${where}: preserved insertion is not admitted for this owner and table`,
-      );
-      assert(
-        update === "none" && table.mutability.delete === "none",
-        `${where}: preserved insertion requires a fully immutable row`,
-      );
-      assert(
-        !table.indexes.some((index) => index.unique),
-        `${where}: preserved insertion supports primary-key conflicts only`,
-      );
-    }
     if (typeof update === "object")
       for (const name of update.columns)
         assert(columns.has(name), `${where}: mutability names unknown column ${name}`);
@@ -752,6 +756,7 @@ function groupChecks(table: PhysicalTable): ManifestCheck[] {
 
 export function tableSql(table: PhysicalTable, enums: Map<string, ResolvedEnum>): string[] {
   validateInsertionInvariant(table);
+  validatePreservedInsertion(table);
   validateInsertionStateProfile(table, enums);
   const statements: string[] = [];
   const lines = table.columns.map((column) => columnDefinition(table, column, enums));
@@ -793,6 +798,7 @@ export function tableSql(table: PhysicalTable, enums: Map<string, ResolvedEnum>)
 
 export function triggerSql(table: PhysicalTable): string[] {
   validateInsertionInvariant(table);
+  validatePreservedInsertion(table);
   const out: string[] = [];
   if (table.insertionInvariant === "deletionLifecycleOriginal")
     out.push(

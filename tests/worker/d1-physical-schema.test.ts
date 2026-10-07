@@ -125,13 +125,17 @@ test("preserved insertion rejects changed replacement and retains exact duplicat
 });
 
 test("preserved insertion refuses unsupported mutability and unique-key conflict models", () => {
-  const validate = (table: PhysicalTable) => validateSchema({ ...schema, tables: [table] }, true);
+  const validate = (table: PhysicalTable, refusal: RegExp) => {
+    assert.throws(() => validateSchema({ ...schema, tables: [table] }, true), refusal);
+    assert.throws(() => tableSql(table, enums), refusal);
+    assert.throws(() => triggerSql(table), refusal);
+  };
   const unsupported = structuredClone(tableOf("entitlement_resolver_definition_profile"));
   Object.assign(unsupported.mutability, { insert: "unsupported" });
-  assert.throws(() => validate(unsupported), /insertion mutability/u);
+  validate(unsupported, /insertion mutability/u);
   const mutable = structuredClone(tableOf("entitlement_resolver_definition_profile"));
   mutable.mutability.update = "any";
-  assert.throws(() => validate(mutable), /fully immutable row/u);
+  validate(mutable, /fully immutable row/u);
   const unique = structuredClone(tableOf("entitlement_resolver_definition_profile"));
   unique.indexes.push({
     name: "ux_entitlement_resolver_definition_profile__artifact_id",
@@ -139,14 +143,14 @@ test("preserved insertion refuses unsupported mutability and unique-key conflict
     path: "fixture",
     unique: true,
   });
-  assert.throws(() => validate(unique), /primary-key conflicts only/u);
+  validate(unique, /primary-key conflicts only/u);
   const unknown = structuredClone(tableOf("entitlement_resolver_definition_profile"));
   unknown.name = "entitlement_unregistered_immutable_profile";
-  assert.throws(() => validate(unknown), /not admitted for this owner and table/u);
+  validate(unknown, /not admitted for this owner and table/u);
   const foreign = structuredClone(tableOf("entitlement_resolver_definition_profile"));
   foreign.owner = "workspace";
   foreign.name = "workspace_unregistered_immutable_profile";
-  assert.throws(() => validate(foreign), /not admitted for this owner and table/u);
+  validate(foreign, /not admitted for this owner and table/u);
 });
 
 test("the manifest covers every owner and keeps every table inside its owner's prefix", () => {
