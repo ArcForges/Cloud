@@ -87,6 +87,16 @@ public sealed class QuotaPeriodPersistenceTests
         Assert.Equal(QuotaDefinitionStatus.NotFound, (await new D1QuotaPeriodStore(h.Port).ReadAsync(h.Realm, Guid.NewGuid(), T.Ct)).Status);
     }
 
+    [Fact]
+    public async Task InvalidCurrentArtifactMetadataRefusesBeforeAnySnapshotReads()
+    {
+        using var h = await Harness.Create(); var actual = h.Authority.Current!; var calls = h.Bridge.Calls;
+        h.Authority.Current = new(actual.RealmId, actual.ConfigurationRevisionId, actual.DocumentHash, actual.ArtifactId,
+            "unsupported-profile", actual.ArtifactHash, actual.VerifiedLength, actual.DefinitionsVersion, actual.RealmKind, actual.PublisherRef, actual.ResolverDefinitions);
+        var result = await h.Source().ReadAsync(h.Realm, h.Workspace, T.Ct);
+        Assert.Equal(QuotaDefinitionStatus.Defect, result.Status); Assert.Null(result.Value); Assert.Equal(calls, h.Bridge.Calls);
+    }
+
     private sealed class Harness : IDisposable
     {
         internal Guid Realm { get; } = Guid.NewGuid(); internal Guid Workspace { get; } = Guid.NewGuid();
@@ -102,8 +112,10 @@ public sealed class QuotaPeriodPersistenceTests
             var h = new Harness();
             try
             {
-                await h.Bridge.ExecAsync(await File.ReadAllTextAsync(Path.Combine(T.RepoRoot().FullName, "src", "ArcForges.Cloud.Storage.D1", "Migrations", "pending", "entitlement__quota-definition-profile.sql"), T.Ct), T.Ct);
+                var pending = Path.Combine(T.RepoRoot().FullName, "src", "ArcForges.Cloud.Storage.D1", "Migrations", "pending", "entitlement__quota-definition-profile.sql");
+                if (File.Exists(pending)) await h.Bridge.ExecAsync(await File.ReadAllTextAsync(pending, T.Ct), T.Ct);
                 await h.Bridge.SeedWorkspaceAsync(h.Workspace, T.Ct);
+                await h.Bridge.ExecAsync($"UPDATE workspace_workspace SET realm_id='{h.Realm:D}' WHERE workspace_id='{h.Workspace:D}';", T.Ct);
                 await h.AddTerm(h.Term, "paid-original", 1_000_000, 100_000_000, -1, T.Ct);
                 var snapshot = new EntitlementSnapshot(h.Workspace.ToString("D"), 1, new(5_000_000), new("actual-definitions", new(ServiceState.Active, new(100_000_000), null, true), [],
                     [new("storage", 100, EntitlementReason.Available, [])], [], [], [], [], new(100_000_000)));

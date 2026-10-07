@@ -18,7 +18,11 @@ internal sealed class QuotaPeriodSource(IQuotaPeriodStore store, IQuotaDefinitio
         cancellationToken.ThrowIfCancellationRequested();
         if (source.Status != QuotaDefinitionStatus.Succeeded || source.Value is not { } current) return new(source.Status == QuotaDefinitionStatus.Succeeded ? QuotaDefinitionStatus.Defect : source.Status);
         if (current.RealmId != realmId || current.ConfigurationRevisionId == Guid.Empty || current.RealmKind is not ("official" or "selfHosted")
-            || current.ResolverDefinitions.IsDefault) return new(QuotaDefinitionStatus.Defect);
+            || current.ResolverDefinitions.IsDefault || current.ResolverDefinitions.Length > QuotaDefinitionValidator.MaximumDefinitions
+            || current.ResolverDefinitions.Any(d => d is null) || current.ArtifactProfile != QuotaDefinitionValidator.ProfileName
+            || !Hash(current.DocumentHash) || !Hash(current.ArtifactHash) || current.VerifiedLength is < 2 or > QuotaDefinitionValidator.MaximumBytes
+            || !QuotaDefinitionValidator.Version(current.DefinitionsVersion) || !QuotaDefinitionValidator.Version(current.ArtifactId)
+            || !QuotaDefinitionValidator.Version(current.PublisherRef)) return new(QuotaDefinitionStatus.Defect);
         var stored = await store.ReadAsync(realmId, workspaceId, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (stored.Status != QuotaDefinitionStatus.Succeeded || stored.Value is not { } value) return new(stored.Status == QuotaDefinitionStatus.Succeeded ? QuotaDefinitionStatus.Defect : stored.Status);
@@ -38,8 +42,10 @@ internal sealed class QuotaPeriodSource(IQuotaPeriodStore store, IQuotaDefinitio
         if (rechecked.Status != QuotaDefinitionStatus.Succeeded || rechecked.Value is not { } latest) return new(rechecked.Status == QuotaDefinitionStatus.Succeeded ? QuotaDefinitionStatus.Defect : rechecked.Status);
         if (latest.RealmId != realmId || latest.ConfigurationRevisionId != current.ConfigurationRevisionId || latest.DocumentHash != current.DocumentHash
             || latest.ArtifactHash != current.ArtifactHash || latest.ArtifactId != current.ArtifactId || latest.DefinitionsVersion != current.DefinitionsVersion
-            || latest.RealmKind != current.RealmKind) return new(QuotaDefinitionStatus.Stale);
+            || latest.RealmKind != current.RealmKind || latest.ArtifactProfile != current.ArtifactProfile || latest.VerifiedLength != current.VerifiedLength
+            || latest.PublisherRef != current.PublisherRef || latest.ResolverDefinitions.IsDefault || !latest.ResolverDefinitions.SequenceEqual(current.ResolverDefinitions)) return new(QuotaDefinitionStatus.Stale);
         var now = checked((clock.GetUtcNow().UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10);
+        cancellationToken.ThrowIfCancellationRequested();
         if (snapshot.ComputedAt.Value > now || snapshot.ValidUntil is { } valid && now >= valid.Value) return new(QuotaDefinitionStatus.Stale);
         var selection = QuotaPeriodSelector.Select(realmId, workspaceId, current.RealmKind, value.Terms, value.Actions, now);
         if (selection.Status != QuotaDefinitionStatus.Succeeded) return new(selection.Status);
@@ -65,4 +71,5 @@ internal sealed class QuotaPeriodSource(IQuotaPeriodStore store, IQuotaDefinitio
             value.SnapshotHash, snapshot.ComputedAt.Value, now, until, snapshot.Content.Service.PaidTermActive, selection.Selected,
             resolved.MoveToImmutable(), value.Terms, value.Actions));
     }
+    private static bool Hash(string? value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 }

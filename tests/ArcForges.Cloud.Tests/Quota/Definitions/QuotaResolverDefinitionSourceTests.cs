@@ -52,13 +52,36 @@ public sealed class QuotaResolverDefinitionSourceTests
         Assert.Equal(0, definitions.Reads);
     }
 
+    [Fact]
+    public async Task InvalidCurrentRowsAndTypedUnavailableSourceRefuseWithoutInventingDefinitions()
+    {
+        var definitions = new Definitions { Value = new("known-v1", [], default, [], false) };
+        Assert.Equal(QuotaDefinitionStatus.Defect, (await new CurrentQuotaResolverDefinitionSource(definitions, new RealmPort()).ReadAsync(Realm, "known-v1", TestContext.Current.CancellationToken)).Status);
+        definitions.Value = new("known-v1", [], [new("duplicate", QuotaCombination.Sum), new("duplicate", QuotaCombination.Max)], [], false);
+        Assert.Equal(QuotaDefinitionStatus.Defect, (await new CurrentQuotaResolverDefinitionSource(definitions, new RealmPort()).ReadAsync(Realm, "known-v1", TestContext.Current.CancellationToken)).Status);
+        definitions.Failure = EntitlementStoreFailure.Unavailable;
+        Assert.Equal(QuotaDefinitionStatus.Unavailable, (await new CurrentQuotaResolverDefinitionSource(definitions, new RealmPort()).ReadAsync(Realm, "known-v1", TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Fact]
+    public async Task BufferedCurrentSourceCancellationPrecedesEvenUnknownVersionRefusal()
+    {
+        using var cancel = new CancellationTokenSource();
+        var definitions = new Definitions { AfterRead = cancel.Cancel };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new CurrentQuotaResolverDefinitionSource(definitions, new RealmPort()).ReadAsync(Realm, "unknown", cancel.Token));
+    }
+
     private sealed class Definitions : IEntitlementDefinitionSource
     {
         public int Reads { get; private set; }
+        internal EntitlementDefinitions Value = new("known-v1", [], [new("independent-key", QuotaCombination.PriorityReplace)], [], false);
+        internal EntitlementStoreFailure? Failure;
+        internal Action? AfterRead;
         public EntitlementDefinitions Current()
         {
             Reads++;
-            return new("known-v1", [], [new("independent-key", QuotaCombination.PriorityReplace)], [], false);
+            if (Failure is { } failure) throw new EntitlementStoreException(failure, "Unavailable definition producer fixture.");
+            AfterRead?.Invoke(); return Value;
         }
     }
     private sealed class RealmPort(RealmAuthorityFailure? failure = null, Action? afterRead = null) : IRealmAuthorityPort

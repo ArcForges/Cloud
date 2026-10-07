@@ -154,7 +154,12 @@ public sealed class QuotaDefinitionPersistenceTests
         internal static async Task<Harness> Create()
         {
             var h = new Harness();
-            try { await h.Bridge.ExecAsync(await File.ReadAllTextAsync(Path.Combine(T.RepoRoot().FullName, "src", "ArcForges.Cloud.Storage.D1", "Migrations", "pending", "entitlement__quota-definition-profile.sql"), T.Ct), T.Ct); return h; }
+            try
+            {
+                var pending = Path.Combine(T.RepoRoot().FullName, "src", "ArcForges.Cloud.Storage.D1", "Migrations", "pending", "entitlement__quota-definition-profile.sql");
+                if (File.Exists(pending)) await h.Bridge.ExecAsync(await File.ReadAllTextAsync(pending, T.Ct), T.Ct);
+                return h;
+            }
             catch { h.Dispose(); throw; }
         }
         internal QuotaDefinitionPublishRequest Request() => new(Guid.NewGuid(), Realm, Revision, new('a', 64), "config:trusted-materializer");

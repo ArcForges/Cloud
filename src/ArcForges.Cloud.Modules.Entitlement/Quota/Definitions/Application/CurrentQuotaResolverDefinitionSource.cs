@@ -21,7 +21,15 @@ internal sealed class CurrentQuotaResolverDefinitionSource(IEntitlementDefinitio
         if (realm.Snapshot is not { } authority) return new(realm.Failure == RealmAuthorityFailure.Defect
             ? QuotaDefinitionStatus.Defect : QuotaDefinitionStatus.Unavailable);
         if (authority.RealmId != realmId) return new(QuotaDefinitionStatus.Denied);
-        var current = definitions.Current();
+        EntitlementDefinitions current;
+        try { current = definitions.Current(); }
+        catch (EntitlementStoreException error)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return new(error.Failure == EntitlementStoreFailure.Unavailable ? QuotaDefinitionStatus.Unavailable : QuotaDefinitionStatus.Defect);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (current is null || current.Capabilities.IsDefault || current.Quotas.IsDefault || current.Allowances.IsDefault) return new(QuotaDefinitionStatus.Defect);
         try { RecordSetValidator.Validate(EntitlementRecordSet.Empty(realmId.ToString("D")), current); }
         catch (ResolverInputException) { return new(QuotaDefinitionStatus.Defect); }
         if (current.Version != definitionsVersion) return new(QuotaDefinitionStatus.NotFound);
