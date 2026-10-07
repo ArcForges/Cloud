@@ -86,13 +86,15 @@
     "eng/provenance/records/cloud-07-cloud-worker-bundle-r1.json": "e86f6a033611c01bb1c948678498d3199ca5e9f05202570cdfa389ac39310009",
     "eng/provenance/artifact-profiles/cloud-release-r52.json": "f603b7fee528f529f81a2403d27b3ef8a6b6649a6f46b573c3e08a910865de65",
     "eng/provenance/records/cloud-82-cloud-runtime-notices-r1.json": "2a31f94ec5d3ea1f3c16947ca79eeba59a73d20203dba80c6152adde7c58af48",
-    "eng/provenance/records/cloud-82-cloud-worker-bundle-r1.json": "bcdb5a612c96ac291cf8390e98c39c4b80619da865b20d58060061f937717e62"
+    "eng/provenance/records/cloud-82-cloud-worker-bundle-r1.json": "bcdb5a612c96ac291cf8390e98c39c4b80619da865b20d58060061f937717e62",
+    "eng/provenance/records/cloud-82-cloud-worker-bundle-r2.json": "711131670c488d683ff72c918759c4443e98ba3d30298f503221151c2367ce4c",
+    "eng/provenance/records/cloud-82-cloud-runtime-notices-r2.json": "b2a6f4cbde7389c03bd82b332627d5c16813c1143f89fbee80569c2550f16733"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "ArcForges delivery worker w-codex-20261006-identity (maintainer-authorized; independent exact-head PR review is a separate final gate)",
     "date": "2026-10-07",
-    "rationale": "CLOUD.82 delivers the real same-factory canonical exact-scope opaque owner contribution producer, closed common Rejected/Unavailable refusal and registered new-security RequiresScopedContributions metadata. Wrong, foreign and legacy-null capabilities on required plans refuse before any receipt or executor call. The optional flag is bound into generated plan/manifest identities only when true; the accepted create-user/default expansion and source ownership remain unchanged. Actual migrated SQLite/Worker component tests cover scope refusal, same-command concurrency and replay, recovery races/fresh reread, cancellation and late-tail rollback; compiler tests cover malformed registrations, exact metadata digests and unchanged legacy bytes. This reviewed first-party/source-input admission preserves all accepted predecessor receipts, dependency coordinates, integrities, lock closure, runtime/provider pins, egress declarations and security gates. It grants no caller authentication or Platform/tail authority, does not alter SQL/clock/locks/production routes/data, and does not claim whole account acceptance or OS isolation.",
+    "rationale": "CLOUD.82 delivers the real same-factory canonical exact-scope opaque owner contribution producer, closed common Rejected/Unavailable refusal and registered new-security RequiresScopedContributions metadata. Wrong, foreign and legacy-null capabilities on required plans refuse before any receipt or executor call. The optional flag is bound into generated plan/manifest identities only when true; the accepted create-user/default expansion and source ownership remain unchanged. Actual migrated SQLite/Worker component tests cover scope refusal, same-command concurrency and replay, recovery races/fresh reread, cancellation and late-tail rollback; compiler tests cover malformed registrations, exact metadata digests and unchanged legacy bytes. This reviewed first-party/source-input admission preserves all accepted predecessor receipts, dependency coordinates, integrities, lock closure, runtime/provider pins, egress declarations and security gates. It grants no caller authentication or Platform/tail authority, does not alter SQL/clock/locks/production routes/data, and does not claim whole account acceptance or OS isolation. Evidence-only r2 corrects predecessor prose while preserving unchanged r52 profile and all committed/accepted history.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -176,7 +178,9 @@
       "eng/provenance/records/cloud-07-cloud-worker-bundle-r1.json": "e86f6a033611c01bb1c948678498d3199ca5e9f05202570cdfa389ac39310009",
       "eng/provenance/artifact-profiles/cloud-release-r52.json": "f603b7fee528f529f81a2403d27b3ef8a6b6649a6f46b573c3e08a910865de65",
       "eng/provenance/records/cloud-82-cloud-runtime-notices-r1.json": "2a31f94ec5d3ea1f3c16947ca79eeba59a73d20203dba80c6152adde7c58af48",
-      "eng/provenance/records/cloud-82-cloud-worker-bundle-r1.json": "bcdb5a612c96ac291cf8390e98c39c4b80619da865b20d58060061f937717e62"
+      "eng/provenance/records/cloud-82-cloud-worker-bundle-r1.json": "bcdb5a612c96ac291cf8390e98c39c4b80619da865b20d58060061f937717e62",
+      "eng/provenance/records/cloud-82-cloud-worker-bundle-r2.json": "711131670c488d683ff72c918759c4443e98ba3d30298f503221151c2367ce4c",
+      "eng/provenance/records/cloud-82-cloud-runtime-notices-r2.json": "b2a6f4cbde7389c03bd82b332627d5c16813c1143f89fbee80569c2550f16733"
     },
     "checks": [
       "locked-restore",
@@ -1007,7 +1011,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-82-cloud-worker-bundle-r1", "cloud-82-cloud-runtime-notices-r1"],
+  "artifactRecords": ["cloud-82-cloud-worker-bundle-r2", "cloud-82-cloud-runtime-notices-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1021,7 +1025,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-82-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-82-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

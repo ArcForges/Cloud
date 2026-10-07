@@ -122,6 +122,7 @@
     "eng/policy/dependency-reviews/cloud-75-r2.json",
     "eng/policy/dependency-reviews/cloud-78-r1.json",
     "eng/policy/dependency-reviews/cloud-82-r1.json",
+    "eng/policy/dependency-reviews/cloud-82-r2.json",
     "eng/policy/dependency-reviews/com-01-r2.json",
     "eng/policy/dependency-reviews/com-01-r3.json",
     "eng/policy/dependency-reviews/com-02-r1.json",
@@ -240,7 +241,9 @@
     "eng/provenance/records/cloud-78-cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-78-cloud-worker-bundle-r1.json",
     "eng/provenance/records/cloud-82-cloud-runtime-notices-r1.json",
+    "eng/provenance/records/cloud-82-cloud-runtime-notices-r2.json",
     "eng/provenance/records/cloud-82-cloud-worker-bundle-r1.json",
+    "eng/provenance/records/cloud-82-cloud-worker-bundle-r2.json",
     "eng/provenance/records/cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r10.json",
     "eng/provenance/records/cloud-runtime-notices-r11.json",
@@ -915,5 +918,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["cloud-82-cloud-worker-bundle-r1", "cloud-82-cloud-runtime-notices-r1"]
+  "artifacts": ["cloud-82-cloud-worker-bundle-r2", "cloud-82-cloud-runtime-notices-r2"]
 }
