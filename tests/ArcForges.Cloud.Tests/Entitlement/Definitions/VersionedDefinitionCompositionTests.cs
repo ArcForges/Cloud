@@ -210,7 +210,10 @@ public sealed class VersionedDefinitionCompositionTests
             Families = new(Bridge, 0, Clock);
             Authority = new(name => name switch
             {
-                "AF_REALM_ID" => Realm.ToString("D"), "AF_AUTH_EPOCH" => "7", "AF_RECOVERY_GENERATION" => "0", _ => null,
+                "AF_REALM_ID" => Realm.ToString("D"),
+                "AF_AUTH_EPOCH" => "7",
+                "AF_RECOVERY_GENERATION" => "0",
+                _ => null,
             }, _ => new RecoveryEpochReader(Plans, Clock));
             Recovery = new(Authority, () => Families);
             Participant = new(this);
