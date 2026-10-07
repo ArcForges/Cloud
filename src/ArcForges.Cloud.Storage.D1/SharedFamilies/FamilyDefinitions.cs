@@ -72,7 +72,8 @@ internal sealed class FamilySecurityExpiryRegistration
 /// A generated family plan: the named plan the Worker executes and, statement by statement, the role each statement plays in the
 /// guarded batch. The roles come from the same generator pass as the SQL, so they cannot drift from it.
 /// </summary>
-internal sealed record FamilyPlanDefinition(PlanDefinition Plan, string Family, IReadOnlyList<FamilyStatementRole> Roles);
+internal sealed record FamilyPlanDefinition(PlanDefinition Plan, string Family, IReadOnlyList<FamilyStatementRole> Roles,
+    bool RequiresScopedContributions = false);
 
 /// <summary>Why the engine refused a family plan or a unit of work. A refusal never carries a value, a statement or a table name.</summary>
 internal enum FamilyViolation
