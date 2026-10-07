@@ -17,15 +17,16 @@ internal static class FamilyExpansion
 {
     internal sealed record Statement(string Role, string Sql, IReadOnlyList<string> Params);
 
-    internal sealed record Plan(string Id, int Version, string Family, string Sha256, IReadOnlyList<Statement> Statements);
+    internal sealed record Plan(string Id, int Version, string Family, string Sha256, IReadOnlyList<Statement> Statements, bool RequiresScopedContributions);
 
     private static string StorageRoot => Path.Combine(T.RepoRoot().FullName, "storage", "plans");
 
     private static string Normalize(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd() + "\n";
 
     /// <summary>The identity of a family plan: the normalized authored text and every expanded statement, in order (shared with the generator by <c>Vectors/family-lock-order.json</c>).</summary>
-    public static string Identity(string normalizedText, IEnumerable<string> statementSql) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedText + "\n-- expanded\n" + string.Join('\n', statementSql) + "\n")));
+    public static string Identity(string normalizedText, IEnumerable<string> statementSql, bool requiresScopedContributions = false) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedText + "\n-- expanded\n" + string.Join('\n', statementSql) + "\n"
+            + (requiresScopedContributions ? "-- security-metadata/v1\nrequiresScopedContributions=true\n" : ""))));
 
     public static IReadOnlyList<Plan> Read()
     {
@@ -42,7 +43,8 @@ internal static class FamilyExpansion
                         statement.GetProperty("role").GetString()!,
                         statement.GetProperty("sql").GetString()!,
                         statement.GetProperty("params").EnumerateArray().Select(kind => kind.GetString()!).ToArray()))
-                    .ToArray()))
+                    .ToArray(),
+                plan.TryGetProperty("requiresScopedContributions", out var scoped) && scoped.GetBoolean()))
             .ToArray();
     }
 
@@ -54,7 +56,7 @@ internal static class FamilyExpansion
         {
             var parts = plan.Id.Split('.');
             var file = Path.Combine(StorageRoot, "families", parts[1] + "." + parts[2] + ".sql");
-            var recomputed = Identity(Normalize(File.ReadAllText(file)), plan.Statements.Select(statement => statement.Sql));
+            var recomputed = Identity(Normalize(File.ReadAllText(file)), plan.Statements.Select(statement => statement.Sql), plan.RequiresScopedContributions);
             Assert.Equal(plan.Sha256, recomputed);
             identities.Add((plan.Id, plan.Version, recomputed));
         }
@@ -79,17 +81,26 @@ public sealed class FamilyExpansionTests
         Assert.NotEqual(vector.GetProperty("sha256").GetString(), FamilyExpansion.Identity(vector.GetProperty("normalizedText").GetString()!, sql.Reverse()));
         Assert.NotEqual(vector.GetProperty("sha256").GetString(), FamilyExpansion.Identity(vector.GetProperty("normalizedText").GetString()! + " ", sql));
         Assert.NotEqual(vector.GetProperty("sha256").GetString(), FamilyExpansion.Identity(vector.GetProperty("normalizedText").GetString()!, sql.Take(1)));
+        Assert.Equal(vector.GetProperty("sha256").GetString(), FamilyExpansion.Identity(vector.GetProperty("normalizedText").GetString()!, sql, false));
+        Assert.Equal("3a8e78364f3b876cda67dc85b69bba52af6146f3b778738601e6d23bbee34756", FamilyExpansion.Identity(vector.GetProperty("normalizedText").GetString()!, sql, true));
     }
 
     [Fact]
     public void EveryListedFamilyPlanEqualsItsGeneratedDefinitionStatementByStatement()
     {
         var listed = FamilyExpansion.Read();
+        using var registry = JsonDocument.Parse(File.ReadAllText(Path.Combine(T.RepoRoot().FullName, "storage", "plans", "families.json")));
+        var scopedPlans = registry.RootElement.TryGetProperty("scopedContributionPlans", out var scoped)
+            ? scoped.EnumerateArray().Select(plan => plan.GetString()!).ToArray() : [];
+        Assert.Equal(scopedPlans.Length, scopedPlans.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(scopedPlans, id => Assert.Single(listed, plan => plan.Id == id));
         Assert.Equal(PlanManifest.FamilyPlans.Count, listed.Count);
         foreach (var plan in listed)
         {
             var generated = Assert.Single(PlanManifest.FamilyPlans, candidate => candidate.Plan.Id == plan.Id && candidate.Plan.Version == plan.Version);
             Assert.Equal(plan.Family, generated.Family);
+            Assert.Equal(scopedPlans.Contains(plan.Id, StringComparer.Ordinal), plan.RequiresScopedContributions);
+            Assert.Equal(plan.RequiresScopedContributions, generated.RequiresScopedContributions);
             Assert.Equal(plan.Statements.Count, generated.Roles.Count);
             Assert.Equal(plan.Statements.Count, generated.Plan.Statements.Count);
             for (var index = 0; index < plan.Statements.Count; index++)

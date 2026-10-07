@@ -27,6 +27,20 @@ internal static class FamilyGuards
     public static FamilyContribution Policy(FamilyModule module, string key, IReadOnlyList<D1Scalar> by, IReadOnlyList<D1Scalar> match, long? freshAfterMicros = null)
         => Exists(FamilyClass.Policy, module, key, by, match, freshAfterMicros);
 
+    /// <summary>
+    /// Captures the trusted server observation as a lower bound for a registered Identity security guard. The generated SQL also
+    /// checks the actual SQLite UTC clock at the authorization statement; this argument never replaces that clock.
+    /// </summary>
+    public static FamilyContribution SecurityAuthorization(string key, IReadOnlyList<D1Scalar> by, IReadOnlyList<D1Scalar> match, long capturedServerMicros)
+    {
+        RequireNonNegative(capturedServerMicros);
+        return Exists(FamilyClass.Authorization, FamilyModule.Identity, key, by, match, capturedServerMicros);
+    }
+
+    /// <summary>A registered persisted due deadline is checked against the actual database clock, never a caller-supplied instant.</summary>
+    public static FamilyContribution SecurityDueAuthorization(string key, IReadOnlyList<D1Scalar> by, IReadOnlyList<D1Scalar> match)
+        => Exists(FamilyClass.Authorization, FamilyModule.Identity, key, by, match, null);
+
     /// <summary>The row's revision equals the revision the caller read. A row that does not exist has revision zero.</summary>
     public static FamilyContribution Revision(FamilyModule module, string key, IReadOnlyList<D1Scalar> by, long expectedRevision)
     {

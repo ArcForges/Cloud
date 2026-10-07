@@ -11,13 +11,69 @@ internal sealed record FamilyParticipant(FamilyModule Module, bool Required, str
 internal sealed record FamilyDefinition(string Id, string Title, string Source, IReadOnlyList<FamilyParticipant> Participants);
 
 /// <summary>The role of one statement of a family plan: the module that owns every table it names, its phase, class and stable key.</summary>
-internal sealed record FamilyStatementRole(FamilyModule Module, FamilyPhase Phase, FamilyClass Class, string Key);
+internal sealed record FamilyStatementRole(FamilyModule Module, FamilyPhase Phase, FamilyClass Class, string Key, FamilySecurityExpiry? SecurityExpiry = null);
+
+/// <summary>The closed security lifetime profiles. Generic policy and lease freshness retain their original behavior.</summary>
+internal enum FamilySecurityExpiryProfile
+{
+    NativeSession,
+    BrowserSession,
+    NativeRefresh,
+    ActionChallenge,
+    NativeCode,
+    BrowserFlow,
+    DeletionGrace,
+    EnrollmentFlow,
+    PendingChallenge,
+    DeletionGraceDue,
+}
+
+/// <summary>Source-generated immutable role metadata. Columns are defensively copied and cannot expose a mutable array.</summary>
+internal sealed class FamilySecurityExpiry
+{
+    public FamilySecurityExpiry(FamilySecurityExpiryProfile profile, string table, IReadOnlyList<string> columns, int? capturedParamIndex)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(columns);
+        Profile = profile;
+        Table = table;
+        Columns = Array.AsReadOnly(columns.ToArray());
+        CapturedParamIndex = capturedParamIndex;
+    }
+
+    public FamilySecurityExpiryProfile Profile { get; }
+    public string Table { get; }
+    public IReadOnlyList<string> Columns { get; }
+    public int? CapturedParamIndex { get; }
+}
+
+/// <summary>A closed registration emitted by the same compiler that expands the SQL security predicate.</summary>
+internal sealed class FamilySecurityExpiryRegistration
+{
+    public FamilySecurityExpiryRegistration(FamilySecurityExpiryProfile profile, string table, IReadOnlyList<string> columns, string key, IReadOnlyList<string> families, IReadOnlyList<string>? plans)
+    {
+        Profile = profile;
+        Table = table;
+        Columns = Array.AsReadOnly(columns.ToArray());
+        Key = key;
+        Families = Array.AsReadOnly(families.ToArray());
+        Plans = plans is null ? null : Array.AsReadOnly(plans.ToArray());
+    }
+
+    public FamilySecurityExpiryProfile Profile { get; }
+    public string Table { get; }
+    public IReadOnlyList<string> Columns { get; }
+    public string Key { get; }
+    public IReadOnlyList<string> Families { get; }
+    public IReadOnlyList<string>? Plans { get; }
+}
 
 /// <summary>
 /// A generated family plan: the named plan the Worker executes and, statement by statement, the role each statement plays in the
 /// guarded batch. The roles come from the same generator pass as the SQL, so they cannot drift from it.
 /// </summary>
-internal sealed record FamilyPlanDefinition(PlanDefinition Plan, string Family, IReadOnlyList<FamilyStatementRole> Roles);
+internal sealed record FamilyPlanDefinition(PlanDefinition Plan, string Family, IReadOnlyList<FamilyStatementRole> Roles,
+    bool RequiresScopedContributions = false);
 
 /// <summary>Why the engine refused a family plan or a unit of work. A refusal never carries a value, a statement or a table name.</summary>
 internal enum FamilyViolation

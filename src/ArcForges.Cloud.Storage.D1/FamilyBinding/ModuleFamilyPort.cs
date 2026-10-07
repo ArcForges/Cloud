@@ -35,7 +35,12 @@ internal sealed class ModuleFamilyPortFactory : IModuleFamilyPortFactory
         this.catalog = Array.AsReadOnly(catalog.Select(item => item with { Participants = Array.AsReadOnly(item.Participants.ToArray()) }).ToArray());
         this.plans = Array.AsReadOnly(plans.Select(item => item with
         {
-            Roles = Array.AsReadOnly(item.Roles.ToArray()),
+            Roles = Array.AsReadOnly(item.Roles.Select(role => role with
+            {
+                SecurityExpiry = role.SecurityExpiry is { } expiry
+                    ? new FamilySecurityExpiry(expiry.Profile, expiry.Table, expiry.Columns, expiry.CapturedParamIndex)
+                    : null,
+            }).ToArray()),
             Plan = item.Plan with
             {
                 Statements = Array.AsReadOnly(item.Plan.Statements.Select(statement => statement with
@@ -101,7 +106,7 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
         this.plans = plans;
     }
 
-    private sealed record AuthorizedContributions(object Issuer, string FamilyId, string PlanId, IReadOnlyList<FamilyContribution> Items) : IModuleFamilyContributionSet;
+    private sealed record AuthorizedContributions(object Issuer, string FamilyId, string PlanId, string? OwnerScope, IReadOnlyList<FamilyContribution> Items) : IModuleFamilyContributionSet;
 
     public async Task<ModulePlanOutcome> ReadAsync(string familyId, ModulePlanRead read, CancellationToken cancellationToken)
     {
@@ -133,8 +138,30 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
 
     public IModuleFamilyContributionSet Contribute(string familyId, string planId, IReadOnlyList<ModuleFamilyContribution> contributions)
     {
-        var definition = Definition(familyId, planId);
-        return new AuthorizedContributions(issuer, familyId, planId, Own(definition, contributions));
+        try
+        {
+            var definition = Definition(familyId, planId, sealing: true);
+            return new AuthorizedContributions(issuer, familyId, planId, null, Own(definition, contributions, sealing: true));
+        }
+        catch (ContributionValidationException)
+        {
+            throw new ModuleFamilyContributionException(ModuleFamilyContributionFailure.Rejected);
+        }
+    }
+
+    public IModuleFamilyContributionSet ContributeScoped(string familyId, string planId, string ownerScope, IReadOnlyList<ModuleFamilyContribution> contributions)
+    {
+        try
+        {
+            if (!Guid.TryParseExact(ownerScope, "D", out var scope) || scope == Guid.Empty || ownerScope != scope.ToString("D"))
+                throw new ContributionValidationException();
+            var definition = Definition(familyId, planId, sealing: true);
+            return new AuthorizedContributions(issuer, familyId, planId, ownerScope, Own(definition, contributions, sealing: true));
+        }
+        catch (ContributionValidationException)
+        {
+            throw new ModuleFamilyContributionException(ModuleFamilyContributionFailure.Rejected);
+        }
     }
 
     public async Task<ModulePlanOutcome> InspectAsync(string familyId, ModuleCommandIdentity identity, CancellationToken cancellationToken)
@@ -167,7 +194,9 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
                 continue;
             }
             if (bundle is not AuthorizedContributions authorized || !ReferenceEquals(authorized.Issuer, issuer)
-                || authorized.FamilyId != write.FamilyId || authorized.PlanId != write.PlanId)
+                || authorized.FamilyId != write.FamilyId || authorized.PlanId != write.PlanId
+                || (authorized.OwnerScope is not null && !string.Equals(authorized.OwnerScope, write.OwnerScope, StringComparison.Ordinal))
+                || (definition.RequiresScopedContributions && authorized.OwnerScope is null))
                 throw new InvalidOperationException("The participant contribution capability is not valid for this factory and plan.");
             foreach (var contribution in authorized.Items) unit.Contribute(contribution);
         }
@@ -198,25 +227,27 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
         }
     }
 
-    private FamilyPlanDefinition Definition(string familyId, string planId)
+    private FamilyPlanDefinition Definition(string familyId, string planId, bool sealing = false)
     {
-        Participant(familyId);
+        Participant(familyId, sealing);
         return plans.SingleOrDefault(plan => plan.Plan.Id == planId && plan.Family == familyId)
-            ?? throw new InvalidOperationException("The family plan is not registered.");
+            ?? throw Validation(sealing, "The family plan is not registered.");
     }
 
-    private IReadOnlyList<FamilyContribution> Own(FamilyPlanDefinition definition, IReadOnlyList<ModuleFamilyContribution> contributions)
+    private IReadOnlyList<FamilyContribution> Own(FamilyPlanDefinition definition, IReadOnlyList<ModuleFamilyContribution> contributions, bool sealing = false)
     {
+        if (sealing && contributions is null) throw new ContributionValidationException();
         ArgumentNullException.ThrowIfNull(contributions);
-        var participant = Participant(definition.Family);
+        var participant = Participant(definition.Family, sealing);
         var output = new List<FamilyContribution>();
         var keys = new HashSet<(FamilyModule, FamilyClass, string)>();
         foreach (var contribution in contributions)
         {
+            if (sealing && (contribution is null || contribution.Arguments is null)) throw new ContributionValidationException();
             if (!ModuleLockOrder.TryFromOwner(contribution.Owner, out var owner)
                 || (owner != participant && !(participant == FamilyModule.Identity && definition.Family == "account-enrollment"
                     && definition.Plan.Id == "families.account-enrollment.create-user" && owner == FamilyModule.Workspace)))
-                throw new InvalidOperationException("The family contribution is not owned by the calling module.");
+                throw Validation(sealing, "The family contribution is not owned by the calling module.");
             var kind = contribution.Class switch
             {
                 "authorization" => FamilyClass.Authorization,
@@ -227,30 +258,33 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
                 "bucket" => FamilyClass.Bucket,
                 "reservation" => FamilyClass.Reservation,
                 "record" => FamilyClass.Record,
-                _ => throw new InvalidOperationException("The family statement class is unknown."),
+                _ => throw Validation(sealing, "The family statement class is unknown."),
             };
             var roleIndex = -1;
             for (var index = 0; index < definition.Roles.Count; index++)
                 if (definition.Roles[index] is { } role && role.Module == owner && role.Class == kind && role.Key == contribution.Key && role.Phase != FamilyPhase.Release) roleIndex = index;
-            if (roleIndex < 0 || !keys.Add((owner, kind, contribution.Key))) throw new InvalidOperationException("The owner contribution is absent or duplicated in this plan.");
+            if (roleIndex < 0 || !keys.Add((owner, kind, contribution.Key))) throw Validation(sealing, "The owner contribution is absent or duplicated in this plan.");
             var values = contribution.Arguments.Select(Scalar).ToArray();
             var statement = definition.Plan.Statements[roleIndex];
             var expected = statement.Params.Count - (definition.Roles[roleIndex].Phase == FamilyPhase.Guard ? 1 : 0);
-            if (expected != values.Length) throw new InvalidOperationException("The owner contribution has the wrong argument count.");
+            if (expected != values.Length) throw Validation(sealing, "The owner contribution has the wrong argument count.");
             output.Add(new FamilyContribution(owner, kind, contribution.Key, values));
         }
         return output;
     }
 
-    private FamilyModule Participant(string family)
+    private FamilyModule Participant(string family, bool sealing = false)
     {
         var registered = catalog.SingleOrDefault(item => item.Id == family)
-            ?? throw new InvalidOperationException("The family is not registered.");
+            ?? throw Validation(sealing, "The family is not registered.");
         if (!ModuleLockOrder.TryFromOwner(module.PlanOwner, out var participant) || participant == FamilyModule.Platform
             || !registered.Participants.Any(item => item.Module == participant))
-            throw new InvalidOperationException("The calling module is not a participant of the family.");
+            throw Validation(sealing, "The calling module is not a participant of the family.");
         return participant;
     }
+
+    private sealed class ContributionValidationException : Exception;
+    private static Exception Validation(bool sealing, string message) => sealing ? new ContributionValidationException() : new InvalidOperationException(message);
 
     private static ModulePlanOutcome Replay(ReplayDecision decision) => new(decision.Kind switch
     {

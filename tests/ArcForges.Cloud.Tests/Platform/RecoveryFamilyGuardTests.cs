@@ -75,8 +75,8 @@ public sealed class RecoveryFamilyGuardTests
         Assert.Equal(4, state);
         Assert.True(D1Values.TryGetInt64(mutation.Arguments[0][4], out var revision));
         Assert.Equal(1, revision);
-        Assert.Throws<InvalidOperationException>(() => factory.For(ModuleDescriptor.Create("Platform", "platform")).Contribute(write.FamilyId, write.PlanId, []));
-        Assert.Throws<InvalidOperationException>(() => port.Contribute(write.FamilyId, write.PlanId, [new("platform", "authorization", "recovery-current", [])]));
+        Assert.Equal(ModuleFamilyContributionFailure.Rejected, Assert.Throws<ModuleFamilyContributionException>(() => factory.For(ModuleDescriptor.Create("Platform", "platform")).Contribute(write.FamilyId, write.PlanId, [])).Failure);
+        Assert.Equal(ModuleFamilyContributionFailure.Rejected, Assert.Throws<ModuleFamilyContributionException>(() => port.Contribute(write.FamilyId, write.PlanId, [new("platform", "authorization", "recovery-current", [])])).Failure);
     }
 
     [Theory]

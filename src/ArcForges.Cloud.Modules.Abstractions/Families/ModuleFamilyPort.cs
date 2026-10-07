@@ -11,6 +11,19 @@ public sealed record ModuleFamilyWrite(string FamilyId, string PlanId, string Ow
 /// <summary>Opaque owner-bound contributions. Only the storage adapter's issuing factory can create a set it will accept; a caller cannot assert a foreign owner.</summary>
 public interface IModuleFamilyContributionSet;
 
+/// <summary>A closed failure to mint an opaque owner capability. The exception carries no plan, SQL, subject or secret.</summary>
+public enum ModuleFamilyContributionFailure { Rejected, Unavailable }
+
+public sealed class ModuleFamilyContributionException : Exception
+{
+    public ModuleFamilyContributionException(ModuleFamilyContributionFailure failure) : base("Module family contribution refused.")
+    {
+        if (!Enum.IsDefined(failure)) throw new ArgumentOutOfRangeException(nameof(failure));
+        Failure = failure;
+    }
+    public ModuleFamilyContributionFailure Failure { get; }
+}
+
 /// <summary>The stable command identity used to check a receipt before deciding whether an enrollment creates anything.</summary>
 public sealed record ModuleCommandIdentity(Guid CommandId, Guid? WorkspaceId, string ActorRef, string Operation, string RequestHash);
 
@@ -22,6 +35,9 @@ public interface IModuleFamilyPort
 
     /// <summary>Seals this module's contributions for one exact registered family plan. A coordinator combines the resulting capabilities without seeing or changing their content.</summary>
     IModuleFamilyContributionSet Contribute(string familyId, string planId, IReadOnlyList<ModuleFamilyContribution> contributions);
+
+    /// <summary>Seals only this owner's statements for one exact canonical owner scope. The scope does not grant authorization.</summary>
+    IModuleFamilyContributionSet ContributeScoped(string familyId, string planId, string ownerScope, IReadOnlyList<ModuleFamilyContribution> contributions);
 
     /// <summary>Succeeded means no receipt was seen; every other status follows the same vocabulary as plan execution. A replay returns its stored result.</summary>
     Task<ModulePlanOutcome> InspectAsync(string familyId, ModuleCommandIdentity identity, CancellationToken cancellationToken);
