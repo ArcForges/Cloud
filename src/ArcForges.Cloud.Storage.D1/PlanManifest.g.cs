@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "cd71a84fdfaa757314957ff0666d67a685fb6afac18359d88901d00e970ba84e";
+    public const string Hash = "303fd7babc723ee717fc9226be991beb5d063c318ae750de0a305ebfda40ab1e";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity
@@ -100,7 +100,7 @@ internal static class PlanManifest
             PlanAccess.Read,
             1,
             [
-                new([new(PlanKind.Scope), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
+                new([new(PlanKind.Scope), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true)])
             ]);
 
         public static readonly PlanDefinition DeletionState = new(
@@ -109,7 +109,7 @@ internal static class PlanManifest
             PlanAccess.Read,
             1,
             [
-                new([new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)])
+                new([new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64, true), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true)])
             ]);
 
         public static readonly PlanDefinition DeletionUser = new(

@@ -59,7 +59,7 @@ public sealed class DeletionTransitionTests
         var result = await Service(new Store(), fixture, policy: policy).PrepareAsync(Target(DeletionTransition.Cancel), Cancellation);
         Assert.Equal(Pending, Assert.IsType<DeletionTransitionPreparation>(result.Value).Lifecycle);
         Assert.Equal("families.account-security.cancel-deletion", fixture.Plan);
-        Assert.Equal((long)UserState.Suspended, fixture.Items!.Single(item => item.Key == "deletion-user").Arguments[0].AsInt64());
+        Assert.Equal((long)UserState.Suspended, fixture.Items!.Single(item => item.Key == "deletion-user" && item.Class == "record").Arguments[0].AsInt64());
         Assert.Equal(1_000_100, fixture.Items!.Single(item => item.Key == "deletion-current").Arguments[4].AsInt64());
         Assert.Empty(fixture.Executor.Calls);
     }
@@ -78,13 +78,13 @@ public sealed class DeletionTransitionTests
         var transition = (DeletionTransition)transitionValue;
         var state = (DeletionState)stateValue;
         var fixture = new Fixture();
-        var store = new Store { Lifecycle = new(new(Pending with { State = state }, UserState.PendingDeletion, 7), null) };
+        var store = new Store { Lifecycle = new(new(Pending with { State = state }, UserState.PendingDeletion, 7, 100), null) };
         var result = await Service(store, fixture, new Clock { At = at }).PrepareAsync(Target(transition), Cancellation);
         Assert.Equal(expected, result.Failure);
         Assert.Equal(expected is null, result.Value is not null);
         Assert.Equal(expected is null ? 1 : 0, fixture.Seals);
         if (expected is null)
-            Assert.Equal(transition == DeletionTransition.Cancel ? 8 : 7, fixture.Items!.Single(item => item.Class == "authorization").Arguments.Count);
+            Assert.Equal(transition == DeletionTransition.Cancel ? 8 : 7, fixture.Items!.Single(item => item.Key is "deletion-current" or "deletion-due" or "deletion-purging").Arguments.Count);
         Assert.Empty(fixture.Executor.Calls);
         // These are request-time preparation checks, not a claim of transaction-time expiry/purge fencing.
     }
@@ -163,6 +163,18 @@ public sealed class DeletionTransitionTests
     }
 
     [Fact]
+    public async Task DifferentCurrentUserRequestCannotReuseOriginalLifecycleAuthority()
+    {
+        var fixture = new Fixture();
+        foreach (var timestamp in new long?[] { null, 99, 101 })
+        {
+            var store = new Store { Lifecycle = new(new(Pending, UserState.PendingDeletion, 7, timestamp), null) };
+            Assert.Equal(IdentityDeletionFailure.StaleAuthority, (await Service(store, fixture).PrepareAsync(Target(DeletionTransition.Cancel), Cancellation)).Failure);
+        }
+        Assert.Equal(0, fixture.Seals);
+    }
+
+    [Fact]
     public async Task ClockIsSampledAfterPersistenceAndCannotTravelBeforeRequest()
     {
         var fixture = new Fixture();
@@ -181,7 +193,7 @@ public sealed class DeletionTransitionTests
         fixture.Executor.Handler = call => call.Plan.Id == "identity.deletion-current"
             ? ScriptedExecutor.Rows([D1Values.Text(Deletion.ToString("D")), D1Values.Text(Realm.ToString("D")), D1Values.Text(User.ToString("D")),
                 D1Values.Int64(100), D1Values.Int64(1_000_100), D1Values.Text("original.v1"), D1Values.Int64(1), D1Values.Int64(3),
-                D1Values.Int64(1), D1Values.Null(), D1Values.Null(), D1Values.Int64(2), D1Values.Int64(4), D1Values.Int64(7)])
+                D1Values.Int64(1), D1Values.Null(), D1Values.Null(), D1Values.Int64(2), D1Values.Int64(4), D1Values.Int64(7), D1Values.Int64(100)])
             : throw new InvalidOperationException("Preparation must never write.");
         var reader = new DeletionLifecyclePort(new ModulePlanPortFactory(fixture.Executor, 0, new Clock()).For(IdentityModule.Instance.Descriptor),
             fixture, new Authority(RealmAuthorityResult.Available(new(Realm, 3, 0, 2))), new Clock());
@@ -190,7 +202,8 @@ public sealed class DeletionTransitionTests
         Assert.NotNull(result.Contribution);
         Assert.Null(result.Failure);
         Assert.Equal(2, fixture.Items!.Single(item => item.Key == "deletion-revision").Arguments[1].AsInt64());
-        Assert.Equal(7, fixture.Items!.Single(item => item.Key == "deletion-current").Arguments[6].AsInt64());
+        Assert.Equal(1, fixture.Items!.Single(item => item.Key == "deletion-current").Arguments[6].AsInt64());
+        Assert.Equal(7, fixture.Items!.Single(item => item.Key == "deletion-user" && item.Class == "authorization").Arguments[4].AsInt64());
         Assert.Single(fixture.Executor.Calls);
         Assert.Equal(PlanAccess.Read, fixture.Executor.Calls[0].Plan.Access);
         await Assert.ThrowsAsync<InvalidOperationException>(() => reader.PrepareAsync(Realm, User, "account-security", "families.account-security.unknown", Workspace.ToString("D"), Cancellation));
@@ -250,7 +263,7 @@ public sealed class DeletionTransitionTests
     private sealed class Store : IDeletionTransitionStore
     {
         public DeletionStoredResult<DeletionUserAuthority> User { get; set; } = new(new(UserState.Active, 7, null), null);
-        public DeletionStoredResult<StoredDeletionAuthority> Lifecycle { get; set; } = new(new(Pending, UserState.PendingDeletion, 7), null);
+        public DeletionStoredResult<StoredDeletionAuthority> Lifecycle { get; set; } = new(new(Pending, UserState.PendingDeletion, 7, 100), null);
         public int UserReads { get; private set; }
         public int LifecycleReads { get; private set; }
         public Action? AfterRead { get; set; }
@@ -283,10 +296,10 @@ public sealed class DeletionTransitionTests
             var catalog = new[] { new FamilyDefinition("account-security", "Deletion fixture", "CLOUD79 test-owned future consumer", [new(FamilyModule.Identity, true, null)]) };
             FamilyPlanDefinition[] plans =
             [
-                PlanFor("request-deletion", [("authorization", "deletion-empty", "t"), ("authorization", "deletion-request-user", "ttii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "tttiitii"), ("record", "deletion-user", "iti")]),
-                PlanFor("cancel-deletion", [("authorization", "deletion-current", "tttiitii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "iti"), ("record", "deletion-user", "iti")]),
-                PlanFor("begin-deletion-purge", [("authorization", "deletion-due", "tttiiti"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "ti")]),
-                PlanFor("complete-deletion-purge", [("authorization", "deletion-purging", "tttiiti"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "iti"), ("record", "deletion-user", "ti")]),
+                PlanFor("request-deletion", [("authorization", "deletion-request-user", "ttii"), ("revision", "deletion-pending-empty", "tii"), ("revision", "deletion-purging-empty", "tii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "tttiitii"), ("record", "deletion-user", "iti")]),
+                PlanFor("cancel-deletion", [("authorization", "deletion-current", "tttiitii"), ("authorization", "deletion-user", "ttiii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "iti"), ("record", "deletion-user", "iti")]),
+                PlanFor("begin-deletion-purge", [("authorization", "deletion-due", "tttiiti"), ("authorization", "deletion-user", "ttiii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "ti")]),
+                PlanFor("complete-deletion-purge", [("authorization", "deletion-purging", "tttiiti"), ("authorization", "deletion-user", "ttiii"), ("revision", "deletion-revision", "ti"), ("record", "deletion-lifecycle", "iti"), ("record", "deletion-user", "ti")]),
             ];
             Factory = new ModuleFamilyPortFactory(Executor, 0, new Clock(), catalog, plans);
             port = Factory.For(IdentityModule.Instance.Descriptor);

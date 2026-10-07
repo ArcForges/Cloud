@@ -6,7 +6,7 @@ using ArcForges.Cloud.Modules.Identity.Recovery.Domain;
 namespace ArcForges.Cloud.Modules.Identity.Recovery.Application;
 
 internal sealed record DeletionUserAuthority(UserState State, long Revision, long? RequestedAtMicros);
-internal sealed record StoredDeletionAuthority(DeletionLifecycle Lifecycle, UserState UserState, long UserRevision);
+internal sealed record StoredDeletionAuthority(DeletionLifecycle Lifecycle, UserState UserState, long UserRevision, long? UserRequestedAtMicros = null);
 internal sealed record DeletionStoredResult<T>(T? Value, IdentityDeletionFailure? Failure) where T : class;
 
 /// <summary>Actual Identity reads; no caller-supplied state/revision or policy can stand in for persistence.</summary>
@@ -69,7 +69,8 @@ internal sealed class DeletionLifecycleService(IDeletionTransitionStore store, D
             own =
             [
                 new("identity", "authorization", "deletion-request-user", [T(target.RealmId), T(target.UserId), I((long)stored.State), I(userRevision)]),
-                new("identity", "authorization", "deletion-empty", [T(target.UserId)]),
+                new("identity", "revision", "deletion-pending-empty", [T(target.UserId), I((long)DeletionState.Pending), I(0)]),
+                new("identity", "revision", "deletion-purging-empty", [T(target.UserId), I((long)DeletionState.Purging), I(0)]),
                 new("identity", "revision", "deletion-revision", [T(target.DeletionId), I(0)]),
                 new("identity", "record", "deletion-user", [I(sampled), T(target.UserId), I(userRevision)]),
                 new("identity", "record", "deletion-lifecycle", [T(target.DeletionId), T(target.RealmId), T(target.UserId), I(sampled), I(deadline),
@@ -87,7 +88,8 @@ internal sealed class DeletionLifecycleService(IDeletionTransitionStore store, D
             if (!lifecycle.HasValidShape() || lifecycle.RealmId != target.RealmId || lifecycle.UserId != target.UserId
                 || lifecycle.DeletionId != target.DeletionId || lifecycle.Revision == long.MaxValue || userRevision is <= 0 or long.MaxValue)
                 return Refused(IdentityDeletionFailure.Defect);
-            if (stored.UserState != UserState.PendingDeletion) return Refused(IdentityDeletionFailure.StaleAuthority);
+            if (stored.UserState != UserState.PendingDeletion || stored.UserRequestedAtMicros != lifecycle.RequestedAtMicros)
+                return Refused(IdentityDeletionFailure.StaleAuthority);
             var sampled = Now();
             if (sampled < lifecycle.RequestedAtMicros) return Refused(IdentityDeletionFailure.StaleAuthority);
             var cancellation = target.Transition == DeletionTransition.Cancel;
@@ -97,12 +99,13 @@ internal sealed class DeletionLifecycleService(IDeletionTransitionStore store, D
             if (target.Transition == DeletionTransition.CompletePurge && !lifecycle.MayCompletePurge(sampled)) return Refused(IdentityDeletionFailure.NotPending);
             var authorization = cancellation ? "deletion-current" : target.Transition == DeletionTransition.BeginPurge ? "deletion-due" : "deletion-purging";
             PlanValue[] bindings = [T(lifecycle.DeletionId), T(target.RealmId), T(target.UserId), I(lifecycle.RequestedAtMicros), I(lifecycle.GraceEndsAtMicros),
-                PlanValue.FromText(lifecycle.PolicyVersion), I(userRevision)];
+                PlanValue.FromText(lifecycle.PolicyVersion), I((long)lifecycle.State)];
             // Expiry fences also bind the captured server sample; due fences use only the actual database clock.
             if (cancellation) bindings = [.. bindings, I(sampled)];
             var list = new List<ModuleFamilyContribution>
             {
                 new("identity", "authorization", authorization, bindings),
+                new("identity", "authorization", "deletion-user", [T(target.RealmId), T(target.UserId), I((long)UserState.PendingDeletion), I(lifecycle.RequestedAtMicros), I(userRevision)]),
                 new("identity", "revision", "deletion-revision", [T(lifecycle.DeletionId), I(lifecycle.Revision)]),
             };
             if (cancellation)

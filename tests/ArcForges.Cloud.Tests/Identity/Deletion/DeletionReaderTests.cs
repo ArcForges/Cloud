@@ -125,11 +125,24 @@ public sealed class DeletionReaderTests
         Assert.Equal(IdentityDeletionFailure.StaleAuthority, (await Reader(new Plans(new ModulePlanOutcome(ModulePlanStatus.Succeeded, [row]))).ReadAsync(Realm, User, Cancellation)).Failure);
     }
 
+    [Fact]
+    public async Task PendingLifecycleMustMatchActualUserDeletionRequestTimestamp()
+    {
+        foreach (var timestamp in new[] { PlanValue.Null, I(99), I(101) })
+        {
+            var row = Row().Rows[0].ToArray();
+            row[14] = timestamp;
+            var result = await Reader(new Plans(new ModulePlanOutcome(ModulePlanStatus.Succeeded, [row]))).ReadAsync(Realm, User, Cancellation);
+            Assert.Equal(IdentityDeletionFailure.StaleAuthority, result.Failure);
+            Assert.Null(result.Snapshot);
+        }
+    }
+
     private static DeletionLifecyclePort Reader(Plans plans, TimeProvider? time = null, IRealmAuthorityPort? authority = null)
         => new(plans, new NoFamily(), authority ?? new Authority(RealmAuthorityResult.Available(new(Realm, 1, 0, 1))), time ?? new Clock());
 
     private static ModulePlanOutcome Row() => new(ModulePlanStatus.Succeeded,
-        [[T(Deletion.ToString("D")), T(Realm.ToString("D")), T(User.ToString("D")), I(100), I(1_000_100), T("policy.v1"), I(1), I(3), I(1), PlanValue.Null, PlanValue.Null, I(2), I(4), I(7)]]);
+        [[T(Deletion.ToString("D")), T(Realm.ToString("D")), T(User.ToString("D")), I(100), I(1_000_100), T("policy.v1"), I(1), I(3), I(1), PlanValue.Null, PlanValue.Null, I(2), I(4), I(7), I(100)]]);
 
     private static PlanValue T(string value) => PlanValue.FromText(value);
     private static PlanValue I(long value) => PlanValue.FromInt64(value);

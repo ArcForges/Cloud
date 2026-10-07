@@ -244,6 +244,7 @@ test("actual registered Worker read is realm-scoped, typed, fresh and side-effec
           "1",
           "4",
           "7",
+          "100",
         ],
       ]);
     }
@@ -322,7 +323,7 @@ test("actual transition reads capture current user and immutable cancelled lifec
     );
     assert(lifecycle.ok);
     assert.equal(lifecycle.rows.length, 1);
-    assert.deepEqual(lifecycle.rows[0].slice(7), ["3", "2", "500", "null", "2", "3", "9"]);
+    assert.deepEqual(lifecycle.rows[0].slice(7), ["3", "2", "500", "null", "2", "3", "9", "null"]);
     db.database.prepare("UPDATE identity_user SET rev=rev+1 WHERE user_id=?").run(user);
     const reread = await execute(
       db,

@@ -35,7 +35,7 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
             _ => IdentityDeletionFailure.Defect,
         });
         if (result.Rows.Count == 0) return IdentityDeletionResult.Refused(IdentityDeletionFailure.NotPending);
-        if (result.Rows.Count != 1 || result.Rows[0].Count != 14) return IdentityDeletionResult.Refused(IdentityDeletionFailure.Defect);
+        if (result.Rows.Count != 1 || result.Rows[0].Count != 15) return IdentityDeletionResult.Refused(IdentityDeletionFailure.Defect);
         try
         {
             var row = result.Rows[0];
@@ -47,7 +47,8 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
             if (!lifecycle.HasValidShape() || lifecycle.RealmId != realmId || lifecycle.UserId != userId || userRevision <= 0)
                 return IdentityDeletionResult.Refused(IdentityDeletionFailure.Defect);
             if (lifecycle.State != DeletionState.Pending) return IdentityDeletionResult.Refused(IdentityDeletionFailure.NotPending);
-            if (userState != (long)UserState.PendingDeletion) return IdentityDeletionResult.Refused(IdentityDeletionFailure.StaleAuthority);
+            if (userState != (long)UserState.PendingDeletion || row[14].AsOptionalInt64() != lifecycle.RequestedAtMicros)
+                return IdentityDeletionResult.Refused(IdentityDeletionFailure.StaleAuthority);
             // Sample after all authority/storage reads; final writes still need the real transaction-clock fence.
             var sampled = UtcMicros.FromDateTimeOffset(time.GetUtcNow()).Value;
             if (sampled < lifecycle.RequestedAtMicros) return IdentityDeletionResult.Refused(IdentityDeletionFailure.StaleAuthority);
@@ -65,6 +66,7 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
     public async Task<IdentityDeletionFamilyResult> PrepareAsync(Guid realmId, Guid userId, string familyId, string planId,
         string ownerScope, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!Guid.TryParseExact(ownerScope, "D", out var scope) || scope == Guid.Empty || ownerScope != scope.ToString("D"))
             return IdentityDeletionFamilyResult.Refused(IdentityDeletionFailure.StaleAuthority);
         var read = await ReadAsync(realmId, userId, cancellationToken).ConfigureAwait(false);
@@ -77,7 +79,8 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
         [
             new("identity", "authorization", "deletion-current",
                 [T(snapshot.DeletionId), T(realmId), T(userId), I(snapshot.RequestedAtMicros), I(snapshot.GraceEndsAtMicros),
-                    PlanValue.FromText(snapshot.PolicyVersion), I(snapshot.UserRevision), I(sampled)]),
+                    PlanValue.FromText(snapshot.PolicyVersion), I((long)DeletionState.Pending), I(sampled)]),
+            new("identity", "authorization", "deletion-user", [T(realmId), T(userId), I((long)UserState.PendingDeletion), I(snapshot.RequestedAtMicros), I(snapshot.UserRevision)]),
             new("identity", "revision", "deletion-revision", [T(snapshot.DeletionId), I(snapshot.LifecycleRevision)]),
         ]);
         cancellationToken.ThrowIfCancellationRequested();
@@ -119,7 +122,7 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
         var result = await Read(new("identity.deletion-state", realmId.ToString("D"), [T(realmId), T(userId), T(deletionId)]), cancellationToken).ConfigureAwait(false);
         if (Failure(result.Status) is { } failure) return new(null, failure);
         if (result.Rows.Count == 0) return new(null, IdentityDeletionFailure.NotPending);
-        if (result.Rows.Count != 1 || result.Rows[0].Count != 14) return new(null, IdentityDeletionFailure.Defect);
+        if (result.Rows.Count != 1 || result.Rows[0].Count != 15) return new(null, IdentityDeletionFailure.Defect);
         try
         {
             var row = result.Rows[0];
@@ -130,7 +133,7 @@ internal sealed class DeletionLifecyclePort(IModulePlanPort plans, IModuleFamily
             var revision = row[13].AsInt64();
             if (!lifecycle.HasValidShape() || lifecycle.DeletionId != deletionId || lifecycle.RealmId != realmId || lifecycle.UserId != userId
                 || state is < 1 or > 5 || revision <= 0) return new(null, IdentityDeletionFailure.Defect);
-            return new(new(lifecycle, (UserState)state, revision), null);
+            return new(new(lifecycle, (UserState)state, revision, row[14].AsOptionalInt64()), null);
         }
         catch (Exception exception) when (exception is InvalidOperationException or FormatException or OverflowException)
         {

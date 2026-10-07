@@ -119,7 +119,7 @@ public sealed class DeletionStoreTests
     }
     private sealed class NoAuthority : IRealmAuthorityPort
     { public Task<RealmAuthorityResult> ResolveAsync(CancellationToken cancellationToken) => throw new InvalidOperationException("Internal store facts are not a standalone authorization decision."); }
-    private static D1Scalar[] LifecycleRow() => [T(Deletion), T(Realm), T(User), I(100), I(1_000_100), D1Values.Text("original.v1"), I(1), I(3), I(2), I(500), D1Values.Null(), I(3), I(3), I(9)];
+    private static D1Scalar[] LifecycleRow() => [T(Deletion), T(Realm), T(User), I(100), I(1_000_100), D1Values.Text("original.v1"), I(1), I(3), I(2), I(500), D1Values.Null(), I(3), I(3), I(9), D1Values.Null()];
     private static D1Scalar T(Guid value) => D1Values.Text(value.ToString("D"));
     private static D1Scalar I(long value) => D1Values.Int64(value);
 }
