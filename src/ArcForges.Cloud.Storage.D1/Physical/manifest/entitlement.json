@@ -48,27 +48,15 @@
     },
     "entitlement.quota_definition_unit": {
       "source": "model 01 quota semantic profile and accepted basis (COM.18), listed order",
-      "values": [
-        "bytes",
-        "microseconds",
-        "samples",
-        "count"
-      ]
+      "values": ["bytes", "microseconds", "samples", "count"]
     },
     "entitlement.quota_definition_mode": {
       "source": "model 01 quota semantic profile and accepted basis (COM.18), listed order",
-      "values": [
-        "Gauge",
-        "EntitlementPeriod"
-      ]
+      "values": ["Gauge", "EntitlementPeriod"]
     },
     "entitlement.quota_definition_combination": {
       "source": "model 01 quota semantic profile and accepted basis (COM.18), listed order",
-      "values": [
-        "Sum",
-        "Max",
-        "PriorityReplace"
-      ]
+      "values": ["Sum", "Max", "PriorityReplace"]
     }
   },
   "tables": [
@@ -578,10 +566,7 @@
           "type": "instant"
         }
       ],
-      "primaryKey": [
-        "realm_id",
-        "definitions_version"
-      ],
+      "primaryKey": ["realm_id", "definitions_version"],
       "checks": [
         {
           "name": "version_nonempty",
@@ -639,10 +624,7 @@
           "maxBytes": 128
         }
       ],
-      "primaryKey": [
-        "realm_id",
-        "quota_key"
-      ],
+      "primaryKey": ["realm_id", "quota_key"],
       "checks": [
         {
           "name": "first_version_nonempty",
