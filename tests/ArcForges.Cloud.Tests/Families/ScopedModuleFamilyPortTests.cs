@@ -62,7 +62,10 @@ public sealed class ScopedModuleFamilyPortTests
             _ => [capability, authority.Contribution!],
         };
         var calls = database.Calls;
-        await Assert.ThrowsAsync<InvalidOperationException>(() => factory.For(Identity).WriteAsync(write with { Participants = participants }, TestContext.Current.CancellationToken));
+        if (variant == "duplicate")
+            Assert.Equal(FamilyViolation.DuplicateContribution, (await Assert.ThrowsAsync<FamilyViolationException>(() => factory.For(Identity).WriteAsync(write with { Participants = participants }, TestContext.Current.CancellationToken))).Violation);
+        else
+            await Assert.ThrowsAsync<InvalidOperationException>(() => factory.For(Identity).WriteAsync(write with { Participants = participants }, TestContext.Current.CancellationToken));
         Assert.Equal(calls, database.Calls);
         await EmptyEffects(database);
     }
