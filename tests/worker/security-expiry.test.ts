@@ -468,12 +468,34 @@ test("pending challenges are not admitted to an arbitrary plan", () => {
   );
 });
 
+function deletionOwnerSchema() {
+  return schema.tables.some((table) => table.name === "identity_account_deletion")
+    ? schema
+    : { ...schema, tables: [...schema.tables, deletionPhysical] };
+}
+
+function ensureDeletionOwner(db: ReturnType<typeof openFamilyD1>) {
+  const migrated = schema.tables.some((table) => table.name === "identity_account_deletion");
+  const existing = db.database
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='identity_account_deletion'",
+    )
+    .get();
+  if (migrated) {
+    assert.ok(existing, "The genuine deletion owner must come from its numbered migration");
+    return;
+  }
+  assert.equal(existing, undefined, "An unmodeled deletion table is not the historical fixture");
+  // Retain the exact historical pre-producer component; never recreate a migrated owner.
+  db.database.exec(deletionDDL);
+}
+
 test("actual immutable deletion-owner DDL protects due and cancellation boundaries", () => {
   assert.equal(
     createHash("sha256").update(deletionDDL, "utf8").digest("hex"),
     "f19739b338cda9b9da8a85a1da9deaad35d70b4ffffd3aa55546ade84eb9c76a",
   );
-  const futureSchema = { ...schema, tables: [...schema.tables, deletionPhysical] };
+  const futureSchema = deletionOwnerSchema();
   for (const [key, plan, state, annotation, live] of [
     ["deletion-due", "begin-deletion-purge", 1, "securityDue", true],
     ["deletion-due", "begin-deletion-purge", 1, "securityDue", false],
@@ -496,7 +518,7 @@ test("actual immutable deletion-owner DDL protects due and cancellation boundari
     const db = openFamilyD1();
     try {
       seed(db);
-      db.database.exec(deletionDDL);
+      ensureDeletionOwner(db);
       const captured = BigInt(Date.now()) * 1000n;
       const due = annotation === "securityDue";
       const deadline = captured + ((due ? !live : live) ? 30_000_000n : -1_000_000n);
@@ -588,7 +610,7 @@ ${guard.sql}`;
 });
 
 test("actual SQLite statement clock accepts deletion at its floor and refuses floor plus one microsecond", () => {
-  const futureSchema = { ...schema, tables: [...schema.tables, deletionPhysical] };
+  const futureSchema = deletionOwnerSchema();
   const guard = expandGuard(
     "kind=authorization module=identity key=deletion-due table=identity_account_deletion by=deletion_id,realm_id match=user_id,state,rev securityDue=grace_ends_at",
     futureSchema,
@@ -599,7 +621,7 @@ test("actual SQLite statement clock accepts deletion at its floor and refuses fl
   const db = openFamilyD1();
   try {
     seed(db);
-    db.database.exec(deletionDDL);
+    ensureDeletionOwner(db);
     db.database
       .prepare(
         "INSERT INTO identity_account_deletion (deletion_id,realm_id,user_id,requested_at,grace_ends_at,policy_version,grace_seconds,previous_user_state,state,cancelled_at,completed_at,rev) VALUES (?,?,?,0,1000000,'p1',1,1,1,NULL,NULL,1)",
@@ -653,7 +675,7 @@ test("an injected unavailable SQLite clock refuses authorization and rolls back 
     );
     assert.deepEqual(snapshot(db), before);
     assert.equal(db.rollbacks(), 1);
-    db.database.exec(deletionDDL);
+    ensureDeletionOwner(db);
     db.database
       .prepare(
         "INSERT INTO identity_account_deletion (deletion_id,realm_id,user_id,requested_at,grace_ends_at,policy_version,grace_seconds,previous_user_state,state,cancelled_at,completed_at,rev) VALUES (?,?,?,0,1000000,'p1',1,1,1,NULL,NULL,1)",
@@ -661,7 +683,7 @@ test("an injected unavailable SQLite clock refuses authorization and rolls back 
       .run(flow, ids.workspace, ids.user);
     const due = expandGuard(
       "kind=authorization module=identity key=deletion-due table=identity_account_deletion by=deletion_id,realm_id match=user_id,state,rev securityDue=grace_ends_at",
-      { ...schema, tables: [...schema.tables, deletionPhysical] },
+      deletionOwnerSchema(),
       "unavailable clock",
       "account-security",
       "begin-deletion-purge",
