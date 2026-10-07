@@ -600,6 +600,7 @@
         }
       ],
       "mutability": {
+        "insert": "preserveExisting",
         "update": "none",
         "delete": "none"
       },

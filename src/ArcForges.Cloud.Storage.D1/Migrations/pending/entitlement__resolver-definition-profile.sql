@@ -21,6 +21,12 @@ CREATE TABLE "entitlement_resolver_definition_profile" (
   CONSTRAINT "ck_entitlement_resolver_definition_profile__same_hash" CHECK ("profile_hash" = "artifact_hash")
 ) STRICT;
 
+CREATE TRIGGER "tr_entitlement_resolver_definition_profile__immutable_insert" BEFORE INSERT ON "entitlement_resolver_definition_profile"
+WHEN EXISTS (SELECT 1 FROM "entitlement_resolver_definition_profile" existing WHERE existing."realm_id" IS NEW."realm_id" AND existing."definitions_version" IS NEW."definitions_version")
+BEGIN
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM "entitlement_resolver_definition_profile" existing WHERE existing."realm_id" IS NEW."realm_id" AND existing."definitions_version" IS NEW."definitions_version" AND existing."realm_id" IS NEW."realm_id" AND existing."definitions_version" IS NEW."definitions_version" AND existing."profile_hash" IS NEW."profile_hash" AND existing."canonical_profile" IS NEW."canonical_profile" AND existing."artifact_id" IS NEW."artifact_id" AND existing."artifact_hash" IS NEW."artifact_hash" AND existing."artifact_length" IS NEW."artifact_length" AND existing."original_config_revision_id" IS NEW."original_config_revision_id" AND existing."original_config_document_hash" IS NEW."original_config_document_hash" AND existing."realm_kind" IS NEW."realm_kind" AND existing."publisher_ref" IS NEW."publisher_ref" AND existing."created_at" IS NEW."created_at") THEN RAISE(IGNORE) ELSE RAISE(ABORT, 'CHECK constraint failed: af_immutable_entitlement_resolver_definition_profile') END;
+END;
+
 CREATE TRIGGER "tr_entitlement_resolver_definition_profile__immutable_update" BEFORE UPDATE ON "entitlement_resolver_definition_profile"
 BEGIN
   SELECT RAISE(ABORT, 'CHECK constraint failed: af_immutable_entitlement_resolver_definition_profile');

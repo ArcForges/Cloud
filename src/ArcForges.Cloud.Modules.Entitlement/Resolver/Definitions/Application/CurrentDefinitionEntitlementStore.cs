@@ -10,7 +10,7 @@ internal sealed class CurrentDefinitionEntitlementStore(IEntitlementStore reads,
     ICurrentResolverDefinitionSource source, CurrentResolverDefinitions captured) : IEntitlementStore
 {
     internal const string Family = "entitlement-definition-resolution";
-    internal const string Plan = "commit-current";
+    internal const string Plan = "families.entitlement-definition-resolution.commit-current";
     private static readonly string[] RecordKeys = ["a-revision", "b-grants", "c-revocations", "d-terms", "e-actions", "f-activations", "g-facts", "h-snapshot"];
 
     public async ValueTask<EntitlementState> LoadAsync(string workspaceId, CancellationToken cancellationToken)

@@ -11,6 +11,7 @@ using ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Infrastructure;
 using ArcForges.Cloud.Storage.FamilyBinding;
 using ArcForges.Cloud.Storage.ModuleBinding;
 using ArcForges.Cloud.Storage.Platform;
+using ArcForges.Cloud.Storage.SharedFamilies;
 using ArcForges.Cloud.Tests.Entitlement;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -20,6 +21,19 @@ namespace ArcForges.Cloud.Tests.ResolverDefinitionAuthority;
 /// <summary>Real Entitlement DI/writer, C75 reads/guards, C82 capabilities and Worker SQLite. Only the unavailable signed Config/artifact authority is substituted.</summary>
 public sealed class VersionedDefinitionCompositionTests
 {
+    [Fact]
+    public void ScopedDefinitionFamilyAdmissionRequiresItsExactRegisteredPlan()
+    {
+        var definition = Assert.Single(ArcForges.Cloud.Storage.PlanManifest.FamilyCatalog, f => f.Id == "entitlement-definition-resolution");
+        var admitted = Assert.Single(ArcForges.Cloud.Storage.PlanManifest.FamilyPlans, f => f.Family == definition.Id);
+        Assert.True(admitted.RequiresScopedContributions);
+        Assert.Empty(FamilyPlanVerifier.Problems(admitted, definition));
+        var wrongPlan = admitted with { Plan = admitted.Plan with { Id = admitted.Plan.Id + "-unregistered" } };
+        Assert.Contains(FamilyPlanVerifier.Problems(wrongPlan, definition), p => p.Contains("scope binding is admitted", StringComparison.Ordinal));
+        var wrongFamily = admitted with { Family = definition.Id + "-unregistered" };
+        Assert.Contains(FamilyPlanVerifier.Problems(wrongFamily, null), p => p.Contains("scope binding is admitted", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task ProductionRevocationRetainsExistingExpectedVersionAndExactReplayRules()
     {
@@ -46,7 +60,7 @@ public sealed class VersionedDefinitionCompositionTests
         foreach (var command in new[] { h.Command() with { Subject = "bad key" }, h.Command() with { Subject = "broken\ud800" },
             h.Command() with { Terms = new QuotaGrantTerms(-1) }, h.Command() with { EffectiveFrom = DateTimeOffset.UnixEpoch.AddTicks(1) } })
             Assert.Equal(EntitlementPortStatus.InvalidRequest, (await port.IssueGrantAsync(command, T.Ct)).Status);
-        Assert.Equal(EntitlementPortStatus.InvalidRequest, (await port.RevokeGrantAsync(new(Harness.Workspace, "bad", "refunded", null, "commerce", 0), T.Ct)).Status);
+        Assert.Equal(EntitlementPortStatus.InvalidRequest, (await port.RevokeGrantAsync(new(Harness.Workspace, "bad key", "refunded", null, "commerce", 0), T.Ct)).Status);
         Assert.Equal(before, h.Bridge.Calls);
         Assert.Equal(0, await h.Count("entitlement_grant"));
     }
@@ -233,7 +247,7 @@ public sealed class VersionedDefinitionCompositionTests
             var hash = Convert.ToHexStringLower(SHA256.HashData(Config.Bytes));
             Config.Approved = new(Realm, revision, new('a', 64), "official", version, "artifact:" + version,
                 ResolverDefinitionValidator.ProfileName, hash, Config.Bytes.Length, "config:materializer");
-            await Bridge.ExecAsync($"UPDATE config_revision SET state=3; INSERT INTO config_revision VALUES ('{revision:D}','fixture','fixture-head',X'{Config.Approved.DocumentHash}','fixture','{Realm:D}',1,1,2,'{{}}');", T.Ct);
+            await Bridge.ExecAsync($"UPDATE config_revision SET state=3; INSERT INTO config_revision VALUES ('{revision:D}','fixture','fixture:{revision:D}',X'{Config.Approved.DocumentHash}','fixture','{Realm:D}',1,1,2,'{{}}');", T.Ct);
             var result = await Services.GetRequiredService<IResolverDefinitionPort>().PublishAsync(new(Guid.NewGuid(), Realm, revision, Config.Approved.DocumentHash, Config.Approved.PublisherRef), T.Ct);
             Assert.Equal(ResolverDefinitionStatus.Succeeded, result.Status);
         }
