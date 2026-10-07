@@ -79,6 +79,29 @@ internal static class FamilyPlanVerifier
         for (var index = 0; index < family.Roles.Count; index++)
         {
             var role = family.Roles[index];
+            if (role.SecurityExpiry is { } expiry)
+            {
+                var where = "statement " + (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + ": ";
+                if (role is not { Module: FamilyModule.Identity, Phase: FamilyPhase.Guard, Class: FamilyClass.Authorization })
+                    problems.Add(where + "security expiry belongs to an Identity authorization guard");
+                if (!PlanManifest.SecurityExpiryCatalog.Any(registration =>
+                    registration.Profile == expiry.Profile &&
+                    string.Equals(registration.Table, expiry.Table, StringComparison.Ordinal) &&
+                    string.Equals(registration.Key, role.Key, StringComparison.Ordinal) &&
+                    registration.Families.Contains(family.Family, StringComparer.Ordinal) &&
+                    (registration.Plans is null || (segments.Length == 3 && registration.Plans.Contains(segments[2], StringComparer.Ordinal))) &&
+                    registration.Columns.SequenceEqual(expiry.Columns, StringComparer.Ordinal)))
+                    problems.Add(where + "security expiry does not match its closed profile, family, role and complete column set");
+                var shape = plan.Statements[index].Params;
+                if (expiry.Profile == FamilySecurityExpiryProfile.DeletionGraceDue)
+                {
+                    if (expiry.CapturedParamIndex is not null)
+                        problems.Add(where + "a due deadline uses only the actual database clock, with no captured clock parameter");
+                }
+                else if (expiry.CapturedParamIndex is not { } captured || captured <= 0 || captured != shape.Count - 1 ||
+                    shape[captured] is not { Kind: PlanKind.Int64, Nullable: false })
+                    problems.Add(where + "security expiry takes the captured server instant as its final nonnullable int64 parameter");
+            }
             if (role.Phase == FamilyPhase.Mutation) continue;
             var parameters = plan.Statements[index].Params;
             if (parameters.Count == 0 || parameters[0] is not { Kind: PlanKind.Text, Nullable: false })

@@ -12,13 +12,13 @@ https://github.com/github/choosealicense.com @ 58267f8f2c5c0099810849cfd7677f52a
 AGPL-3.0-only
 GNU Affero General Public License version 3; Copyright Free Software Foundation, Inc. Complete original licence and its verbatim-copying permission are retained.
 
-cloud-07-cloud-runtime-notices-r2
-https://github.com/ArcForges/Cloud @ 91448a4a9a41b0a3f73548719c7ff244fe0acc7e
+cloud-78-cloud-runtime-notices-r1
+https://github.com/ArcForges/Cloud @ 4fc85a56a0ffc9492de157dc23aad97c02a88281
 AGPL-3.0-only
 ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped.
 
-cloud-07-cloud-worker-bundle-r2
-https://github.com/ArcForges/Cloud @ 91448a4a9a41b0a3f73548719c7ff244fe0acc7e
+cloud-78-cloud-worker-bundle-r1
+https://github.com/ArcForges/Cloud @ 4fc85a56a0ffc9492de157dc23aad97c02a88281
 AGPL-3.0-only
 Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. @arcforges/ai-internal generated validators: Copyright ArcForges contributors, Apache-2.0 (published Contracts NOTICE retained in third-party/Contracts.NOTICE.txt). Complete respective terms accompany the actual Worker bundle.
 
