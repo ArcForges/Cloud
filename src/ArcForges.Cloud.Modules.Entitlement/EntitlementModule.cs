@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using ArcForges.Cloud.Modules.Entitlement.Persistence.Infrastructure;
+using ArcForges.Cloud.Modules.Entitlement.Quota.Definitions.Application;
+using ArcForges.Cloud.Modules.Entitlement.Quota.Definitions.Domain;
+using ArcForges.Cloud.Modules.Entitlement.Quota.Definitions.Infrastructure;
+using ArcForges.Cloud.Modules.Entitlement.Quota.Periods.Application;
+using ArcForges.Cloud.Modules.Entitlement.Quota.Periods.Infrastructure;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Kernel.Application;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Kernel.Infrastructure;
 using ArcForges.Cloud.Modules.Entitlement.Resolver.Application;
@@ -41,5 +46,15 @@ public sealed class EntitlementModule : IModuleBoundary
         services.TryAddSingleton<IQuotaKernelPort>(provider => new QuotaKernel(
             provider.GetRequiredService<IQuotaKernelStore>(), provider.GetRequiredService<IQuotaKernelAuthority>(),
             provider.GetRequiredService<IQuotaMeasurementAuthority>(), provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IQuotaDefinitionValidator, QuotaDefinitionValidator>();
+        services.TryAddSingleton<IQuotaResolverDefinitionSource>(provider => new CurrentQuotaResolverDefinitionSource(
+            provider.GetService<IEntitlementDefinitionSource>(), provider.GetService<IRealmAuthorityPort>()));
+        services.TryAddSingleton<IQuotaDefinitionStore>(provider => new D1QuotaDefinitionStore(provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor)));
+        services.TryAddSingleton<IQuotaDefinitionPort>(provider => new QuotaDefinitionService(provider.GetRequiredService<IQuotaDefinitionStore>(),
+            provider.GetService<IQuotaApprovedConfigurationSource>(), provider.GetService<IQuotaDefinitionArtifactPort>(),
+            provider.GetService<IQuotaResolverDefinitionSource>(), provider.GetRequiredService<IQuotaDefinitionValidator>(), provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IQuotaPeriodStore>(provider => new D1QuotaPeriodStore(provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor)));
+        services.TryAddSingleton<IQuotaPeriodSource>(provider => new QuotaPeriodSource(provider.GetRequiredService<IQuotaPeriodStore>(), provider.GetRequiredService<IQuotaDefinitionPort>(),
+            provider.GetService<IQuotaApprovedConfigurationSource>(), provider.GetRequiredService<IQuotaDefinitionValidator>(), provider.GetRequiredService<TimeProvider>()));
     }
 }

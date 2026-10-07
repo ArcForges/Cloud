@@ -45,6 +45,30 @@
     "entitlement.workspace_status": {
       "source": "model 01 section 6 entitlement.workspace_status_fact.status (inline, listed order; COM.16)",
       "values": ["normal", "restricted", "suspended"]
+    },
+    "entitlement.quota_definition_unit": {
+      "source": "model 01 quota semantic profile and accepted basis (COM.18), listed order",
+      "values": [
+        "bytes",
+        "microseconds",
+        "samples",
+        "count"
+      ]
+    },
+    "entitlement.quota_definition_mode": {
+      "source": "model 01 quota semantic profile and accepted basis (COM.18), listed order",
+      "values": [
+        "Gauge",
+        "EntitlementPeriod"
+      ]
+    },
+    "entitlement.quota_definition_combination": {
+      "source": "model 01 quota semantic profile and accepted basis (COM.18), listed order",
+      "values": [
+        "Sum",
+        "Max",
+        "PriorityReplace"
+      ]
     }
   },
   "tables": [
@@ -513,6 +537,123 @@
       "primaryKey": ["feature_key"],
       "mutability": { "update": "none", "delete": "none" },
       "note": "Global, not per workspace: a feature is released once from released_at and a feature with no row is not released. Appended without a workspace revision; a snapshot learns of it at its next refresh (knowledge time)."
+    },
+    {
+      "name": "entitlement_quota_definition_profile",
+      "model": "01 quota semantic profile and accepted basis (COM.18)",
+      "columns": [
+        {
+          "name": "realm_id",
+          "type": "id"
+        },
+        {
+          "name": "definitions_version",
+          "type": "text",
+          "maxBytes": 128
+        },
+        {
+          "name": "profile_hash",
+          "type": "hash"
+        },
+        {
+          "name": "canonical_profile",
+          "type": "text",
+          "maxBytes": 65536
+        },
+        {
+          "name": "artifact_id",
+          "type": "text",
+          "maxBytes": 128
+        },
+        {
+          "name": "artifact_hash",
+          "type": "hash"
+        },
+        {
+          "name": "artifact_length",
+          "type": "int64"
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": [
+        "realm_id",
+        "definitions_version"
+      ],
+      "checks": [
+        {
+          "name": "version_nonempty",
+          "sql": "length(\"definitions_version\") > 0"
+        },
+        {
+          "name": "artifact_nonempty",
+          "sql": "length(\"artifact_id\") > 0"
+        },
+        {
+          "name": "artifact_length",
+          "sql": "\"artifact_length\" BETWEEN 2 AND 65536 AND length(CAST(\"canonical_profile\" AS BLOB)) = \"artifact_length\""
+        },
+        {
+          "name": "same_content_hash",
+          "sql": "\"profile_hash\" = \"artifact_hash\""
+        }
+      ],
+      "mutability": {
+        "update": "none",
+        "delete": "none"
+      },
+      "note": "Append-only complete canonical owner artifact, never operator approval. Realm/version is immutable; actual Config owns signed association. Persisted with indexed key meanings in one guarded batch."
+    },
+    {
+      "name": "entitlement_quota_definition_key",
+      "model": "01 quota semantic profile and accepted basis (COM.18)",
+      "columns": [
+        {
+          "name": "realm_id",
+          "type": "id"
+        },
+        {
+          "name": "quota_key",
+          "type": "key"
+        },
+        {
+          "name": "unit",
+          "type": "enum",
+          "enum": "entitlement.quota_definition_unit"
+        },
+        {
+          "name": "mode",
+          "type": "enum",
+          "enum": "entitlement.quota_definition_mode"
+        },
+        {
+          "name": "combination",
+          "type": "enum",
+          "enum": "entitlement.quota_definition_combination"
+        },
+        {
+          "name": "first_definitions_version",
+          "type": "text",
+          "maxBytes": 128
+        }
+      ],
+      "primaryKey": [
+        "realm_id",
+        "quota_key"
+      ],
+      "checks": [
+        {
+          "name": "first_version_nonempty",
+          "sql": "length(\"first_definitions_version\") > 0"
+        }
+      ],
+      "mutability": {
+        "update": "none",
+        "delete": "none"
+      },
+      "note": "Indexed original semantic meaning retained when later profiles remove a key; new profile guards exact unit/mode/combination and inserts only verified absence in the same commit. No historical JSON scan or meaning overwrite."
     }
   ]
 }

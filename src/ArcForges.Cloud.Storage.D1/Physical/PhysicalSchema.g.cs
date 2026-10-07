@@ -8,7 +8,7 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "0273dbd090cdc2cb7db14327aac86cd9eb4600775415eebdebc31dd34e9fd6ac";
+    public const string ManifestHash = "68b1ef8ee2f89fce476a28c0e951f33f614a88a297b7006d6f4aef8ff0b87395";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
     public const int HighestMigration = 24;
@@ -53,6 +53,9 @@ internal static partial class PhysicalSchema
         new("entitlement.capacity_reservation_state", false, [new("held", 1), new("settled", 2), new("released", 3), new("expired", 4)]),
         new("entitlement.grant_kind", false, [new("capability", 1), new("quota", 2), new("allowance", 3)]),
         new("entitlement.grant_source", false, [new("Subscription", 1), new("CloudPass", 2), new("StorageAddOn", 3), new("PurchasedCredit", 4), new("AdminGrant", 5), new("Migration", 6), new("Compensation", 7)]),
+        new("entitlement.quota_definition_combination", false, [new("Sum", 1), new("Max", 2), new("PriorityReplace", 3)]),
+        new("entitlement.quota_definition_mode", false, [new("Gauge", 1), new("EntitlementPeriod", 2)]),
+        new("entitlement.quota_definition_unit", false, [new("bytes", 1), new("microseconds", 2), new("samples", 3), new("count", 4)]),
         new("entitlement.quota_event_kind", false, [new("consume", 1), new("release", 2), new("adjust", 3)]),
         new("entitlement.quota_reservation_state", false, [new("held", 1), new("settled", 2), new("releasing", 3), new("released", 4)]),
         new("entitlement.quota_scope_kind", false, [new("workspace", 1), new("deployment", 2)]),
@@ -1093,6 +1096,34 @@ internal static partial class PhysicalSchema
             new("rev", PhysicalKind.Rev, false),
         ],
         ["scope_kind", "scope_id", "quota_key", "period_key"]);
+
+    public static PhysicalTable EntitlementQuotaDefinitionKey { get; } = new(
+        "entitlement_quota_definition_key",
+        "entitlement",
+        [
+            new("realm_id", PhysicalKind.Id, false),
+            new("quota_key", PhysicalKind.Key, false),
+            new("unit", PhysicalKind.Enum, false, EnumName: "entitlement.quota_definition_unit"),
+            new("mode", PhysicalKind.Enum, false, EnumName: "entitlement.quota_definition_mode"),
+            new("combination", PhysicalKind.Enum, false, EnumName: "entitlement.quota_definition_combination"),
+            new("first_definitions_version", PhysicalKind.Text, false, MaxBytes: 128),
+        ],
+        ["realm_id", "quota_key"]);
+
+    public static PhysicalTable EntitlementQuotaDefinitionProfile { get; } = new(
+        "entitlement_quota_definition_profile",
+        "entitlement",
+        [
+            new("realm_id", PhysicalKind.Id, false),
+            new("definitions_version", PhysicalKind.Text, false, MaxBytes: 128),
+            new("profile_hash", PhysicalKind.Hash, false),
+            new("canonical_profile", PhysicalKind.Text, false, MaxBytes: 65536),
+            new("artifact_id", PhysicalKind.Text, false, MaxBytes: 128),
+            new("artifact_hash", PhysicalKind.Hash, false),
+            new("artifact_length", PhysicalKind.Int64, false),
+            new("created_at", PhysicalKind.Instant, false),
+        ],
+        ["realm_id", "definitions_version"]);
 
     public static PhysicalTable EntitlementQuotaEvent { get; } = new(
         "entitlement_quota_event",
@@ -2919,6 +2950,8 @@ internal static partial class PhysicalSchema
         EntitlementFeatureRelease,
         EntitlementGrant,
         EntitlementQuotaBudget,
+        EntitlementQuotaDefinitionKey,
+        EntitlementQuotaDefinitionProfile,
         EntitlementQuotaEvent,
         EntitlementQuotaReservation,
         EntitlementRevision,
