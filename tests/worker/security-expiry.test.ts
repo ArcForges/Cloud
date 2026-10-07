@@ -548,6 +548,138 @@ test("actual immutable deletion-owner DDL protects due and cancellation boundari
   }
 });
 
+test("actual SQLite statement clock refuses expiry at its ceiling and accepts only ceiling plus one microsecond", () => {
+  const guard = expandGuard(nativeHeader, schema, "SQLite ceiling boundary", "session-lifecycle");
+  const db = openFamilyD1();
+  try {
+    seedSession(db, 60_000_000_000_000_000n, 60_000_000_000_000_000n);
+    // A statement-local projection derives the fixture deadline from the real VFS clock.
+    // Both this CTE and the unchanged compiled predicate execute in one sqlite3_step.
+    const sql = `WITH clock AS MATERIALIZED (SELECT ${securityNowUpperMicros} + CAST(? AS INTEGER) AS deadline),
+identity_session AS (
+  SELECT current.session_id, current.user_id, current.credential_kind,
+         clock.deadline AS expires_at, clock.deadline AS access_expires_at
+  FROM main.identity_session AS current CROSS JOIN clock
+)
+${guard.sql}`;
+    for (const delta of [-1, 0, 1]) {
+      db.database.exec("BEGIN IMMEDIATE");
+      try {
+        const run = () => db.database.prepare(sql).run(delta, uuid(), session, ids.user, 1, 0);
+        if (delta > 0) {
+          run();
+          assert.equal(
+            db.database.prepare("SELECT allowed FROM platform_command_guard").get()?.allowed,
+            1,
+          );
+        } else assert.throws(run, /CHECK constraint failed/u);
+      } finally {
+        db.database.exec("ROLLBACK");
+      }
+      assert.equal(
+        db.database.prepare("SELECT COUNT(*) AS n FROM platform_command_guard").get()?.n,
+        0,
+      );
+    }
+  } finally {
+    db.database.close();
+  }
+});
+
+test("actual SQLite statement clock accepts deletion at its floor and refuses floor plus one microsecond", () => {
+  const futureSchema = { ...schema, tables: [...schema.tables, deletionPhysical] };
+  const guard = expandGuard(
+    "kind=authorization module=identity key=deletion-due table=identity_account_deletion by=deletion_id,realm_id match=user_id,state,rev securityDue=grace_ends_at",
+    futureSchema,
+    "SQLite floor boundary",
+    "account-security",
+    "begin-deletion-purge",
+  );
+  const db = openFamilyD1();
+  try {
+    seed(db);
+    db.database.exec(deletionDDL);
+    db.database
+      .prepare(
+        "INSERT INTO identity_account_deletion (deletion_id,realm_id,user_id,requested_at,grace_ends_at,policy_version,grace_seconds,previous_user_state,state,cancelled_at,completed_at,rev) VALUES (?,?,?,0,1000000,'p1',1,1,1,NULL,NULL,1)",
+      )
+      .run(flow, ids.workspace, ids.user);
+    // The projection changes only this boundary fixture, never the persisted immutable deadline.
+    const sql = `WITH clock AS MATERIALIZED (SELECT ${securityNowLowerMicros} + CAST(? AS INTEGER) AS deadline),
+identity_account_deletion AS (
+  SELECT current.deletion_id, current.realm_id, current.user_id, current.state, current.rev,
+         clock.deadline AS grace_ends_at
+  FROM main.identity_account_deletion AS current CROSS JOIN clock
+)
+${guard.sql}`;
+    for (const delta of [-1, 0, 1]) {
+      db.database.exec("BEGIN IMMEDIATE");
+      try {
+        const run = () =>
+          db.database.prepare(sql).run(delta, uuid(), flow, ids.workspace, ids.user, 1, 1);
+        if (delta <= 0) {
+          run();
+          assert.equal(
+            db.database.prepare("SELECT allowed FROM platform_command_guard").get()?.allowed,
+            1,
+          );
+        } else assert.throws(run, /CHECK constraint failed/u);
+      } finally {
+        db.database.exec("ROLLBACK");
+      }
+    }
+    assert.equal(
+      db.database.prepare("SELECT grace_ends_at FROM identity_account_deletion").get()
+        ?.grace_ends_at,
+      1_000_000,
+    );
+  } finally {
+    db.database.close();
+  }
+});
+
+test("an injected unavailable SQLite clock refuses authorization and rolls back the actual Worker transaction", async () => {
+  const db = openFamilyD1();
+  try {
+    const captured = BigInt(Date.now()) * 1000n;
+    seedSession(db, captured + 60_000_000n, captured + 30_000_000n);
+    const before = snapshot(db);
+    // Only the unavailable clock dependency is injected; SQL, migrations and executor are real.
+    db.database.function("strftime", { varargs: true }, () => null);
+    assert.deepEqual(
+      await runFamily(db, dictionary, argumentsFor(captured), ids.workspace, { planId }),
+      { ok: false, failure: "precondition" },
+    );
+    assert.deepEqual(snapshot(db), before);
+    assert.equal(db.rollbacks(), 1);
+    db.database.exec(deletionDDL);
+    db.database
+      .prepare(
+        "INSERT INTO identity_account_deletion (deletion_id,realm_id,user_id,requested_at,grace_ends_at,policy_version,grace_seconds,previous_user_state,state,cancelled_at,completed_at,rev) VALUES (?,?,?,0,1000000,'p1',1,1,1,NULL,NULL,1)",
+      )
+      .run(flow, ids.workspace, ids.user);
+    const due = expandGuard(
+      "kind=authorization module=identity key=deletion-due table=identity_account_deletion by=deletion_id,realm_id match=user_id,state,rev securityDue=grace_ends_at",
+      { ...schema, tables: [...schema.tables, deletionPhysical] },
+      "unavailable clock",
+      "account-security",
+      "begin-deletion-purge",
+    );
+    db.database.exec("BEGIN IMMEDIATE");
+    try {
+      assert.throws(
+        () => db.database.prepare(due.sql).run(uuid(), flow, ids.workspace, ids.user, 1, 1),
+        /CHECK constraint failed/u,
+      );
+    } finally {
+      db.database.exec("ROLLBACK");
+    }
+    assert.deepEqual(snapshot(db), before);
+  } finally {
+    db.database.close();
+  }
+});
+
 test("concurrent stale snapshots refuse after a real commit with a lost transport reply and reopen", async () => {
   const directory = mkdtempSync(path.join(tmpdir(), "expiry-receipt-"));
   const file = path.join(directory, "db.sqlite");
