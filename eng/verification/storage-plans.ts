@@ -979,6 +979,23 @@ export function expandGuard(
     case "authorization":
     case "policy": {
       for (const item of list("match")) add(compare(item, "match column"));
+      if (
+        familyId === "entitlement-definition-resolution" &&
+        planName === "commit-current" &&
+        module === "config" &&
+        key === "current-definitions-head"
+      ) {
+        assert(
+          kind === "policy" &&
+            tableName === "config_revision" &&
+            fields.get("by") === "realm_id,config_revision_id" &&
+            fields.get("match") === "content_hash",
+          `${where}: current definition head has one exact Config-owned role`,
+        );
+        column("state", "active configuration state", ["enum"]);
+        once("state");
+        conditions.push("state = 2");
+      }
       const fresh = fields.get("fresh");
       if (fields.has("securityExpiry") || fields.has("securityDue")) {
         const due = fields.has("securityDue");
@@ -1037,7 +1054,15 @@ export function expandGuard(
       const rev = need("rev");
       column(rev, "revision column", ["rev"]);
       once(rev);
-      predicate = `COALESCE((SELECT ${rev} FROM ${tableName} WHERE ${byConditions.join(" AND ")}), 0) = CAST(? AS INTEGER)`;
+      const storedRevision =
+        familyId === "entitlement-definition-resolution" &&
+        planName === "commit-current" &&
+        module === "entitlement" &&
+        key === "workspace-revision" &&
+        tableName === "entitlement_revision"
+          ? `CASE WHEN ${rev} > 0 THEN ${rev} ELSE -1 END`
+          : rev;
+      predicate = `COALESCE((SELECT ${storedRevision} FROM ${tableName} WHERE ${byConditions.join(" AND ")}), 0) = CAST(? AS INTEGER)`;
       params.push({ kind: "int64", nullable: false });
       break;
     }

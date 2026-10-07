@@ -45,6 +45,10 @@
     "entitlement.workspace_status": {
       "source": "model 01 section 6 entitlement.workspace_status_fact.status (inline, listed order; COM.16)",
       "values": ["normal", "restricted", "suspended"]
+    },
+    "entitlement.resolver_realm_kind": {
+      "source": "model 01 entitlement.resolver_definition_profile.realm_kind (COM.20)",
+      "values": ["official", "selfHosted"]
     }
   },
   "tables": [
@@ -513,6 +517,93 @@
       "primaryKey": ["feature_key"],
       "mutability": { "update": "none", "delete": "none" },
       "note": "Global, not per workspace: a feature is released once from released_at and a feature with no row is not released. Appended without a workspace revision; a snapshot learns of it at its next refresh (knowledge time)."
+    },
+    {
+      "name": "entitlement_resolver_definition_profile",
+      "model": "01 section 6 entitlement.resolver_definition_profile (COM.20)",
+      "columns": [
+        {
+          "name": "realm_id",
+          "type": "id"
+        },
+        {
+          "name": "definitions_version",
+          "type": "text",
+          "maxBytes": 128
+        },
+        {
+          "name": "profile_hash",
+          "type": "hash"
+        },
+        {
+          "name": "canonical_profile",
+          "type": "text",
+          "maxBytes": 65536
+        },
+        {
+          "name": "artifact_id",
+          "type": "text",
+          "maxBytes": 128
+        },
+        {
+          "name": "artifact_hash",
+          "type": "hash"
+        },
+        {
+          "name": "artifact_length",
+          "type": "int64"
+        },
+        {
+          "name": "original_config_revision_id",
+          "type": "id"
+        },
+        {
+          "name": "original_config_document_hash",
+          "type": "hash"
+        },
+        {
+          "name": "realm_kind",
+          "type": "enum",
+          "enum": "entitlement.resolver_realm_kind"
+        },
+        {
+          "name": "publisher_ref",
+          "type": "text",
+          "maxBytes": 256
+        },
+        {
+          "name": "created_at",
+          "type": "instant"
+        }
+      ],
+      "primaryKey": ["realm_id", "definitions_version"],
+      "checks": [
+        {
+          "name": "version_nonempty",
+          "sql": "length(\"definitions_version\") > 0"
+        },
+        {
+          "name": "artifact_nonempty",
+          "sql": "length(\"artifact_id\") > 0"
+        },
+        {
+          "name": "publisher_nonempty",
+          "sql": "length(\"publisher_ref\") > 0"
+        },
+        {
+          "name": "artifact_length",
+          "sql": "\"artifact_length\" BETWEEN 2 AND 65536 AND length(CAST(\"canonical_profile\" AS BLOB)) = \"artifact_length\""
+        },
+        {
+          "name": "same_hash",
+          "sql": "\"profile_hash\" = \"artifact_hash\""
+        }
+      ],
+      "mutability": {
+        "update": "none",
+        "delete": "none"
+      },
+      "note": "Complete immutable independent full resolver profile with first accepted signed Configuration provenance. Later approved exact artifact reuse retains the original provenance; current authorization is a separate actual Config head association."
     }
   ]
 }

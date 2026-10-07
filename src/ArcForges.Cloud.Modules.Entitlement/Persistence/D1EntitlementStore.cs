@@ -88,6 +88,16 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
     public async ValueTask<CommitOutcome> CommitAsync(
         string workspaceId, long expectedRevision, EntitlementAppend append, EntitlementSnapshot snapshot, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        var write = PrepareCommit(workspaceId, expectedRevision, append, snapshot);
+        var outcome = await plans.WriteAsync(write, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return CommitStatus(outcome);
+    }
+
+    /// <summary>The existing single writer's exact captured mutation and tail. A current-definition coordinator seals this owner preparation.</summary>
+    internal static ModulePlanWrite PrepareCommit(string workspaceId, long expectedRevision, EntitlementAppend append, EntitlementSnapshot snapshot)
+    {
         ArgumentNullException.ThrowIfNull(append);
         ArgumentNullException.ThrowIfNull(snapshot);
         var scope = RequireWorkspace(workspaceId);
@@ -146,16 +156,17 @@ internal sealed class D1EntitlementStore(IModulePlanPort plans) : IEntitlementSt
             commandId, workspace, Actor, Operation, hash, result, newRevision, created, created + ReceiptRetentionMicros,
             [new ModuleOutboxEvent(IdOf(hash, "outbox"), AggregateKind, workspace, newRevision, EventType, result, workspace, commandId, null)],
             1, ChangeRecord(scope, newRevision, columns.Version, append));
-        var outcome = await plans.WriteAsync(new ModulePlanWrite(EntitlementPlans.Commit, scope, owner, commit), cancellationToken).ConfigureAwait(false);
-        return outcome.Status switch
-        {
-            ModulePlanStatus.Succeeded or ModulePlanStatus.Replayed => CommitOutcome.Committed,
-            ModulePlanStatus.GuardRefused => CommitOutcome.RevisionConflict,
-            ModulePlanStatus.UnknownOutcome => CommitOutcome.UnknownOutcome,
-            ModulePlanStatus.Unavailable or ModulePlanStatus.StaleGeneration => throw new EntitlementStoreException(EntitlementStoreFailure.Unavailable, "The commit was not executed: " + outcome.Status + "."),
-            _ => throw new EntitlementStoreException(EntitlementStoreFailure.Defect, "The commit was refused: " + outcome.Status + "."),
-        };
+        return new ModulePlanWrite(EntitlementPlans.Commit, scope, owner, commit);
     }
+
+    internal static CommitOutcome CommitStatus(ModulePlanOutcome outcome) => outcome.Status switch
+    {
+        ModulePlanStatus.Succeeded or ModulePlanStatus.Replayed => CommitOutcome.Committed,
+        ModulePlanStatus.GuardRefused => CommitOutcome.RevisionConflict,
+        ModulePlanStatus.UnknownOutcome => CommitOutcome.UnknownOutcome,
+        ModulePlanStatus.Unavailable or ModulePlanStatus.StaleGeneration => throw new EntitlementStoreException(EntitlementStoreFailure.Unavailable, "The commit was not executed: " + outcome.Status + "."),
+        _ => throw new EntitlementStoreException(EntitlementStoreFailure.Defect, "The commit was refused: " + outcome.Status + "."),
+    };
 
     public async ValueTask<FeatureReleaseOutcome> AppendFeatureReleaseAsync(FeatureReleaseFact release, CancellationToken cancellationToken)
     {

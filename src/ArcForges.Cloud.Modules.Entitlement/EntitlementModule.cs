@@ -3,6 +3,9 @@ using ArcForges.Cloud.Modules.Entitlement.Persistence.Infrastructure;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Kernel.Application;
 using ArcForges.Cloud.Modules.Entitlement.Quota.Kernel.Infrastructure;
 using ArcForges.Cloud.Modules.Entitlement.Resolver.Application;
+using ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Application;
+using ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Domain;
+using ArcForges.Cloud.Modules.Entitlement.Resolver.Definitions.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -29,6 +32,14 @@ public sealed class EntitlementModule : IModuleBoundary
     void IModuleBoundary.Register(IServiceCollection services)
     {
         services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IResolverDefinitionValidator, ResolverDefinitionValidator>();
+        services.TryAddSingleton<IResolverDefinitionStore>(provider => new D1ResolverDefinitionStore(provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor)));
+        services.TryAddSingleton<IResolverDefinitionPort>(provider => new ResolverDefinitionPublisher(
+            provider.GetRequiredService<IResolverDefinitionStore>(), provider.GetService<IResolverApprovedConfigurationSource>(),
+            provider.GetService<IResolverDefinitionArtifactPort>(), provider.GetRequiredService<IResolverDefinitionValidator>(),
+            provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<ICurrentResolverDefinitionSource>(provider => new CurrentResolverDefinitionSource(
+            provider.GetService<IResolverApprovedConfigurationSource>(), provider.GetRequiredService<IResolverDefinitionPort>()));
         services.TryAddSingleton<IEntitlementIdSource, GuidEntitlementIdSource>();
         services.TryAddSingleton<IEntitlementStore>(provider => new D1EntitlementStore(provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor)));
         services.TryAddSingleton(provider => new EntitlementService(
@@ -36,7 +47,13 @@ public sealed class EntitlementModule : IModuleBoundary
             provider.GetRequiredService<IEntitlementDefinitionSource>(),
             provider.GetRequiredService<IEntitlementIdSource>(),
             provider.GetRequiredService<TimeProvider>()));
-        services.TryAddSingleton<IEntitlementGrantPort>(provider => new EntitlementGrantPortAdapter(provider.GetRequiredService<EntitlementService>()));
+        services.TryAddSingleton(provider => new VersionedEntitlementService(
+            provider.GetRequiredService<IEntitlementStore>(), provider.GetRequiredService<ICurrentResolverDefinitionSource>(),
+            provider.GetRequiredService<IResolverDefinitionPort>(), provider.GetService<IRealmAuthorityPort>(),
+            provider.GetRequiredService<IModuleFamilyPortFactory>().For(Descriptor), provider.GetService<IResolverConfigurationParticipant>(),
+            provider.GetService<IRealmAuthorityFamilyPort>(),
+            provider.GetRequiredService<IEntitlementIdSource>(), provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IEntitlementGrantPort>(provider => new VersionedEntitlementGrantPortAdapter(provider.GetRequiredService<VersionedEntitlementService>()));
         services.TryAddSingleton<IQuotaKernelStore>(provider => new D1QuotaKernelStore(provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor)));
         services.TryAddSingleton<IQuotaKernelPort>(provider => new QuotaKernel(
             provider.GetRequiredService<IQuotaKernelStore>(), provider.GetRequiredService<IQuotaKernelAuthority>(),
