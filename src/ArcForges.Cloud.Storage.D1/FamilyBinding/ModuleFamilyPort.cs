@@ -106,7 +106,7 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
         this.plans = plans;
     }
 
-    private sealed record AuthorizedContributions(object Issuer, string FamilyId, string PlanId, IReadOnlyList<FamilyContribution> Items) : IModuleFamilyContributionSet;
+    private sealed record AuthorizedContributions(object Issuer, string FamilyId, string PlanId, string? OwnerScope, IReadOnlyList<FamilyContribution> Items) : IModuleFamilyContributionSet;
 
     public async Task<ModulePlanOutcome> ReadAsync(string familyId, ModulePlanRead read, CancellationToken cancellationToken)
     {
@@ -141,7 +141,22 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
         try
         {
             var definition = Definition(familyId, planId, sealing: true);
-            return new AuthorizedContributions(issuer, familyId, planId, Own(definition, contributions, sealing: true));
+            return new AuthorizedContributions(issuer, familyId, planId, null, Own(definition, contributions, sealing: true));
+        }
+        catch (ContributionValidationException)
+        {
+            throw new ModuleFamilyContributionException(ModuleFamilyContributionFailure.Rejected);
+        }
+    }
+
+    public IModuleFamilyContributionSet ContributeScoped(string familyId, string planId, string ownerScope, IReadOnlyList<ModuleFamilyContribution> contributions)
+    {
+        try
+        {
+            if (!Guid.TryParseExact(ownerScope, "D", out var scope) || scope == Guid.Empty || ownerScope != scope.ToString("D"))
+                throw new ContributionValidationException();
+            var definition = Definition(familyId, planId, sealing: true);
+            return new AuthorizedContributions(issuer, familyId, planId, ownerScope, Own(definition, contributions, sealing: true));
         }
         catch (ContributionValidationException)
         {
@@ -179,7 +194,9 @@ internal sealed class ModuleFamilyPort : IModuleFamilyPort
                 continue;
             }
             if (bundle is not AuthorizedContributions authorized || !ReferenceEquals(authorized.Issuer, issuer)
-                || authorized.FamilyId != write.FamilyId || authorized.PlanId != write.PlanId)
+                || authorized.FamilyId != write.FamilyId || authorized.PlanId != write.PlanId
+                || (authorized.OwnerScope is not null && !string.Equals(authorized.OwnerScope, write.OwnerScope, StringComparison.Ordinal))
+                || (definition.RequiresScopedContributions && authorized.OwnerScope is null))
                 throw new InvalidOperationException("The participant contribution capability is not valid for this factory and plan.");
             foreach (var contribution in authorized.Items) unit.Contribute(contribution);
         }

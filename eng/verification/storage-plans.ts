@@ -32,6 +32,7 @@ export interface PlanDefinition {
   sha256: string;
   /** Only in a shared family plan: the family it belongs to. */
   family?: string;
+  requiresScopedContributions?: boolean;
 }
 export interface PlanManifest {
   manifestHash: string;
@@ -671,6 +672,7 @@ export interface FamilyDefinition {
 }
 export interface FamilyRegistry {
   families: FamilyDefinition[];
+  scopedContributionPlans?: string[];
 }
 export interface FamilyParseContext {
   registry: FamilyRegistry;
@@ -696,7 +698,7 @@ export const modulePrefix = (module: string) =>
   module === platformModule ? sharedPrefix : `${module.replaceAll("-", "_")}_`;
 
 export function parseFamilyRegistry(text: string): FamilyRegistry {
-  const value = JSON.parse(text) as { schemaVersion?: number; families?: unknown };
+  const value = JSON.parse(text) as { schemaVersion?: number; families?: unknown; scopedContributionPlans?: unknown };
   assert.equal(value.schemaVersion, 1, `${familyRegistryFile}: schemaVersion`);
   assert(Array.isArray(value.families), `${familyRegistryFile}: families`);
   const seen = new Set<string>();
@@ -777,8 +779,23 @@ export function parseFamilyRegistry(text: string): FamilyRegistry {
       participants,
     });
   }
-  return { families };
+  if (value.scopedContributionPlans === undefined) return { families };
+  assert(Array.isArray(value.scopedContributionPlans) && value.scopedContributionPlans.length > 0, `${familyRegistryFile}: scopedContributionPlans is a nonempty array`);
+  const seenPlans = new Set<string>();
+  const scopedContributionPlans = value.scopedContributionPlans.map((plan: unknown) => {
+    assert(typeof plan === "string", `${familyRegistryFile}: scoped plan is text`);
+    const segments = plan.split(".");
+    assert(segments.length === 3 && segments[0] === "families" && stableKeyPattern.test(segments[2] ?? "")
+      && families.some(family => family.family === segments[1]) && scopedSecurityFamilies.has(segments[1] ?? "")
+      && plan !== "families.account-enrollment.create-user", `${familyRegistryFile}: scoped plan is an admitted new security family plan`);
+    assert(!seenPlans.has(plan), `${familyRegistryFile}: duplicate scoped plan`);
+    seenPlans.add(plan);
+    return plan;
+  });
+  return { families, scopedContributionPlans };
 }
+
+const scopedSecurityFamilies = new Set(["account-enrollment", "device-revocation", "session-lifecycle", "push-registration", "account-security", "token-issuance"]);
 
 const phaseRank: Record<FamilyPhase, number> = { guard: 0, mutation: 1, release: 2 };
 function moduleRank(meta: FamilyStatementMeta) {
@@ -1075,8 +1092,8 @@ export function expandGuard(
  * the physical manifest, so the authored text alone cannot identify the SQL the Worker runs; hashing the expansion too makes any
  * change of a column, a type or the expansion rules change the plan hash and with it the manifest identity both sides compare.
  */
-export function familyIdentity(normalizedText: string, statementSql: readonly string[]) {
-  return sha256Hex(`${normalizedText}\n-- expanded\n${statementSql.join("\n")}\n`);
+export function familyIdentity(normalizedText: string, statementSql: readonly string[], requiresScopedContributions = false) {
+  return sha256Hex(`${normalizedText}\n-- expanded\n${statementSql.join("\n")}\n${requiresScopedContributions ? "-- security-metadata/v1\nrequiresScopedContributions=true\n" : ""}`);
 }
 
 /** The generated last statement of every family plan: no committed state holds a guard row. */
@@ -1089,6 +1106,8 @@ export const releaseStatement: PlanStatement = {
 
 /** The checks that need the whole plan and the registry; the grammar of single statements is checked while parsing. */
 export function assertFamilyPlan(plan: PlanDefinition, registry: FamilyRegistry) {
+  assert.equal(plan.requiresScopedContributions === true, registry.scopedContributionPlans?.includes(plan.id) === true,
+    `${plan.id}: scoped contribution metadata differs from the closed registry`);
   const familyId = plan.id.split(".")[1] ?? "";
   const definition = registry.families.find((candidate) => candidate.family === familyId);
   assert(definition, `${plan.id}: family ${familyId} is not in ${familyRegistryFile}`);
@@ -1403,6 +1422,7 @@ export function parsePlanFile(
     ? familyIdentity(
         normalized,
         statements.map((statement) => statement.sql),
+        context.registry.scopedContributionPlans?.includes(id) === true,
       )
     : sha256Hex(normalized);
   return {
@@ -1414,6 +1434,7 @@ export function parsePlanFile(
     sha256: identity,
     ...(tail === undefined ? {} : { tail }),
     ...(familyId === undefined ? {} : { family: familyId }),
+    ...(context?.registry.scopedContributionPlans?.includes(id) === true ? { requiresScopedContributions: true } : {}),
   };
 }
 export function manifestHashOf(plans: readonly PlanDefinition[]) {
@@ -1486,6 +1507,7 @@ export function buildManifest(root: string, options: BuildOptions = {}): PlanMan
   const ordered = plans.toSorted((a, b) =>
     a.id < b.id ? -1 : a.id > b.id ? 1 : a.version - b.version,
   );
+  for (const id of families.scopedContributionPlans ?? []) assert(ordered.some(plan => plan.id === id && plan.family !== undefined), `${familyRegistryFile}: scoped metadata names unregistered plan ${id}`);
   return { manifestHash: manifestHashOf(ordered), plans: ordered, registry, families };
 }
 
@@ -1631,7 +1653,7 @@ ${plan.statements
     return `            new(FamilyModule.${moduleEnum[meta.module] ?? assert.fail(meta.module)}, FamilyPhase.${pascal(meta.phase)}, FamilyClass.${pascal(meta.class)}, ${text(meta.key)}${suffix})`;
   })
   .join(",\n")}
-        ])`,
+        ]${plan.requiresScopedContributions === true ? ", RequiresScopedContributions: true" : ""})`,
   );
   const list2 = (items: string[]) => (items.length === 0 ? "[]" : `[\n${items.join(",\n")}\n    ]`);
   const expiryCatalog = securityExpiryRegistrations.map(
@@ -1678,6 +1700,7 @@ export async function renderFamilyExpansion(manifest: PlanManifest) {
       version: plan.version,
       family: plan.family,
       sha256: plan.sha256,
+      ...(plan.requiresScopedContributions === true ? { requiresScopedContributions: true } : {}),
       statements: plan.statements.map((statement) => ({
         role: statement.family
           ? `${statement.family.phase} ${statement.family.module} ${statement.family.class} ${statement.family.key}`
