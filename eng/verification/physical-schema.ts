@@ -509,6 +509,23 @@ function validateInsertionInvariant(table: PhysicalTable): void {
   assert.equal(update.when, 'OLD."state" IN (1, 3)', message);
 }
 
+function validateInsertionStateProfile(
+  table: PhysicalTable,
+  enums: Map<string, ResolvedEnum>,
+): void {
+  if (table.insertionInvariant === undefined) return;
+  assert.deepEqual(
+    enums.get("identity.deletion_state")?.members,
+    [
+      { name: "pending", number: 1 },
+      { name: "cancelled", number: 2 },
+      { name: "purging", number: 3 },
+      { name: "purged", number: 4 },
+    ],
+    `${table.name}: invalid deletion lifecycle state profile`,
+  );
+}
+
 export function validateSchema(schema: PhysicalSchema, partial = false): void {
   const enums = new Map(schema.enums.map((entry) => [entry.name, entry]));
   const tables = new Map(schema.tables.map((entry) => [entry.name, entry]));
@@ -516,17 +533,7 @@ export function validateSchema(schema: PhysicalSchema, partial = false): void {
   const indexNames = new Set<string>();
   for (const table of schema.tables) {
     validateInsertionInvariant(table);
-    if (table.insertionInvariant !== undefined)
-      assert.deepEqual(
-        enums.get("identity.deletion_state")?.members,
-        [
-          { name: "pending", number: 1 },
-          { name: "cancelled", number: 2 },
-          { name: "purging", number: 3 },
-          { name: "purged", number: 4 },
-        ],
-        `${table.name}: invalid deletion lifecycle state profile`,
-      );
+    validateInsertionStateProfile(table, enums);
     const where = `table ${table.name}`;
     assert(namePattern.test(table.name) && table.name.length <= maxName, `${where}: invalid name`);
     assert(table.columns.length > 0, `${where}: no columns`);
@@ -720,6 +727,8 @@ function groupChecks(table: PhysicalTable): ManifestCheck[] {
 }
 
 export function tableSql(table: PhysicalTable, enums: Map<string, ResolvedEnum>): string[] {
+  validateInsertionInvariant(table);
+  validateInsertionStateProfile(table, enums);
   const statements: string[] = [];
   const lines = table.columns.map((column) => columnDefinition(table, column, enums));
   lines.push(

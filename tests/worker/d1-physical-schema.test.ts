@@ -622,7 +622,12 @@ test("deletion insertion invariant is omitted from every old table and emits onl
   assert(sql?.includes('WHERE "deletion_id" = NEW."deletion_id"'));
   assert(sql?.includes('NEW."state" IN (1, 3)'));
   assert(sql?.includes('WHERE "user_id" = NEW."user_id" AND "state" IN (1, 3)'));
-  assert.deepEqual(compareShapes(readShape(migratedDatabase(true)), expectedShape(schema)), []);
+  const database = migratedDatabase(true);
+  try {
+    assert.deepEqual(compareShapes(readShape(database), expectedShape(schema)), []);
+  } finally {
+    database.close();
+  }
 });
 
 test("deletion insertion marker refuses unknown, foreign and every mismatched authority shape before SQL emission", () => {
@@ -639,7 +644,7 @@ test("deletion insertion marker refuses unknown, foreign and every mismatched au
       table.owner = "workspace";
     },
     (table) => {
-      table.name = "identity_step_up_challenge";
+      table.name = "identity_foreign_table";
     },
     (table) => {
       table.primaryKey = ["user_id"];
@@ -714,6 +719,10 @@ test("deletion insertion marker refuses unknown, foreign and every mismatched au
   assert(purging);
   purging.number = 7;
   assert.throws(() => validateSchema(copy), /invalid deletion lifecycle state profile/u);
+  assert.throws(
+    () => tableSql(tableOf("identity_account_deletion"), enumMap(copy)),
+    /invalid deletion lifecycle state profile/u,
+  );
 });
 
 test("strict physical drift refuses a missing or weakened original insertion trigger", () => {
