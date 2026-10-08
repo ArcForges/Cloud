@@ -12,7 +12,7 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-    "package.json": "cb41ad481365a822b59a2f1a432c7e5d98f70acf54aded41f5df46cdbbd2d985",
+    "package.json": "26b7159230ed1ba303dd2274ebfaac88d771ab998f0950defc014e818868bbe8",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -80,7 +80,7 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "w-deku-20261008-rev-har-40",
     "date": "2026-10-08",
-    "rationale": "Successor of har-40-r3, changing only the reviewer field: it names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40 (coordinator adjudication 2026-10-08, receipt reviewer field rule). har-40-r3 was committed with PENDING and stays immutable history. The admitted inputs, package coordinates, closure and checks are those of har-40-r3. The change that har-40-r3 admitted (naming gate and GOV.10 successor architecture rules): Adds the build-only NuGet ArcForges.Contracts.Validation 1.0.0-ci.205.1 (the CON.23 naming identity, GOV.14 binding, Contracts source 696242d16034262ce8b7268e8d157cd0e5bee544, an ancestor of Contracts origin/main; archive SHA512 OWvMF30zpN6ms2KlQCtax5P7TACrgK50Vb0drN5zy4iXgk2TZd+5UU+LDGaA2ioowA1EQIZx8ZUyRoayZaHadA==) to Directory.Packages.props (central version) and to the architecture test host as PackageReference with PrivateAssets all, so the naming tests read its packaged scanner and policy and nothing ships it. The host lock tests/ArchitectureTests/packages.lock.json gains the naming package as Direct and its locked transitive closure: ArcForges.Contracts.Events, ArcForges.Contracts.PublicApi and ArcForges.Sdk.Contracts at 1.0.0-ci.205.1 (each source commit 696242d, verified in its packaged source.json), ArcForges.Contracts.Foundation at 1.0.0-ci.287.1 (already admitted), Google.Protobuf 3.36.1 and Grpc.Core.Api 2.84.0 (already admitted). eng/policy/naming-candidate.json is retargeted from the npm @arcforges/proto 1.0.0-ci.287.1 publication, which is provenance only, to the NuGet identity; tooling/project.ts verifies the restored archive SHA512, the packaged source commit and both packaged SHA256 values (scanner 7c4cd704..., policy f5d59629...) before python -I runs the scanner. The single-candidate Contracts rule excludes this build-only identity by name and still requires its exact pin. No runtime package, licence, npm coordinate or npm closure entry changes; @arcforges/proto stays an unused devDependency until its own successor receipt retires it. The reviewer field names w-deku-20261008-rev-har-40 in this successor.",
+    "rationale": "Successor of har-40-r4, changing only the hash-bound package.json input (SHA256 26b7159230ed1ba303dd2274ebfaac88d771ab998f0950defc014e818868bbe8): the package.json policy script now runs dotnet restore of tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj with --locked-mode before tooling/project.ts naming reads the build-only ArcForges.Contracts.Validation 1.0.0-ci.205.1 package from the NuGet packages folder, so the naming scan no longer depends on a prior restore (a fresh Linux runner failed with ENOENT before this change). No dependency, package coordinate, closure entry, licence, runtime or wrangler input changes; the admitted packages and checks are those of har-40-r4. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40. har-40-r4 stays immutable history.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -90,7 +90,7 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-      "package.json": "cb41ad481365a822b59a2f1a432c7e5d98f70acf54aded41f5df46cdbbd2d985",
+      "package.json": "26b7159230ed1ba303dd2274ebfaac88d771ab998f0950defc014e818868bbe8",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -1000,7 +1000,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/har-40-r4.json",
+  "reviewRecord": "eng/policy/dependency-reviews/har-40-r5.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
