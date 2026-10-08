@@ -63,8 +63,16 @@ public static class HarnessWakeEndpoint
         }
 
         var reply = await port.HandleAsync(message, context.RequestAborted).ConfigureAwait(false);
-        // 200 once the wake is taken (the run's own decision follows); 503 when the store could not settle it, so the alarm retries.
-        context.Response.StatusCode = reply == HarnessWakeReply.Taken ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable;
+        // 200 once the wake is taken (the run's own decision follows). Every other reply is the typed retryable 503: the store could not settle the
+        // wake, a live lease refused it, or a read was not served. The alarm retries it, and the Retry-After hint is one second (the first backoff).
+        if (reply == HarnessWakeReply.Taken)
+        {
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.Headers["Retry-After"] = "1";
     }
 
     /// <summary>The wake body: exactly the closed key set, the exact version and kind, canonical identifiers, a time and a Worker version.</summary>

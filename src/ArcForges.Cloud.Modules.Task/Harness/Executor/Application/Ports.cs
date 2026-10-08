@@ -27,6 +27,16 @@ internal enum StoreStatus
     Stale,
 }
 
+/// <summary>
+/// A read of the store was not served because the store was unavailable. Nothing was read or written, so a caller may retry the same call
+/// later; the wake answers it as a typed retryable outcome instead of a fault.
+/// </summary>
+internal sealed class HarnessReadUnavailableException(string plan) : Exception("The harness read " + plan + " is unavailable.")
+{
+    /// <summary>The named plan whose read was not served.</summary>
+    internal string Plan { get; } = plan;
+}
+
 internal sealed record LeaseRow(Guid Holder, long Epoch, long ExpiresAtMicros, long RecoveryGeneration);
 
 /// <summary>What a load reads of one run: its state and revision, the lease, the durable counters and the last checkpoint receipt.</summary>

@@ -21,13 +21,15 @@ public sealed class EvaluatedRepositoryGate
         "ThePerModelTokenBucketRefusesAnEmptyBucketAndRefillsWithTime", "AnAdapterRefusalIsAPreDispatchRefusal",
         "AnAdapterFailureAfterTheBindingIsUnknownAndNeverRetried", "ATransportFailureIsUnknown", "ACallThatOutlastsItsDeadlineIsUnknownWithTheDeadlineReason",
         "ACallerCancellationIsUnknownWithTheCancelledReason", "AnAnswerOverTheCallerCapOrNotAJsonObjectIsUnknown",
+        "AStreamRequestIsRefusedBeforeAnyTokenIsSpent", "AnAnswerThatIsNotJsonIsUnknownWhateverItsBody",
     ];
 
     /// <summary>The offline wake tests (HAR.40 (f) and (g)) that exercise the wake service and its claim under the Worker version.</summary>
     private static readonly string[] WakeTests =
     [
-        "AWakeClaimsAQueuedRunUnderTheWorkerVersionAndReleasesItToWaiting", "AWakeForAHeldOrAbsentRunIsTakenAndChangesNothing",
+        "AWakeClaimsAQueuedRunUnderTheWorkerVersionAndReleasesItToWaiting", "AWakeForAHeldRunIsRetriedUntilItsLeaseExpiresAndAnAbsentRunIsTakenAndChangesNothing",
         "AWakeWhoseReleaseCannotSettleIsStoppedSoItIsRetried", "AWakeWithAMalformedWorkerVersionIsRefusedByTheService",
+        "AWakeWhoseRunReadIsNotServedIsUnavailableAndChangesNothing", "AWakeWhoseAttemptReadIsNotServedReleasesItsLeaseAndTheRetryClaimsAndSettles",
     ];
 
     /// <summary>The wake route tests: the route exists only under the foundation configuration and verifies before it parses.</summary>

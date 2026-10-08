@@ -62,8 +62,19 @@ internal enum EffectStepStatus
     /// <summary>The dispatch was made and its effect is unknown; it is never retried and waits for reconciliation.</summary>
     UnknownEffect,
 
-    /// <summary>No external call was made (see <see cref="EffectStepResult.Reason"/>).</summary>
+    /// <summary>
+    /// No external call was made by this step (see <see cref="EffectStepResult.Reason"/>). A step with this status never reached the supplier
+    /// call. A dispatch intent may still be durable when the intent write itself was unknown; the resume then records that effect as unknown
+    /// and never dispatches it again.
+    /// </summary>
     NotDispatched,
+
+    /// <summary>
+    /// The supplier call was made, but its outcome could not be recorded under the fence (<see cref="EffectStepResult.Kind"/> is what the
+    /// supplier answered, when it answered). The durable state stays dispatching, so the effect is unknown to the caller: it is never retried,
+    /// and the next resume records it as unknown. The caller must reconcile it as an interrupted effect, never as one that did not happen.
+    /// </summary>
+    OutcomeNotRecorded,
 }
 
 internal enum NotDispatchedReason
@@ -84,6 +95,10 @@ internal enum NotDispatchedReason
     NotFound,
 }
 
+/// <summary>
+/// The result of one effect step. <see cref="Reason"/> says why a step stopped without a settled outcome: for <see cref="EffectStepStatus.NotDispatched"/>
+/// why no call was made, for <see cref="EffectStepStatus.OutcomeNotRecorded"/> which store status refused the outcome.
+/// </summary>
 internal sealed record EffectStepResult(EffectStepStatus Status, NotDispatchedReason Reason, Guid? CommandId, int Attempts, EffectResultKind? Kind);
 
 internal enum ResumeKind
@@ -253,8 +268,9 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
                 cancellationToken).ConfigureAwait(false);
             if (recorded != StoreStatus.Succeeded)
             {
-                // The durable state stays dispatching: a resume records the effect as unknown and never repeats it.
-                return NotDispatched(FromStoreStep(recorded), commandId, ordinal, kind);
+                // The supplier was called: this is not a NotDispatched step. The durable state stays dispatching, so a resume records the effect
+                // as unknown and never repeats it.
+                return new EffectStepResult(EffectStepStatus.OutcomeNotRecorded, FromStoreStep(recorded), commandId, ordinal, kind);
             }
 
             switch (RetryPolicy.Decide(kind, ordinal))

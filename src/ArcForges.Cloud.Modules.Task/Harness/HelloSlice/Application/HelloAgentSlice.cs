@@ -149,6 +149,9 @@ internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort mo
                 return answer is null ? (new Stop(HelloStatus.Interrupted, RunState.Interrupted, "result_missing_" + operation), null) : (null, answer);
             case EffectStepStatus.UnknownEffect:
                 return (new Stop(HelloStatus.Interrupted, RunState.Interrupted, "unknown_effect_" + operation), null);
+            case EffectStepStatus.OutcomeNotRecorded:
+                // The supplier was called and its outcome did not commit: the effect is unknown, never retried, and reconciled on resume.
+                return (new Stop(HelloStatus.Interrupted, RunState.Interrupted, "outcome_not_recorded_" + operation), null);
             case EffectStepStatus.FailedDidNotHappen:
                 return (new Stop(HelloStatus.Failed, RunState.Failed, "step_failed_" + operation), null);
             case EffectStepStatus.RefusedExhausted:

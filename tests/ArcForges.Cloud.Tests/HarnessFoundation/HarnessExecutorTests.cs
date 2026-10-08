@@ -295,7 +295,8 @@ public sealed class HarnessExecutorTests
         };
 
         var result = await executorA.RunEffectAsync(claimA, ModelRequest(), LoopBounds.Default, T.Ct);
-        Assert.Equal(EffectStepStatus.NotDispatched, result.Status);
+        // The supplier was called, so the step is not NotDispatched: its outcome was refused under a stale fence and is not recorded.
+        Assert.Equal(EffectStepStatus.OutcomeNotRecorded, result.Status);
         Assert.Equal(NotDispatchedReason.StoreRefused, result.Reason);
         Assert.Equal(1, effects.Count);
 

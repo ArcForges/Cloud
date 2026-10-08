@@ -256,6 +256,32 @@ public sealed class AgentDispatchTests
     }
 
     [Fact]
+    public async Task AStreamRequestIsRefusedBeforeAnyTokenIsSpent()
+    {
+        var (client, handler, _) = Client(Options(capacity: 1, refill: 1));
+        Assert.Equal("stream_refused", (await client.DispatchAsync(Call(json: "{\"stream\":true}"), T.Ct)).Reason);
+        Assert.Equal("stream_refused", (await client.DispatchAsync(Call(json: "{\"stream\":\"yes\"}"), T.Ct)).Reason);
+        Assert.Equal("stream_refused", (await client.DispatchAsync(Call(json: "{\"stream\":false,\"stream\":true}"), T.Ct)).Reason);
+        Assert.Empty(handler.Requests);
+
+        // Nothing was sent or spent, so the single token still admits a call that does not stream.
+        Assert.Equal(ModelDispatchStatus.Succeeded, (await client.DispatchAsync(Call(), T.Ct)).Status);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task AnAnswerThatIsNotJsonIsUnknownWhateverItsBody()
+    {
+        var (client, handler, _) = Client();
+        handler.Respond = (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("data: {\"response\":\"hi\"}\n\n", Encoding.UTF8, "text/event-stream"),
+        });
+        Assert.Equal(new ModelCallResult(ModelDispatchStatus.Unknown, null, "response_media_type"), await client.DispatchAsync(Call(), T.Ct));
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public void TheEnvelopeWriterAcceptsOnlyAJsonObjectAsTheFrozenRequest()
     {
         Assert.ThrowsAny<System.Text.Json.JsonException>(() => AiEnvelope.Build(Model, [Model], 1024, 1024, "[1]"));

@@ -35,4 +35,20 @@ internal static class AiEnvelope
 
         return stream.ToArray();
     }
+
+    /// <summary>
+    /// True when the frozen request asks for a streamed answer: some top-level <c>stream</c> member is present and is not JSON false. The
+    /// Worker answers a streamed request as text/event-stream, which this module never requests (HAR.40 (e)); every occurrence is checked, so
+    /// a duplicated member cannot hide a stream request.
+    /// </summary>
+    internal static bool RequestsStream(string requestJson)
+    {
+        using var document = JsonDocument.Parse(requestJson);
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (property.NameEquals("stream") && property.Value.ValueKind != JsonValueKind.False) return true;
+        }
+
+        return false;
+    }
 }

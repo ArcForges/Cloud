@@ -45,6 +45,8 @@ public sealed class ModelDispatchClient(ModelDispatchOptions options, HttpClient
             return Refused("request_invalid");
         }
 
+        // A streamed answer is never requested: a stream request is refused before any token is taken or any byte is sent (HAR.40 (e)).
+        if (AiEnvelope.RequestsStream(request.RequestJson)) return Refused("stream_refused");
         if (envelope.Length > options.MaxBodyBytes) return Refused("body_over_cap");
         if (!buckets.TryTake(request.ModelId, Micros())) return Refused("rate_limited");
         return await SendAsync(envelope, request.Deadline, cancellationToken).ConfigureAwait(false);
@@ -91,6 +93,10 @@ public sealed class ModelDispatchClient(ModelDispatchOptions options, HttpClient
             var code = (int)response.StatusCode;
             if (code is 400 or 403 or 404 or 405 or 413 or 415) return Refused("adapter_refused_" + code.ToString(System.Globalization.CultureInfo.InvariantCulture));
             if (code != 200) return Unknown("adapter_" + code.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // Only the JSON answer the envelope asks for is an answer. Any other media type (a streamed text/event-stream, for one) is a possibly
+            // dispatched effect whose content this module cannot record, so it is Unknown and never retried.
+            if (!string.Equals(response.Content.Headers.ContentType?.MediaType, "application/json", StringComparison.OrdinalIgnoreCase))
+                return Unknown("response_media_type");
 
             var body = await ReadBoundedAsync(response.Content, options.MaxResponseBytes, bound.Token).ConfigureAwait(false);
             if (body is null) return Unknown("response_over_cap");

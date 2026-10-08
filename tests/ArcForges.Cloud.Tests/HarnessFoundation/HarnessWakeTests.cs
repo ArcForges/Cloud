@@ -31,6 +31,17 @@ internal sealed class FailingPlanPort(IModulePlanPort inner, string failingPlan,
             : inner.WriteAsync(write, cancellationToken);
 }
 
+/// <summary>The plan port with one named read answered as unavailable, so that read is not served and nothing is read or written by it.</summary>
+internal sealed class FailingReadPlanPort(IModulePlanPort inner, string failingPlan) : IModulePlanPort
+{
+    public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken cancellationToken) =>
+        read.PlanId == failingPlan
+            ? Task.FromResult(ModulePlanOutcome.Of(ModulePlanStatus.Unavailable))
+            : inner.ReadAsync(read, cancellationToken);
+
+    public Task<ModulePlanOutcome> WriteAsync(ModulePlanWrite write, CancellationToken cancellationToken) => inner.WriteAsync(write, cancellationToken);
+}
+
 /// <summary>The wake port the endpoint tests drive: it accepts the one signature the test sends and records what the endpoint passed on.</summary>
 internal sealed class StubWakePort : IHarnessWakePort
 {
@@ -106,17 +117,24 @@ public sealed class HarnessWakeTests
     }
 
     [Fact]
-    public async Task AWakeForAHeldOrAbsentRunIsTakenAndChangesNothing()
+    public async Task AWakeForAHeldRunIsRetriedUntilItsLeaseExpiresAndAnAbsentRunIsTakenAndChangesNothing()
     {
         using var fixture = await HarnessFixture.CreateAsync();
         var executor = new HarnessExecutor(new D1HarnessStore(fixture.Port), new NoEffects(), fixture.Ids, fixture.Clock);
         Assert.Equal(ClaimStatus.Claimed, (await executor.ClaimAsync(fixture.Run, HarnessFixture.Identity("worker.held"), T.Ct)).Status);
 
+        // A live lease of another holder refuses the claim. The holder may have crashed, so the wake is retried rather than dropped (HAR.40 (b)).
         var held = await Service(fixture).HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
-        Assert.Equal(HarnessWakeReply.Taken, held);
+        Assert.Equal(HarnessWakeReply.Stopped, held);
         Assert.Equal("2", await fixture.RunStateAsync());
         var run = await fixture.QueryAsync("SELECT worker_version FROM task_run WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "'");
         Assert.Equal("worker.held", run[0][0]);
+
+        // Once the lease has expired, the retry claims the run and releases it to waiting.
+        fixture.Clock.AdvanceSeconds(61);
+        var retry = await Service(fixture).HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
+        Assert.Equal(HarnessWakeReply.Taken, retry);
+        Assert.Equal("3", await fixture.RunStateAsync());
 
         var absent = await Service(fixture).HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, Guid.Parse("00000000-0000-4000-8000-00000000ffff"), WorkerVersion, 1), T.Ct);
         Assert.Equal(HarnessWakeReply.Taken, absent);
@@ -142,6 +160,41 @@ public sealed class HarnessWakeTests
 
         Assert.Equal(HarnessWakeReply.Stopped, reply);
         Assert.Equal("1", await fixture.RunStateAsync());
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+    }
+
+    [Fact]
+    public async Task AWakeWhoseRunReadIsNotServedIsUnavailableAndChangesNothing()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var reply = await Service(fixture, new FailingReadPlanPort(fixture.Port, "task.harness-executor-run-load"))
+            .HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
+
+        Assert.Equal(HarnessWakeReply.Unavailable, reply);
+        Assert.Equal("1", await fixture.RunStateAsync());
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+    }
+
+    [Fact]
+    public async Task AWakeWhoseAttemptReadIsNotServedReleasesItsLeaseAndTheRetryClaimsAndSettles()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        // A reserved attempt with no dispatch intent is left by a crash after the reserve committed (write 2).
+        var first = new HarnessExecutor(new D1HarnessStore(new CrashingPlanPort(fixture.Port, 2, after: true)), new FakeEffects(), fixture.Ids, fixture.Clock);
+        var claim = (await first.ClaimAsync(fixture.Run, HarnessFixture.Identity(), T.Ct)).Claim!;
+        await Assert.ThrowsAsync<SimulatedCrash>(() => first.RunEffectAsync(claim, Request, LoopBounds.Default, T.Ct));
+        fixture.Clock.AdvanceSeconds(61);
+
+        // The open attempt cannot be read, so the wake releases its own lease to waiting and answers the typed retryable reply.
+        var unavailable = await Service(fixture, new FailingReadPlanPort(fixture.Port, "task.harness-executor-attempt-load"))
+            .HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
+        Assert.Equal(HarnessWakeReply.Unavailable, unavailable);
+        Assert.Equal("3", await fixture.RunStateAsync());
+        Assert.Equal(1, await fixture.CountOpenAttemptsAsync());
+
+        // The retry claims the released run and settles the open attempt.
+        var retry = await Service(fixture).HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
+        Assert.Equal(HarnessWakeReply.Taken, retry);
         Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
     }
 
@@ -226,6 +279,11 @@ public sealed class HarnessWakeTests
 
         port.Reply = HarnessWakeReply.Stopped;
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await Post(client, body)).StatusCode);
+
+        port.Reply = HarnessWakeReply.Unavailable;
+        var unavailable = await Post(client, body);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, unavailable.StatusCode);
+        Assert.Equal("1", Assert.Single(unavailable.Headers.GetValues("Retry-After")));
 
         port.Reply = HarnessWakeReply.Taken;
         Assert.Equal(HttpStatusCode.BadRequest, (await Post(client, Body(workerVersion: null))).StatusCode);

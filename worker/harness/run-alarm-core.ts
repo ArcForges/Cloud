@@ -14,8 +14,18 @@ export interface WakeHandle {
   readonly attempts: number;
 }
 
-/** Bounded retries of a failed wake, with the 1, 2 and 4 second backoff of contracts 05 section 2, then the wake is dropped. */
-export const maxWakeAttempts = 4;
+/** The C# lease term (LeasePolicy.TermMicros, 60 seconds). A wake refused by a live lease must keep retrying until that lease has expired. */
+export const leaseTermSeconds = 60;
+
+/**
+ * The backoff between the failed deliveries of one wake, in seconds. The steps double from 1 second and their sum is 63 seconds, which is
+ * more than the lease term: a holder that crashed while its lease was live leaves a lease that expires no later than one term after the
+ * refusal that the first retry saw, so a retry lands after expiry and the wake claims the run instead of being dropped (HAR.40 (b)).
+ */
+export const wakeBackoffSeconds: readonly number[] = [1, 2, 4, 8, 16, 32];
+
+/** Bounded deliveries of one wake: the first delivery and one more per backoff step; the wake is dropped after the last failure. */
+export const maxWakeAttempts = wakeBackoffSeconds.length + 1;
 
 const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const maxAlarmMs = 365 * 24 * 60 * 60 * 1000;
@@ -79,7 +89,8 @@ export type RetryPlan =
 export function afterFailure(handle: WakeHandle, nowMs: number): RetryPlan {
   const attempts = handle.attempts + 1;
   if (attempts >= maxWakeAttempts) return { kind: "drop" };
-  const seconds = attempts === 1 ? 1 : attempts === 2 ? 2 : 4;
+  const seconds = wakeBackoffSeconds[attempts - 1];
+  if (seconds === undefined) return { kind: "drop" };
   return { kind: "retry", handle: { ...handle, attempts }, atMs: nowMs + seconds * 1000 };
 }
 

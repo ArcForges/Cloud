@@ -4,7 +4,7 @@
 // stand-in as container-classes.test.ts lets the real module load under Node.
 import assert from "node:assert/strict";
 import { register } from "node:module";
-import test from "node:test";
+import test, { mock } from "node:test";
 
 const stub = [
   "export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
@@ -28,6 +28,8 @@ interface Handle {
 
 interface CoreModule {
   readonly maxWakeAttempts: number;
+  readonly leaseTermSeconds: number;
+  readonly wakeBackoffSeconds: readonly number[];
   parseSchedule(body: unknown, nowMs: number): { ok: true; handle: Handle } | { ok: false };
   wakeBody(handle: Handle, workerVersion: string): Uint8Array;
   wakeBodySha256Hex(body: Uint8Array): Promise<string>;
@@ -225,7 +227,7 @@ test("without the Worker version identifier no wake is sent and the handle is ke
   assert.equal(handleOf(store).attempts, 1, "the failed wake is retried, not dropped silently");
 });
 
-test("a failed wake is retried on the 1, 2 and 4 second backoff and then dropped", () => {
+test("a failed wake is retried on the doubling 1 to 32 second backoff and then dropped", () => {
   let handle: Handle = { workspaceId, runId, wakeAtMs: now, attempts: 0 };
   const delays: (number | "drop")[] = [];
   for (let failure = 0; failure < core.maxWakeAttempts; failure += 1) {
@@ -237,7 +239,65 @@ test("a failed wake is retried on the 1, 2 and 4 second backoff and then dropped
     delays.push(plan.atMs - now);
     handle = plan.handle;
   }
-  assert.deepEqual(delays, [1000, 2000, 4000, "drop"]);
+  assert.deepEqual(delays, [1000, 2000, 4000, 8000, 16000, 32000, "drop"]);
+});
+
+test("the wake retry horizon covers the full 60 second lease term, so a wake refused by a live lease is not dropped early", () => {
+  // The lease of a crashed holder expires no later than one term after the refusal, and the first delivery was refused by that lease.
+  // The last retry must therefore land at least one full term after the first refused delivery.
+  assert.equal(core.leaseTermSeconds, 60);
+  const horizonMs = core.wakeBackoffSeconds.reduce((sum, seconds) => sum + seconds * 1000, 0);
+  assert.ok(
+    horizonMs >= core.leaseTermSeconds * 1000,
+    `horizon ${horizonMs} ms covers the lease term`,
+  );
+
+  // Each failure happens at the time of the previous retry, so the backoff steps accumulate into the horizon.
+  let handle: Handle = { workspaceId, runId, wakeAtMs: now, attempts: 0 };
+  let failedAtMs = now;
+  for (;;) {
+    const plan = core.afterFailure(handle, failedAtMs);
+    if (plan.kind === "drop") break;
+    failedAtMs = plan.atMs;
+    handle = plan.handle;
+  }
+  assert.ok(
+    failedAtMs - now >= core.leaseTermSeconds * 1000,
+    "the last retry is after the lease term",
+  );
+});
+
+test("a wake refused by a live lease keeps being retried for the whole lease term before it is dropped", async () => {
+  // The clock is driven by the test: each delivery happens at the alarm time the previous failure scheduled, as the platform fires it.
+  const start = now + 1_000_000_000_000;
+  let clockMs = start;
+  const dateNow = mock.method(Date, "now", () => clockMs);
+  try {
+    const store = storage();
+    const containerStub = container(503);
+    const adapter = adapterFor({ ...w2cEnv, CLOUD_CONTAINER: containerStub }, store);
+    await adapter.schedule({ ...schedule, wakeAtMs: start + 60_000 });
+
+    const deliveriesMs: number[] = [];
+    for (let delivery = 0; delivery < core.maxWakeAttempts; delivery += 1) {
+      deliveriesMs.push(clockMs);
+      await fire(adapter, store);
+      if (store.alarmAt !== null) clockMs = store.alarmAt;
+    }
+
+    // One first delivery and one per backoff step: every delivery was made, and the wake is dropped only after the last one.
+    assert.equal(containerStub.requests.length, core.maxWakeAttempts);
+    assert.equal(store.map.has("wake"), false, "the wake is dropped only after its last delivery");
+    assert.equal(store.alarmAt, null);
+    // The last delivery lands at least one full lease term after the first refused delivery.
+    const lastDeliveryMs = deliveriesMs.at(-1) ?? start;
+    assert.ok(
+      lastDeliveryMs - start >= core.leaseTermSeconds * 1000,
+      `the last delivery is ${lastDeliveryMs - start} ms after the first, past the lease term`,
+    );
+  } finally {
+    dateNow.mock.restore();
+  }
 });
 
 test("a stored handle is read back only in its exact shape and with an attempt count below the bound", () => {

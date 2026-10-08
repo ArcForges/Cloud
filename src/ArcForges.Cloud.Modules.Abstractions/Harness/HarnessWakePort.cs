@@ -13,11 +13,15 @@ public static class HarnessWakeRoute
 /// <summary>One wake: a run and the Cloudflare Worker version identifier that delivered it. The Cloud build identity is the host's own.</summary>
 public sealed record HarnessWakeMessage(Guid WorkspaceId, Guid RunId, string WorkerVersion, long WakeAtMs);
 
-/// <summary>What the wake did. <see cref="Stopped"/> means the store could not settle the wake: the caller retries it later.</summary>
+/// <summary>
+/// What the wake did. <see cref="Stopped"/> means the store could not settle the wake, or a live lease of another holder refused it: the caller
+/// retries it later. <see cref="Unavailable"/> means a store read was not served, so nothing was claimed or written; it is retryable too.
+/// </summary>
 public enum HarnessWakeReply
 {
     Taken,
     Stopped,
+    Unavailable,
 }
 
 /// <summary>The wake port of the Task module, implemented by the module and composed by the host with its own W2C verifier.</summary>

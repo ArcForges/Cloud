@@ -32,6 +32,7 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
         var outcome = await plans.ReadAsync(
             new ModulePlanRead(HarnessPlans.RunLoad, scope, [PlanValue.FromText(Id(run.RunId)), PlanValue.FromText(scope)]),
             cancellationToken).ConfigureAwait(false);
+        if (outcome.Status == ModulePlanStatus.Unavailable) throw new HarnessReadUnavailableException(HarnessPlans.RunLoad);
         if (outcome.Status != ModulePlanStatus.Succeeded) throw Refused(outcome.Status);
         if (outcome.Rows.Count == 0) return null;
         var row = outcome.Rows[0];
@@ -58,6 +59,7 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
         var outcome = await plans.ReadAsync(
             new ModulePlanRead(HarnessPlans.AttemptLoad, scope, [PlanValue.FromText(Id(run.RunId)), PlanValue.FromText(scope)]),
             cancellationToken).ConfigureAwait(false);
+        if (outcome.Status == ModulePlanStatus.Unavailable) throw new HarnessReadUnavailableException(HarnessPlans.AttemptLoad);
         if (outcome.Status != ModulePlanStatus.Succeeded) throw Refused(outcome.Status);
         if (outcome.Rows.Count == 0) return null;
         var row = outcome.Rows[0];

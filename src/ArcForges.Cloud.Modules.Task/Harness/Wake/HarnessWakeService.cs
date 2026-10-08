@@ -24,7 +24,10 @@ public sealed class HarnessWakeService(
         return verify(method, rawTarget, bodySha256Hex, header);
     }
 
-    /// <summary>Takes one wake. A run that cannot be claimed (not claimable, another holder, a stale generation or absent) is taken as delivered.</summary>
+    /// <summary>
+    /// Takes one wake. A run that is absent, not claimable or at another recovery generation is taken as delivered. A run whose live lease
+    /// belongs to another holder, a store that cannot settle the wake and a read that is not served are retried (Stopped, Unavailable).
+    /// </summary>
     public async Task<HarnessWakeReply> HandleAsync(HarnessWakeMessage message, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -33,7 +36,12 @@ public sealed class HarnessWakeService(
         // A wake dispatches nothing, so it carries no pinned model or tariff; the identity still binds the Worker version and the build.
         var identity = new RunIdentity(message.RunId, cloudBuildIdentity, message.WorkerVersion, recoveryGeneration, new PinnedSnapshot(string.Empty, string.Empty));
         var outcome = await new HarnessWakeHandler(executor).HandleAsync(new HarnessRun(message.WorkspaceId, message.RunId), identity, cancellationToken).ConfigureAwait(false);
-        return outcome.Status == WakeStatus.Stopped ? HarnessWakeReply.Stopped : HarnessWakeReply.Taken;
+        return outcome.Status switch
+        {
+            WakeStatus.Stopped => HarnessWakeReply.Stopped,
+            WakeStatus.Unavailable => HarnessWakeReply.Unavailable,
+            _ => HarnessWakeReply.Taken,
+        };
     }
 
     internal static bool IsWorkerVersion(string value) =>
