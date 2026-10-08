@@ -67,13 +67,16 @@ The admission, request-tool, local `say_hello` tool and finish-greeting steps ar
 
 - The Cloud `wrangler.json` and `package.json` are hash-bound inputs. Their changes for this task are admitted by the successor receipt chain in `eng/policy/dependency-reviews/` (`har-40-r1.json`, then later successors), each naming its retained predecessor. The reviewer field names the independent reviewer at review time.
 - The `EvaluatedRepositoryGate` contract map links the dispatch, wake and route members to their offline tests (`tests/ArcForges.Cloud.Tests/HarnessFoundation`).
-- The GOV.10 successor architecture rules (the AI Harness rule set with its fixtures) are not part of this tree yet. They remain open under HAR.40 validation (d).
+- The GOV.10 successor architecture rules are in `tests/ArchitectureTests/AiHarness` (HAR.40 validation (d)). All 27 rules keep their names under the five WP-05 obligations and run over Cloud's C# projects, manifests and Worker sources. Each rule has a passing baseline fixture and at least one refusing fixture, and the real inputs of this checkout carry no finding outside the owned register `eng/policy/harness-architecture-exceptions.json`.
+- That register holds one row, `wire-codec` on `src/ArcForges.Cloud/Ingress/PipelineProbe.cs`: the proof-only probe frames its replies with a private encoder because no generated Contracts message exists for its service. The row expires 2027-03-31 and leaves the production path under CLOUD.84.
+- Recorded limits, carried over from GOV.10: C# rules match syntax, not symbols, so aliasing and indirection are not seen; the task-result check is a syntactic heuristic (a call, or a name ending in task); Worker rules read TypeScript text and see one specifier per import; the audit reads the top-level project graph only.
+- The forbidden-term scan is the canonical scanner and policy of the NuGet package `ArcForges.Contracts.Validation` 1.0.0-ci.205.1 (`eng/policy/naming-candidate.json`, CON.23 identity, GOV.14 binding). The npm `@arcforges/proto` 1.0.0-ci.287.1 publication is provenance only. `tooling/project.ts naming` verifies the restored archive SHA512, the packaged source commit and both packaged SHA256 values before `python -I` runs the scanner.
 
 ## Still open
 
 - HAR.00: the full Harness loop on this executor (turn loop, context assembly, tool proposals, the 120 s loop deadline and the rest of WP-52.00).
 - AIR.00: the production admitted-model snapshot from POL.08 (HAR.40 uses a reviewed proof fixture only). Production dispatch is never released without it.
 - The live Workers AI binding proof, the container capacity proof and the deployed crash-injection proof. These are operator runs (see [harness proofs](harness-proofs.md)).
-- The GOV.10 successor architecture port (validation (d)).
+- The one-for-one port of the AI policy suite: its 84 fixtures and 111 suite tests. The rules and their fixtures are in place; these counts are not yet matched.
 - The AI-repository retirement documentation. It waits for the AI integration role to be claimed; no AI-repository file was changed.
 - Retirement of the deployed `arcforges-ai-hello` Worker. It needs explicit user confirmation and is not performed by this task.
