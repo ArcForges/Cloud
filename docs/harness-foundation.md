@@ -67,7 +67,7 @@ Named limits: a read that is not followed by a fenced write (a refused claim, a 
 
 ### Model and tariff pin (HAR.40 validation (f))
 
-The pinned model and tariff snapshot is stored in `task_harness_budget` at the run's first claim and never changes (the table refuses an update of the pin). Every later claim, wake and reservation must present the same pair: a claim under a different pair is refused before any lease is taken (`PinRefused`), a wake under it is not claimed, and the reservation plan refuses it inside the database. The executor also refuses the pair before any reservation.
+The pinned model and tariff snapshot is stored in `task_harness_budget` at the run's first claim and never changes (the table refuses an update of the pin). Every later dispatching claim and reservation must present the same pair: a claim under a different pair is refused before any lease is taken (`PinRefused`), and the reservation plan refuses it inside the database. The executor also refuses the pair before any reservation. A wake dispatches nothing and carries no pair, so it claims under the pair the run stores (`ClaimPinRule.InheritStored`); a run that never stored a pair has never been dispatched and is not claimed by a wake (`PinRefused`, nothing written).
 
 ### Wake
 
