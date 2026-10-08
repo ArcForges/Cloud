@@ -49,7 +49,7 @@ Live steps that remain operator runs (`liveNotRun`):
 
 ## Proof 2: executor crash injection
 
-Driver: `eng/verification/harness-proof-executor.ts`. Realness: `dotnet-local`. It runs `HarnessCrashTests` and `HarnessExecutorTests` (34 tests, including the ten-row crash matrix at claim, reserve, dispatch intent, outcome and yield, each before and after its commit) against the SQLite oracle with the checked-in plans.
+Driver: `eng/verification/harness-proof-executor.ts`. Realness: `dotnet-local`. It runs `HarnessCrashTests` and `HarnessExecutorTests` (38 tests, including the ten-row crash matrix at claim, reserve, dispatch intent, outcome and yield, each before and after its commit) against the SQLite oracle with the checked-in plans.
 
 Live steps that remain operator runs (`liveNotRun`):
 
@@ -100,10 +100,60 @@ Operator live runs use the same template with `realness` set to `deployed-live`,
 
 ## Local results recorded for this tree (2026-10-08)
 
-| Proof                | Status  | Realness     | Result                                                                      |
-| -------------------- | ------- | ------------ | --------------------------------------------------------------------------- |
-| `ai-binding`         | passed  | node-fixture | 12 of 12 checks passed; overhead p50 0.195 ms and p95 0.703 ms (fixture)    |
-| `executor-crash`     | passed  | dotnet-local | 34 of 34 crash and executor tests passed on the clean build                 |
-| `container-capacity` | not-run | not-run      | configuration observed only (`lite`, `max_instances` 1); live steps not run |
+Tree: `task/har-40` at `3725db0ff454dfe806d64383f71e491445e80350`. The Windows runs used a clean worktree at that commit with SDK 10.0.401 from `global.json` and Node v24.20.0. The WSL run used a Linux-native copy of the same commit (see the Native AOT records below). Each proof record is written under `artifacts/harness-proof/`, which Git ignores.
+
+### Proof records
+
+| Proof                | Status  | Realness     | Result                                                                                                                             |
+| -------------------- | ------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `ai-binding`         | passed  | node-fixture | 12 of 12 checks passed; 50 of 50 JSON calls answered 200; overhead p50 0.078 ms and p95 0.344 ms (fixture, not Workers AI latency) |
+| `executor-crash`     | passed  | dotnet-local | 38 of 38 tests passed (`HarnessCrashTests` and `HarnessExecutorTests`; `dotnet test` exit 0)                                       |
+| `container-capacity` | not-run | not-run      | no probe URL set; configuration observed only (`lite`, `max_instances` 1); the live steps are not run                              |
 
 The live steps above are open. None of these results is a Cloudflare provider result.
+
+### Offline validation at HEAD (Windows)
+
+| Command                                                                                | Exit | Counts                                                                                                             |
+| -------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------ |
+| `npm run check:dotnet` (restore `--locked-mode`, Release build, test, format verify)   | 0    | 1,348 total, 1,348 passed, 0 failed, 0 skipped; `ArcForges.Cloud.Tests` 927 passed; `ArchitectureTests` 421 passed |
+| `npm run test:dependencies` (first step of `npm run check`)                            | 0    | 18 of 18 passed                                                                                                    |
+| `npm run check:plans`                                                                  | 0    | 65 plans, no rewrites                                                                                              |
+| `npm run check:physical`                                                               | 0    | 162 tables, 105 enums; 26 numbered migrations, 0 pending                                                           |
+| `npm run policy`                                                                       | 0    | 813 files, 0 exceptions, 0 findings                                                                                |
+| `node tooling/project.ts toolchain` (step 5 of `npm run check`)                        | 1    | stopped on the Node pin (see the Node gap below); not run locally                                                  |
+| `node tooling/project.ts licence` and `provenance` (run separately after the failure)  | 0    | both passed                                                                                                        |
+| `npm run format:check`                                                                 | 0    | all matched files use Prettier code style                                                                          |
+| `npm run lint`                                                                         | 0    | 393 files, no findings                                                                                             |
+| `npm run typecheck`                                                                    | 0    | `tsconfig.json` and `tsconfig.worker.json`                                                                         |
+| `npm test`                                                                             | 0    | 776 tests, 776 passed, 0 failed, 0 skipped                                                                         |
+| thin-adapter subset (`ai-internal`, `run-alarm`, `container-classes`, `harness-proof`) | 0    | 43 tests, 43 passed, 0 failed                                                                                      |
+
+`npm run check` as a whole exits 1 on this machine, at the toolchain step only. The other steps were run one at a time after it, with the exit codes above.
+
+**Node gap.** The local runtime is Node v24.20.0. `package.json` (`engines`) and `.node-version` pin 24.21.0, and the toolchain step fails its pinned-version assertion. This is a local environment gap, recorded as not run locally. A Node 24.21.0 run of `npm run check` is still required before publication.
+
+### Native AOT publishes (P2-024)
+
+| Target      | Machine                                                                                        | Result                                                                                                      |
+| ----------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `win-x64`   | Windows 11 Pro for Workstations, clean worktree, SDK 10.0.401                                  | `restore --locked-mode` and `publish -c Release -r win-x64` exit 0; `ArcForges.Cloud.exe`, 18,769,920 bytes |
+| `linux-x64` | WSL2 Debian GNU/Linux 13 (trixie), kernel 6.18.40.1-microsoft-standard-WSL2, Linux-native copy | `publish -c Release -r linux-x64` exit 0; `ArcForges.Cloud`, 18,502,696 bytes                               |
+
+The WSL toolchain was .NET SDK 10.0.400 with runtime 10.0.11, Debian clang and LLD 19.1.7, and zlib present. The Linux-native copy was made from a git bundle of `task/har-40` at the commit above. The Windows worktree was not used for it.
+
+- Locked restore failed under SDK 10.0.400 with exit 1 and NU1004: `Microsoft.NET.ILLink.Tasks` is requested as `[10.0.12, )` and resolves to 10.0.11, and `Microsoft.DotNet.ILCompiler` differs the same way. The committed lock files were not changed to match.
+- Unlocked restore (the documented fallback) exited 0 only after a temporary `global.json` adapter that changed the SDK pin from 10.0.401 to 10.0.400. The adapter and the rewritten `packages.lock.json` files exist in the Linux copy only, and are not committed.
+- The `--build-info` run in that copy reports `sourceCommit` `3725db0`, `dirty` true (because of that uncommitted adapter), kind `local`.
+- Host smoke on the linux-x64 binary (gRPC-Web over HTTP): `SayHello` with name `World` answered 200 with the body `Hello, World!` and `grpc-status: 0`. An empty name answered 200 with `grpc-status: 3` and the message `Name must not be empty.`. An unknown method answered 200 with `grpc-status: 12` (`unimplemented`). The host logged each request and stopped cleanly on SIGTERM.
+- The win-x64 binary had `--build-info` reporting `sourceCommit` `3725db0`, `dirty` false, kind `local`. Its Hello calls gave the same results for World and the empty name; the unknown method also answered 200 with a gRPC error trailer.
+
+### Decision: the root `@arcforges/proto` devDependency stays (ADP-07)
+
+`@arcforges/proto` 1.0.0-ci.287.1 remains a root devDependency. No successor receipt was written, and no manifest or lock file changed. Reasons:
+
+- The architecture rule `WirePackagePin` in `tests/ArchitectureTests/AiHarness/HarnessArchitectureRules.cs` requires an exact, registry-locked pin of the public wire package in the root manifest and its lock. Removing the entry would make the wire-package rule refuse.
+- `@arcforges/api-client`, also a root devDependency, depends on `@arcforges/proto`, so its lock entry stays whatever the root says.
+- No Worker or product source imports the package. `tests/worker/identity-structure.test.ts` reads its generated `dist/gen` files, and `tooling/licence-boundary.ts` names it.
+
+A later change to the package is a separate admission, not part of HAR.40.
