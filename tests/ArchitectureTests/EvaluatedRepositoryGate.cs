@@ -27,7 +27,8 @@ public sealed class EvaluatedRepositoryGate
     /// <summary>The offline wake tests (HAR.40 (f) and (g)) that exercise the wake service and its claim under the Worker version.</summary>
     private static readonly string[] WakeTests =
     [
-        "AWakeClaimsAQueuedRunUnderTheWorkerVersionAndReleasesItToWaiting", "AWakeForAHeldRunIsRetriedUntilItsLeaseExpiresAndAnAbsentRunIsTakenAndChangesNothing",
+        "AWakeClaimsAPinnedWaitingRunUnderTheWorkerVersionUnderItsStoredPinAndReleasesItToWaiting", "AWakeForARunThatNeverStoredAPinIsNotClaimedAndWritesNothing",
+        "AWakeForAHeldRunIsRetriedUntilItsLeaseExpiresAndAnAbsentRunIsTakenAndChangesNothing",
         "AWakeWhoseReleaseCannotSettleIsStoppedSoItIsRetried", "AWakeWithAMalformedWorkerVersionIsRefusedByTheService",
         "AWakeWhoseRunReadIsNotServedIsUnavailableAndChangesNothing", "AWakeWhoseAttemptReadIsNotServedReleasesItsLeaseAndTheRetryClaimsAndSettles",
     ];
