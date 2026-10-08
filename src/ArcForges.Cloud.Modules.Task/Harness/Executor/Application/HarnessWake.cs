@@ -36,8 +36,13 @@ internal sealed class HarnessWakeHandler(HarnessExecutor executor)
         try
         {
             // The wake's own counted calls are charged in its claim batch: the wait cycle and container call that delivered it, and the open-attempt
-            // read of the resume that follows under the new lease (BudgetDefinition).
-            claimed = await executor.ClaimAsync(run, identity, BudgetDefinition.WakeDelivery + BudgetDefinition.ResumeRead, cancellationToken).ConfigureAwait(false);
+            // read of the resume that follows under the new lease (BudgetDefinition). The wake carries no pin: it claims under the pair the run stores.
+            claimed = await executor.ClaimAsync(
+                run,
+                identity,
+                BudgetDefinition.WakeDelivery + BudgetDefinition.ResumeRead,
+                ClaimPinRule.InheritStored,
+                cancellationToken).ConfigureAwait(false);
         }
         catch (HarnessReadUnavailableException)
         {

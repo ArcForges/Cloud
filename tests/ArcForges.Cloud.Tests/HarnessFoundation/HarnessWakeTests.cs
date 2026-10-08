@@ -79,6 +79,14 @@ public sealed class HarnessWakeTests
     private static HarnessWakeService Service(HarnessFixture fixture, IModulePlanPort? port = null) =>
         new(port ?? fixture.Port, "cloud.build.1", 1, fixture.Clock, (_, _, _, _) => true);
 
+    /// <summary>A run that a pinned claim started and released to waiting, as the Hello slice leaves it. A wake claims only such a run.</summary>
+    private static async Task PinnedWaitingRunAsync(HarnessFixture fixture)
+    {
+        var executor = new HarnessExecutor(new D1HarnessStore(fixture.Port), new NoEffects(), fixture.Ids, fixture.Clock);
+        var claim = (await executor.ClaimAsync(fixture.Run, HarnessFixture.Identity(), T.Ct)).Claim!;
+        Assert.Equal(StoreStatus.Succeeded, await executor.YieldAsync(claim, RunState.Waiting, T.Ct));
+    }
+
     [Fact]
     public void AWakeBodyIsAcceptedOnlyInItsClosedShapeWithCanonicalIdentifiersAndAWorkerVersion()
     {
@@ -104,15 +112,35 @@ public sealed class HarnessWakeTests
     }
 
     [Fact]
-    public async Task AWakeClaimsAQueuedRunUnderTheWorkerVersionAndReleasesItToWaiting()
+    public async Task AWakeClaimsAPinnedWaitingRunUnderTheWorkerVersionUnderItsStoredPinAndReleasesItToWaiting()
     {
         using var fixture = await HarnessFixture.CreateAsync();
+        await PinnedWaitingRunAsync(fixture);
         var reply = await Service(fixture).HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
 
         Assert.Equal(HarnessWakeReply.Taken, reply);
         Assert.Equal("3", await fixture.RunStateAsync());
         var run = await fixture.QueryAsync("SELECT worker_version FROM task_run WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "'");
         Assert.Equal(WorkerVersion, run[0][0]);
+        // The wake carries no pin; the stored pair is unchanged by it.
+        var pinned = await fixture.QueryAsync("SELECT pinned_model_id, pinned_tariff_snapshot_id FROM task_harness_budget WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "'");
+        Assert.Equal(HarnessFixture.Pin.ModelId, pinned[0][0]);
+        Assert.Equal(HarnessFixture.Pin.TariffSnapshotId, pinned[0][1]);
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+    }
+
+    [Fact]
+    public async Task AWakeForARunThatNeverStoredAPinIsNotClaimedAndWritesNothing()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        // A run that no pinned claim has started has no stored pair. A wake dispatches nothing and carries no pin, so it cannot claim the run:
+        // it is taken as delivered and nothing is written (no lease, no budget row, no attempt).
+        var reply = await Service(fixture).HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
+
+        Assert.Equal(HarnessWakeReply.Taken, reply);
+        Assert.Equal("1", await fixture.RunStateAsync());
+        var budgets = await fixture.QueryAsync("SELECT COUNT(*) FROM task_harness_budget WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "'");
+        Assert.Equal("0", budgets[0][0]);
         Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
     }
 
@@ -144,6 +172,7 @@ public sealed class HarnessWakeTests
     public async Task AWakeWhoseReleaseCannotSettleIsStoppedSoItIsRetried()
     {
         using var fixture = await HarnessFixture.CreateAsync();
+        await PinnedWaitingRunAsync(fixture);
         var reply = await Service(fixture, new FailingPlanPort(fixture.Port, "task.harness-executor-yield"))
             .HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
         Assert.Equal(HarnessWakeReply.Stopped, reply);
@@ -155,11 +184,12 @@ public sealed class HarnessWakeTests
     public async Task AWakeWhoseClaimCannotBeSettledIsStoppedSoItIsRetriedAndChangesNothing(ModulePlanStatus status)
     {
         using var fixture = await HarnessFixture.CreateAsync();
+        await PinnedWaitingRunAsync(fixture);
         var reply = await Service(fixture, new FailingPlanPort(fixture.Port, "task.harness-executor-claim", status))
             .HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
 
         Assert.Equal(HarnessWakeReply.Stopped, reply);
-        Assert.Equal("1", await fixture.RunStateAsync());
+        Assert.Equal("3", await fixture.RunStateAsync());
         Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
     }
 

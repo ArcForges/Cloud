@@ -33,7 +33,8 @@ public sealed class HarnessWakeService(
         ArgumentNullException.ThrowIfNull(message);
         if (!IsWorkerVersion(message.WorkerVersion)) throw new ArgumentException("A wake carries a bounded Worker version identifier.", nameof(message));
         var executor = new HarnessExecutor(new D1HarnessStore(plans), new NoDispatchEffects(), new RandomHarnessIds(), time);
-        // A wake dispatches nothing, so it carries no pinned model or tariff; the identity still binds the Worker version and the build.
+        // A wake dispatches nothing, so it carries no pinned model or tariff; its claim inherits the pair the run stores (ClaimPinRule.InheritStored),
+        // and the identity still binds the Worker version and the build.
         var identity = new RunIdentity(message.RunId, cloudBuildIdentity, message.WorkerVersion, recoveryGeneration, new PinnedSnapshot(string.Empty, string.Empty));
         var outcome = await new HarnessWakeHandler(executor).HandleAsync(new HarnessRun(message.WorkspaceId, message.RunId), identity, cancellationToken).ConfigureAwait(false);
         return outcome.Status switch

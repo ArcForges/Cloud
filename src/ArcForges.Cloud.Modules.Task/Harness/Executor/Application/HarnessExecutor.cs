@@ -58,6 +58,16 @@ internal enum ClaimStatus
 
 internal sealed record ClaimResult(ClaimStatus Status, ClaimedRun? Claim, long? Epoch);
 
+/// <summary>How a claim decides its pin (HAR.40 validation (f)).</summary>
+internal enum ClaimPinRule
+{
+    /// <summary>The caller supplies the model and tariff pair it will dispatch against; an unpinned identity is refused.</summary>
+    Supplied,
+
+    /// <summary>A wake dispatches nothing and supplies no pin: the claim uses the pair the run already stores, and is refused when none is stored.</summary>
+    InheritStored,
+}
+
 internal enum EffectStepStatus
 {
     /// <summary>The supplier answered and the outcome is recorded.</summary>
@@ -140,13 +150,21 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
 
     /// <summary>Claims the run for this executor. The epoch of the new lease is one more than the previous one.</summary>
     internal Task<ClaimResult> ClaimAsync(HarnessRun run, RunIdentity identity, CancellationToken cancellationToken) =>
-        ClaimAsync(run, identity, BudgetCharge.Zero, cancellationToken);
+        ClaimAsync(run, identity, BudgetCharge.Zero, ClaimPinRule.Supplied, cancellationToken);
 
     /// <summary>
     /// Claims the run. <paramref name="extraCharge"/> is the charge of what the caller does under the claim (a wake delivery and its resume read);
     /// it is written in the claim batch with the claim's own charge, so the counters never lag the calls.
     /// </summary>
-    internal async Task<ClaimResult> ClaimAsync(HarnessRun run, RunIdentity identity, BudgetCharge extraCharge, CancellationToken cancellationToken)
+    internal Task<ClaimResult> ClaimAsync(HarnessRun run, RunIdentity identity, BudgetCharge extraCharge, CancellationToken cancellationToken) =>
+        ClaimAsync(run, identity, extraCharge, ClaimPinRule.Supplied, cancellationToken);
+
+    /// <summary>
+    /// Claims the run under <paramref name="pinRule"/>. A dispatching caller supplies its pin (<see cref="ClaimPinRule.Supplied"/>). A wake dispatches
+    /// nothing and carries no pin, so it claims under the pin the run already stores (<see cref="ClaimPinRule.InheritStored"/>): the claim batch then
+    /// writes the same pair, and a run that never stored a pin is refused before any write.
+    /// </summary>
+    internal async Task<ClaimResult> ClaimAsync(HarnessRun run, RunIdentity identity, BudgetCharge extraCharge, ClaimPinRule pinRule, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(identity);
         if (identity.RunId != run.RunId) throw new ArgumentException("The identity names another run.", nameof(identity));
@@ -156,10 +174,18 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
         if (before.State is not (RunState.Queued or RunState.Running or RunState.Waiting or RunState.Interrupted))
             return new ClaimResult(ClaimStatus.NotClaimable, null, null);
 
-        // The pin is the model and tariff pair the run was first claimed with. A different pair, or an unpinned identity, is refused here and
-        // again in the claim batch, so no lease is taken and nothing is dispatched under a changed pin.
-        if (!identity.Pinned.IsPinned || (before.Pin is not null && !before.Pin.Matches(identity.Pinned)))
+        // The pin is the model and tariff pair the run was first claimed with. A different pair is refused here and again in the claim batch, so
+        // no lease is taken and nothing is dispatched under a changed pin. An inherited pin is the stored pair, so it cannot differ.
+        var pin = identity.Pinned;
+        if (pinRule == ClaimPinRule.InheritStored && !pin.IsPinned)
+        {
+            if (before.Pin is null) return new ClaimResult(ClaimStatus.PinRefused, null, null);
+            pin = before.Pin;
+        }
+
+        if (!pin.IsPinned || (before.Pin is not null && !before.Pin.Matches(pin)))
             return new ClaimResult(ClaimStatus.PinRefused, null, null);
+        identity = identity with { Pinned = pin };
 
         var holder = ids.NewId();
         var now = Micros();
