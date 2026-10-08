@@ -89,6 +89,7 @@
     "eng/migrations/sql.ts",
     "eng/policy/dependency-policy.json",
     "eng/policy/dependency-reviews/admission-r1.json",
+    "eng/policy/dependency-reviews/capacity-pacer-retire-r1.json",
     "eng/policy/dependency-reviews/cloud-01-r1.json",
     "eng/policy/dependency-reviews/cloud-02-r1.json",
     "eng/policy/dependency-reviews/cloud-03-r1.json",
