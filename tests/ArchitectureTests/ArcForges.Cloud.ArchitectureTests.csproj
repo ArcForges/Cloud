@@ -8,6 +8,14 @@
   <ItemGroup>
     <PackageReference Include="xunit.v3.mtp-v2" />
     <PackageReference Update="ArcForges.Build.Policy" GeneratePathProperty="true" />
+    <!-- The canonical naming scanner and policy (WP-05.02, P2-021 item 4). Build-only: the naming tests read its packaged files and nothing ships it. -->
+    <PackageReference Include="ArcForges.Contracts.Validation" GeneratePathProperty="true" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>NamingPackageRoot</_Parameter1>
+      <_Parameter2>$(PkgArcForges_Contracts_Validation)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
   <PropertyGroup>
     <LicenceBoundary>AGPL</LicenceBoundary>

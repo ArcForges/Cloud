@@ -2,12 +2,14 @@
   "schemaVersion": 1,
   "repository": "Cloud",
   "sourceCommit": "eaaafb11e6b3bd8af5b3bc9d770ea309fdb275cf",
-  "manifests": ["package.json"],
+  "manifests": [
+    "package.json"
+  ],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
     ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
     ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
-    "Directory.Packages.props": "1b4846a287dba86efcdf0fc5e29a2cc4a99a6d2ec9e3592579d9b4cc8e98e3ae",
+    "Directory.Packages.props": "8ae7a5a2f00ba8fad9189a37a65753cfd829fbe531a2454d1df44648911f1794",
     "Dockerfile": "932e9c9f575133302aa21915b34ab5b6e52b9fe35741b87f07093bc8ebe68ffa",
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
@@ -19,8 +21,8 @@
     "tests/ArcForges.Cloud.Consumer/packages.lock.json": "4c1c255b6f8ddd1d3a5fc577f47aa1f9f065b2482336792530a19f136e7909ff",
     "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "fd3a353d1de9cb23fd0c7849e353f982c246b83c2e3103d71b7ca5947460c13e",
     "tests/ArcForges.Cloud.Tests/packages.lock.json": "94fb6841e591445132e29d80743eee666ba172cdae993457e3c98a2456c6243c",
-    "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj": "d19471c5dc68dd8c006d533ce763ee0f24c8dca44cb7b58eddb23e325c2de151",
-    "tests/ArchitectureTests/packages.lock.json": "f6d230ccd616da3f2445e37a8ecaae3bf97b52efdbf46555ff60bf8ebcbe0c53",
+    "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj": "93123c0f27e3816e951938a556298a209e25851757b0cc7c43bf2baf37c23cf1",
+    "tests/ArchitectureTests/packages.lock.json": "32ce93118af6a518c20c35b0d5f7058e41b8872d8037883c71602c41d56b2904",
     "tests/kotlin-consumer/build.gradle.kts": "05c1cb296b5f5b66c4f75282c44383a32a8a596c330c14fd782e1912919c8394",
     "tests/kotlin-consumer/gradle.lockfile": "0a6640ce98f60bf6e38bf19158fc87e68e33e1934eb3ede2df75b614a6b18c47",
     "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
@@ -80,12 +82,12 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "PENDING: independent reviewer session, named at review time; the authoring worker w-deku-20261008-har-40 is not the reviewer",
     "date": "2026-10-08",
-    "rationale": "Successor of har-40-r1 for HAR.40 step 3 (proof drivers, offline proof helper tests, docs and validation). package.json: adds three npm scripts (test:harness:ai, test:harness:executor, test:harness:capacity) that run the local opt-in proof drivers under eng/verification, and adds tests/worker/harness-proof.test.ts to the offline test script. No dependency, version, lock, closure, licence or npm coordinate changes; no registry package is added. wrangler.json, the Worker bundle, the release profile and the runtime notices are unchanged by this receipt. The new proof drivers are local opt-in, refuse to run under CI, read no credential and add no package. The reviewer field stays PENDING until an independent reviewer session is named at review time.",
+    "rationale": "Successor of har-40-r2 for HAR.40 review findings (naming gate and GOV.10 successor architecture rules). Adds the build-only NuGet ArcForges.Contracts.Validation 1.0.0-ci.205.1 (the CON.23 naming identity, GOV.14 binding, Contracts source 696242d16034262ce8b7268e8d157cd0e5bee544, an ancestor of Contracts origin/main; archive SHA512 OWvMF30zpN6ms2KlQCtax5P7TACrgK50Vb0drN5zy4iXgk2TZd+5UU+LDGaA2ioowA1EQIZx8ZUyRoayZaHadA==) to Directory.Packages.props (central version) and to the architecture test host as PackageReference with PrivateAssets all, so the naming tests read its packaged scanner and policy and nothing ships it. The host lock tests/ArchitectureTests/packages.lock.json gains the naming package as Direct and its locked transitive closure: ArcForges.Contracts.Events, ArcForges.Contracts.PublicApi and ArcForges.Sdk.Contracts at 1.0.0-ci.205.1 (each source commit 696242d, verified in its packaged source.json), ArcForges.Contracts.Foundation at 1.0.0-ci.287.1 (already admitted), Google.Protobuf 3.36.1 and Grpc.Core.Api 2.84.0 (already admitted). eng/policy/naming-candidate.json is retargeted from the npm @arcforges/proto 1.0.0-ci.287.1 publication, which is provenance only, to the NuGet identity; tooling/project.ts verifies the restored archive SHA512, the packaged source commit and both packaged SHA256 values (scanner 7c4cd704..., policy f5d59629...) before python -I runs the scanner. The single-candidate Contracts rule excludes this build-only identity by name and still requires its exact pin. No runtime package, licence, npm coordinate or npm closure entry changes; @arcforges/proto stays an unused devDependency until its own successor receipt retires it. The reviewer field stays PENDING until an independent reviewer session is named at review time.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
       ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
-      "Directory.Packages.props": "1b4846a287dba86efcdf0fc5e29a2cc4a99a6d2ec9e3592579d9b4cc8e98e3ae",
+      "Directory.Packages.props": "8ae7a5a2f00ba8fad9189a37a65753cfd829fbe531a2454d1df44648911f1794",
       "Dockerfile": "932e9c9f575133302aa21915b34ab5b6e52b9fe35741b87f07093bc8ebe68ffa",
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
@@ -97,8 +99,8 @@
       "tests/ArcForges.Cloud.Consumer/packages.lock.json": "4c1c255b6f8ddd1d3a5fc577f47aa1f9f065b2482336792530a19f136e7909ff",
       "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "fd3a353d1de9cb23fd0c7849e353f982c246b83c2e3103d71b7ca5947460c13e",
       "tests/ArcForges.Cloud.Tests/packages.lock.json": "94fb6841e591445132e29d80743eee666ba172cdae993457e3c98a2456c6243c",
-      "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj": "d19471c5dc68dd8c006d533ce763ee0f24c8dca44cb7b58eddb23e325c2de151",
-      "tests/ArchitectureTests/packages.lock.json": "f6d230ccd616da3f2445e37a8ecaae3bf97b52efdbf46555ff60bf8ebcbe0c53",
+      "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj": "93123c0f27e3816e951938a556298a209e25851757b0cc7c43bf2baf37c23cf1",
+      "tests/ArchitectureTests/packages.lock.json": "32ce93118af6a518c20c35b0d5f7058e41b8872d8037883c71602c41d56b2904",
       "tests/kotlin-consumer/build.gradle.kts": "05c1cb296b5f5b66c4f75282c44383a32a8a596c330c14fd782e1912919c8394",
       "tests/kotlin-consumer/gradle.lockfile": "0a6640ce98f60bf6e38bf19158fc87e68e33e1934eb3ede2df75b614a6b18c47",
       "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
@@ -163,8 +165,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No framework, runtime, Worker source or coordinate change. The proof drivers run only on a developer machine: the fixture AI proof uses the real ai.internal handler under Node with a labelled fixture binding; the executor proof runs the offline C# crash and executor suites; the capacity proof reads wrangler.json and probes a deployed proof origin only when the operator supplies one. None of them is in the hosted pipeline.",
-    "maintenance": "The migration list is append-only from the live tag; never edit or reuse v1, capacity-pacer-v1 or retire-capacity-pacer-v1. A later task that needs a production schedule declares it in the top-level triggers; env.proof keeps its own triggers declaration so top-level schedules are never inherited. The nested Sharp override and its removal condition from sharp-0-35-5-r1 are unchanged. The mandatory high-severity npm audit and dependency-review gates remain enabled. Earlier immutable receipts and provenance records are retained; any later version, closure, licence or artifact change needs its own reviewed successor.",
+    "runtimeAssessment": "No runtime coordinate changes. The naming package is referenced only by the offline architecture test host with PrivateAssets all, so it is not in any shipped closure, Worker bundle, release profile or runtime notice. The naming scan runs in the local check gate and in the offline architecture tests; no hosted live or inference check is added.",
+    "maintenance": "The naming candidate changes only by a reviewed successor that retargets naming-candidate.json, Directory.Packages.props, the architecture host and this receipt together. A new Contracts line must cite its source commit as an ancestor of the producer's main (the rolled-back package rule). Earlier immutable receipts are retained.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
   },
@@ -1000,7 +1002,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/har-40-r2.json",
+  "reviewRecord": "eng/policy/dependency-reviews/har-40-r3.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

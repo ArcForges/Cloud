@@ -8,6 +8,20 @@
         "resolved": "1.0.0-ci.94.1",
         "contentHash": "PCpeEXikk2m87zhMF6L8tbHe2QrI87mO4Nc5lJBenEDhOePwwV4TkArc6IaM1G11Pm8ojVjurLAIoPW22ozb/A=="
       },
+      "ArcForges.Contracts.Validation": {
+        "type": "Direct",
+        "requested": "[1.0.0-ci.205.1, )",
+        "resolved": "1.0.0-ci.205.1",
+        "contentHash": "qgcp1h5V4uZc/LfEBRZ9876a1aZjUqWwV56UI9c0O0yDpu4mpbL4mA2c62YnTZf8XaxTHBPEttjU15geYycv5g==",
+        "dependencies": {
+          "ArcForges.Contracts.Events": "1.0.0-ci.205.1",
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.205.1",
+          "ArcForges.Contracts.PublicApi": "1.0.0-ci.205.1",
+          "ArcForges.Sdk.Contracts": "1.0.0-ci.205.1",
+          "Google.Protobuf": "3.36.1",
+          "Grpc.Core.Api": "2.84.0"
+        }
+      },
       "xunit.v3.mtp-v2": {
         "type": "Direct",
         "requested": "[4.0.1, )",
@@ -18,6 +32,43 @@
           "xunit.v3.assert": "[4.0.1]",
           "xunit.v3.core.mtp-v2": "[4.0.1]"
         }
+      },
+      "ArcForges.Contracts.Events": {
+        "type": "Transitive",
+        "resolved": "1.0.0-ci.205.1",
+        "contentHash": "8Vp9JbBlENBhLcFTiVNSQ1kBZFWpUCc3ws5imLW2Yx8pw1/ZZjGhfVmFbNWOChYt0sDfeWBM3+WJVFVzl46EWw==",
+        "dependencies": {
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.205.1",
+          "Google.Protobuf": "3.36.1"
+        }
+      },
+      "ArcForges.Contracts.Foundation": {
+        "type": "Transitive",
+        "resolved": "1.0.0-ci.287.1",
+        "contentHash": "Jwe5Z6K57vDsKmcxQFbbwyQZQUQsOkzYH26ogQIRb/biRtaGxLCtOsNg4felCuNTJt9bwRmC6AGx3eJyCoCk/g==",
+        "dependencies": {
+          "Google.Protobuf": "3.36.1"
+        }
+      },
+      "ArcForges.Sdk.Contracts": {
+        "type": "Transitive",
+        "resolved": "1.0.0-ci.205.1",
+        "contentHash": "DE9NESb1QcitCMuUWgTXNzLKU7df+VY5aMIWpqmIM8xQgvu68R4Q/VbemN01UfBw10Q1N1qUs02MyMcpp8ki6g==",
+        "dependencies": {
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.205.1",
+          "Google.Protobuf": "3.36.1",
+          "Grpc.Core.Api": "2.84.0"
+        }
+      },
+      "Google.Protobuf": {
+        "type": "Transitive",
+        "resolved": "3.36.1",
+        "contentHash": "77AqPEoaY1ODE+syYBHti0jXiwQq0J/fUr/fRyYhNlc9oKtH5dZZEr/OLKtdKNVG83PRnCYB2r8B80ZrObzOGQ=="
+      },
+      "Grpc.Core.Api": {
+        "type": "Transitive",
+        "resolved": "2.84.0",
+        "contentHash": "p2SOMl6q/GZ4/5MLkgboC/z55g4zKUEruRn/g46QgppjQBVnsLZVBU/9VO7n60ll38G3Eo8Zu9b7x+W01GKFVg=="
       },
       "Microsoft.ApplicationInsights": {
         "type": "Transitive",
@@ -125,6 +176,17 @@
         "dependencies": {
           "xunit.v3.extensibility.core": "[4.0.1]",
           "xunit.v3.runner.common": "[4.0.1]"
+        }
+      },
+      "ArcForges.Contracts.PublicApi": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.0-ci.287.1, )",
+        "resolved": "1.0.0-ci.287.1",
+        "contentHash": "/chAZbT/NTs4yyQBV5dgh37/dWBTKt3PHCikIidI9T90LheydsJoCWxKHGC6Tjzw0rqA62rYxnQfXGzKhTea5Q==",
+        "dependencies": {
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.287.1",
+          "Google.Protobuf": "3.36.1",
+          "Grpc.Core.Api": "2.84.0"
         }
       }
     }
