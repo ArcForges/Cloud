@@ -8,6 +8,7 @@ import { handleExecutePlan } from "./storage/handler.ts";
 
 export { ContainerProxy };
 export { FoundationJobCoordinator } from "./foundation/durable.ts";
+export { HarnessRunAlarm } from "./harness/run-alarm.ts";
 
 // The production Container class is exactly the Hello class: no outbound interception, no
 // environment hook, and nothing registered on it, so its start sequence is unchanged.

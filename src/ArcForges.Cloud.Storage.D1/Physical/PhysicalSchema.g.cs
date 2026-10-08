@@ -8,13 +8,13 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "0273dbd090cdc2cb7db14327aac86cd9eb4600775415eebdebc31dd34e9fd6ac";
+    public const string ManifestHash = "ca9fc0f47ef3a6851f7d93f6923c50b990ab3e6a81dab92db8709f106db07e65";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
-    public const int HighestMigration = 24;
+    public const int HighestMigration = 25;
 
     /// <summary>SHA-256 over the ordered sequence and checksum of every locked migration.</summary>
-    public const string MigrationLockHash = "53751e3f5bd780159f8cfa607c41b5d57fbd1f3e038b6e6ad0ac818229a362c9";
+    public const string MigrationLockHash = "842610f83c70475f6f98d55b6db59e7d9f9d937d8c928011ef4065dcda014c2b";
 
     public static IReadOnlyList<PhysicalEnum> Enums { get; } =
     [
@@ -2616,6 +2616,20 @@ internal static partial class PhysicalSchema
         ],
         ["run_id"]);
 
+    public static PhysicalTable TaskHarnessBudget { get; } = new(
+        "task_harness_budget",
+        "task",
+        [
+            new("run_id", PhysicalKind.Id, false),
+            new("counted_steps", PhysicalKind.Int64, false),
+            new("subrequests", PhysicalKind.Int64, false),
+            new("model_calls", PhysicalKind.Int64, false),
+            new("tool_invocations", PhysicalKind.Int64, false),
+            new("updated_at", PhysicalKind.Instant, false),
+            new("rev", PhysicalKind.Rev, false),
+        ],
+        ["run_id"]);
+
     public static PhysicalTable TaskIterationOutput { get; } = new(
         "task_iteration_output",
         "task",
@@ -3009,6 +3023,7 @@ internal static partial class PhysicalSchema
         TaskControlReceipt,
         TaskExecutionCommand,
         TaskExecutionLease,
+        TaskHarnessBudget,
         TaskIterationOutput,
         TaskPlanStep,
         TaskRun,

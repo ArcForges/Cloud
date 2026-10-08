@@ -54,13 +54,18 @@ test("the checked-in proof environment is isolated from the production Worker", 
   // subclass that registers outbound interception.
   const classes = (value: unknown) => JSON.stringify(value).match(/"class_name":"[^"]+"/gu);
   assert.deepEqual(classes(top.containers), ['"class_name":"CloudContainer"']);
-  assert.deepEqual(classes(top.durable_objects), ['"class_name":"CloudContainer"']);
+  // HarnessRunAlarm (HAR.40) is the wake-only alarm adapter: it holds a wake handle and no run state.
+  assert.deepEqual(classes(top.durable_objects), [
+    '"class_name":"CloudContainer"',
+    '"class_name":"HarnessRunAlarm"',
+  ]);
   // The live script recorded the discarded build's capacity-pacer-v1 tag; that history is kept
   // and the class it added is retired. Only the deletion is applied after the live tag.
   assert.deepEqual(top.migrations, [
     { tag: "v1", new_sqlite_classes: ["CloudContainer"] },
     { tag: "capacity-pacer-v1", new_sqlite_classes: ["CapacityJobPacer"] },
     { tag: "retire-capacity-pacer-v1", deleted_classes: ["CapacityJobPacer"] },
+    { tag: "harness-run-alarm-v1", new_sqlite_classes: ["HarnessRunAlarm"] },
   ]);
   assert.deepEqual(classes(proof.containers), ['"class_name":"FoundationContainer"']);
   assert.deepEqual(

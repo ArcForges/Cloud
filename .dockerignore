@@ -67,6 +67,14 @@
 !src/ArcForges.Cloud.Modules.*/Core/Application/*.cs
 !src/ArcForges.Cloud.Modules.*/Core/Infrastructure/
 !src/ArcForges.Cloud.Modules.*/Core/Infrastructure/*.cs
+!src/ArcForges.Cloud.Modules.Task/Harness/
+!src/ArcForges.Cloud.Modules.Task/Harness/Executor/
+!src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/
+!src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/*.cs
+!src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/
+!src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/*.cs
+!src/ArcForges.Cloud.Modules.Task/Harness/Executor/Infrastructure/
+!src/ArcForges.Cloud.Modules.Task/Harness/Executor/Infrastructure/*.cs
 !artifacts/
 !artifacts/image-notices/
 !artifacts/image-notices/**
