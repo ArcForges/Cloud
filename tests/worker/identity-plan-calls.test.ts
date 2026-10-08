@@ -264,7 +264,7 @@ function document() {
 }
 
 test("the vector file equals what the builders produce for its inputs", () => {
-  if (process.env["IDENTITY_VECTORS_UPDATE"] === "1")
+  if (process.env.IDENTITY_VECTORS_UPDATE === "1")
     writeFileSync(vectorPath, `${JSON.stringify(document(), null, 2)}\n`);
   const stored = JSON.parse(readFileSync(vectorPath, "utf8")) as unknown;
   assert.deepEqual(stored, JSON.parse(JSON.stringify(document())));

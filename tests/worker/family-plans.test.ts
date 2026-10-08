@@ -122,7 +122,7 @@ test("the repository registry parses and the fixture registry parses", () => {
 
 test("a malformed registry is refused, and Support and TrustSafety cannot participate", () => {
   const participants = (entry: Record<string, unknown>) =>
-    entry["participants"] as Record<string, unknown>[];
+    entry.participants as Record<string, unknown>[];
   const cases: [string, (entry: Record<string, unknown>) => void, RegExp][] = [
     [
       "a participant outside the SU-04 order (support)",
@@ -166,20 +166,20 @@ test("a malformed registry is refused, and Support and TrustSafety cannot partic
     ],
     [
       "fewer than two participants",
-      (entry) => (entry["participants"] = [{ module: "config", requirement: "required" }]),
+      (entry) => (entry.participants = [{ module: "config", requirement: "required" }]),
       /at least two participants/u,
     ],
     [
       "no required participant",
       (entry) =>
-        (entry["participants"] = [
+        (entry.participants = [
           { module: "config", requirement: "conditional", when: "x" },
           { module: "sync", requirement: "conditional", when: "y" },
         ]),
       /needs a required participant/u,
     ],
-    ["a malformed family id", (entry) => (entry["family"] = "Bad_Id"), /invalid family id/u],
-    ["an extra family field", (entry) => (entry["owner"] = "x"), /fields of/u],
+    ["a malformed family id", (entry) => (entry.family = "Bad_Id"), /invalid family id/u],
+    ["an extra family field", (entry) => (entry.owner = "x"), /fields of/u],
   ];
   for (const [name, change, expected] of cases)
     assert.throws(() => parseFamilyRegistry(registryWith(change)), expected, name);

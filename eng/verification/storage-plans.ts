@@ -521,9 +521,9 @@ export function parseFamilyRegistry(text: string): FamilyRegistry {
     assert.deepEqual(
       Object.keys(entry).sort(),
       ["family", "participants", "source", "title"],
-      `${familyRegistryFile}: fields of ${String(entry["family"])}`,
+      `${familyRegistryFile}: fields of ${String(entry.family)}`,
     );
-    const family = String(entry["family"]);
+    const family = String(entry.family);
     assert(familyPattern.test(family), `${familyRegistryFile}: invalid family id ${family}`);
     assert(!seen.has(family), `${familyRegistryFile}: duplicate family ${family}`);
     seen.add(family);
@@ -534,13 +534,10 @@ export function parseFamilyRegistry(text: string): FamilyRegistry {
         `${familyRegistryFile}: ${family} ${field}`,
       );
     }
-    assert(
-      Array.isArray(entry["participants"]),
-      `${familyRegistryFile}: participants of ${family}`,
-    );
+    assert(Array.isArray(entry.participants), `${familyRegistryFile}: participants of ${family}`);
     const participants: FamilyParticipant[] = [];
-    for (const raw of entry["participants"] as Record<string, unknown>[]) {
-      const module = String(raw["module"]);
+    for (const raw of entry.participants as Record<string, unknown>[]) {
+      const module = String(raw.module);
       assert(
         (lockOrder as readonly string[]).includes(module),
         `${familyRegistryFile}: ${family}: module ${module} has no position in the SU-04 order; the Architecture Owner must extend the order before it may participate`,
@@ -549,12 +546,12 @@ export function parseFamilyRegistry(text: string): FamilyRegistry {
         !participants.some((participant) => participant.module === module),
         `${familyRegistryFile}: ${family}: duplicate participant ${module}`,
       );
-      const requirement = raw["requirement"];
+      const requirement = raw.requirement;
       assert(
         requirement === "required" || requirement === "conditional",
         `${familyRegistryFile}: ${family}: requirement of ${module}`,
       );
-      const when = raw["when"];
+      const when = raw.when;
       if (requirement === "conditional")
         assert(
           typeof when === "string" && when.length >= 1 && when.length <= 200,
@@ -588,8 +585,8 @@ export function parseFamilyRegistry(text: string): FamilyRegistry {
     );
     families.push({
       family,
-      title: String(entry["title"]),
-      source: String(entry["source"]),
+      title: String(entry.title),
+      source: String(entry.source),
       participants,
     });
   }

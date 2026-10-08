@@ -12,7 +12,7 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-    "package.json": "2307d69c48dd472085f40a7d74dfd1dce1d5aac04f8f50fe5222f57457048979",
+    "package.json": "cb41ad481365a822b59a2f1a432c7e5d98f70acf54aded41f5df46cdbbd2d985",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -26,7 +26,7 @@
     "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
     "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
     "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-    "wrangler.json": "82ad2ab115e0a86e2a29e986e59bc328e00811d2df1833490f4effa04a100f7b",
+    "wrangler.json": "f0ffa228de21b33d6664d911c32c150ab58f6e194778d1dc7051986bebec9c96",
     "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
     "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
     ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
@@ -78,9 +78,9 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "ArcForges delivery worker w-c20261008-cloud-retire-pacer (maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "reviewer": "PENDING: independent reviewer session, named at review time; the authoring worker w-deku-20261008-har-40 is not the reviewer",
     "date": "2026-10-08",
-    "rationale": "Retires the Durable Object class CapacityJobPacer and the production cron schedule that builds later discarded from main (CLOUD.07, PR #72, first deployed by main run 37548538476) added to the production Worker. The class came through migration capacity-pacer-v1; the baseline migration list lacked that tag, so Wrangler replayed v1 and Cloudflare refused the deployment of c77aace (error 10074). The top-level migrations of wrangler.json keep v1, record capacity-pacer-v1 exactly as the live script applied it and append retire-capacity-pacer-v1 with deleted_classes CapacityJobPacer. The discarded builds also registered the schedule '* * * * *', which Wrangler leaves in place unless triggers.crons is declared; production now declares an empty crons list to remove it, and env.proof declares an empty triggers object so it inherits nothing and its schedules stay untouched. wrangler.json is a hash-bound input, so it is re-bound here by this immutable successor receipt of capacity-pacer-retire-r1. No binding, export, variable, route, Container setting or runtime source changes, and the Worker bundle, release profile cloud-release-r37 and runtime notices are unchanged. No npm or NuGet coordinate, integrity value or closure entry changes, and no new native capability or broader source reuse permission is created.",
+    "rationale": "Successor of har-40-r1 for HAR.40 step 3 (proof drivers, offline proof helper tests, docs and validation). package.json: adds three npm scripts (test:harness:ai, test:harness:executor, test:harness:capacity) that run the local opt-in proof drivers under eng/verification, and adds tests/worker/harness-proof.test.ts to the offline test script. No dependency, version, lock, closure, licence or npm coordinate changes; no registry package is added. wrangler.json, the Worker bundle, the release profile and the runtime notices are unchanged by this receipt. The new proof drivers are local opt-in, refuse to run under CI, read no credential and add no package. The reviewer field stays PENDING until an independent reviewer session is named at review time.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -90,7 +90,7 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-      "package.json": "2307d69c48dd472085f40a7d74dfd1dce1d5aac04f8f50fe5222f57457048979",
+      "package.json": "cb41ad481365a822b59a2f1a432c7e5d98f70acf54aded41f5df46cdbbd2d985",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -104,7 +104,7 @@
       "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
       "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
       "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-      "wrangler.json": "82ad2ab115e0a86e2a29e986e59bc328e00811d2df1833490f4effa04a100f7b",
+      "wrangler.json": "f0ffa228de21b33d6664d911c32c150ab58f6e194778d1dc7051986bebec9c96",
       "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
       "Directory.Build.targets": "fa4bf35487140fecd21b71a2fb524792631a292df2313f9440f8c6e7e90a82d2",
       ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
@@ -163,7 +163,7 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No framework, runtime, Worker source or coordinate changes. Only the production Durable Object migration list and cron triggers change; Wrangler 4.143.1 uploads only the steps after the live tag, so the deployment applies the single class deletion, and it replaces the production schedules with an empty list. Deleting the class discards its storage; it held scheduling hints only and was never enabled in production. The baseline Worker has no scheduled handler and needs no schedule. Source/type checks, the pinned migration and trigger tests and the existing CI compilation, Native AOT packaging and candidate verification apply. No local runtime/performance scenario, macOS or other-platform native execution is asserted.",
+    "runtimeAssessment": "No framework, runtime, Worker source or coordinate change. The proof drivers run only on a developer machine: the fixture AI proof uses the real ai.internal handler under Node with a labelled fixture binding; the executor proof runs the offline C# crash and executor suites; the capacity proof reads wrangler.json and probes a deployed proof origin only when the operator supplies one. None of them is in the hosted pipeline.",
     "maintenance": "The migration list is append-only from the live tag; never edit or reuse v1, capacity-pacer-v1 or retire-capacity-pacer-v1. A later task that needs a production schedule declares it in the top-level triggers; env.proof keeps its own triggers declaration so top-level schedules are never inherited. The nested Sharp override and its removal condition from sharp-0-35-5-r1 are unchanged. The mandatory high-severity npm audit and dependency-review gates remain enabled. Earlier immutable receipts and provenance records are retained; any later version, closure, licence or artifact change needs its own reviewed successor.",
     "previous": null,
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
@@ -1000,7 +1000,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/capacity-pacer-retire-r2.json",
+  "reviewRecord": "eng/policy/dependency-reviews/har-40-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

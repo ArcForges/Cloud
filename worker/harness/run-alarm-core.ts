@@ -38,8 +38,22 @@ export function parseSchedule(
   return { ok: true, handle: { workspaceId, runId, wakeAtMs, attempts: 0 } };
 }
 
-/** The signed body of one wake. It carries identifiers only; the C# endpoint decides everything else. */
-export function wakeBody(handle: WakeHandle): Uint8Array {
+/**
+ * The Cloudflare Worker version identifier, as the Worker reports it (version metadata). It is a bounded token and is kept apart from the
+ * Cloud build identity, which the C# side supplies itself (HAR.40 validation (g)).
+ */
+const workerVersionPattern = /^[A-Za-z0-9._:-]{1,128}$/u;
+export function isWorkerVersion(value: unknown): value is string {
+  return typeof value === "string" && workerVersionPattern.test(value);
+}
+
+/**
+ * The signed body of one wake. It carries identifiers, a time and the Worker version identifier, and nothing else; the C# endpoint
+ * decides everything else. The caller must supply a valid Worker version; the body is never built without one.
+ */
+export function wakeBody(handle: WakeHandle, workerVersion: string): Uint8Array {
+  if (!isWorkerVersion(workerVersion))
+    throw new Error("A wake needs a bounded Worker version identifier.");
   return new TextEncoder().encode(
     JSON.stringify({
       v: 1,
@@ -47,6 +61,7 @@ export function wakeBody(handle: WakeHandle): Uint8Array {
       workspaceId: handle.workspaceId,
       runId: handle.runId,
       wakeAtMs: handle.wakeAtMs,
+      workerVersion,
     }),
   );
 }

@@ -9,6 +9,7 @@ import { newNonce, sign } from "../private/signing.ts";
 import {
   afterFailure,
   harnessContainerName,
+  isWorkerVersion,
   parseSchedule,
   readHandle,
   wakeBody,
@@ -19,6 +20,8 @@ import {
 
 export interface RunAlarmEnv extends PrivateKeyEnv {
   CLOUD_CONTAINER: ContainerNamespaceLike;
+  /** The Worker's version metadata binding (wrangler version_metadata); its id is the Worker version identifier of the wake. */
+  CF_VERSION_METADATA?: { readonly id: string };
 }
 
 /** The only storage key the alarm uses; it holds the wake handle and nothing else. */
@@ -69,7 +72,10 @@ export class HarnessRunAlarm extends DurableObject<RunAlarmEnv> {
   private async deliver(handle: WakeHandle): Promise<boolean> {
     const keys = loadKeys(this.env, "W2C");
     if (!keys) return false;
-    const body = wakeBody(handle);
+    // Without the Worker version identifier the wake is not sent; the alarm keeps its handle and retries on the bounded schedule.
+    const workerVersion = this.env.CF_VERSION_METADATA?.id;
+    if (!isWorkerVersion(workerVersion)) return false;
+    const body = wakeBody(handle, workerVersion);
     const headers = await sign(
       {
         method: "POST",

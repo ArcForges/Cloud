@@ -13,6 +13,30 @@ namespace ArcForges.Cloud.ArchitectureTests;
 /// </summary>
 public sealed class EvaluatedRepositoryGate
 {
+    /// <summary>The offline model dispatch tests (HAR.40 (c)) that exercise the dispatch port, its client and the envelope admission.</summary>
+    private static readonly string[] DispatchTests =
+    [
+        "ASuccessfulCallSendsTheClosedEnvelopeWithTheFrozenRequestAndReturnsTheAnswer", "EveryPreDispatchAdmissionRefusesWithoutAnyCall",
+        "ARequestOverTheCallerCapIsRefusedBeforeAnyCall", "ARefusedAdmissionSpendsNoToken", "ARequestThatCannotBeSerialisedSpendsNoToken",
+        "ThePerModelTokenBucketRefusesAnEmptyBucketAndRefillsWithTime", "AnAdapterRefusalIsAPreDispatchRefusal",
+        "AnAdapterFailureAfterTheBindingIsUnknownAndNeverRetried", "ATransportFailureIsUnknown", "ACallThatOutlastsItsDeadlineIsUnknownWithTheDeadlineReason",
+        "ACallerCancellationIsUnknownWithTheCancelledReason", "AnAnswerOverTheCallerCapOrNotAJsonObjectIsUnknown",
+    ];
+
+    /// <summary>The offline wake tests (HAR.40 (f) and (g)) that exercise the wake service and its claim under the Worker version.</summary>
+    private static readonly string[] WakeTests =
+    [
+        "AWakeClaimsAQueuedRunUnderTheWorkerVersionAndReleasesItToWaiting", "AWakeForAHeldOrAbsentRunIsTakenAndChangesNothing",
+        "AWakeWhoseReleaseCannotSettleIsStoppedSoItIsRetried", "AWakeWithAMalformedWorkerVersionIsRefusedByTheService",
+    ];
+
+    /// <summary>The wake route tests: the route exists only under the foundation configuration and verifies before it parses.</summary>
+    private static readonly string[] RouteTests =
+    [
+        "TheEndpointVerifiesBeforeItParsesAndAnswersThroughItsStatusCodes", "WithoutAWakePortTheRouteDoesNotExist",
+        "TheWakePathIsDeclaredToTheIngressOnlyUnderTheFoundationConfiguration",
+    ];
+
     /// <summary>The public Cloud API and the real test methods that exercise each member. A new public member fails RP-10 until mapped here.</summary>
     private static readonly (string Api, string Method, string TestType, string[] Tests)[] ApiTests =
     [
@@ -45,6 +69,20 @@ public sealed class EvaluatedRepositoryGate
         ("ArcForges.Cloud.Modules.IModulePlanPortFactory", "For", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
             ["APlanOfAnotherOwnerIsRefusedBeforeAnythingIsSent", "AnUnknownPlanAndAnAccessMismatchAreCallerDefectsThatNeverReachTheExecutor"]),
         ("ArcForges.Cloud.Modules.ModulePlanOutcome", "Of", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests", ["EveryPlanFailureBecomesATypedStatus"]),
+        // HAR.40: the model dispatch port and its client (Agent module), the wake port (Task module) and the wake route. The real tests are the
+        // offline dispatch and wake suites of ArcForges.Cloud.Tests.HarnessFoundation; the wake route is exercised through the composed host.
+        ("ArcForges.Cloud.Modules.IModelDispatchPort", "SnapshotOf", "ArcForges.Cloud.Tests.HarnessFoundation.AgentDispatchTests", ["ASnapshotExistsOnlyForAnAdmittedModel"]),
+        ("ArcForges.Cloud.Modules.IModelDispatchPort", "DispatchAsync", "ArcForges.Cloud.Tests.HarnessFoundation.AgentDispatchTests", DispatchTests),
+        ("ArcForges.Cloud.Modules.Agent.Dispatch.Application.ModelDispatchClient", "SnapshotOf", "ArcForges.Cloud.Tests.HarnessFoundation.AgentDispatchTests", ["ASnapshotExistsOnlyForAnAdmittedModel"]),
+        ("ArcForges.Cloud.Modules.Agent.Dispatch.Application.ModelDispatchClient", "DispatchAsync", "ArcForges.Cloud.Tests.HarnessFoundation.AgentDispatchTests", DispatchTests),
+        ("ArcForges.Cloud.Modules.Agent.Dispatch.Domain.ModelDispatchOptions", "Create", "ArcForges.Cloud.Tests.HarnessFoundation.AgentDispatchTests",
+            ["TheBaseAddressIsExactlyTheAiInternalRootOverPlainHttp", "AnAdmittedSetAndItsCapsAreBoundedWhenTheOptionsAreBuilt"]),
+        ("ArcForges.Cloud.Modules.IHarnessWakePort", "Authenticate", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessWakeTests", ["TheServiceAuthenticatesOnlyWhatTheHostVerifierAccepts"]),
+        ("ArcForges.Cloud.Modules.IHarnessWakePort", "HandleAsync", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessWakeTests", WakeTests),
+        ("ArcForges.Cloud.Modules.Task.Harness.Wake.HarnessWakeService", "Authenticate", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessWakeTests", ["TheServiceAuthenticatesOnlyWhatTheHostVerifierAccepts"]),
+        ("ArcForges.Cloud.Modules.Task.Harness.Wake.HarnessWakeService", "HandleAsync", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessWakeTests", WakeTests),
+        ("ArcForges.Cloud.Modules.Task.Harness.Wake.HarnessWakeEndpoint", "Map", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessWakeTests", RouteTests),
+        ("ArcForges.Cloud.Modules.Task.TaskModule", "Map", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessWakeTests", RouteTests),
         .. new[] { "FromInt64", "FromBool", "FromText", "FromBytes", "FromOptionalText", "AsInt64", "AsBool", "AsText", "AsBytes", "AsOptionalText", "AsOptionalInt64", "Equals", "GetHashCode", "ToString" }
             .Select(member => ("ArcForges.Cloud.Modules.PlanValue", member, "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
                 new[] { "PlanValuesAreExactAndNeverDescribeTheirContent", "ARoundTripCarriesExactTypedValuesTheScopeAndTheRecoveryGeneration" })),

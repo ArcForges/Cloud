@@ -29,7 +29,7 @@ type Db = ReturnType<typeof openFamilyD1>;
 const attempt = (db: Db, values: FixtureValues) =>
   runFamily(db, dictionary, fixtureArguments(values), ids.workspace);
 const guardRows = (db: Db) =>
-  Number(db.database.prepare("SELECT COUNT(*) AS n FROM platform_command_guard").get()?.["n"]);
+  Number(db.database.prepare("SELECT COUNT(*) AS n FROM platform_command_guard").get()?.n);
 type State = Record<string, unknown[][]>;
 
 function seeded(overrides: Parameters<typeof seed>[1] = {}) {
@@ -43,11 +43,11 @@ test("a batch whose guards all hold commits every mutation and the receipt and l
   const result = await attempt(db, defaults());
   assert.equal(result.ok, true);
   const state = snapshot(db) as State;
-  assert.deepEqual(state["budget"], [["13", "2", "4"]]);
-  assert.deepEqual(state["revision"], [["8"]]);
-  assert.deepEqual(state["suppression"], [[ids.recipientHash, "1"]]);
-  assert.equal(state["commands"]?.length, 1);
-  assert.deepEqual(state["guards"], []);
+  assert.deepEqual(state.budget, [["13", "2", "4"]]);
+  assert.deepEqual(state.revision, [["8"]]);
+  assert.deepEqual(state.suppression, [[ids.recipientHash, "1"]]);
+  assert.equal(state.commands?.length, 1);
+  assert.deepEqual(state.guards, []);
   assert.equal(db.rollbacks(), 0);
 });
 
@@ -140,13 +140,10 @@ test("two writers that read the same revision: one commits, the other is refused
   const reread = { ...b, revision: "8", budgetRev: "4", usedBefore: "13", usedAfter: "15" };
   assert.equal((await attempt(second, reread)).ok, true);
   const state = snapshot(first) as State;
-  assert.deepEqual(state["budget"], [["15", "2", "5"]]);
-  assert.deepEqual(state["revision"], [["9"]]);
-  assert.equal(state["commands"]?.length, 2, "each command is recorded once");
-  assert.deepEqual(state["suppression"]?.map((row) => row[0]).sort(), [
-    "recipient-a",
-    "recipient-b",
-  ]);
+  assert.deepEqual(state.budget, [["15", "2", "5"]]);
+  assert.deepEqual(state.revision, [["9"]]);
+  assert.equal(state.commands?.length, 2, "each command is recorded once");
+  assert.deepEqual(state.suppression?.map((row) => row[0]).sort(), ["recipient-a", "recipient-b"]);
 });
 
 test("a lost response replayed under the same command applies nothing twice, whether its values are stale or current", async () => {
@@ -227,7 +224,7 @@ test("balances compare exactly above 2^53 and at the int64 bound, never through 
     (await attempt(db, { ...defaults(), usedBefore: exact, usedAfter: "9223372036854775807" })).ok,
     true,
   );
-  assert.deepEqual((snapshot(db) as State)["budget"], [["9223372036854775807", "2", "4"]]);
+  assert.deepEqual((snapshot(db) as State).budget, [["9223372036854775807", "2", "4"]]);
   // One past the signed range never reaches SQL: the bridge refuses it before anything runs.
   const refused = seeded();
   const before = snapshot(refused);

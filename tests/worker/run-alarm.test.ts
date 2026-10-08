@@ -29,7 +29,7 @@ interface Handle {
 interface CoreModule {
   readonly maxWakeAttempts: number;
   parseSchedule(body: unknown, nowMs: number): { ok: true; handle: Handle } | { ok: false };
-  wakeBody(handle: Handle): Uint8Array;
+  wakeBody(handle: Handle, workerVersion: string): Uint8Array;
   wakeBodySha256Hex(body: Uint8Array): Promise<string>;
   afterFailure(
     handle: Handle,
@@ -88,7 +88,12 @@ const workspaceId = "00000000-0000-4000-8000-0000000000b1";
 const runId = "00000000-0000-4000-8000-0000000000d1";
 const now = 1_800_000_000_000;
 const secret = Buffer.alloc(32, 7).toString("base64url");
-const w2cEnv = { HMAC_W2C_KEY_ID: "w2c-test", HMAC_W2C_SECRET: secret };
+const workerVersion = "wv-test-1";
+const w2cEnv = {
+  HMAC_W2C_KEY_ID: "w2c-test",
+  HMAC_W2C_SECRET: secret,
+  CF_VERSION_METADATA: { id: workerVersion },
+};
 const schedule = { runId, workspaceId, wakeAtMs: now + 5_000 };
 
 /** Storage and alarm of one Durable Object instance, with every write recorded so a test can prove what the adapter wrote. */
@@ -179,11 +184,45 @@ test("a schedule is accepted only in its closed shape, with canonical identifier
 
 test("the wake body carries identifiers and a time, and nothing that could be run state", () => {
   const body = JSON.parse(
-    new TextDecoder().decode(core.wakeBody({ workspaceId, runId, wakeAtMs: now, attempts: 0 })),
+    new TextDecoder().decode(
+      core.wakeBody({ workspaceId, runId, wakeAtMs: now, attempts: 0 }, workerVersion),
+    ),
   );
-  assert.deepEqual(Object.keys(body).sort(), ["kind", "runId", "v", "wakeAtMs", "workspaceId"]);
+  assert.deepEqual(Object.keys(body).sort(), [
+    "kind",
+    "runId",
+    "v",
+    "wakeAtMs",
+    "workerVersion",
+    "workspaceId",
+  ]);
   assert.equal(body.kind, "harness.wake");
   assert.equal(body.v, 1);
+  assert.equal(
+    body.workerVersion,
+    workerVersion,
+    "the Worker version identifier is carried as its own field",
+  );
+});
+
+test("a wake body is never built without a bounded Worker version identifier", () => {
+  const handle = { workspaceId, runId, wakeAtMs: now, attempts: 0 };
+  assert.throws(() => core.wakeBody(handle, ""), /Worker version/u);
+  assert.throws(() => core.wakeBody(handle, "bad version with spaces"), /Worker version/u);
+  assert.throws(() => core.wakeBody(handle, "v".repeat(129)), /Worker version/u);
+});
+
+test("without the Worker version identifier no wake is sent and the handle is kept for a retry", async () => {
+  const store = storage();
+  const containerStub = container(200);
+  const adapter = adapterFor(
+    { HMAC_W2C_KEY_ID: "w2c-test", HMAC_W2C_SECRET: secret, CLOUD_CONTAINER: containerStub },
+    store,
+  );
+  await adapter.schedule({ ...schedule, wakeAtMs: Date.now() + 60_000 });
+  await fire(adapter, store);
+  assert.equal(containerStub.requests.length, 0, "nothing is sent without the version");
+  assert.equal(handleOf(store).attempts, 1, "the failed wake is retried, not dropped silently");
 });
 
 test("a failed wake is retried on the 1, 2 and 4 second backoff and then dropped", () => {

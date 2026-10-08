@@ -8,6 +8,9 @@
   "triggers": {
     "crons": []
   },
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  },
   "routes": [
     {
       "pattern": "arcforges.com/api/*",
@@ -33,6 +36,9 @@
         "class_name": "HarnessRunAlarm"
       }
     ]
+  },
+  "ai": {
+    "binding": "AI"
   },
   "migrations": [
     {
@@ -78,6 +84,9 @@
       "workers_dev": false,
       "preview_urls": false,
       "triggers": {},
+      "version_metadata": {
+        "binding": "CF_VERSION_METADATA"
+      },
       "routes": [
         {
           "pattern": "proof.arcforges.com",

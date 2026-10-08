@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Container, ContainerProxy, type OutboundHandler } from "@cloudflare/containers";
+import { aiInternalOutbound } from "./ai/internal/outbound.ts";
 import { containerEnvironment } from "./foundation/container-env.ts";
 import { fetchEntry, queueEntry, type WorkerEnv } from "./foundation/entry.ts";
 import { handleObjects } from "./foundation/objects.ts";
@@ -10,13 +11,20 @@ export { ContainerProxy };
 export { FoundationJobCoordinator } from "./foundation/durable.ts";
 export { HarnessRunAlarm } from "./harness/run-alarm.ts";
 
-// The production Container class is exactly the Hello class: no outbound interception, no
-// environment hook, and nothing registered on it, so its start sequence is unchanged.
+// The production Container class is the Hello class plus one outbound host: ai.internal, the thin
+// Workers AI transport of HAR.40. It has no environment hook, and enableInternet stays false, so the
+// container reaches nothing but the exact virtual host registered below.
 export class CloudContainer extends Container {
   override defaultPort = 8080;
   override sleepAfter = "60s";
   override enableInternet = false;
 }
+
+// Assigned (not declared as a static field) so the base class setter registers the handler under
+// the production class name only; FoundationContainer has its own registry entry.
+CloudContainer.outboundByHost = {
+  "ai.internal": aiInternalOutbound as OutboundHandler,
+};
 
 // Only the isolated proof environment binds this subclass (wrangler.json env.proof). The
 // outbound registry is keyed by class name, so nothing below reaches CloudContainer.
