@@ -358,11 +358,7 @@ internal static partial class HarnessArchitectureFixtures
             return sources;
         }
 
-        yield return ("layer-cycle", "projects", () =>
-        {
-            var sources = With(Baseline(), Task, Module("Task", Reference("../ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj")));
-            return With(sources, Identity, Module("Identity", Reference("../ArcForges.Cloud.Modules.Task/ArcForges.Cloud.Modules.Task.csproj")));
-        });
+        yield return ("layer-cycle", "projects", () => With(With(Baseline(), Task, Module("Task", Reference("../ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj"))), Identity, Module("Identity", Reference("../ArcForges.Cloud.Modules.Task/ArcForges.Cloud.Modules.Task.csproj"))));
         yield return ("layer-entry", "source-references-host", () => With(Baseline(), Task, Module("Task", Reference("../ArcForges.Cloud/ArcForges.Cloud.csproj"))));
         yield return ("layer-escape", "project-leaves-repository", () => With(Baseline(), Task, Module("Task", Reference("../../../../Contracts/src/Foo.csproj"))));
         yield return ("layer-escape", "worker-url-import", () => With(Baseline(), "worker/ai/internal/handler.ts", "import { x } from \"https://example.invalid/x.js\";\nexport const h = x;\n"));
