@@ -31,6 +31,14 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["CloudContainer"]
+    },
+    {
+      "tag": "capacity-pacer-v1",
+      "new_sqlite_classes": ["CapacityJobPacer"]
+    },
+    {
+      "tag": "retire-capacity-pacer-v1",
+      "deleted_classes": ["CapacityJobPacer"]
     }
   ],
   "ratelimits": [
