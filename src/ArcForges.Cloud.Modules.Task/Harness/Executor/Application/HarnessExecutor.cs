@@ -283,7 +283,8 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
             var intent = await store.MarkDispatchAsync(claim.Fence, ids.NewId(), attemptId, Micros(), cancellationToken).ConfigureAwait(false);
             if (intent != StoreStatus.Succeeded)
             {
-                // No intent is durable, so nothing was or will be dispatched by this attempt.
+                // The supplier was not called by this step. The intent write did not succeed, but an intent may still be durable when that write's
+                // outcome was unknown: a resume then records the effect as unknown and never dispatches it again (see NotDispatched).
                 return NotDispatched(FromStoreStep(intent), commandId, ordinal);
             }
 
@@ -476,6 +477,10 @@ internal enum EffectKind
 /// One effect request. It carries a digest of the request content rather than the content, so no prompt or body is ever persisted by
 /// the executor (checkpoints are references only).
 /// </summary>
+/// <param name="TextInputTokens">
+/// The UTF-8 byte count of the staged request body, not a tokenizer count. Under a byte-level tokenizer a token covers at least one byte, so the
+/// byte count is an upper bound on the body's input tokens: a body admitted on its bytes is within the token cap.
+/// </param>
 internal sealed record EffectRequest(
     EffectKind Kind,
     string Operation,

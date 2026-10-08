@@ -43,6 +43,23 @@ internal sealed class FakeModels : IModelDispatchPort
     internal static ModelCallResult Answer(string json) => new(ModelDispatchStatus.Succeeded, json, "ok");
 }
 
+/// <summary>The plan port with one named read answered as unavailable from its Nth read on; the earlier reads are served, so a claim can commit first.</summary>
+internal sealed class ReadNotServedFromPort(IModulePlanPort inner, string plan, int fromRead) : IModulePlanPort
+{
+    private int reads;
+
+    public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken cancellationToken)
+    {
+        if (read.PlanId != plan) return inner.ReadAsync(read, cancellationToken);
+        reads++;
+        return reads >= fromRead
+            ? Task.FromResult(ModulePlanOutcome.Of(ModulePlanStatus.Unavailable))
+            : inner.ReadAsync(read, cancellationToken);
+    }
+
+    public Task<ModulePlanOutcome> WriteAsync(ModulePlanWrite write, CancellationToken cancellationToken) => inner.WriteAsync(write, cancellationToken);
+}
+
 /// <summary>Model answers in the shape the supplier returns (one choice, one assistant message).</summary>
 internal static class Answers
 {
@@ -58,6 +75,9 @@ public sealed class HelloSliceTests
 {
     private static HelloAgentSlice Slice(HarnessFixture fixture, IModelDispatchPort models, TimeSpan? keepalive = null, HelloModelSettings? settings = null) =>
         new(new D1HarnessStore(fixture.Port), models, fixture.Ids, fixture.Clock, settings ?? HelloModelSettings.Deployed, keepalive ?? TimeSpan.FromHours(1));
+
+    private static HelloAgentSlice SliceOver(HarnessFixture fixture, IModelDispatchPort models, IModulePlanPort port) =>
+        new(new D1HarnessStore(port), models, fixture.Ids, fixture.Clock, HelloModelSettings.Deployed, TimeSpan.FromHours(1));
 
     private static HarnessExecutor Executor(HarnessFixture fixture) => new(new D1HarnessStore(fixture.Port), new FakeEffects(), fixture.Ids, fixture.Clock);
 
@@ -450,6 +470,37 @@ public sealed class HelloSliceTests
 
         Assert.Equal(StoreStatus.Succeeded, await store.ReserveStepAsync(claim.Fence, Reserve(fixture.Ids.NewId()), T.Ct));
         Assert.Equal(StoreStatus.Refused, await store.ReserveStepAsync(claim.Fence, Reserve(fixture.Ids.NewId()), T.Ct));
+    }
+
+    [Fact]
+    public async Task ARunReadNotServedDuringTheClaimIsRetryableAndChangesNothing()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var models = new FakeModels();
+        var result = await SliceOver(fixture, models, new FailingReadPlanPort(fixture.Port, "task.harness-executor-run-load")).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+
+        Assert.Equal(new HelloResult(HelloStatus.Unavailable, "read_unavailable_claim", null), result);
+        Assert.Empty(models.Calls);
+        Assert.Equal("1", await fixture.RunStateAsync());
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+    }
+
+    [Fact]
+    public async Task ARunReadNotServedUnderItsClaimReleasesTheRunToWaitingBeforeAnyDispatchAndTheRetryCompletes()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var models = new FakeModels();
+        // The claim makes two run-load reads (before and after the claim commits); the third is the first step's read under the lease.
+        var result = await SliceOver(fixture, models, new ReadNotServedFromPort(fixture.Port, "task.harness-executor-run-load", 3)).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+
+        Assert.Equal(new HelloResult(HelloStatus.Unavailable, "read_unavailable", null), result);
+        Assert.Empty(models.Calls);
+        Assert.Equal("3", await fixture.RunStateAsync());
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+
+        var retry = await Slice(fixture, models).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+        Assert.Equal(HelloStatus.Succeeded, retry.Status);
+        Assert.Equal("6", await fixture.RunStateAsync());
     }
 
     [Fact]

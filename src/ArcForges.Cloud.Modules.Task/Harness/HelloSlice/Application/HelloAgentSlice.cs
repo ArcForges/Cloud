@@ -23,6 +23,13 @@ internal enum HelloStatus
 
     /// <summary>The fence was lost: the slice stopped and wrote nothing further.</summary>
     LeaseLost,
+
+    /// <summary>
+    /// A store read was not served. No dispatch was in flight at the read, so nothing unknown is outstanding; a run claimed by this slice is released
+    /// to waiting, and the caller answers a typed retryable reply. A claim that committed before its own read failed is this slice's lease and
+    /// expires on its term, as the wake handler records (HarnessWakeHandler).
+    /// </summary>
+    Unavailable,
 }
 
 internal sealed record HelloResult(HelloStatus Status, string Reason, string? Message);
@@ -52,7 +59,18 @@ internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort mo
 
         var effects = new HelloEffectPort(models, settings, keepaliveInterval);
         var executor = new HarnessExecutor(store, effects, ids, time);
-        var claimed = await executor.ClaimAsync(run, identity, cancellationToken).ConfigureAwait(false);
+        ClaimResult claimed;
+        try
+        {
+            claimed = await executor.ClaimAsync(run, identity, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HarnessReadUnavailableException)
+        {
+            // A read was not served during the claim. Nothing was dispatched; if the claim had committed, its lease is this run's own and it
+            // expires on its term, so the typed retryable reply is the caller's cue to retry.
+            return new HelloResult(HelloStatus.Unavailable, "read_unavailable_claim", null);
+        }
+
         if (claimed.Status != ClaimStatus.Claimed || claimed.Claim is null) return Refused("claim_" + claimed.Status.ToString().ToLowerInvariant());
 
         var claim = claimed.Claim;
@@ -66,6 +84,12 @@ internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort mo
             // The release is a short fenced write that must not be cancelled with the caller: a dispatch may be in flight, and an interrupted
             // run is the safe state for it (the next claim records any unresolved effect as unknown and never repeats it).
             return await SettleAsync(executor, claim, RunState.Interrupted, HelloStatus.Interrupted, "cancelled", null, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (HarnessReadUnavailableException)
+        {
+            // Every read of the executor is made before its step's intent is recorded, and no read runs while a dispatch is in flight, so no
+            // effect is unresolved here. The run is released to waiting (as the wake handler does) so the retry claims at once.
+            return await SettleAsync(executor, claim, RunState.Waiting, HelloStatus.Unavailable, "read_unavailable", null, CancellationToken.None).ConfigureAwait(false);
         }
     }
 
