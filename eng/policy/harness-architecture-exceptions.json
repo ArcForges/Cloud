@@ -10,6 +10,46 @@
       "reason": "The proof-only pipeline probe frames its replies with a private ProtoBuilder because no generated Contracts message exists for the arcforges.proof.v1 probe service. The probe leaves the production path under CLOUD.84 (proof-only code leaves the production bundle). Never extended silently.",
       "created": "2026-10-08",
       "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-2",
+      "rule": "layer-escape",
+      "file": "tests/worker/container-classes.test.ts",
+      "detail": "Computed dynamic specifier needs explicit admission",
+      "owner": "Cloud integration owner (HAR.40)",
+      "reason": "The test loads the workerd-only Worker entry through a constant path after the loader hook is registered, so the Node-side project does not type-check the workerd module. The specifier is one reviewed constant, never input. Replace it with a literal specifier when the Node test project can type-check the Worker entry.",
+      "created": "2026-10-08",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-3",
+      "rule": "layer-escape",
+      "file": "tests/worker/run-alarm.test.ts",
+      "detail": "Computed dynamic specifier needs explicit admission",
+      "owner": "Cloud integration owner (HAR.40)",
+      "reason": "The test loads the workerd-only Durable Object modules through constant paths so the Node-side project does not type-check them. Every specifier is a reviewed constant in the test file, never input. Replace them with literal specifiers when the Node test project can type-check the modules.",
+      "created": "2026-10-08",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-4",
+      "rule": "wire-codec",
+      "file": "worker/ingress/correlation.ts",
+      "detail": "Manual varint or binary reader/writer logic",
+      "owner": "Cloud integration owner (CLOUD.69 correlation seam)",
+      "reason": "The CLOUD.69 Worker correlation reader extracts only RequestMeta.correlationId from the client frame with a minimal handwritten varint reader. It predates HAR.40, lies outside this task's write scope and is owned by CLOUD.69. It must be replaced by a reviewed generated reader before this exception expires.",
+      "created": "2026-10-08",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-5",
+      "rule": "wire-codec",
+      "file": "tests/worker/ingress-correlation.test.ts",
+      "detail": "Manual varint or binary reader/writer logic",
+      "owner": "Cloud integration owner (CLOUD.69 correlation seam)",
+      "reason": "A test-only encoder builds client protobuf frames as input for the CLOUD.69 correlation reader. It produces test bytes only, is never shipped and expires with the reader exception HAR40-EX-4.",
+      "created": "2026-10-08",
+      "expires": "2027-03-31"
     }
   ]
 }
