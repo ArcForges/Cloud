@@ -513,8 +513,8 @@ internal static partial class HarnessArchitecture
     {
         var root = Obj(ParseJson(c.Text("package.json")));
         var apacheRoot = Str(Obj(root?["arcforges"])?["licenceBoundary"]) == ApacheBoundary;
-        var lock = Obj(ParseJson(c.Text("package-lock.json")));
-        if (Obj(lock?["packages"]) is not { } packages) return;
+        var lockFile = Obj(ParseJson(c.Text("package-lock.json")));
+        if (Obj(lockFile?["packages"]) is not { } packages) return;
         foreach (var (key, value) in packages)
         {
             if (!key.Contains("node_modules/", StringComparison.Ordinal)) continue;
@@ -692,11 +692,11 @@ internal static partial class HarnessArchitecture
     private static void WirePackagePin(Context c)
     {
         var root = Obj(ParseJson(c.Text("package.json")));
-        var lock = Obj(ParseJson(c.Text("package-lock.json")));
+        var lockFile = Obj(ParseJson(c.Text("package-lock.json")));
         var pin = StringMap(root?["dependencies"]).GetValueOrDefault(PublicWirePackage) ?? StringMap(root?["devDependencies"]).GetValueOrDefault(PublicWirePackage);
-        var entry = Obj(Obj(lock?["packages"])?["node_modules/" + PublicWirePackage]);
+        var entry = Obj(Obj(lockFile?["packages"])?["node_modules/" + PublicWirePackage]);
         var tarball = "https://registry.npmjs.org/" + PublicWirePackage + "/-/proto-" + pin + ".tgz";
-        var lockRoot = Obj(Obj(lock?["packages"])?[""]);
+        var lockRoot = Obj(Obj(lockFile?["packages"])?[""]);
         var lockedPin = StringMap(lockRoot?["dependencies"]).GetValueOrDefault(PublicWirePackage) ?? StringMap(lockRoot?["devDependencies"]).GetValueOrDefault(PublicWirePackage);
         var integrity = Str(entry?["integrity"]) ?? string.Empty;
         var integrityOk = integrity.StartsWith("sha512-", StringComparison.Ordinal) && Sha512Base64.IsMatch(integrity["sha512-".Length..]);

@@ -43,8 +43,8 @@ public sealed class PolicyLexerTests
     public void DistinguishesDivisionFromARegularExpression()
     {
         Assert.DoesNotContain(PolicyLexer.Tokenize("x = a / b / c;"), token => token.Kind == TokenKind.Regex);
-        Assert.Single(PolicyLexer.Tokenize("x = /a\\/b/g;").Where(token => token.Kind == TokenKind.Regex));
-        Assert.Single(PolicyLexer.Tokenize("return /x/.test(y);").Where(token => token.Kind == TokenKind.Regex));
+        Assert.Single(PolicyLexer.Tokenize("x = /a\\/b/g;"), token => token.Kind == TokenKind.Regex);
+        Assert.Single(PolicyLexer.Tokenize("return /x/.test(y);"), token => token.Kind == TokenKind.Regex);
     }
 
     [Fact]
