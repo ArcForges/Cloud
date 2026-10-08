@@ -11,7 +11,10 @@ internal enum WakeStatus
     /// <summary>The run was claimed, its open attempt settled, and the lease released to waiting.</summary>
     Settled,
 
-    /// <summary>The wake could not be settled under the fence; the lease is not released by this path.</summary>
+    /// <summary>
+    /// The wake could not be settled because the store was unknown or unavailable, or the recorded state could not be resumed under the
+    /// fence. The caller answers a retryable status so the wake is delivered again.
+    /// </summary>
     Stopped,
 }
 
@@ -26,13 +29,21 @@ internal sealed class HarnessWakeHandler(HarnessExecutor executor)
     internal async Task<WakeOutcome> HandleAsync(HarnessRun run, RunIdentity identity, CancellationToken cancellationToken)
     {
         var claimed = await executor.ClaimAsync(run, identity, cancellationToken).ConfigureAwait(false);
+        // An unsettled store is never a delivered wake: the caller retries it. Any other refusal is a run that is not ours to wake.
+        if (claimed.Status is ClaimStatus.Unknown or ClaimStatus.Unavailable)
+            return new WakeOutcome(WakeStatus.Stopped, claimed.Status, null, null);
         if (claimed.Status != ClaimStatus.Claimed || claimed.Claim is null)
             return new WakeOutcome(WakeStatus.NotClaimed, claimed.Status, null, null);
 
         var claim = claimed.Claim;
         var resumed = await executor.ResumeAsync(claim, cancellationToken).ConfigureAwait(false);
         if (resumed.Kind == ResumeKind.Stopped)
+        {
+            // The wake dispatches nothing, so the lease it holds is released to waiting when the store allows it. Otherwise the retry would
+            // see its own live lease and be taken as delivered. A release that cannot settle leaves the lease to its term.
+            _ = await executor.YieldAsync(claim, RunState.Waiting, cancellationToken).ConfigureAwait(false);
             return new WakeOutcome(WakeStatus.Stopped, ClaimStatus.Claimed, resumed.Kind, null);
+        }
 
         var released = await executor.YieldAsync(claim, RunState.Waiting, cancellationToken).ConfigureAwait(false);
         return released == StoreStatus.Succeeded

@@ -71,14 +71,27 @@ internal sealed class CrashingPlanPort(IModulePlanPort inner, int crashAtWrite, 
 
     public int Writes => writes;
 
+    /// <summary>The named plan of the write the crash was raised at (null until a crash is raised).</summary>
+    public string? CrashedPlanId { get; private set; }
+
     public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken cancellationToken) => inner.ReadAsync(read, cancellationToken);
 
     public async Task<ModulePlanOutcome> WriteAsync(ModulePlanWrite write, CancellationToken cancellationToken)
     {
         var index = Interlocked.Increment(ref writes);
-        if (index == crashAtWrite && !after) throw new SimulatedCrash(index, after: false);
+        if (index == crashAtWrite && !after)
+        {
+            CrashedPlanId = write.PlanId;
+            throw new SimulatedCrash(index, after: false);
+        }
+
         var outcome = await inner.WriteAsync(write, cancellationToken).ConfigureAwait(false);
-        if (index == crashAtWrite && after) throw new SimulatedCrash(index, after: true);
+        if (index == crashAtWrite && after)
+        {
+            CrashedPlanId = write.PlanId;
+            throw new SimulatedCrash(index, after: true);
+        }
+
         return outcome;
     }
 }

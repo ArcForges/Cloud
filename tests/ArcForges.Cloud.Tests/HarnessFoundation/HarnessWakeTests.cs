@@ -20,14 +20,14 @@ using Xunit;
 
 namespace ArcForges.Cloud.Tests.HarnessFoundation;
 
-/// <summary>The plan port with one named write made unavailable, so the wake's release (the yield) cannot settle.</summary>
-internal sealed class FailingPlanPort(IModulePlanPort inner, string failingPlan) : IModulePlanPort
+/// <summary>The plan port with one named write answered with a failure status (unavailable by default), so that write cannot settle.</summary>
+internal sealed class FailingPlanPort(IModulePlanPort inner, string failingPlan, ModulePlanStatus status = ModulePlanStatus.Unavailable) : IModulePlanPort
 {
     public Task<ModulePlanOutcome> ReadAsync(ModulePlanRead read, CancellationToken cancellationToken) => inner.ReadAsync(read, cancellationToken);
 
     public Task<ModulePlanOutcome> WriteAsync(ModulePlanWrite write, CancellationToken cancellationToken) =>
         write.PlanId == failingPlan
-            ? Task.FromResult(ModulePlanOutcome.Of(ModulePlanStatus.Unavailable))
+            ? Task.FromResult(ModulePlanOutcome.Of(status))
             : inner.WriteAsync(write, cancellationToken);
 }
 
@@ -58,6 +58,8 @@ internal sealed class StubWakePort : IHarnessWakePort
 public sealed class HarnessWakeTests
 {
     private const string WorkerVersion = "wv-test-7";
+
+    private static readonly EffectRequest Request = new(EffectKind.ModelCall, "model.call", "digest.wake-resume", HarnessFixture.Pin, 1024, 100, 0);
 
     private static string Body(string? workerVersion = WorkerVersion, string runId = "00000000-0000-4000-8000-0000000000d1") =>
         "{\"v\":1,\"kind\":\"harness.wake\",\"workspaceId\":\"00000000-0000-4000-8000-0000000000b1\",\"runId\":\"" + runId
@@ -127,6 +129,44 @@ public sealed class HarnessWakeTests
         var reply = await Service(fixture, new FailingPlanPort(fixture.Port, "task.harness-executor-yield"))
             .HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
         Assert.Equal(HarnessWakeReply.Stopped, reply);
+    }
+
+    [Theory]
+    [InlineData(ModulePlanStatus.Unavailable)]
+    [InlineData(ModulePlanStatus.UnknownOutcome)]
+    public async Task AWakeWhoseClaimCannotBeSettledIsStoppedSoItIsRetriedAndChangesNothing(ModulePlanStatus status)
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var reply = await Service(fixture, new FailingPlanPort(fixture.Port, "task.harness-executor-claim", status))
+            .HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
+
+        Assert.Equal(HarnessWakeReply.Stopped, reply);
+        Assert.Equal("1", await fixture.RunStateAsync());
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+    }
+
+    [Fact]
+    public async Task AWakeWhoseResumeCannotSettleReleasesItsLeaseSoTheRetryClaimsAndSettles()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        // A reserved attempt with no dispatch intent is left by a crash after the reserve committed (write 2).
+        var first = new HarnessExecutor(new D1HarnessStore(new CrashingPlanPort(fixture.Port, 2, after: true)), new FakeEffects(), fixture.Ids, fixture.Clock);
+        var claim = (await first.ClaimAsync(fixture.Run, HarnessFixture.Identity(), T.Ct)).Claim!;
+        await Assert.ThrowsAsync<SimulatedCrash>(() => first.RunEffectAsync(claim, Request, LoopBounds.Default, T.Ct));
+        fixture.Clock.AdvanceSeconds(61);
+
+        // The first wake cannot record the refusal of the open attempt, so it stops and releases its own lease to waiting.
+        var stopped = await Service(fixture, new FailingPlanPort(fixture.Port, "task.harness-executor-record-outcome"))
+            .HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
+        Assert.Equal(HarnessWakeReply.Stopped, stopped);
+        Assert.Equal("3", await fixture.RunStateAsync());
+        Assert.Equal(1, await fixture.CountOpenAttemptsAsync());
+
+        // The retry claims the released run at once (not taken as held by a live lease) and settles the open attempt.
+        var retry = await Service(fixture).HandleAsync(new HarnessWakeMessage(HarnessFixture.WorkspaceId, HarnessFixture.RunId, WorkerVersion, 1), T.Ct);
+        Assert.Equal(HarnessWakeReply.Taken, retry);
+        Assert.Equal("3", await fixture.RunStateAsync());
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
     }
 
     [Fact]

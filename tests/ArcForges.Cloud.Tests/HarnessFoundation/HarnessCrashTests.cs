@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using System.Security.Cryptography;
+using System.Text;
 using ArcForges.Cloud.Modules.Task.Harness.Executor.Application;
 using ArcForges.Cloud.Modules.Task.Harness.Executor.Domain;
 using ArcForges.Cloud.Modules.Task.Harness.Executor.Infrastructure;
@@ -113,5 +115,83 @@ public sealed class HarnessCrashTests
         var after = await fixture.QueryAsync("SELECT state, failure_class, effect_certainty FROM task_attempt WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "'");
         Assert.Equal("4|5|3", after[0][0] + "|" + after[0][1] + "|" + after[0][2]);
         Assert.Equal(1, supplier.Count);
+    }
+
+    /// <summary>
+    /// Crash injection at the lease renewal, a fenced write the effect matrix above does not reach. The first effect runs at claim time
+    /// (writes 1 to 4); after 20 seconds the second effect renews the lease first (write 5), so a crash there is at the renewal.
+    /// </summary>
+    /// <param name="after">True when the crash happens after the renewal committed; false when it happens before.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ACrashDuringLeaseRenewalAfterAnEffectNeverRepeatsItAndTheWakeSettlesTheRun(bool after)
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var firstSupplier = new FakeEffects();
+        var crashing = new CrashingPlanPort(fixture.Port, 5, after);
+        var first = new HarnessExecutor(new D1HarnessStore(crashing), firstSupplier, fixture.Ids, fixture.Clock);
+
+        var claim = (await first.ClaimAsync(fixture.Run, HarnessFixture.Identity(), T.Ct)).Claim!;
+        Assert.Equal(EffectStepStatus.Succeeded, (await first.RunEffectAsync(claim, Request, LoopBounds.Default, T.Ct)).Status);
+
+        fixture.Clock.AdvanceSeconds(20);
+        await Assert.ThrowsAsync<SimulatedCrash>(() => first.RunEffectAsync(claim, Request, LoopBounds.Default, T.Ct));
+        Assert.Equal(5, crashing.Writes);
+        Assert.Equal("task.harness-executor-renew", crashing.CrashedPlanId);
+        Assert.Equal(1, firstSupplier.Count);
+
+        // The lease lasts at most 60 seconds past the renewal, so a restarted process claims it after 61 more seconds.
+        fixture.Clock.AdvanceSeconds(61);
+        var secondSupplier = new FakeEffects();
+        var restarted = new HarnessExecutor(fixture.Store, secondSupplier, fixture.Ids, fixture.Clock);
+        var wake = await new HarnessWakeHandler(restarted).HandleAsync(fixture.Run, HarnessFixture.Identity(), T.Ct);
+
+        Assert.Equal(WakeStatus.Settled, wake.Status);
+        Assert.Equal(ResumeKind.NothingOpen, wake.Resume);
+        Assert.Equal(0, secondSupplier.Count);
+        Assert.Equal(1, firstSupplier.Count);
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+        Assert.Equal("3", await fixture.RunStateAsync());
+        Assert.Equal(1, (await fixture.BudgetAsync()).CountedSteps);
+    }
+
+    /// <summary>
+    /// Crash injection at the checkpoint (write 5, after the first effect's outcome). A crash before the commit stores no receipt
+    /// reference; a crash after it stores one. Either way the completed effect is never dispatched again and the run settles.
+    /// </summary>
+    /// <param name="after">True when the crash happens after the checkpoint committed; false when it happens before.</param>
+    /// <param name="receiptIsNull">The SQL null test of the stored receipt reference after the crash: "1" when none is stored.</param>
+    [Theory]
+    [InlineData(false, "1")]
+    [InlineData(true, "0")]
+    public async Task ACrashAtACheckpointStoresTheReferenceAllOrNothingAndNeverRepeatsAnEffect(bool after, string receiptIsNull)
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var firstSupplier = new FakeEffects();
+        var crashing = new CrashingPlanPort(fixture.Port, 5, after);
+        var first = new HarnessExecutor(new D1HarnessStore(crashing), firstSupplier, fixture.Ids, fixture.Clock);
+        var claim = (await first.ClaimAsync(fixture.Run, HarnessFixture.Identity(), T.Ct)).Claim!;
+        Assert.Equal(EffectStepStatus.Succeeded, (await first.RunEffectAsync(claim, Request, LoopBounds.Default, T.Ct)).Status);
+
+        var receipt = SHA256.HashData(Encoding.UTF8.GetBytes("harness.checkpoint.crash-matrix"));
+        await Assert.ThrowsAsync<SimulatedCrash>(() => new D1HarnessStore(crashing).CheckpointAsync(claim.Fence, Guid.NewGuid(), receipt, fixture.Clock.Micros(), T.Ct));
+        Assert.Equal("task.harness-executor-checkpoint", crashing.CrashedPlanId);
+        Assert.Equal(1, firstSupplier.Count);
+
+        var stored = await fixture.QueryAsync("SELECT last_iteration_receipt IS NULL FROM task_run WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "'");
+        Assert.Equal(receiptIsNull, stored[0][0]);
+
+        fixture.Clock.AdvanceSeconds(61);
+        var secondSupplier = new FakeEffects();
+        var restarted = new HarnessExecutor(fixture.Store, secondSupplier, fixture.Ids, fixture.Clock);
+        var wake = await new HarnessWakeHandler(restarted).HandleAsync(fixture.Run, HarnessFixture.Identity(), T.Ct);
+
+        Assert.Equal(WakeStatus.Settled, wake.Status);
+        Assert.Equal(0, secondSupplier.Count);
+        Assert.Equal(1, firstSupplier.Count);
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+        Assert.Equal("3", await fixture.RunStateAsync());
+        Assert.Equal(1, (await fixture.BudgetAsync()).CountedSteps);
     }
 }
