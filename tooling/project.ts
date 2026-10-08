@@ -438,7 +438,9 @@ export async function namingScan() {
     "Naming package archive digest differs from the pinned candidate.",
   );
   assert.equal(
-    createHash("sha512").update(await readFile(archive)).digest("base64"),
+    createHash("sha512")
+      .update(await readFile(archive))
+      .digest("base64"),
     naming.archiveSha512,
     "Naming package archive bytes differ from the pinned candidate.",
   );

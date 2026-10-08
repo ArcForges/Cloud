@@ -67,12 +67,14 @@ internal static class HarnessArchitectureFixtures
         {
             var sources = With(Baseline(), Task, Module("Task", Reference("../ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj")));
             return With(sources, Identity, Module("Identity", Reference("../ArcForges.Cloud.Modules.Task/ArcForges.Cloud.Modules.Task.csproj")));
-        });
+        }
+        );
         yield return ("layer-cycle", "worker-imports", () =>
         {
             var sources = With(Baseline(), "worker/ai/internal/a.ts", "import { b } from \"./b.ts\";\nexport const a = b;\n");
             return With(sources, "worker/ai/internal/b.ts", "import { a } from \"./a.ts\";\nexport const b = a;\n");
-        });
+        }
+        );
 
         // layer-entry
         yield return ("layer-entry", "source-references-host", () => With(Baseline(), Task, Module("Task", Reference("../ArcForges.Cloud/ArcForges.Cloud.csproj"))));

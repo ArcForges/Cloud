@@ -94,6 +94,8 @@ function checkPackage(name: string) {
         "arcforges.contracts.events",
         "arcforges.contracts.foundation",
         "arcforges.build.policy",
+        "arcforges.contracts.validation",
+        "arcforges.sdk.contracts",
       ].includes(name.toLowerCase()),
       `Unknown first-party package owner: ${name}`,
     );

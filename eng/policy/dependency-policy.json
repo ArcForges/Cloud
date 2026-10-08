@@ -2,9 +2,7 @@
   "schemaVersion": 1,
   "repository": "Cloud",
   "sourceCommit": "eaaafb11e6b3bd8af5b3bc9d770ea309fdb275cf",
-  "manifests": [
-    "package.json"
-  ],
+  "manifests": ["package.json"],
   "inputs": {
     ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
     ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
