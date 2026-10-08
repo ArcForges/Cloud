@@ -116,6 +116,7 @@
     "eng/policy/dependency-reviews/prf-07-r7.json",
     "eng/policy/dependency-reviews/prf-07-r8.json",
     "eng/policy/dependency-reviews/prf-07-r9.json",
+    "eng/policy/dependency-reviews/sharp-0-35-5-r1.json",
     "eng/policy/dependency-reviews/wrangler-4-143-1-r1.json",
     "eng/policy/exceptions.json",
     "eng/policy/licence-boundary.json",
@@ -152,6 +153,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r34.json",
     "eng/provenance/artifact-profiles/cloud-release-r35.json",
     "eng/provenance/artifact-profiles/cloud-release-r36.json",
+    "eng/provenance/artifact-profiles/cloud-release-r37.json",
     "eng/provenance/artifact-profiles/cloud-release-r4.json",
     "eng/provenance/artifact-profiles/cloud-release-r5.json",
     "eng/provenance/artifact-profiles/cloud-release-r6.json",
@@ -246,6 +248,8 @@
     "eng/provenance/records/gradle-wrapper-9-7-1-r1.json",
     "eng/provenance/records/grpc-apache-legal-r1.json",
     "eng/provenance/records/protobuf-bsd-legal-r1.json",
+    "eng/provenance/records/sharp-0-35-5-cloud-runtime-notices-r1.json",
+    "eng/provenance/records/sharp-0-35-5-cloud-worker-bundle-r1.json",
     "eng/provenance/template.json",
     "eng/verification/commit-tail.ts",
     "eng/verification/d1-entitlement-local.ts",
@@ -740,5 +744,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["cloud-71-cloud-runtime-notices-r1", "cloud-71-cloud-worker-bundle-r1"]
+  "artifacts": ["sharp-0-35-5-cloud-runtime-notices-r1", "sharp-0-35-5-cloud-worker-bundle-r1"]
 }

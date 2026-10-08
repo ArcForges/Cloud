@@ -67,6 +67,11 @@
     "typescript": "7.0.2",
     "wrangler": "4.143.1"
   },
+  "overrides": {
+    "miniflare": {
+      "sharp": "0.35.5"
+    }
+  },
   "arcforges": {
     "licenceBoundary": "AGPL"
   }
