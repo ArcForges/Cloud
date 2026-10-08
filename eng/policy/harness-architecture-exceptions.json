@@ -1,9 +1,15 @@
-[
-  {
-    "rule": "wire-codec",
-    "path": "src/ArcForges.Cloud/Ingress/PipelineProbe.cs",
-    "owner": "Cloud integration owner (HAR.40)",
-    "reason": "The proof-only pipeline probe frames its replies with a private ProtoBuilder because no generated Contracts message exists for the arcforges.proof.v1 probe service. The probe leaves the production path under CLOUD.84 (proof-only code leaves the production bundle). Never extended silently.",
-    "expires": "2027-03-31"
-  }
-]
+{
+  "schemaVersion": 1,
+  "exceptions": [
+    {
+      "id": "HAR40-EX-1",
+      "rule": "wire-codec",
+      "file": "src/ArcForges.Cloud/Ingress/PipelineProbe.cs",
+      "detail": "Handwritten wire codec primitive: WriteVarint",
+      "owner": "Cloud integration owner (HAR.40)",
+      "reason": "The proof-only pipeline probe frames its replies with a private ProtoBuilder because no generated Contracts message exists for the arcforges.proof.v1 probe service. The probe leaves the production path under CLOUD.84 (proof-only code leaves the production bundle). Never extended silently.",
+      "created": "2026-10-08",
+      "expires": "2027-03-31"
+    }
+  ]
+}

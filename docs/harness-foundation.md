@@ -70,14 +70,50 @@ The admission, request-tool, local `say_hello` tool and finish-greeting steps ar
 - The `EvaluatedRepositoryGate` contract map links the dispatch, wake and route members to their offline tests (`tests/ArcForges.Cloud.Tests/HarnessFoundation`).
 - The GOV.10 successor architecture rules are in `tests/ArchitectureTests/AiHarness` (HAR.40 validation (d)). All 27 rules keep their names under the five WP-05 obligations and run over Cloud's C# projects, manifests and Worker sources. Each rule has a passing baseline fixture and at least one refusing fixture, and the real inputs of this checkout carry no finding outside the owned register `eng/policy/harness-architecture-exceptions.json`.
 - That register holds one row, `wire-codec` on `src/ArcForges.Cloud/Ingress/PipelineProbe.cs`: the proof-only probe frames its replies with a private encoder because no generated Contracts message exists for its service. The row expires 2027-03-31 and leaves the production path under CLOUD.84.
-- Recorded limits, carried over from GOV.10: C# rules match syntax, not symbols, so aliasing and indirection are not seen; the task-result check is a syntactic heuristic (a call, or a name ending in task); Worker rules read TypeScript text and see one specifier per import; the audit reads the top-level project graph only.
+- The AI policy suite is ported one-for-one (HAR.40 validation (d)). Its 84 fixtures (27 passing, 57 refusing) run as `HarnessArchitectureFixtures.AiFixtures()` with the AI rule, kind and name, applied to the Cloud layout. Its lexer suite (`PolicyLexerTests`, 7 tests), SPDX suite (`SpdxExpressionTests`, 2 tests and 3 further precedence and syntax tests), exceptions suite (`ArchitectureExceptionTests`, 7 tests), architecture suite (`HarnessArchitectureTests`) and repository suite (`HarnessRepositoryTests`, 3 tests) are ported with the same test names and outcomes. The naming suite is `NamingGateTests` (the pinned archive, the scanner on the Cloud tree, every forbidden term, and a failing scanner as a finding).
+- The Worker TypeScript is read through the policy lexer (`PolicyLexer`): comments, strings, templates and regular expressions are opaque, and module declarations are read from tokens. Computed imports fail closed.
+- `licence-allowlist` evaluates each locked licence and declared project licence as a real SPDX expression (`SpdxExpression`): AND binds tighter than OR, parentheses group, a WITH exception is always refused, and an operator or identifier outside the grammar is refused.
+- The exceptions register (`eng/policy/harness-architecture-exceptions.json`) uses the AI exceptions schema. Each exception names one exact finding (rule, file and detail), an owner, a reason of substance, a creation date that is not in the future and a lifetime of at most 180 days; an expired, malformed, over-long or unused entry is itself a finding.
+- Adaptations to Cloud's layout, each recorded so that a reviewer can see where the port differs from the AI policy. The Worker entry is `worker/index.ts`. The Workers AI adapter is the `worker/ai/internal` folder, and the Harness wake handle is `worker/harness`; the inference binding may be called only in the adapter. The store rules (D1, R2, KV, Hyperdrive, Queue types and bindings) apply to those adapter folders, because Cloud's own storage bridge holds D1 by design. A route is refused only when it exposes an internal path (`/internal...`) or covers every path (`/*`), because the Cloud API route `arcforges.com/api/*` is public by design. `@arcforges/proto` may be a development dependency of the root manifest; a Worker file that imports it must have it as a runtime dependency. The admitted Contracts packages are `@arcforges/proto`, `@arcforges/ai-internal` and `@arcforges/api-client`.
+- Recorded limits, carried over from GOV.10: the rules match lexical tokens and C# syntax, not symbols, so aliasing and indirection are not seen; the task-result check is a syntactic heuristic (a call, or a name ending in task); the Worker rules see one module specifier per declaration; the wrangler audit covers the top level and each environment.
 - The forbidden-term scan is the canonical scanner and policy of the NuGet package `ArcForges.Contracts.Validation` 1.0.0-ci.205.1 (`eng/policy/naming-candidate.json`, CON.23 identity, GOV.14 binding). The npm `@arcforges/proto` 1.0.0-ci.287.1 publication is provenance only. `tooling/project.ts naming` verifies the restored archive SHA512, the packaged source commit and both packaged SHA256 values before `python -I` runs the scanner.
+
+### Rule catalogue
+
+| Rule                       | Obligation | What it refuses                                                                                              |
+| -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ |
+| `layer-cycle`              | WP-05.00   | A cycle in the project graph or in the Worker import graph                                                   |
+| `layer-entry`              | WP-05.00   | An import of the Worker entry (`worker/index.ts`) or of the host entry                                       |
+| `layer-escape`             | WP-05.00   | A sibling or parent checkout, an absolute path, a URL, a test or a computed import reached from the Worker   |
+| `layer-runtime-dependency` | WP-05.00   | A Node built-in or an undeclared package in the Worker, or an undeclared central package in a source project |
+| `layer-product-reference`  | WP-05.00   | An ArcForges package other than the admitted Contracts packages and this repository's own projects           |
+| `layer-business-authority` | WP-05.00   | A store type or store binding in an adapter, a Durable Object outside the run alarm, a module-to-module link |
+| `layer-public-exposure`    | WP-05.00   | `workers_dev` or `preview_urls` enabled, or a route that exposes an internal path or covers every path        |
+| `licence-declaration`      | WP-05.01   | A project or manifest without an SPDX identifier or boundary, and an inventory that drifts from the projects  |
+| `licence-boundary-set`     | WP-05.01   | An unenumerated Apache boundary, or an AGPL boundary whose licence is not AGPL-3.0-only                      |
+| `licence-cross-boundary`   | WP-05.01   | An Apache-boundary project that references an AGPL project                                                   |
+| `licence-allowlist`        | WP-05.01   | A locked or declared licence expression that the boundary does not allow, or LGPL outside development        |
+| `naming-identity`          | WP-05.02   | A naming candidate that is not the pinned NuGet identity, the pinned digests, the publication or the pin      |
+| `naming-scan`              | WP-05.02   | A naming scan report that is missing, failed or ran under another policy                                     |
+| `wire-package`             | WP-05.03   | A wire pin that is floating, not registry-locked, or not a runtime dependency of a Worker that imports it    |
+| `wire-import`              | WP-05.03   | A deep or build-output import of the generated package, or a file compiled outside its project               |
+| `wire-source`              | WP-05.03   | A copied generated source, an authored schema, or protoc output authored in the repository                   |
+| `wire-codec`               | WP-05.03   | A handwritten or alternative wire codec (C# primitives, a protobuf wire package, manual varint masks)        |
+| `wire-schema`              | WP-05.03   | A codec call whose schema is not imported from the published package                                         |
+| `wire-shadow`              | WP-05.03   | A local declaration that redefines a generated wire type or namespace                                        |
+| `banned-reflection`        | WP-05.04   | Reflection emit, dynamic loading, `Reflect`, or prototype mutation                                           |
+| `banned-dynamic-code`      | WP-05.04   | `eval`, `Function`, runtime compilation, `dynamic`, a code string in a timer, or a computed import           |
+| `banned-blocking-wait`     | WP-05.04   | A sync-over-async wait, `Atomics.wait`, a `*Sync` host call, a clock busy-wait, or `XMLHttpRequest`          |
+| `banned-provider-sdk`      | WP-05.04   | A provider SDK package, namespace, import or endpoint literal                                                |
+| `banned-provider-call`     | WP-05.04   | The inference binding referenced or called outside the Workers AI adapter                                    |
+| `banned-secret-logging`    | WP-05.04   | Logging of a secret-bearing or content-bearing value (`console`, `Console`, `Debug`, `Trace`, `Log`)         |
+| `banned-float-money`       | WP-05.04   | A floating-point type or handling in a money, credit, price or amount value                                  |
+| `banned-raw-memory`        | WP-05.04   | Unmanaged or unsafe memory, `SharedArrayBuffer`, `WebAssembly.Memory`, or non-wait `Atomics`                 |
 
 ## Still open
 
 - HAR.00: the full Harness loop on this executor (turn loop, context assembly, tool proposals, the 120 s loop deadline and the rest of WP-52.00).
 - AIR.00: the production admitted-model snapshot from POL.08 (HAR.40 uses a reviewed proof fixture only). Production dispatch is never released without it.
 - The live Workers AI binding proof, the container capacity proof and the deployed crash-injection proof. These are operator runs (see [harness proofs](harness-proofs.md)).
-- The one-for-one port of the AI policy suite: its 84 fixtures and 111 suite tests. The rules and their fixtures are in place; these counts are not yet matched.
 - The AI-repository retirement documentation. It waits for the AI integration role to be claimed; no AI-repository file was changed.
 - Retirement of the deployed `arcforges-ai-hello` Worker. It needs explicit user confirmation and is not performed by this task.
