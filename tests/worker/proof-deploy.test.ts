@@ -88,6 +88,18 @@ test("the retired CapacityJobPacer class has no binding, export or proof migrati
   assert(!worker.includes("CapacityJobPacer"));
 });
 
+test("production clears the discarded cron schedule while the proof environment keeps none", () => {
+  // Wrangler replaces a Worker's schedules only when triggers.crons is declared, and an environment
+  // inherits the top-level triggers unless it declares its own. Production declares an empty list so
+  // the discarded every-minute schedule is removed; the proof environment declares an empty object so
+  // it inherits nothing and its schedules are never touched, exactly as before.
+  const top = wrangler as unknown as Record<string, unknown>;
+  assert.deepEqual(top.triggers, { crons: [] });
+  assert.deepEqual((wrangler.env.proof as unknown as Record<string, unknown>).triggers, {});
+  const worker = readFileSync(path.resolve(import.meta.dirname, "../../worker/index.ts"), "utf8");
+  assert(!/\bscheduled\b/u.test(worker), "the Worker has no scheduled handler");
+});
+
 test("the proof config pins the registry digest, revision and account and nothing else", () => {
   const config = buildProofConfig(wrangler, {
     account,
