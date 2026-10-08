@@ -5,6 +5,9 @@
   "compatibility_date": "2026-09-15",
   "workers_dev": false,
   "preview_urls": false,
+  "triggers": {
+    "crons": []
+  },
   "routes": [
     {
       "pattern": "arcforges.com/api/*",
@@ -31,6 +34,14 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["CloudContainer"]
+    },
+    {
+      "tag": "capacity-pacer-v1",
+      "new_sqlite_classes": ["CapacityJobPacer"]
+    },
+    {
+      "tag": "retire-capacity-pacer-v1",
+      "deleted_classes": ["CapacityJobPacer"]
     }
   ],
   "ratelimits": [
@@ -58,6 +69,7 @@
       "name": "arcforges-cloud-proof",
       "workers_dev": false,
       "preview_urls": false,
+      "triggers": {},
       "routes": [
         {
           "pattern": "proof.arcforges.com",

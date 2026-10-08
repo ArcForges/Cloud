@@ -55,7 +55,13 @@ test("the checked-in proof environment is isolated from the production Worker", 
   const classes = (value: unknown) => JSON.stringify(value).match(/"class_name":"[^"]+"/gu);
   assert.deepEqual(classes(top.containers), ['"class_name":"CloudContainer"']);
   assert.deepEqual(classes(top.durable_objects), ['"class_name":"CloudContainer"']);
-  assert.deepEqual(top.migrations, [{ tag: "v1", new_sqlite_classes: ["CloudContainer"] }]);
+  // The live script recorded the discarded build's capacity-pacer-v1 tag; that history is kept
+  // and the class it added is retired. Only the deletion is applied after the live tag.
+  assert.deepEqual(top.migrations, [
+    { tag: "v1", new_sqlite_classes: ["CloudContainer"] },
+    { tag: "capacity-pacer-v1", new_sqlite_classes: ["CapacityJobPacer"] },
+    { tag: "retire-capacity-pacer-v1", deleted_classes: ["CapacityJobPacer"] },
+  ]);
   assert.deepEqual(classes(proof.containers), ['"class_name":"FoundationContainer"']);
   assert.deepEqual(
     JSON.stringify(proof.migrations).includes('"CloudContainer"'),
@@ -70,6 +76,28 @@ test("the checked-in proof environment is isolated from the production Worker", 
     Object.keys(proof.vars).filter((key) => /SECRET|TOKEN/u.test(key)),
     [],
   );
+});
+
+test("the retired CapacityJobPacer class has no binding, export or proof migration", () => {
+  // The deletion migration is valid only while nothing binds or exports the class.
+  const top = wrangler as unknown as Record<string, unknown>;
+  const { migrations: _migrations, env: _env, ...production } = top;
+  assert(!JSON.stringify(production).includes("CapacityJobPacer"));
+  assert(!JSON.stringify(wrangler.env.proof).includes("CapacityJobPacer"));
+  const worker = readFileSync(path.resolve(import.meta.dirname, "../../worker/index.ts"), "utf8");
+  assert(!worker.includes("CapacityJobPacer"));
+});
+
+test("production clears the discarded cron schedule while the proof environment keeps none", () => {
+  // Wrangler replaces a Worker's schedules only when triggers.crons is declared, and an environment
+  // inherits the top-level triggers unless it declares its own. Production declares an empty list so
+  // the discarded every-minute schedule is removed; the proof environment declares an empty object so
+  // it inherits nothing and its schedules are never touched, exactly as before.
+  const top = wrangler as unknown as Record<string, unknown>;
+  assert.deepEqual(top.triggers, { crons: [] });
+  assert.deepEqual((wrangler.env.proof as unknown as Record<string, unknown>).triggers, {});
+  const worker = readFileSync(path.resolve(import.meta.dirname, "../../worker/index.ts"), "utf8");
+  assert(!/\bscheduled\b/u.test(worker), "the Worker has no scheduled handler");
 });
 
 test("the proof config pins the registry digest, revision and account and nothing else", () => {
