@@ -12,7 +12,7 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-    "package.json": "26b7159230ed1ba303dd2274ebfaac88d771ab998f0950defc014e818868bbe8",
+    "package.json": "ce87b2c0fefad980cf71d5ee224e0078f409eb91ed5af1074276229731c3c74d",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -80,7 +80,7 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "w-deku-20261008-rev-har-40",
     "date": "2026-10-08",
-    "rationale": "Successor of har-40-r4, changing only the hash-bound package.json input (SHA256 26b7159230ed1ba303dd2274ebfaac88d771ab998f0950defc014e818868bbe8): the package.json policy script now runs dotnet restore of tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj with --locked-mode before tooling/project.ts naming reads the build-only ArcForges.Contracts.Validation 1.0.0-ci.205.1 package from the NuGet packages folder, so the naming scan no longer depends on a prior restore (a fresh Linux runner failed with ENOENT before this change). No dependency, package coordinate, closure entry, licence, runtime or wrangler input changes; the admitted packages and checks are those of har-40-r4. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40. har-40-r4 stays immutable history.",
+    "rationale": "Successor of har-40-r5, changing only the hash-bound package.json input (SHA256 ce87b2c0fefad980cf71d5ee224e0078f409eb91ed5af1074276229731c3c74d): the check gate now runs dotnet restore of tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj with --locked-mode before the naming package is read, and the policy script is restored to node tooling/project.ts naming, the exact wiring that the forbidden-term scan test requires. The r5 policy-script variant ran the restore inside the policy script and failed that wiring test. The naming package is still restored before the policy step on a fresh runner with no prior restore. No dependency, package coordinate, closure entry, licence, runtime or wrangler input changes; the admitted packages and checks are those of har-40-r5. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40. har-40-r5 stays immutable history.",
     "inputs": {
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -90,7 +90,7 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-      "package.json": "26b7159230ed1ba303dd2274ebfaac88d771ab998f0950defc014e818868bbe8",
+      "package.json": "ce87b2c0fefad980cf71d5ee224e0078f409eb91ed5af1074276229731c3c74d",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
@@ -1000,7 +1000,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/har-40-r5.json",
+  "reviewRecord": "eng/policy/dependency-reviews/har-40-r6.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
