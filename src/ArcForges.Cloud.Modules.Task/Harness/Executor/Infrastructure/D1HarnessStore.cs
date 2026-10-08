@@ -42,6 +42,7 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
         var budget = row[9].IsNull
             ? new BudgetCounters(0, 0, 0, 0)
             : new BudgetCounters(Int(row[9]), Int(row[10]), Int(row[11]), Int(row[12]));
+        var pin = row[14].IsNull || row[15].IsNull ? null : new PinnedSnapshot(row[14].AsText(), row[15].AsText());
         return new RunSnapshot(
             (RunState)Int(row[0]),
             Int(row[1]),
@@ -50,6 +51,7 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
             row[4].AsText(),
             lease,
             budget,
+            pin,
             row[13].IsNull ? null : row[13].AsBytes().ToArray());
     }
 
@@ -77,9 +79,12 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
             HarnessPlans.Claim,
             run,
             [
-                [T(command.GuardId), T(run.RunId), T(run.WorkspaceId), I(command.RecoveryGeneration), T(run.RunId), I(command.NowMicros)],
+                [
+                    T(command.GuardId), T(run.RunId), T(run.WorkspaceId), I(command.RecoveryGeneration), T(run.RunId), I(command.NowMicros),
+                    T(run.RunId), T(run.RunId), T(command.Pinned.ModelId), T(command.Pinned.TariffSnapshotId),
+                ],
                 [T(run.RunId), T(command.Holder), T(command.WorkflowId), T(command.WorkerVersion), I(command.ExpiresAtMicros), I(command.RecoveryGeneration)],
-                [T(run.RunId), I(command.NowMicros)],
+                [T(run.RunId), I(command.Charge.Steps), I(command.Charge.Subrequests), T(command.Pinned.ModelId), T(command.Pinned.TariffSnapshotId), I(command.NowMicros)],
                 [T(command.WorkflowId), T(command.WorkerVersion), I(command.RecoveryGeneration), I(command.NowMicros), T(run.RunId)],
                 [T(command.GuardId)],
             ],
@@ -92,7 +97,7 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
             [
                 [T(guardId), T(fence.Run.RunId), T(fence.Run.WorkspaceId), T(fence.Holder), I(fence.Epoch), I(fence.RecoveryGeneration), I(nowMicros)],
                 [I(expiresAtMicros), T(fence.Run.RunId), T(fence.Holder), I(fence.Epoch)],
-                [I(nowMicros), T(fence.Run.RunId)],
+                [I(BudgetDefinition.MaintenanceBatch.Steps), I(BudgetDefinition.MaintenanceBatch.Subrequests), I(nowMicros), T(fence.Run.RunId)],
                 [T(guardId)],
             ],
             cancellationToken);
@@ -105,7 +110,8 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
                 [
                     T(command.GuardId), T(fence.Run.RunId), T(fence.Run.WorkspaceId), T(fence.Holder), I(fence.Epoch), I(fence.RecoveryGeneration),
                     I(command.NowMicros), I(command.Cost.Steps), I(command.StepLimit), I(command.Cost.Subrequests), I(command.SubrequestLimit),
-                    I(command.Cost.ModelCalls), I(command.ModelLimit), I(command.Cost.ToolInvocations), I(command.ToolLimit), T(command.CommandId),
+                    I(command.Cost.ModelCalls), I(command.ModelLimit), I(command.Cost.ToolInvocations), I(command.ToolLimit),
+                    T(command.Pinned.ModelId), T(command.Pinned.TariffSnapshotId), T(command.CommandId),
                 ],
                 [I(command.Cost.Steps), I(command.Cost.Subrequests), I(command.Cost.ModelCalls), I(command.Cost.ToolInvocations), I(command.NowMicros), T(fence.Run.RunId)],
                 [T(command.CommandId), T(fence.Run.RunId), I(fence.Epoch), T(command.Operation), T(command.RequestSha256), I(command.NowMicros)],
@@ -144,6 +150,7 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
                     T(command.NewCommandState), command.ResultRef is null ? PlanValue.Null : PlanValue.FromText(command.ResultRef),
                     T(command.AttemptId), T(fence.Run.RunId), T(fence.Run.RunId), T(command.ExpectedCommandState),
                 ],
+                [I(command.Charge.Steps), I(command.Charge.Subrequests), I(command.NowMicros), T(fence.Run.RunId)],
                 [T(command.GuardId)],
             ],
             cancellationToken);
@@ -155,7 +162,7 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
             [
                 [T(guardId), T(fence.Run.RunId), T(fence.Run.WorkspaceId), T(fence.Holder), I(fence.Epoch), I(fence.RecoveryGeneration), I(nowMicros)],
                 [PlanValue.FromBytes(receiptSha256), I(nowMicros), T(fence.Run.RunId)],
-                [I(nowMicros), T(fence.Run.RunId)],
+                [I(BudgetDefinition.MaintenanceBatch.Steps), I(BudgetDefinition.MaintenanceBatch.Subrequests), I(nowMicros), T(fence.Run.RunId)],
                 [T(guardId)],
             ],
             cancellationToken);
@@ -168,7 +175,7 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
                 [T(guardId), T(fence.Run.RunId), T(fence.Run.WorkspaceId), T(fence.Holder), I(fence.Epoch), I(fence.RecoveryGeneration), I(nowMicros)],
                 [I((long)nextState), I(nowMicros), T(fence.Run.RunId)],
                 [T(fence.Run.RunId), T(fence.Holder), I(fence.Epoch)],
-                [I(nowMicros), T(fence.Run.RunId)],
+                [I(BudgetDefinition.MaintenanceBatch.Steps), I(BudgetDefinition.MaintenanceBatch.Subrequests), I(nowMicros), T(fence.Run.RunId)],
                 [T(guardId)],
             ],
             cancellationToken);

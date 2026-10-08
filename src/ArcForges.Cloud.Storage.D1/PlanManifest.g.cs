@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "106e4458aeaac34de0f671b6c8d1f682ba75cebd5ab8aa02db90b11be32daeda";
+    public const string Hash = "47f9f5f36d0bd5048dfaafcf16c4ed08e51635369f3916862af94d8b60187bd6";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity
@@ -268,7 +268,7 @@ internal static class PlanManifest
             [
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Text)], null),
-                new([new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
                 new([new(PlanKind.Text)], null)
             ]);
 
@@ -278,9 +278,9 @@ internal static class PlanManifest
             PlanAccess.Write,
             0,
             [
-                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64)], null),
-                new([new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
                 new([new(PlanKind.Text)], null)
             ]);
@@ -306,6 +306,7 @@ internal static class PlanManifest
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text)], null),
                 new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
                 new([new(PlanKind.Text)], null)
             ]);
 
@@ -317,7 +318,7 @@ internal static class PlanManifest
             [
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
-                new([new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
                 new([new(PlanKind.Text)], null)
             ]);
 
@@ -327,7 +328,7 @@ internal static class PlanManifest
             PlanAccess.Write,
             0,
             [
-                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
                 new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
@@ -340,7 +341,7 @@ internal static class PlanManifest
             PlanAccess.Read,
             1,
             [
-                new([new(PlanKind.Text), new(PlanKind.Scope)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Bytes, true)])
+                new([new(PlanKind.Text), new(PlanKind.Scope)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Bytes, true), new(PlanKind.Text, true), new(PlanKind.Text, true)])
             ]);
 
         public static readonly PlanDefinition HarnessExecutorYield = new(
@@ -352,7 +353,7 @@ internal static class PlanManifest
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
                 new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
                 new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
-                new([new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
                 new([new(PlanKind.Text)], null)
             ]);
     }

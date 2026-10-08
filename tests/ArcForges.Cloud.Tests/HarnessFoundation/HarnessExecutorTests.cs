@@ -60,7 +60,7 @@ public sealed class HarnessExecutorTests
         Assert.False(await Executor(fixture, effects).RenewIfDueAsync(oldClaim, T.Ct));
         var reserve = await fixture.Store.ReserveStepAsync(oldClaim.Fence, Reserve(fixture, oldClaim.Fence), T.Ct);
         Assert.Equal(StoreStatus.Refused, reserve);
-        Assert.Equal(new BudgetCounters(0, 0, 0, 0), await fixture.BudgetAsync());
+        Assert.Equal(new BudgetCounters(6, 6, 0, 0), await fixture.BudgetAsync());
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public sealed class HarnessExecutorTests
         Assert.Equal(EffectStepStatus.NotDispatched, result.Status);
         Assert.Equal(NotDispatchedReason.LeaseLost, result.Reason);
         Assert.Equal(0, effects.Count);
-        Assert.Equal(new BudgetCounters(0, 0, 0, 0), await fixture.BudgetAsync());
+        Assert.Equal(new BudgetCounters(3, 3, 0, 0), await fixture.BudgetAsync());
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public sealed class HarnessExecutorTests
         Assert.Equal(EffectStepStatus.Succeeded, result.Status);
         Assert.Equal(1, result.Attempts);
         Assert.Equal(1, effects.Count);
-        Assert.Equal(new BudgetCounters(1, 4, 1, 0), await fixture.BudgetAsync());
+        Assert.Equal(new BudgetCounters(8, 8, 1, 0), await fixture.BudgetAsync());
         var attempt = await fixture.QueryAsync("SELECT state, failure_class, effect_certainty FROM task_attempt WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "'");
         Assert.Equal("3|NULL|2", Flat(attempt));
         var command = await fixture.QueryAsync("SELECT state, result_ref FROM task_execution_command WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "'");
@@ -133,7 +133,7 @@ public sealed class HarnessExecutorTests
         Assert.Equal(3, effects.Count);
         Assert.Equal(3, effects.Calls.Select(call => call.AttemptId).Distinct().Count());
         Assert.Single(effects.Calls.Select(call => call.CommandId).Distinct());
-        Assert.Equal(new BudgetCounters(3, 12, 3, 0), await fixture.BudgetAsync());
+        Assert.Equal(new BudgetCounters(18, 16, 3, 0), await fixture.BudgetAsync());
         var attempts = await fixture.QueryAsync("SELECT attempt_ordinal, state FROM task_attempt WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "' ORDER BY attempt_ordinal");
         Assert.Equal("1|4;2|4;3|3", Flat(attempts));
     }
@@ -212,7 +212,7 @@ public sealed class HarnessExecutorTests
         var result = await executor.RunEffectAsync(claim, ModelRequest(pin: other), LoopBounds.Default, T.Ct);
         Assert.Equal(NotDispatchedReason.PinRefused, result.Reason);
         Assert.Equal(0, effects.Count);
-        Assert.Equal(new BudgetCounters(0, 0, 0, 0), await fixture.BudgetAsync());
+        Assert.Equal(new BudgetCounters(3, 3, 0, 0), await fixture.BudgetAsync());
     }
 
     [Fact]
@@ -236,15 +236,15 @@ public sealed class HarnessExecutorTests
         var effects = new FakeEffects();
         var executor = Executor(fixture, effects);
         var claim = (await executor.ClaimAsync(fixture.Run, HarnessFixture.Identity(), T.Ct)).Claim!;
-        await fixture.ExecAsync("UPDATE task_harness_budget SET counted_steps = 23999 WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "';");
+        await fixture.ExecAsync("UPDATE task_harness_budget SET counted_steps = 23995 WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "';");
 
         Assert.Equal(EffectStepStatus.Succeeded, (await executor.RunEffectAsync(claim, ModelRequest(), LoopBounds.Default, T.Ct)).Status);
-        Assert.Equal(new BudgetCounters(24_000, 4, 1, 0), await fixture.BudgetAsync());
+        Assert.Equal(new BudgetCounters(24_000, 8, 1, 0), await fixture.BudgetAsync());
 
         var paused = await executor.RunEffectAsync(claim, ModelRequest(), LoopBounds.Default, T.Ct);
         Assert.Equal(NotDispatchedReason.BudgetPausedAtEffectGuard, paused.Reason);
         Assert.Equal(1, effects.Count);
-        Assert.Equal(new BudgetCounters(24_000, 4, 1, 0), await fixture.BudgetAsync());
+        Assert.Equal(new BudgetCounters(24_000, 8, 1, 0), await fixture.BudgetAsync());
     }
 
     [Fact]
@@ -259,7 +259,7 @@ public sealed class HarnessExecutorTests
         var result = await executor.RunEffectAsync(claim, ModelRequest(), LoopBounds.Default, T.Ct);
         Assert.Equal(NotDispatchedReason.BudgetSubrequestStop, result.Reason);
         Assert.Equal(0, effects.Count);
-        Assert.Equal(new BudgetCounters(0, 899_997, 0, 0), await fixture.BudgetAsync());
+        Assert.Equal(new BudgetCounters(3, 899_997, 0, 0), await fixture.BudgetAsync());
     }
 
     [Fact]
@@ -403,5 +403,6 @@ public sealed class HarnessExecutorTests
         BudgetPolicy.EffectSubrequestStop,
         LoopBounds.DefaultModelCalls,
         LoopBounds.DefaultToolInvocations,
-        fixture.Clock.Micros());
+        fixture.Clock.Micros(),
+        HarnessFixture.Pin);
 }

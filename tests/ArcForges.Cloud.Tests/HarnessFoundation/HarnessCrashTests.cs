@@ -22,19 +22,21 @@ public sealed class HarnessCrashTests
     /// <param name="after">True when the crash happens after the write committed; false when it happens before.</param>
     /// <param name="resume">The name of the resume kind the restarted executor must report.</param>
     /// <param name="suppliedCalls">The supplier calls the first process made; the restarted process never calls the supplier.</param>
-    /// <param name="countedSteps">The counted steps that committed.</param>
+    /// <param name="countedSteps">The counted steps that committed: the claim 3, a reservation 5 (its state read and four batches with the outbound
+    /// fetch), the wake 6 (its wait cycle, container call, claim and reads), a resumed outcome 1 and a yield 1 (BudgetDefinition).</param>
+    /// <param name="subrequests">The subrequests that committed: the same charges, without the wait cycle and the retry.</param>
     [Theory]
-    [InlineData(1, false, "NothingOpen", 0, 0)]
-    [InlineData(1, true, "NothingOpen", 0, 0)]
-    [InlineData(2, false, "NothingOpen", 0, 0)]
-    [InlineData(2, true, "ReleasedBeforeDispatch", 0, 1)]
-    [InlineData(3, false, "ReleasedBeforeDispatch", 0, 1)]
-    [InlineData(3, true, "UnknownEffectRecorded", 0, 1)]
-    [InlineData(4, false, "UnknownEffectRecorded", 1, 1)]
-    [InlineData(4, true, "NothingOpen", 1, 1)]
-    [InlineData(5, false, "NothingOpen", 1, 1)]
-    [InlineData(5, true, "NothingOpen", 1, 1)]
-    public async Task ACrashAtAFencedWriteNeverRepeatsAnEffectAndTheWakeSettlesTheRun(int write, bool after, string resume, int suppliedCalls, int countedSteps)
+    [InlineData(1, false, "NothingOpen", 0, 7, 6)]
+    [InlineData(1, true, "NothingOpen", 0, 10, 9)]
+    [InlineData(2, false, "NothingOpen", 0, 10, 9)]
+    [InlineData(2, true, "ReleasedBeforeDispatch", 0, 16, 15)]
+    [InlineData(3, false, "ReleasedBeforeDispatch", 0, 16, 15)]
+    [InlineData(3, true, "UnknownEffectRecorded", 0, 16, 15)]
+    [InlineData(4, false, "UnknownEffectRecorded", 1, 16, 15)]
+    [InlineData(4, true, "NothingOpen", 1, 15, 14)]
+    [InlineData(5, false, "NothingOpen", 1, 15, 14)]
+    [InlineData(5, true, "NothingOpen", 1, 16, 15)]
+    public async Task ACrashAtAFencedWriteNeverRepeatsAnEffectAndTheWakeSettlesTheRun(int write, bool after, string resume, int suppliedCalls, int countedSteps, int subrequests)
     {
         using var fixture = await HarnessFixture.CreateAsync();
         var firstSupplier = new FakeEffects();
@@ -74,8 +76,7 @@ public sealed class HarnessCrashTests
 
         var counters = await fixture.BudgetAsync();
         Assert.Equal(countedSteps, counters.CountedSteps);
-        // Every reserved effect keeps its subrequests; the yields and the wake's own batches add to them, never remove them.
-        Assert.True(counters.Subrequests >= countedSteps * BudgetPolicy.SubrequestsPerEffect);
+        Assert.Equal(subrequests, counters.Subrequests);
     }
 
     [Fact]
@@ -153,7 +154,8 @@ public sealed class HarnessCrashTests
         Assert.Equal(1, firstSupplier.Count);
         Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
         Assert.Equal("3", await fixture.RunStateAsync());
-        Assert.Equal(1, (await fixture.BudgetAsync()).CountedSteps);
+        // Claim 3 and the reservation 5, the renewal (1, written only when it committed), the wake's claim 6 and its yield 1.
+        Assert.Equal(new BudgetCounters(after ? 16 : 15, after ? 15 : 14, 1, 0), await fixture.BudgetAsync());
     }
 
     /// <summary>
@@ -192,6 +194,7 @@ public sealed class HarnessCrashTests
         Assert.Equal(1, firstSupplier.Count);
         Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
         Assert.Equal("3", await fixture.RunStateAsync());
-        Assert.Equal(1, (await fixture.BudgetAsync()).CountedSteps);
+        // Claim 3 and the reservation 5, the checkpoint (1, written only when it committed), the wake's claim 6 and its yield 1.
+        Assert.Equal(new BudgetCounters(after ? 16 : 15, after ? 15 : 14, 1, 0), await fixture.BudgetAsync());
     }
 }

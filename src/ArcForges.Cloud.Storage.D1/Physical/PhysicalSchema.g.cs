@@ -8,13 +8,13 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "ca9fc0f47ef3a6851f7d93f6923c50b990ab3e6a81dab92db8709f106db07e65";
+    public const string ManifestHash = "f8b2ec2597e5754c30cdcbf86fe423ba0c3f3995fba0f8353853c18f04b58376";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
     public const int HighestMigration = 25;
 
     /// <summary>SHA-256 over the ordered sequence and checksum of every locked migration.</summary>
-    public const string MigrationLockHash = "842610f83c70475f6f98d55b6db59e7d9f9d937d8c928011ef4065dcda014c2b";
+    public const string MigrationLockHash = "f499d30d177e25a5a21ee60755acd7707e8a71d8a96f45622b4ee52487aecfc3";
 
     public static IReadOnlyList<PhysicalEnum> Enums { get; } =
     [
@@ -2625,6 +2625,8 @@ internal static partial class PhysicalSchema
             new("subrequests", PhysicalKind.Int64, false),
             new("model_calls", PhysicalKind.Int64, false),
             new("tool_invocations", PhysicalKind.Int64, false),
+            new("pinned_model_id", PhysicalKind.Text, false),
+            new("pinned_tariff_snapshot_id", PhysicalKind.Text, false),
             new("updated_at", PhysicalKind.Instant, false),
             new("rev", PhysicalKind.Rev, false),
         ],

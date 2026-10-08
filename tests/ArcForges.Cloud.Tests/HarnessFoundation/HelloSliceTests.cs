@@ -90,8 +90,9 @@ public sealed class HelloSliceTests
         Assert.Equal(0, models.Calls[1].ToolCount);
         Assert.Contains("\"tools\":[{\"type\":\"function\"", models.Calls[0].RequestJson, StringComparison.Ordinal);
         Assert.Contains("\"tool_choice\":\"none\"", models.Calls[1].RequestJson, StringComparison.Ordinal);
-        // Subrequests: 4 per effect, plus 1 per checkpoint (admission and one after each answer) and 1 for the yield (BudgetPolicy).
-        Assert.Equal(new BudgetCounters(CountedSteps: 3, Subrequests: 17, ModelCalls: 2, ToolInvocations: 1), await fixture.BudgetAsync());
+        // The claim 3 (claim batch and two reads), the model step 5 and the tool step 4 and the final model step 5 (BudgetDefinition), one
+        // checkpoint per answer and at admission (4), and the yield (1): 22 steps and 22 subrequests, two model calls and one tool invocation.
+        Assert.Equal(new BudgetCounters(CountedSteps: 22, Subrequests: 22, ModelCalls: 2, ToolInvocations: 1), await fixture.BudgetAsync());
         Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
     }
 
@@ -251,9 +252,10 @@ public sealed class HelloSliceTests
 
         Assert.Equal(HelloStatus.Succeeded, result.Status);
         Assert.Equal(4, models.Calls.Count);
-        // Every attempt is reserved, so each refused attempt counts against the step and model budgets.
-        // Five reserved steps (three attempts and two more), plus the admission and three checkpoints and the yield.
-        Assert.Equal(new BudgetCounters(CountedSteps: 5, Subrequests: 25, ModelCalls: 4, ToolInvocations: 1), await fixture.BudgetAsync());
+        // Every attempt is reserved, so each refused attempt counts against the step and model budgets. The first step is 5 steps and 5
+        // subrequests, each retry is 5 steps (its retry class) and 4 subrequests. With the claim 3, four checkpoints, the tool step 4,
+        // the final step 5 and the yield 1: 32 steps and 30 subrequests.
+        Assert.Equal(new BudgetCounters(CountedSteps: 32, Subrequests: 30, ModelCalls: 4, ToolInvocations: 1), await fixture.BudgetAsync());
     }
 
     [Fact]
@@ -360,7 +362,8 @@ public sealed class HelloSliceTests
         var result = await Slice(fixture, models).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
         Assert.Equal(new HelloResult(HelloStatus.Failed, reason, null), result);
         Assert.Equal(2, models.Calls.Count);
-        Assert.Equal(new BudgetCounters(CountedSteps: 3, Subrequests: 16, ModelCalls: 2, ToolInvocations: 1), await fixture.BudgetAsync());
+        // The claim 3, the admission and two answers' checkpoints (3), the two model steps 5 and 5, the tool step 4 and the yield 1.
+        Assert.Equal(new BudgetCounters(CountedSteps: 21, Subrequests: 21, ModelCalls: 2, ToolInvocations: 1), await fixture.BudgetAsync());
     }
 
     [Fact]
@@ -440,7 +443,7 @@ public sealed class HelloSliceTests
 
         ReserveCommand Reserve(Guid attempt) => new(
             fixture.Ids.NewId(), commandId, attempt, fixture.Ids.NewId(), 1, "request-tool", new string('a', 64),
-            EffectCost.ModelCall, BudgetPolicy.EffectStepGuard, BudgetPolicy.EffectSubrequestStop, 16, 64, fixture.Clock.Micros());
+            EffectCost.ModelCall, BudgetPolicy.EffectStepGuard, BudgetPolicy.EffectSubrequestStop, 16, 64, fixture.Clock.Micros(), HarnessFixture.Pin);
 
         Assert.Equal(StoreStatus.Succeeded, await store.ReserveStepAsync(claim.Fence, Reserve(fixture.Ids.NewId()), T.Ct));
         Assert.Equal(StoreStatus.Refused, await store.ReserveStepAsync(claim.Fence, Reserve(fixture.Ids.NewId()), T.Ct));

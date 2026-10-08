@@ -72,10 +72,10 @@ internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort mo
     private async Task<HelloResult> RunClaimedAsync(HarnessExecutor executor, HelloEffectPort effects, ClaimedRun claim, string name, CancellationToken cancellationToken)
     {
         var pinned = claim.Identity.Pinned;
-        var loaded = await store.LoadAsync(claim.Fence.Run, cancellationToken).ConfigureAwait(false);
-        if (loaded is null) return new HelloResult(HelloStatus.Failed, "run_missing", null);
-        var budget = loaded.Budget;
-        if (budget.CountedSteps != 0 || budget.Subrequests != 0 || budget.ModelCalls != 0 || budget.ToolInvocations != 0)
+        // The run as the claim left it (read under the new lease). The claim's own charge is in its counters, so only the effect counters
+        // decide whether an effect was ever reserved: a run with a reserved model or tool step is never started again here.
+        var budget = claim.Admitted.Budget;
+        if (budget.ModelCalls != 0 || budget.ToolInvocations != 0)
             return await SettleAsync(executor, claim, RunState.Interrupted, HelloStatus.Refused, "already_started", null, cancellationToken).ConfigureAwait(false);
 
         // Admission is a fenced checkpoint with no effect: the identity it binds is the Worker version and the Cloud build, with the epoch.

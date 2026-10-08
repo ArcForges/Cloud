@@ -6,17 +6,21 @@ namespace ArcForges.Cloud.Modules.Task.Harness.Executor.Application;
 /// <summary>A claimed run: the fence of this claim and the local view of its lease. It is held by one executor only.</summary>
 internal sealed class ClaimedRun
 {
-    internal ClaimedRun(RunIdentity identity, Fence fence, long expiresAtMicros, long renewedAtMicros)
+    internal ClaimedRun(RunIdentity identity, Fence fence, long expiresAtMicros, long renewedAtMicros, RunSnapshot admitted)
     {
         Identity = identity;
         Fence = fence;
         ExpiresAtMicros = expiresAtMicros;
         RenewedAtMicros = renewedAtMicros;
+        Admitted = admitted;
     }
 
     internal RunIdentity Identity { get; }
 
     internal Fence Fence { get; }
+
+    /// <summary>The run as the claim left it, read under the new lease: its budget already carries the claim's charge.</summary>
+    internal RunSnapshot Admitted { get; }
 
     internal long ExpiresAtMicros { get; set; }
 
@@ -38,6 +42,12 @@ internal enum ClaimStatus
 
     /// <summary>The recovery generation of the identity is not the run's current generation.</summary>
     StaleGeneration,
+
+    /// <summary>
+    /// The identity's model and tariff pin is not the pin the run was first claimed with, or the identity is unpinned. Nothing is claimed and
+    /// nothing is dispatched.
+    /// </summary>
+    PinRefused,
 
     /// <summary>Another live lease holds the run, or the claim lost a race.</summary>
     Refused,
@@ -129,7 +139,14 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
     private const int MaxResultRefLength = 128;
 
     /// <summary>Claims the run for this executor. The epoch of the new lease is one more than the previous one.</summary>
-    internal async Task<ClaimResult> ClaimAsync(HarnessRun run, RunIdentity identity, CancellationToken cancellationToken)
+    internal Task<ClaimResult> ClaimAsync(HarnessRun run, RunIdentity identity, CancellationToken cancellationToken) =>
+        ClaimAsync(run, identity, BudgetCharge.Zero, cancellationToken);
+
+    /// <summary>
+    /// Claims the run. <paramref name="extraCharge"/> is the charge of what the caller does under the claim (a wake delivery and its resume read);
+    /// it is written in the claim batch with the claim's own charge, so the counters never lag the calls.
+    /// </summary>
+    internal async Task<ClaimResult> ClaimAsync(HarnessRun run, RunIdentity identity, BudgetCharge extraCharge, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(identity);
         if (identity.RunId != run.RunId) throw new ArgumentException("The identity names another run.", nameof(identity));
@@ -139,20 +156,34 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
         if (before.State is not (RunState.Queued or RunState.Running or RunState.Waiting or RunState.Interrupted))
             return new ClaimResult(ClaimStatus.NotClaimable, null, null);
 
+        // The pin is the model and tariff pair the run was first claimed with. A different pair, or an unpinned identity, is refused here and
+        // again in the claim batch, so no lease is taken and nothing is dispatched under a changed pin.
+        if (!identity.Pinned.IsPinned || (before.Pin is not null && !before.Pin.Matches(identity.Pinned)))
+            return new ClaimResult(ClaimStatus.PinRefused, null, null);
+
         var holder = ids.NewId();
         var now = Micros();
         var expires = now + LeasePolicy.TermMicros;
         var status = await store.ClaimAsync(
             run,
-            new ClaimCommand(ids.NewId(), holder, identity.WorkflowId, identity.WorkerVersion, identity.RecoveryGeneration, now, expires),
+            new ClaimCommand(
+                ids.NewId(),
+                holder,
+                identity.WorkflowId,
+                identity.WorkerVersion,
+                identity.RecoveryGeneration,
+                now,
+                expires,
+                identity.Pinned,
+                BudgetDefinition.Claim + extraCharge),
             cancellationToken).ConfigureAwait(false);
         if (status != StoreStatus.Succeeded) return new ClaimResult(FromStore(status), null, null);
 
         // The claim is real only when this holder owns the lease that the store now shows.
         var after = await store.LoadAsync(run, cancellationToken).ConfigureAwait(false);
-        if (after?.Lease is not { } lease || lease.Holder != holder) return new ClaimResult(ClaimStatus.Refused, null, null);
+        if (after is null || after.Lease is not { } lease || lease.Holder != holder) return new ClaimResult(ClaimStatus.Refused, null, null);
         var fence = new Fence(run, holder, lease.Epoch, identity.RecoveryGeneration);
-        return new ClaimResult(ClaimStatus.Claimed, new ClaimedRun(identity, fence, lease.ExpiresAtMicros, now), lease.Epoch);
+        return new ClaimResult(ClaimStatus.Claimed, new ClaimedRun(identity, fence, lease.ExpiresAtMicros, now, after), lease.Epoch);
     }
 
     /// <summary>Renews the lease when a renewal is due. Returns false when the lease is lost; the caller then makes no further call.</summary>
@@ -187,11 +218,12 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
             && !ModelRequestCaps.Admits(request.MaxOutputTokens, request.TextInputTokens, request.ToolCount))
             return NotDispatched(NotDispatchedReason.RequestOutsideCaps, null, 0);
 
+        // This read is the first attempt's counted state read (see BudgetDefinition.ModelAttempt); the reservation below charges it.
         var snapshot = await store.LoadAsync(claim.Fence.Run, cancellationToken).ConfigureAwait(false);
         if (snapshot is null) return NotDispatched(NotDispatchedReason.NotFound, null, 0);
         if (snapshot.Lease?.Holder != claim.Fence.Holder) return NotDispatched(NotDispatchedReason.LeaseLost, null, 0);
-        var cost = request.Kind == EffectKind.ModelCall ? EffectCost.ModelCall : EffectCost.ToolInvocation;
-        var local = BudgetGuard.ForEffect(snapshot.Budget, cost, bounds);
+        if (snapshot.Pin is null || !snapshot.Pin.Matches(request.Pinned)) return NotDispatched(NotDispatchedReason.PinRefused, null, 0);
+        var local = BudgetGuard.ForEffect(snapshot.Budget, CostOf(request.Kind, 1), bounds);
         if (local != GuardDecision.Allowed) return NotDispatched(FromGuard(local), null, 0);
 
         var commandId = ids.NewId();
@@ -201,6 +233,7 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
         for (var ordinal = 1; ; ordinal++)
         {
             var attemptId = ids.NewId();
+            var cost = CostOf(request.Kind, ordinal);
             var reserve = await store.ReserveStepAsync(
                 claim.Fence,
                 new ReserveCommand(
@@ -216,9 +249,10 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
                     BudgetPolicy.EffectSubrequestStop,
                     bounds.ModelCalls,
                     bounds.ToolInvocations,
-                    Micros()),
+                    Micros(),
+                    request.Pinned),
                 cancellationToken).ConfigureAwait(false);
-            if (reserve != StoreStatus.Succeeded) return await ExplainRefusalAsync(claim, reserve, ordinal, commandId, cancellationToken).ConfigureAwait(false);
+            if (reserve != StoreStatus.Succeeded) return await ExplainRefusalAsync(claim, reserve, ordinal, commandId, cost, cancellationToken).ConfigureAwait(false);
 
             var intent = await store.MarkDispatchAsync(claim.Fence, ids.NewId(), attemptId, Micros(), cancellationToken).ConfigureAwait(false);
             if (intent != StoreStatus.Succeeded)
@@ -264,7 +298,8 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
                     outcome.Certainty,
                     outcome.Command,
                     resultRef,
-                    Micros()),
+                    Micros(),
+                    BudgetCharge.Zero),
                 cancellationToken).ConfigureAwait(false);
             if (recorded != StoreStatus.Succeeded)
             {
@@ -305,7 +340,7 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
             var released = await store.RecordOutcomeAsync(
                 claim.Fence,
                 new OutcomeCommand(ids.NewId(), open.AttemptId, AttemptState.Pending, CommandStates.Reserved, AttemptState.Failed,
-                    FailureClass.Refused, EffectCertainty.DidNotHappen, CommandStates.Refused, null, Micros()),
+                    FailureClass.Refused, EffectCertainty.DidNotHappen, CommandStates.Refused, null, Micros(), BudgetDefinition.ResumedOutcome),
                 cancellationToken).ConfigureAwait(false);
             return released == StoreStatus.Succeeded
                 ? new ResumeResult(ResumeKind.ReleasedBeforeDispatch, open.CommandId, released)
@@ -317,7 +352,7 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
             var unknown = await store.RecordOutcomeAsync(
                 claim.Fence,
                 new OutcomeCommand(ids.NewId(), open.AttemptId, AttemptState.Running, CommandStates.Dispatching, AttemptState.Failed,
-                    FailureClass.UnknownEffect, EffectCertainty.Unknown, CommandStates.Outcome, null, Micros()),
+                    FailureClass.UnknownEffect, EffectCertainty.Unknown, CommandStates.Outcome, null, Micros(), BudgetDefinition.ResumedOutcome),
                 cancellationToken).ConfigureAwait(false);
             return unknown == StoreStatus.Succeeded
                 ? new ResumeResult(ResumeKind.UnknownEffectRecorded, open.CommandId, unknown)
@@ -338,7 +373,7 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
         return status;
     }
 
-    private async Task<EffectStepResult> ExplainRefusalAsync(ClaimedRun claim, StoreStatus status, int ordinal, Guid commandId, CancellationToken cancellationToken)
+    private async Task<EffectStepResult> ExplainRefusalAsync(ClaimedRun claim, StoreStatus status, int ordinal, Guid commandId, EffectCost cost, CancellationToken cancellationToken)
     {
         var reason = FromStoreStep(status);
         if (status == StoreStatus.Refused)
@@ -346,12 +381,18 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
             var snapshot = await store.LoadAsync(claim.Fence.Run, cancellationToken).ConfigureAwait(false);
             if (snapshot?.Lease is not { } lease || lease.Holder != claim.Fence.Holder || Micros() >= lease.ExpiresAtMicros)
                 reason = NotDispatchedReason.StaleWriter;
-            else if (snapshot.Budget.CountedSteps + 1 > BudgetPolicy.EffectStepGuard)
+            else if (snapshot.Pin is null || !snapshot.Pin.Matches(claim.Identity.Pinned))
+                reason = NotDispatchedReason.PinRefused;
+            else if (snapshot.Budget.CountedSteps + cost.Steps > BudgetPolicy.EffectStepGuard)
                 reason = NotDispatchedReason.BudgetPausedAtEffectGuard;
         }
 
         return NotDispatched(reason, commandId, ordinal - 1);
     }
+
+    /// <summary>The reserved cost of one attempt of an effect of this kind (see <see cref="BudgetDefinition"/>).</summary>
+    private static EffectCost CostOf(EffectKind kind, int ordinal) =>
+        kind == EffectKind.ModelCall ? BudgetDefinition.ModelAttempt(ordinal) : BudgetDefinition.ToolAttempt(ordinal);
 
     private EffectStepResult NotDispatched(NotDispatchedReason reason, Guid? commandId, int attempts, EffectResultKind? kind = null) =>
         new(EffectStepStatus.NotDispatched, reason, commandId, attempts, kind);

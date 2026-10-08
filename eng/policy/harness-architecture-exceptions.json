@@ -37,7 +37,7 @@
       "file": "worker/ingress/correlation.ts",
       "detail": "Manual varint or binary reader/writer logic",
       "owner": "Cloud integration owner (CLOUD.69 correlation seam)",
-      "reason": "The CLOUD.69 Worker correlation reader extracts only RequestMeta.correlationId from the client frame with a minimal handwritten varint reader. It predates HAR.40, lies outside this task's write scope and is owned by CLOUD.69. It must be replaced by a reviewed generated reader before this exception expires.",
+      "reason": "The CLOUD.69 Worker correlation reader extracts only RequestMeta.correlationId from the client frame with a minimal handwritten varint reader. It predates HAR.40, lies outside this task's write scope and is owned by CLOUD.69. It must be replaced by a reviewed generated reader before this exception expires. HAR.40 registers it only because the ported WP-05.03 wire-codec rule (GOV.10 successor, HarnessArchitectureRules) scans all Worker release code under worker/, and HAR.40 does not change this file.",
       "created": "2026-10-08",
       "expires": "2027-03-31"
     },
@@ -47,7 +47,7 @@
       "file": "tests/worker/ingress-correlation.test.ts",
       "detail": "Manual varint or binary reader/writer logic",
       "owner": "Cloud integration owner (CLOUD.69 correlation seam)",
-      "reason": "A test-only encoder builds client protobuf frames as input for the CLOUD.69 correlation reader. It produces test bytes only, is never shipped and expires with the reader exception HAR40-EX-4.",
+      "reason": "A test-only encoder builds client protobuf frames as input for the CLOUD.69 correlation reader. It produces test bytes only, is never shipped and expires with the reader exception HAR40-EX-4. HAR.40 registers it because the ported wire-codec rule covers the test tree of the Worker; HAR.40 does not change this file.",
       "created": "2026-10-08",
       "expires": "2027-03-31"
     }

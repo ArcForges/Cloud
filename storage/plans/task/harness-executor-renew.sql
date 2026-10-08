@@ -11,7 +11,8 @@ SELECT ?, 'task.harness-renew', CASE WHEN EXISTS (SELECT 1 FROM task_execution_l
 THEN 1 ELSE 0 END;
 -- statement: params=int64,text,text,int64
 UPDATE task_execution_lease SET expires_at = CAST(? AS INTEGER) WHERE run_id = ? AND holder = ? AND epoch = CAST(? AS INTEGER);
--- statement: params=int64,text
-UPDATE task_harness_budget SET subrequests = subrequests + 1, updated_at = CAST(? AS INTEGER), rev = rev + 1 WHERE run_id = ?;
+-- statement: params=int64,int64,int64,text
+UPDATE task_harness_budget SET counted_steps = counted_steps + CAST(? AS INTEGER), subrequests = subrequests + CAST(? AS INTEGER),
+  updated_at = CAST(? AS INTEGER), rev = rev + 1 WHERE run_id = ?;
 -- statement: params=text
 DELETE FROM platform_command_guard WHERE command_id = ?;

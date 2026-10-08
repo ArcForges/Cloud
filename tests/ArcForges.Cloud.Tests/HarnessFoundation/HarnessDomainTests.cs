@@ -34,9 +34,11 @@ public sealed class HarnessDomainTests
     [Fact]
     public void AnEffectIsAllowedUpToTheEffectGuardAndPausedAtItWithoutAnyWrite()
     {
+        // A model effect costs five counted steps, so the last effect that ends at the guard starts at 23,995.
         var cost = EffectCost.ModelCall;
         var bounds = LoopBounds.Default;
-        Assert.Equal(GuardDecision.Allowed, BudgetGuard.ForEffect(new BudgetCounters(23_999, 0, 0, 0), cost, bounds));
+        Assert.Equal(GuardDecision.Allowed, BudgetGuard.ForEffect(new BudgetCounters(23_995, 0, 0, 0), cost, bounds));
+        Assert.Equal(GuardDecision.PausedAtEffectGuard, BudgetGuard.ForEffect(new BudgetCounters(23_996, 0, 0, 0), cost, bounds));
         Assert.Equal(GuardDecision.PausedAtEffectGuard, BudgetGuard.ForEffect(new BudgetCounters(24_000, 0, 0, 0), cost, bounds));
     }
 
@@ -53,8 +55,8 @@ public sealed class HarnessDomainTests
     public void TheSubrequestStopLeavesReconciliationItsAllowance()
     {
         // A model call reserves four subrequests, so 899,996 is the last counted value that still dispatches.
-        Assert.Equal(GuardDecision.Allowed, BudgetGuard.ForEffect(new BudgetCounters(0, 899_996, 0, 0), EffectCost.ModelCall, LoopBounds.Default));
-        Assert.Equal(GuardDecision.SubrequestStop, BudgetGuard.ForEffect(new BudgetCounters(0, 899_997, 0, 0), EffectCost.ModelCall, LoopBounds.Default));
+        Assert.Equal(GuardDecision.Allowed, BudgetGuard.ForEffect(new BudgetCounters(0, 899_995, 0, 0), EffectCost.ModelCall, LoopBounds.Default));
+        Assert.Equal(GuardDecision.SubrequestStop, BudgetGuard.ForEffect(new BudgetCounters(0, 899_996, 0, 0), EffectCost.ModelCall, LoopBounds.Default));
         Assert.Equal(GuardDecision.Allowed, BudgetGuard.ForReconciliation(new BudgetCounters(0, 899_997, 0, 0), 1, 4));
         Assert.Equal(GuardDecision.SubrequestStop, BudgetGuard.ForReconciliation(new BudgetCounters(0, 999_998, 0, 0), 1, 4));
     }

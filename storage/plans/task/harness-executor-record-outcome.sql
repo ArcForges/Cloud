@@ -20,5 +20,8 @@ WHERE attempt_id = ? AND run_id = ? AND state = CAST(? AS INTEGER);
 -- statement: params=text,text?,text,text,text,text
 UPDATE task_execution_command SET state = ?, result_ref = ?
 WHERE command_id = (SELECT command_id FROM task_attempt WHERE attempt_id = ? AND run_id = ?) AND run_id = ? AND state = ?;
+-- statement: params=int64,int64,int64,text
+UPDATE task_harness_budget SET counted_steps = counted_steps + CAST(? AS INTEGER), subrequests = subrequests + CAST(? AS INTEGER),
+  updated_at = CAST(? AS INTEGER), rev = rev + 1 WHERE run_id = ?;
 -- statement: params=text
 DELETE FROM platform_command_guard WHERE command_id = ?;

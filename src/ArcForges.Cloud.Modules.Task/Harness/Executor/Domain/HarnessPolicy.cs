@@ -32,12 +32,6 @@ internal static class BudgetPolicy
     /// <summary>The subrequest allowance of a run, of which the last 100,000 are reserved for reconciliation.</summary>
     internal const long SubrequestAllowance = 1_000_000;
 
-    /// <summary>
-    /// Subrequests reserved for one effect attempt: the reservation batch, the dispatch-intent batch, the external call and the outcome batch.
-    /// Renewal, checkpoint and yield batches each count one.
-    /// </summary>
-    internal const long SubrequestsPerEffect = 4;
-
     /// <summary>At most two pre-dispatch retries, each with a fresh attempt identity (contracts 05 line 88).</summary>
     internal const int MaxPreDispatchRetries = 2;
 

@@ -39,7 +39,10 @@ internal sealed class HarnessReadUnavailableException(string plan) : Exception("
 
 internal sealed record LeaseRow(Guid Holder, long Epoch, long ExpiresAtMicros, long RecoveryGeneration);
 
-/// <summary>What a load reads of one run: its state and revision, the lease, the durable counters and the last checkpoint receipt.</summary>
+/// <summary>
+/// What a load reads of one run: its state and revision, the lease, the durable counters, the model and tariff pin stored at the first
+/// claim (null before that claim) and the last checkpoint receipt.
+/// </summary>
 internal sealed record RunSnapshot(
     RunState State,
     long Revision,
@@ -48,12 +51,26 @@ internal sealed record RunSnapshot(
     string WorkerVersion,
     LeaseRow? Lease,
     BudgetCounters Budget,
+    PinnedSnapshot? Pin,
     byte[]? LastReceipt);
 
 /// <summary>The newest attempt that is still open (pending or running) and its command, as a load reads them.</summary>
 internal sealed record OpenAttempt(Guid AttemptId, Guid StepId, Guid CommandId, int Ordinal, AttemptState State, string? CommandState);
 
-internal sealed record ClaimCommand(Guid GuardId, Guid Holder, string WorkflowId, string WorkerVersion, long RecoveryGeneration, long NowMicros, long ExpiresAtMicros);
+/// <summary>
+/// The claim of a run. <see cref="Pinned"/> is stored at the first claim and must equal the stored pin afterwards; <see cref="Charge"/> is the
+/// budget charge of the claim sequence, written in the same batch.
+/// </summary>
+internal sealed record ClaimCommand(
+    Guid GuardId,
+    Guid Holder,
+    string WorkflowId,
+    string WorkerVersion,
+    long RecoveryGeneration,
+    long NowMicros,
+    long ExpiresAtMicros,
+    PinnedSnapshot Pinned,
+    BudgetCharge Charge);
 
 /// <summary>One counted step reserved under the fence, before any dispatch. The limits are the policy values the guard compares against.</summary>
 internal sealed record ReserveCommand(
@@ -69,7 +86,8 @@ internal sealed record ReserveCommand(
     long SubrequestLimit,
     long ModelLimit,
     long ToolLimit,
-    long NowMicros);
+    long NowMicros,
+    PinnedSnapshot Pinned);
 
 /// <summary>One attempt outcome. The expected states are the guard: a stale or repeated outcome matches nothing and commits nothing.</summary>
 internal sealed record OutcomeCommand(
@@ -82,7 +100,8 @@ internal sealed record OutcomeCommand(
     EffectCertainty? Certainty,
     string NewCommandState,
     string? ResultRef,
-    long NowMicros);
+    long NowMicros,
+    BudgetCharge Charge);
 
 /// <summary>
 /// The durable store of the executor. Each write is one guarded batch: its guard checks the fence (holder, epoch, recovery generation and

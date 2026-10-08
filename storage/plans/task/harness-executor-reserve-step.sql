@@ -2,7 +2,7 @@
 -- version: 1
 -- access: write
 -- tail: none a counted step is reserved under the live fence before any dispatch; the reservation is the durable record that precedes the external call
--- statement: params=text,text,scope,text,int64,int64,int64,int64,int64,int64,int64,int64,int64,int64,int64,text
+-- statement: params=text,text,scope,text,int64,int64,int64,int64,int64,int64,int64,int64,int64,int64,int64,text,text,text
 INSERT INTO platform_command_guard (command_id, guard_key, allowed)
 SELECT ?, 'task.harness-reserve', CASE WHEN
   EXISTS (SELECT 1 FROM task_execution_lease l
@@ -14,7 +14,8 @@ SELECT ?, 'task.harness-reserve', CASE WHEN
       AND b.counted_steps + CAST(? AS INTEGER) <= CAST(? AS INTEGER)
       AND b.subrequests + CAST(? AS INTEGER) <= CAST(? AS INTEGER)
       AND b.model_calls + CAST(? AS INTEGER) <= CAST(? AS INTEGER)
-      AND b.tool_invocations + CAST(? AS INTEGER) <= CAST(? AS INTEGER))
+      AND b.tool_invocations + CAST(? AS INTEGER) <= CAST(? AS INTEGER)
+      AND b.pinned_model_id = ? AND b.pinned_tariff_snapshot_id = ?)
   AND NOT EXISTS (SELECT 1 FROM task_execution_command c WHERE c.command_id = ? AND c.state <> 'refused')
 THEN 1 ELSE 0 END;
 -- statement: params=int64,int64,int64,int64,int64,text

@@ -42,7 +42,32 @@ HAR.40 is the first Harness proof set under P2-021: the C# executor on D1, the t
 | Context                               | 256 KiB default, 1 MiB hard; 200 and 500 items | `ContextBytesDefault`, `ContextBytesHard`, `ContextItemsDefault`, `ContextItemsHard` |
 | Checkpoint                            | 128 KiB, references only                       | `CheckpointLimitBytes`                                                               |
 
-The values are C# policy. A policy may narrow a bound and never enlarge it. The step-guard counted classes follow the reviewed C# budget definition in HAR.40 validation (b).
+The values are C# policy. A policy may narrow a bound and never enlarge it.
+
+### Reviewed budget definition (HAR.40 validation (b)(1))
+
+`BudgetDefinition` in `Domain/Budget.cs` is the reviewed C# definition of the counted classes. Every listed call is one counted step (`StepWeight`). A subrequest is counted for the classes that leave the executor (`SubrequestWeight`).
+
+| Counted class   | Steps | Subrequests | Where it is charged                                                |
+| --------------- | ----- | ----------- | ------------------------------------------------------------------ |
+| `D1Call`        | 1     | 1           | every D1 statement (a read) or batch (a write) the executor issues |
+| `OutboundFetch` | 1     | 1           | the outbound fetch of a model step, including `ai.internal`        |
+| `ContainerCall` | 1     | 1           | the call that carries a wake into the container                    |
+| `R2Operation`   | 1     | 1           | none today; any R2 call charges this class                         |
+| `Retry`         | 1     | 0           | each pre-dispatch retry (a fresh attempt identity)                 |
+| `WaitCycle`     | 1     | 0           | each wake delivery of a run                                        |
+
+The charges are written in the same fenced batch as the call they pay for:
+
+- **Model attempt** (reserved before dispatch): the state read, the reservation, the dispatch intent, the outbound fetch and the outcome, so 5 steps and 5 subrequests for the first attempt. A retry attempt is 5 steps and 4 subrequests (the retry class instead of the state read). A tool attempt is 4 steps and 4 subrequests (no outbound fetch).
+- **Claim**: the claim batch and the two state reads of the claim sequence, 3 steps and 3 subrequests. A wake adds its wait cycle and container call and the open-attempt read of its resume (`WakeDelivery`, `ResumeRead`).
+- **Renewal, checkpoint and yield**: one D1 batch each (1 step and 1 subrequest). A resumed outcome written on a wake is one D1 batch.
+
+Named limits: a read that is not followed by a fenced write (a refused claim, a refused effect) is not durable-counted. Every such refusal stops the slice or the wake at once and is bounded by the Durable Object alarm schedule (seven deliveries) and by the step guard, and the HAR.00 loop must stop on the first refusal the same way.
+
+### Model and tariff pin (HAR.40 validation (f))
+
+The pinned model and tariff snapshot is stored in `task_harness_budget` at the run's first claim and never changes (the table refuses an update of the pin). Every later claim, wake and reservation must present the same pair: a claim under a different pair is refused before any lease is taken (`PinRefused`), a wake under it is not claimed, and the reservation plan refuses it inside the database. The executor also refuses the pair before any reservation.
 
 ### Wake
 
