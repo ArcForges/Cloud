@@ -44,8 +44,10 @@ public sealed class HarnessBudgetTests
     [Fact]
     public void AToolAttemptHasNoOutboundFetch()
     {
+        // A tool attempt is the reservation, the dispatch intent and the outcome, with no outbound fetch. A retry adds one retry step in
+        // place of the state read, so the second attempt costs three subrequests, not four.
         Assert.Equal(new EffectCost(4, 4, 0, 1), BudgetDefinition.ToolAttempt(1));
-        Assert.Equal(new EffectCost(5, 4, 0, 1), BudgetDefinition.ToolAttempt(2));
+        Assert.Equal(new EffectCost(4, 3, 0, 1), BudgetDefinition.ToolAttempt(2));
         Assert.Equal(new EffectCost(4, 4, 0, 1), EffectCost.ToolInvocation);
     }
 

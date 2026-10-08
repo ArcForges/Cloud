@@ -221,7 +221,10 @@ public sealed class HelloSliceTests
         var executor = Executor(fixture);
         var claim = (await executor.ClaimAsync(fixture.Run, HarnessFixture.Identity(), T.Ct)).Claim!;
         Assert.Equal(StoreStatus.Succeeded, await executor.YieldAsync(claim, RunState.Waiting, T.Ct));
-        await fixture.ExecAsync("UPDATE task_harness_budget SET counted_steps = 1 WHERE run_id = '" + HarnessFixture.RunId.ToString("D") + "';");
+        // A reserved model effect is written as its increments (ModelAttempt(1): five steps, five subrequests, one model call), never as a lower value.
+        await fixture.ExecAsync(
+            "UPDATE task_harness_budget SET counted_steps = counted_steps + 5, subrequests = subrequests + 5, model_calls = model_calls + 1 WHERE run_id = '"
+            + HarnessFixture.RunId.ToString("D") + "';");
         var models = new FakeModels();
         var result = await Slice(fixture, models).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
         Assert.Equal(new HelloResult(HelloStatus.Refused, "already_started", null), result);
