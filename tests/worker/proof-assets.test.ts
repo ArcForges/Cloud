@@ -537,6 +537,52 @@ test("the two profile pages are one shell and every reference stays on the root"
     ),
     /control character, a backslash or an entity/u,
   );
+  // A leading or trailing space is not a control character, but browsers strip it from a URL attribute before
+  // resolving, so " //host" and " javascript:" would leave the origin. Every padded form is refused as written.
+  for (const padded of [
+    " //evil.example.test/x",
+    " javascript:alert(1)",
+    "//evil.example.test/x ",
+  ]) {
+    refuses(
+      withShell((html) =>
+        html.replace('<a href="" class="reload">', `<a href="${padded}" class="reload">`),
+      ),
+      /has leading or trailing whitespace/u,
+    );
+    refuses(
+      withShell((html) =>
+        html.replace(
+          '<script src="_framework/blazor.webassembly.js"></script>',
+          `<script src="${padded}"></script>`,
+        ),
+      ),
+      /has leading or trailing whitespace/u,
+    );
+    refuses(
+      withShell((html) =>
+        html.replace('<div id="app">', `<form action="${padded}"></form><div id="app">`),
+      ),
+      /has leading or trailing whitespace/u,
+    );
+  }
+  refuses(
+    withShell((html) =>
+      html.replace(
+        '<a href="" class="reload">',
+        '<a href="\t//evil.example.test/x" class="reload">',
+      ),
+    ),
+    /control character, a backslash or an entity/u,
+  );
+  refuses(
+    { files: { "app.css": '@import " //evil.example.test/x.css";' } },
+    /violates the same-origin rules/u,
+  );
+  refuses(
+    { files: { "app.css": '@import url( "javascript:alert(1)");' } },
+    /violates the same-origin rules/u,
+  );
   refuses(
     withShell((html) => html.replace("_framework/blazor.webassembly.js", "_framework/missing.js")),
     /references a file the bundle does not hold/u,

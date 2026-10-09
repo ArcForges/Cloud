@@ -372,6 +372,9 @@ function referenceProblem(reference: string, relative: boolean): string | null {
     reference.includes("&") ||
     [...reference].some((character) => character.charCodeAt(0) < 0x20 || character === "\x7f");
   if (controlOrEntity) return "uses a control character, a backslash or an entity";
+  // Browsers strip leading and trailing spaces before resolving a URL attribute, so a padded reference such as
+  // " //host/x" would classify as relative here but leave the origin in the browser: refuse it before classifying.
+  if (reference !== reference.trim()) return "has leading or trailing whitespace";
   if (reference === "" || reference.startsWith("#")) return null;
   if (reference.startsWith("//") || /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(reference))
     return "references another origin";
