@@ -348,9 +348,20 @@ export function expectedProfileHeaders(policies: Record<string, string | undefin
       "  X-Frame-Options: DENY",
       "  Cache-Control: public, no-cache, no-transform",
     );
-  lines.push("/assets/*", "  ! Cache-Control", immutable, "/_framework/*", "  ! Cache-Control", immutable);
+  lines.push(
+    "/assets/*",
+    "  ! Cache-Control",
+    immutable,
+    "/_framework/*",
+    "  ! Cache-Control",
+    immutable,
+  );
   for (const loader of frameworkLoaders)
-    lines.push(`/${loader}`, "  ! Cache-Control", "  Cache-Control: public, no-cache, no-transform");
+    lines.push(
+      `/${loader}`,
+      "  ! Cache-Control",
+      "  Cache-Control: public, no-cache, no-transform",
+    );
   return `${lines.join("\n")}\n`;
 }
 
@@ -421,7 +432,10 @@ function pageViolations(html: string, rules: PageRules): string[] {
       const value = tag.attributes.get(attribute);
       if (value === undefined) continue;
       const repository =
-        rules.sourceLink && tag.name === "a" && attribute === "href" && sourceRepository.test(value);
+        rules.sourceLink &&
+        tag.name === "a" &&
+        attribute === "href" &&
+        sourceRepository.test(value);
       if (!repository) check(attribute, value);
     }
     const srcset = tag.attributes.get("srcset");
@@ -484,9 +498,21 @@ function headerRules(headers: string): Map<string, string> {
 /** The policy of one App profile: a restrictive set whose script sources are exactly its page's sources. */
 function checkProfilePolicy(name: string, policy: string, html: string): void {
   const directives = parsePolicy(policy);
-  assert.deepEqual(directives.get("default-src"), ["'self'"], `${name} default-src must be exactly 'self'.`);
-  assert.deepEqual(directives.get("connect-src"), ["'self'"], `${name} connect-src must be exactly 'self'.`);
-  assert.deepEqual(directives.get("style-src"), ["'self'"], `${name} style-src must be exactly 'self'.`);
+  assert.deepEqual(
+    directives.get("default-src"),
+    ["'self'"],
+    `${name} default-src must be exactly 'self'.`,
+  );
+  assert.deepEqual(
+    directives.get("connect-src"),
+    ["'self'"],
+    `${name} connect-src must be exactly 'self'.`,
+  );
+  assert.deepEqual(
+    directives.get("style-src"),
+    ["'self'"],
+    `${name} style-src must be exactly 'self'.`,
+  );
   for (const [directive, sources] of directives)
     for (const source of sources)
       assert(
@@ -570,7 +596,10 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
   for (const entry of files) {
     const encoding = encodingSuffix.exec(entry.path)?.[0];
     if (encoding === undefined) {
-      assert(servedPlain(entry.path), `The bundle holds a file outside the served layout: ${entry.path}`);
+      assert(
+        servedPlain(entry.path),
+        `The bundle holds a file outside the served layout: ${entry.path}`,
+      );
     } else {
       const plainPath = entry.path.slice(0, -encoding.length);
       const plain = byPath.get(plainPath);
@@ -605,7 +634,9 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
       !(rules.get(pattern) ?? "").includes("Content-Security-Policy"),
       `The ${pattern} rule must not carry a policy.`,
     );
-  const plainNames = new Set(files.map((entry) => entry.path).filter((p) => !encodingSuffix.test(p)));
+  const plainNames = new Set(
+    files.map((entry) => entry.path).filter((p) => !encodingSuffix.test(p)),
+  );
   const policies: Record<string, string> = {};
   for (const name of profileNames) {
     const html = text(`${name}/index.html`);
@@ -730,7 +761,10 @@ export function verifySiteArchive(archive: Uint8Array, pinnedDigest: string): Ve
   const files = readBundleArchive(archive);
   const names = files.map((entry) => entry.path);
   for (let index = 1; index < names.length; index += 1)
-    assert((names[index - 1] ?? "") < (names[index] ?? ""), "The Site archive is not in ordinal path order.");
+    assert(
+      (names[index - 1] ?? "") < (names[index] ?? ""),
+      "The Site archive is not in ordinal path order.",
+    );
   const stylesheets = names.filter((name) => siteStylesheet.test(name));
   assert.equal(stylesheets.length, 1, "The Site must hold exactly one content-hashed stylesheet.");
   assert.deepEqual(
@@ -749,7 +783,11 @@ export function verifySiteArchive(archive: Uint8Array, pinnedDigest: string): Ve
   const headers = text(headersName);
   assert(!headers.includes("\r"), "The Site headers file must use LF line ends.");
   assert(!headers.includes("wasm-unsafe-eval"), "The Site policy carries a WebAssembly token.");
-  assert.equal(headers, expectedSiteHeaders(policy), "The Site headers file differs from the reviewed rules.");
+  assert.equal(
+    headers,
+    expectedSiteHeaders(policy),
+    "The Site headers file differs from the reviewed rules.",
+  );
   const siteFiles = new Set(names);
   for (const name of pages) {
     const html = text(name);
@@ -877,7 +915,10 @@ export interface ProofAssets {
 export function composeProofAssets(profile: VerifiedBundle, site: VerifiedSite): ProofAssets {
   const tree = new Map<string, Uint8Array>();
   for (const entry of site.files) {
-    assert(!profileOwnedPath.test(entry.path), `The Site holds a path the profiles serve: ${entry.path}`);
+    assert(
+      !profileOwnedPath.test(entry.path),
+      `The Site holds a path the profiles serve: ${entry.path}`,
+    );
     if (entry.path !== headersName) tree.set(entry.path, entry.bytes);
   }
   for (const entry of profile.files) {

@@ -716,7 +716,17 @@ export function releaseDownloadArguments(
   assetName: string,
   directory: string,
 ): string[] {
-  return ["release", "download", pin.release, "--repo", pin.repository, "--pattern", assetName, "--dir", directory];
+  return [
+    "release",
+    "download",
+    pin.release,
+    "--repo",
+    pin.repository,
+    "--pattern",
+    assetName,
+    "--dir",
+    directory,
+  ];
 }
 
 export interface StagedProofAssets {

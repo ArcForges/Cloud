@@ -34,8 +34,7 @@ import {
 } from "../../eng/verification/proof-deploy.ts";
 
 // ---- Synthetic WEB.40-shaped fixtures: the Web writers' formats, so that each test can damage one thing. ----
-const sha = (value: Uint8Array | string) =>
-  createHash("sha256").update(value).digest("hex");
+const sha = (value: Uint8Array | string) => createHash("sha256").update(value).digest("hex");
 
 function octal(value: number, length: number): string {
   return `${value.toString(8).padStart(length - 1, "0")}\0`;
@@ -70,10 +69,7 @@ interface TarEntry {
 }
 
 /** A ustar archive of the entries in the order given, closed by two zero blocks. */
-function tarArchive(
-  entries: TarEntry[],
-  options: { uid?: number; type?: string } = {},
-): Buffer {
+function tarArchive(entries: TarEntry[], options: { uid?: number; type?: string } = {}): Buffer {
   const parts: Buffer[] = [];
   for (const entry of entries) {
     parts.push(tarHeader(entry.path, entry.bytes.byteLength, options), Buffer.from(entry.bytes));
@@ -222,7 +218,12 @@ test("the Worker answers every one of its own route families before any asset", 
   for (const pathname of ["/proof/v1/x", "/session/v1/bootstrap", "/session/v1/logout"])
     assert(isProofPath(pathname) && matches(pathname));
   // No profile asset path is Worker-first, so the profiles are not shadowed by the Worker.
-  for (const pathname of ["/account/", "/chat/", "/_framework/blazor.webassembly.js", "/favicon.svg"])
+  for (const pathname of [
+    "/account/",
+    "/chat/",
+    "/_framework/blazor.webassembly.js",
+    "/favicon.svg",
+  ])
     assert(!matches(pathname), pathname);
 });
 
@@ -282,14 +283,20 @@ test("the generated proof config points the assets at the staged directory and k
 test("the pins name the WEB.40 release assets by their own digests, one release for both", () => {
   assert.equal(profileBundlePin.repository, "ArcForges/Web");
   assert.equal(profileBundlePin.release, "web-0.1.0-ci.111.1");
-  assert.equal(profileBundlePin.digest, "4afc8f285a7a64202ce221bc4e3011a9f8b6de641d50eef0a537677e80eaef9a");
+  assert.equal(
+    profileBundlePin.digest,
+    "4afc8f285a7a64202ce221bc4e3011a9f8b6de641d50eef0a537677e80eaef9a",
+  );
   assert.equal(
     profileBundleAssetName(profileBundlePin.digest),
     `web-profiles-${profileBundlePin.digest}.tar`,
   );
   assert.equal(siteArchivePin.repository, profileBundlePin.repository);
   assert.equal(siteArchivePin.release, profileBundlePin.release);
-  assert.equal(siteArchivePin.digest, "573575617dec11d2d3678bf5ccd92728190b64a79e7907e050764fd8a1d131ac");
+  assert.equal(
+    siteArchivePin.digest,
+    "573575617dec11d2d3678bf5ccd92728190b64a79e7907e050764fd8a1d131ac",
+  );
   assert.equal(
     siteArchiveAssetName(siteArchivePin.digest),
     `web-site-${siteArchivePin.digest}.tar`,
@@ -304,7 +311,10 @@ test("the retired React pin is no longer referenced by the proof sources", () =>
   ]) {
     const source = readFileSync(path.resolve(import.meta.dirname, "../..", rel), "utf8");
     assert(!source.includes("web-0.1.0-ci.90.1"), rel);
-    assert(!source.includes("67956d7f4b3d2909625585ca68f19f3f8a9ea27a5a08958659b9d9841871f996"), rel);
+    assert(
+      !source.includes("67956d7f4b3d2909625585ca68f19f3f8a9ea27a5a08958659b9d9841871f996"),
+      rel,
+    );
   }
 });
 
@@ -326,8 +336,14 @@ test("a well-formed WEB.40 bundle verifies and a digest that is not the pin is r
     "_framework/blazor.webassembly.js",
     "_framework/ArcForges.Web.App.w1s8cjv5ju.wasm.br",
   ])
-    assert(verified.files.some((file) => file.path === served), served);
-  assert.equal(verified.files.some((file) => file.path === "manifest.json"), false);
+    assert(
+      verified.files.some((file) => file.path === served),
+      served,
+    );
+  assert.equal(
+    verified.files.some((file) => file.path === "manifest.json"),
+    false,
+  );
   assert.throws(() => verifyProfileBundle(built.archive, sha("other")), /pinned digest/u);
   assert.throws(() => verifyProfileBundle(built.archive, "abc"), /not a SHA-256/u);
   // One flipped byte anywhere changes the digest and is refused before any parsing.
@@ -387,7 +403,10 @@ test("content that disagrees with the manifest is refused even when the digest i
 test("the archive reader accepts only plain regular files with the canonical header", () => {
   const good = tarArchive([{ path: "a.txt", bytes: Buffer.from("x") }]);
   assert.equal(readBundleArchive(good).length, 1);
-  assert.throws(() => readBundleArchive(tarArchive([{ path: "a", bytes: Buffer.from("x") }], { uid: 1000 })), /canonical header/u);
+  assert.throws(
+    () => readBundleArchive(tarArchive([{ path: "a", bytes: Buffer.from("x") }], { uid: 1000 })),
+    /canonical header/u,
+  );
   for (const type of ["5", "1", "2"])
     assert.throws(
       () => readBundleArchive(tarArchive([{ path: "a", bytes: Buffer.from("x") }], { type })),
@@ -397,10 +416,7 @@ test("the archive reader accepts only plain regular files with the canonical hea
   assert.throws(() => readBundleArchive(Buffer.concat([good, Buffer.alloc(512)])), /follows/u);
   assert.throws(() => readBundleArchive(Buffer.concat([good, Buffer.alloc(512, 1)])));
   assert.throws(() => readBundleArchive(Buffer.alloc(100)), /Not a profile bundle/u);
-  assert.throws(
-    () => readBundleArchive(Buffer.alloc(25 * 1024 * 1024)),
-    /larger than the limit/u,
-  );
+  assert.throws(() => readBundleArchive(Buffer.alloc(25 * 1024 * 1024)), /larger than the limit/u);
   for (const bad of ["../x", "/abs", "a//b", "a/../b", "with space"])
     assert.throws(
       () => readBundleArchive(tarArchive([{ path: bad, bytes: Buffer.alloc(0) }])),
@@ -448,7 +464,10 @@ test("the served layout admits only the reviewed WEB.40 files and their own enco
         delete manifest.files["account/index.html"];
       },
       tamper: (entries) => {
-        entries.splice(entries.findIndex((entry) => entry.path === "account/index.html"), 1);
+        entries.splice(
+          entries.findIndex((entry) => entry.path === "account/index.html"),
+          1,
+        );
       },
     },
     /The bundle has no account\/index\.html/u,
@@ -464,16 +483,30 @@ test("the served layout admits only the reviewed WEB.40 files and their own enco
 });
 
 test("the two profile pages are one shell and every reference stays on the root", () => {
-  refuses({ files: { "chat/index.html": profileShell.replace("Loading", "Wait") } }, /one application shell/u);
-  refuses(withShell((html) => html.replace(/\n/gu, "\r\n")), /must use LF line ends/u);
-  refuses(withShell((html) => html.replace('<base href="/" />', "")), /must set exactly one base/u);
+  refuses(
+    { files: { "chat/index.html": profileShell.replace("Loading", "Wait") } },
+    /one application shell/u,
+  );
+  refuses(
+    withShell((html) => html.replace(/\n/gu, "\r\n")),
+    /must use LF line ends/u,
+  );
+  refuses(
+    withShell((html) => html.replace('<base href="/" />', "")),
+    /must set exactly one base/u,
+  );
   refuses(
     withShell((html) => html.replace('<base href="/" />', '<base href="/" /><base href="/" />')),
     /must set exactly one base/u,
   );
-  refuses(withShell((html) => html.replace('<base href="/" />', '<base href="/account/" />')), /sets a base other than/u);
   refuses(
-    withShell((html) => html.replace("_framework/blazor.webassembly.js", "https://cdn.example.com/b.js")),
+    withShell((html) => html.replace('<base href="/" />', '<base href="/account/" />')),
+    /sets a base other than/u,
+  );
+  refuses(
+    withShell((html) =>
+      html.replace("_framework/blazor.webassembly.js", "https://cdn.example.com/b.js"),
+    ),
     /references another origin/u,
   );
   refuses(
@@ -481,19 +514,27 @@ test("the two profile pages are one shell and every reference stays on the root"
     /references another origin/u,
   );
   refuses(
-    withShell((html) => html.replace("_framework/blazor.webassembly.js", "../_framework/blazor.webassembly.js")),
+    withShell((html) =>
+      html.replace("_framework/blazor.webassembly.js", "../_framework/blazor.webassembly.js"),
+    ),
     /climbs out of the root/u,
   );
   refuses(
-    withShell((html) => html.replace('<a href="" class="reload">', '<a href="javascript:void(0)" class="reload">')),
+    withShell((html) =>
+      html.replace('<a href="" class="reload">', '<a href="javascript:void(0)" class="reload">'),
+    ),
     /references another origin/u,
   );
   refuses(
-    withShell((html) => html.replace('<a href="" class="reload">', '<a href="\\\\evil" class="reload">')),
+    withShell((html) =>
+      html.replace('<a href="" class="reload">', '<a href="\\\\evil" class="reload">'),
+    ),
     /control character, a backslash or an entity/u,
   );
   refuses(
-    withShell((html) => html.replace('<a href="" class="reload">', '<a href="&#47;evil" class="reload">')),
+    withShell((html) =>
+      html.replace('<a href="" class="reload">', '<a href="&#47;evil" class="reload">'),
+    ),
     /control character, a backslash or an entity/u,
   );
   refuses(
@@ -501,7 +542,9 @@ test("the two profile pages are one shell and every reference stays on the root"
     /references a file the bundle does not hold/u,
   );
   refuses(
-    withShell((html) => html.replace("<title>", '<meta http-equiv="refresh" content="0;url=/x" /><title>')),
+    withShell((html) =>
+      html.replace("<title>", '<meta http-equiv="refresh" content="0;url=/x" /><title>'),
+    ),
     /has a meta http-equiv/u,
   );
   // Empty and fragment references, relative references and the root base are the reviewed shape: accepted.
@@ -518,12 +561,12 @@ test("each profile's policy is the one its page derives, with the exact WebAssem
   const inline = profileShell.replace("</body>", "<script>window.p=1;</script></body>");
   assert.match(expectedProfilePolicy(inline), /script-src 'self' 'wasm-unsafe-eval' 'sha256-/u);
   accepts(withShell((html) => html.replace("</body>", "<script>window.p=1;</script></body>")));
+  refuses({ shell: inline, csp: { account: derived, chat: derived } }, /does not match its page/u);
+  // A policy that drops WebAssembly, adds unsafe-eval or widens a directive is refused.
   refuses(
-    { shell: inline, csp: { account: derived, chat: derived } },
+    { csp: { account: derived.replace(" 'wasm-unsafe-eval'", "") } },
     /does not match its page/u,
   );
-  // A policy that drops WebAssembly, adds unsafe-eval or widens a directive is refused.
-  refuses({ csp: { account: derived.replace(" 'wasm-unsafe-eval'", "") } }, /does not match its page/u);
   refuses(
     { csp: { account: derived.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval' 'unsafe-eval'") } },
     /does not match its page/u,
@@ -562,14 +605,25 @@ test("a policy over the Cloudflare header line budget is refused", () => {
     { length: 40 },
     (_, index) => `<script>window.n${index}=${index};</script>`,
   ).join("");
-  refuses(withShell((html) => html.replace("</body>", `${scripts}</body>`)), /exceeds the header line budget/u);
+  refuses(
+    withShell((html) => html.replace("</body>", `${scripts}</body>`)),
+    /exceeds the header line budget/u,
+  );
 });
 
 test("the headers file is the reviewed one: rules unique, no policy on the shared rules, LF only", () => {
   const expected = accepts().headers;
-  refuses({ headers: `${expected}/account/*\n  X-A: b\n` }, /Duplicate headers rule \/account\/\*/u);
   refuses(
-    { headers: expected.replace("/*\n  X-Content-Type-Options", "/*\n  Content-Security-Policy: default-src 'self'\n  X-Content-Type-Options") },
+    { headers: `${expected}/account/*\n  X-A: b\n` },
+    /Duplicate headers rule \/account\/\*/u,
+  );
+  refuses(
+    {
+      headers: expected.replace(
+        "/*\n  X-Content-Type-Options",
+        "/*\n  Content-Security-Policy: default-src 'self'\n  X-Content-Type-Options",
+      ),
+    },
     /must not carry a policy/u,
   );
   refuses({ headers: `${expected}/extra/*\n  X-A: b\n` }, /differs from the reviewed rules/u);
@@ -577,7 +631,10 @@ test("the headers file is the reviewed one: rules unique, no policy on the share
 });
 
 test("stylesheets of the bundle import only paths that stay on the root", () => {
-  refuses({ files: { "app.css": '@import "https://cdn.example.com/x.css";' } }, /violates the same-origin rules/u);
+  refuses(
+    { files: { "app.css": '@import "https://cdn.example.com/x.css";' } },
+    /violates the same-origin rules/u,
+  );
   accepts({ files: { "app.css": '@import "/fonts.css";' } });
 });
 
@@ -643,17 +700,20 @@ test("the Site archive verifies against its pinned digest with its exact members
   const built = siteArchive();
   const site = verifySiteArchive(built.archive, built.digest);
   assert.equal(site.digest, built.digest);
-  assert.deepEqual(site.files.map((file) => file.path), [
-    "404.css",
-    "404.html",
-    "_headers",
-    siteStylesheetPath,
-    "cloud-hello/index.html",
-    "favicon.svg",
-    "hello/index.html",
-    "index.html",
-    "robots.txt",
-  ]);
+  assert.deepEqual(
+    site.files.map((file) => file.path),
+    [
+      "404.css",
+      "404.html",
+      "_headers",
+      siteStylesheetPath,
+      "cloud-hello/index.html",
+      "favicon.svg",
+      "hello/index.html",
+      "index.html",
+      "robots.txt",
+    ],
+  );
   assert.equal(
     site.policy,
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
@@ -667,7 +727,13 @@ test("the Site archive is refused for a non-canonical header, an order, a member
   refusesSite({ tamper: (entries) => entries.reverse() }, /ordinal path order/u);
   refusesSite({ files: { "extra.txt": "x" } }, /members other than the reviewed Site/u);
   refusesSite(
-    { tamper: (entries) => entries.splice(entries.findIndex((entry) => entry.path === "404.html"), 1) },
+    {
+      tamper: (entries) =>
+        entries.splice(
+          entries.findIndex((entry) => entry.path === "404.html"),
+          1,
+        ),
+    },
     /members other than the reviewed Site/u,
   );
   refusesSite(
@@ -679,16 +745,30 @@ test("the Site archive is refused for a non-canonical header, an order, a member
 test("the Site policy never carries WebAssembly, and its headers file is the reviewed one", () => {
   const policy = acceptsSite().policy;
   refusesSite(
-    { headers: expectedSiteHeaders(policy.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")) },
+    {
+      headers: expectedSiteHeaders(
+        policy.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'"),
+      ),
+    },
     /WebAssembly token/u,
   );
-  refusesSite({ headers: `${expectedSiteHeaders(policy)}/extra/*\n  X-A: b\n` }, /differs from the reviewed rules/u);
-  refusesSite({ headers: expectedSiteHeaders(policy).replace(/\n/gu, "\r\n") }, /headers file must use LF/u);
+  refusesSite(
+    { headers: `${expectedSiteHeaders(policy)}/extra/*\n  X-A: b\n` },
+    /differs from the reviewed rules/u,
+  );
+  refusesSite(
+    { headers: expectedSiteHeaders(policy).replace(/\n/gu, "\r\n") },
+    /headers file must use LF/u,
+  );
 });
 
 test("the Site pages are same-origin: no base, no foreign link but its source, every script covered", () => {
   refusesSite(
-    { files: { "index.html": sitePage("x", "<p>x</p>").replace("<head>", "<head><base href=\"/\" />") } },
+    {
+      files: {
+        "index.html": sitePage("x", "<p>x</p>").replace("<head>", '<head><base href="/" />'),
+      },
+    },
     /violates the Site's same-origin rules/u,
   );
   refusesSite(
@@ -700,11 +780,17 @@ test("the Site pages are same-origin: no base, no foreign link but its source, e
     /violates the Site's same-origin rules/u,
   );
   refusesSite(
-    { files: { "index.html": sitePage("x", '<link rel="stylesheet" href="/assets/missing.css" />') } },
+    {
+      files: {
+        "index.html": sitePage("x", '<link rel="stylesheet" href="/assets/missing.css" />'),
+      },
+    },
     /violates the Site's same-origin rules/u,
   );
   refusesSite(
-    { files: { "404.html": notFoundPage.replace("</body>", "<script>window.x=1;</script></body>") } },
+    {
+      files: { "404.html": notFoundPage.replace("</body>", "<script>window.x=1;</script></body>") },
+    },
     /does not cover an inline script/u,
   );
   refusesSite(
@@ -712,11 +798,13 @@ test("the Site pages are same-origin: no base, no foreign link but its source, e
     /must use LF line ends/u,
   );
   refusesSite(
-    { tamper: (entries) => {
-      const entry = entries.find((item) => item.path === siteStylesheetPath);
-      assert(entry);
-      entry.bytes = Buffer.from('@import "https://cdn.example.com/x.css";');
-    } },
+    {
+      tamper: (entries) => {
+        const entry = entries.find((item) => item.path === siteStylesheetPath);
+        assert(entry);
+        entry.bytes = Buffer.from('@import "https://cdn.example.com/x.css";');
+      },
+    },
     /violates the Site's same-origin rules/u,
   );
 });
@@ -746,7 +834,11 @@ test("the profile and the Site are one proof tree with one headers file", () => 
   assert.equal(paths.length, union.size);
   assert.equal(assets.profileDigest, profile.digest);
   assert.equal(assets.siteDigest, site.digest);
-  assert.deepEqual(composeProofAssets(accepts(), acceptsSite()).files, assets.files, "deterministic");
+  assert.deepEqual(
+    composeProofAssets(accepts(), acceptsSite()).files,
+    assets.files,
+    "deterministic",
+  );
 });
 
 test("identical shared root files merge, and a differing one refuses the tree", () => {
@@ -757,18 +849,25 @@ test("identical shared root files merge, and a differing one refuses the tree", 
   );
   assert.throws(
     () =>
-      composeProofAssets(accepts({ files: { "favicon.svg": "<svg/><!-- other -->" } }), acceptsSite()),
+      composeProofAssets(
+        accepts({ files: { "favicon.svg": "<svg/><!-- other -->" } }),
+        acceptsSite(),
+      ),
     /different bytes at favicon\.svg/u,
   );
   assert.throws(
-    () => composeProofAssets(accepts(), acceptsSite({ files: { "robots.txt": "User-agent: x\n" } })),
+    () =>
+      composeProofAssets(accepts(), acceptsSite({ files: { "robots.txt": "User-agent: x\n" } })),
     /different bytes at robots\.txt/u,
   );
 });
 
 test("the Site may not hold a file under a profile route", () => {
   const site = acceptsSite();
-  const forged = { ...site, files: [...site.files, { path: "chat/index.html", bytes: Buffer.from("x") }] };
+  const forged = {
+    ...site,
+    files: [...site.files, { path: "chat/index.html", bytes: Buffer.from("x") }],
+  };
   assert.throws(
     () => composeProofAssets(accepts(), forged),
     /path the profiles serve: chat\/index\.html/u,
@@ -829,7 +928,10 @@ test("the header merge keeps one line, refuses a conflict and unsets an inherite
   );
   assert.throws(() => composeHeaders("/*\n  X-A: 1\n", ""), /LF line ends/u);
   assert.throws(() => composeHeaders("/*\n  X-A 1\n", "/x/*\n  X-A: 1\n"), /not a plain header/u);
-  assert.throws(() => composeHeaders("/*\n  X-A: 1\n/*\n  X-B: 2\n", "/x/*\n  X-A: 1\n"), /Duplicate headers rule/u);
+  assert.throws(
+    () => composeHeaders("/*\n  X-A: 1\n/*\n  X-B: 2\n", "/x/*\n  X-A: 1\n"),
+    /Duplicate headers rule/u,
+  );
 });
 
 test("the composed proof tree stages into the fixed directory with its one headers file", async () => {
