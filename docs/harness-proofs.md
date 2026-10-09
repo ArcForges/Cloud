@@ -220,20 +220,20 @@ Offline gates re-run at this HEAD after the stop:
 
 This batch answers the independent review finding that the local CI-equivalent run at `10d62a8` had no exit codes for the Node, architecture and C# gates. It ran on the clean tree at `10d62a8e3985999b294acae3868c90a47dc8a9ff` (Windows), through the workstation build slot (`delivery.py build-slot run --worker w-deku-20261008-har-40 --task HAR.40`). The slot was queued until it was free, and no earlier run's lease was changed by this worker. Every command exits 0.
 
-| Command                                | Exit | Result                                                                                       |
-| -------------------------------------- | ---- | -------------------------------------------------------------------------------------------- |
-| `npm run test:dependencies`            | 0    | 18 of 18 dependency tests                                                                    |
-| `npm run check:plans`                  | 0    | plan files and generated dictionary check                                                    |
-| `npm run check:physical`               | 0    | physical checks                                                                              |
-| `npm run policy`                       | 0    | policy checks                                                                                |
-| `node tooling/project.ts licence`      | 0    | licence checks                                                                               |
-| `node tooling/project.ts provenance`   | 0    | provenance checks                                                                            |
-| `npm run format:check`                 | 0    | Prettier code style                                                                          |
-| `npm run lint`                         | 0    | no findings                                                                                  |
-| `npm run typecheck`                    | 0    | `tsconfig.json` and `tsconfig.worker.json`                                                   |
-| `npm test`                             | 0    | 777 tests, 777 passed, 0 failed                                                              |
-| `npm run test:harness:ai`              | 0    | `ai-binding` passed, 12 of 12 checks, realness `node-fixture`                                |
-| `npm run check:dotnet`                 | 0    | restore `--locked-mode`, build Release (succeeded), `ArcForges.Cloud.ArchitectureTests` and `ArcForges.Cloud.Tests` passed, `dotnet format --verify-no-changes` clean |
-| `node tooling/project.ts licence-evaluated` | 0 | licence evaluation                                                                       |
+| Command                                     | Exit | Result                                                                                                                                                                |
+| ------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run test:dependencies`                 | 0    | 18 of 18 dependency tests                                                                                                                                             |
+| `npm run check:plans`                       | 0    | plan files and generated dictionary check                                                                                                                             |
+| `npm run check:physical`                    | 0    | physical checks                                                                                                                                                       |
+| `npm run policy`                            | 0    | policy checks                                                                                                                                                         |
+| `node tooling/project.ts licence`           | 0    | licence checks                                                                                                                                                        |
+| `node tooling/project.ts provenance`        | 0    | provenance checks                                                                                                                                                     |
+| `npm run format:check`                      | 0    | Prettier code style                                                                                                                                                   |
+| `npm run lint`                              | 0    | no findings                                                                                                                                                           |
+| `npm run typecheck`                         | 0    | `tsconfig.json` and `tsconfig.worker.json`                                                                                                                            |
+| `npm test`                                  | 0    | 777 tests, 777 passed, 0 failed                                                                                                                                       |
+| `npm run test:harness:ai`                   | 0    | `ai-binding` passed, 12 of 12 checks, realness `node-fixture`                                                                                                         |
+| `npm run check:dotnet`                      | 0    | restore `--locked-mode`, build Release (succeeded), `ArcForges.Cloud.ArchitectureTests` and `ArcForges.Cloud.Tests` passed, `dotnet format --verify-no-changes` clean |
+| `node tooling/project.ts licence-evaluated` | 0    | licence evaluation                                                                                                                                                    |
 
 The C# build and tests, the Node test suite and the architecture gate are therefore verified at `10d62a8`. The Docker candidate image, `verifyStoredImage` and the hosted `candidate` job are not covered by this batch and remain the authority, as stated in the sections above.
