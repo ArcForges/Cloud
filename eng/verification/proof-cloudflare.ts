@@ -8,7 +8,7 @@
 // runner-local file; they are never printed, never committed and never leave the runner except into the
 // proof Worker. No live service is called: the checks are provider metadata receipts, not runtime tests.
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,14 +17,18 @@ import {
   generateSecrets,
   proofBucketName,
   proofDatabaseName,
+  composeProofAssets,
   profileBundleAssetName,
   profileBundlePin,
   proofAssetsDirName,
   proofHostname,
   proofQueueNames,
   proofWorkerName,
-  stageProfileAssets,
+  siteArchiveAssetName,
+  siteArchivePin,
+  stageProofAssets,
   verifyProfileBundle,
+  verifySiteArchive,
   type CandidateConfig,
 } from "./proof-deploy.ts";
 
@@ -706,6 +710,57 @@ export function requireContext(
   return { account, token };
 }
 
+/** The gh arguments that download one pinned Web release asset into a directory. */
+export function releaseDownloadArguments(
+  pin: { repository: string; release: string },
+  assetName: string,
+  directory: string,
+): string[] {
+  return [
+    "release",
+    "download",
+    pin.release,
+    "--repo",
+    pin.repository,
+    "--pattern",
+    assetName,
+    "--dir",
+    directory,
+  ];
+}
+
+export interface StagedProofAssets {
+  profileDigest: string;
+  siteDigest: string;
+  files: number;
+  headersSha256: string;
+}
+
+/**
+ * Verifies the two downloaded Web release assets against their pinned digests (the Blazor profile bundle and the C#
+ * Site archive), composes them into the one proof tree and stages it under the root's artifacts. Nothing is staged
+ * unless both verify.
+ */
+export async function verifyAndStageProofAssets(
+  downloaded: { profile: Uint8Array; site: Uint8Array },
+  root: string,
+  pins: { profile: string; site: string } = {
+    profile: profileBundlePin.digest,
+    site: siteArchivePin.digest,
+  },
+): Promise<StagedProofAssets> {
+  const profile = verifyProfileBundle(downloaded.profile, pins.profile);
+  const site = verifySiteArchive(downloaded.site, pins.site);
+  const assets = composeProofAssets(profile, site);
+  const files = await stageProofAssets(assets, path.join(root, "artifacts", proofAssetsDirName));
+  return {
+    profileDigest: profile.digest,
+    siteDigest: site.digest,
+    files,
+    headersSha256: createHash("sha256").update(assets.headers).digest("hex"),
+  };
+}
+
 async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<void> {
   const { verifyCandidate } = await import("../../tooling/project.ts");
   const { candidateDir, readJson, root, run, wrangler, writeJson } =
@@ -738,33 +793,25 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   const imageDigest = digests.find((value) => value.startsWith(prefix));
   assert(imageDigest, "Cloudflare registry did not return the pushed image digest.");
 
-  // CLOUD.71: the Web profile bundle, the immutable release asset named by its digest. It is downloaded from the
-  // pinned release, verified against the pinned digest and staged as the proof assets; nothing is rebuilt, no Web
-  // source is read, and a mismatch stops the job before anything is deployed.
-  const bundleDir = path.join(root, "artifacts", "profile-bundle");
-  const assetName = profileBundleAssetName(profileBundlePin.digest);
-  await rm(bundleDir, { recursive: true, force: true });
-  await run("gh", [
-    "release",
-    "download",
-    profileBundlePin.release,
-    "--repo",
-    profileBundlePin.repository,
-    "--pattern",
-    assetName,
-    "--dir",
-    bundleDir,
-  ]);
-  const verifiedBundle = verifyProfileBundle(
-    await readFile(path.join(bundleDir, assetName)),
-    profileBundlePin.digest,
-  );
-  const stagedFiles = await stageProfileAssets(
-    verifiedBundle,
-    path.join(root, "artifacts", proofAssetsDirName),
+  // WEB.40 (CLOUD.85): the two immutable release assets of one Web release, the Blazor profile bundle and the C#
+  // Site archive. Each is downloaded from its pinned release, verified against its pinned digest and composed into
+  // the one proof tree. Nothing is rebuilt and no Web source is read; a mismatch stops the job before anything is
+  // deployed.
+  const releaseDir = path.join(root, "artifacts", "web-release");
+  const profileAsset = profileBundleAssetName(profileBundlePin.digest);
+  const siteAsset = siteArchiveAssetName(siteArchivePin.digest);
+  await rm(releaseDir, { recursive: true, force: true });
+  await run("gh", releaseDownloadArguments(profileBundlePin, profileAsset, releaseDir));
+  await run("gh", releaseDownloadArguments(siteArchivePin, siteAsset, releaseDir));
+  const staged = await verifyAndStageProofAssets(
+    {
+      profile: await readFile(path.join(releaseDir, profileAsset)),
+      site: await readFile(path.join(releaseDir, siteAsset)),
+    },
+    root,
   );
   console.log(
-    `Profile bundle ${profileBundlePin.release} ${verifiedBundle.digest}: ${stagedFiles} files verified and staged as the proof assets.`,
+    `Web ${profileBundlePin.release}: profile bundle ${staged.profileDigest} and Site ${staged.siteDigest} verified; ${staged.files} files staged as the proof assets.`,
   );
 
   await checkProofDomainFree(api);
@@ -828,9 +875,14 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
     profileBundle: {
       repository: profileBundlePin.repository,
       release: profileBundlePin.release,
-      digest: verifiedBundle.digest,
-      files: stagedFiles,
+      digest: staged.profileDigest,
     },
+    siteArchive: {
+      repository: siteArchivePin.repository,
+      release: siteArchivePin.release,
+      digest: staged.siteDigest,
+    },
+    proofAssets: { files: staged.files, headersSha256: staged.headersSha256 },
     receipts: receipts.map((check) => ({ name: check.name, ok: check.ok })),
     deployedAt: new Date().toISOString(),
   });

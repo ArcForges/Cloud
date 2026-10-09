@@ -74,13 +74,13 @@
     "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
     "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
     "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-    "wrangler.json": "d94d5d098885a21241eb939e3651dbe016aca4e58cdff00abc89dd669628c668"
+    "wrangler.json": "54b032243498e8aff586c518b455b18d465b33b49c04451da1de5b40d26f508c"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "w-deku-20261008-rev-har-40",
+    "reviewer": "w-deku-20261009-rev-cloud-85",
     "date": "2026-10-09",
-    "rationale": "HAR.40 successor of har-40-r13, derived by the repository tooling at 284de7d (the alarm reply deadline commit). cloud-release-r45 (profile sha256 d0fec3a81b20cd236eb713de3a3857f19f1c219175ac51c60aa62344f12084b6) is the successor of cloud-release-r44 and binds the one changed Native AOT input src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessAlarmClient.cs, whose reply body is now read under the alarm deadline. One hash-bound change: the release profile cloud-release-r45 and the records har-40-cloud-worker-bundle-r8 and har-40-cloud-runtime-notices-r8 bind that source and supersede r7; cloud-release-r44 and the r7 records stay as immutable history. package.json, the locks, packages, integrity values, licences, NuGet locks, Dockerfile, base and SDK images, wrangler.json and legal files are unchanged from har-40-r13. The reviewer field names w-deku-20261008-rev-har-40; the decision is recorded as approved at write time under the record review rule, to be verified by that reviewer at the exact head.",
+    "rationale": "CLOUD.85 successor of har-40-r14, the receipt active on origin/main at this merge (the HAR.40 chain head), derived by the repository tooling after merging origin/main into task/cloud-85. Its only change to a hash-bound input is wrangler.json: the env.proof static-assets block sets not_found_handling to \"404-page\" (CLOUD.85 D6), so the proof origin answers unknown paths with the Site's own not-found page. The Worker-first route list, the production configuration, the bindings, the migrations, the Containers and the triggers are unchanged. No npm or NuGet coordinate, integrity value or closure entry changes, and no new native capability or broader source reuse permission is created. The branch receipt cloud-85-r1, chained from capacity-pacer-retire-r2, stays as committed immutable history and is not on the active chain: its committed bytes cannot be corrected in place, so this successor supersedes the main head instead.",
     "inputs": {
       ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -152,7 +152,7 @@
       "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
       "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
       "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-      "wrangler.json": "d94d5d098885a21241eb939e3651dbe016aca4e58cdff00abc89dd669628c668"
+      "wrangler.json": "54b032243498e8aff586c518b455b18d465b33b49c04451da1de5b40d26f508c"
     },
     "checks": [
       "locked-restore",
@@ -163,10 +163,12 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No runtime coordinate changes. The naming package is referenced only by the offline architecture test host with PrivateAssets all, so it is not in any shipped closure, Worker bundle, release profile or runtime notice. The naming scan runs in the local check gate and in the offline architecture tests; no hosted live or inference check is added.",
-    "maintenance": "The naming candidate changes only by a reviewed successor that retargets naming-candidate.json, Directory.Packages.props, the architecture host and this receipt together. A new Contracts line must cite its source commit as an ancestor of the producer's main (the rolled-back package rule). Earlier immutable receipts are retained.",
-    "previous": "eng/policy/dependency-reviews/har-40-r13.json",
-    "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record."
+    "runtimeAssessment": "No production runtime change: the change is confined to the env.proof static-assets block, which only the proof environment deploys. Worker source, bindings and the production Worker bundle are unchanged. The offline tests in tests/worker/proof-assets.test.ts and tests/worker/proof-cloudflare.test.ts run in npm test. The deployed proof-origin observation is an operator step under the RES-cloud-deployment lease and is not asserted by this receipt. No local runtime or performance scenario is asserted.",
+    "maintenance": "wrangler.json is bound by this receipt. A later change to it needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
+    "previous": "eng/policy/dependency-reviews/har-40-r14.json",
+    "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
+    "reviewedOn": "2026-10-09",
+    "decision": "approved"
   },
   "closure": {
     "node_modules/@arcforges/ai-internal": {
@@ -997,7 +999,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/har-40-r14.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-85-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

@@ -2,6 +2,9 @@
 // Offline checks of the CI-only proof access, provisioning and receipt logic against a fake
 // Cloudflare API. The real account is exercised only by the manually dispatched workflow jobs.
 import assert from "node:assert/strict";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   CloudflareApi,
@@ -10,8 +13,17 @@ import {
   report,
   probeAccess,
   provision,
+  releaseDownloadArguments,
   requireContext,
+  verifyAndStageProofAssets,
 } from "../../eng/verification/proof-cloudflare.ts";
+import {
+  profileBundleAssetName,
+  profileBundlePin,
+  proofAssetsDirName,
+  siteArchiveAssetName,
+  siteArchivePin,
+} from "../../eng/verification/proof-deploy.ts";
 
 const account = "0".repeat(32);
 const token = `${"a".repeat(12)}-${"b".repeat(12)}`;
@@ -269,4 +281,61 @@ test("the proof environment is reachable only from a manual run on main with the
   ])
     assert.throws(() => requireContext({ ...good, ...bad }, "deploy"));
   assert.throws(() => requireContext(good, "delete"));
+});
+
+test("each Web release asset is downloaded from its pinned release by its digest name", () => {
+  assert.match(profileBundlePin.digest, /^[0-9a-f]{64}$/u);
+  assert.match(siteArchivePin.digest, /^[0-9a-f]{64}$/u);
+  assert.deepEqual(
+    releaseDownloadArguments(
+      profileBundlePin,
+      profileBundleAssetName(profileBundlePin.digest),
+      "artifacts/web-release",
+    ),
+    [
+      "release",
+      "download",
+      profileBundlePin.release,
+      "--repo",
+      profileBundlePin.repository,
+      "--pattern",
+      `web-profiles-${profileBundlePin.digest}.tar`,
+      "--dir",
+      "artifacts/web-release",
+    ],
+  );
+  assert.deepEqual(
+    releaseDownloadArguments(
+      siteArchivePin,
+      siteArchiveAssetName(siteArchivePin.digest),
+      "artifacts/web-release",
+    ),
+    [
+      "release",
+      "download",
+      siteArchivePin.release,
+      "--repo",
+      siteArchivePin.repository,
+      "--pattern",
+      `web-site-${siteArchivePin.digest}.tar`,
+      "--dir",
+      "artifacts/web-release",
+    ],
+  );
+});
+
+test("an asset that does not match its pinned digest stops the staging before anything is written", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "arcforges-cloud-proof-"));
+  try {
+    await assert.rejects(
+      verifyAndStageProofAssets(
+        { profile: Buffer.from("not a bundle"), site: Buffer.from("not a site") },
+        root,
+      ),
+      /does not match the pinned digest/u,
+    );
+    await assert.rejects(stat(path.join(root, "artifacts", proofAssetsDirName)));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
