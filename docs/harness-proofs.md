@@ -414,7 +414,7 @@ Each gate ran once at this code head, through the workstation build slot in the 
 | `npm run candidate`                                         | 1    | the Docker build fails with `spawn docker ENOENT`: the workstation has no Docker CLI, and WSL2 is limited to the Native AOT publish and run under this unit. No candidate was produced locally; the hosted candidate job is the authority. Policy and provenance pass locally                                 |
 | `npm run test:artifact` (`release-provenance.test.ts`)      | 1    | 9 of 10. The failing check compares the real Worker bundle digest `f14b2e79…` (equal to the `worker.sha256` of profiles r44 and r45 and of records r7 and r8) with the stale constant `b46b7d53…` at `tests/worker/release-provenance.test.ts:33`. This is open item 4 below, outside this unit's write scope |
 
-The architecture project showed no stale build output at this head; its tests pass after the rebuild above.
+The architecture project's Release build output (`tests/ArchitectureTests/bin/Release` and `obj/Release`) was removed before the build, as at `9e496816`, so no stale output was tested. Its tests passed in the run above.
 
 ### Native AOT at 5a3afcb
 
