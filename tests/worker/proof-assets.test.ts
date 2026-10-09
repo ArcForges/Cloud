@@ -24,6 +24,8 @@ import {
   profileBundlePin,
   proofAssetsDirName,
   readBundleArchive,
+  siteArchiveAssetName,
+  siteArchivePin,
   stageProofAssets,
   verifyProfileBundle,
   verifySiteArchive,
@@ -277,14 +279,33 @@ test("the generated proof config points the assets at the staged directory and k
   assert.throws(() => buildProofConfig(noAssets, options), /no static assets/u);
 });
 
-test("the pin names a Web release asset by its own digest", () => {
+test("the pins name the WEB.40 release assets by their own digests, one release for both", () => {
   assert.equal(profileBundlePin.repository, "ArcForges/Web");
-  assert.match(profileBundlePin.release, /^web-0\.1\.0-ci\.[1-9]\d*\.[1-9]\d*$/u);
-  assert.match(profileBundlePin.digest, /^[0-9a-f]{64}$/u);
+  assert.equal(profileBundlePin.release, "web-0.1.0-ci.111.1");
+  assert.equal(profileBundlePin.digest, "4afc8f285a7a64202ce221bc4e3011a9f8b6de641d50eef0a537677e80eaef9a");
   assert.equal(
     profileBundleAssetName(profileBundlePin.digest),
     `web-profiles-${profileBundlePin.digest}.tar`,
   );
+  assert.equal(siteArchivePin.repository, profileBundlePin.repository);
+  assert.equal(siteArchivePin.release, profileBundlePin.release);
+  assert.equal(siteArchivePin.digest, "573575617dec11d2d3678bf5ccd92728190b64a79e7907e050764fd8a1d131ac");
+  assert.equal(
+    siteArchiveAssetName(siteArchivePin.digest),
+    `web-site-${siteArchivePin.digest}.tar`,
+  );
+});
+
+test("the retired React pin is no longer referenced by the proof sources", () => {
+  for (const rel of [
+    "eng/verification/proof-deploy.ts",
+    "eng/verification/proof-cloudflare.ts",
+    "wrangler.json",
+  ]) {
+    const source = readFileSync(path.resolve(import.meta.dirname, "../..", rel), "utf8");
+    assert(!source.includes("web-0.1.0-ci.90.1"), rel);
+    assert(!source.includes("67956d7f4b3d2909625585ca68f19f3f8a9ea27a5a08958659b9d9841871f996"), rel);
+  }
 });
 
 test("a well-formed WEB.40 bundle verifies and a digest that is not the pin is refused first", () => {

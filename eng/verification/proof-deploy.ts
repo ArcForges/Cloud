@@ -20,13 +20,14 @@ export const workerFirst = ["/api/*", "/session/v1/*", "/proof/v1/*"];
 export const proofAssetsDirName = "proof-assets";
 
 /**
- * The Web profile bundle served from the proof origin (CLOUD.71): the immutable release asset that the Web main-push
- * build publishes as `web-profiles-<digest>.tar`. Moving the pin is a reviewed change; nothing is rebuilt here.
+ * The Web profile bundle served from the proof origin (CLOUD.71, moved to the WEB.40 release by CLOUD.85): the
+ * immutable release asset that the Web main-push build publishes as `web-profiles-<digest>.tar`. Moving the pin is
+ * a reviewed change; nothing is rebuilt here.
  */
 export const profileBundlePin = {
   repository: "ArcForges/Web",
-  release: "web-0.1.0-ci.90.1",
-  digest: "67956d7f4b3d2909625585ca68f19f3f8a9ea27a5a08958659b9d9841871f996",
+  release: "web-0.1.0-ci.111.1",
+  digest: "4afc8f285a7a64202ce221bc4e3011a9f8b6de641d50eef0a537677e80eaef9a",
 } as const;
 export const profileBundleAssetName = (digest: string) => `web-profiles-${digest}.tar`;
 /**
