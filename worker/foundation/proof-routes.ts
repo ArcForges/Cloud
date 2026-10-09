@@ -79,7 +79,7 @@ async function forwardSession(request: Request, env: FoundationEnv): Promise<Res
   const headers = new Headers();
   const cookie = sessionCookieOnly(request.headers.get("cookie"));
   if (cookie) headers.set("cookie", cookie);
-  for (const name of ["origin", "x-af-csrf"]) {
+  for (const name of ["origin", edgeGuard.csrfHeader]) {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
   }
