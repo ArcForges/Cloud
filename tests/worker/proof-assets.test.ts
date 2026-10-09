@@ -601,7 +601,28 @@ test("each profile's policy is the one its page derives, with the exact WebAssem
   const derived = policyOf();
   assert.equal(
     derived,
-    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'",
+  );
+  // The shells carry <base href="/">, so an App profile's base URI is 'self' and no other value (CLOUD.85 D1, S36).
+  refuses(
+    { csp: { account: derived.replace("base-uri 'self'", "base-uri 'none'") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { chat: derived.replace("base-uri 'self'", "base-uri 'none'") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { account: derived.replace("base-uri 'self'", "base-uri *") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { chat: derived.replace("base-uri 'self'", "base-uri 'self' https:") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { chat: derived.replace("base-uri 'self'", "base-uri https://example.test") } },
+    /does not match its page/u,
   );
   // An inline script of the page is covered by its hash in script-src, and by nothing else.
   const inline = profileShell.replace("</body>", "<script>window.p=1;</script></body>");
@@ -1081,6 +1102,17 @@ test("the Site archive is refused for a non-canonical header, an order, a member
     { files: { "assets/site.0123456789abcdef.css": "x" } },
     /exactly one content-hashed stylesheet/u,
   );
+});
+
+test("the Site policy keeps base-uri 'none', and a Site with any other base URI is refused", () => {
+  const policy = acceptsSite().policy;
+  assert.match(policy, /base-uri 'none';/u);
+  for (const baseUri of ["'self'", "*", "https://example.test", "'self' 'none'"]) {
+    refusesSite(
+      { headers: expectedSiteHeaders(policy.replace("base-uri 'none'", `base-uri ${baseUri}`)) },
+      /The Site headers file differs from the reviewed rules\./u,
+    );
+  }
 });
 
 test("the Site policy never carries WebAssembly, and its headers file is the reviewed one", () => {

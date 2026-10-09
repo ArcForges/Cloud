@@ -321,14 +321,17 @@ function inlineHashSet(pages: string[]): string[] {
   return [...hashes].sort();
 }
 
-/** The policy text that follows the script sources (WasmContentSecurityPolicy.FromHostPages). */
-function policyText(scriptSources: string[]): string {
-  return `default-src 'self'; script-src ${scriptSources.join(" ")}; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`;
+/**
+ * The policy text that follows the script sources (WasmContentSecurityPolicy.FromHostPages). The base URI is
+ * 'self' for the App profiles, whose shells carry <base href="/"> (CLOUD.85 D1, S36), and 'none' for the Site.
+ */
+function policyText(scriptSources: string[], baseUri: "'self'" | "'none'"): string {
+  return `default-src 'self'; script-src ${scriptSources.join(" ")}; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri ${baseUri}; frame-ancestors 'none'; form-action 'none'`;
 }
 
 /** The App profile policy the Web build derives from its shell: 'self', 'wasm-unsafe-eval' and the inline hashes. */
 export function expectedProfilePolicy(page: string): string {
-  return policyText(["'self'", "'wasm-unsafe-eval'", ...inlineHashSet([page])]);
+  return policyText(["'self'", "'wasm-unsafe-eval'", ...inlineHashSet([page])], "'self'");
 }
 
 /** The headers file the Web build writes for the two App profiles (ProfileBundle.HeadersText), byte for byte. */
@@ -730,7 +733,7 @@ const profileOwnedPath = /^(?:account|chat|_framework)(?:\/|$)/u;
 
 /** The Site policy the Site builder derives from its pages (SiteContentSecurityPolicy.FromPages). */
 export function expectedSitePolicy(pages: string[]): string {
-  return policyText(["'self'", ...inlineHashSet(pages)]);
+  return policyText(["'self'", ...inlineHashSet(pages)], "'none'");
 }
 
 /** The headers file of the public Site (SiteSecurityHeaders.Render), byte for byte. */
