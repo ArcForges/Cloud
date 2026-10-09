@@ -133,6 +133,12 @@ in the job wake message and the private job-slice call. It uses only fields the 
 `traceparent` request header between the Worker and the host. It adds no wire field, no client-visible header and no
 contract meaning, and it is never an authorization input.
 
+The Worker's guards on this identity (the canonical UUID shape, the nil value, the field numbers that carry it and the
+traceparent version and flags) are declared in `src/ArcForges.Cloud/Generation/CorrelationGuards.cs` and generated into
+`worker/tables/cloud-tables.generated.ts` (CLOUD.84). `worker/ingress/correlation.ts` applies those guards and forwards the
+values; the host's rule (`CorrelationContext.IsValidId`) is unchanged, and `GeneratedTablesTests` and `CorrelationGuardTests`
+check the declarations against it.
+
 | Hop                    | What happens                                                                                                                                                                                                                                                                      | Where                                                                                    |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | Client to Worker       | A route that declares `requestMeta` has the client's `RequestMeta.correlationId` read from the request message. Only a canonical `Id` (exactly 16 bytes, not all zero, stated once) is accepted; an absent value is created (`crypto.randomUUID`); a malformed one is refused.    | `worker/ingress/correlation.ts`, `worker/ingress/pipeline.ts`                            |

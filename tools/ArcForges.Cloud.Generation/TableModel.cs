@@ -17,6 +17,17 @@ public sealed record RouteRow(
     string Instance,
     bool RequestMeta);
 
+/// <summary>The correlation guards of the Worker (CR-01, CR-03): the identity shape, where it lives in a request and the traceparent form.</summary>
+public sealed record CorrelationGuardRow(
+    string UuidPattern,
+    string NilUuid,
+    int RequestMetaField,
+    int CorrelationIdField,
+    int IdValueField,
+    int IdByteLength,
+    string TraceparentVersion,
+    string TraceparentFlags);
+
 /// <summary>Everything the Worker's transport tables are generated from, read from the C# host and its declarations.</summary>
 public sealed record TableModel(
     string HelloPath,
@@ -28,7 +39,8 @@ public sealed record TableModel(
     int ColdStartMilliseconds,
     int StreamLifetimeMilliseconds,
     string SessionCookieName,
-    string CsrfHeader);
+    string CsrfHeader,
+    CorrelationGuardRow Correlation);
 
 /// <summary>
 /// Reads the transport tables by reflection over the host's registrations: HelloModule (the production policies and the plain health
@@ -42,6 +54,7 @@ public static class HostReader
     private const string PipelineProbeType = "ArcForges.Cloud.Ingress.PipelineProbe";
     private const string IngressPipelineType = "ArcForges.Cloud.Ingress.IngressPipeline";
     private const string BudgetsType = "ArcForges.Cloud.Generation.TransportBudgets";
+    private const string GuardsType = "ArcForges.Cloud.Generation.CorrelationGuards";
     private const string ApiPrefix = "/api";
     private const string HelloMethod = "/arcforges.hello.v1.HelloService/SayHello";
     private const BindingFlags AnyMember = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
@@ -85,6 +98,7 @@ public static class HostReader
             throw new InvalidOperationException("TransportBudgets.MaxBodyBytes must equal the Hello policy's request bound.");
 
         var ingress = LoadType(assembly, IngressPipelineType);
+        var guards = LoadType(assembly, GuardsType);
         return new TableModel(
             HelloPath: ApiPrefix + helloRow.Path,
             HealthPath: ApiPrefix + health.Path,
@@ -95,7 +109,16 @@ public static class HostReader
             ColdStartMilliseconds: Constant(budgets, "ColdStartMilliseconds"),
             StreamLifetimeMilliseconds: Constant(budgets, "StreamLifetimeMilliseconds"),
             SessionCookieName: Text(ingress, "SessionCookieName"),
-            CsrfHeader: Text(ingress, "CsrfHeader").ToLowerInvariant());
+            CsrfHeader: Text(ingress, "CsrfHeader").ToLowerInvariant(),
+            Correlation: new CorrelationGuardRow(
+                UuidPattern: Text(guards, "UuidPattern"),
+                NilUuid: Text(guards, "NilUuid"),
+                RequestMetaField: Constant(guards, "RequestMetaField"),
+                CorrelationIdField: Constant(guards, "CorrelationIdField"),
+                IdValueField: Constant(guards, "IdValueField"),
+                IdByteLength: Constant(guards, "IdByteLength"),
+                TraceparentVersion: Text(guards, "TraceparentVersion"),
+                TraceparentFlags: Text(guards, "TraceparentFlags")));
     }
 
     private static Type LoadType(Assembly assembly, string name) =>

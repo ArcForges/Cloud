@@ -9,7 +9,6 @@ import {
   isCorrelationId,
   newCorrelationId,
   newSpanId,
-  parseTraceparent,
   readRequestCorrelation,
   singleMessage,
   traceparentFor,
@@ -22,6 +21,7 @@ import type { CoordinatorLike, FoundationEnv, WakeMessage } from "../../worker/f
 import { base64UrlEncode } from "../../worker/private/encoding.ts";
 import { routeRequest, type CloudBindings } from "../../worker/router.ts";
 import { createFakeR2 } from "./support/fake-r2.ts";
+import { parseTraceparent } from "./support/traceparent.ts";
 
 const origin = "https://proof.example.test";
 const whoami = "/api/arcforges.proof.v1.PipelineProbe/Whoami";

@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Worker side of the correlation seam (CLOUD.69; Design CR-01, CR-03, CR-06, HP-06). One correlation
-// identity per call: a client's RequestMeta.correlationId is accepted only as a canonical, nonzero,
-// lowercase UUID (wire registry 04: Id is exactly 16 nonzero bytes), an absent one is created here, and a
-// malformed one is refused by the caller of this module. The identity never takes part in authorization.
+// The Worker side of the correlation seam (CLOUD.69; Design CR-01, CR-03, CR-06, HP-06). One correlation identity per call: a client's
+// RequestMeta.correlationId is accepted only when it matches the identity guard (a canonical, nonzero, lowercase UUID; wire registry 04:
+// Id is exactly 16 nonzero bytes), an absent one is created here, and a malformed one is refused by the caller of this module. The
+// identity never takes part in authorization.
 //
-// The identity reaches the host as the trace id of one W3C traceparent the Worker builds itself (a UUID is
-// exactly 128 bits), so the Worker, the host and a wake message are joined by the identifier alone and no new
-// header, field or contract meaning exists. Nothing a client sends is ever copied into a header: every value
-// here is produced from 16 validated bytes or from the platform's random source.
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-const traceparentPattern = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/u;
-const nilUuid = "00000000-0000-0000-0000-000000000000";
+// The guards (the identifier shape, the field numbers that carry it and the traceparent form) are declared in C# and generated into
+// worker/tables/cloud-tables.generated.ts (CLOUD.84 S34(3)). This module applies them and forwards; it decides nothing of its own.
+//
+// The identity reaches the host as the trace id of one W3C traceparent the Worker builds itself (a UUID is exactly 128 bits), so the
+// Worker, the host and a wake message are joined by the identifier alone and no new header, field or contract meaning exists. Nothing a
+// client sends is ever copied into a header: every value here is produced from 16 validated bytes or from the platform's random source.
+import { correlationGuard } from "../tables/cloud-tables.generated.ts";
 
-const requestMetaField = 1;
-const correlationIdField = 3;
-const idValueField = 1;
+const uuidPattern = new RegExp(correlationGuard.uuidPattern, "u");
+const nilUuid = correlationGuard.nilUuid;
+const requestMetaField = correlationGuard.requestMetaField;
+const correlationIdField = correlationGuard.correlationIdField;
+const idValueField = correlationGuard.idValueField;
+const idByteLength = correlationGuard.idByteLength;
 
 /** A canonical lowercase UUID that is not the nil UUID: the only accepted spelling of a correlation or causation id. */
 export function isCorrelationId(value: unknown): value is string {
@@ -37,22 +40,7 @@ export function newSpanId(): string {
 /** The W3C traceparent of a call: the correlation id is the trace id, the Worker's span is the parent of the host's. */
 export function traceparentFor(correlationId: string, spanId: string = newSpanId()): string {
   if (!isCorrelationId(correlationId)) throw new TypeError("Invalid correlation id.");
-  return `00-${correlationId.replaceAll("-", "")}-${spanId}-01`;
-}
-
-export interface Traceparent {
-  readonly correlationId: string;
-  readonly parentSpanId: string;
-}
-
-/** A strict W3C traceparent (version 00, nonzero trace and parent ids), or null. */
-export function parseTraceparent(value: string | null): Traceparent | null {
-  const match = value === null ? null : traceparentPattern.exec(value);
-  if (!match) return null;
-  const [, traceId = "", parentSpanId = ""] = match;
-  if (/^0+$/u.test(traceId) || /^0+$/u.test(parentSpanId)) return null;
-  const correlationId = `${traceId.slice(0, 8)}-${traceId.slice(8, 12)}-${traceId.slice(12, 16)}-${traceId.slice(16, 20)}-${traceId.slice(20)}`;
-  return { correlationId, parentSpanId };
+  return `${correlationGuard.traceparentVersion}-${correlationId.replaceAll("-", "")}-${spanId}-${correlationGuard.traceparentFlags}`;
 }
 
 export type RequestCorrelation =
@@ -145,7 +133,7 @@ function readId(message: Uint8Array): string | null {
       return null;
     }
   }
-  if (value?.length !== 16 || value.every((byte) => byte === 0)) return null;
+  if (value?.length !== idByteLength || value.every((byte) => byte === 0)) return null;
   return formatId(value);
 }
 
