@@ -818,6 +818,30 @@ test("slash-separated attributes, entities and every other url-bearing form stay
   for (const tag of ok) accepts({ shell: shellWith(tag) });
 });
 
+test("the codebase, archive and imagesrcset attributes refuse a foreign entry in any position", () => {
+  const other = /violates the same-origin rules/u;
+  const evil = "https://evil.example.test";
+  for (const tag of [
+    `<object codebase="${evil}/"></object>`,
+    '<applet codebase="//evil.example.test/" code="x.class"></applet>',
+    '<object codebase=" //evil.example.test/"></object>',
+    `<object archive="${evil}/a.jar"></object>`,
+    // archive is a space-separated list, so a foreign second entry is refused as well.
+    `<object archive="/a.jar ${evil}/b.jar"></object>`,
+    '<applet archive="/a.jar //evil.example.test/b.jar" code="x.class"></applet>',
+    `<link rel="preload" as="image" href="/a.png" imagesrcset="${evil}/a.png 1x">`,
+    // imagesrcset is a candidate list, so a foreign second candidate is refused as well.
+    `<link rel="preload" as="image" href="/a.png" imagesrcset="/a.png 1x, ${evil}/b.png 2x">`,
+    '<link rel="preload" as="image" href="/a.png" imagesrcset="/a.png 1x, //evil.example.test/b.png 2x">',
+  ])
+    refuses(withFragment(tag), other);
+  const ok = [
+    '<object archive="/a.jar /b.jar" codebase="/"></object>',
+    '<link rel="preload" as="image" href="/a.png" imagesrcset="/a.png 1x, /b.png 2x">',
+  ];
+  for (const tag of ok) accepts({ shell: shellWith(tag) });
+});
+
 test("script-src allows only 'self', 'wasm-unsafe-eval' and sha256 hashes", () => {
   const derived = derivedPolicy();
   for (const source of [

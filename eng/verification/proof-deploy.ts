@@ -396,7 +396,18 @@ const urlAttributes = [
   "cite",
   "background",
   "manifest",
+  "codebase",
+  "archive",
+  "imagesrcset",
 ];
+
+/** The references one url attribute names: archive is a space-separated URL list and imagesrcset a candidate list. */
+function attributeReferences(attribute: string, value: string): string[] {
+  if (attribute === "archive") return value.split(/\s+/u);
+  if (attribute === "imagesrcset")
+    return value.split(",").map((candidate) => candidate.trim().split(/\s+/u)[0] ?? "");
+  return [value];
+}
 
 /** The served file a script, stylesheet or icon tag names (the root is the base), or undefined when it names none. */
 function loadedFile(tag: StartTag): string | undefined {
@@ -439,7 +450,8 @@ function pageViolations(html: string, rules: PageRules): string[] {
         tag.name === "a" &&
         attribute === "href" &&
         sourceRepository.test(value);
-      if (!repository) check(attribute, value);
+      if (!repository)
+        for (const reference of attributeReferences(attribute, value)) check(attribute, reference);
     }
     const srcset = tag.attributes.get("srcset");
     if (srcset !== undefined)
