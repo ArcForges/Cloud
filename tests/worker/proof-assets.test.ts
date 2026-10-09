@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -684,6 +684,270 @@ test("stylesheets of the bundle import only paths that stay on the root", () => 
   accepts({ files: { "app.css": '@import "/fonts.css";' } });
 });
 
+// ---- Refusals of the CLOUD.71 verifier, restated for the WEB.40 shell. Each probe changes one thing. ----
+/** The reviewed shell with one fragment before </body>; its policy is derived from the probed page. */
+const shellWith = (fragment: string) => profileShell.replace("</body>", `${fragment}</body>`);
+/** Both profile pages hold the same probe bytes, while the policies stay the reviewed shell's. */
+const samePages = (html: string): ProfileSpec => ({
+  files: { "account/index.html": html, "chat/index.html": html },
+});
+/** The reviewed shell with one fragment at the start of the application root; the policy follows the page. */
+const withFragment = (fragment: string): ProfileSpec =>
+  withShell((html) => html.replace('<div id="app">', `${fragment}<div id="app">`));
+const derivedPolicy = () => policyOf();
+const manifestRow = (manifest: ManifestDocument, name: string) => {
+  const row = manifest.profiles[name];
+  assert(row);
+  return row;
+};
+
+test("an inline script is found in every start-tag form and must be covered in script-src itself", () => {
+  const uncovered = /does not match its page/u;
+  // Whatever its start tag looks like, an inline script is found, and the policy of the shell does not cover it.
+  for (const tag of [
+    "<script/x>window.other = 1;</script>",
+    "<script\n>window.other = 1;</script>",
+    '<script data-x="src=1">window.other = 1;</script>',
+    "<SCRIPT>window.other = 1;</SCRIPT >",
+    "<Script type=module>window.other = 1;</script\n>",
+  ])
+    refuses(samePages(shellWith(tag)), uncovered);
+  // An external script (a real src attribute in either form) needs no hash, and its body text is not executed inline.
+  for (const external of [
+    "<script src=/_framework/dotnet.js></script>",
+    "<script/src=/_framework/dotnet.js></script>",
+    "<script src=/_framework/dotnet.js>not executed</script>",
+  ])
+    accepts({ shell: shellWith(external) });
+  // The hash must be in script-src itself: the same hash in style-src does not cover the script.
+  const probe = shellWith('<script>window.p="probe";</script>');
+  const hash = `'sha256-${createHash("sha256").update('window.p="probe";').digest("base64")}'`;
+  const policy = derivedPolicy();
+  refuses(
+    {
+      ...samePages(probe),
+      csp: {
+        account: policy.replace("style-src 'self'", `style-src 'self' ${hash}`),
+        chat: policy,
+      },
+    },
+    uncovered,
+  );
+  refuses(
+    {
+      ...samePages(probe),
+      csp: {
+        account: policy.replace("script-src", "x-script-src"),
+        chat: policy.replace("script-src", "x-script-src"),
+      },
+    },
+    uncovered,
+  );
+});
+
+test("page references are refused unless they are plain same-origin paths, in every quoting form", () => {
+  const other = /another origin/u;
+  const control = /control character, a backslash or an entity/u;
+  for (const [tag, pattern] of [
+    ["<a href='https://cdn.example.test/x'>x</a>", other],
+    ["<img src=https://cdn.example.test/x.png>", other],
+    ["<img src=//cdn.example.test/x.png>", other],
+    ["<a href='//cdn.example.test/'>x</a>", other],
+    ['<a href = "https://cdn.example.test/">x</a>', other],
+    ['<A HREF="https://cdn.example.test/">x</A>', other],
+    ['<a href="/\\cdn.example.test/x">x</a>', control],
+    ["<a href=/\\cdn.example.test/x>x</a>", control],
+    ['<a href="\\\\cdn.example.test/x">x</a>', control],
+    ['<a href="/ok/\\x">x</a>', control],
+    ['<a href="/\tcdn.example.test/">x</a>', control],
+    ['<a href="data:text/html,x">x</a>', other],
+    ['<a href="javascript:void(0)">x</a>', other],
+  ] as const)
+    refuses(withFragment(tag), pattern);
+  // Plain absolute paths, fragments and all three quoting forms of them pass.
+  accepts(withFragment(`<a href="/a">1</a><a href='/b'>2</a><a href=/c>3</a><a href="#x">4</a>`));
+});
+
+test("slash-separated attributes, entities and every other url-bearing form stay on this origin", () => {
+  const other = /violates the same-origin rules/u;
+  const evil = "https://evil.example.test/x";
+  for (const tag of [
+    `<script/src=${evil}.js></script>`,
+    `<link/href=${evil}.css rel=stylesheet>`,
+    `<img/src=${evil}.png>`,
+    `<img\n/src=${evil}.png>`,
+    `<img / src='${evil}.png'>`,
+    `<a title="a>b" href="${evil}">x</a>`,
+    '<a href="/&#x2F;evil.example.test">x</a>',
+    '<a href="/&#92;evil.example.test">x</a>',
+    '<a href="/&sol;evil.example.test">x</a>',
+    '<a href="/a&amp;b">x</a>',
+    '<a href="#a&b">x</a>',
+    `<img srcset="${evil}.png 1x, /b.png 2x">`,
+    '<img srcset="/a.png 1x, //evil.example.test/b.png 2x">',
+    '<img srcset="/a&#x2F;b.png 1x">',
+    `<meta http-equiv=refresh content="0;url=${evil}">`,
+    '<meta http-equiv="Refresh" content="0;url=/ok">',
+    `<form action="${evil}"></form>`,
+    `<form><button formaction="${evil}">x</button></form>`,
+    `<object data="${evil}"></object>`,
+    `<video poster="${evil}.png"></video>`,
+    `<html manifest=${evil}></html>`,
+    `<a ping="${evil}">x</a>`,
+    `<blockquote cite="${evil}">x</blockquote>`,
+    `<table background="${evil}.png"></table>`,
+    // The first of two equal attributes is the one a browser uses.
+    `<img src=${evil}.png src=/ok.png>`,
+    `<style>@import url(${evil}.css);</style>`,
+    `<style>@import "${evil}.css";</style>`,
+    "<style>@import url('//evil.example.test/x.css');</style>",
+    '<STYLE>@IMPORT URL("https://evil.example.test/x.css")</STYLE >',
+  ])
+    refuses(withFragment(tag), other);
+  // A second base is refused by the one-base rule before any reference is read.
+  refuses(withFragment('<base href="/ok/">'), /must set exactly one base/u);
+  const ok = [
+    '<img src="/a.png" srcset="/a.png 1x, /b.png 2x"><form action="/ok"></form>',
+    "<style>@import url('/assets/x.css');</style>",
+    "<SCRIPT SRC=/_framework/dotnet.js></SCRIPT>",
+    // An external script's body text is not executed inline and needs no hash.
+    "<script src=/_framework/dotnet.js>not executed</script>",
+    // Text in a script body is not markup; the shell's policy covers the body by its hash.
+    '<script type="module">const x = "<img src=https://evil.example.test/y.png>";</script>',
+  ];
+  for (const tag of ok) accepts({ shell: shellWith(tag) });
+});
+
+test("script-src allows only 'self', 'wasm-unsafe-eval' and sha256 hashes", () => {
+  const derived = derivedPolicy();
+  for (const source of [
+    "https:",
+    "data:",
+    "https://cdn.example.test",
+    "'strict-dynamic'",
+    "'nonce-abc123'",
+    "'sha256-short'",
+    `'sha384-${"A".repeat(64)}'`,
+    "blob:",
+    "'self'x",
+  ])
+    refuses(
+      { csp: { chat: derived.replace("script-src 'self'", `script-src 'self' ${source}`) } },
+      /does not match its page/u,
+    );
+  // The legitimate policy still passes (its own hash is a sha256 source).
+  accepts();
+});
+
+test("a tag-like text in a covered script body neither hides a real tag after it nor counts as one", () => {
+  const body = "if (a<b) { run(); }";
+  const script = `<script>${body}</script>`;
+  refuses(
+    { shell: shellWith(`${script}<img src=https://evil.example.test/y.png>`) },
+    /another origin/u,
+  );
+  accepts({ shell: shellWith(`${script}<img src=/y.png>`) });
+});
+
+test("each profile's policy must cover its own inline scripts and stay restrictive", () => {
+  const uncovered = /does not match its page/u;
+  const derived = derivedPolicy();
+  // An inline script in any letter case or with a spaced closing tag must be covered as well.
+  refuses(samePages(shellWith("<script>window.other = 1;</script junk>")), uncovered);
+  for (const tag of ["SCRIPT", "Script"])
+    refuses(samePages(shellWith(`<${tag}>window.other = 1;</${tag} >`)), uncovered);
+  // A page whose inline script the policy of its shell does not cover is refused, in both profiles.
+  refuses(samePages(shellWith('<script>window.p="account";</script>')), uncovered);
+  refuses(
+    { csp: { account: derived.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'") } },
+    uncovered,
+  );
+  refuses({ csp: { chat: derived.replace("style-src 'self'", "style-src 'self' *") } }, uncovered);
+  refuses(
+    { csp: { chat: derived.replace("connect-src 'self'", "connect-src https:") } },
+    uncovered,
+  );
+  refuses({ csp: { chat: derived.replace("default-src 'self'; ", "") } }, uncovered);
+  refuses(
+    {
+      manifest: (manifest) => {
+        manifestRow(manifest, "chat").csp = "x";
+      },
+    },
+    /manifest policy of chat differs/u,
+  );
+  refuses(
+    { headers: "/*\n  X: y\n/chat/*\n  Content-Security-Policy: x\n" },
+    /No headers rule for \/account/u,
+  );
+});
+
+test("default-src and connect-src must be exactly 'self' and a directive may not repeat", () => {
+  const derived = derivedPolicy();
+  for (const bad of [
+    derived.replace("default-src 'self'", "default-src 'self' https:"),
+    derived.replace("default-src 'self'", "default-src 'none'"),
+    derived.replace("connect-src 'self'", "connect-src 'self' https://other.example.test"),
+    derived.replace("connect-src 'self'", "x-connect-src 'self'"),
+    derived.replace("connect-src 'self'", "connect-src 'self'; connect-src 'self'"),
+  ])
+    refuses({ csp: { chat: bad } }, /does not match its page/u);
+  assert.throws(() => parsePolicy("a x; A y"), /repeats the a directive/u);
+});
+
+test("the site-wide and asset rules never carry a policy and every rule is unique", () => {
+  const expected = accepts().headers;
+  refuses(
+    {
+      headers: expected.replace(
+        "/assets/*\n  ! Cache-Control",
+        "/assets/*\n  Content-Security-Policy: default-src *\n  ! Cache-Control",
+      ),
+    },
+    /\/assets\/\* rule must not carry a policy/u,
+  );
+  refuses({ headers: `${expected}/chat/*\n  X: y\n` }, /Duplicate headers rule \/chat\/\*/u);
+});
+
+test("the manifest names each profile's own page, and a build digest is a SHA-256", () => {
+  refuses(
+    {
+      manifest: (manifest) => {
+        manifestRow(manifest, "account").page = "chat/index.html";
+      },
+    },
+    /manifest names another page for account/u,
+  );
+  refuses(
+    {
+      manifest: (manifest) => {
+        manifestRow(manifest, "chat").page = "index.html";
+      },
+    },
+    /manifest names another page for chat/u,
+  );
+  for (const digest of ["A".repeat(64), "f".repeat(63), ""])
+    refuses(
+      {
+        manifest: (manifest) => {
+          manifestRow(manifest, "chat").buildDigest = digest;
+        },
+      },
+      /build digest of chat is not a SHA-256/u,
+    );
+});
+
+test("only the root app files and the framework may have precompressed siblings", () => {
+  refuses(
+    { files: { "account/index.html.br": brotliCompressSync(profileShell) } },
+    /encoded file without its plain file/u,
+  );
+  refuses(
+    { files: { "chat/index.html.gz": gzipSync(profileShell) } },
+    /encoded file without its plain file/u,
+  );
+});
+
 // ---- The Site (WEB.40 web-site-<sha256>.tar): the Site builder's members, pages and headers, as synthetic bytes. ----
 const siteCss = "body{margin:0}";
 const siteStylesheetPath = `assets/site.${sha(siteCss).slice(0, 16)}.css`;
@@ -993,6 +1257,23 @@ test("the composed proof tree stages into the fixed directory with its one heade
       stageProofAssets(assets, path.join(parent, "elsewhere")),
       /Unexpected staging directory/u,
     );
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("staging replaces the stale content of an earlier staging and leaves the directory beside it alone", async () => {
+  const assets = composeProofAssets(accepts(), acceptsSite());
+  const parent = await mkdtemp(path.join(tmpdir(), "arcforges-proof-stale-"));
+  try {
+    const target = path.join(parent, proofAssetsDirName);
+    await writeFile(path.join(parent, "keep.txt"), "kept");
+    assert.equal(await stageProofAssets(assets, target), assets.files.length);
+    await writeFile(path.join(target, "stale.txt"), "stale");
+    // Stale content of an earlier staging never survives a second staging of the same tree.
+    assert.equal(await stageProofAssets(assets, target), assets.files.length);
+    await assert.rejects(stat(path.join(target, "stale.txt")));
+    assert.equal(await readFile(path.join(parent, "keep.txt"), "utf8"), "kept");
   } finally {
     await rm(parent, { recursive: true, force: true });
   }

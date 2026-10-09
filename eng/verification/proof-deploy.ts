@@ -474,6 +474,11 @@ function cssViolations(css: string, relative: boolean): string[] {
   return problems;
 }
 
+/** Fails with every violation named in the message, so a refusal says which reference or rule was refused. */
+function assertNoViolations(problems: string[], message: string): void {
+  assert.equal(problems.length, 0, `${message}: ${problems.join("; ")}`);
+}
+
 /** A policy as directives (name to sources); a repeated directive name is refused. */
 export function parsePolicy(policy: string): Map<string, string[]> {
   const directives = new Map<string, string[]>();
@@ -650,14 +655,13 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
       1,
       `${name}/index.html must set exactly one base.`,
     );
-    assert.deepEqual(
+    assertNoViolations(
       pageViolations(html, {
         relative: true,
         base: true,
         sourceLink: false,
         files: plainNames,
       }),
-      [],
       `${name} page violates the same-origin rules`,
     );
     const rule = rules.get(`/${name}/*`);
@@ -690,9 +694,8 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
   );
   for (const entry of files)
     if (entry.path.endsWith(".css"))
-      assert.deepEqual(
+      assertNoViolations(
         cssViolations(Buffer.from(entry.bytes).toString("utf8"), true),
-        [],
         `${entry.path} violates the same-origin rules`,
       );
   return { digest, manifest, files, headers };
@@ -795,9 +798,8 @@ export function verifySiteArchive(archive: Uint8Array, pinnedDigest: string): Ve
   for (const name of pages) {
     const html = text(name);
     assert(!html.includes("\r"), `${name} must use LF line ends.`);
-    assert.deepEqual(
+    assertNoViolations(
       pageViolations(html, { relative: false, base: false, files: siteFiles, sourceLink: true }),
-      [],
       `${name} violates the Site's same-origin rules`,
     );
     const scriptSources = parsePolicy(policy).get("script-src") ?? [];
@@ -808,9 +810,8 @@ export function verifySiteArchive(archive: Uint8Array, pinnedDigest: string): Ve
       );
   }
   for (const name of [...stylesheets, "404.css"])
-    assert.deepEqual(
+    assertNoViolations(
       cssViolations(text(name), false),
-      [],
       `${name} violates the Site's same-origin rules`,
     );
   return { digest, files, headers, policy };
