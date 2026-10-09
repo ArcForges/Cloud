@@ -105,7 +105,7 @@ internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort mo
     /// The read_unavailable exit with a wake armed (HAR.40 alarm arming, follow-up). The executor arms the wake before it commits the waiting state.
     /// An armed and committed park answers the typed retryable reply. A refused arm answers the same reply and parks nothing: the lease is left to its
     /// term, and a retry claims the run after it. A waiting commit that does not happen is released the way a failed release is (LeaseLost), and the
-    /// executor cancels the armed wake on a best-effort basis.
+    /// executor reserves the arm and the cancel first (a refused reservation answers reserve_*, arms nothing and writes nothing further), then cancels the armed wake on a best-effort basis.
     /// </summary>
     private async Task<HelloResult> ParkUnavailableAsync(HarnessExecutor executor, ClaimedRun claim, IHarnessAlarmPort alarm, CancellationToken cancellationToken)
     {
@@ -114,6 +114,7 @@ internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort mo
         return parked.Status switch
         {
             ParkStatus.Parked or ParkStatus.ArmRefused => new HelloResult(HelloStatus.Unavailable, "read_unavailable", null),
+            ParkStatus.ReserveRefused => new HelloResult(HelloStatus.LeaseLost, "reserve_" + (parked.Reserve ?? StoreStatus.Unknown).ToString().ToLowerInvariant(), null),
             ParkStatus.CommitRefused or ParkStatus.CommitUnknown => new HelloResult(HelloStatus.LeaseLost, "release_" + (parked.Commit ?? StoreStatus.Unknown).ToString().ToLowerInvariant(), null),
             _ => new HelloResult(HelloStatus.LeaseLost, "release_released", null),
         };

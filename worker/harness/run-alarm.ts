@@ -3,7 +3,7 @@
 // and a time), it never reads or writes run state, and it does not decide whether the run advances. Each alarm sends one signed wake
 // to the C# endpoint and reports nothing else; the C# side claims, resumes and records every outcome under its own fence.
 // The C# executor arms the wake before it parks a run with a timer, and cancels it best-effort when the parking commit fails. The arming
-// request reaches schedule() and cancel() through the harness.internal outbound handler (worker/harness/internal/outbound.ts), on the proof
+// request reaches schedule() and cancel() through the harness.internal outbound handler (worker/harness/run-alarm-core.ts), on the proof
 // Container class only. The live observation of a real alarm wake after a restart is an operator step (docs/harness-proofs.md, Proof 2).
 import { Container } from "@cloudflare/containers";
 import type { DurableObject } from "cloudflare:workers";

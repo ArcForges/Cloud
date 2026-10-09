@@ -115,7 +115,11 @@ internal interface IHarnessStore
 
     Task<StoreStatus> ClaimAsync(HarnessRun run, ClaimCommand command, CancellationToken cancellationToken);
 
-    Task<StoreStatus> RenewAsync(Fence fence, Guid guardId, long nowMicros, long expiresAtMicros, CancellationToken cancellationToken);
+    /// <summary>
+    /// Renews the lease. <paramref name="extraCharge"/> is the charge of the calls the caller reserves in the same fenced batch (HAR.40 alarm arming);
+    /// a plain renewal passes <see cref="BudgetCharge.Zero"/>.
+    /// </summary>
+    Task<StoreStatus> RenewAsync(Fence fence, Guid guardId, long nowMicros, long expiresAtMicros, BudgetCharge extraCharge, CancellationToken cancellationToken);
 
     Task<StoreStatus> ReserveStepAsync(Fence fence, ReserveCommand command, CancellationToken cancellationToken);
 

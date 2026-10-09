@@ -5,7 +5,7 @@ import { containerEnvironment } from "./foundation/container-env.ts";
 import { fetchEntry, queueEntry, type WorkerEnv } from "./foundation/entry.ts";
 import { handleObjects } from "./foundation/objects.ts";
 import type { FoundationEnv } from "./foundation/types.ts";
-import { harnessInternalOutbound } from "./harness/internal/outbound.ts";
+import { harnessInternalOutbound } from "./harness/run-alarm-core.ts";
 import { handleExecutePlan } from "./storage/handler.ts";
 
 export { ContainerProxy };

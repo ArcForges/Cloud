@@ -153,6 +153,12 @@ internal enum ParkStatus
     /// </summary>
     ArmRefused,
 
+    /// <summary>
+    /// The reserving batch (the lease renewal that charges the arm and the cancel before either is sent) did not commit. Nothing was armed or
+    /// written; the lease is left as the store holds it.
+    /// </summary>
+    ReserveRefused,
+
     /// <summary>The waiting commit did not commit after arming: the armed wake was cancelled on a best-effort basis.</summary>
     CommitRefused,
 
@@ -160,8 +166,11 @@ internal enum ParkStatus
     CommitUnknown,
 }
 
-/// <summary>The result of parking a run with a timer; <see cref="Commit"/> is the store status of the waiting commit when it was attempted.</summary>
-internal sealed record ParkResult(ParkStatus Status, StoreStatus? Commit);
+/// <summary>
+/// The result of parking a run with a timer. <see cref="Reserve"/> is the store status of the reserving batch when it was attempted, and
+/// <see cref="Commit"/> the store status of the waiting commit when it was attempted.
+/// </summary>
+internal sealed record ParkResult(ParkStatus Status, StoreStatus? Commit, StoreStatus? Reserve = null);
 
 /// <summary>
 /// The C# executor of one run. It claims a lease (60 seconds, renewed every 20 seconds), reserves every counted step under the fence
@@ -246,7 +255,7 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
         if (now >= claim.ExpiresAtMicros) return false;
         if (!LeasePolicy.RenewalDue(claim.RenewedAtMicros, now)) return true;
         var expires = now + LeasePolicy.TermMicros;
-        var status = await store.RenewAsync(claim.Fence, ids.NewId(), now, expires, cancellationToken).ConfigureAwait(false);
+        var status = await store.RenewAsync(claim.Fence, ids.NewId(), now, expires, BudgetCharge.Zero, cancellationToken).ConfigureAwait(false);
         if (status != StoreStatus.Succeeded) return false;
         claim.ExpiresAtMicros = expires;
         claim.RenewedAtMicros = now;
@@ -426,11 +435,12 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
     }
 
     /// <summary>
-    /// Parks the claimed run with a timer (the contracts 05 wait row). The order is fixed (HAR.40 alarm arming): the wake is armed first, and only
-    /// then the fenced write records the waiting state and releases the lease. A crash after arming and before the commit leaves a running run
-    /// whose lease expires within its term, and the armed wake claims it after that. An arm that is refused does not park the run and writes
-    /// nothing. A commit that did not commit cancels the armed wake on a best-effort basis; an unknown commit keeps it armed, because a stray
-    /// wake is harmless under the fenced claim while a cancelled wake of a committed waiting run would strand it.
+    /// Parks the claimed run with a timer (the contracts 05 wait row). The order is fixed (HAR.40 alarm arming). First a fenced lease renewal
+    /// reserves the charge of the arm and of the best-effort cancel (<see cref="BudgetDefinition.AlarmReservation"/>), so a counter never lags a
+    /// call. Then the wake is armed, and only then the fenced write records the waiting state and releases the lease. A crash after arming and
+    /// before the commit leaves a running run whose lease expires within its term, and the armed wake claims it after that. An arm that is refused
+    /// does not park the run and parks nothing. A commit that did not commit cancels the armed wake on a best-effort basis; an unknown commit keeps
+    /// it armed, because a stray wake is harmless under the fenced claim while a cancelled wake of a committed waiting run would strand it.
     /// </summary>
     internal async Task<ParkResult> ParkWithTimerAsync(ClaimedRun claim, long wakeAtMs, IHarnessAlarmPort alarm, CancellationToken cancellationToken)
     {
@@ -439,12 +449,19 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
         if (claim.Released) return new ParkResult(ParkStatus.Released, null);
 
         var run = claim.Fence.Run;
+        var now = Micros();
+        var expires = now + LeasePolicy.TermMicros;
+        var reserved = await store.RenewAsync(claim.Fence, ids.NewId(), now, expires, BudgetDefinition.AlarmReservation, cancellationToken).ConfigureAwait(false);
+        if (reserved != StoreStatus.Succeeded) return new ParkResult(ParkStatus.ReserveRefused, null, reserved);
+        claim.ExpiresAtMicros = expires;
+        claim.RenewedAtMicros = now;
+
         var armed = await alarm.ScheduleAsync(new HarnessAlarmSchedule(run.WorkspaceId, run.RunId, wakeAtMs), cancellationToken).ConfigureAwait(false);
-        if (armed != HarnessAlarmReply.Armed) return new ParkResult(ParkStatus.ArmRefused, null);
+        if (armed != HarnessAlarmReply.Armed) return new ParkResult(ParkStatus.ArmRefused, null, reserved);
 
         var committed = await YieldAsync(claim, RunState.Waiting, cancellationToken).ConfigureAwait(false);
-        if (committed == StoreStatus.Succeeded) return new ParkResult(ParkStatus.Parked, committed);
-        if (committed == StoreStatus.Unknown) return new ParkResult(ParkStatus.CommitUnknown, committed);
+        if (committed == StoreStatus.Succeeded) return new ParkResult(ParkStatus.Parked, committed, reserved);
+        if (committed == StoreStatus.Unknown) return new ParkResult(ParkStatus.CommitUnknown, committed, reserved);
 
         try
         {
@@ -457,7 +474,7 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
             _ = exception;
         }
 
-        return new ParkResult(ParkStatus.CommitRefused, committed);
+        return new ParkResult(ParkStatus.CommitRefused, committed, reserved);
     }
 
     private async Task<EffectStepResult> ExplainRefusalAsync(ClaimedRun claim, StoreStatus status, int ordinal, Guid commandId, EffectCost cost, CancellationToken cancellationToken)

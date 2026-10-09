@@ -84,6 +84,13 @@ internal static class BudgetDefinition
     /// <summary>The charge of one wake delivery: one wait cycle and the container call that carried it.</summary>
     internal static BudgetCharge WakeDelivery => BudgetCharge.Of(CountedClass.WaitCycle) + BudgetCharge.Of(CountedClass.ContainerCall);
 
+    /// <summary>
+    /// The charge reserved before a run is parked with a timer (HAR.40 alarm arming): one outbound fetch for the arm and one for the best-effort
+    /// cancel. The cancel can only follow a commit that did not happen, and then no fenced write is left to charge it, so both calls are reserved
+    /// in the batch that precedes the arm. A reserved cancel that is not sent leaves the counters one subrequest higher, which is the conservative side.
+    /// </summary>
+    internal static BudgetCharge AlarmReservation => BudgetCharge.Of(CountedClass.OutboundFetch, 2);
+
     /// <summary>The charge of the open-attempt read that a resumed wake makes under its new lease.</summary>
     internal static BudgetCharge ResumeRead => BudgetCharge.Of(CountedClass.D1Call);
 

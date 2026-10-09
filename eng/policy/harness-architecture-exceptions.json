@@ -50,16 +50,6 @@
       "reason": "A test-only encoder builds client protobuf frames as input for the CLOUD.69 correlation reader. It produces test bytes only, is never shipped and expires with the reader exception HAR40-EX-4. HAR.40 registers it because the ported wire-codec rule covers the test tree of the Worker; HAR.40 does not change this file.",
       "created": "2026-10-08",
       "expires": "2027-03-31"
-    },
-    {
-      "id": "HAR40-EX-6",
-      "rule": "layer-escape",
-      "file": "tests/worker/harness-internal.test.ts",
-      "detail": "Computed dynamic specifier needs explicit admission",
-      "owner": "Cloud integration owner (HAR.40)",
-      "reason": "The test loads the workerd-only harness alarm modules through constant paths after the loader hook is registered, as tests/worker/run-alarm.test.ts does (HAR40-EX-3). Every specifier is a reviewed constant in the test file, never input. Replace them with literal specifiers when the Node test project can type-check the modules.",
-      "created": "2026-10-09",
-      "expires": "2027-03-31"
     }
   ]
 }

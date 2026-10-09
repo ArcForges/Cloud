@@ -14,9 +14,12 @@ internal sealed class SimulatedAlarmCrash() : Exception("A simulated crash befor
 /// The alarm port of the tests. It records every arm and cancel in order, answers from a script (armed when no script is set), and can die
 /// before it records an arm, which is the crash point before arming.
 /// </summary>
-internal sealed class RecordingAlarm : IHarnessAlarmPort
+internal sealed class RecordingAlarm(List<string>? timeline = null) : IHarnessAlarmPort
 {
     public List<string> Events { get; } = [];
+
+    /// <summary>The order of every call of the run, shared with the store, when a timeline is given.</summary>
+    private readonly List<string>? timeline = timeline;
 
     public List<HarnessAlarmSchedule> Schedules { get; } = [];
 
@@ -30,6 +33,7 @@ internal sealed class RecordingAlarm : IHarnessAlarmPort
     {
         if (CrashBeforeArm) throw new SimulatedAlarmCrash();
         Events.Add("arm");
+        timeline?.Add("arm");
         Schedules.Add(schedule);
         return Task.FromResult(Reply?.Invoke(schedule) ?? HarnessAlarmReply.Armed);
     }
@@ -37,6 +41,7 @@ internal sealed class RecordingAlarm : IHarnessAlarmPort
     public Task CancelAsync(Guid workspaceId, Guid runId, CancellationToken cancellationToken)
     {
         Events.Add("cancel");
+        timeline?.Add("cancel");
         if (CancelThrows) throw new InvalidOperationException("The cancel did not reach the alarm.");
         return Task.CompletedTask;
     }
@@ -46,7 +51,7 @@ internal sealed class RecordingAlarm : IHarnessAlarmPort
 /// The store of the executor with its yield answered by a script. A scripted outcome commits nothing, so the run stays as the claim left it;
 /// every yield is recorded in order, which proves the arm happens before the waiting commit.
 /// </summary>
-internal sealed class YieldScriptStore(IHarnessStore inner, List<string> events, StoreStatus? yieldOutcome = null) : IHarnessStore
+internal sealed class YieldScriptStore(IHarnessStore inner, List<string> events, StoreStatus? yieldOutcome = null, StoreStatus? renewOutcome = null) : IHarnessStore
 {
     public Task<RunSnapshot?> LoadAsync(HarnessRun run, CancellationToken cancellationToken) => inner.LoadAsync(run, cancellationToken);
 
@@ -54,8 +59,13 @@ internal sealed class YieldScriptStore(IHarnessStore inner, List<string> events,
 
     public Task<StoreStatus> ClaimAsync(HarnessRun run, ClaimCommand command, CancellationToken cancellationToken) => inner.ClaimAsync(run, command, cancellationToken);
 
-    public Task<StoreStatus> RenewAsync(Fence fence, Guid guardId, long nowMicros, long expiresAtMicros, CancellationToken cancellationToken) =>
-        inner.RenewAsync(fence, guardId, nowMicros, expiresAtMicros, cancellationToken);
+    public Task<StoreStatus> RenewAsync(Fence fence, Guid guardId, long nowMicros, long expiresAtMicros, BudgetCharge extraCharge, CancellationToken cancellationToken)
+    {
+        events.Add("reserve");
+        return renewOutcome is { } outcome
+            ? Task.FromResult(outcome)
+            : inner.RenewAsync(fence, guardId, nowMicros, expiresAtMicros, extraCharge, cancellationToken);
+    }
 
     public Task<StoreStatus> ReserveStepAsync(Fence fence, ReserveCommand command, CancellationToken cancellationToken) => inner.ReserveStepAsync(fence, command, cancellationToken);
 
@@ -99,7 +109,7 @@ public sealed class HarnessAlarmArmingTests
     {
         using var fixture = await HarnessFixture.CreateAsync();
         var events = new List<string>();
-        var alarm = new RecordingAlarm();
+        var alarm = new RecordingAlarm(events);
         var claim = await ClaimAsync(fixture, fixture.Store);
 
         var parked = await new HarnessExecutor(new YieldScriptStore(fixture.Store, events), new FakeEffects(), fixture.Ids, fixture.Clock)
@@ -107,8 +117,10 @@ public sealed class HarnessAlarmArmingTests
 
         Assert.Equal(ParkStatus.Parked, parked.Status);
         Assert.Equal(StoreStatus.Succeeded, parked.Commit);
+        Assert.Equal(StoreStatus.Succeeded, parked.Reserve);
         Assert.Equal(new[] { "arm" }, alarm.Events);
-        Assert.Equal(new[] { "commit:Waiting" }, events);
+        // The reserving batch comes first, then the arm, then the waiting commit (one shared timeline).
+        Assert.Equal(new[] { "reserve", "arm", "commit:Waiting" }, events);
         Assert.Equal(HarnessFixture.WorkspaceId, alarm.Schedules[0].WorkspaceId);
         Assert.Equal(HarnessFixture.RunId, alarm.Schedules[0].RunId);
         Assert.Equal(WakeAtMs(fixture), alarm.Schedules[0].WakeAtMs);
@@ -157,7 +169,7 @@ public sealed class HarnessAlarmArmingTests
         Assert.Equal(ParkStatus.CommitRefused, parked.Status);
         Assert.Equal(StoreStatus.Refused, parked.Commit);
         Assert.Equal(new[] { "arm", "cancel" }, alarm.Events);
-        Assert.Equal(new[] { "commit:Waiting" }, events);
+        Assert.Equal(new[] { "reserve", "commit:Waiting" }, events);
         Assert.False(claim.Released);
         Assert.Equal("2", await fixture.RunStateAsync());
     }
@@ -216,10 +228,12 @@ public sealed class HarnessAlarmArmingTests
     public async Task ACrashAtTheArmBoundaryIsRecoveredByTheWakeAndNeverAdvancesTheRunTwice(string crashPoint)
     {
         using var fixture = await HarnessFixture.CreateAsync();
-        var alarm = new RecordingAlarm { CrashBeforeArm = crashPoint == "before-arm" };
+        var alarm = new RecordingAlarm();
         var firstSupplier = new FakeEffects();
-        // The claim is write 1 and the waiting commit is write 2 of the first process.
-        var crashing = new CrashingPlanPort(fixture.Port, crashAtWrite: 2, after: crashPoint == "after-commit");
+        // The claim is write 1, the reserving lease renewal is write 2 and the waiting commit is write 3 of the first process. The before-arm row
+        // crashes at the reserving write, so nothing is armed; the other rows crash at or after the commit boundary.
+        var crashAtWrite = crashPoint == "before-arm" ? 2 : 3;
+        var crashing = new CrashingPlanPort(fixture.Port, crashAtWrite, after: crashPoint == "after-commit");
         var first = new HarnessExecutor(new D1HarnessStore(crashing), firstSupplier, fixture.Ids, fixture.Clock);
         var claim = Assert.IsType<ClaimedRun>((await first.ClaimAsync(fixture.Run, HarnessFixture.Identity(), T.Ct)).Claim);
 
@@ -265,5 +279,68 @@ public sealed class HarnessAlarmArmingTests
         var again = await WakeAsync(fixture, new FakeEffects());
         Assert.Equal(WakeStatus.Settled, again.Status);
         Assert.Equal("3", await fixture.RunStateAsync());
+    }
+
+    [Fact]
+    public async Task TheParkReservesTheArmAndTheCancelAsTwoOutboundFetchesAndCountsEveryCallItMakes()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var claim = await ClaimAsync(fixture, fixture.Store);
+        var before = await fixture.BudgetAsync();
+
+        var parked = await new HarnessExecutor(fixture.Store, new FakeEffects(), fixture.Ids, fixture.Clock)
+            .ParkWithTimerAsync(claim, WakeAtMs(fixture), new RecordingAlarm(), T.Ct);
+        var after = await fixture.BudgetAsync();
+
+        Assert.Equal(ParkStatus.Parked, parked.Status);
+        // The reserving renewal (one batch), the reservation of the arm and the cancel (two outbound fetches) and the waiting commit (one batch).
+        var expected = BudgetDefinition.MaintenanceBatch + BudgetDefinition.AlarmReservation + BudgetDefinition.MaintenanceBatch;
+        Assert.Equal(before.CountedSteps + expected.Steps, after.CountedSteps);
+        Assert.Equal(before.Subrequests + expected.Subrequests, after.Subrequests);
+        Assert.Equal(before.ModelCalls, after.ModelCalls);
+        Assert.Equal(before.ToolInvocations, after.ToolInvocations);
+        Assert.Equal(4, expected.Steps);
+        Assert.Equal(4, expected.Subrequests);
+    }
+
+    [Fact]
+    public async Task ARefusedArmKeepsItsReservedChargeAndWritesNothingMore()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var claim = await ClaimAsync(fixture, fixture.Store);
+        var before = await fixture.BudgetAsync();
+
+        var parked = await new HarnessExecutor(fixture.Store, new FakeEffects(), fixture.Ids, fixture.Clock)
+            .ParkWithTimerAsync(claim, WakeAtMs(fixture), new RecordingAlarm { Reply = _ => HarnessAlarmReply.Refused }, T.Ct);
+        var after = await fixture.BudgetAsync();
+
+        Assert.Equal(ParkStatus.ArmRefused, parked.Status);
+        // The arm was sent and refused: the reservation of the call is still counted, and no waiting commit was written.
+        Assert.Equal(before.CountedSteps + BudgetDefinition.MaintenanceBatch.Steps + BudgetDefinition.AlarmReservation.Steps, after.CountedSteps);
+        Assert.Equal(before.Subrequests + BudgetDefinition.MaintenanceBatch.Subrequests + BudgetDefinition.AlarmReservation.Subrequests, after.Subrequests);
+        Assert.Equal("2", await fixture.RunStateAsync());
+    }
+
+    [Fact]
+    public async Task ARefusedReservationArmsNothingAndTheRunKeepsItsLease()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var events = new List<string>();
+        var alarm = new RecordingAlarm(events);
+        var claim = await ClaimAsync(fixture, fixture.Store);
+        var before = await fixture.BudgetAsync();
+
+        var parked = await new HarnessExecutor(new YieldScriptStore(fixture.Store, events, renewOutcome: StoreStatus.Refused), new FakeEffects(), fixture.Ids, fixture.Clock)
+            .ParkWithTimerAsync(claim, WakeAtMs(fixture), alarm, T.Ct);
+
+        Assert.Equal(ParkStatus.ReserveRefused, parked.Status);
+        Assert.Equal(StoreStatus.Refused, parked.Reserve);
+        Assert.Null(parked.Commit);
+        // Nothing is armed, nothing is committed and no counter moves: the reserving batch itself was refused.
+        Assert.Empty(alarm.Events);
+        Assert.Equal(new[] { "reserve" }, events);
+        Assert.False(claim.Released);
+        Assert.Equal(before, await fixture.BudgetAsync());
+        Assert.Equal("2", await fixture.RunStateAsync());
     }
 }

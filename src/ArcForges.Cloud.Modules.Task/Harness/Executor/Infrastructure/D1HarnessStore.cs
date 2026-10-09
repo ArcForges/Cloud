@@ -90,14 +90,14 @@ internal sealed class D1HarnessStore(IModulePlanPort plans) : IHarnessStore
             ],
             cancellationToken);
 
-    public Task<StoreStatus> RenewAsync(Fence fence, Guid guardId, long nowMicros, long expiresAtMicros, CancellationToken cancellationToken) =>
+    public Task<StoreStatus> RenewAsync(Fence fence, Guid guardId, long nowMicros, long expiresAtMicros, BudgetCharge extraCharge, CancellationToken cancellationToken) =>
         WriteAsync(
             HarnessPlans.Renew,
             fence.Run,
             [
                 [T(guardId), T(fence.Run.RunId), T(fence.Run.WorkspaceId), T(fence.Holder), I(fence.Epoch), I(fence.RecoveryGeneration), I(nowMicros)],
                 [I(expiresAtMicros), T(fence.Run.RunId), T(fence.Holder), I(fence.Epoch)],
-                [I(BudgetDefinition.MaintenanceBatch.Steps), I(BudgetDefinition.MaintenanceBatch.Subrequests), I(nowMicros), T(fence.Run.RunId)],
+                [I(BudgetDefinition.MaintenanceBatch.Steps + extraCharge.Steps), I(BudgetDefinition.MaintenanceBatch.Subrequests + extraCharge.Subrequests), I(nowMicros), T(fence.Run.RunId)],
                 [T(guardId)],
             ],
             cancellationToken);

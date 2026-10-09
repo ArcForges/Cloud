@@ -523,9 +523,9 @@ public sealed class HelloSliceTests
         var result = await AlarmSlice(fixture, UnavailableOnFirstStepStore(fixture, events), models, alarm).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
 
         Assert.Equal(new HelloResult(HelloStatus.Unavailable, "read_unavailable", null), result);
-        // The wake is armed before the waiting commit, and the run is parked with its lease released.
+        // The reserving renewal, then the wake is armed before the waiting commit, and the run is parked with its lease released.
         Assert.Equal(new[] { "arm" }, alarm.Events);
-        Assert.Equal(new[] { "commit:Waiting" }, events);
+        Assert.Equal(new[] { "reserve", "commit:Waiting" }, events);
         var schedule = Assert.Single(alarm.Schedules);
         Assert.Equal(HarnessFixture.WorkspaceId, schedule.WorkspaceId);
         Assert.Equal(HarnessFixture.RunId, schedule.RunId);
@@ -549,6 +549,23 @@ public sealed class HelloSliceTests
         Assert.Equal(HelloStatus.Succeeded, retry.Status);
         Assert.Equal("Hello, Ada!", retry.Message);
         Assert.Equal("6", await fixture.RunStateAsync());
+    }
+
+    [Fact(Skip = "Binding requirement not delivered (brief section 10, HAR.40 alarm arming follow-up item 1): a parked Hello run must resume without a caller retry. The continuation needs a stored greeting input and a model dispatch under the wake, and the coordinator has not yet decided how the input is stored. Remove the Skip when that decision is recorded and the continuation is delivered.")]
+    public async Task AParkedHelloRunResumesAndCompletesTheGreetingWithoutACallerRetry()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var alarm = new RecordingAlarm();
+        var models = new FakeModels();
+        var result = await AlarmSlice(fixture, UnavailableOnFirstStepStore(fixture, []), models, alarm).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+        Assert.Equal(new HelloResult(HelloStatus.Unavailable, "read_unavailable", null), result);
+
+        // The required behaviour: the wake at the scheduled time resumes the run, and the greeting completes with no caller retry.
+        fixture.Clock.AdvanceSeconds(1);
+        var wake = await new HarnessWakeHandler(new HarnessExecutor(fixture.Store, new FakeEffects(), fixture.Ids, fixture.Clock)).HandleAsync(fixture.Run, HarnessFixture.Identity(), T.Ct);
+        Assert.Equal(WakeStatus.Settled, wake.Status);
+        Assert.Equal("6", await fixture.RunStateAsync());
+        Assert.Equal(2, models.Calls.Count);
     }
 
     [Fact]
@@ -579,7 +596,8 @@ public sealed class HelloSliceTests
 
         Assert.Equal(new HelloResult(HelloStatus.Unavailable, "read_unavailable", null), result);
         Assert.Equal(new[] { "arm" }, alarm.Events);
-        Assert.Empty(events);
+        // Only the reserving renewal was written: the refused arm parked nothing and committed no waiting state.
+        Assert.Equal(new[] { "reserve" }, events);
         Assert.Empty(models.Calls);
         // Not parked: the run stays under the lease the claim took, and nothing is written after the refused arm.
         Assert.Equal("2", await fixture.RunStateAsync());
@@ -609,7 +627,7 @@ public sealed class HelloSliceTests
 
         Assert.Equal(new HelloResult(HelloStatus.LeaseLost, "release_refused", null), result);
         Assert.Equal(new[] { "arm", "cancel" }, alarm.Events);
-        Assert.Equal(new[] { "commit:Waiting" }, events);
+        Assert.Equal(new[] { "reserve", "commit:Waiting" }, events);
         Assert.Empty(models.Calls);
         Assert.Equal("2", await fixture.RunStateAsync());
     }
