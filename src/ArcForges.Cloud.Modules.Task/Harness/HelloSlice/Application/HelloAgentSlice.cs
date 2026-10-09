@@ -93,7 +93,8 @@ internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort mo
         {
             // Every read of the executor is made before its step's intent is recorded, and no read runs while a dispatch is in flight, so no
             // effect is unresolved here. Without an alarm port the run is released to waiting (as the wake handler does) so the retry claims at once.
-            // With the port (the proof composition) the run parks with a wake, so it resumes even when the caller does not retry.
+            // With the port the run parks with a wake about one second later. The wake settles it to waiting and runs no step, so the greeting
+            // continues only on a later claim by the caller's retry.
             if (alarm is null)
                 return await SettleAsync(executor, claim, RunState.Waiting, HelloStatus.Unavailable, "read_unavailable", null, CancellationToken.None).ConfigureAwait(false);
             return await ParkUnavailableAsync(executor, claim, alarm, CancellationToken.None).ConfigureAwait(false);

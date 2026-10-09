@@ -30,10 +30,6 @@
       {
         "name": "CLOUD_CONTAINER",
         "class_name": "CloudContainer"
-      },
-      {
-        "name": "HARNESS_RUN_ALARM",
-        "class_name": "HarnessRunAlarm"
       }
     ]
   },
@@ -52,10 +48,6 @@
     {
       "tag": "retire-capacity-pacer-v1",
       "deleted_classes": ["CapacityJobPacer"]
-    },
-    {
-      "tag": "harness-run-alarm-v1",
-      "new_sqlite_classes": ["HarnessRunAlarm"]
     }
   ],
   "ratelimits": [

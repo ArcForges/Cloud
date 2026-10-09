@@ -7,7 +7,7 @@ namespace ArcForges.Cloud.Modules.Task.Harness.Wake;
 
 /// <summary>
 /// The wake of a run as the Task module serves it (HAR.40): the signed wake claims the run under the Cloud build identity and the Worker
-/// version identifier, resumes it and releases the lease to Waiting. It runs no model or tool step; every decision is C#. The host composes it
+/// version identifier, reconciles its open attempt and releases the lease to Waiting. It runs no model or tool step; every decision is C#. The host composes it
 /// with its own W2C verifier, so the module never depends on the signing implementation.
 /// </summary>
 public sealed class HarnessWakeService(

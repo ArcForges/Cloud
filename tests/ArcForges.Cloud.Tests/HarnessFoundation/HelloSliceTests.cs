@@ -512,7 +512,7 @@ public sealed class HelloSliceTests
         new(new D1HarnessStore(new ReadNotServedFromPort(fixture.Port, "task.harness-executor-run-load", 3)), events, yieldOutcome);
 
     [Fact]
-    public async Task AReadNotServedWithTheAlarmPortParksTheRunWithAWakeAboutOneSecondLaterAndTheWakeResumesIt()
+    public async Task AReadNotServedWithTheAlarmPortParksTheRunWithAWakeAboutOneSecondLaterAndTheWakeSettlesItWithoutADispatch()
     {
         using var fixture = await HarnessFixture.CreateAsync();
         var events = new List<string>();
@@ -534,7 +534,8 @@ public sealed class HelloSliceTests
         Assert.Equal("3", await fixture.RunStateAsync());
         Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
 
-        // The wake at the scheduled time claims the parked run and settles it, with no caller retry and no dispatch.
+        // The wake at the scheduled time claims the parked run and settles it back to Waiting. It runs no step, so the run stays in
+        // state 3 with no model call; only a claim by the caller's retry continues the greeting.
         fixture.Clock.AdvanceSeconds(1);
         var wake = await new HarnessWakeHandler(new HarnessExecutor(fixture.Store, new FakeEffects(), fixture.Ids, fixture.Clock)).HandleAsync(fixture.Run, HarnessFixture.Identity(), T.Ct);
         Assert.Equal(WakeStatus.Settled, wake.Status);

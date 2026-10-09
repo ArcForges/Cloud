@@ -54,17 +54,29 @@ test("the checked-in proof environment is isolated from the production Worker", 
   // subclass that registers outbound interception.
   const classes = (value: unknown) => JSON.stringify(value).match(/"class_name":"[^"]+"/gu);
   assert.deepEqual(classes(top.containers), ['"class_name":"CloudContainer"']);
-  // HarnessRunAlarm (HAR.40) is the wake-only alarm adapter: it holds a wake handle and no run state.
-  assert.deepEqual(classes(top.durable_objects), [
-    '"class_name":"CloudContainer"',
-    '"class_name":"HarnessRunAlarm"',
-  ]);
+  // The production script binds no Durable Object of the harness: the run alarm (HAR.40) exists only in the proof environment.
+  assert.deepEqual(classes(top.durable_objects), ['"class_name":"CloudContainer"']);
+  const { env: _proofEnvironment, ...production } = top;
+  assert(!JSON.stringify(production).includes("HarnessRunAlarm"), "production binds no run alarm");
+  assert(
+    !JSON.stringify(production).includes("HARNESS_RUN_ALARM"),
+    "production binds no run alarm",
+  );
   // The live script recorded the discarded build's capacity-pacer-v1 tag; that history is kept
   // and the class it added is retired. Only the deletion is applied after the live tag.
   assert.deepEqual(top.migrations, [
     { tag: "v1", new_sqlite_classes: ["CloudContainer"] },
     { tag: "capacity-pacer-v1", new_sqlite_classes: ["CapacityJobPacer"] },
     { tag: "retire-capacity-pacer-v1", deleted_classes: ["CapacityJobPacer"] },
+  ]);
+  // The proof environment binds the run alarm (HAR.40) with its own migration; it is a wake-only adapter that holds a wake handle and no run state.
+  assert.deepEqual(classes(proof.durable_objects), [
+    '"class_name":"FoundationContainer"',
+    '"class_name":"FoundationJobCoordinator"',
+    '"class_name":"HarnessRunAlarm"',
+  ]);
+  assert.deepEqual(proof.migrations, [
+    { tag: "v1", new_sqlite_classes: ["FoundationContainer", "FoundationJobCoordinator"] },
     { tag: "harness-run-alarm-v1", new_sqlite_classes: ["HarnessRunAlarm"] },
   ]);
   assert.deepEqual(classes(proof.containers), ['"class_name":"FoundationContainer"']);
