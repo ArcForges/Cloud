@@ -224,6 +224,12 @@
           "Grpc.AspNetCore.Web": "[2.84.0, )"
         }
       },
+      "arcforges.cloud.generation": {
+        "type": "Project",
+        "dependencies": {
+          "ArcForges.Cloud": "[1.0.0, )"
+        }
+      },
       "arcforges.cloud.modules.abstractions": {
         "type": "Project"
       },

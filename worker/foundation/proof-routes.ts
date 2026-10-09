@@ -4,6 +4,7 @@
 import { BodyTooLarge, jsonResponse, readBounded, refusal } from "../private/bounded-body.ts";
 import { sha256, sha256Hex } from "../private/encoding.ts";
 import { isCorrelationId, newCorrelationId } from "../ingress/correlation.ts";
+import { edgeGuard } from "../tables/cloud-tables.generated.ts";
 import { poisonName } from "./poison.ts";
 import { isOperatorAuthorization, verifyOperatorSignature } from "./operator-signature.ts";
 import { ContainerCallError, postSigned } from "./container-client.ts";
@@ -18,7 +19,7 @@ import {
   type WakeMessage,
 } from "./types.ts";
 
-export const sessionCookieName = "__Host-af_session";
+export const sessionCookieName = edgeGuard.sessionCookieName;
 export const maxRequestBytes = 16_384;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const scopePattern = /^proof\/[A-Za-z0-9._/-]{1,200}$/u;

@@ -2,10 +2,11 @@
 // What the Worker checks and forwards of a credential for a session-authenticated method. The Worker
 // refuses what can be refused from the headers alone, before any Container wakes; the C# host validates
 // the credential against the authoritative store and is the only authority. Nothing here proves a session.
+import { edgeGuard } from "../tables/cloud-tables.generated.ts";
 import { grpcStatus } from "./errors.ts";
 
-export const sessionCookieName = "__Host-af_session";
-export const csrfHeader = "x-af-csrf";
+export const sessionCookieName = edgeGuard.sessionCookieName;
+export const csrfHeader = edgeGuard.csrfHeader;
 const cookiePattern = /^[A-Za-z0-9_-]{43}$/u;
 const csrfPattern = /^[A-Za-z0-9_-]{43}$/u;
 const bearerPattern = /^Bearer ([A-Za-z0-9._~+/=-]{16,4096})$/u;

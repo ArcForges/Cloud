@@ -23,13 +23,8 @@ import {
 import { guardResponse } from "./frames.ts";
 import { classifyStartFailureResponse, containerUnavailable } from "../readiness/container.ts";
 import { bounded, readBytes, reject, rpcError } from "./io.ts";
-import {
-  type ApiRoute,
-  coldStartBudgetMs,
-  findRoute,
-  healthPath,
-  streamLifetimeMs,
-} from "./routes.ts";
+import { healthRoute } from "../tables/cloud-tables.generated.ts";
+import { coldStartBudgetMs, findRoute, healthPath, streamLifetimeMs } from "./routes.ts";
 
 export interface IngressEnv {
   SOURCE_REVISION: string;
@@ -41,18 +36,6 @@ export interface IngressEnv {
   };
   HELLO_RATE_LIMITER: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
-
-const healthRoute: ApiRoute = {
-  path: healthPath.slice(4),
-  kind: "unary",
-  auth: "anonymous",
-  maxRequestBytes: 0,
-  maxFrameBytes: 0,
-  maxUnaryResponseBytes: 8192,
-  maxDurationMs: 15_000,
-  instance: "hello",
-  requestMeta: false,
-};
 
 /** The stable message key of the registered refusal for a request that cannot be admitted as stated. */
 export const invalidRequestKey = "validation.invalid_request";
