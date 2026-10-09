@@ -72,15 +72,15 @@
     "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "ac3a8660e4e99aed60247cffe8d43805610639c0efcd8c7e90d90c4f9002f280",
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
-    "eng/provenance/artifact-profiles/cloud-release-r38.json": "cedd2f2302546e33aebf9218d0e1088cbbd432fa05df3d3d3f693d146fba45ba",
-    "eng/provenance/records/har-40-cloud-runtime-notices-r1.json": "d506fea697e94051ce3362dfc8a31a51e3b0833758c2a752e94e8e52786d8743",
-    "eng/provenance/records/har-40-cloud-worker-bundle-r1.json": "a6c855042dfba7f00381e59edc9652a997f4aa43c9099709dfc9c7d53b90a56c"
+    "eng/provenance/artifact-profiles/cloud-release-r39.json": "95a808c1f5917acc0012bbe6bd1172089be56f8774db89bfc4da09914e80a401",
+    "eng/provenance/records/har-40-cloud-runtime-notices-r2.json": "01e8cd62363027c9f22ccc89e5312d8e86cd52ded3aae6a4e306cb732878a782",
+    "eng/provenance/records/har-40-cloud-worker-bundle-r2.json": "a294f68229896668f712aa2ee9e3211b273685a3d9704c62694cd773c353112b"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "w-deku-20261008-rev-har-40",
     "date": "2026-10-09",
-    "rationale": "Successor of har-40-r6, changing only the hash-bound release inputs: the artifact profile cloud-release-r37 is superseded by cloud-release-r38, and the sharp-0-35-5 shipped-artifact records by har-40-cloud-runtime-notices-r1 and har-40-cloud-worker-bundle-r1. The successor profile binds the regenerated worker/storage/plans.generated.ts, the Harness and ai.internal sources, the run-alarm worker module and the changed .dockerignore and Directory.Packages.props; it and its records are derived by repository tooling from the source tree and the Worker bundle metafile and are never hand-edited. No package coordinate, integrity value, licence, NuGet lock, closure entry, runtime or wrangler input changes; the admitted packages and checks are those of har-40-r6. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40. har-40-r6 stays immutable history.",
+    "rationale": "HAR.40 successor of har-40-r7 for the Native AOT and Worker release closure, derived at 22f8dddb0633. cloud-release-r38 was bound at ba4d537, and af732b5 then changed worker/ai/internal/envelope.ts and src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/HarnessPolicy.cs, so the candidate failed with 'Changed build input: worker/ai/internal/envelope.ts' (tooling/release-provenance.ts). cloud-release-r39 re-derives every changed input hash, the Worker bundle sha256 from a fresh wrangler dry-run metafile (input closure, output inputs, exports and external imports unchanged), and the run-alarm comment that records the reviewed alarm deferral to HAR.00. The inputs are derived by repository tooling and never hand-edited. No package coordinate, integrity value, licence, NuGet lock, closure entry, runtime or wrangler input changes; the shipped package set and legal files are unchanged. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40. The predecessor profile, records and receipts stay immutable history.",
     "inputs": {
       ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -91,9 +91,9 @@
       "Directory.Packages.props": "8ae7a5a2f00ba8fad9189a37a65753cfd829fbe531a2454d1df44648911f1794",
       "Dockerfile": "932e9c9f575133302aa21915b34ab5b6e52b9fe35741b87f07093bc8ebe68ffa",
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
-      "eng/provenance/artifact-profiles/cloud-release-r38.json": "cedd2f2302546e33aebf9218d0e1088cbbd432fa05df3d3d3f693d146fba45ba",
-      "eng/provenance/records/har-40-cloud-runtime-notices-r1.json": "d506fea697e94051ce3362dfc8a31a51e3b0833758c2a752e94e8e52786d8743",
-      "eng/provenance/records/har-40-cloud-worker-bundle-r1.json": "a6c855042dfba7f00381e59edc9652a997f4aa43c9099709dfc9c7d53b90a56c",
+      "eng/provenance/artifact-profiles/cloud-release-r39.json": "95a808c1f5917acc0012bbe6bd1172089be56f8774db89bfc4da09914e80a401",
+      "eng/provenance/records/har-40-cloud-runtime-notices-r2.json": "01e8cd62363027c9f22ccc89e5312d8e86cd52ded3aae6a4e306cb732878a782",
+      "eng/provenance/records/har-40-cloud-worker-bundle-r2.json": "a294f68229896668f712aa2ee9e3211b273685a3d9704c62694cd773c353112b",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
       "package.json": "ce87b2c0fefad980cf71d5ee224e0078f409eb91ed5af1074276229731c3c74d",
@@ -983,7 +983,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["har-40-cloud-runtime-notices-r1", "har-40-cloud-worker-bundle-r1"],
+  "artifactRecords": ["har-40-cloud-runtime-notices-r2", "har-40-cloud-worker-bundle-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -997,7 +997,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/har-40-r7.json",
+  "reviewRecord": "eng/policy/dependency-reviews/har-40-r8.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
