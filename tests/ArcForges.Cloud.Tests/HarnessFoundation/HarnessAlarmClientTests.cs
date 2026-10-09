@@ -31,6 +31,22 @@ internal sealed class HangingAlarmHandler : HttpMessageHandler
     }
 }
 
+/// <summary>A reply body that never completes: it is read only until the read is cancelled.</summary>
+internal sealed class StalledBodyContent : HttpContent
+{
+    protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+        SerializeToStreamAsync(stream, context, CancellationToken.None);
+
+    protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken) =>
+        Task.Delay(Timeout.Infinite, cancellationToken);
+
+    protected override bool TryComputeLength(out long length)
+    {
+        length = 0;
+        return false;
+    }
+}
+
 /// <summary>
 /// The outbound alarm client (HAR.40 alarm arming). It sends one closed JSON request per call to <c>harness.internal</c> and treats every reply
 /// other than the exact scheduled reply as a refusal, so a run is parked only when the alarm was confirmed armed.
@@ -92,6 +108,22 @@ public sealed class HarnessAlarmClientTests
         var (client, _) = ClientFor(_ => throw new HttpRequestException("the container could not reach harness.internal"));
 
         Assert.Equal(HarnessAlarmReply.Refused, await client.ScheduleAsync(Schedule, T.Ct));
+    }
+
+    [Fact]
+    public async Task AStalledReplyBodyIsBoundedByTheAlarmDeadlineAndFailsClosed()
+    {
+        // The headers arrive at once and the body never completes. The read shares the client's deadline, so the schedule is refused within it.
+        // The bounded wait makes a body read that ignores the deadline fail the test instead of hanging the run.
+        var handler = new ScriptedAlarmHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StalledBodyContent() });
+        var client = new HarnessAlarmClient(new HttpClient(handler), TimeSpan.FromMilliseconds(100));
+
+        var cancellation = TestContext.Current.CancellationToken;
+        var pending = client.ScheduleAsync(Schedule, cancellation);
+        var reply = await pending.WaitAsync(TimeSpan.FromSeconds(10), cancellation);
+
+        Assert.Equal(HarnessAlarmReply.Refused, reply);
+        Assert.Single(handler.Requests);
     }
 
     [Fact]

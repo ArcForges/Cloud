@@ -36,9 +36,11 @@ public sealed class HarnessAlarmClient(HttpClient http, TimeSpan timeout) : IHar
             + ",\"workspaceId\":\"" + schedule.WorkspaceId.ToString("D") + "\"}";
         try
         {
-            using var reply = await PostAsync(SchedulePath, body, cancellationToken).ConfigureAwait(false);
+            // One deadline covers the headers and the body, so a stalled body is bounded by the alarm deadline as well.
+            using var deadline = Deadline(cancellationToken);
+            using var reply = await PostAsync(SchedulePath, body, deadline.Token).ConfigureAwait(false);
             if (reply.StatusCode != HttpStatusCode.OK) return HarnessAlarmReply.Refused;
-            var text = await reply.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var text = await reply.Content.ReadAsStringAsync(deadline.Token).ConfigureAwait(false);
             return string.Equals(text, ScheduledReply, StringComparison.Ordinal) ? HarnessAlarmReply.Armed : HarnessAlarmReply.Refused;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -55,7 +57,8 @@ public sealed class HarnessAlarmClient(HttpClient http, TimeSpan timeout) : IHar
         var body = "{\"runId\":\"" + runId.ToString("D") + "\",\"workspaceId\":\"" + workspaceId.ToString("D") + "\"}";
         try
         {
-            (await PostAsync(CancelPath, body, cancellationToken).ConfigureAwait(false)).Dispose();
+            using var deadline = Deadline(cancellationToken);
+            (await PostAsync(CancelPath, body, deadline.Token).ConfigureAwait(false)).Dispose();
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -64,14 +67,20 @@ public sealed class HarnessAlarmClient(HttpClient http, TimeSpan timeout) : IHar
         }
     }
 
-    private async Task<HttpResponseMessage> PostAsync(string path, string body, CancellationToken cancellationToken)
+    /// <summary>The caller's cancellation linked to the client's own deadline. The caller disposes it after the reply body is read.</summary>
+    private CancellationTokenSource Deadline(CancellationToken cancellationToken)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
+        return deadline;
+    }
+
+    private async Task<HttpResponseMessage> PostAsync(string path, string body, CancellationToken deadline)
+    {
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri("http://" + Host + path))
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json"),
         };
-        return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
+        return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline).ConfigureAwait(false);
     }
 }

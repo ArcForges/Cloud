@@ -551,7 +551,7 @@ public sealed class HelloSliceTests
         Assert.Equal("6", await fixture.RunStateAsync());
     }
 
-    [Fact(Skip = "Binding requirement not delivered (brief section 10, HAR.40 alarm arming follow-up item 1): a parked Hello run must resume without a caller retry. The continuation needs a stored greeting input and a model dispatch under the wake, and the coordinator has not yet decided how the input is stored. Remove the Skip when that decision is recorded and the continuation is delivered.")]
+    [Fact(Skip = "HAR.00: resume after wake needs durable run input (brief S24)")]
     public async Task AParkedHelloRunResumesAndCompletesTheGreetingWithoutACallerRetry()
     {
         using var fixture = await HarnessFixture.CreateAsync();
