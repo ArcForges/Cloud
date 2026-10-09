@@ -159,6 +159,26 @@ The live steps above are open. None of these results is a Cloudflare provider re
 
 A later change to the package is a separate admission, not part of HAR.40.
 
+## Release candidate at the review head: a deterministic failure, now bound (2026-10-09)
+
+An independent review of `6e79cac` found that `npm run candidate` cannot pass at that head, whatever the container's network. `eng/provenance/artifact-profiles/cloud-release-r38.json` bound `worker/ai/internal/envelope.ts` at its `ba4d537` content, and `af732b5` changed that file after the profile was bound. `src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/HarnessPolicy.cs`, which is in the Native AOT input closure, changed in the same commit. `stageImageNotices` (`tooling/release-provenance.ts`, first called by `buildCandidate` before the Docker build) stopped with `Changed build input: worker/ai/internal/envelope.ts`. The hosted `candidate` job is required by `verify`, so this blocked CI and deploy. The section "Local candidate attempt" below describes the `9b4b3b4` tree and did not report this failure, so it did not describe the head.
+
+Fix:
+
+- `22f8ddd` records the reviewed deferral of the alarm arming (see Proof 2) and changes one comment in `worker/harness/run-alarm.ts`.
+- `54e243f` adds the successor profile `cloud-release-r39`, derived by the repository tooling from the tree at `22f8ddd` and a fresh `wrangler deploy --dry-run` metafile, not written by hand. It re-binds the changed hashes of `worker/ai/internal/envelope.ts`, `worker/harness/run-alarm.ts` and `HarnessPolicy.cs`. The Worker bundle `sha256` is `d0d733fc194e6661ff34f8ac1e8fa091a67f5d2b0dc2dca6747a8e18fe631fa6`. The bundle input closure (112 files), the output inputs, the exports (`HarnessRunAlarm` included) and the external import (`cloudflare:workers`) are unchanged, and so are the packages, legal files and base image.
+- The successor records `har-40-cloud-worker-bundle-r2` and `har-40-cloud-runtime-notices-r2` bind `cloud-release-r39`. The successor receipt `har-40-r8` supersedes `har-40-r7`, keeps the same packages and checks and names the pre-assigned reviewer `w-deku-20261008-rev-har-40`. The dependency policy binds `har-40-r8`, and `NOTICE.txt` is regenerated.
+
+Checks at `54e243f` (clean tree, Windows, Node v24.20.0):
+
+| Check                                                                                                                                                                                 | Result                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| The release-candidate steps that run before the Docker build, replayed in the same order (`releaseProfile`, `stageImageNotices`, `legalBundle`, `verifyWorker` on the fresh bundle) | passed; `verifyWorker` returned the bundle `sha256` above, 313,077 bytes                                                  |
+| `node tooling/dependency-policy.ts` and `node --test tooling/dependency-policy.test.ts`                                                                                               | exit 0; 18 of 18 dependency tests passed                                                                                |
+| `node tooling/project.ts provenance` and `licence`                                                                                                                                    | exit 0                                                                                                                  |
+
+Not run locally: the Docker image build, `verifyStoredImage`, the Docker-side `verifyImageFiles` and the container-side candidate test. The container image's NuGet restore stalled locally (see the next section), so the hosted `candidate` job is the authority for the image and the sealed candidate.
+
 ## Local candidate attempt (2026-10-09): environment limitation
 
 Tree: `task/har-40` at `9b4b3b4b1b1015fb81673bf09d6356be8b03a173`, clean worktree. The run used `npm run candidate` through the build slot (`delivery.py build-slot run --worker w-deku-20261008-har-40 --task HAR.40`), with the docker launcher kept outside the repository (it forwards to `wsl -e docker`) on `PATH` for that run only.
