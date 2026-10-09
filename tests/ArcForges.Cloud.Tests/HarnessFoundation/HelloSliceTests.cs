@@ -503,6 +503,116 @@ public sealed class HelloSliceTests
         Assert.Equal("6", await fixture.RunStateAsync());
     }
 
+    /// <summary>The Hello slice as the proof composition builds it: the read-unavailable exit parks through the registered alarm port.</summary>
+    private static HelloAgentSlice AlarmSlice(HarnessFixture fixture, IHarnessStore store, IModelDispatchPort models, IHarnessAlarmPort? alarm) =>
+        new(store, models, fixture.Ids, fixture.Clock, HelloModelSettings.Deployed, TimeSpan.FromHours(1), alarm);
+
+    /// <summary>A store whose yields are recorded in order, over a plan port that answers the first step's run read as unavailable.</summary>
+    private static YieldScriptStore UnavailableOnFirstStepStore(HarnessFixture fixture, List<string> events, StoreStatus? yieldOutcome = null) =>
+        new(new D1HarnessStore(new ReadNotServedFromPort(fixture.Port, "task.harness-executor-run-load", 3)), events, yieldOutcome);
+
+    [Fact]
+    public async Task AReadNotServedWithTheAlarmPortParksTheRunWithAWakeAboutOneSecondLaterAndTheWakeResumesIt()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var events = new List<string>();
+        var alarm = new RecordingAlarm();
+        var models = new FakeModels();
+        var nowMs = fixture.Clock.Micros() / 1000;
+
+        var result = await AlarmSlice(fixture, UnavailableOnFirstStepStore(fixture, events), models, alarm).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+
+        Assert.Equal(new HelloResult(HelloStatus.Unavailable, "read_unavailable", null), result);
+        // The wake is armed before the waiting commit, and the run is parked with its lease released.
+        Assert.Equal(new[] { "arm" }, alarm.Events);
+        Assert.Equal(new[] { "commit:Waiting" }, events);
+        var schedule = Assert.Single(alarm.Schedules);
+        Assert.Equal(HarnessFixture.WorkspaceId, schedule.WorkspaceId);
+        Assert.Equal(HarnessFixture.RunId, schedule.RunId);
+        Assert.Equal(nowMs + 1000, schedule.WakeAtMs);
+        Assert.Empty(models.Calls);
+        Assert.Equal("3", await fixture.RunStateAsync());
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+
+        // The wake at the scheduled time claims the parked run and settles it, with no caller retry and no dispatch.
+        fixture.Clock.AdvanceSeconds(1);
+        var wake = await new HarnessWakeHandler(new HarnessExecutor(fixture.Store, new FakeEffects(), fixture.Ids, fixture.Clock)).HandleAsync(fixture.Run, HarnessFixture.Identity(), T.Ct);
+        Assert.Equal(WakeStatus.Settled, wake.Status);
+        Assert.Equal(ClaimStatus.Claimed, wake.Claim);
+        Assert.Equal(ResumeKind.NothingOpen, wake.Resume);
+        Assert.Equal("3", await fixture.RunStateAsync());
+        Assert.Empty(models.Calls);
+
+        // The caller's own retry then runs the greeting to completion on the claimed run.
+        var retry = await AlarmSlice(fixture, new D1HarnessStore(fixture.Port), models, alarm).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+        Assert.Equal(HelloStatus.Succeeded, retry.Status);
+        Assert.Equal("Hello, Ada!", retry.Message);
+        Assert.Equal("6", await fixture.RunStateAsync());
+    }
+
+    [Fact]
+    public async Task AReadNotServedWithoutTheAlarmPortSettlesToWaitingAsBefore()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var events = new List<string>();
+        var models = new FakeModels();
+
+        var result = await AlarmSlice(fixture, UnavailableOnFirstStepStore(fixture, events), models, alarm: null).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+
+        Assert.Equal(new HelloResult(HelloStatus.Unavailable, "read_unavailable", null), result);
+        Assert.Equal(new[] { "commit:Waiting" }, events);
+        Assert.Empty(models.Calls);
+        Assert.Equal("3", await fixture.RunStateAsync());
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+    }
+
+    [Fact]
+    public async Task ARefusedArmAnswersTheRetryableReplyWithoutParkingAndTheRunClaimsAfterItsLeaseTerm()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var events = new List<string>();
+        var alarm = new RecordingAlarm { Reply = _ => HarnessAlarmReply.Refused };
+        var models = new FakeModels();
+
+        var result = await AlarmSlice(fixture, UnavailableOnFirstStepStore(fixture, events), models, alarm).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+
+        Assert.Equal(new HelloResult(HelloStatus.Unavailable, "read_unavailable", null), result);
+        Assert.Equal(new[] { "arm" }, alarm.Events);
+        Assert.Empty(events);
+        Assert.Empty(models.Calls);
+        // Not parked: the run stays under the lease the claim took, and nothing is written after the refused arm.
+        Assert.Equal("2", await fixture.RunStateAsync());
+        Assert.Equal(0, await fixture.CountOpenAttemptsAsync());
+
+        // A wake delivered while that lease is live is refused and retried, not taken.
+        var early = await new HarnessWakeHandler(new HarnessExecutor(fixture.Store, new FakeEffects(), fixture.Ids, fixture.Clock)).HandleAsync(fixture.Run, HarnessFixture.Identity(), T.Ct);
+        Assert.Equal(WakeStatus.Stopped, early.Status);
+        Assert.Equal("2", await fixture.RunStateAsync());
+
+        // The caller's retry claims the run once the lease has expired, and completes it.
+        fixture.Clock.AdvanceSeconds(61);
+        var retry = await AlarmSlice(fixture, new D1HarnessStore(fixture.Port), models, alarm).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+        Assert.Equal(HelloStatus.Succeeded, retry.Status);
+        Assert.Equal("6", await fixture.RunStateAsync());
+    }
+
+    [Fact]
+    public async Task AWaitingCommitThatDidNotHappenAfterArmingCancelsTheWakeAndReleasesWithTheFailedReleaseReply()
+    {
+        using var fixture = await HarnessFixture.CreateAsync();
+        var events = new List<string>();
+        var alarm = new RecordingAlarm();
+        var models = new FakeModels();
+
+        var result = await AlarmSlice(fixture, UnavailableOnFirstStepStore(fixture, events, StoreStatus.Refused), models, alarm).RunAsync(fixture.Run, HarnessFixture.Identity(), "Ada", T.Ct);
+
+        Assert.Equal(new HelloResult(HelloStatus.LeaseLost, "release_refused", null), result);
+        Assert.Equal(new[] { "arm", "cancel" }, alarm.Events);
+        Assert.Equal(new[] { "commit:Waiting" }, events);
+        Assert.Empty(models.Calls);
+        Assert.Equal("2", await fixture.RunStateAsync());
+    }
+
     [Fact]
     public void ARunIdentityBindsTheWorkerVersionAndTheBuildIdentityApartAndPerEpoch()
     {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using System.Security.Cryptography;
 using System.Text;
+using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Modules.Task.Harness.Executor.Application;
 using ArcForges.Cloud.Modules.Task.Harness.Executor.Domain;
 using ArcForges.Cloud.Modules.Task.Harness.HelloSlice.Domain;
@@ -41,8 +42,11 @@ internal sealed record HelloResult(HelloStatus Status, string Reason, string? Me
 /// write. Retries and their limits come from the executor: a pre-dispatch refusal may be retried twice with a fresh attempt, and an unknown
 /// effect is never retried.
 /// </summary>
-internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort models, IHarnessIds ids, TimeProvider time, HelloModelSettings settings, TimeSpan keepaliveInterval)
+internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort models, IHarnessIds ids, TimeProvider time, HelloModelSettings settings, TimeSpan keepaliveInterval, IHarnessAlarmPort? alarm = null)
 {
+    /// <summary>The wake of a run that read_unavailable parked: one second after the park, the same one-second Retry-After hint the wake route answers.</summary>
+    private const long UnavailableWakeDelayMs = 1000;
+
     internal async Task<HelloResult> RunAsync(HarnessRun run, RunIdentity identity, string name, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(identity);
@@ -88,9 +92,30 @@ internal sealed class HelloAgentSlice(IHarnessStore store, IModelDispatchPort mo
         catch (HarnessReadUnavailableException)
         {
             // Every read of the executor is made before its step's intent is recorded, and no read runs while a dispatch is in flight, so no
-            // effect is unresolved here. The run is released to waiting (as the wake handler does) so the retry claims at once.
-            return await SettleAsync(executor, claim, RunState.Waiting, HelloStatus.Unavailable, "read_unavailable", null, CancellationToken.None).ConfigureAwait(false);
+            // effect is unresolved here. Without an alarm port the run is released to waiting (as the wake handler does) so the retry claims at once.
+            // With the port (the proof composition) the run parks with a wake, so it resumes even when the caller does not retry.
+            if (alarm is null)
+                return await SettleAsync(executor, claim, RunState.Waiting, HelloStatus.Unavailable, "read_unavailable", null, CancellationToken.None).ConfigureAwait(false);
+            return await ParkUnavailableAsync(executor, claim, alarm, CancellationToken.None).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The read_unavailable exit with a wake armed (HAR.40 alarm arming, follow-up). The executor arms the wake before it commits the waiting state.
+    /// An armed and committed park answers the typed retryable reply. A refused arm answers the same reply and parks nothing: the lease is left to its
+    /// term, and a retry claims the run after it. A waiting commit that does not happen is released the way a failed release is (LeaseLost), and the
+    /// executor cancels the armed wake on a best-effort basis.
+    /// </summary>
+    private async Task<HelloResult> ParkUnavailableAsync(HarnessExecutor executor, ClaimedRun claim, IHarnessAlarmPort alarm, CancellationToken cancellationToken)
+    {
+        var wakeAtMs = time.GetUtcNow().ToUnixTimeMilliseconds() + UnavailableWakeDelayMs;
+        var parked = await executor.ParkWithTimerAsync(claim, wakeAtMs, alarm, cancellationToken).ConfigureAwait(false);
+        return parked.Status switch
+        {
+            ParkStatus.Parked or ParkStatus.ArmRefused => new HelloResult(HelloStatus.Unavailable, "read_unavailable", null),
+            ParkStatus.CommitRefused or ParkStatus.CommitUnknown => new HelloResult(HelloStatus.LeaseLost, "release_" + (parked.Commit ?? StoreStatus.Unknown).ToString().ToLowerInvariant(), null),
+            _ => new HelloResult(HelloStatus.LeaseLost, "release_released", null),
+        };
     }
 
     private async Task<HelloResult> RunClaimedAsync(HarnessExecutor executor, HelloEffectPort effects, ClaimedRun claim, string name, CancellationToken cancellationToken)

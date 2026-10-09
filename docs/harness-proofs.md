@@ -51,9 +51,10 @@ Live steps that remain operator runs (`liveNotRun`):
 
 Driver: `eng/verification/harness-proof-executor.ts`. Realness: `dotnet-local`. It runs `HarnessCrashTests` and `HarnessExecutorTests` (38 tests, including the ten-row crash matrix at claim, reserve, dispatch intent, outcome and yield, each before and after its commit) against the SQLite oracle with the checked-in plans.
 
-Alarm arming (HAR.40, delivered by the successor of `cloud-release-r40`; this section supersedes the earlier evidence rows that record a deferral). The executor arms the run's wake before it parks the run with a timer, and commits the waiting state after the arm. These offline tests cover it:
+Alarm arming (HAR.40, delivered by the successors of `cloud-release-r40` and `cloud-release-r41`; this section supersedes the earlier evidence rows that record a deferral). The executor arms the run's wake before it parks the run with a timer, and commits the waiting state after the arm. The arming caller is the Hello-agent slice's `read_unavailable` exit: under the proof composition, which registers the alarm port, a read that is not served parks the run with a wake one second later, and the wake claims and resumes the run without any caller retry. These offline tests cover it:
 
 - `HarnessAlarmArmingTests`: the arm comes before the waiting commit; a refused arm does not park the run, writes nothing and is retried by a wake after the lease term; a waiting commit that did not commit after arming cancels the wake best-effort; an unknown commit keeps the wake armed; a released claim arms nothing. The three crash rows at the arm boundary (before arm, after arm and before commit, after commit) are each settled once by a later wake, with no supplier call and no second advance.
+- `HelloSliceTests` (alarm arming follow-up): the read-unavailable exit with the port arms the wake, commits the waiting state after the arm and answers `read_unavailable`; a later wake at the scheduled time claims and settles the run with no dispatch, and the caller's retry then completes the greeting. Without the port the exit settles to waiting as before. A refused arm answers the same reply, parks nothing, and a wake while the lease is live is refused. A waiting commit that does not happen after arming cancels the wake and answers `release_refused`.
 - `HarnessAlarmClientTests`: one closed JSON request per call to `harness.internal`; every reply other than the exact scheduled reply, a transport failure, a timeout and a cancelled caller are refusals.
 - `tests/worker/harness-internal.test.ts`: the `harness.internal` handler refuses every other method, path, host, query, content type, size and body before any run's alarm is addressed; a missing binding is 503; the offline loop runs the schedule through the handler, fires the alarm, and checks the signed wake POST to the container stub against the body the C# wake endpoint parses.
 
@@ -168,7 +169,7 @@ An independent review of `6e79cac` found that `npm run candidate` cannot pass at
 
 Fix:
 
-- `22f8ddd` records the reviewed deferral of the alarm arming (see Proof 2) and changes one comment in `worker/harness/run-alarm.ts`.
+- `22f8ddd` (superseded history: the deferral below is delivered by HAR.40, see Proof 2) records the reviewed deferral of the alarm arming and changes one comment in `worker/harness/run-alarm.ts`.
 - `54e243f` adds the successor profile `cloud-release-r39`, derived by the repository tooling from the tree at `22f8ddd` and a fresh `wrangler deploy --dry-run` metafile, not written by hand. It re-binds the changed hashes of `worker/ai/internal/envelope.ts`, `worker/harness/run-alarm.ts` and `HarnessPolicy.cs`. The Worker bundle `sha256` is `d0d733fc194e6661ff34f8ac1e8fa091a67f5d2b0dc2dca6747a8e18fe631fa6`. The bundle input closure (112 files), the output inputs, the exports (`HarnessRunAlarm` included) and the external import (`cloudflare:workers`) are unchanged, and so are the packages, legal files and base image.
 - The successor records `har-40-cloud-worker-bundle-r2` and `har-40-cloud-runtime-notices-r2` bind `cloud-release-r39`. The successor receipt `har-40-r8` supersedes `har-40-r7`, keeps the same packages and checks and names the pre-assigned reviewer `w-deku-20261008-rev-har-40`. The dependency policy binds `har-40-r8`, and `NOTICE.txt` is regenerated.
 
@@ -186,16 +187,16 @@ Not run locally: the Docker image build, `verifyStoredImage`, the Docker-side `v
 
 The batch below ran on the clean tree at `54e243f` (the review fix), in this order, with the offline commands of the batch. Each exits 0.
 
-| Command                                             | Exit | Result                                                                                                                  |
-| --------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------- |
-| `npm run lint`                                      | 0    | no findings                                                                                                             |
-| `npm run typecheck`                                 | 0    | `tsconfig.json` and `tsconfig.worker.json`                                                                              |
-| `npm run format:check`                              | 0    | all matched files use Prettier code style                                                                               |
-| `npm test`                                          | 0    | 777 tests, 777 passed, 0 failed, 0 skipped; includes the run-alarm, proof-deploy and harness-proof driver tests         |
-| `npm run test:harness:ai`                           | 0    | `ai-binding` passed, 12 of 12 checks, realness `node-fixture`                                                           |
-| `npm run test:harness:executor`                     | 0    | `executor-crash` passed, 2 of 2 checks; `dotnet test` total 38, failed 0, succeeded 38; `liveNotRun` shows the deferral |
-| `node tooling/dependency-policy.ts` (and its tests) | 0    | 18 of 18 dependency tests                                                                                               |
-| `node tooling/project.ts provenance` and `licence`  | 0    | no findings                                                                                                             |
+| Command                                             | Exit | Result                                                                                                                                                    |
+| --------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run lint`                                      | 0    | no findings                                                                                                                                               |
+| `npm run typecheck`                                 | 0    | `tsconfig.json` and `tsconfig.worker.json`                                                                                                                |
+| `npm run format:check`                              | 0    | all matched files use Prettier code style                                                                                                                 |
+| `npm test`                                          | 0    | 777 tests, 777 passed, 0 failed, 0 skipped; includes the run-alarm, proof-deploy and harness-proof driver tests                                           |
+| `npm run test:harness:ai`                           | 0    | `ai-binding` passed, 12 of 12 checks, realness `node-fixture`                                                                                             |
+| `npm run test:harness:executor`                     | 0    | `executor-crash` passed, 2 of 2 checks; `dotnet test` total 38, failed 0, succeeded 38; `liveNotRun` shows the deferral (superseded history, see Proof 2) |
+| `node tooling/dependency-policy.ts` (and its tests) | 0    | 18 of 18 dependency tests                                                                                                                                 |
+| `node tooling/project.ts provenance` and `licence`  | 0    | no findings                                                                                                                                               |
 
 The `ai-binding` and `executor-crash` records were regenerated by this batch under `artifacts/harness-proof/` (Git ignores them). `container-capacity` was not rerun, and its record is unchanged (`not-run`). The C# code is unchanged since `af732b5`, so `npm run check:dotnet` was not rerun. The Node gap is unchanged: the local runtime is Node v24.20.0 against the 24.21.0 pin, so `npm run check` still stops at its `toolchain` step, and hosted CI is the authority for that gate.
 
