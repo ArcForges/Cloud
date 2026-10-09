@@ -15,7 +15,14 @@ const hooks = `
 export async function resolve(specifier, context, next) {
   if (specifier === "cloudflare:workers")
     return { url: "data:text/javascript,${encodeURIComponent(stub)}", shortCircuit: true };
-  return next(specifier, context);
+  try {
+    return await next(specifier, context);
+  } catch (error) {
+    // The package is authored for bundlers and imports its own files without an extension (the alarm base derives from Container).
+    if (specifier.startsWith(".") && !/[.][cm]?[jt]s$/u.test(specifier))
+      return next(specifier + ".js", context);
+    throw error;
+  }
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
 

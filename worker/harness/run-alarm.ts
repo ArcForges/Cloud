@@ -2,7 +2,8 @@
 // The Durable Object alarm that wakes a run. It is a thin platform adapter (P2-021 item 1): it holds only a wake handle (a run identifier
 // and a time), it never reads or writes run state, and it does not decide whether the run advances. Each alarm sends one signed wake
 // to the C# endpoint and reports nothing else; the C# side claims, resumes and records every outcome under its own fence.
-import { DurableObject } from "cloudflare:workers";
+import { Container } from "@cloudflare/containers";
+import type { DurableObject } from "cloudflare:workers";
 import type { ContainerNamespaceLike } from "../foundation/types.ts";
 import { loadKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import { newNonce, sign } from "../private/signing.ts";
@@ -27,7 +28,11 @@ export interface RunAlarmEnv extends PrivateKeyEnv {
 /** The only storage key the alarm uses; it holds the wake handle and nothing else. */
 const handleKey = "wake";
 
-export class HarnessRunAlarm extends DurableObject<RunAlarmEnv> {
+// The base is the Durable Object base that Container extends (the same derivation as foundation/durable.ts). A value import of
+// `cloudflare:workers` here would add a second external import statement to the bundle, which the release profile does not bind.
+const DurableObjectBase = Object.getPrototypeOf(Container) as typeof DurableObject;
+
+export class HarnessRunAlarm extends DurableObjectBase<RunAlarmEnv> {
   /** Stores the wake handle and sets the alarm. Anything outside the closed schedule shape is refused and writes nothing. */
   async schedule(input: unknown): Promise<{ scheduled: boolean }> {
     const parsed = parseSchedule(input, Date.now());
