@@ -282,10 +282,10 @@ test("the generated proof config points the assets at the staged directory and k
 
 test("the pins name the WEB.40 release assets by their own digests, one release for both", () => {
   assert.equal(profileBundlePin.repository, "ArcForges/Web");
-  assert.equal(profileBundlePin.release, "web-0.1.0-ci.111.1");
+  assert.equal(profileBundlePin.release, "web-0.1.0-ci.117.1");
   assert.equal(
     profileBundlePin.digest,
-    "4afc8f285a7a64202ce221bc4e3011a9f8b6de641d50eef0a537677e80eaef9a",
+    "2070acd93565eceb190f872505c85fcd6c40ef71643aff4924ba1f026ff87001",
   );
   assert.equal(
     profileBundleAssetName(profileBundlePin.digest),
@@ -295,7 +295,7 @@ test("the pins name the WEB.40 release assets by their own digests, one release 
   assert.equal(siteArchivePin.release, profileBundlePin.release);
   assert.equal(
     siteArchivePin.digest,
-    "573575617dec11d2d3678bf5ccd92728190b64a79e7907e050764fd8a1d131ac",
+    "735374a56bce3e63dabcb0a4abaa25a1d6ae23a0890eade5c8273bf110bfb0a8",
   );
   assert.equal(
     siteArchiveAssetName(siteArchivePin.digest),

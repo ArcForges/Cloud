@@ -26,8 +26,8 @@ export const proofAssetsDirName = "proof-assets";
  */
 export const profileBundlePin = {
   repository: "ArcForges/Web",
-  release: "web-0.1.0-ci.111.1",
-  digest: "4afc8f285a7a64202ce221bc4e3011a9f8b6de641d50eef0a537677e80eaef9a",
+  release: "web-0.1.0-ci.117.1",
+  digest: "2070acd93565eceb190f872505c85fcd6c40ef71643aff4924ba1f026ff87001",
 } as const;
 export const profileBundleAssetName = (digest: string) => `web-profiles-${digest}.tar`;
 /**
@@ -36,8 +36,8 @@ export const profileBundleAssetName = (digest: string) => `web-profiles-${digest
  */
 export const siteArchivePin = {
   repository: "ArcForges/Web",
-  release: "web-0.1.0-ci.111.1",
-  digest: "573575617dec11d2d3678bf5ccd92728190b64a79e7907e050764fd8a1d131ac",
+  release: "web-0.1.0-ci.117.1",
+  digest: "735374a56bce3e63dabcb0a4abaa25a1d6ae23a0890eade5c8273bf110bfb0a8",
 } as const;
 export const siteArchiveAssetName = (digest: string) => `web-site-${digest}.tar`;
 
