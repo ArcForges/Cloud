@@ -616,6 +616,7 @@
     "tests/ArcForges.Cloud.Tests/HarnessFoundation/HarnessPinTests.cs",
     "tests/ArcForges.Cloud.Tests/HarnessFoundation/HarnessWakeTests.cs",
     "tests/ArcForges.Cloud.Tests/HarnessFoundation/HelloSliceTests.cs",
+    "tests/ArcForges.Cloud.Tests/HarnessFoundation/WorkersAiModelPinTests.cs",
     "tests/ArcForges.Cloud.Tests/HelloEndpointTests.cs",
     "tests/ArcForges.Cloud.Tests/Identity/IdentityDomainTests.cs",
     "tests/ArcForges.Cloud.Tests/Identity/IdentityHarness.cs",

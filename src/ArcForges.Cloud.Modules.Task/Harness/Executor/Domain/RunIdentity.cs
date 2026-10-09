@@ -19,9 +19,13 @@ internal sealed record PinnedSnapshot(string ModelId, string TariffSnapshotId)
         && string.Equals(ModelId, requested.ModelId, StringComparison.Ordinal)
         && string.Equals(TariffSnapshotId, requested.TariffSnapshotId, StringComparison.Ordinal);
 
+    /// <summary>
+    /// The same character set as ModelDispatchOptions.IsToken (1 to 128 characters; letters, digits and @ / . _ : -) and the TypeScript envelope
+    /// token. Every Workers AI model identifier starts with '@cf/', so the '@' must be admitted or a real model is never pinned.
+    /// </summary>
     private static bool IsToken(string value) =>
         value.Length is >= 1 and <= 128
-        && value.All(character => character is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '.' or '_' or ':' or '/' or '-');
+        && value.All(character => character is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '@' or '.' or '_' or ':' or '/' or '-');
 }
 
 /// <summary>
