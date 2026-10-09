@@ -24,7 +24,6 @@ import {
   profileBundlePin,
   proofAssetsDirName,
   readBundleArchive,
-  stageProfileAssets,
   stageProofAssets,
   verifyProfileBundle,
   verifySiteArchive,
@@ -561,24 +560,6 @@ test("stylesheets of the bundle import only paths that stay on the root", () => 
   accepts({ files: { "app.css": '@import "/fonts.css";' } });
 });
 
-test("staging writes the verified files without the manifest into a fresh directory of the fixed name", async () => {
-  const verified = accepts();
-  const parent = await mkdtemp(path.join(tmpdir(), "arcforges-proof-"));
-  try {
-    const target = path.join(parent, proofAssetsDirName);
-    assert.equal(await stageProfileAssets(verified, target), verified.files.length);
-    assert.equal(await stageProfileAssets(verified, target), verified.files.length);
-    assert((await stat(path.join(target, "_headers"))).isFile());
-    await assert.rejects(stat(path.join(target, "manifest.json")));
-    await assert.rejects(
-      stageProfileAssets(verified, path.join(parent, "elsewhere")),
-      /Unexpected staging directory/u,
-    );
-  } finally {
-    await rm(parent, { recursive: true, force: true });
-  }
-});
-
 // ---- The Site (WEB.40 web-site-<sha256>.tar): the Site builder's members, pages and headers, as synthetic bytes. ----
 const siteCss = "body{margin:0}";
 const siteStylesheetPath = `assets/site.${sha(siteCss).slice(0, 16)}.css`;
@@ -838,6 +819,7 @@ test("the composed proof tree stages into the fixed directory with its one heade
     assert.equal(await stageProofAssets(assets, target), assets.files.length);
     assert.equal(await readFile(path.join(target, "_headers"), "utf8"), assets.headers);
     assert.equal(await readFile(path.join(target, siteStylesheetPath), "utf8"), siteCss);
+    await assert.rejects(stat(path.join(target, "manifest.json")));
     await assert.rejects(
       stageProofAssets(assets, path.join(parent, "elsewhere")),
       /Unexpected staging directory/u,

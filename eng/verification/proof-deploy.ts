@@ -29,6 +29,16 @@ export const profileBundlePin = {
   digest: "67956d7f4b3d2909625585ca68f19f3f8a9ea27a5a08958659b9d9841871f996",
 } as const;
 export const profileBundleAssetName = (digest: string) => `web-profiles-${digest}.tar`;
+/**
+ * The Site archive of the same Web release (CLOUD.85 D2 option A): the C# public Site, a deterministic ustar whose
+ * name is the digest of its own bytes. Moving the pin is a reviewed change, as for the profile bundle.
+ */
+export const siteArchivePin = {
+  repository: "ArcForges/Web",
+  release: "web-0.1.0-ci.111.1",
+  digest: "573575617dec11d2d3678bf5ccd92728190b64a79e7907e050764fd8a1d131ac",
+} as const;
+export const siteArchiveAssetName = (digest: string) => `web-site-${digest}.tar`;
 
 interface ProofEnvironment {
   name?: string;
@@ -651,23 +661,6 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
         `${entry.path} violates the same-origin rules`,
       );
   return { digest, manifest, files, headers };
-}
-
-/** Writes the verified files (not the manifest) into a fresh staging directory named for the proof assets. */
-export async function stageProfileAssets(
-  bundle: VerifiedBundle,
-  directory: string,
-): Promise<number> {
-  assert.equal(path.basename(directory), proofAssetsDirName, "Unexpected staging directory.");
-  const resolved = path.resolve(directory);
-  await rm(resolved, { recursive: true, force: true });
-  for (const entry of bundle.files) {
-    const target = path.resolve(resolved, ...entry.path.split("/"));
-    assert(target.startsWith(`${resolved}${path.sep}`), "A staged path escapes its directory.");
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, entry.bytes);
-  }
-  return bundle.files.length;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
