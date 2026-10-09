@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
@@ -409,22 +410,39 @@ export async function verifyToolchain(nodeVersion: string, npmVersion: string) {
   assert.equal(`npm@${npmVersion}`, manifest.packageManager, "Select the pinned npm version.");
 }
 
+/** The NuGet global packages folder that restore populates (NUGET_PACKAGES overrides the default per-user location). */
+function nugetPackagesRoot(): string {
+  return process.env.NUGET_PACKAGES || path.join(os.homedir(), ".nuget", "packages");
+}
+
 /**
- * WP-05.02: the forbidden-term scan is the canonical published scanner of the exact @arcforges/proto candidate named by
- * eng/policy/naming-candidate.json. Its identity and asset digests are verified before it runs, and its report is the
- * source-policy evidence the architecture host binds to the source commit (RP-01, RP-08).
+ * WP-05.02: the forbidden-term scan is the canonical scanner and policy of the NuGet package ArcForges.Contracts.Validation named by
+ * eng/policy/naming-candidate.json (P2-021 item 4; the npm @arcforges/proto publication is provenance only). The restored package
+ * folder must match the pinned archive SHA512, the packaged source commit and both packaged SHA256 values before the scanner runs,
+ * and the scanner's report is the source-policy evidence the architecture host binds to the source commit (RP-01, RP-08).
  */
 export async function namingScan() {
   const naming = await readJson<{
     package: string;
     version: string;
     sourceCommit: string;
+    archiveSha512: string;
     assets: Record<string, string>;
   }>(path.join(root, "eng/policy/naming-candidate.json"));
-  const namingRoot = path.join(root, "node_modules", naming.package);
+  const id = naming.package.toLowerCase();
+  const namingRoot = path.join(nugetPackagesRoot(), id, naming.version);
+  const archive = path.join(namingRoot, `${id}.${naming.version}.nupkg`);
   assert.equal(
-    (await readJson<{ version: string }>(path.join(namingRoot, "package.json"))).version,
-    naming.version,
+    (await readFile(`${archive}.sha512`, "utf8")).trim(),
+    naming.archiveSha512,
+    "Naming package archive digest differs from the pinned candidate.",
+  );
+  assert.equal(
+    createHash("sha512")
+      .update(await readFile(archive))
+      .digest("base64"),
+    naming.archiveSha512,
+    "Naming package archive bytes differ from the pinned candidate.",
   );
   assert.equal(
     (await readJson<{ commit: string }>(path.join(namingRoot, "source.json"))).commit,
@@ -437,6 +455,7 @@ export async function namingScan() {
       `Naming asset changed: ${asset}`,
     );
   await run("python", [
+    "-I",
     path.join(namingRoot, "tools/naming/eng/check_naming.py"),
     "--repository",
     `Cloud=${root}`,

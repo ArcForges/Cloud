@@ -1116,6 +1116,103 @@
         }
       ],
       "primaryKey": ["kind", "instance_id", "recovery_generation"]
+    },
+    {
+      "name": "task_harness_budget",
+      "model": "Harness executor budget (HAR.40): not a model 01 field list; defined by the task migration under RES-cloud-d1-migrations",
+      "note": "Durable counted-step, subrequest, model-call and tool-invocation totals of one run, and the model and tariff snapshot the run is pinned to (HAR.40 validation (f)). Written only by the executor's fenced plans; never reset; monotonic by trigger; the pin is set once at the first claim and never changes.",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "id"
+        },
+        {
+          "name": "counted_steps",
+          "type": "int64",
+          "monotonic": true
+        },
+        {
+          "name": "subrequests",
+          "type": "int64",
+          "monotonic": true
+        },
+        {
+          "name": "model_calls",
+          "type": "int64",
+          "monotonic": true
+        },
+        {
+          "name": "tool_invocations",
+          "type": "int64",
+          "monotonic": true
+        },
+        {
+          "name": "pinned_model_id",
+          "type": "text"
+        },
+        {
+          "name": "pinned_tariff_snapshot_id",
+          "type": "text"
+        },
+        {
+          "name": "updated_at",
+          "type": "instant"
+        },
+        {
+          "name": "rev",
+          "type": "rev"
+        }
+      ],
+      "primaryKey": ["run_id"],
+      "foreignKeys": [
+        {
+          "columns": ["run_id"],
+          "references": {
+            "table": "task_run",
+            "columns": ["run_id"]
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "checks": [
+        {
+          "name": "counted_steps",
+          "sql": "\"counted_steps\" BETWEEN 0 AND 25000"
+        },
+        {
+          "name": "subrequests",
+          "sql": "\"subrequests\" BETWEEN 0 AND 1000000"
+        },
+        {
+          "name": "model_calls",
+          "sql": "\"model_calls\" BETWEEN 0 AND 64"
+        },
+        {
+          "name": "tool_invocations",
+          "sql": "\"tool_invocations\" BETWEEN 0 AND 256"
+        },
+        {
+          "name": "pinned_model_id",
+          "sql": "length(\"pinned_model_id\") BETWEEN 1 AND 128"
+        },
+        {
+          "name": "pinned_tariff_snapshot_id",
+          "sql": "length(\"pinned_tariff_snapshot_id\") BETWEEN 1 AND 128"
+        }
+      ],
+      "mutability": {
+        "update": {
+          "columns": [
+            "counted_steps",
+            "subrequests",
+            "model_calls",
+            "tool_invocations",
+            "updated_at",
+            "rev"
+          ]
+        },
+        "delete": "none"
+      }
     }
   ]
 }

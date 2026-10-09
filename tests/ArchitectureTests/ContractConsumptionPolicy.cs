@@ -16,6 +16,13 @@ internal static partial class ContractConsumptionPolicy
 {
     private const string GrpcBindAttribute = "Grpc.Core.BindServiceMethodAttribute";
 
+    /// <summary>
+    /// The naming scanner is a build-only identity (ArcForges.Contracts.Validation, CON.23 line 1.0.0-ci.205.1, GOV.14 binding). It ships
+    /// nothing, is not a wire consumer and is pinned by its own exact identity check (NamingWiring, NamingGateTests), so it is excluded from
+    /// the single runtime candidate only.
+    /// </summary>
+    private const string BuildOnlyNamingTool = "ArcForges.Contracts.Validation";
+
     /// <summary>All contract NuGet packages and all contract npm packages pin the same exact candidate version.</summary>
     public static IReadOnlyList<string> CheckPins(string packagesProps, string packageJson)
     {
@@ -51,7 +58,7 @@ internal static partial class ContractConsumptionPolicy
             }
         }
 
-        if (nuget.Values.Concat(npm.Values).Distinct(StringComparer.Ordinal).Count() > 1)
+        if (nuget.Where(pin => pin.Key != BuildOnlyNamingTool).Select(pin => pin.Value).Concat(npm.Values).Distinct(StringComparer.Ordinal).Count() > 1)
         {
             problems.Add("Contract packages come from more than one candidate version.");
         }

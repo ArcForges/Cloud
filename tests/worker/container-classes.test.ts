@@ -48,19 +48,20 @@ const containerContext = {
   blockConcurrencyWhile: () => Promise.resolve(),
 };
 
-test("the production Container class registers no outbound interception", () => {
-  assert.equal(CloudContainer.outboundByHost, undefined);
-  assert.equal(CloudContainer.outboundHandlers, undefined);
-  assert.deepEqual(
-    Object.getOwnPropertyNames(CloudContainer).filter((name) => /outbound/iu.test(name)),
-    [],
+test("the production Container class registers exactly the ai.internal outbound host (HAR.40 reviewed change)", () => {
+  assert.deepEqual(Object.keys(CloudContainer.outboundByHost ?? {}), ["ai.internal"]);
+  assert.equal(typeof CloudContainer.outboundByHost?.["ai.internal"], "function");
+  assert.equal(
+    CloudContainer.outboundHandlers,
+    undefined,
+    "no named handler set beyond the ai.internal host",
   );
 });
 
 test("the production Container class has no constructor, environment hook or foundation import", () => {
   assert.deepEqual(Object.getOwnPropertyNames(CloudContainer.prototype), ["constructor"]);
   const source = CloudContainer.toString();
-  assert.doesNotMatch(source, /constructor|envVars|containerEnvironment|outbound|Foundation/u);
+  assert.doesNotMatch(source, /constructor|envVars|containerEnvironment|Foundation/u);
 });
 
 test("the production Container keeps the Hello settings and no environment variables", () => {
@@ -74,16 +75,23 @@ test("the production Container keeps the Hello settings and no environment varia
   assert.deepEqual(instance.envVars, {}, "no foundation variable reaches the production class");
 });
 
-test("only the proof class carries the two exact outbound hosts and the environment hook", () => {
+test("only the proof class carries the storage, objects and harness alarm hosts and the environment hook; ai.internal stays production-only", () => {
   assert.deepEqual(Object.keys(FoundationContainer.outboundByHost ?? {}).sort(), [
+    "harness.internal",
     "objects.internal",
     "storage.internal",
   ]);
+  assert.equal(typeof FoundationContainer.outboundByHost?.["harness.internal"], "function");
+  assert.equal(
+    CloudContainer.outboundByHost?.["harness.internal"],
+    undefined,
+    "the production class never reaches the harness alarm host",
+  );
   assert.equal(Object.getPrototypeOf(FoundationContainer), CloudContainer);
   assert.equal(
-    CloudContainer.outboundByHost,
+    FoundationContainer.outboundByHost?.["ai.internal"],
     undefined,
-    "registering the proof hosts leaves production alone",
+    "the proof class never reaches the ai.internal handler",
   );
 
   const disabled = new FoundationContainer(containerContext, {});

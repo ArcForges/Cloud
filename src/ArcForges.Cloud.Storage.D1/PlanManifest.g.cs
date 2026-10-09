@@ -9,7 +9,7 @@ namespace ArcForges.Cloud.Storage;
 /// <summary>Typed definitions of the reviewed named plans and their single manifest identity.</summary>
 internal static class PlanManifest
 {
-    public const string Hash = "141e11a1bba4e93727a66e83ba1e9942f56d721dc1527be7c74e860b3572593d";
+    public const string Hash = "47f9f5f36d0bd5048dfaafcf16c4ed08e51635369f3916862af94d8b60187bd6";
 
     /// <summary>The reviewed plans of the identity owner (<c>storage/plans/identity</c>).</summary>
     internal static class Identity
@@ -245,6 +245,116 @@ internal static class PlanManifest
             100,
             [
                 new([new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text)], [new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64, true), new(PlanKind.Int64), new(PlanKind.Int64)])
+            ]);
+    }
+
+    /// <summary>The reviewed plans of the task owner (<c>storage/plans/task</c>).</summary>
+    internal static class Task
+    {
+        public static readonly PlanDefinition HarnessExecutorAttemptLoad = new(
+            "task.harness-executor-attempt-load",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Scope)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text, true)])
+            ]);
+
+        public static readonly PlanDefinition HarnessExecutorCheckpoint = new(
+            "task.harness-executor-checkpoint",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Bytes), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition HarnessExecutorClaim = new(
+            "task.harness-executor-claim",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition HarnessExecutorMarkDispatch = new(
+            "task.harness-executor-mark-dispatch",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition HarnessExecutorRecordOutcome = new(
+            "task.harness-executor-record-outcome",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition HarnessExecutorRenew = new(
+            "task.harness-executor-renew",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition HarnessExecutorReserveStep = new(
+            "task.harness-executor-reserve-step",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Text)], null)
+            ]);
+
+        public static readonly PlanDefinition HarnessExecutorRunLoad = new(
+            "task.harness-executor-run-load",
+            1,
+            PlanAccess.Read,
+            1,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Scope)], [new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Text, true), new(PlanKind.Bytes, true), new(PlanKind.Text, true), new(PlanKind.Text, true)])
+            ]);
+
+        public static readonly PlanDefinition HarnessExecutorYield = new(
+            "task.harness-executor-yield",
+            1,
+            PlanAccess.Write,
+            0,
+            [
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Scope), new(PlanKind.Text), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text), new(PlanKind.Text), new(PlanKind.Int64)], null),
+                new([new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Int64), new(PlanKind.Text)], null),
+                new([new(PlanKind.Text)], null)
             ]);
     }
 
@@ -636,7 +746,7 @@ internal static class PlanManifest
             ]);
     }
 
-    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.UserLoad, Identity.UserRename, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser];
+    public static readonly IReadOnlyList<PlanDefinition> All = [Identity.CredentialAdd, Identity.CredentialFind, Identity.CredentialList, Identity.CredentialRelabel, Identity.CredentialRevoke, Identity.CredentialTouch, Identity.UserLoad, Identity.UserRename, Entitlement.ActivationsLoad, Entitlement.Commit, Entitlement.FeatureReleaseAppend, Entitlement.FeatureReleaseGet, Entitlement.FeatureReleasesLoad, Entitlement.GrantsLoad, Entitlement.RevisionLoad, Entitlement.RevocationsLoad, Entitlement.SnapshotLoad, Entitlement.StatusFactsLoad, Entitlement.TermActionsLoad, Entitlement.TermsLoad, Task.HarnessExecutorAttemptLoad, Task.HarnessExecutorCheckpoint, Task.HarnessExecutorClaim, Task.HarnessExecutorMarkDispatch, Task.HarnessExecutorRecordOutcome, Task.HarnessExecutorRenew, Task.HarnessExecutorReserveStep, Task.HarnessExecutorRunLoad, Task.HarnessExecutorYield, Platform.ArchiveAck, Platform.ArchivePurge, Platform.ArchiveSelect, Platform.ArchiveState, Platform.CommandLoad, Platform.CommandRecordFailure, Platform.InboxLoad, Platform.InboxRecord, Platform.OutboxAck, Platform.OutboxAttempt, Platform.OutboxDeadLetter, Platform.OutboxPurge, Platform.OutboxRequeue, Platform.OutboxSelect, Platform.StreamFence, Platform.StreamLoad, Foundation.AccountLoad, Foundation.AccountSeed, Foundation.ExactLoad, Foundation.ExactStore, Foundation.InboxSeen, Foundation.JobClaim, Foundation.JobCommit, Foundation.JobItems, Foundation.JobLoad, Foundation.JobStart, Foundation.OutboxState, Foundation.Readiness, Foundation.ReceiptLoad, Foundation.SessionCreate, Foundation.SessionLoad, Foundation.SessionLoadById, Foundation.SessionRevoke, Foundation.SessionTouch, Foundation.Transfer, Families.AccountEnrollmentCreateUser];
 
     /// <summary>The closed registry of shared transaction families (<c>storage/plans/families.json</c>, Design SU-01).</summary>
     public static readonly IReadOnlyList<FamilyDefinition> FamilyCatalog = [
