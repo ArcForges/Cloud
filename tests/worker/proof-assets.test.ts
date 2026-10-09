@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Offline checks of the proof origin's static profile assets (CLOUD.71): route precedence, the pinned digest, the
-// strict bundle reader, the headers and the staging. No network, no deployment and no Cloudflare call.
+// Offline checks of the proof origin's static assets: the route precedence and the generated proof configuration
+// (CLOUD.71), and the WEB.40 profile bundle: the pinned digest, the strict reader, the served layout, the pages, the
+// policies and the headers. No network, no deployment and no release download.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { brotliCompressSync, gzipSync } from "node:zlib";
 import { isProofPath } from "../../worker/foundation/proof-routes.ts";
 import {
   buildProofConfig,
+  expectedProfileHeaders,
+  expectedProfilePolicy,
+  parsePolicy,
   profileBundleAssetName,
   profileBundlePin,
   proofAssetsDirName,
-  parsePolicy,
   readBundleArchive,
   stageProfileAssets,
   verifyProfileBundle,
@@ -22,16 +26,20 @@ import {
   type CandidateConfig,
 } from "../../eng/verification/proof-deploy.ts";
 
-const wrangler = JSON.parse(
-  readFileSync(path.resolve(import.meta.dirname, "../../wrangler.json"), "utf8"),
-) as CandidateConfig;
-const sha = (value: Uint8Array | string) => createHash("sha256").update(value).digest("hex");
+// ---- Synthetic WEB.40-shaped fixtures: the Web writers' formats, so that each test can damage one thing. ----
+const sha = (value: Uint8Array | string) =>
+  createHash("sha256").update(value).digest("hex");
 
-// ---- A bundle writer that follows the Web build's format exactly, so each test can damage one thing. ----
-function octal(value: number, length: number) {
+function octal(value: number, length: number): string {
   return `${value.toString(8).padStart(length - 1, "0")}\0`;
 }
-function header(entryPath: string, size: number, options: { uid?: number; type?: string } = {}) {
+
+/** One canonical ustar header: mode 0644, owner and time 0, a regular file with no names (the Web writer). */
+function tarHeader(
+  entryPath: string,
+  size: number,
+  options: { uid?: number; type?: string } = {},
+): Buffer {
   const head = Buffer.alloc(512);
   Buffer.from(entryPath, "ascii").copy(head, 0);
   head.write(octal(0o644, 8), 100, "ascii");
@@ -48,13 +56,20 @@ function header(entryPath: string, size: number, options: { uid?: number; type?:
   head.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, "ascii");
   return head;
 }
-function tar(
-  entries: { path: string; bytes: Uint8Array }[],
+
+interface TarEntry {
+  path: string;
+  bytes: Uint8Array;
+}
+
+/** A ustar archive of the entries in the order given, closed by two zero blocks. */
+function tarArchive(
+  entries: TarEntry[],
   options: { uid?: number; type?: string } = {},
-) {
+): Buffer {
   const parts: Buffer[] = [];
   for (const entry of entries) {
-    parts.push(header(entry.path, entry.bytes.byteLength, options), Buffer.from(entry.bytes));
+    parts.push(tarHeader(entry.path, entry.bytes.byteLength, options), Buffer.from(entry.bytes));
     const pad = (512 - (entry.bytes.byteLength % 512)) % 512;
     if (pad > 0) parts.push(Buffer.alloc(pad));
   }
@@ -62,63 +77,120 @@ function tar(
   return Buffer.concat(parts);
 }
 
-function page(profile: string, extra = "") {
-  return `<!DOCTYPE html><html><head><link rel="modulepreload" href="/assets/entry.js"/></head><body>${extra}<script>window.p="${profile}";</script><script type="module" src="/assets/entry.js"></script></body></html>`;
-}
-const csp = (profile: string, tail = "") =>
-  `default-src 'self'; script-src 'self' '${`sha256-${createHash("sha256").update(`window.p="${profile}";`).digest("base64")}`}'; style-src 'self'${tail}; connect-src 'self'; object-src 'none'`;
+/** The application shell the Web publish writes (src/ArcForges.Web.App/wwwroot/index.html). */
+const profileShell = [
+  "<!DOCTYPE html>",
+  '<html lang="en">',
+  "<head>",
+  '    <meta charset="utf-8" />',
+  '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
+  '    <meta name="robots" content="noindex, nofollow" />',
+  '    <meta name="theme-color" content="#f4f3ed" />',
+  '    <link rel="icon" href="favicon.svg" type="image/svg+xml" />',
+  "    <title>ArcForges</title>",
+  '    <base href="/" />',
+  '    <link rel="stylesheet" href="app.css" />',
+  "</head>",
+  "<body>",
+  '    <div id="app">Loading…</div>',
+  '    <div id="blazor-error-ui">',
+  '        <span role="alert">An unhandled error has occurred. <a href="" class="reload">Reload</a></span>',
+  '        <button type="button" class="dismiss" aria-label="Dismiss">&times;</button>',
+  "    </div>",
+  '    <script src="_framework/blazor.webassembly.js"></script>',
+  "</body>",
+  "</html>",
+  "",
+].join("\n");
 
-interface Spec {
-  pages?: Record<string, string>;
+/** The root files that the App publish and the Site share, byte for byte (the merge rule of the proof tree). */
+const sharedFavicon = "<svg/>";
+const sharedRobots = "User-agent: *\n";
+
+interface ManifestDocument {
+  schema: number;
+  profiles: Record<string, { page: string; buildDigest: string; csp: string }>;
+  files: Record<string, { sha256: string; bytes: number }>;
+}
+
+interface ProfileSpec {
+  shell?: string;
+  /** Files added to or replaced in the bundle, by path. */
+  files?: Record<string, string | Uint8Array>;
+  /** The headers file, when it is not the reviewed one. */
   headers?: string;
-  extra?: Record<string, string>;
-  csp?: Record<string, string>;
-  tamper?: (entries: { path: string; bytes: Uint8Array }[]) => void;
-  manifest?: (manifest: Record<string, unknown>) => void;
+  /** The policy of a profile, when it is not the one its page derives. */
+  csp?: Partial<Record<"account" | "chat", string>>;
+  tamper?: (entries: TarEntry[]) => void;
+  manifest?: (manifest: ManifestDocument) => void;
   tarOptions?: { uid?: number; type?: string };
 }
-function bundle(spec: Spec = {}) {
-  const policies = { account: csp("account"), chat: csp("chat"), ...spec.csp };
-  const headers =
-    spec.headers ??
-    `/*\n  X-Content-Type-Options: nosniff\n/account/*\n  Content-Security-Policy: ${policies.account}\n/chat/*\n  Content-Security-Policy: ${policies.chat}\n/assets/*\n  ! Cache-Control\n  Cache-Control: public, max-age=31536000, immutable\n`;
-  const files: Record<string, string> = {
-    "account/index.html": page("account"),
-    "chat/index.html": page("chat"),
-    "assets/entry.js": "export const entry = 1;",
-    "favicon.svg": "<svg/>",
-    "robots.txt": "User-agent: *\n",
-    _headers: headers,
-    ...spec.pages,
-    ...spec.extra,
+
+const bytesOf = (value: string | Uint8Array): Buffer =>
+  typeof value === "string" ? Buffer.from(value, "utf8") : Buffer.from(value);
+
+/** A profile bundle with the WEB.40 layout, built from the reviewed writer's rules. */
+function profileBundle(spec: ProfileSpec = {}): { archive: Buffer; digest: string } {
+  const shell = spec.shell ?? profileShell;
+  const policy = expectedProfilePolicy(shell);
+  const policies = { account: spec.csp?.account ?? policy, chat: spec.csp?.chat ?? policy };
+  const files: Record<string, string | Uint8Array> = {
+    "account/index.html": shell,
+    "chat/index.html": shell,
+    "_framework/blazor.webassembly.js": "// loader",
+    "_framework/blazor.webassembly.js.gz": gzipSync("// loader"),
+    "_framework/dotnet.js": "// dotnet loader",
+    "_framework/dotnet.runtime.a1b2c3d4e5.js": "export {};",
+    "_framework/ArcForges.Web.App.w1s8cjv5ju.wasm": "\0asm",
+    "_framework/ArcForges.Web.App.w1s8cjv5ju.wasm.br": brotliCompressSync("\0asm"),
+    "_framework/ArcForges.Web.App.w1s8cjv5ju.wasm.gz": gzipSync("\0asm"),
+    "app.css": "body{margin:0}",
+    "favicon.svg": sharedFavicon,
+    "robots.txt": sharedRobots,
+    _headers: spec.headers ?? expectedProfileHeaders(policies),
+    ...spec.files,
   };
   const names = Object.keys(files).sort();
-  const manifest: Record<string, unknown> = {
+  const manifest: ManifestDocument = {
     schema: 1,
     profiles: {
-      account: { page: "account/index.html", buildDigest: sha("a"), csp: policies.account },
-      chat: { page: "chat/index.html", buildDigest: sha("c"), csp: policies.chat },
+      account: { page: "account/index.html", buildDigest: sha("build"), csp: policies.account },
+      chat: { page: "chat/index.html", buildDigest: sha("build"), csp: policies.chat },
     },
     files: Object.fromEntries(
-      names.map((name) => [
-        name,
-        { sha256: sha(files[name] as string), bytes: Buffer.byteLength(files[name] as string) },
-      ]),
+      names.map((name) => {
+        const bytes = bytesOf(files[name] ?? "");
+        return [name, { sha256: sha(bytes), bytes: bytes.byteLength }];
+      }),
     ),
   };
   spec.manifest?.(manifest);
-  const entries = [
+  const entries: TarEntry[] = [
     { path: "manifest.json", bytes: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`) },
-    ...names.map((name) => ({ path: name, bytes: Buffer.from(files[name] as string) })),
+    ...names.map((name) => ({ path: name, bytes: bytesOf(files[name] ?? "") })),
   ];
   spec.tamper?.(entries);
-  const archive = tar(entries, spec.tarOptions);
+  const archive = tarArchive(entries, spec.tarOptions);
   return { archive, digest: sha(archive) };
 }
-const refuses = (spec: Spec, pattern: RegExp) => {
-  const built = bundle(spec);
+
+const wrangler = JSON.parse(
+  readFileSync(path.resolve(import.meta.dirname, "../../wrangler.json"), "utf8"),
+) as CandidateConfig;
+
+const refuses = (spec: ProfileSpec, pattern: RegExp) => {
+  const built = profileBundle(spec);
   assert.throws(() => verifyProfileBundle(built.archive, built.digest), pattern);
 };
+const accepts = (spec: ProfileSpec = {}) => {
+  const built = profileBundle(spec);
+  return verifyProfileBundle(built.archive, built.digest);
+};
+/** A bundle whose shell is changed; its policy follows the page, so only the change under test can fail. */
+const withShell = (replace: (html: string) => string): ProfileSpec => ({
+  shell: replace(profileShell),
+});
+const policyOf = (shell = profileShell) => expectedProfilePolicy(shell);
 
 test("the Worker answers every one of its own route families before any asset", () => {
   const assets = (wrangler.env.proof as { assets?: Record<string, unknown> }).assets;
@@ -143,7 +215,7 @@ test("the Worker answers every one of its own route families before any asset", 
   for (const pathname of ["/proof/v1/x", "/session/v1/bootstrap", "/session/v1/logout"])
     assert(isProofPath(pathname) && matches(pathname));
   // No profile asset path is Worker-first, so the profiles are not shadowed by the Worker.
-  for (const pathname of ["/account/", "/chat/", "/assets/entry.js", "/favicon.svg"])
+  for (const pathname of ["/account/", "/chat/", "/_framework/blazor.webassembly.js", "/favicon.svg"])
     assert(!matches(pathname), pathname);
 });
 
@@ -207,21 +279,26 @@ test("the pin names a Web release asset by its own digest", () => {
   );
 });
 
-test("a well-formed bundle verifies and a digest that is not the pin is refused first", () => {
-  const built = bundle();
-  const verified = verifyProfileBundle(built.archive, built.digest);
+test("a well-formed WEB.40 bundle verifies and a digest that is not the pin is refused first", () => {
+  const built = profileBundle();
+  const verified = accepts();
   assert.equal(verified.digest, built.digest);
   assert.deepEqual(
-    verified.files.map((file) => file.path),
-    [
-      "_headers",
-      "account/index.html",
-      "assets/entry.js",
-      "chat/index.html",
-      "favicon.svg",
-      "robots.txt",
-    ],
+    verified.files.map((file) => file.path).sort(),
+    Object.keys(verified.manifest.files).sort(),
   );
+  for (const served of [
+    "_headers",
+    "account/index.html",
+    "chat/index.html",
+    "app.css",
+    "favicon.svg",
+    "robots.txt",
+    "_framework/blazor.webassembly.js",
+    "_framework/ArcForges.Web.App.w1s8cjv5ju.wasm.br",
+  ])
+    assert(verified.files.some((file) => file.path === served), served);
+  assert.equal(verified.files.some((file) => file.path === "manifest.json"), false);
   assert.throws(() => verifyProfileBundle(built.archive, sha("other")), /pinned digest/u);
   assert.throws(() => verifyProfileBundle(built.archive, "abc"), /not a SHA-256/u);
   // One flipped byte anywhere changes the digest and is refused before any parsing.
@@ -234,254 +311,213 @@ test("content that disagrees with the manifest is refused even when the digest i
   refuses(
     {
       tamper: (entries) => {
-        const entry = entries.find((item) => item.path === "assets/entry.js");
+        const entry = entries.find((item) => item.path === "app.css");
         assert(entry);
-        entry.bytes = Buffer.from("export const entry = 2;");
+        entry.bytes = Buffer.from("body{margin:1}");
       },
     },
-    /Content of assets\/entry\.js/u,
+    /Content of app\.css/u,
   );
   refuses(
     {
       tamper: (entries) => {
-        const entry = entries.find((item) => item.path === "assets/entry.js");
+        const entry = entries.find((item) => item.path === "app.css");
         assert(entry);
-        entry.bytes = Buffer.from("export const entry = 22;");
+        entry.bytes = Buffer.from("body{margin:1px 2px}");
       },
     },
-    /Size of assets\/entry\.js/u,
+    /Size of app\.css/u,
   );
-  refuses({ tamper: (entries) => entries.splice(2, 1) }, /exactly the manifest's files/u);
+  refuses({ tamper: (entries) => entries.splice(1, 1) }, /exactly the manifest's files/u);
   refuses(
-    { tamper: (entries) => entries.push({ path: "assets/zz.js", bytes: Buffer.from("x") }) },
+    { tamper: (entries) => entries.push({ path: "zz.txt", bytes: Buffer.from("x") }) },
     /exactly the manifest's files/u,
   );
   refuses(
-    { tamper: (entries) => entries.unshift(entries.splice(1, 1)[0] as (typeof entries)[0]) },
+    { tamper: (entries) => entries.unshift(entries.splice(1, 1)[0] as TarEntry) },
     /manifest must be the first/u,
   );
-  refuses({ manifest: (manifest) => (manifest.schema = 2) }, /schema/u);
+  refuses(
+    {
+      manifest: (manifest) => {
+        manifest.schema = 2;
+      },
+    },
+    /schema/u,
+  );
+  refuses(
+    {
+      manifest: (manifest) => {
+        delete manifest.profiles.chat;
+      },
+    },
+    /exactly the account and chat profiles/u,
+  );
 });
 
 test("the archive reader accepts only plain regular files with the canonical header", () => {
-  const entries = [{ path: "a.txt", bytes: Buffer.from("hello") }];
-  assert.equal(readBundleArchive(tar(entries)).length, 1);
-  // The owner field is pinned: a different uid is not the Web build's header.
-  assert.throws(() => readBundleArchive(tar(entries, { uid: 1000 })), /canonical header/u);
-  // A symbolic link, a hard link or a directory entry is refused.
-  for (const type of ["1", "2", "5"])
-    assert.throws(() => readBundleArchive(tar(entries, { type })), /canonical header/u);
-  const good = tar(entries);
+  const good = tarArchive([{ path: "a.txt", bytes: Buffer.from("x") }]);
+  assert.equal(readBundleArchive(good).length, 1);
+  assert.throws(() => readBundleArchive(tarArchive([{ path: "a", bytes: Buffer.from("x") }], { uid: 1000 })), /canonical header/u);
+  for (const type of ["5", "1", "2"])
+    assert.throws(
+      () => readBundleArchive(tarArchive([{ path: "a", bytes: Buffer.from("x") }], { type })),
+      /canonical header/u,
+    );
   assert.throws(() => readBundleArchive(good.subarray(0, good.length - 512)));
   assert.throws(() => readBundleArchive(Buffer.concat([good, Buffer.alloc(512)])), /follows/u);
   assert.throws(() => readBundleArchive(Buffer.concat([good, Buffer.alloc(512, 1)])));
   assert.throws(() => readBundleArchive(Buffer.alloc(100)), /Not a profile bundle/u);
-  assert.throws(() => readBundleArchive(Buffer.alloc(30 * 1024 * 1024)), /larger than the limit/u);
-  for (const bad of ["../x", "/abs", "a//b", "a b", "a/../b", ".hidden", "a/"])
+  assert.throws(
+    () => readBundleArchive(Buffer.alloc(25 * 1024 * 1024)),
+    /larger than the limit/u,
+  );
+  for (const bad of ["../x", "/abs", "a//b", "a/../b", "with space"])
     assert.throws(
-      () => readBundleArchive(tar([{ path: bad, bytes: Buffer.alloc(0) }])),
-      /plain relative path/u,
+      () => readBundleArchive(tarArchive([{ path: bad, bytes: Buffer.alloc(0) }])),
+      /plain relative path|canonical header/u,
       bad,
     );
   const tooMany = Array.from({ length: 401 }, (_, index) => ({
-    path: `f${index}`,
+    path: `f${index}.txt`,
     bytes: Buffer.alloc(0),
   }));
-  assert.throws(() => readBundleArchive(tar(tooMany)), /Too many/u);
+  assert.throws(() => readBundleArchive(tarArchive(tooMany)), /Too many/u);
 });
 
-test("a file outside the served layout, a source map or a missing page refuses the bundle", () => {
-  for (const extra of [
-    "assets/sub/deep.js",
-    "other/index.html",
-    "index.html",
-    "account/extra.html",
-    "server.js",
-  ])
-    refuses({ extra: { [extra]: "x" } }, /outside the served layout/u);
-  refuses({ extra: { "assets/entry.js.map": "{}" } }, /source map/u);
+test("the served layout admits only the reviewed WEB.40 files and their own encodings", () => {
+  refuses({ files: { "assets/entry.js": "export {};" } }, /outside the served layout/u);
+  refuses({ files: { "_framework/app.js": "x" } }, /outside the served layout/u);
   refuses(
-    {
-      tamper: (entries) =>
-        entries.splice(
-          entries.findIndex((e) => e.path === "chat/index.html"),
-          1,
-        ),
-    },
-    /exactly the manifest's files/u,
+    { files: { "_framework/ArcForges.Web.App.w1s8cjv5j.wasm": "x" } },
+    /outside the served layout/u,
   );
-});
-
-test("pages use LF line ends and reference only their own origin", () => {
+  refuses({ files: { "index.html": profileShell } }, /outside the served layout/u);
   refuses(
-    { pages: { "chat/index.html": page("chat").replaceAll("><", ">\r\n<") } },
-    /LF line ends/u,
-  );
-  refuses({ headers: "/*\r\n  X: y\r\n" }, /LF line ends/u);
-  refuses(
-    {
-      pages: {
-        "account/index.html": page("account", '<img src="https://cdn.example.test/a.png"/>'),
-      },
-    },
-    /another origin/u,
+    { files: { "_framework/dotnet.runtime.a1b2c3d4e5.js.map": "{}" } },
+    /outside the served layout/u,
   );
   refuses(
-    { pages: { "account/index.html": page("account", '<a href="//cdn.example.test/">x</a>') } },
-    /another origin/u,
+    { files: { "index.html.br": brotliCompressSync(profileShell) } },
+    /encoded file without its plain file/u,
   );
   refuses(
-    {
-      pages: {
-        "account/index.html": page("account", '<link href="assets/x.css" rel="stylesheet"/>'),
-      },
-    },
-    /another origin/u,
+    { files: { "_framework/x.abcdefghij.js.gz": gzipSync("x") } },
+    /encoded file without its plain file/u,
   );
-});
-
-test("each profile's policy must cover its own inline scripts and stay restrictive", () => {
-  // The Chat policy applied to the Account page does not cover the Account inline script.
-  refuses({ csp: { account: csp("chat") } }, /does not cover an inline script/u);
-  // An inline script in any letter case or with a spaced closing tag must be covered as well.
   refuses(
-    { pages: { "chat/index.html": page("chat", "<script>window.other = 1;</script junk>") } },
-    /does not cover an inline script/u,
+    { files: { "_framework/ArcForges.Web.App.w1s8cjv5ju.wasm.br": "not brotli" } },
+    /does not decode to its plain file/u,
   );
-  for (const tag of ["SCRIPT", "Script"])
-    refuses(
-      { pages: { "chat/index.html": page("chat", `<${tag}>window.other = 1;</${tag} >`) } },
-      /does not cover an inline script/u,
-    );
-  refuses({ csp: { account: csp("account", " 'unsafe-inline'") } }, /not restrictive/u);
-  refuses({ csp: { chat: csp("chat", " *") } }, /not restrictive/u);
   refuses(
-    { csp: { chat: csp("chat").replace("connect-src 'self'", "connect-src https:") } },
-    /connect-src/u,
+    { files: { "app.css.gz": gzipSync("body{margin:1px}") } },
+    /does not decode to its plain file/u,
   );
-  refuses({ csp: { chat: csp("chat").replace("default-src 'self'; ", "") } }, /default-src/u);
   refuses(
     {
       manifest: (manifest) => {
-        const profiles = manifest.profiles as Record<string, { csp: string }>;
-        profiles.chat = { csp: "x" };
+        delete manifest.files["account/index.html"];
+      },
+      tamper: (entries) => {
+        entries.splice(entries.findIndex((entry) => entry.path === "account/index.html"), 1);
       },
     },
-    /manifest policy of chat differs/u,
+    /The bundle has no account\/index\.html/u,
   );
-  refuses(
-    { headers: "/*\n  X: y\n/chat/*\n  Content-Security-Policy: x\n" },
-    /No headers rule for \/account/u,
-  );
-});
-
-test("the site-wide and asset rules never carry a policy and every rule is unique", () => {
-  const rules = (extra: string) =>
-    `${extra}/account/*\n  Content-Security-Policy: ${csp("account")}\n/chat/*\n  Content-Security-Policy: ${csp("chat")}\n`;
-  refuses(
-    { headers: rules("/*\n  Content-Security-Policy: default-src *\n") },
-    /\/\* rule must not carry a policy/u,
-  );
-  refuses(
-    { headers: rules("/assets/*\n  Content-Security-Policy: default-src *\n") },
-    /\/assets\/\* rule must not carry a policy/u,
-  );
-  refuses({ headers: `${rules("")}/chat/*\n  X: y\n` }, /Duplicate headers rule/u);
-});
-
-test("staging writes the verified files without the manifest into a fresh directory of the fixed name", async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), "cloud71-"));
-  try {
-    const target = path.join(parent, proofAssetsDirName);
-    await writeFile(path.join(parent, "keep.txt"), "kept");
-    const built = bundle();
-    const verified = verifyProfileBundle(built.archive, built.digest);
-    // Stale content of an earlier staging never survives.
-    await stageProfileAssets(verified, target);
-    await writeFile(path.join(target, "stale.txt"), "stale");
-    assert.equal(await stageProfileAssets(verified, target), 6);
-    assert.deepEqual((await readdir(target)).sort(), [
-      "_headers",
-      "account",
-      "assets",
-      "chat",
-      "favicon.svg",
-      "robots.txt",
-    ]);
-    assert.equal(await readFile(path.join(target, "account/index.html"), "utf8"), page("account"));
-    await assert.rejects(stat(path.join(target, "manifest.json")));
-    assert.equal(await readFile(path.join(parent, "keep.txt"), "utf8"), "kept");
-    await assert.rejects(
-      stageProfileAssets(verified, path.join(parent, "elsewhere")),
-      /Unexpected staging/u,
-    );
-  } finally {
-    await rm(parent, { recursive: true, force: true });
-  }
-});
-
-test("an inline script is found in every start-tag form and must be covered in script-src itself", () => {
-  const uncovered = /does not cover an inline script/u;
-  refuses(
-    { pages: { "chat/index.html": page("chat", "<script/x>window.other = 1;</script>") } },
-    uncovered,
-  );
-  refuses(
-    { pages: { "chat/index.html": page("chat", "<script\n>window.other = 1;</script>") } },
-    uncovered,
-  );
-  // A src that only appears inside another attribute value or in a slash-separated form is not an external script.
-  refuses(
-    {
-      pages: {
-        "chat/index.html": page("chat", '<script data-x="src=1">window.other = 1;</script>'),
-      },
+  // The encodings of the root app files and the framework are served as the Web publish writes them.
+  const verified = accepts({
+    files: {
+      "app.css.br": brotliCompressSync("body{margin:0}"),
+      "favicon.svg.gz": gzipSync(Buffer.from("<svg/>")),
     },
-    uncovered,
-  );
-  // An external script (a real src attribute, in any form) needs no hash; its body text is not executed inline.
-  for (const external of [
-    "<script src=/assets/a.js></script>",
-    "<script/src=/assets/a.js></script>",
-  ]) {
-    const built = bundle({ pages: { "chat/index.html": page("chat", external) } });
-    assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
-  }
-  // The hash must be in script-src: the same hash in style-src does not cover the script.
-  const hash = `'sha256-${createHash("sha256").update('window.p="chat";').digest("base64")}'`;
+  });
+  assert(verified.files.some((file) => file.path === "app.css.br"));
+});
+
+test("the two profile pages are one shell and every reference stays on the root", () => {
+  refuses({ files: { "chat/index.html": profileShell.replace("Loading", "Wait") } }, /one application shell/u);
+  refuses(withShell((html) => html.replace(/\n/gu, "\r\n")), /must use LF line ends/u);
+  refuses(withShell((html) => html.replace('<base href="/" />', "")), /must set exactly one base/u);
   refuses(
-    {
-      csp: {
-        chat: `default-src 'self'; script-src 'self'; style-src 'self' ${hash}; connect-src 'self'; object-src 'none'`,
-      },
-    },
-    uncovered,
+    withShell((html) => html.replace('<base href="/" />', '<base href="/" /><base href="/" />')),
+    /must set exactly one base/u,
+  );
+  refuses(withShell((html) => html.replace('<base href="/" />', '<base href="/account/" />')), /sets a base other than/u);
+  refuses(
+    withShell((html) => html.replace("_framework/blazor.webassembly.js", "https://cdn.example.com/b.js")),
+    /references another origin/u,
+  );
+  refuses(
+    withShell((html) => html.replace("_framework/blazor.webassembly.js", "//cdn.example.com/b.js")),
+    /references another origin/u,
+  );
+  refuses(
+    withShell((html) => html.replace("_framework/blazor.webassembly.js", "../_framework/blazor.webassembly.js")),
+    /climbs out of the root/u,
+  );
+  refuses(
+    withShell((html) => html.replace('<a href="" class="reload">', '<a href="javascript:void(0)" class="reload">')),
+    /references another origin/u,
+  );
+  refuses(
+    withShell((html) => html.replace('<a href="" class="reload">', '<a href="\\\\evil" class="reload">')),
+    /control character, a backslash or an entity/u,
+  );
+  refuses(
+    withShell((html) => html.replace('<a href="" class="reload">', '<a href="&#47;evil" class="reload">')),
+    /control character, a backslash or an entity/u,
+  );
+  refuses(
+    withShell((html) => html.replace("_framework/blazor.webassembly.js", "_framework/missing.js")),
+    /references a file the bundle does not hold/u,
+  );
+  refuses(
+    withShell((html) => html.replace("<title>", '<meta http-equiv="refresh" content="0;url=/x" /><title>')),
+    /has a meta http-equiv/u,
+  );
+  // Empty and fragment references, relative references and the root base are the reviewed shape: accepted.
+  assert.equal(accepts().digest.length, 64);
+});
+
+test("each profile's policy is the one its page derives, with the exact WebAssembly token set", () => {
+  const derived = policyOf();
+  assert.equal(
+    derived,
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+  );
+  // An inline script of the page is covered by its hash in script-src, and by nothing else.
+  const inline = profileShell.replace("</body>", "<script>window.p=1;</script></body>");
+  assert.match(expectedProfilePolicy(inline), /script-src 'self' 'wasm-unsafe-eval' 'sha256-/u);
+  accepts(withShell((html) => html.replace("</body>", "<script>window.p=1;</script></body>")));
+  refuses(
+    { shell: inline, csp: { account: derived, chat: derived } },
+    /does not match its page/u,
+  );
+  // A policy that drops WebAssembly, adds unsafe-eval or widens a directive is refused.
+  refuses({ csp: { account: derived.replace(" 'wasm-unsafe-eval'", "") } }, /does not match its page/u);
+  refuses(
+    { csp: { account: derived.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval' 'unsafe-eval'") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { account: derived.replace("connect-src 'self'", "connect-src *") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { chat: derived.replace("default-src 'self'", "default-src 'self' https:") } },
+    /does not match its page/u,
   );
   refuses(
     {
-      csp: {
-        chat: `default-src 'self'; x-script-src 'self' ${hash}; connect-src 'self'; object-src 'none'`,
+      manifest: (manifest: ManifestDocument) => {
+        const row = manifest.profiles.account;
+        assert(row);
+        row.csp = "default-src 'self'";
       },
     },
-    uncovered,
+    /manifest policy of account differs from its rule/u,
   );
-});
-
-test("default-src and connect-src must be exactly 'self' and a directive may not repeat", () => {
-  const hash = `'sha256-${createHash("sha256").update('window.p="chat";').digest("base64")}'`;
-  const policy = (extra: string) => `${extra}; script-src 'self' ${hash}; object-src 'none'`;
-  const good = policy("default-src 'self'; connect-src 'self'");
-  const built = bundle({ csp: { chat: good } });
-  assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
-  for (const bad of [
-    "default-src 'self' https:; connect-src 'self'",
-    "default-src 'self'; connect-src 'self' https://other.example.test",
-    "default-src 'self'; x-connect-src 'self'",
-    "default-src 'self'; connect-src 'self'; connect-src 'self'",
-    "x-default-src 'self'; connect-src 'self'",
-    "default-src 'none'; connect-src 'self'",
-  ])
-    refuses({ csp: { chat: policy(bad) } }, /exactly 'self'|repeats the/u);
+  // The policy is parsed as directives, and a repeated directive is refused.
   assert.deepEqual(
     [...parsePolicy("a 'self' b; ;C  x y;")],
     [
@@ -492,131 +528,44 @@ test("default-src and connect-src must be exactly 'self' and a directive may not
   assert.throws(() => parsePolicy("a x; A y"), /repeats the a directive/u);
 });
 
-test("page references are refused unless they are plain same-origin paths, in every quoting form", () => {
-  const other = /another origin/u;
-  for (const tag of [
-    "<a href='https://cdn.example.test/x'>x</a>",
-    "<img src=https://cdn.example.test/x.png>",
-    "<img src=//cdn.example.test/x.png>",
-    "<a href='//cdn.example.test/'>x</a>",
-    '<a href = "https://cdn.example.test/">x</a>',
-    '<A HREF="https://cdn.example.test/">x</A>',
-    '<a href="/\\cdn.example.test/x">x</a>',
-    "<a href=/\\cdn.example.test/x>x</a>",
-    '<a href="\\\\cdn.example.test/x">x</a>',
-    '<a href="/ok/\\x">x</a>',
-    '<a href="/\tcdn.example.test/">x</a>',
-    '<a href="data:text/html,x">x</a>',
-    '<a href="javascript:void(0)">x</a>',
-  ])
-    refuses({ pages: { "account/index.html": page("account", tag) } }, other);
-  // Plain absolute paths, fragments and all three quoting forms of them pass.
-  const ok = `<a href="/a">1</a><a href='/b'>2</a><a href=/c>3</a><a href="#x">4</a>`;
-  const built = bundle({ pages: { "account/index.html": page("account", ok) } });
-  assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
+test("a policy over the Cloudflare header line budget is refused", () => {
+  const scripts = Array.from(
+    { length: 40 },
+    (_, index) => `<script>window.n${index}=${index};</script>`,
+  ).join("");
+  refuses(withShell((html) => html.replace("</body>", `${scripts}</body>`)), /exceeds the header line budget/u);
 });
 
-test("slash-separated attributes, entities and every other url-bearing form stay on this origin", () => {
-  const other = /violates the same-origin rules/u;
-  const evil = "https://evil.example.test/x";
-  for (const tag of [
-    `<script/src=${evil}.js></script>`,
-    `<link/href=${evil}.css rel=stylesheet>`,
-    `<img/src=${evil}.png>`,
-    `<img\n/src=${evil}.png>`,
-    `<img / src='${evil}.png'>`,
-    `<a title="a>b" href="${evil}">x</a>`,
-    '<a href="/&#x2F;evil.example.test">x</a>',
-    '<a href="/&#92;evil.example.test">x</a>',
-    '<a href="/&sol;evil.example.test">x</a>',
-    '<a href="/a&amp;b">x</a>',
-    '<a href="#a&b">x</a>',
-    `<img srcset="${evil}.png 1x, /b.png 2x">`,
-    '<img srcset="/a.png 1x, //evil.example.test/b.png 2x">',
-    '<img srcset="/a&#x2F;b.png 1x">',
-    `<meta http-equiv=refresh content="0;url=${evil}">`,
-    '<meta http-equiv="Refresh" content="0;url=/ok">',
-    `<form action="${evil}"></form>`,
-    `<form><button formaction="${evil}">x</button></form>`,
-    `<object data="${evil}"></object>`,
-    `<video poster="${evil}.png"></video>`,
-    '<base href="/ok/">',
-    `<html manifest=${evil}></html>`,
-    `<a ping="${evil}">x</a>`,
-    `<blockquote cite="${evil}">x</blockquote>`,
-    `<table background="${evil}.png"></table>`,
-    // The first of two equal attributes is the one a browser uses.
-    `<img src=${evil}.png src=/ok.png>`,
-    `<style>@import url(${evil}.css);</style>`,
-    `<style>@import "${evil}.css";</style>`,
-    "<style>@import url('//evil.example.test/x.css');</style>",
-    '<STYLE>@IMPORT URL("https://evil.example.test/x.css")</STYLE >',
-  ])
-    refuses({ pages: { "account/index.html": page("account", tag) } }, other);
-  refuses({ extra: { "assets/x.css": `@import url(${evil}.css);` } }, /assets\/x\.css violates/u);
-  refuses({ extra: { "assets/x.css": '@import "//evil.example.test/x.css";' } }, /assets\/x\.css/u);
-  const ok = [
-    '<img src="/a.png" srcset="/a.png 1x, /b.png 2x"><form action="/ok"></form>',
-    "<style>@import url('/assets/x.css');</style>",
-    "<SCRIPT SRC=/assets/other.js></SCRIPT>",
-    // An external script's body text is not executed inline and needs no hash.
-    "<script src=/assets/a.js>not executed</script>",
-    // Text in a script body is not markup.
-    '<script type="module">const x = "<img src=https://evil.example.test/y.png>";</script>',
-  ];
-  for (const tag of ok) {
-    const built = bundle({
-      pages: { "account/index.html": page("account", tag) },
-      csp: {
-        account: csp("account").replace(
-          "script-src 'self'",
-          `script-src 'self' '${`sha256-${createHash("sha256")
-            .update(
-              tag.includes('type="module"')
-                ? `const x = "<img src=https://evil.example.test/y.png>";`
-                : "",
-            )
-            .digest("base64")}`}'`,
-        ),
-      },
-      extra: { "assets/x.css": "@import url(/assets/y.css); body{color:red}" },
-    });
-    assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest, tag);
-  }
-});
-
-test("script-src allows only 'self' and sha256 hashes", () => {
-  for (const source of [
-    "https:",
-    "data:",
-    "https://cdn.example.test",
-    "'strict-dynamic'",
-    "'nonce-abc123'",
-    "'sha256-short'",
-    `'sha384-${"A".repeat(64)}'`,
-    "blob:",
-    "'self'x",
-  ])
-    refuses(
-      { csp: { chat: csp("chat").replace("script-src 'self'", `script-src 'self' ${source}`) } },
-      /script-src allows a source other than/u,
-    );
-  // The legitimate policy still passes (its own hash is a sha256 source).
-  const built = bundle();
-  assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
-});
-
-test("a tag-like text in a covered script body neither hides a real tag after it nor counts as one", () => {
-  const body = "if (a<b) { run(); }";
-  const hash = `'sha256-${createHash("sha256").update(body).digest("base64")}'`;
-  const withHash = (html: string) => ({
-    pages: { "account/index.html": page("account", html) },
-    csp: { account: csp("account").replace("script-src 'self'", `script-src 'self' ${hash}`) },
-  });
+test("the headers file is the reviewed one: rules unique, no policy on the shared rules, LF only", () => {
+  const expected = accepts().headers;
+  refuses({ headers: `${expected}/account/*\n  X-A: b\n` }, /Duplicate headers rule \/account\/\*/u);
   refuses(
-    withHash(`<script>${body}</script><img src=https://evil.example.test/y.png>`),
-    /another origin/u,
+    { headers: expected.replace("/*\n  X-Content-Type-Options", "/*\n  Content-Security-Policy: default-src 'self'\n  X-Content-Type-Options") },
+    /must not carry a policy/u,
   );
-  const built = bundle(withHash(`<script>${body}</script><img src=/y.png>`));
-  assert.equal(verifyProfileBundle(built.archive, built.digest).digest, built.digest);
+  refuses({ headers: `${expected}/extra/*\n  X-A: b\n` }, /differs from the reviewed rules/u);
+  refuses({ headers: expected.replace(/\n/gu, "\r\n") }, /headers file must use LF/u);
+});
+
+test("stylesheets of the bundle import only paths that stay on the root", () => {
+  refuses({ files: { "app.css": '@import "https://cdn.example.com/x.css";' } }, /violates the same-origin rules/u);
+  accepts({ files: { "app.css": '@import "/fonts.css";' } });
+});
+
+test("staging writes the verified files without the manifest into a fresh directory of the fixed name", async () => {
+  const verified = accepts();
+  const parent = await mkdtemp(path.join(tmpdir(), "arcforges-proof-"));
+  try {
+    const target = path.join(parent, proofAssetsDirName);
+    assert.equal(await stageProfileAssets(verified, target), verified.files.length);
+    assert.equal(await stageProfileAssets(verified, target), verified.files.length);
+    assert((await stat(path.join(target, "_headers"))).isFile());
+    await assert.rejects(stat(path.join(target, "manifest.json")));
+    await assert.rejects(
+      stageProfileAssets(verified, path.join(parent, "elsewhere")),
+      /Unexpected staging directory/u,
+    );
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
 });

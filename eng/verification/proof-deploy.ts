@@ -5,6 +5,7 @@
 // Wrangler through a runner-local file and never printed, committed or sent anywhere else.
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -141,16 +142,27 @@ export function generateSecrets(
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// The profile bundle: strict reader and verification. The bundle is a plain POSIX ustar written by the Web
-// build (apps/app/scripts/bundle.ts); this reader accepts exactly that shape and refuses everything else.
+// The profile bundle: strict reader and verification. The bundle is a plain POSIX ustar written by the Web build
+// (tools/ArcForges.Web.Tooling/Profiles/ProfileBundle.cs, WEB.40); this reader accepts exactly that shape and refuses
+// everything else. The served layout is the Web's: the shells at /account/ and /chat/ under base href "/", the framework
+// at the root, and the root app files.
 
 const block = 512;
 const sha256Hex = (value: Uint8Array) => createHash("sha256").update(value).digest("hex");
 const maxFiles = 400;
 const maxBundleBytes = 24 * 1024 * 1024;
+const headerLineBudget = 1800;
 const profileNames = ["account", "chat"] as const;
 const manifestName = "manifest.json";
 const headersName = "_headers";
+/** The unfingerprinted framework loaders, revalidated on every load (ProfileBundle.UnfingerprintedFrameworkLoaders). */
+const frameworkLoaders = ["_framework/blazor.webassembly.js", "_framework/dotnet.js"];
+/** The root files of the App publish that the bundle serves. The application shell itself is not served at the root. */
+const appRootFiles = ["app.css", "favicon.svg", "robots.txt"];
+/** A fingerprinted framework file: ten lower-case characters before the extension, as the SDK names them. */
+const fingerprintedFramework = /^_framework\/[^/]+\.[a-z0-9]{10}\.(?:js|wasm|dat)$/u;
+/** The suffix of a precompressed sibling of a plain file: Brotli (.br) or gzip (.gz). */
+const encodingSuffix = /\.(?:br|gz)$/u;
 
 export interface BundleEntry {
   path: string;
@@ -230,8 +242,10 @@ export function readBundleArchive(archive: Uint8Array): BundleEntry[] {
 export interface VerifiedBundle {
   digest: string;
   manifest: BundleManifest;
-  /** Every file to stage (the manifest is not served). */
+  /** Every served file, including the headers file; the manifest is not served. */
   files: BundleEntry[];
+  /** The headers file as the bundle writes it. */
+  headers: string;
 }
 
 interface StartTag {
@@ -274,6 +288,7 @@ function startTags(html: string): StartTag[] {
   return tags;
 }
 
+/** The sha256 source of every non-empty inline script body of a page (the Web's policy derivation). */
 function inlineScriptHashes(html: string): string[] {
   const hashes: string[] = [];
   for (const tag of startTags(html)) {
@@ -288,12 +303,60 @@ function inlineScriptHashes(html: string): string[] {
   return hashes;
 }
 
-/** True for a plain same-origin absolute path (or a fragment); entities, backslashes and control characters never are. */
-function samePath(reference: string): boolean {
-  if (reference.startsWith("#")) return !/[&\\\t\n\r]/u.test(reference);
-  return (
-    reference.startsWith("/") && !reference.startsWith("//") && !/[&\\\t\n\r]/u.test(reference)
-  );
+/** The inline script sources of pages: unique and sorted, as the Web's SortedSet holds them. */
+function inlineHashSet(pages: string[]): string[] {
+  const hashes = new Set<string>();
+  for (const html of pages) for (const hash of inlineScriptHashes(html)) hashes.add(hash);
+  return [...hashes].sort();
+}
+
+/** The policy text that follows the script sources (WasmContentSecurityPolicy.FromHostPages). */
+function policyText(scriptSources: string[]): string {
+  return `default-src 'self'; script-src ${scriptSources.join(" ")}; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`;
+}
+
+/** The App profile policy the Web build derives from its shell: 'self', 'wasm-unsafe-eval' and the inline hashes. */
+export function expectedProfilePolicy(page: string): string {
+  return policyText(["'self'", "'wasm-unsafe-eval'", ...inlineHashSet([page])]);
+}
+
+/** The headers file the Web build writes for the two App profiles (ProfileBundle.HeadersText), byte for byte. */
+export function expectedProfileHeaders(policies: Record<string, string | undefined>): string {
+  const immutable = "  Cache-Control: public, max-age=31536000, immutable, no-transform";
+  const lines = [
+    "/*",
+    "  X-Content-Type-Options: nosniff",
+    "  Referrer-Policy: no-referrer",
+    "  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()",
+    "  X-Robots-Tag: noindex, nofollow",
+  ];
+  for (const name of profileNames)
+    lines.push(
+      `/${name}/*`,
+      `  Content-Security-Policy: ${policies[name] ?? ""}`,
+      "  X-Frame-Options: DENY",
+      "  Cache-Control: public, no-cache, no-transform",
+    );
+  lines.push("/assets/*", "  ! Cache-Control", immutable, "/_framework/*", "  ! Cache-Control", immutable);
+  for (const loader of frameworkLoaders)
+    lines.push(`/${loader}`, "  ! Cache-Control", "  Cache-Control: public, no-cache, no-transform");
+  return `${lines.join("\n")}\n`;
+}
+
+/** Why a reference leaves the root, or null when it stays on this origin. Relative references resolve to the root. */
+function referenceProblem(reference: string, relative: boolean): string | null {
+  const controlOrEntity =
+    reference.includes("\\") ||
+    reference.includes("&") ||
+    [...reference].some((character) => character.charCodeAt(0) < 0x20 || character === "\x7f");
+  if (controlOrEntity) return "uses a control character, a backslash or an entity";
+  if (reference === "" || reference.startsWith("#")) return null;
+  if (reference.startsWith("//") || /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(reference))
+    return "references another origin";
+  const pathPart = reference.split(/[?#]/u, 1)[0] ?? "";
+  if (pathPart.split("/").includes("..")) return "climbs out of the root";
+  if (!relative && !reference.startsWith("/")) return "uses a relative reference";
+  return null;
 }
 
 /** The url attributes whose value must stay on this origin. */
@@ -310,38 +373,70 @@ const urlAttributes = [
   "manifest",
 ];
 
-/** Everything in a page that could reach another origin or change its base; one message per violation. */
-function pageViolations(html: string): string[] {
+/** The served file a script, stylesheet or icon tag names (the root is the base), or undefined when it names none. */
+function loadedFile(tag: StartTag): string | undefined {
+  const rel = tag.attributes.get("rel") ?? "";
+  const loads = /(?:^|\s)(?:stylesheet|icon)(?:\s|$)/iu.test(rel);
+  const value =
+    tag.name === "script"
+      ? tag.attributes.get("src")
+      : tag.name === "link" && loads
+        ? tag.attributes.get("href")
+        : undefined;
+  if (value === undefined || value.startsWith("#")) return undefined;
+  return value.startsWith("/") ? value.slice(1) : value;
+}
+
+interface PageRules {
+  /** Whether relative references are allowed (the App shells, with base href "/"). */
+  relative: boolean;
+  /** Whether a base element is allowed; when it is, it must be exactly <base href="/">. */
+  base: boolean;
+  /** The files of the bundle that scripts, stylesheets and icons may load. */
+  files: ReadonlySet<string>;
+}
+
+/** Everything in a page that could reach another origin, change its base or load a file the bundle does not hold. */
+function pageViolations(html: string, rules: PageRules): string[] {
   const problems: string[] = [];
+  const check = (attribute: string, value: string) => {
+    const problem = referenceProblem(value, rules.relative);
+    if (problem !== null) problems.push(`${problem}: ${attribute}=${value}`);
+  };
   for (const tag of startTags(html)) {
     for (const attribute of urlAttributes) {
       const value = tag.attributes.get(attribute);
-      if (value !== undefined && !samePath(value))
-        problems.push(`references another origin: ${attribute}=${value}`);
+      if (value !== undefined) check(attribute, value);
     }
     const srcset = tag.attributes.get("srcset");
     if (srcset !== undefined)
-      for (const candidate of srcset.split(",")) {
-        const url = candidate.trim().split(/\s+/u)[0] ?? "";
-        if (!samePath(url)) problems.push(`references another origin: srcset ${url}`);
-      }
-    if (tag.name === "base") problems.push("sets a base");
+      for (const candidate of srcset.split(","))
+        check("srcset", candidate.trim().split(/\s+/u)[0] ?? "");
+    if (tag.name === "base") {
+      if (!rules.base) problems.push("sets a base");
+      else if (tag.attributes.size !== 1 || tag.attributes.get("href") !== "/")
+        problems.push("sets a base other than /");
+    }
     if (tag.name === "meta" && tag.attributes.has("http-equiv"))
       problems.push(`has a meta http-equiv: ${tag.attributes.get("http-equiv")}`);
+    const file = loadedFile(tag);
+    if (file !== undefined && !rules.files.has(file))
+      problems.push(`references a file the bundle does not hold: ${file}`);
   }
   for (const style of html.matchAll(/<style[^>]*>([\s\S]*?)<\/style[^>]*>/giu))
-    problems.push(...cssViolations(style[1] ?? ""));
+    problems.push(...cssViolations(style[1] ?? "", rules.relative));
   return problems;
 }
 
-/** A stylesheet may import only same-origin paths. */
-function cssViolations(css: string): string[] {
+/** A stylesheet may import only paths that stay on this origin. */
+function cssViolations(css: string, relative: boolean): string[] {
   const problems: string[] = [];
   for (const rule of css.matchAll(
     /@import\s*(?:url\(\s*)?(?:"([^"]*)"|'([^']*)'|([^\s)"';]*))/giu,
   )) {
     const target = rule[1] ?? rule[2] ?? rule[3] ?? "";
-    if (!samePath(target)) problems.push(`imports another origin: ${target}`);
+    const problem = referenceProblem(target, relative);
+    if (problem !== null) problems.push(`imports: ${problem}: ${target}`);
   }
   return problems;
 }
@@ -370,9 +465,66 @@ function headerRules(headers: string): Map<string, string> {
   return rules;
 }
 
+/** The policy of one App profile: a restrictive set whose script sources are exactly its page's sources. */
+function checkProfilePolicy(name: string, policy: string, html: string): void {
+  const directives = parsePolicy(policy);
+  assert.deepEqual(directives.get("default-src"), ["'self'"], `${name} default-src must be exactly 'self'.`);
+  assert.deepEqual(directives.get("connect-src"), ["'self'"], `${name} connect-src must be exactly 'self'.`);
+  assert.deepEqual(directives.get("style-src"), ["'self'"], `${name} style-src must be exactly 'self'.`);
+  for (const [directive, sources] of directives)
+    for (const source of sources)
+      assert(
+        source !== "'unsafe-inline'" && source !== "'unsafe-eval'" && !source.includes("*"),
+        `${name} policy is not restrictive: ${directive} ${source}`,
+      );
+  const scriptSources = directives.get("script-src") ?? [];
+  assert(
+    scriptSources.includes("'wasm-unsafe-eval'"),
+    `${name} script-src must allow WebAssembly compilation.`,
+  );
+  for (const source of scriptSources)
+    assert(
+      source === "'self'" ||
+        source === "'wasm-unsafe-eval'" ||
+        /^'sha256-[A-Za-z0-9+/]{43}='$/u.test(source),
+      `${name} script-src allows a source other than 'self', 'wasm-unsafe-eval' and sha256 hashes: ${source}`,
+    );
+  for (const hash of inlineHashSet([html]))
+    assert(
+      scriptSources.includes(hash),
+      `${name} policy does not cover an inline script of its page in script-src.`,
+    );
+}
+
+/** Whether a precompressed file decodes to exactly its plain file. */
+function decodesTo(bytes: Uint8Array, encoding: string, plain: Uint8Array): boolean {
+  try {
+    const decoded = encoding === ".br" ? brotliDecompressSync(bytes) : gunzipSync(bytes);
+    return Buffer.compare(decoded, plain) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** The plain files the profile bundle serves. Anything else is refused. */
+function servedPlain(entryPath: string): boolean {
+  return (
+    entryPath === headersName ||
+    profileNames.some((name) => entryPath === `${name}/index.html`) ||
+    appRootFiles.includes(entryPath) ||
+    frameworkLoaders.includes(entryPath) ||
+    fingerprintedFramework.test(entryPath)
+  );
+}
+
+/** Only the root app files and the framework may have precompressed siblings. */
+function encodable(entryPath: string): boolean {
+  return appRootFiles.includes(entryPath) || entryPath.startsWith("_framework/");
+}
+
 /**
- * Verifies the bundle bytes against the pinned digest, then the archive, the manifest, every file, the layout, the
- * pages and the headers. Anything unexpected refuses the bundle; nothing is repaired or skipped.
+ * Verifies the bundle bytes against the pinned digest, then the archive, the manifest, every file, the served layout,
+ * the pages, the policies and the headers. Anything unexpected refuses the bundle; nothing is repaired or skipped.
  */
 export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): VerifiedBundle {
   assert.match(pinnedDigest, /^[0-9a-f]{64}$/u, "The pinned digest is not a SHA-256.");
@@ -383,32 +535,52 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
   const manifest = JSON.parse(Buffer.from(first.bytes).toString("utf8")) as BundleManifest;
   assert.equal(manifest.schema, 1, "Unknown bundle manifest schema.");
   assert.deepEqual(
+    Object.keys(manifest.profiles ?? {}).sort(),
+    [...profileNames],
+    "The manifest must name exactly the account and chat profiles.",
+  );
+  assert.deepEqual(
     files.map((entry) => entry.path),
     Object.keys(manifest.files).sort(),
     "The archive does not hold exactly the manifest's files in order.",
   );
+  const byPath = new Map(files.map((entry) => [entry.path, entry]));
   for (const entry of files) {
     const row = manifest.files[entry.path];
     assert(row, `Unlisted file ${entry.path}`);
     assert.equal(row.bytes, entry.bytes.byteLength, `Size of ${entry.path}`);
     assert.equal(row.sha256, sha256Hex(entry.bytes), `Content of ${entry.path}`);
   }
-  const pages = profileNames.map((name) => `${name}/index.html`);
   for (const entry of files) {
-    const allowed =
-      entry.path === headersName ||
-      entry.path === "favicon.svg" ||
-      entry.path === "robots.txt" ||
-      pages.includes(entry.path) ||
-      /^assets\/[A-Za-z0-9_][A-Za-z0-9._-]*$/u.test(entry.path);
-    assert(allowed, `The bundle holds a file outside the served layout: ${entry.path}`);
+    const encoding = encodingSuffix.exec(entry.path)?.[0];
+    if (encoding === undefined) {
+      assert(servedPlain(entry.path), `The bundle holds a file outside the served layout: ${entry.path}`);
+    } else {
+      const plainPath = entry.path.slice(0, -encoding.length);
+      const plain = byPath.get(plainPath);
+      assert(
+        plain !== undefined && servedPlain(plainPath) && encodable(plainPath),
+        `The bundle holds an encoded file without its plain file: ${entry.path}`,
+      );
+      assert(
+        decodesTo(entry.bytes, encoding, plain.bytes),
+        `${entry.path} does not decode to its plain file.`,
+      );
+    }
     assert(!entry.path.endsWith(".map"), `A source map is in the bundle: ${entry.path}`);
   }
   const text = (name: string) => {
-    const entry = files.find((candidate) => candidate.path === name);
+    const entry = byPath.get(name);
     assert(entry, `The bundle has no ${name}.`);
     return Buffer.from(entry.bytes).toString("utf8");
   };
+  // Both profiles are one application shell, so the two pages are the same bytes.
+  assert.equal(
+    text("account/index.html"),
+    text("chat/index.html"),
+    "The two profile pages must be one application shell.",
+  );
+  assert(byPath.has("_framework/blazor.webassembly.js"), "The bundle has no WebAssembly loader.");
   const headers = text(headersName);
   assert(!headers.includes("\r"), "The headers file must use LF line ends.");
   const rules = headerRules(headers);
@@ -417,10 +589,22 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
       !(rules.get(pattern) ?? "").includes("Content-Security-Policy"),
       `The ${pattern} rule must not carry a policy.`,
     );
+  const plainNames = new Set(files.map((entry) => entry.path).filter((p) => !encodingSuffix.test(p)));
+  const policies: Record<string, string> = {};
   for (const name of profileNames) {
     const html = text(`${name}/index.html`);
     // The policy hashes are of the bytes a browser executes: CRLF in a page would invalidate them.
     assert(!html.includes("\r"), `${name}/index.html must use LF line ends.`);
+    assert.equal(
+      startTags(html).filter((tag) => tag.name === "base").length,
+      1,
+      `${name}/index.html must set exactly one base.`,
+    );
+    assert.deepEqual(
+      pageViolations(html, { relative: true, base: true, files: plainNames }),
+      [],
+      `${name} page violates the same-origin rules`,
+    );
     const rule = rules.get(`/${name}/*`);
     assert(rule, `No headers rule for /${name}/*.`);
     const policy = /^ {2}Content-Security-Policy: (.+)$/mu.exec(rule)?.[1] ?? "";
@@ -429,39 +613,34 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
       policy,
       `The manifest policy of ${name} differs from its rule.`,
     );
-    const directives = parsePolicy(policy);
-    assert.deepEqual(
-      directives.get("default-src"),
-      ["'self'"],
-      `${name} default-src must be exactly 'self'.`,
+    assert.equal(
+      manifest.profiles[name]?.page,
+      `${name}/index.html`,
+      `The manifest names another page for ${name}.`,
     );
-    assert.deepEqual(
-      directives.get("connect-src"),
-      ["'self'"],
-      `${name} connect-src must be exactly 'self'.`,
+    assert.match(
+      manifest.profiles[name]?.buildDigest ?? "",
+      /^[0-9a-f]{64}$/u,
+      `The build digest of ${name} is not a SHA-256.`,
     );
-    assert(!/unsafe-inline|unsafe-eval|\*/u.test(policy), `${name} policy is not restrictive.`);
-    const scriptSources = directives.get("script-src") ?? [];
-    for (const source of scriptSources)
-      assert(
-        source === "'self'" || /^'sha256-[A-Za-z0-9+/]{43}='$/u.test(source),
-        `${name} script-src allows a source other than 'self' and sha256 hashes: ${source}`,
-      );
-    for (const hash of inlineScriptHashes(html))
-      assert(
-        scriptSources.includes(hash),
-        `${name} policy does not cover an inline script of its page in script-src.`,
-      );
-    assert.deepEqual(pageViolations(html), [], `${name} page violates the same-origin rules`);
+    assert.equal(policy, expectedProfilePolicy(html), `${name} policy does not match its page.`);
+    assert(policy.length < headerLineBudget, `${name} policy exceeds the header line budget.`);
+    checkProfilePolicy(name, policy, html);
+    policies[name] = policy;
   }
+  assert.equal(
+    headers,
+    expectedProfileHeaders(policies),
+    "The headers file differs from the reviewed rules.",
+  );
   for (const entry of files)
     if (entry.path.endsWith(".css"))
       assert.deepEqual(
-        cssViolations(Buffer.from(entry.bytes).toString("utf8")),
+        cssViolations(Buffer.from(entry.bytes).toString("utf8"), true),
         [],
         `${entry.path} violates the same-origin rules`,
       );
-  return { digest, manifest, files };
+  return { digest, manifest, files, headers };
 }
 
 /** Writes the verified files (not the manifest) into a fresh staging directory named for the proof assets. */
