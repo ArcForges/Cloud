@@ -40,6 +40,16 @@ public sealed class EvaluatedRepositoryGate
         "TheWakePathIsDeclaredToTheIngressOnlyUnderTheFoundationConfiguration",
     ];
 
+    /// <summary>The real tests of the alarm client's schedule path (HAR.40 alarm arming).</summary>
+    private static readonly string[] AlarmScheduleTests =
+    [
+        "AScheduleIsOneClosedPostToTheScheduleRouteOfTheHarnessHost", "AnyReplyOtherThanTheExactScheduledReplyIsARefusal",
+        "ATransportFailureIsAFailClosedRefusal", "ACallerThatIsCancelledOrAHungReplyAreFailClosedRefusals",
+    ];
+
+    /// <summary>The real tests of the alarm client's cancel path (HAR.40 alarm arming).</summary>
+    private static readonly string[] AlarmCancelTests = ["ACancelIsOneClosedRunKeyPostToTheCancelRouteAndItsFailureIsSwallowed"];
+
     /// <summary>The public Cloud API and the real test methods that exercise each member. A new public member fails RP-10 until mapped here.</summary>
     private static readonly (string Api, string Method, string TestType, string[] Tests)[] ApiTests =
     [
@@ -86,6 +96,12 @@ public sealed class EvaluatedRepositoryGate
         ("ArcForges.Cloud.Modules.Task.Harness.Wake.HarnessWakeService", "HandleAsync", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessWakeTests", WakeTests),
         ("ArcForges.Cloud.Modules.Task.Harness.Wake.HarnessWakeEndpoint", "Map", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessWakeTests", RouteTests),
         ("ArcForges.Cloud.Modules.Task.TaskModule", "Map", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessWakeTests", RouteTests),
+        // HAR.40 alarm arming: the alarm port (Abstractions) and its outbound client (Task module). The real tests are the closed-request, fail-closed
+        // and reply suites of HarnessAlarmClientTests; the executor's arm-before-commit order is tested in HarnessAlarmArmingTests.
+        ("ArcForges.Cloud.Modules.IHarnessAlarmPort", "ScheduleAsync", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessAlarmClientTests", AlarmScheduleTests),
+        ("ArcForges.Cloud.Modules.IHarnessAlarmPort", "CancelAsync", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessAlarmClientTests", AlarmCancelTests),
+        ("ArcForges.Cloud.Modules.Task.Harness.Wake.HarnessAlarmClient", "ScheduleAsync", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessAlarmClientTests", AlarmScheduleTests),
+        ("ArcForges.Cloud.Modules.Task.Harness.Wake.HarnessAlarmClient", "CancelAsync", "ArcForges.Cloud.Tests.HarnessFoundation.HarnessAlarmClientTests", AlarmCancelTests),
         .. new[] { "FromInt64", "FromBool", "FromText", "FromBytes", "FromOptionalText", "AsInt64", "AsBool", "AsText", "AsBytes", "AsOptionalText", "AsOptionalInt64", "Equals", "GetHashCode", "ToString" }
             .Select(member => ("ArcForges.Cloud.Modules.PlanValue", member, "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
                 new[] { "PlanValuesAreExactAndNeverDescribeTheirContent", "ARoundTripCarriesExactTypedValuesTheScopeAndTheRecoveryGeneration" })),

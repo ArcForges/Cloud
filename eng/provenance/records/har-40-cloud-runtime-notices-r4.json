@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "har-40-cloud-runtime-notices-r3",
+  "id": "har-40-cloud-runtime-notices-r4",
   "kind": "generated",
   "sourceRepository": "https://github.com/ArcForges/Cloud",
-  "sourceCommit": "df60471bfb366bf82e5a394d103b3d2f52e47133",
+  "sourceCommit": "dff030dfef92e77a661242c555e010dea735d431",
   "sourcePaths": [
     ".dockerignore",
     "Directory.Build.props",
@@ -116,6 +116,7 @@
     "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Application/HelloAgentSlice.cs",
     "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Application/HelloEffectPort.cs",
     "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Domain/HelloSlicePolicy.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessAlarmClient.cs",
     "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessWakeEndpoint.cs",
     "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessWakeService.cs",
     "src/ArcForges.Cloud.Modules.Task/TaskModule.cs",
@@ -212,15 +213,15 @@
       "project": "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
       "package": "arcforges-cloud-container",
       "kind": "native-image-notices",
-      "profile": "eng/provenance/artifact-profiles/cloud-release-r40.json",
-      "sha256": "add320ce41212f77e166e5f399b373c877105016919446225de51db4f0c112c5"
+      "profile": "eng/provenance/artifact-profiles/cloud-release-r41.json",
+      "sha256": "5cbb8536513aa2d82a9ea078cd7b42413838e0f18ae610c5f9f60ffcde326dba"
     }
   ],
   "disposition": "Copy",
   "verification": {
     "kind": "actual-image",
     "command": "Build the locked Dockerfile Native AOT application with the reviewed SDK image digest; preserve the pinned runtime base and its full legal files. Inspect the stopped final image and source receipt under /app/notices. Promote the sealed candidate by its recorded identity without executing the application.",
-    "expected": "Declared build inputs of the Native AOT image (the src compile closure of the Cloud host plus the root build inputs) and the complete legal files, including the published Contracts NOTICE, match the reviewed profile cloud-release-r39. The sealed candidate preserves the inspected image and Worker identities.",
+    "expected": "Declared build inputs of the Native AOT image (the src compile closure of the Cloud host plus the root build inputs) and the complete legal files, including the published Contracts NOTICE, match the reviewed profile cloud-release-r41. The sealed candidate preserves the inspected image and Worker identities.",
     "artifacts": []
   },
   "notice": {
@@ -263,23 +264,24 @@
     "inputs": [
       {
         "repository": "https://github.com/ArcForges/Cloud",
-        "commit": "5a2cdf18afebc308c03496098a822c8079fabb18",
+        "commit": "dff030dfef92e77a661242c555e010dea735d431",
         "paths": [
+          ".dockerignore",
           "Directory.Build.props",
           "Directory.Build.targets",
           "Directory.Packages.props",
+          "Dockerfile",
           "NuGet.Config",
+          "eng/version-sources.json",
           "global.json",
+          "package-lock.json",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessAlarmClient.cs",
           "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+          "src/ArcForges.Cloud/BuildIdentity.cs",
           "src/ArcForges.Cloud/HealthStatus.cs",
           "src/ArcForges.Cloud/HelloEndpoint.cs",
           "src/ArcForges.Cloud/Program.cs",
-          "src/ArcForges.Cloud/packages.lock.json",
-          "Dockerfile",
-          ".dockerignore",
-          "eng/version-sources.json",
-          "package-lock.json",
-          "src/ArcForges.Cloud/BuildIdentity.cs"
+          "src/ArcForges.Cloud/packages.lock.json"
         ],
         "spdx": "AGPL-3.0-only",
         "evidence": [
@@ -382,9 +384,9 @@
     "reviewer": "w-deku-20261008-rev-har-40",
     "reviewedOn": "2026-10-09",
     "decision": "approved",
-    "rationale": "HAR.40 successor of the predecessor records and of the prior release profile, derived at df60471bfb366bf82e5a394d103b3d2f52e47133. The only changed hash-bound input is src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/RunIdentity.cs, whose PinnedSnapshot.IsToken now admits '@' as ModelDispatchOptions.IsToken and the TypeScript envelope token do, so every Workers AI model identifier can be pinned (defect found by the independent review of 1b68cb2). cloud-release-r40 re-derives that input hash by repository-owned derivation from the tree at df60471bfb366bf82e5a394d103b3d2f52e47133; no other input hash changed. The Worker bundle sha256, its input closure, output inputs, exports and external imports are unchanged, and so are the packages, integrity values, licences, NuGet locks, runtime and wrangler inputs and legal files. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40; the decision is approved as written by the authoring worker under the coordinator record review rule (the r2 practice), and the reviewer session verifies it at the exact head. The Native AOT image and the Worker bundle were not rebuilt in a Docker or wrangler deploy here. The predecessor profile, records and receipts stay immutable history.",
-    "baselineCommit": "df60471bfb366bf82e5a394d103b3d2f52e47133",
+    "rationale": "HAR.40 alarm arming successor, derived by the repository tooling at dff030dfef92e77a661242c555e010dea735d431: cloud-release-r41 (profile sha256 5cbb8536513aa2d82a9ea078cd7b42413838e0f18ae610c5f9f60ffcde326dba) is the successor of cloud-release-r40 and binds the changed hash-bound inputs of the alarm arming. The Native AOT closure of the Cloud host gains src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessAlarmClient.cs; HarnessExecutor.cs, HarnessWakePort.cs and HostModules.cs change. The Worker bundle is bound by har-40-cloud-worker-bundle-r4. The packages, licences, legal files and the pinned base and SDK images are unchanged. The record supersedes har-40-cloud-runtime-notices-r3, which stays as history with its decision approved. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40; the decision is approved as written by the authoring worker under the coordinator record review rule (the r2 practice), and the reviewer session verifies it at the exact head. The Native AOT image was not built in Docker here.",
+    "baselineCommit": "dff030dfef92e77a661242c555e010dea735d431",
     "reconciliation": false
   },
-  "supersedes": "har-40-cloud-runtime-notices-r2"
+  "supersedes": "har-40-cloud-runtime-notices-r3"
 }

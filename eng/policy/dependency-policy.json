@@ -13,12 +13,12 @@
     "Directory.Packages.props": "8ae7a5a2f00ba8fad9189a37a65753cfd829fbe531a2454d1df44648911f1794",
     "Dockerfile": "932e9c9f575133302aa21915b34ab5b6e52b9fe35741b87f07093bc8ebe68ffa",
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
-    "eng/provenance/artifact-profiles/cloud-release-r40.json": "add320ce41212f77e166e5f399b373c877105016919446225de51db4f0c112c5",
-    "eng/provenance/records/har-40-cloud-runtime-notices-r3.json": "7367dc062f4b9bc78e0589edc59633ba5ee8b5fe4e12f5c54879d6514635d5fa",
-    "eng/provenance/records/har-40-cloud-worker-bundle-r3.json": "6d97a1f110b903d2b096111416fb12c30849a9cc5d55c5c6df2db7c9cfa20fdc",
+    "eng/provenance/artifact-profiles/cloud-release-r41.json": "5cbb8536513aa2d82a9ea078cd7b42413838e0f18ae610c5f9f60ffcde326dba",
+    "eng/provenance/records/har-40-cloud-runtime-notices-r4.json": "04fa694784228abb803f5cdf13ca69862c47713a7edd958581bc94e246901450",
+    "eng/provenance/records/har-40-cloud-worker-bundle-r4.json": "09b204a04e37a45705f3953f904963189e66a302a535bbc06f98a3c942bfa9cd",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-    "package.json": "ce87b2c0fefad980cf71d5ee224e0078f409eb91ed5af1074276229731c3c74d",
+    "package.json": "934e364a5e342f5046301b356a4d18ebb07cfe0f1acab020e08f3522df00c8c5",
     "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
     "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
     "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -74,13 +74,13 @@
     "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
     "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
     "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-    "wrangler.json": "f0ffa228de21b33d6664d911c32c150ab58f6e194778d1dc7051986bebec9c96"
+    "wrangler.json": "5766a3aa4b155f2bd9874ac7ca7a6291970da17cbf0cabed09e2f13af926796c"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "w-deku-20261008-rev-har-40",
     "date": "2026-10-09",
-    "rationale": "HAR.40 successor of the predecessor records and of the prior release profile, derived at df60471bfb366bf82e5a394d103b3d2f52e47133. The only changed hash-bound input is src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/RunIdentity.cs, whose PinnedSnapshot.IsToken now admits '@' as ModelDispatchOptions.IsToken and the TypeScript envelope token do, so every Workers AI model identifier can be pinned (defect found by the independent review of 1b68cb2). cloud-release-r40 re-derives that input hash by repository-owned derivation from the tree at df60471bfb366bf82e5a394d103b3d2f52e47133; no other input hash changed. The Worker bundle sha256, its input closure, output inputs, exports and external imports are unchanged, and so are the packages, integrity values, licences, NuGet locks, runtime and wrangler inputs and legal files. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40; its decision is recorded as pending until that review approves it. The Native AOT image and the Worker bundle were not rebuilt in a Docker or wrangler deploy here. The predecessor profile, records and receipts stay immutable history. The receipt is the successor of har-40-r8 and names the same packages and checks. Its immutable predecessor stays in history.",
+    "rationale": "HAR.40 successor of har-40-r9, derived by the repository tooling at dff030d (the alarm arming commit). The changed hash-bound inputs are wrangler.json (env.proof binds HARNESS_RUN_ALARM with the migration harness-run-alarm-v1), package.json (the test list gains tests/worker/harness-internal.test.ts) and the superseded release records: cloud-release-r41 binds the Worker and Native AOT inputs that changed (worker/harness/internal/outbound.ts added; run-alarm-core.ts, run-alarm.ts, worker/index.ts, HarnessWakePort.cs, HarnessExecutor.cs and HostModules.cs changed; HarnessAlarmClient.cs added to the Native AOT closure), and the records har-40-cloud-worker-bundle-r4 and har-40-cloud-runtime-notices-r4 bind it. The packages, integrity values, licences, NuGet locks, Dockerfile, base and SDK images and legal files are unchanged. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40; the decision is recorded as approved at write time under the record review rule, to be verified by that reviewer at the exact head. The Docker image build and a wrangler deploy were not run here; the Worker bundle was built by wrangler deploy --dry-run.",
     "inputs": {
       ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -91,12 +91,12 @@
       "Directory.Packages.props": "8ae7a5a2f00ba8fad9189a37a65753cfd829fbe531a2454d1df44648911f1794",
       "Dockerfile": "932e9c9f575133302aa21915b34ab5b6e52b9fe35741b87f07093bc8ebe68ffa",
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
-      "eng/provenance/artifact-profiles/cloud-release-r40.json": "add320ce41212f77e166e5f399b373c877105016919446225de51db4f0c112c5",
-      "eng/provenance/records/har-40-cloud-runtime-notices-r3.json": "7367dc062f4b9bc78e0589edc59633ba5ee8b5fe4e12f5c54879d6514635d5fa",
-      "eng/provenance/records/har-40-cloud-worker-bundle-r3.json": "6d97a1f110b903d2b096111416fb12c30849a9cc5d55c5c6df2db7c9cfa20fdc",
+      "eng/provenance/artifact-profiles/cloud-release-r41.json": "5cbb8536513aa2d82a9ea078cd7b42413838e0f18ae610c5f9f60ffcde326dba",
+      "eng/provenance/records/har-40-cloud-runtime-notices-r4.json": "04fa694784228abb803f5cdf13ca69862c47713a7edd958581bc94e246901450",
+      "eng/provenance/records/har-40-cloud-worker-bundle-r4.json": "09b204a04e37a45705f3953f904963189e66a302a535bbc06f98a3c942bfa9cd",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-      "package.json": "ce87b2c0fefad980cf71d5ee224e0078f409eb91ed5af1074276229731c3c74d",
+      "package.json": "934e364a5e342f5046301b356a4d18ebb07cfe0f1acab020e08f3522df00c8c5",
       "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
       "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
       "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -152,7 +152,7 @@
       "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
       "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
       "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-      "wrangler.json": "f0ffa228de21b33d6664d911c32c150ab58f6e194778d1dc7051986bebec9c96"
+      "wrangler.json": "5766a3aa4b155f2bd9874ac7ca7a6291970da17cbf0cabed09e2f13af926796c"
     },
     "checks": [
       "locked-restore",
@@ -983,7 +983,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["har-40-cloud-runtime-notices-r3", "har-40-cloud-worker-bundle-r3"],
+  "artifactRecords": ["har-40-cloud-runtime-notices-r4", "har-40-cloud-worker-bundle-r4"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -997,7 +997,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/har-40-r9.json",
+  "reviewRecord": "eng/policy/dependency-reviews/har-40-r10.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
