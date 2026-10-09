@@ -97,7 +97,7 @@ export async function runExecutorProof(now = new Date()): Promise<ProofEvidence>
     checks,
     liveNotRun: [
       "Cloudflare D1 fenced writes under a real lease (operator: run the proof environment and kill the Container between a dispatch intent and its outcome).",
-      "Durable Object alarm wake after a real process restart: deferred to HAR.00 (reviewed deferral). No route arms HarnessRunAlarm and the proof environment binds no HarnessRunAlarm, so this is not an operator step for HAR.40.",
+      "Durable Object alarm wake after a real process restart: operator step on proof.arcforges.com (arm a parked run through harness.internal, restart the FoundationContainer, observe the alarm wake that claims the run). The offline arming and Hello read-unavailable wake tests pass; the live observation is not run here (P2-017: no live CI).",
     ],
     notes: [
       "Crash points: claim, reserve, dispatch intent, outcome and yield, each before and after its commit (HarnessCrashTests).",
