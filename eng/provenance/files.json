@@ -14,6 +14,7 @@
     ".github/pull_request_template.md",
     ".github/workflows/ci.yml",
     ".gitignore",
+    ".gitleaks.toml",
     ".java-version",
     ".node-version",
     ".npmrc",
