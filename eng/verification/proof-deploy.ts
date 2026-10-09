@@ -401,9 +401,9 @@ const urlAttributes = [
   "imagesrcset",
 ];
 
-/** The references one url attribute names: archive is a space-separated URL list and imagesrcset a candidate list. */
+/** The references one url attribute names: archive and ping are space-separated URL lists and imagesrcset a candidate list. */
 function attributeReferences(attribute: string, value: string): string[] {
-  if (attribute === "archive") return value.split(/\s+/u);
+  if (attribute === "archive" || attribute === "ping") return value.split(/\s+/u);
   if (attribute === "imagesrcset")
     return value.split(",").map((candidate) => candidate.trim().split(/\s+/u)[0] ?? "");
   return [value];

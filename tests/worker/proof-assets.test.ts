@@ -818,7 +818,7 @@ test("slash-separated attributes, entities and every other url-bearing form stay
   for (const tag of ok) accepts({ shell: shellWith(tag) });
 });
 
-test("the codebase, archive and imagesrcset attributes refuse a foreign entry in any position", () => {
+test("the codebase, archive, ping and imagesrcset attributes refuse a foreign entry in any position", () => {
   const other = /violates the same-origin rules/u;
   const evil = "https://evil.example.test";
   for (const tag of [
@@ -829,6 +829,11 @@ test("the codebase, archive and imagesrcset attributes refuse a foreign entry in
     // archive is a space-separated list, so a foreign second entry is refused as well.
     `<object archive="/a.jar ${evil}/b.jar"></object>`,
     '<applet archive="/a.jar //evil.example.test/b.jar" code="x.class"></applet>',
+    // ping is a space-separated URL list too, so every entry is checked, in any position.
+    `<a ping="${evil}/t">x</a>`,
+    `<a ping="/t ${evil}/t">x</a>`,
+    '<a ping="/t //evil.example.test/t">x</a>',
+    '<a ping="/t  //evil.example.test/t /u">x</a>',
     `<link rel="preload" as="image" href="/a.png" imagesrcset="${evil}/a.png 1x">`,
     // imagesrcset is a candidate list, so a foreign second candidate is refused as well.
     `<link rel="preload" as="image" href="/a.png" imagesrcset="/a.png 1x, ${evil}/b.png 2x">`,
@@ -837,6 +842,8 @@ test("the codebase, archive and imagesrcset attributes refuse a foreign entry in
     refuses(withFragment(tag), other);
   const ok = [
     '<object archive="/a.jar /b.jar" codebase="/"></object>',
+    '<a ping="/t /u">x</a>',
+    '<a ping="/t  /u">x</a>',
     '<link rel="preload" as="image" href="/a.png" imagesrcset="/a.png 1x, /b.png 2x">',
   ];
   for (const tag of ok) accepts({ shell: shellWith(tag) });
