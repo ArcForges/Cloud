@@ -47,11 +47,6 @@ https://github.com/gradle/gradle @ 92f0512e7f06d84621afba191f75e265363890cf
 Apache-2.0
 Full Apache terms for the source-only wrapper.
 
-gradle-wrapper-9-7-1-r1
-https://github.com/gradle/gradle @ 92f0512e7f06d84621afba191f75e265363890cf
-Apache-2.0
-Copyright 2015 the original Gradle authors. Apache-2.0; full terms in third-party/Gradle.LICENSE.txt.
-
 grpc-apache-legal-r1
 https://github.com/grpc/grpc-dotnet @ 4301104498e53898a452e8fb2fea6c0b1492b755
 Apache-2.0
