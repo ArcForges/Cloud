@@ -44,7 +44,10 @@ test("same version with altered bytes", () => {
 });
 test("wrong publisher", () => {
   const policy = structuredClone(baseline);
-  policy.firstParty["@arcforges/proto"] = { publisher: "other/Contracts", visibility: "public" };
+  policy.firstParty["@arcforges/ai-internal"] = {
+    publisher: "other/Contracts",
+    visibility: "internal",
+  };
   assert.throws(() => validatePolicy(policy), /Wrong publisher/u);
 });
 test("untrusted registry", () => {
@@ -82,7 +85,18 @@ test("source cannot escape into a sibling repository", () => {
     () => validateImports(root, "example.ts", 'import "../Contracts/private.ts";', baseline),
     /Sibling source/u,
   );
-  validateImports(root, "src/example.ts", 'import type { X } from "@arcforges/proto";', baseline);
+  // No public client package remains admitted (CLOUD.84 U2); a public source import needs its admitted public name.
+  const publicClient = structuredClone(baseline);
+  publicClient.firstParty["@arcforges/example-client"] = {
+    publisher: "ArcForges/Contracts",
+    visibility: "public",
+  };
+  validateImports(
+    root,
+    "src/example.ts",
+    'import type { X } from "@arcforges/example-client";',
+    publicClient,
+  );
 });
 test("stable closure cannot inherit foundation candidates", () => {
   const policy = structuredClone(baseline);
@@ -163,12 +177,13 @@ test("only the explicitly named private generated package is admitted, and only 
     visibility: "public",
   };
   assert.throws(() => validatePolicy(exposed), /Internal package/u);
-  const publicClient = withInternalPackage();
-  publicClient.firstParty["@arcforges/proto"] = {
+  // The retired public client names stay unadmitted: a policy cannot re-admit them by name.
+  const retired = withInternalPackage();
+  retired.firstParty["@arcforges/proto"] = {
     publisher: "ArcForges/Contracts",
-    visibility: "internal",
+    visibility: "public",
   };
-  assert.throws(() => validatePolicy(publicClient), /Internal package/u);
+  assert.throws(() => validatePolicy(retired), /Unadmitted internal/u);
   const other = withInternalPackage();
   other.repository = "Web";
   assert.throws(() => validatePolicy(other), /outside its owner/u);

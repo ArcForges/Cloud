@@ -2,10 +2,28 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createHelloClient } from "@arcforges/api-client";
-import { Code, ConnectError } from "@connectrpc/connect";
 import type { Identity } from "./build-identity.ts";
-import { readJson, root } from "./process.ts";
+import { candidateDir, root, run } from "./process.ts";
+
+// The Hello protocol probe is the NuGet Contracts generated client, built and run from tools/ArcForges.Cloud.Generation (CLOUD.84
+// S33(3)(b)). The candidate job publishes it self-contained for linux-x64 and seals it in the candidate manifest.
+export const probeProject = path.join(
+  root,
+  "tools",
+  "ArcForges.Cloud.Generation",
+  "ArcForges.Cloud.Generation.csproj",
+);
+export const sealedProbeName = "arcforges-probe";
+
+export interface ProbeResult {
+  transport: "binary gRPC-Web";
+  publishedClient: string;
+  greeting: true;
+  unicode: true;
+  invalidArgument: true;
+  resourceExhausted: true;
+  workerBoundary: boolean;
+}
 
 export async function waitForHealth(
   baseUrl: string,
@@ -60,103 +78,22 @@ export async function waitForHealth(
   throw new Error(`Container readiness did not converge within ${timeoutMs / 1000}s: ${last}`);
 }
 
-export async function verifyProtocol(baseUrl: string, worker: boolean) {
-  const client = createHelloClient({
-    baseUrl,
-    fetch: (input, init) => fetch(input, { ...init, credentials: "omit", redirect: "error" }),
-  });
-  for (const name of ["ArcForges", "世界 👋"]) {
-    const response = await client.sayHello({ name }, { timeoutMs: 20000 });
-    assert.equal(response.message, `Hello, ${name}!`);
-  }
-  await assert.rejects(
-    client.sayHello({ name: "" }, { timeoutMs: 20000 }),
-    (error: unknown) => error instanceof ConnectError && error.code === Code.InvalidArgument,
-  );
-  await assert.rejects(
-    client.sayHello({ name: "x".repeat(257) }, { timeoutMs: 20000 }),
-    (error: unknown) => error instanceof ConnectError && error.code === Code.ResourceExhausted,
-  );
-
-  if (worker) {
-    // Exercise real router normalization using the published serializer, not handmade protobuf.
-    for (const contentType of [
-      "application/grpc-web",
-      "Application/GRPC-Web+Proto; charset=utf-8",
-    ]) {
-      const normalized = createHelloClient({
-        baseUrl,
-        fetch: (input, init) => {
-          const headers = new Headers(init?.headers);
-          headers.set("content-type", contentType);
-          return fetch(input, { ...init, headers, redirect: "error" });
-        },
-      });
-      assert.equal(
-        (await normalized.sayHello({ name: "Content-Type" }, { timeoutMs: 5000 })).message,
-        "Hello, Content-Type!",
-      );
-    }
-    for (const [deadline, code] of [
-      ["0m", Code.DeadlineExceeded],
-      ["invalid", Code.InvalidArgument],
-    ] as const) {
-      const expired = createHelloClient({
-        baseUrl,
-        fetch: (input, init) => {
-          const headers = new Headers(init?.headers);
-          headers.set("grpc-timeout", deadline);
-          return fetch(input, { ...init, headers, redirect: "error" });
-        },
-      });
-      await assert.rejects(
-        expired.sayHello({ name: "Deadline" }, { timeoutMs: 5000 }),
-        (error: unknown) => error instanceof ConnectError && error.code === code,
-      );
-    }
-    for (const [endpoint, method, expected] of [
-      ["/unknown", "GET", 404],
-      ["/api/arcforges.hello.v1.HelloService/SayHello", "POST", 404],
-      ["/arcforges.hello.v1.HelloService/SayHello", "GET", 405],
-    ] as const) {
-      const response = await fetch(baseUrl + endpoint, {
-        method,
-        redirect: "error",
-        signal: AbortSignal.timeout(10000),
-      });
-      assert.equal(response.status, expected);
-      await response.arrayBuffer();
-    }
-    const unsupported = await fetch(`${baseUrl}/arcforges.hello.v1.HelloService/SayHello`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-      signal: AbortSignal.timeout(10000),
-      redirect: "error",
-    });
-    assert.equal(unsupported.status, 415);
-    await unsupported.arrayBuffer();
-    const oversized = await fetch(`${baseUrl}/arcforges.hello.v1.HelloService/SayHello`, {
-      method: "POST",
-      headers: { "content-type": "application/grpc-web+proto" },
-      body: new Uint8Array(4097),
-      signal: AbortSignal.timeout(10000),
-      redirect: "error",
-    });
-    assert.equal(oversized.status, 413);
-    await oversized.arrayBuffer();
-  }
-  return {
-    transport: "binary gRPC-Web",
-    publishedClient: (
-      await readJson<{ version: string }>(
-        path.join(root, "node_modules/@arcforges/api-client/package.json"),
-      )
-    ).version,
-    greeting: true,
-    unicode: true,
-    invalidArgument: true,
-    resourceExhausted: true,
-    workerBoundary: worker,
-  };
+/**
+ * Runs the Hello protocol assertions against a base URL. CI spawns the sealed binary from the candidate, and local runs build and
+ * run the same project with dotnet run. The probe prints one JSON line on success and exits non-zero on any failed assertion.
+ */
+export async function runProbe(baseUrl: string, worker: boolean): Promise<ProbeResult> {
+  const args = ["probe", baseUrl, String(worker)];
+  const output =
+    process.env.CI === "true"
+      ? await run(path.join(candidateDir, sealedProbeName), args, true)
+      : await run(
+          "dotnet",
+          ["run", "--project", probeProject, "-c", "Release", "--", ...args],
+          true,
+        );
+  const line = output.split(/\r?\n/u).filter(Boolean).at(-1) ?? "";
+  const result = JSON.parse(line) as ProbeResult;
+  assert.equal(result.workerBoundary, worker, "The probe reports a different Worker boundary");
+  return result;
 }

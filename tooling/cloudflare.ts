@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { candidateDir, readJson, root, run, wrangler, writeJson } from "./process.ts";
 import { verifyCandidate, type WorkerConfig } from "./project.ts";
-import { verifyProtocol, waitForHealth } from "./protocol.ts";
+import { runProbe, waitForHealth } from "./protocol.ts";
 
 import { expectedIdentity, verifyHealthIdentity } from "./build-identity.ts";
 import { requireGatePassed } from "../eng/migrations/deploy.ts";
@@ -124,7 +124,7 @@ async function smoke() {
     expectedIdentity(candidate.version).build,
   );
   verifyHealthIdentity(health, expectedIdentity(candidate.version));
-  const protocol = await verifyProtocol(productionBase, true);
+  const protocol = await runProbe(productionBase, true);
   // The Cloud API route must not replace the already deployed static Web origin.
   const home = await fetch("https://arcforges.com/", {
     redirect: "error",

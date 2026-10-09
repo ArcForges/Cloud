@@ -48,8 +48,9 @@ const gitEnvironment = () =>
   );
 const sections = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
 const exact = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
-// Public client packages and the one private generated package the Cloud Worker may import.
-const publicPackages = ["@arcforges/proto", "@arcforges/api-client"];
+// Public client packages admitted by name. None remains: CLOUD.84 U2 retired @arcforges/proto and @arcforges/api-client, and the
+// Contracts identity is the committed record. A new public client needs its name admitted here by review.
+const publicPackages: string[] = [];
 const internalPackages = ["@arcforges/ai-internal"];
 // Only the production Worker runtime imports the private generated records (exact package root).
 const internalImportRoots = ["worker/"];

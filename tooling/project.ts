@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
-import { verifyProtocol, waitForHealth } from "./protocol.ts";
+import { probeProject, runProbe, sealedProbeName, waitForHealth } from "./protocol.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
 import { auditProvenance } from "./provenance.ts";
 import {
@@ -34,6 +34,8 @@ const payloadFiles = [
   "legal-notices.json",
   "worker-meta.json",
   "image-provenance.json",
+  // CLOUD.84 S33(3)(b): the self-contained Hello probe, sealed here and run by CI through runProbe.
+  "arcforges-probe",
 ] as const;
 export interface Candidate {
   schema: 1;
@@ -180,7 +182,7 @@ export async function testContainer(image: string, revision: string, identity: I
     const native = await binding("8081/tcp");
     const health = await waitForHealth(web, revision, false, 60000);
     verifyHealthIdentity(health, identity);
-    const grpcWeb = await verifyProtocol(web, false);
+    const grpcWeb = await runProbe(web, false);
     await run("dotnet", [
       "run",
       "--project",
@@ -194,7 +196,7 @@ export async function testContainer(image: string, revision: string, identity: I
     await run("docker", ["restart", id]);
     const restartedWeb = await binding("8080/tcp");
     verifyHealthIdentity(await waitForHealth(restartedWeb, revision, false, 60000), identity);
-    await verifyProtocol(restartedWeb, false);
+    await runProbe(restartedWeb, false);
     await writeJson(path.join(root, "artifacts", "container-evidence.json"), {
       imageId: imageInfo.Id,
       health,
@@ -256,7 +258,7 @@ async function testWorker(candidate: Candidate) {
       expectedIdentity(candidate.version).build,
     );
     verifyHealthIdentity(health, expectedIdentity(candidate.version));
-    const result = await verifyProtocol("http://127.0.0.1:18787/api", true);
+    const result = await runProbe("http://127.0.0.1:18787/api", true);
     await writeJson(path.join(root, "artifacts", "worker-evidence.json"), {
       workerName,
       revision: candidate.revision,
@@ -376,6 +378,34 @@ async function buildCandidate() {
   config.containers[0].image = image;
   await writeJson(path.join(candidateDir, "wrangler.json"), config);
   await run("docker", ["save", "--output", "artifacts/candidate/docker-image.tar", image]);
+  // CLOUD.84 S33(3)(b): publish the Hello probe self-contained for linux-x64 and seal it with the other payload files. The publish
+  // restore adds a build-only trimming package to the probe's lock file, so the reviewed lock is put back at once: the committed
+  // inputs stay as admitted, and the sealed binary is the output of that restore.
+  const probeLock = path.join(root, "tools", "ArcForges.Cloud.Generation", "packages.lock.json");
+  const reviewedProbeLock = await readFile(probeLock);
+  const probeOutput = path.join(root, "artifacts", "probe");
+  try {
+    await run("dotnet", [
+      "publish",
+      probeProject,
+      "-c",
+      "Release",
+      "-r",
+      "linux-x64",
+      "--self-contained",
+      "true",
+      "-p:PublishSingleFile=true",
+      "-p:DebugType=none",
+      "-o",
+      probeOutput,
+    ]);
+  } finally {
+    await writeFile(probeLock, reviewedProbeLock);
+  }
+  await copyFile(
+    path.join(probeOutput, "ArcForges.Cloud.Generation"),
+    path.join(candidateDir, sealedProbeName),
+  );
   const files: Record<string, string> = {};
   for (const file of payloadFiles) files[file] = await sha256(path.join(candidateDir, file));
   await writeJson(path.join(candidateDir, "manifest.json"), {

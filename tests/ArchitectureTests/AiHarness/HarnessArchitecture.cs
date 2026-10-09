@@ -89,7 +89,7 @@ internal static partial class HarnessArchitecture
         new("licence-allowlist", "WP-05.01", "Every locked dependency and declared licence expression is allowed for its boundary; LGPL is development-only"),
         new("naming-identity", "WP-05.02", "The naming candidate is the exact NuGet identity, centrally pinned, locked and published from its producer"),
         new("naming-scan", "WP-05.02", "The naming scan of this checkout passed with zero findings under the pinned policy"),
-        new("wire-package", "WP-05.03", "The wire package is one exact registry-locked pin, and the Worker imports it only as a runtime dependency"),
+        new("wire-package", "WP-05.03", "A declared wire package is one exact registry-locked pin, and a release Worker that imports it needs it as a runtime dependency"),
         new("wire-import", "WP-05.03", "Generated types are imported only from the package root; no source reaches into a build output or a copied tree"),
         new("wire-source", "WP-05.03", "No copied generated source or schema file is authored in this repository"),
         new("wire-codec", "WP-05.03", "No handwritten or alternative wire codec"),

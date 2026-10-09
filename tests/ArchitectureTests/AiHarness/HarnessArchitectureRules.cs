@@ -686,33 +686,44 @@ internal static partial class HarnessArchitecture
     }
 
     /// <summary>
-    /// The wire package pin: one exact, registry-locked candidate that the root manifest and the lock both carry. A Worker file that imports it
-    /// needs it as a runtime dependency; a build or test consumer may hold it as a development dependency.
+    /// The wire package pin (CLOUD.84 S38(1)). If the root manifest declares the public wire package, in either section, the declaration is
+    /// one exact, registry-locked candidate that the lock carries too. A release Worker file that imports it needs it as a runtime
+    /// dependency; a build or test consumer may hold it as a development dependency. If the package is neither declared nor imported, the
+    /// rule has nothing to pin and passes. Every declared or imported use stays refused unless it meets these conditions.
     /// </summary>
     private static void WirePackagePin(Context c)
     {
         var root = Obj(ParseJson(c.Text("package.json")));
         var lockFile = Obj(ParseJson(c.Text("package-lock.json")));
-        var pin = StringMap(root?["dependencies"]).GetValueOrDefault(PublicWirePackage) ?? StringMap(root?["devDependencies"]).GetValueOrDefault(PublicWirePackage);
-        var entry = Obj(Obj(lockFile?["packages"])?["node_modules/" + PublicWirePackage]);
-        var tarball = "https://registry.npmjs.org/" + PublicWirePackage + "/-/proto-" + pin + ".tgz";
-        var lockRoot = Obj(Obj(lockFile?["packages"])?[""]);
-        var lockedPin = StringMap(lockRoot?["dependencies"]).GetValueOrDefault(PublicWirePackage) ?? StringMap(lockRoot?["devDependencies"]).GetValueOrDefault(PublicWirePackage);
-        var integrity = Str(entry?["integrity"]) ?? string.Empty;
-        var integrityOk = integrity.StartsWith("sha512-", StringComparison.Ordinal) && Sha512Base64.IsMatch(integrity["sha512-".Length..]);
-        if (pin is null || !ExactVersion.IsMatch(pin) || !pin.Contains("-ci.", StringComparison.Ordinal) || Str(entry?["version"]) != pin
-            || Str(entry?["resolved"]) != tarball || !integrityOk || lockedPin != pin)
-        {
-            c.Report("wire-package", "package.json", "Exact registry-locked published candidate pin of the public wire package required");
-        }
-
+        var runtime = StringMap(root?["dependencies"]).GetValueOrDefault(PublicWirePackage);
+        var pin = runtime ?? StringMap(root?["devDependencies"]).GetValueOrDefault(PublicWirePackage);
+        var declared = runtime is not null || StringMap(root?["devDependencies"]).ContainsKey(PublicWirePackage);
+        var imported = new List<string>();
         foreach (var file in c.TypeScript.Where(file => file.Release))
         {
-            var imports = file.References.Any(reference => reference.Specifier is not null && (reference.Specifier == PublicWirePackage || reference.Specifier.StartsWith(PublicWirePackage + "/", StringComparison.Ordinal)));
-            if (imports && !StringMap(root?["dependencies"]).ContainsKey(PublicWirePackage))
+            if (file.References.Any(reference => reference.Specifier is not null && (reference.Specifier == PublicWirePackage || reference.Specifier.StartsWith(PublicWirePackage + "/", StringComparison.Ordinal))))
+                imported.Add(file.Path);
+        }
+
+        if (declared)
+        {
+            var entry = Obj(Obj(lockFile?["packages"])?["node_modules/" + PublicWirePackage]);
+            var tarball = "https://registry.npmjs.org/" + PublicWirePackage + "/-/proto-" + pin + ".tgz";
+            var lockRoot = Obj(Obj(lockFile?["packages"])?[""]);
+            var lockedPin = StringMap(lockRoot?["dependencies"]).GetValueOrDefault(PublicWirePackage) ?? StringMap(lockRoot?["devDependencies"]).GetValueOrDefault(PublicWirePackage);
+            var integrity = Str(entry?["integrity"]) ?? string.Empty;
+            var integrityOk = integrity.StartsWith("sha512-", StringComparison.Ordinal) && Sha512Base64.IsMatch(integrity["sha512-".Length..]);
+            if (pin is null || !ExactVersion.IsMatch(pin) || !pin.Contains("-ci.", StringComparison.Ordinal) || Str(entry?["version"]) != pin
+                || Str(entry?["resolved"]) != tarball || !integrityOk || lockedPin != pin)
             {
-                c.Report("wire-package", file.Path, "Worker imports the wire package without a runtime dependency");
+                c.Report("wire-package", "package.json", "Exact registry-locked published candidate pin of the public wire package required");
             }
+        }
+
+        foreach (var path in imported)
+        {
+            if (runtime is null)
+                c.Report("wire-package", path, "Worker imports the wire package without a runtime dependency");
         }
     }
 

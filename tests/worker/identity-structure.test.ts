@@ -3,6 +3,8 @@
 // seat or shared-editor concept (WO-05); (2) no capability treats an authentication identity as a user (BR-04); (3) workspace
 // ownership is the direct owner_user_id relation and nothing rewrites it (WO-01, WO-02). Each scan is proven on fixtures that break
 // its rule, so it cannot pass vacuously, and every exception is an exact, reasoned allowlist entry: a new hit fails.
+// The generated public contracts are scanned by the C# test tests/ArcForges.Cloud.Tests/Generation/IdentityContractStructureTests.cs,
+// against the NuGet ArcForges.Contracts.PublicApi types (CLOUD.84 S33(3)(c)); the npm proto package is no longer read here.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -93,27 +95,6 @@ const allowed: { surface: string; identifier: string; reason: string; prefix?: b
     surface: "manifest",
     identifier: "chat_message.role",
     reason: "the author of a chat message, not a workspace role",
-  },
-  {
-    surface: "contract",
-    identifier: "TranscriptRole",
-    reason: "the author of a chat message in the public API, not a workspace role",
-  },
-  {
-    surface: "contract",
-    identifier: "role",
-    reason: "the author role of a content part or transcript message (chat), not a workspace role",
-  },
-  {
-    surface: "contract",
-    identifier: "TRANSCRIPT_ROLE_",
-    prefix: true,
-    reason: "the values of the public chat message author enum, not workspace roles",
-  },
-  {
-    surface: "contract",
-    identifier: "TranscriptRoleSchema",
-    reason: "generated descriptor of the chat TranscriptRole enum",
   },
 ];
 
@@ -242,22 +223,6 @@ function listFiles(directory: string, match: RegExp): string[] {
   return found;
 }
 
-/** Message, enum, field, service and method names of the generated public contracts, from the generated declarations' own markers. */
-function contractIdentifiers(): string[] {
-  const generated = path.join(repositoryRoot, "node_modules/@arcforges/proto/dist/gen");
-  const list: string[] = [];
-  for (const file of listFiles(generated, /_pb\.d\.ts$/u)) {
-    const text = readFileSync(file, "utf8");
-    for (const match of text.matchAll(
-      /@generated from (?:message|enum|field|service|rpc|enum value): (?:optional |repeated )?(?:[\w.]+ )?([A-Za-z_][\w.]*)/gu,
-    ))
-      list.push(match[1]?.split(".").at(-1) ?? "");
-    for (const match of text.matchAll(/export declare (?:const|enum|type|class) ([A-Za-z_]\w*)/gu))
-      list.push(match[1] ?? "");
-  }
-  return list;
-}
-
 /** An operation identifier or a method path as a string literal: `identity.credential.add`, `/arcforges.publicapi.v1.Service/Method`. */
 const operationShape = /^(?:\/[a-z][\w.]*\/[A-Za-z]\w*|[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+)$/u;
 
@@ -358,12 +323,6 @@ test("the physical schema, the locked migrations and the named plans carry no me
   assert.ok(schema.length > 500, "the scan reads the migrated database");
   assert.deepEqual(scan("manifest", schema), []);
   assert.deepEqual(scan("plan", planIdentifiers()), []);
-});
-
-test("the generated public contracts declare no membership, role, invitation, seat or shared-editor concept", () => {
-  const identifiers = contractIdentifiers();
-  assert.ok(identifiers.length > 100, "the scan reads the generated declarations");
-  assert.deepEqual(scan("contract", identifiers), []);
 });
 
 test("the operations the Cloud host, its modules and its Worker declare name no membership, role, invitation, seat or shared-editor concept", () => {
