@@ -107,6 +107,10 @@
     {
       "path": "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj",
       "kind": "msbuild"
+    },
+    {
+      "path": "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj",
+      "kind": "msbuild"
     }
   ]
 }
