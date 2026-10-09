@@ -114,6 +114,7 @@
     "eng/policy/dependency-reviews/har-40-r11.json",
     "eng/policy/dependency-reviews/har-40-r12.json",
     "eng/policy/dependency-reviews/har-40-r13.json",
+    "eng/policy/dependency-reviews/har-40-r14.json",
     "eng/policy/dependency-reviews/har-40-r2.json",
     "eng/policy/dependency-reviews/har-40-r3.json",
     "eng/policy/dependency-reviews/har-40-r4.json",
@@ -180,6 +181,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r42.json",
     "eng/provenance/artifact-profiles/cloud-release-r43.json",
     "eng/provenance/artifact-profiles/cloud-release-r44.json",
+    "eng/provenance/artifact-profiles/cloud-release-r45.json",
     "eng/provenance/artifact-profiles/cloud-release-r5.json",
     "eng/provenance/artifact-profiles/cloud-release-r6.json",
     "eng/provenance/artifact-profiles/cloud-release-r7.json",
@@ -279,6 +281,7 @@
     "eng/provenance/records/har-40-cloud-runtime-notices-r5.json",
     "eng/provenance/records/har-40-cloud-runtime-notices-r6.json",
     "eng/provenance/records/har-40-cloud-runtime-notices-r7.json",
+    "eng/provenance/records/har-40-cloud-runtime-notices-r8.json",
     "eng/provenance/records/har-40-cloud-worker-bundle-r1.json",
     "eng/provenance/records/har-40-cloud-worker-bundle-r2.json",
     "eng/provenance/records/har-40-cloud-worker-bundle-r3.json",
@@ -286,6 +289,7 @@
     "eng/provenance/records/har-40-cloud-worker-bundle-r5.json",
     "eng/provenance/records/har-40-cloud-worker-bundle-r6.json",
     "eng/provenance/records/har-40-cloud-worker-bundle-r7.json",
+    "eng/provenance/records/har-40-cloud-worker-bundle-r8.json",
     "eng/provenance/records/protobuf-bsd-legal-r1.json",
     "eng/provenance/records/sharp-0-35-5-cloud-runtime-notices-r1.json",
     "eng/provenance/records/sharp-0-35-5-cloud-worker-bundle-r1.json",
@@ -854,5 +858,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["har-40-cloud-runtime-notices-r7", "har-40-cloud-worker-bundle-r7"]
+  "artifacts": ["har-40-cloud-runtime-notices-r8", "har-40-cloud-worker-bundle-r8"]
 }
