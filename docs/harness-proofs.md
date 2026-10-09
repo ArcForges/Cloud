@@ -157,3 +157,23 @@ The WSL toolchain was .NET SDK 10.0.400 with runtime 10.0.11, Debian clang and L
 - No Worker or product source imports the package. `tests/worker/identity-structure.test.ts` reads its generated `dist/gen` files, and `tooling/licence-boundary.ts` names it.
 
 A later change to the package is a separate admission, not part of HAR.40.
+
+## Local candidate attempt (2026-10-09): environment limitation
+
+Tree: `task/har-40` at `9b4b3b4b1b1015fb81673bf09d6356be8b03a173`, clean worktree. The run used `npm run candidate` through the build slot (`delivery.py build-slot run --worker w-deku-20261008-har-40 --task HAR.40`), with the docker launcher kept outside the repository (it forwards to `wsl -e docker`) on `PATH` for that run only.
+
+| Attempt | Result |
+| ------- | ------ |
+| 1 | Not started. The slot started `npm` without a shell and Windows could not find it (WinError 2). No npm or docker process ran. |
+| 2 (the one retry, `npm.cmd run candidate`) | Reached the container image's NuGet restore and stalled. No package restore completed. The build was stopped after about 516 seconds. |
+
+The stall: 29 timeout lines from the container's restore against `api.nuget.org`, either 100-second request timeouts or 60-second no-data timeouts. The failing packages were `Microsoft.NET.ILLink.Tasks` 10.0.12 (4 times), `Microsoft.DotNet.ILCompiler` 10.0.12, `ArcForges.Build.Policy` 1.0.0-ci.94.1, `Grpc.AspNetCore.Web` 2.84.0 (2 times), `ArcForges.Contracts.CloudInternal` 1.0.0-ci.287.1, and the `ArcForges.Contracts.PublicApi` package index.
+
+This is classified as a local environment limitation. The host and a plain container reach nuget.org, but the container image's restore does not. No proxy, DNS or network change was made. No candidate manifest and no candidate image were produced; the stopped run left only the git-ignored `artifacts/candidate/legal-notices.json`. No container was left running. Per the 2026-10-09 HAR.40 local candidate adjudication (brief section 10), the hosted candidate job is the authority for the candidate.
+
+Offline gates re-run at this HEAD after the stop:
+
+| Command | Exit | Result |
+| ------- | ---- | ------ |
+| `npm run policy` | 0 | `Cloud: pass; 821 files; 0 exceptions; 0 findings` |
+| `node tooling/project.ts provenance` | 0 | no findings |
