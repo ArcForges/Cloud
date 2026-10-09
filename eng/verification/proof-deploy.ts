@@ -392,6 +392,8 @@ interface PageRules {
   relative: boolean;
   /** Whether a base element is allowed; when it is, it must be exactly <base href="/">. */
   base: boolean;
+  /** Whether a page may link to its own source repository (the public Site's shell only). */
+  sourceLink: boolean;
   /** The files of the bundle that scripts, stylesheets and icons may load. */
   files: ReadonlySet<string>;
 }
@@ -406,7 +408,10 @@ function pageViolations(html: string, rules: PageRules): string[] {
   for (const tag of startTags(html)) {
     for (const attribute of urlAttributes) {
       const value = tag.attributes.get(attribute);
-      if (value !== undefined) check(attribute, value);
+      if (value === undefined) continue;
+      const repository =
+        rules.sourceLink && tag.name === "a" && attribute === "href" && sourceRepository.test(value);
+      if (!repository) check(attribute, value);
     }
     const srcset = tag.attributes.get("srcset");
     if (srcset !== undefined)
@@ -601,7 +606,12 @@ export function verifyProfileBundle(archive: Uint8Array, pinnedDigest: string): 
       `${name}/index.html must set exactly one base.`,
     );
     assert.deepEqual(
-      pageViolations(html, { relative: true, base: true, files: plainNames }),
+      pageViolations(html, {
+        relative: true,
+        base: true,
+        sourceLink: false,
+        files: plainNames,
+      }),
       [],
       `${name} page violates the same-origin rules`,
     );
@@ -658,4 +668,256 @@ export async function stageProfileAssets(
     await writeFile(target, entry.bytes);
   }
   return bundle.files.length;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The Site archive (WEB.40 release asset web-site-<sha256>.tar): the C# public Site, verified against its pinned
+// digest and composed with the profile bundle into one proof tree and one headers file (CLOUD.85 D2 option A, D4, D5).
+
+/** The Site's pages, as the Site builder renders them (SitePages.All). */
+const sitePages = ["index.html", "hello/index.html", "cloud-hello/index.html"];
+/** The Site's other members, written beside its pages (SiteBuilder.BuildAsync). */
+const siteRootFiles = ["404.css", "404.html", "favicon.svg", "robots.txt"];
+/** The one content-hashed stylesheet the Site links from its pages. */
+const siteStylesheet = /^assets\/site\.[0-9a-f]{16}\.css$/u;
+/** The one outbound link a Site page may carry: its own source repository (the shell's SourceUrl). */
+const sourceRepository = /^https:\/\/github\.com\/ArcForges\/Web(?:\/tree\/[0-9a-f]{40})?$/u;
+/** The root paths that the profile routes own; the Site may not hold a file under them. */
+const profileOwnedPath = /^(?:account|chat|_framework)(?:\/|$)/u;
+
+/** The Site policy the Site builder derives from its pages (SiteContentSecurityPolicy.FromPages). */
+export function expectedSitePolicy(pages: string[]): string {
+  return policyText(["'self'", ...inlineHashSet(pages)]);
+}
+
+/** The headers file of the public Site (SiteSecurityHeaders.Render), byte for byte. */
+export function expectedSiteHeaders(policy: string): string {
+  const lines = [
+    "/*",
+    `  Content-Security-Policy: ${policy}`,
+    "  X-Content-Type-Options: nosniff",
+    "  Referrer-Policy: no-referrer",
+    "  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()",
+    "  X-Frame-Options: DENY",
+    "  X-Robots-Tag: noindex, nofollow",
+    "  Cache-Control: public, no-cache, no-transform",
+    "/assets/*",
+    "  ! Cache-Control",
+    "  Cache-Control: public, max-age=31536000, immutable, no-transform",
+    "/__build.json",
+    "  ! Cache-Control",
+    "  Cache-Control: no-store, no-transform",
+    "/__build-info.json",
+    "  ! Cache-Control",
+    "  Cache-Control: no-store, no-transform",
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+export interface VerifiedSite {
+  digest: string;
+  /** Every member, including the Site's own headers file. */
+  files: BundleEntry[];
+  /** The Site's headers file as the Site writes it. */
+  headers: string;
+  /** The Site policy, derived from its pages and matched by its headers file. */
+  policy: string;
+}
+
+/**
+ * Verifies the Site archive against its pinned digest, then its strict layout, its exact member set and order, its pages
+ * (same-origin, no base, every inline script covered by its policy) and its headers. A Site policy never carries a
+ * WebAssembly token: the public pages need no WebAssembly.
+ */
+export function verifySiteArchive(archive: Uint8Array, pinnedDigest: string): VerifiedSite {
+  assert.match(pinnedDigest, /^[0-9a-f]{64}$/u, "The pinned digest is not a SHA-256.");
+  const digest = sha256Hex(archive);
+  assert.equal(digest, pinnedDigest, "The Site archive does not match the pinned digest.");
+  const files = readBundleArchive(archive);
+  const names = files.map((entry) => entry.path);
+  for (let index = 1; index < names.length; index += 1)
+    assert((names[index - 1] ?? "") < (names[index] ?? ""), "The Site archive is not in ordinal path order.");
+  const stylesheets = names.filter((name) => siteStylesheet.test(name));
+  assert.equal(stylesheets.length, 1, "The Site must hold exactly one content-hashed stylesheet.");
+  assert.deepEqual(
+    names,
+    [...sitePages, ...siteRootFiles, ...stylesheets, headersName].sort(),
+    "The Site holds members other than the reviewed Site.",
+  );
+  const byPath = new Map(files.map((entry) => [entry.path, entry] as const));
+  const text = (name: string) => {
+    const entry = byPath.get(name);
+    assert(entry, `The Site has no ${name}.`);
+    return Buffer.from(entry.bytes).toString("utf8");
+  };
+  const pages = [...sitePages, "404.html"];
+  const policy = expectedSitePolicy(sitePages.map((name) => text(name)));
+  const headers = text(headersName);
+  assert(!headers.includes("\r"), "The Site headers file must use LF line ends.");
+  assert(!headers.includes("wasm-unsafe-eval"), "The Site policy carries a WebAssembly token.");
+  assert.equal(headers, expectedSiteHeaders(policy), "The Site headers file differs from the reviewed rules.");
+  const siteFiles = new Set(names);
+  for (const name of pages) {
+    const html = text(name);
+    assert(!html.includes("\r"), `${name} must use LF line ends.`);
+    assert.deepEqual(
+      pageViolations(html, { relative: false, base: false, files: siteFiles, sourceLink: true }),
+      [],
+      `${name} violates the Site's same-origin rules`,
+    );
+    const scriptSources = parsePolicy(policy).get("script-src") ?? [];
+    for (const hash of inlineScriptHashes(html))
+      assert(
+        scriptSources.includes(hash),
+        `${name} policy does not cover an inline script of its page in script-src.`,
+      );
+  }
+  for (const name of [...stylesheets, "404.css"])
+    assert.deepEqual(
+      cssViolations(text(name), false),
+      [],
+      `${name} violates the Site's same-origin rules`,
+    );
+  return { digest, files, headers, policy };
+}
+
+interface HeaderBlock {
+  pattern: string;
+  lines: string[];
+}
+const unsetLine = /^ {2}! ([A-Za-z-]+)$/u;
+const setLine = /^ {2}([A-Za-z-]+): (.+)$/u;
+/** The header a line sets or unsets, or the line itself when it is neither. */
+const headerName = (line: string): string =>
+  unsetLine.exec(line)?.[1] ?? setLine.exec(line)?.[1] ?? line;
+
+/** The rule blocks of a headers file in order; a line is one header set or one header unset. */
+function headerBlocks(headers: string): HeaderBlock[] {
+  assert(
+    headers.endsWith("\n") && !headers.includes("\r"),
+    "A headers file must use LF line ends and end with a newline.",
+  );
+  const blocks: HeaderBlock[] = [];
+  for (const rule of headers.slice(0, -1).split(/\n(?=\/)/u)) {
+    const [pattern = "", ...lines] = rule.split("\n");
+    assert(
+      !blocks.some((block) => block.pattern === pattern),
+      `Duplicate headers rule ${pattern}.`,
+    );
+    for (const line of lines)
+      assert(
+        unsetLine.test(line) || setLine.test(line),
+        `A headers line is not a plain header: ${line}`,
+      );
+    blocks.push({ pattern, lines });
+  }
+  return blocks;
+}
+
+/**
+ * One headers file for the proof origin. The Site's rules come first, unchanged. A profile rule with the same path
+ * pattern merges by line: an identical line is kept once, and a different value for the same header refuses the merge.
+ * A profile rule for another path keeps only what differs from the Site's global rule, and where the Site sets the same
+ * header to another value it unsets that header first, so the Site's policy never reaches /account/* or /chat/*.
+ */
+export function composeHeaders(siteText: string, profileText: string): string {
+  const merged = new Map<string, string[]>();
+  for (const block of headerBlocks(siteText)) merged.set(block.pattern, [...block.lines]);
+  const inherited = new Map<string, string>();
+  for (const line of merged.get("/*") ?? []) {
+    const set = setLine.exec(line);
+    if (set !== null) inherited.set(set[1] ?? "", set[2] ?? "");
+  }
+  for (const block of headerBlocks(profileText)) {
+    const existing = merged.get(block.pattern);
+    if (existing !== undefined) {
+      for (const line of block.lines) {
+        if (existing.includes(line)) continue;
+        const name = headerName(line);
+        assert(
+          !existing.some((other) => headerName(other) === name),
+          `The Site and the profile set ${name} differently on ${block.pattern}.`,
+        );
+        existing.push(line);
+      }
+      continue;
+    }
+    const unset = new Set(
+      block.lines.map((line) => unsetLine.exec(line)?.[1]).filter((name) => name !== undefined),
+    );
+    const lines: string[] = [];
+    for (const line of block.lines) {
+      const set = setLine.exec(line);
+      if (set === null) {
+        lines.push(line);
+        continue;
+      }
+      const name = set[1] ?? "";
+      const value = set[2] ?? "";
+      if (unset.has(name)) {
+        lines.push(line);
+        continue;
+      }
+      const parent = inherited.get(name);
+      if (parent === value) continue;
+      if (parent !== undefined) lines.push(`  ! ${name}`);
+      lines.push(line);
+    }
+    if (lines.length > 0) merged.set(block.pattern, lines);
+  }
+  return `${[...merged].map(([pattern, lines]) => [pattern, ...lines].join("\n")).join("\n")}\n`;
+}
+
+export interface ProofAssets {
+  /** Every file of the one proof tree, sorted by path, including the composed headers file. */
+  files: BundleEntry[];
+  headers: string;
+  profileDigest: string;
+  siteDigest: string;
+}
+
+/**
+ * The profile bundle and the Site as one proof tree. A path that both hold merges only when the bytes are identical
+ * (favicon.svg and robots.txt today); a different byte refuses. The Site may not hold a file under a profile route.
+ */
+export function composeProofAssets(profile: VerifiedBundle, site: VerifiedSite): ProofAssets {
+  const tree = new Map<string, Uint8Array>();
+  for (const entry of site.files) {
+    assert(!profileOwnedPath.test(entry.path), `The Site holds a path the profiles serve: ${entry.path}`);
+    if (entry.path !== headersName) tree.set(entry.path, entry.bytes);
+  }
+  for (const entry of profile.files) {
+    if (entry.path === headersName) continue;
+    const shared = tree.get(entry.path);
+    if (shared === undefined) tree.set(entry.path, entry.bytes);
+    else
+      assert(
+        Buffer.compare(shared, entry.bytes) === 0,
+        `The Site and the profile hold different bytes at ${entry.path}.`,
+      );
+  }
+  const headers = composeHeaders(site.headers, profile.headers);
+  tree.set(headersName, Buffer.from(headers, "utf8"));
+  const files = [...tree]
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([entryPath, bytes]) => ({ path: entryPath, bytes }));
+  return { files, headers, profileDigest: profile.digest, siteDigest: site.digest };
+}
+
+async function writeTree(files: BundleEntry[], directory: string): Promise<number> {
+  assert.equal(path.basename(directory), proofAssetsDirName, "Unexpected staging directory.");
+  const resolved = path.resolve(directory);
+  await rm(resolved, { recursive: true, force: true });
+  for (const entry of files) {
+    const target = path.resolve(resolved, ...entry.path.split("/"));
+    assert(target.startsWith(`${resolved}${path.sep}`), "A staged path escapes its directory.");
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, entry.bytes);
+  }
+  return files.length;
+}
+
+/** Writes the composed proof tree into a fresh staging directory named for the proof assets. */
+export async function stageProofAssets(assets: ProofAssets, directory: string): Promise<number> {
+  return writeTree(assets.files, directory);
 }

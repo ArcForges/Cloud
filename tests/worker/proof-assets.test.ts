@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -13,7 +13,11 @@ import { brotliCompressSync, gzipSync } from "node:zlib";
 import { isProofPath } from "../../worker/foundation/proof-routes.ts";
 import {
   buildProofConfig,
+  composeHeaders,
+  composeProofAssets,
   expectedProfileHeaders,
+  expectedSiteHeaders,
+  expectedSitePolicy,
   expectedProfilePolicy,
   parsePolicy,
   profileBundleAssetName,
@@ -21,7 +25,9 @@ import {
   proofAssetsDirName,
   readBundleArchive,
   stageProfileAssets,
+  stageProofAssets,
   verifyProfileBundle,
+  verifySiteArchive,
   workerFirst,
   type CandidateConfig,
 } from "../../eng/verification/proof-deploy.ts";
@@ -563,6 +569,274 @@ test("staging writes the verified files without the manifest into a fresh direct
     await assert.rejects(stat(path.join(target, "manifest.json")));
     await assert.rejects(
       stageProfileAssets(verified, path.join(parent, "elsewhere")),
+      /Unexpected staging directory/u,
+    );
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+// ---- The Site (WEB.40 web-site-<sha256>.tar): the Site builder's members, pages and headers, as synthetic bytes. ----
+const siteCss = "body{margin:0}";
+const siteStylesheetPath = `assets/site.${sha(siteCss).slice(0, 16)}.css`;
+const sourceLink = `https://github.com/ArcForges/Web/tree/${"a".repeat(40)}`;
+const sitePage = (title: string, body: string) =>
+  [
+    "<!DOCTYPE html>",
+    '<html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="robots" content="noindex, nofollow" /><meta name="theme-color" content="#f4f3ed" /><link rel="icon" href="/favicon.svg" type="image/svg+xml" />',
+    `<title>${title}</title><link rel="stylesheet" href="/${siteStylesheetPath}" /></head><body>`,
+    `<div class="site-shell"><a class="skip-link" href="#main">Skip to content</a><header><a class="brand" href="/">ArcForges</a><nav><a href="/hello">Hello example</a><a class="source-link" href="${sourceLink}">Source</a></nav></header>`,
+    `<main id="main" tabindex="-1">${body}</main><footer><a href="/license.txt">AGPL-3.0-only</a></footer></div></body></html>`,
+  ].join("");
+const sitePageNames = ["index.html", "hello/index.html", "cloud-hello/index.html"];
+const sitePages = (): Record<string, string> => ({
+  "index.html": sitePage("Hello, world. — ArcForges", "<h1>Hello, world.</h1>"),
+  "hello/index.html": sitePage("Your hello — ArcForges", "<h1>Your hello</h1>"),
+  "cloud-hello/index.html": sitePage("Server connection — ArcForges", "<h1>Server connection</h1>"),
+});
+const notFoundPage =
+  '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" /><link rel="stylesheet" href="/404.css" /><link rel="icon" href="/favicon.svg" /><title>Not found</title></head><body><a href="/">← Back home</a></body></html>';
+
+export interface SiteSpec {
+  /** Members added to or replaced in the Site, by path (the pages and the policy follow them). */
+  files?: Record<string, string>;
+  headers?: string;
+  tamper?: (entries: TarEntry[]) => void;
+  tarOptions?: { uid?: number; type?: string };
+}
+
+/** A Site archive with the Site builder's members, pages, policy and headers. */
+function siteArchive(spec: SiteSpec = {}): { archive: Buffer; digest: string } {
+  const members: Record<string, string> = {
+    "404.css": siteCss,
+    "404.html": notFoundPage,
+    "favicon.svg": sharedFavicon,
+    "robots.txt": sharedRobots,
+    [siteStylesheetPath]: siteCss,
+    ...sitePages(),
+    ...spec.files,
+  };
+  const policy = expectedSitePolicy(sitePageNames.map((name) => members[name] ?? ""));
+  members._headers = spec.headers ?? expectedSiteHeaders(policy);
+  const entries: TarEntry[] = Object.keys(members)
+    .sort()
+    .map((entryPath) => ({ path: entryPath, bytes: Buffer.from(members[entryPath] ?? "") }));
+  spec.tamper?.(entries);
+  const archive = tarArchive(entries, spec.tarOptions);
+  return { archive, digest: sha(archive) };
+}
+const acceptsSite = (spec: SiteSpec = {}) => {
+  const built = siteArchive(spec);
+  return verifySiteArchive(built.archive, built.digest);
+};
+const refusesSite = (spec: SiteSpec, pattern: RegExp) => {
+  const built = siteArchive(spec);
+  assert.throws(() => verifySiteArchive(built.archive, built.digest), pattern);
+};
+
+test("the Site archive verifies against its pinned digest with its exact members, policy and headers", () => {
+  const built = siteArchive();
+  const site = verifySiteArchive(built.archive, built.digest);
+  assert.equal(site.digest, built.digest);
+  assert.deepEqual(site.files.map((file) => file.path), [
+    "404.css",
+    "404.html",
+    "_headers",
+    siteStylesheetPath,
+    "cloud-hello/index.html",
+    "favicon.svg",
+    "hello/index.html",
+    "index.html",
+    "robots.txt",
+  ]);
+  assert.equal(
+    site.policy,
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+  );
+  assert.throws(() => verifySiteArchive(built.archive, sha("other")), /pinned digest/u);
+  assert.throws(() => verifySiteArchive(built.archive, "abc"), /not a SHA-256/u);
+});
+
+test("the Site archive is refused for a non-canonical header, an order, a member set or a stylesheet count", () => {
+  refusesSite({ tarOptions: { uid: 1000 } }, /canonical header/u);
+  refusesSite({ tamper: (entries) => entries.reverse() }, /ordinal path order/u);
+  refusesSite({ files: { "extra.txt": "x" } }, /members other than the reviewed Site/u);
+  refusesSite(
+    { tamper: (entries) => entries.splice(entries.findIndex((entry) => entry.path === "404.html"), 1) },
+    /members other than the reviewed Site/u,
+  );
+  refusesSite(
+    { files: { "assets/site.0123456789abcdef.css": "x" } },
+    /exactly one content-hashed stylesheet/u,
+  );
+});
+
+test("the Site policy never carries WebAssembly, and its headers file is the reviewed one", () => {
+  const policy = acceptsSite().policy;
+  refusesSite(
+    { headers: expectedSiteHeaders(policy.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")) },
+    /WebAssembly token/u,
+  );
+  refusesSite({ headers: `${expectedSiteHeaders(policy)}/extra/*\n  X-A: b\n` }, /differs from the reviewed rules/u);
+  refusesSite({ headers: expectedSiteHeaders(policy).replace(/\n/gu, "\r\n") }, /headers file must use LF/u);
+});
+
+test("the Site pages are same-origin: no base, no foreign link but its source, every script covered", () => {
+  refusesSite(
+    { files: { "index.html": sitePage("x", "<p>x</p>").replace("<head>", "<head><base href=\"/\" />") } },
+    /violates the Site's same-origin rules/u,
+  );
+  refusesSite(
+    { files: { "index.html": sitePage("x", '<a href="https://evil.example/">x</a>') } },
+    /violates the Site's same-origin rules/u,
+  );
+  refusesSite(
+    { files: { "hello/index.html": sitePage("x", '<a href="hello">x</a>') } },
+    /violates the Site's same-origin rules/u,
+  );
+  refusesSite(
+    { files: { "index.html": sitePage("x", '<link rel="stylesheet" href="/assets/missing.css" />') } },
+    /violates the Site's same-origin rules/u,
+  );
+  refusesSite(
+    { files: { "404.html": notFoundPage.replace("</body>", "<script>window.x=1;</script></body>") } },
+    /does not cover an inline script/u,
+  );
+  refusesSite(
+    { files: { "index.html": `${sitePage("x", "<p>x</p>")}\r` } },
+    /must use LF line ends/u,
+  );
+  refusesSite(
+    { tamper: (entries) => {
+      const entry = entries.find((item) => item.path === siteStylesheetPath);
+      assert(entry);
+      entry.bytes = Buffer.from('@import "https://cdn.example.com/x.css";');
+    } },
+    /violates the Site's same-origin rules/u,
+  );
+});
+
+test("the profile and the Site are one proof tree with one headers file", () => {
+  const profile = accepts();
+  const site = acceptsSite();
+  const assets = composeProofAssets(profile, site);
+  const paths = assets.files.map((file) => file.path);
+  assert.equal(new Set(paths).size, paths.length);
+  assert.equal(paths.filter((entryPath) => entryPath === "_headers").length, 1);
+  for (const served of [
+    "index.html",
+    "404.html",
+    siteStylesheetPath,
+    "account/index.html",
+    "chat/index.html",
+    "_framework/blazor.webassembly.js",
+    "app.css",
+    "favicon.svg",
+    "robots.txt",
+  ])
+    assert(paths.includes(served), served);
+  assert.equal(paths.includes("manifest.json"), false);
+  assert.deepEqual(paths, [...paths].sort());
+  const union = new Set([...profile.files, ...site.files].map((file) => file.path));
+  assert.equal(paths.length, union.size);
+  assert.equal(assets.profileDigest, profile.digest);
+  assert.equal(assets.siteDigest, site.digest);
+  assert.deepEqual(composeProofAssets(accepts(), acceptsSite()).files, assets.files, "deterministic");
+});
+
+test("identical shared root files merge, and a differing one refuses the tree", () => {
+  assert.equal(
+    composeProofAssets(accepts(), acceptsSite()).files.filter((file) => file.path === "favicon.svg")
+      .length,
+    1,
+  );
+  assert.throws(
+    () =>
+      composeProofAssets(accepts({ files: { "favicon.svg": "<svg/><!-- other -->" } }), acceptsSite()),
+    /different bytes at favicon\.svg/u,
+  );
+  assert.throws(
+    () => composeProofAssets(accepts(), acceptsSite({ files: { "robots.txt": "User-agent: x\n" } })),
+    /different bytes at robots\.txt/u,
+  );
+});
+
+test("the Site may not hold a file under a profile route", () => {
+  const site = acceptsSite();
+  const forged = { ...site, files: [...site.files, { path: "chat/index.html", bytes: Buffer.from("x") }] };
+  assert.throws(
+    () => composeProofAssets(accepts(), forged),
+    /path the profiles serve: chat\/index\.html/u,
+  );
+});
+
+test("the composed headers keep each surface's rules and unset the Site policy under the profiles", () => {
+  const site = acceptsSite();
+  const accountPolicy = expectedProfilePolicy(profileShell);
+  const expected = [
+    "/*",
+    `  Content-Security-Policy: ${site.policy}`,
+    "  X-Content-Type-Options: nosniff",
+    "  Referrer-Policy: no-referrer",
+    "  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()",
+    "  X-Frame-Options: DENY",
+    "  X-Robots-Tag: noindex, nofollow",
+    "  Cache-Control: public, no-cache, no-transform",
+    "/assets/*",
+    "  ! Cache-Control",
+    "  Cache-Control: public, max-age=31536000, immutable, no-transform",
+    "/__build.json",
+    "  ! Cache-Control",
+    "  Cache-Control: no-store, no-transform",
+    "/__build-info.json",
+    "  ! Cache-Control",
+    "  Cache-Control: no-store, no-transform",
+    "/account/*",
+    "  ! Content-Security-Policy",
+    `  Content-Security-Policy: ${accountPolicy}`,
+    "/chat/*",
+    "  ! Content-Security-Policy",
+    `  Content-Security-Policy: ${accountPolicy}`,
+    "/_framework/*",
+    "  ! Cache-Control",
+    "  Cache-Control: public, max-age=31536000, immutable, no-transform",
+    "/_framework/blazor.webassembly.js",
+    "  ! Cache-Control",
+    "  Cache-Control: public, no-cache, no-transform",
+    "/_framework/dotnet.js",
+    "  ! Cache-Control",
+    "  Cache-Control: public, no-cache, no-transform",
+  ];
+  assert.equal(composeProofAssets(accepts(), site).headers, `${expected.join("\n")}\n`);
+});
+
+test("the header merge keeps one line, refuses a conflict and unsets an inherited value", () => {
+  assert.equal(composeHeaders("/*\n  X-A: 1\n", "/*\n  X-A: 1\n"), "/*\n  X-A: 1\n");
+  assert.throws(() => composeHeaders("/*\n  X-A: 1\n", "/*\n  X-A: 2\n"), /differently on \/\*/u);
+  assert.equal(composeHeaders("/*\n  X-A: 1\n", "/x/*\n  X-A: 1\n"), "/*\n  X-A: 1\n");
+  assert.equal(
+    composeHeaders("/*\n  X-A: 1\n", "/x/*\n  X-A: 2\n"),
+    "/*\n  X-A: 1\n/x/*\n  ! X-A\n  X-A: 2\n",
+  );
+  assert.equal(
+    composeHeaders("/*\n  X-A: 1\n", "/x/*\n  ! X-A\n  X-A: 1\n"),
+    "/*\n  X-A: 1\n/x/*\n  ! X-A\n  X-A: 1\n",
+  );
+  assert.throws(() => composeHeaders("/*\n  X-A: 1\n", ""), /LF line ends/u);
+  assert.throws(() => composeHeaders("/*\n  X-A 1\n", "/x/*\n  X-A: 1\n"), /not a plain header/u);
+  assert.throws(() => composeHeaders("/*\n  X-A: 1\n/*\n  X-B: 2\n", "/x/*\n  X-A: 1\n"), /Duplicate headers rule/u);
+});
+
+test("the composed proof tree stages into the fixed directory with its one headers file", async () => {
+  const assets = composeProofAssets(accepts(), acceptsSite());
+  const parent = await mkdtemp(path.join(tmpdir(), "arcforges-proof-tree-"));
+  try {
+    const target = path.join(parent, proofAssetsDirName);
+    assert.equal(await stageProofAssets(assets, target), assets.files.length);
+    assert.equal(await readFile(path.join(target, "_headers"), "utf8"), assets.headers);
+    assert.equal(await readFile(path.join(target, siteStylesheetPath), "utf8"), siteCss);
+    await assert.rejects(
+      stageProofAssets(assets, path.join(parent, "elsewhere")),
       /Unexpected staging directory/u,
     );
   } finally {
