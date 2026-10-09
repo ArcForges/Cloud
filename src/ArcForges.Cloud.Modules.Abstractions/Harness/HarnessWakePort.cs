@@ -32,3 +32,33 @@ public interface IHarnessWakePort
 
     Task<HarnessWakeReply> HandleAsync(HarnessWakeMessage message, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// The schedule of one run's wake: the run and the Unix time in milliseconds at which its Durable Object alarm must deliver the wake (HAR.40).
+/// The run is addressed by its workspace and run identifiers, the same pair the wake carries.
+/// </summary>
+public sealed record HarnessAlarmSchedule(Guid WorkspaceId, Guid RunId, long WakeAtMs);
+
+/// <summary>
+/// What the alarm arming did. <see cref="Armed"/> is the only reply that lets the executor park a run with a timer; every other outcome is a refusal,
+/// and the executor does not park.
+/// </summary>
+public enum HarnessAlarmReply
+{
+    Armed,
+    Refused,
+}
+
+/// <summary>
+/// The alarm port of the Task module (HAR.40 alarm arming). The executor arms the run's wake before it parks the run with a timer and cancels it
+/// on a best-effort basis when the parking commit fails. The implementation sends one closed JSON request to the outbound virtual host
+/// <c>harness.internal</c>; it fails closed, so every transport or validation failure is a refusal and never a fault.
+/// </summary>
+public interface IHarnessAlarmPort
+{
+    /// <summary>Arms the run's wake for the scheduled time. <see cref="HarnessAlarmReply.Refused"/> on any failure.</summary>
+    Task<HarnessAlarmReply> ScheduleAsync(HarnessAlarmSchedule schedule, CancellationToken cancellationToken);
+
+    /// <summary>Cancels the run's armed wake. Best effort: the caller treats a failure as no cancellation, which a stray wake makes harmless.</summary>
+    Task CancelAsync(Guid workspaceId, Guid runId, CancellationToken cancellationToken);
+}

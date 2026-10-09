@@ -5,6 +5,7 @@ import { containerEnvironment } from "./foundation/container-env.ts";
 import { fetchEntry, queueEntry, type WorkerEnv } from "./foundation/entry.ts";
 import { handleObjects } from "./foundation/objects.ts";
 import type { FoundationEnv } from "./foundation/types.ts";
+import { harnessInternalOutbound } from "./harness/internal/outbound.ts";
 import { handleExecutePlan } from "./storage/handler.ts";
 
 export { ContainerProxy };
@@ -37,7 +38,8 @@ export class FoundationContainer extends CloudContainer {
 
 // The proof Container reaches bindings only through these exact virtual hosts; everything else
 // stays closed because enableInternet is false. Assigned (not declared as a static field) so the
-// base class setter registers the handlers for this class name.
+// base class setter registers the handlers for this class name. harness.internal is the run alarm
+// of HAR.40: it arms and cancels one run's wake and is reachable from the proof class only.
 const storageOutbound: OutboundHandler<WorkerEnv> = (request, env) =>
   handleExecutePlan(request, env as FoundationEnv);
 const objectsOutbound: OutboundHandler<WorkerEnv> = (request, env) =>
@@ -45,6 +47,7 @@ const objectsOutbound: OutboundHandler<WorkerEnv> = (request, env) =>
 FoundationContainer.outboundByHost = {
   "storage.internal": storageOutbound as OutboundHandler,
   "objects.internal": objectsOutbound as OutboundHandler,
+  "harness.internal": harnessInternalOutbound as OutboundHandler,
 };
 
 export default {

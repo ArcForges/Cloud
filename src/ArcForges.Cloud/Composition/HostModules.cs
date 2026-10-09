@@ -43,7 +43,8 @@ internal static class HostModules
 /// <summary>
 /// The harness wake port of the Task module, appended to the host composition (HAR.40, RES-cloud-host-composition). It is registered and its
 /// private path declared only when the foundation configuration is present, because the W2C verifier keys come from it. Without that
-/// configuration no wake port is registered, the Task module maps no route and the ingress pipeline refuses the path.
+/// configuration no wake port is registered, the Task module maps no route and the ingress pipeline refuses the path. The alarm arming port
+/// (the outbound harness.internal client) is registered under the same condition.
 /// </summary>
 internal sealed class HarnessWakeModule(JsonObject identity) : IHostModule
 {
@@ -53,6 +54,8 @@ internal sealed class HarnessWakeModule(JsonObject identity) : IHostModule
     {
         enabled = builder.Services.Any(descriptor => descriptor.ServiceType == typeof(FoundationOptions));
         if (!enabled) return;
+        // The alarm port (HAR.40 alarm arming) is registered with the wake route and nowhere else; production registers nothing new.
+        builder.Services.TryAddSingleton<IHarnessAlarmPort>(_ => new HarnessAlarmClient(FoundationModule.NewClient(), TimeSpan.FromSeconds(5)));
         builder.Services.TryAddSingleton<IHarnessWakePort>(provider =>
         {
             var configured = provider.GetRequiredService<FoundationOptions>();

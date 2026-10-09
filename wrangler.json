@@ -116,6 +116,10 @@
           {
             "name": "JOB_COORDINATOR",
             "class_name": "FoundationJobCoordinator"
+          },
+          {
+            "name": "HARNESS_RUN_ALARM",
+            "class_name": "HarnessRunAlarm"
           }
         ]
       },
@@ -123,6 +127,10 @@
         {
           "tag": "v1",
           "new_sqlite_classes": ["FoundationContainer", "FoundationJobCoordinator"]
+        },
+        {
+          "tag": "harness-run-alarm-v1",
+          "new_sqlite_classes": ["HarnessRunAlarm"]
         }
       ],
       "d1_databases": [

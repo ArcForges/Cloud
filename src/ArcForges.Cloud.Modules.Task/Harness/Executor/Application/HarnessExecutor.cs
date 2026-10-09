@@ -138,6 +138,31 @@ internal enum ResumeKind
 
 internal sealed record ResumeResult(ResumeKind Kind, Guid? CommandId, StoreStatus? Store);
 
+/// <summary>What parking a run with a timer did (see <see cref="HarnessExecutor.ParkWithTimerAsync"/>).</summary>
+internal enum ParkStatus
+{
+    /// <summary>The wake was armed and the waiting state committed with the lease released.</summary>
+    Parked,
+
+    /// <summary>The claim was already released by this executor: nothing was armed or written.</summary>
+    Released,
+
+    /// <summary>
+    /// The wake was not armed. Nothing was written: the run is not parked and its lease is left to its term. The caller answers the typed
+    /// retryable reply, and a retry claims the run once that lease has expired.
+    /// </summary>
+    ArmRefused,
+
+    /// <summary>The waiting commit did not commit after arming: the armed wake was cancelled on a best-effort basis.</summary>
+    CommitRefused,
+
+    /// <summary>The waiting commit outcome is unknown after arming: the wake stays armed, and nothing is cancelled.</summary>
+    CommitUnknown,
+}
+
+/// <summary>The result of parking a run with a timer; <see cref="Commit"/> is the store status of the waiting commit when it was attempted.</summary>
+internal sealed record ParkResult(ParkStatus Status, StoreStatus? Commit);
+
 /// <summary>
 /// The C# executor of one run. It claims a lease (60 seconds, renewed every 20 seconds), reserves every counted step under the fence
 /// before dispatch, records a durable dispatch intent before the external call, records every outcome under the fence, and on resume
@@ -398,6 +423,41 @@ internal sealed class HarnessExecutor(IHarnessStore store, IEffectPort effects, 
         var status = await store.YieldAsync(claim.Fence, ids.NewId(), nextState, Micros(), cancellationToken).ConfigureAwait(false);
         if (status == StoreStatus.Succeeded) claim.Released = true;
         return status;
+    }
+
+    /// <summary>
+    /// Parks the claimed run with a timer (the contracts 05 wait row). The order is fixed (HAR.40 alarm arming): the wake is armed first, and only
+    /// then the fenced write records the waiting state and releases the lease. A crash after arming and before the commit leaves a running run
+    /// whose lease expires within its term, and the armed wake claims it after that. An arm that is refused does not park the run and writes
+    /// nothing. A commit that did not commit cancels the armed wake on a best-effort basis; an unknown commit keeps it armed, because a stray
+    /// wake is harmless under the fenced claim while a cancelled wake of a committed waiting run would strand it.
+    /// </summary>
+    internal async Task<ParkResult> ParkWithTimerAsync(ClaimedRun claim, long wakeAtMs, IHarnessAlarmPort alarm, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(claim);
+        ArgumentNullException.ThrowIfNull(alarm);
+        if (claim.Released) return new ParkResult(ParkStatus.Released, null);
+
+        var run = claim.Fence.Run;
+        var armed = await alarm.ScheduleAsync(new HarnessAlarmSchedule(run.WorkspaceId, run.RunId, wakeAtMs), cancellationToken).ConfigureAwait(false);
+        if (armed != HarnessAlarmReply.Armed) return new ParkResult(ParkStatus.ArmRefused, null);
+
+        var committed = await YieldAsync(claim, RunState.Waiting, cancellationToken).ConfigureAwait(false);
+        if (committed == StoreStatus.Succeeded) return new ParkResult(ParkStatus.Parked, committed);
+        if (committed == StoreStatus.Unknown) return new ParkResult(ParkStatus.CommitUnknown, committed);
+
+        try
+        {
+            // The commit is known not to have happened: the run is not waiting, so the armed wake is cancelled. Its own deadline bounds the call.
+            await alarm.CancelAsync(run.WorkspaceId, run.RunId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Best effort: a cancel that fails leaves a stray wake, which the fenced claim takes as harmless.
+            _ = exception;
+        }
+
+        return new ParkResult(ParkStatus.CommitRefused, committed);
     }
 
     private async Task<EffectStepResult> ExplainRefusalAsync(ClaimedRun claim, StoreStatus status, int ordinal, Guid commandId, EffectCost cost, CancellationToken cancellationToken)

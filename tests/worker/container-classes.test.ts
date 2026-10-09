@@ -75,11 +75,18 @@ test("the production Container keeps the Hello settings and no environment varia
   assert.deepEqual(instance.envVars, {}, "no foundation variable reaches the production class");
 });
 
-test("only the proof class carries the storage and objects hosts and the environment hook; ai.internal stays production-only", () => {
+test("only the proof class carries the storage, objects and harness alarm hosts and the environment hook; ai.internal stays production-only", () => {
   assert.deepEqual(Object.keys(FoundationContainer.outboundByHost ?? {}).sort(), [
+    "harness.internal",
     "objects.internal",
     "storage.internal",
   ]);
+  assert.equal(typeof FoundationContainer.outboundByHost?.["harness.internal"], "function");
+  assert.equal(
+    CloudContainer.outboundByHost?.["harness.internal"],
+    undefined,
+    "the production class never reaches the harness alarm host",
+  );
   assert.equal(Object.getPrototypeOf(FoundationContainer), CloudContainer);
   assert.equal(
     FoundationContainer.outboundByHost?.["ai.internal"],

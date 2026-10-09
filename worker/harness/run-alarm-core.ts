@@ -6,6 +6,14 @@ import { sha256Hex } from "../private/encoding.ts";
 export const wakePath = "/internal/harness/v1/wake";
 export const harnessContainerName = "harness";
 
+/**
+ * The outbound virtual host of the C# alarm client (HAR.40 alarm arming). The proof container class alone registers it, with exactly one
+ * schedule path and one cancel path. Nothing else is reachable through it.
+ */
+export const alarmHost = "harness.internal";
+export const scheduleAlarmPath = "/v1/schedule";
+export const cancelAlarmPath = "/v1/cancel";
+
 /** The wake handle: the only state the alarm holds. It names a run and a time; it never holds run state. */
 export interface WakeHandle {
   readonly workspaceId: string;
@@ -110,4 +118,30 @@ export function readHandle(value: unknown): WakeHandle | null {
   )
     return null;
   return { workspaceId, runId, wakeAtMs, attempts };
+}
+
+/**
+ * The run key that names one run's alarm: the workspace and the run identifiers, the same pair the wake carries. The Worker addresses the
+ * Durable Object with it and never with a free-form name.
+ */
+export function runKey(workspaceId: string, runId: string): string {
+  return `${workspaceId}/${runId}`;
+}
+
+/** A run named by its run key fields. */
+export interface RunRef {
+  readonly workspaceId: string;
+  readonly runId: string;
+}
+
+/** Parses the cancel body: exactly the run key with canonical identifiers. Anything else, including a schedule time, is refused. */
+export function parseRunRef(body: unknown): { ok: true; ref: RunRef } | { ok: false } {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return { ok: false };
+  const record = body as Record<string, unknown>;
+  const keys = Object.keys(record).sort().join(",");
+  if (keys !== "runId,workspaceId") return { ok: false };
+  const { runId, workspaceId } = record;
+  if (typeof runId !== "string" || !canonicalUuid.test(runId)) return { ok: false };
+  if (typeof workspaceId !== "string" || !canonicalUuid.test(workspaceId)) return { ok: false };
+  return { ok: true, ref: { workspaceId, runId } };
 }

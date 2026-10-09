@@ -400,6 +400,7 @@
     "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Application/HelloAgentSlice.cs",
     "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Application/HelloEffectPort.cs",
     "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Domain/HelloSlicePolicy.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessAlarmClient.cs",
     "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessWakeEndpoint.cs",
     "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessWakeService.cs",
     "src/ArcForges.Cloud.Modules.Task/TaskModule.cs",
@@ -612,6 +613,8 @@
     "tests/ArcForges.Cloud.Tests/FoundationOptionsTests.cs",
     "tests/ArcForges.Cloud.Tests/FoundationTestSupport.cs",
     "tests/ArcForges.Cloud.Tests/HarnessFoundation/AgentDispatchTests.cs",
+    "tests/ArcForges.Cloud.Tests/HarnessFoundation/HarnessAlarmArmingTests.cs",
+    "tests/ArcForges.Cloud.Tests/HarnessFoundation/HarnessAlarmClientTests.cs",
     "tests/ArcForges.Cloud.Tests/HarnessFoundation/HarnessBudgetTests.cs",
     "tests/ArcForges.Cloud.Tests/HarnessFoundation/HarnessCrashTests.cs",
     "tests/ArcForges.Cloud.Tests/HarnessFoundation/HarnessDomainTests.cs",
@@ -720,6 +723,7 @@
     "tests/worker/foundation-objects.test.ts",
     "tests/worker/foundation-poison.test.ts",
     "tests/worker/foundation-proof-routes.test.ts",
+    "tests/worker/harness-internal.test.ts",
     "tests/worker/harness-proof.test.ts",
     "tests/worker/identity-core-oracle.test.ts",
     "tests/worker/identity-plan-calls.test.ts",
@@ -787,6 +791,7 @@
     "worker/foundation/proof-routes.ts",
     "worker/foundation/queue.ts",
     "worker/foundation/types.ts",
+    "worker/harness/internal/outbound.ts",
     "worker/harness/run-alarm-core.ts",
     "worker/harness/run-alarm.ts",
     "worker/index.ts",
@@ -835,5 +840,8 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["har-40-cloud-runtime-notices-r3", "har-40-cloud-worker-bundle-r3"]
+  "artifacts": [
+    "har-40-cloud-runtime-notices-r3",
+    "har-40-cloud-worker-bundle-r3"
+  ]
 }

@@ -47,17 +47,20 @@ Live steps that remain operator runs (`liveNotRun`):
 3. Real 429 semantics, including whether a rate-limited call was counted or dispatched: provoke the limit on the proof account and record the response. Until then a 429 is treated as a possibly dispatched effect.
 4. SSE pass-through across the Cloudflare edge: stream one answer through the deployed Worker.
 
-## Proof 2: executor crash injection
+## Proof 2: executor crash injection and alarm arming
 
 Driver: `eng/verification/harness-proof-executor.ts`. Realness: `dotnet-local`. It runs `HarnessCrashTests` and `HarnessExecutorTests` (38 tests, including the ten-row crash matrix at claim, reserve, dispatch intent, outcome and yield, each before and after its commit) against the SQLite oracle with the checked-in plans.
+
+Alarm arming (HAR.40, delivered by the successor of `cloud-release-r40`; this section supersedes the earlier evidence rows that record a deferral). The executor arms the run's wake before it parks the run with a timer, and commits the waiting state after the arm. These offline tests cover it:
+
+- `HarnessAlarmArmingTests`: the arm comes before the waiting commit; a refused arm does not park the run, writes nothing and is retried by a wake after the lease term; a waiting commit that did not commit after arming cancels the wake best-effort; an unknown commit keeps the wake armed; a released claim arms nothing. The three crash rows at the arm boundary (before arm, after arm and before commit, after commit) are each settled once by a later wake, with no supplier call and no second advance.
+- `HarnessAlarmClientTests`: one closed JSON request per call to `harness.internal`; every reply other than the exact scheduled reply, a transport failure, a timeout and a cancelled caller are refusals.
+- `tests/worker/harness-internal.test.ts`: the `harness.internal` handler refuses every other method, path, host, query, content type, size and body before any run's alarm is addressed; a missing binding is 503; the offline loop runs the schedule through the handler, fires the alarm, and checks the signed wake POST to the container stub against the body the C# wake endpoint parses.
 
 Live steps that remain operator runs (`liveNotRun`):
 
 1. Cloudflare D1 fenced writes under a real lease: kill the Container between a dispatch intent and its outcome on the proof environment.
-
-Open. This proof is not delivered by HAR.40. A deferral to HAR.00 is proposed and has not been adjudicated by the coordinator; the HAR.40 outcome names a Durable Object alarm wake, so that outcome clause is unmet until the coordinator amends it:
-
-2. Durable Object alarm wake after a real process restart. Nothing in HAR.40 arms `HarnessRunAlarm`: no Worker route calls `schedule`, and the proof environment (`env.proof` in `wrangler.json`) binds no `HarnessRunAlarm` (the production Worker binds `HARNESS_RUN_ALARM`, and nothing arms it). The C# wake route is mapped only under `FOUNDATION_PROOF`, so an alarm POST would be refused in production. The wake contract and its offline tests pass; the arming path, the proof binding and the live observation belong to HAR.00 ([harness foundation](harness-foundation.md), Wake).
+2. Durable Object alarm wake after a real process restart: on `proof.arcforges.com`, arm a parked run through `harness.internal`, restart the `FoundationContainer`, and observe the alarm wake that claims the run. The offline tests above pass; the live observation is not run here (P2-017: no live CI). The proof environment binds `HARNESS_RUN_ALARM` (`env.proof` in `wrangler.json`).
 
 ## Proof 3: container capacity
 
