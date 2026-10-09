@@ -13,7 +13,9 @@ internal static class LeasePolicy
 
 /// <summary>
 /// The executor's budget values (HAR.40 validation (b)). They are C# values under the reviewed budget definition, never the Cloudflare
-/// Workflow platform settings they replace. Each is a ceiling the database also enforces at its hard value.
+/// Workflow platform settings they replace. The hard step ceiling and the subrequest allowance are also CHECK constraints on
+/// task_harness_budget (migration 0025), so the database refuses a counted value above them; the effect stops below those values
+/// (the step guard and the subrequest stop) are enforced by the executor only.
 /// </summary>
 internal static class BudgetPolicy
 {

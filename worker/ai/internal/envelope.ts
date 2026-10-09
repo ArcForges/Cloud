@@ -13,7 +13,9 @@ export const hardByteCap = 1_048_576;
 /** The most admitted models one call may name. */
 export const maxAdmittedModels = 16;
 
-const modelToken = /^[A-Za-z0-9@/._-]{1,128}$/u;
+// The same character set as the C# ModelDispatchOptions.IsToken that admits a model and its tariff snapshot (1 to 128 characters; letters,
+// digits and @ / . _ : -). Keep the two in step: a colon is allowed on both sides or on neither.
+const modelToken = /^[A-Za-z0-9@/._:-]{1,128}$/u;
 const envelopeKeys = "admittedModels,maxBodyBytes,maxResponseBytes,model,request,v";
 
 export interface AiEnvelope {

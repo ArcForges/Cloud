@@ -272,6 +272,43 @@ test("no request header, and no token, reaches the binding", async () => {
   assert.deepEqual(Object.keys(ai.calls[0] ?? {}).sort(), ["inputs", "model"]);
 });
 
+test("a model token uses the C# IsToken character set: a colon is accepted, and other characters or a longer name are refused", () => {
+  const colonModel = "acme:tier/model_1@v2.0-x";
+  const accepted = parseEnvelope(
+    new TextEncoder().encode(envelope({ model: colonModel, admittedModels: [colonModel] })),
+  );
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) assert.equal(accepted.value.model, colonModel);
+
+  const refusedShape = [
+    "acme model",
+    "acme,model",
+    "acme#model",
+    "acme?model",
+    "a".repeat(129),
+    "",
+  ];
+  for (const token of refusedShape) {
+    assert.deepEqual(
+      parseEnvelope(new TextEncoder().encode(envelope({ model: token, admittedModels: [token] }))),
+      { ok: false, status: 400, code: "ai.model_shape" },
+      `model refused: ${token}`,
+    );
+  }
+  assert.deepEqual(
+    parseEnvelope(
+      new TextEncoder().encode(envelope({ model: colonModel, admittedModels: ["acme model"] })),
+    ),
+    { ok: false, status: 400, code: "ai.admitted_set_shape" },
+  );
+  assert.deepEqual(
+    parseEnvelope(
+      new TextEncoder().encode(envelope({ model: colonModel, admittedModels: ["other:model"] })),
+    ),
+    { ok: false, status: 403, code: "ai.model_not_admitted" },
+  );
+});
+
 test("the envelope parser refuses every shape it is asked to parse and accepts the exact closed shape", () => {
   const ok = parseEnvelope(new TextEncoder().encode(envelope()));
   assert.equal(ok.ok, true);
