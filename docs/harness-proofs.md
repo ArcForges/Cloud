@@ -55,7 +55,7 @@ Live steps that remain operator runs (`liveNotRun`):
 
 1. Cloudflare D1 fenced writes under a real lease: kill the Container between a dispatch intent and its outcome on the proof environment.
 
-Deferred to HAR.00 (a reviewed deferral, not an operator step for this proof):
+Open. This proof is not delivered by HAR.40. A deferral to HAR.00 is proposed and has not been adjudicated by the coordinator; the HAR.40 outcome names a Durable Object alarm wake, so that outcome clause is unmet until the coordinator amends it:
 
 2. Durable Object alarm wake after a real process restart. Nothing in HAR.40 arms `HarnessRunAlarm`: no Worker route calls `schedule`, and the proof environment (`env.proof` in `wrangler.json`) binds no `HarnessRunAlarm` (the production Worker binds `HARNESS_RUN_ALARM`, and nothing arms it). The C# wake route is mapped only under `FOUNDATION_PROOF`, so an alarm POST would be refused in production. The wake contract and its offline tests pass; the arming path, the proof binding and the live observation belong to HAR.00 ([harness foundation](harness-foundation.md), Wake).
 
