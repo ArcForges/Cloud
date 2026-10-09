@@ -13,9 +13,9 @@
     "Directory.Packages.props": "8ae7a5a2f00ba8fad9189a37a65753cfd829fbe531a2454d1df44648911f1794",
     "Dockerfile": "932e9c9f575133302aa21915b34ab5b6e52b9fe35741b87f07093bc8ebe68ffa",
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
-    "eng/provenance/artifact-profiles/cloud-release-r41.json": "5cbb8536513aa2d82a9ea078cd7b42413838e0f18ae610c5f9f60ffcde326dba",
-    "eng/provenance/records/har-40-cloud-runtime-notices-r4.json": "04fa694784228abb803f5cdf13ca69862c47713a7edd958581bc94e246901450",
-    "eng/provenance/records/har-40-cloud-worker-bundle-r4.json": "09b204a04e37a45705f3953f904963189e66a302a535bbc06f98a3c942bfa9cd",
+    "eng/provenance/artifact-profiles/cloud-release-r42.json": "ba4ba6992148d61f47f60a917034cadc32108c39ec12033ab0bb04b3a87e9b3d",
+    "eng/provenance/records/har-40-cloud-runtime-notices-r5.json": "a164116402111e513f9545c235c9134a368a3f5024fcfe11018a6b844c41f85f",
+    "eng/provenance/records/har-40-cloud-worker-bundle-r5.json": "b7703818af1e257a3fafd2fedc3fa9757adc57c69e6ae277ac8a0842d64208a3",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
     "package.json": "934e364a5e342f5046301b356a4d18ebb07cfe0f1acab020e08f3522df00c8c5",
@@ -80,7 +80,7 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "w-deku-20261008-rev-har-40",
     "date": "2026-10-09",
-    "rationale": "HAR.40 successor of har-40-r9, derived by the repository tooling at dff030d (the alarm arming commit). The changed hash-bound inputs are wrangler.json (env.proof binds HARNESS_RUN_ALARM with the migration harness-run-alarm-v1), package.json (the test list gains tests/worker/harness-internal.test.ts) and the superseded release records: cloud-release-r41 binds the Worker and Native AOT inputs that changed (worker/harness/internal/outbound.ts added; run-alarm-core.ts, run-alarm.ts, worker/index.ts, HarnessWakePort.cs, HarnessExecutor.cs and HostModules.cs changed; HarnessAlarmClient.cs added to the Native AOT closure), and the records har-40-cloud-worker-bundle-r4 and har-40-cloud-runtime-notices-r4 bind it. The packages, integrity values, licences, NuGet locks, Dockerfile, base and SDK images and legal files are unchanged. The reviewer field names the pre-assigned independent reviewer session w-deku-20261008-rev-har-40; the decision is recorded as approved at write time under the record review rule, to be verified by that reviewer at the exact head. The Docker image build and a wrangler deploy were not run here; the Worker bundle was built by wrangler deploy --dry-run.",
+    "rationale": "HAR.40 successor of har-40-r10, derived by the repository tooling at c2619400d776e4d78641f9acd9c98ea6bb8c49a4 (the Hello read-unavailable arming commit). The only changed hash-bound input of this step is the Native AOT input src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Application/HelloAgentSlice.cs. cloud-release-r42 binds it and supersedes cloud-release-r41; the records har-40-cloud-worker-bundle-r5 and har-40-cloud-runtime-notices-r5 bind r42 and supersede r4. wrangler.json, package.json, the packages, integrity values, licences, NuGet locks, Dockerfile, base and SDK images and legal files are unchanged from har-40-r10. The reviewer field names w-deku-20261008-rev-har-40; the decision is recorded as approved at write time under the record review rule, to be verified by that reviewer at the exact head. The Docker image build was not run here; the Worker bundle was built by wrangler deploy --dry-run and is byte-identical to the r41 bundle.",
     "inputs": {
       ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
       ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
@@ -91,9 +91,9 @@
       "Directory.Packages.props": "8ae7a5a2f00ba8fad9189a37a65753cfd829fbe531a2454d1df44648911f1794",
       "Dockerfile": "932e9c9f575133302aa21915b34ab5b6e52b9fe35741b87f07093bc8ebe68ffa",
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
-      "eng/provenance/artifact-profiles/cloud-release-r41.json": "5cbb8536513aa2d82a9ea078cd7b42413838e0f18ae610c5f9f60ffcde326dba",
-      "eng/provenance/records/har-40-cloud-runtime-notices-r4.json": "04fa694784228abb803f5cdf13ca69862c47713a7edd958581bc94e246901450",
-      "eng/provenance/records/har-40-cloud-worker-bundle-r4.json": "09b204a04e37a45705f3953f904963189e66a302a535bbc06f98a3c942bfa9cd",
+      "eng/provenance/artifact-profiles/cloud-release-r42.json": "ba4ba6992148d61f47f60a917034cadc32108c39ec12033ab0bb04b3a87e9b3d",
+      "eng/provenance/records/har-40-cloud-runtime-notices-r5.json": "a164116402111e513f9545c235c9134a368a3f5024fcfe11018a6b844c41f85f",
+      "eng/provenance/records/har-40-cloud-worker-bundle-r5.json": "b7703818af1e257a3fafd2fedc3fa9757adc57c69e6ae277ac8a0842d64208a3",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
       "package.json": "934e364a5e342f5046301b356a4d18ebb07cfe0f1acab020e08f3522df00c8c5",
@@ -983,7 +983,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["har-40-cloud-runtime-notices-r4", "har-40-cloud-worker-bundle-r4"],
+  "artifactRecords": ["har-40-cloud-runtime-notices-r5", "har-40-cloud-worker-bundle-r5"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -997,7 +997,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/har-40-r10.json",
+  "reviewRecord": "eng/policy/dependency-reviews/har-40-r11.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
