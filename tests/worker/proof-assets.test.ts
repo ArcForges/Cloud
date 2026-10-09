@@ -203,7 +203,7 @@ test("the Worker answers every one of its own route families before any asset", 
   assert(assets);
   assert.deepEqual(assets.run_worker_first, workerFirst);
   assert.deepEqual(workerFirst, ["/api/*", "/session/v1/*", "/proof/v1/*"]);
-  assert.equal(assets.not_found_handling, "none");
+  assert.equal(assets.not_found_handling, "404-page");
   assert.equal(assets.html_handling, "auto-trailing-slash");
   assert.equal(assets.binding, undefined, "no new binding: the Worker code is unchanged");
   const matches = (pathname: string) =>
@@ -230,6 +230,9 @@ test("only the proof environment gains assets; production and the other bindings
   assert.equal(top.assets, undefined);
   assert.equal(wrangler.env.proof.workers_dev, false);
   assert.equal(wrangler.env.proof.preview_urls, false);
+  // The proof origin serves the Site 404 page for unknown paths, as production Web does; no other environment changes.
+  assert.equal(wrangler.env.proof.assets?.not_found_handling, "404-page");
+  assert.equal((wrangler as unknown as Record<string, unknown>).assets, undefined);
   assert.deepEqual(wrangler.env.proof.routes, [
     { pattern: "proof.arcforges.com", custom_domain: true },
   ]);
