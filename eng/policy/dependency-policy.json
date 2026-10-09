@@ -17,7 +17,7 @@
     "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-    "package.json": "2084e4187d73e25b476c698ddccd70e314b68c894b29a0b153958569b5a3938f",
+    "package.json": "cc71ad1634160adb6277340717bbe29ebb96e4cc4c3f584332db2221ed79b32d",
     "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
     "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
     "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -64,17 +64,19 @@
     "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
     "tests/ArcForges.Cloud.Consumer/packages.lock.json": "4c1c255b6f8ddd1d3a5fc577f47aa1f9f065b2482336792530a19f136e7909ff",
-    "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "fd3a353d1de9cb23fd0c7849e353f982c246b83c2e3103d71b7ca5947460c13e",
-    "tests/ArcForges.Cloud.Tests/packages.lock.json": "94fb6841e591445132e29d80743eee666ba172cdae993457e3c98a2456c6243c",
+    "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "eb0af2275c7f33bcaf60e0ebebe3e22a17fda6955be9279c387f9d6ce6dd5b5c",
+    "tests/ArcForges.Cloud.Tests/packages.lock.json": "090af91fa87f14e8caa622adef31a74f15b4a3cacf83f9dd7d1dcefa7d351ddb",
     "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj": "93123c0f27e3816e951938a556298a209e25851757b0cc7c43bf2baf37c23cf1",
     "tests/ArchitectureTests/packages.lock.json": "32ce93118af6a518c20c35b0d5f7058e41b8872d8037883c71602c41d56b2904",
+    "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "55b2ea62598b79835df9ea417b168adc4f397ccefa5f456d54b2d57a718d6fc6",
+    "tools/ArcForges.Cloud.Generation/packages.lock.json": "6b8cba8f601e50ce3dd3686dd74deb6933051aa5e7a37edd271e2eeaee734d9b",
     "wrangler.json": "54b032243498e8aff586c518b455b18d465b33b49c04451da1de5b40d26f508c"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "w-deku-20261009-rev-cloud-84",
     "date": "2026-10-09",
-    "rationale": "CLOUD.84 U1 removes the Kotlin consumer gate after AND.40 PR B. The setup-java, check:kotlin and Gradle wrapper validation steps, the java-kotlin CodeQL language with its verified tool download and Kotlin compile step, and the Kotlin artifact path leave .github/workflows/ci.yml. The check:kotlin and test:kotlin:live scripts leave package.json. .java-version and tests/kotlin-consumer (Gradle wrapper, Gradle lockfile, verification metadata and Kotlin sources) are deleted and leave the admitted input set; the workflow and package.json digests are re-bound. No npm or NuGet coordinate, integrity value or closure entry changes. The successor chains from cloud-85-r2, the receipt active on origin/main at this change.",
+    "rationale": "CLOUD.84 U3 and U4 generate the Worker transport tables and the correlation guards from C#. This receipt re-binds the inputs that group changes: package.json (the generate and check:generated scripts), tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj (one ProjectReference to the non-published tool project tools/ArcForges.Cloud.Generation, CLOUD.84 D3) and tests/ArcForges.Cloud.Tests/packages.lock.json (the matching project entry). It admits the tool project's tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj and packages.lock.json as inputs. The tool is not published and its locked closure is the existing host closure (ArcForges.Cloud and its locked packages): no npm or NuGet coordinate, integrity value or version changes. The successor chains from cloud-84-r1, the receipt active before this group.",
     "inputs": {
       ".github/workflows/ci.yml": "e5c33bc17b1fe12b36cd4de6a7c8fea4a47a8e06891606a6f7bd41317dec81cf",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -89,7 +91,7 @@
       "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-      "package.json": "2084e4187d73e25b476c698ddccd70e314b68c894b29a0b153958569b5a3938f",
+      "package.json": "cc71ad1634160adb6277340717bbe29ebb96e4cc4c3f584332db2221ed79b32d",
       "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
       "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
       "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -136,10 +138,12 @@
       "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
       "tests/ArcForges.Cloud.Consumer/packages.lock.json": "4c1c255b6f8ddd1d3a5fc577f47aa1f9f065b2482336792530a19f136e7909ff",
-      "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "fd3a353d1de9cb23fd0c7849e353f982c246b83c2e3103d71b7ca5947460c13e",
-      "tests/ArcForges.Cloud.Tests/packages.lock.json": "94fb6841e591445132e29d80743eee666ba172cdae993457e3c98a2456c6243c",
+      "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "eb0af2275c7f33bcaf60e0ebebe3e22a17fda6955be9279c387f9d6ce6dd5b5c",
+      "tests/ArcForges.Cloud.Tests/packages.lock.json": "090af91fa87f14e8caa622adef31a74f15b4a3cacf83f9dd7d1dcefa7d351ddb",
       "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj": "93123c0f27e3816e951938a556298a209e25851757b0cc7c43bf2baf37c23cf1",
       "tests/ArchitectureTests/packages.lock.json": "32ce93118af6a518c20c35b0d5f7058e41b8872d8037883c71602c41d56b2904",
+      "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "55b2ea62598b79835df9ea417b168adc4f397ccefa5f456d54b2d57a718d6fc6",
+      "tools/ArcForges.Cloud.Generation/packages.lock.json": "6b8cba8f601e50ce3dd3686dd74deb6933051aa5e7a37edd271e2eeaee734d9b",
       "wrangler.json": "54b032243498e8aff586c518b455b18d465b33b49c04451da1de5b40d26f508c"
     },
     "checks": [
@@ -151,9 +155,9 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No runtime change. The Kotlin verification client was a CI and local diagnostic only; it is not part of the Worker bundle, the candidate image or the deployed Hello. Production Worker and host code are unchanged, and deployment verification keeps the C# Native AOT and gRPC-Web protocol checks. No runtime capability, dependency class or native closure changes.",
+    "runtimeAssessment": "No runtime change to the shipped closure. The tool project is never published, the host and the production Worker entry keep their behaviour, and the generated Worker tables carry the same values. No runtime capability, dependency class or native closure changes.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/cloud-85-r2.json",
+    "previous": "eng/policy/dependency-reviews/cloud-84-r1.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-10-09",
     "decision": "approved"
@@ -987,7 +991,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
