@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
   auditDependencies,
   digest,
+  historicalReviews,
   immutableCoordinates,
+  introducingCommit,
   validateHistoricalCoordinates,
   validateClosure,
   validateCsharpImports,
@@ -216,4 +220,57 @@ test("private generated C# records are importable only by the Cloud host, its pl
       ),
     /Unadmitted private/u,
   );
+});
+test("a receipt introduced inside a merge commit is found and bound to that merge, not to a side draft", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "dependency-merge-receipt-"));
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith("GIT_")),
+  );
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.autocrlf=false",
+        ...args,
+      ],
+      { cwd: dir, encoding: "utf8", windowsHide: true, env },
+    ).trim();
+  const receipt = "eng/policy/dependency-reviews/merged-r1.json";
+  try {
+    git("init", "-q", "-b", "main");
+    writeFileSync(path.join(dir, "README.md"), "base\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    mkdirSync(path.join(dir, path.dirname(receipt)), { recursive: true });
+    git("checkout", "-q", "-b", "side");
+    writeFileSync(path.join(dir, "side.txt"), "side\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "side");
+    // A draft receipt on the side branch never reaches main, so it is not an admitted version.
+    writeFileSync(path.join(dir, receipt), '{"review":{"status":"draft"}}\n');
+    git("add", ".");
+    git("commit", "-q", "-m", "side draft receipt");
+    git("checkout", "-q", "main");
+    writeFileSync(path.join(dir, "main.txt"), "main\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "main");
+    git("merge", "-q", "--no-ff", "--no-commit", "side");
+    const admitted = '{"review":{"status":"approved"}}\n';
+    writeFileSync(path.join(dir, receipt), admitted);
+    git("add", ".");
+    git("commit", "-q", "-m", "merge side with the approved receipt");
+    const merge = git("rev-parse", "HEAD");
+    assert.deepEqual(historicalReviews(dir), [receipt]);
+    assert.equal(introducingCommit(dir, receipt), merge);
+    assert.equal(git("show", `${merge}:${receipt}`), admitted.trim());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
