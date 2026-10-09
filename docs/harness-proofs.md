@@ -54,7 +54,10 @@ Driver: `eng/verification/harness-proof-executor.ts`. Realness: `dotnet-local`. 
 Live steps that remain operator runs (`liveNotRun`):
 
 1. Cloudflare D1 fenced writes under a real lease: kill the Container between a dispatch intent and its outcome on the proof environment.
-2. Durable Object alarm wake after a real process restart: observe `HarnessRunAlarm` on the proof environment.
+
+Deferred to HAR.00 (a reviewed deferral, not an operator step for this proof):
+
+2. Durable Object alarm wake after a real process restart. Nothing in HAR.40 arms `HarnessRunAlarm`: no Worker route calls `schedule`, and the proof environment (`env.proof` in `wrangler.json`) binds no `HarnessRunAlarm` (the production Worker binds `HARNESS_RUN_ALARM`, and nothing arms it). The C# wake route is mapped only under `FOUNDATION_PROOF`, so an alarm POST would be refused in production. The wake contract and its offline tests pass; the arming path, the proof binding and the live observation belong to HAR.00 ([harness foundation](harness-foundation.md), Wake).
 
 ## Proof 3: container capacity
 

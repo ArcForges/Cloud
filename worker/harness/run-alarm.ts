@@ -2,6 +2,8 @@
 // The Durable Object alarm that wakes a run. It is a thin platform adapter (P2-021 item 1): it holds only a wake handle (a run identifier
 // and a time), it never reads or writes run state, and it does not decide whether the run advances. Each alarm sends one signed wake
 // to the C# endpoint and reports nothing else; the C# side claims, resumes and records every outcome under its own fence.
+// HAR.40 arms nothing: no Worker route or C# port reaches schedule(), and the proof environment binds no HarnessRunAlarm. Arming and the
+// proof observation are a reviewed deferral to HAR.00 (docs/harness-foundation.md, Wake; docs/harness-proofs.md, Proof 2).
 import { Container } from "@cloudflare/containers";
 import type { DurableObject } from "cloudflare:workers";
 import type { ContainerNamespaceLike } from "../foundation/types.ts";
