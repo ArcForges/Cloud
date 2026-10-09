@@ -46,7 +46,8 @@ public sealed class ActualRepositoryTests
     public void TheForbiddenTermScanIsWiredIntoTheCheckGateWithTheExactPublishedScanner()
     {
         Assert.Empty(NamingWiring.Check(CloudRepository.Read(Root, "package.json"), CloudRepository.Read(Root, "tooling/project.ts"),
-            CloudRepository.Read(Root, "eng/policy/naming-candidate.json"), CloudRepository.Read(Root, "package-lock.json")));
+            CloudRepository.Read(Root, "eng/policy/naming-candidate.json"), CloudRepository.Read(Root, "tests/ArchitectureTests/packages.lock.json"),
+            CloudRepository.Read(Root, "Directory.Packages.props"), CloudRepository.Read(Root, "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj")));
     }
 
     [Fact]

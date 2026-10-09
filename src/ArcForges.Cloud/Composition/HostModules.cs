@@ -2,11 +2,14 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using ArcForges.Cloud.Foundation;
+using ArcForges.Cloud.Hmac;
 using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Modules;
+using ArcForges.Cloud.Modules.Task.Harness.Wake;
 using ArcForges.Cloud.Storage;
 using ArcForges.Cloud.Storage.ModuleBinding;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using TaskModule = ArcForges.Cloud.Modules.Task.TaskModule;
 
 namespace ArcForges.Cloud.Composition;
 
@@ -32,8 +35,47 @@ internal static class HostModules
     /// <summary>The ingress module comes first so its pipeline runs before the gRPC-Web adapter; it reads the other modules' policies when mapping.</summary>
     public static IReadOnlyList<IHostModule> All(JsonObject identity)
     {
-        IHostModule[] served = [new HelloModule(identity), new FoundationModule(), new ModulePlanBindingModule(), .. ModuleBoundaries.All.Select(boundary => new ModuleBoundaryHost(boundary))];
+        IHostModule[] served = [new HelloModule(identity), new FoundationModule(), new ModulePlanBindingModule(), .. ModuleBoundaries.All.Select(boundary => new ModuleBoundaryHost(boundary)), new HarnessWakeModule(identity)];
         return [new IngressModule(served), .. served];
+    }
+}
+
+/// <summary>
+/// The harness wake port of the Task module, appended to the host composition (HAR.40, RES-cloud-host-composition). It is registered and its
+/// private path declared only when the foundation configuration is present, because the W2C verifier keys come from it. Without that
+/// configuration no wake port is registered, the Task module maps no route and the ingress pipeline refuses the path. The alarm arming port
+/// (the outbound harness.internal client) is registered under the same condition.
+/// </summary>
+internal sealed class HarnessWakeModule(JsonObject identity) : IHostModule
+{
+    private bool enabled;
+
+    public void Register(WebApplicationBuilder builder)
+    {
+        enabled = builder.Services.Any(descriptor => descriptor.ServiceType == typeof(FoundationOptions));
+        if (!enabled) return;
+        // The alarm port (HAR.40 alarm arming) is registered with the wake route and nowhere else; production registers nothing new.
+        builder.Services.TryAddSingleton<IHarnessAlarmPort>(_ => new HarnessAlarmClient(FoundationModule.NewClient(), TimeSpan.FromSeconds(5)));
+        builder.Services.TryAddSingleton<IHarnessWakePort>(provider =>
+        {
+            var configured = provider.GetRequiredService<FoundationOptions>();
+            var time = provider.GetRequiredService<TimeProvider>();
+            var build = identity["build"]!.AsObject();
+            var cloudBuild = build["sourceCommit"]!.GetValue<string>() + (build["dirty"]!.GetValue<bool>() ? "-dirty" : "");
+            var plans = new ModulePlanPortFactory(provider.GetRequiredService<IPlanExecutor>(), configured.RecoveryGeneration, time).For(TaskModule.Instance.Descriptor);
+            return new HarnessWakeService(
+                plans,
+                cloudBuild,
+                checked((long)configured.RecoveryGeneration),
+                time,
+                (method, target, bodyHash, header) => PrivateRequestVerifier.Verify(method, target, bodyHash, header, configured.VerifyKeys, time.GetUtcNow(), out _));
+        });
+    }
+
+    public IEnumerable<string> PlainPaths => enabled ? [HarnessWakeRoute.Path] : [];
+
+    public void Map(WebApplication app)
+    {
     }
 }
 

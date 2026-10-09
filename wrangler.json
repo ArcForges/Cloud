@@ -8,6 +8,9 @@
   "triggers": {
     "crons": []
   },
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  },
   "routes": [
     {
       "pattern": "arcforges.com/api/*",
@@ -29,6 +32,9 @@
         "class_name": "CloudContainer"
       }
     ]
+  },
+  "ai": {
+    "binding": "AI"
   },
   "migrations": [
     {
@@ -70,6 +76,9 @@
       "workers_dev": false,
       "preview_urls": false,
       "triggers": {},
+      "version_metadata": {
+        "binding": "CF_VERSION_METADATA"
+      },
       "routes": [
         {
           "pattern": "proof.arcforges.com",
@@ -99,6 +108,10 @@
           {
             "name": "JOB_COORDINATOR",
             "class_name": "FoundationJobCoordinator"
+          },
+          {
+            "name": "HARNESS_RUN_ALARM",
+            "class_name": "HarnessRunAlarm"
           }
         ]
       },
@@ -106,6 +119,10 @@
         {
           "tag": "v1",
           "new_sqlite_classes": ["FoundationContainer", "FoundationJobCoordinator"]
+        },
+        {
+          "tag": "harness-run-alarm-v1",
+          "new_sqlite_classes": ["HarnessRunAlarm"]
         }
       ],
       "d1_databases": [

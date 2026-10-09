@@ -8,13 +8,13 @@ namespace ArcForges.Cloud.Storage.Physical;
 internal static partial class PhysicalSchema
 {
     /// <summary>SHA-256 of the canonical expanded manifest (enum registry and every table).</summary>
-    public const string ManifestHash = "0273dbd090cdc2cb7db14327aac86cd9eb4600775415eebdebc31dd34e9fd6ac";
+    public const string ManifestHash = "f8b2ec2597e5754c30cdcbf86fe423ba0c3f3995fba0f8353853c18f04b58376";
 
     /// <summary>The highest numbered migration whose checksum the migration lock holds (the StorageSchemaVersion).</summary>
-    public const int HighestMigration = 24;
+    public const int HighestMigration = 25;
 
     /// <summary>SHA-256 over the ordered sequence and checksum of every locked migration.</summary>
-    public const string MigrationLockHash = "53751e3f5bd780159f8cfa607c41b5d57fbd1f3e038b6e6ad0ac818229a362c9";
+    public const string MigrationLockHash = "f499d30d177e25a5a21ee60755acd7707e8a71d8a96f45622b4ee52487aecfc3";
 
     public static IReadOnlyList<PhysicalEnum> Enums { get; } =
     [
@@ -2616,6 +2616,22 @@ internal static partial class PhysicalSchema
         ],
         ["run_id"]);
 
+    public static PhysicalTable TaskHarnessBudget { get; } = new(
+        "task_harness_budget",
+        "task",
+        [
+            new("run_id", PhysicalKind.Id, false),
+            new("counted_steps", PhysicalKind.Int64, false),
+            new("subrequests", PhysicalKind.Int64, false),
+            new("model_calls", PhysicalKind.Int64, false),
+            new("tool_invocations", PhysicalKind.Int64, false),
+            new("pinned_model_id", PhysicalKind.Text, false),
+            new("pinned_tariff_snapshot_id", PhysicalKind.Text, false),
+            new("updated_at", PhysicalKind.Instant, false),
+            new("rev", PhysicalKind.Rev, false),
+        ],
+        ["run_id"]);
+
     public static PhysicalTable TaskIterationOutput { get; } = new(
         "task_iteration_output",
         "task",
@@ -3009,6 +3025,7 @@ internal static partial class PhysicalSchema
         TaskControlReceipt,
         TaskExecutionCommand,
         TaskExecutionLease,
+        TaskHarnessBudget,
         TaskIterationOutput,
         TaskPlanStep,
         TaskRun,

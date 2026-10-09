@@ -1,0 +1,11 @@
+# Exact SHA-256 file-digest false positives in the immutable release profiles (S31).
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "S31: reviewed SHA-256 digests of first-party source files in the immutable cloud release profiles; the generic-api-key rule fires on the TestAccess.cs path keys. Only 64-character lowercase hex values in cloud-release-rN.json profiles are exempt."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^eng/provenance/artifact-profiles/cloud-release-r[0-9]+\.json$''']
+regexTarget = "secret"
+regexes = ['''^[0-9a-f]{64}$''']

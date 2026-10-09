@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using ArcForges.Cloud.Modules.Task.Harness.Wake;
+using Microsoft.AspNetCore.Routing;
+
 namespace ArcForges.Cloud.Modules.Task;
 
 /// <summary>
@@ -14,4 +17,7 @@ public sealed class TaskModule : IModuleBoundary
     public static TaskModule Instance { get; } = new();
 
     public ModuleDescriptor Descriptor { get; } = ModuleDescriptor.Create("Task", "task");
+
+    /// <summary>Maps the harness wake route (HAR.40). The route exists only when the host has registered the wake port, so production maps nothing.</summary>
+    public void Map(IEndpointRouteBuilder endpoints) => HarnessWakeEndpoint.Map(endpoints);
 }

@@ -158,22 +158,30 @@ public sealed class RepositoryInventoryTests
           "devDependencies": { "@arcforges/proto": "1.0.0-ci.287.1" } }
         """;
 
-    private const string Script = "check_naming.py --repository Cloud=${root} artifacts/evidence/naming.json eng/policy/naming-candidate.json";
+    private const string Script = "python -I check_naming.py --repository Cloud=${root} artifacts/evidence/naming.json eng/policy/naming-candidate.json NUGET_PACKAGES archiveSha512 nupkg";
 
     private const string Candidate = """
-        { "package": "@arcforges/proto", "version": "1.0.0-ci.287.1", "sourceCommit": "ca45f36cccbdd31380f76b8f6cdecc958fdcb430",
+        { "package": "ArcForges.Contracts.Validation", "ecosystem": "nuget", "version": "1.0.0-ci.205.1",
+          "sourceCommit": "696242d16034262ce8b7268e8d157cd0e5bee544", "archiveSha512": "OWvMF30zpN6ms2KlQCtax5P7TACrgK50Vb0drN5zy4iXgk2TZd+5UU+LDGaA2ioowA1EQIZx8ZUyRoayZaHadA==",
           "assets": { "tools/naming/eng/check_naming.py": "7c4cd7041b8b53e1bfb6fc0016befcd50259ffaca512d389456e00d3c26d5eaf" } }
         """;
 
+    private const string Props = """
+        <Project><ItemGroup><PackageVersion Include="ArcForges.Contracts.Validation" Version="1.0.0-ci.205.1" /></ItemGroup></Project>
+        """;
+
+    private const string ArchitectureProject = """
+        <Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="ArcForges.Contracts.Validation" GeneratePathProperty="true" PrivateAssets="all" /></ItemGroup></Project>
+        """;
+
     private const string Lock = """
-        { "packages": { "": { "devDependencies": { "@arcforges/proto": "1.0.0-ci.287.1" } },
-          "node_modules/@arcforges/proto": { "version": "1.0.0-ci.287.1" } } }
+        { "version": 2, "dependencies": { "net10.0": { "ArcForges.Contracts.Validation": { "type": "Direct", "requested": "[1.0.0-ci.205.1, )", "resolved": "1.0.0-ci.205.1" } } } }
         """;
 
     [Fact]
     public void TheNamingScanWiringIsAcceptedWhenTheGateScanAndCandidateAgree()
     {
-        Assert.Empty(NamingWiring.Check(PackageJson, Script, Candidate, Lock));
+        Assert.Empty(NamingWiring.Check(PackageJson, Script, Candidate, Lock, Props, ArchitectureProject));
     }
 
     [Theory]
@@ -184,16 +192,17 @@ public sealed class RepositoryInventoryTests
     [InlineData("candidate-version")]
     [InlineData("candidate-commit")]
     [InlineData("candidate-digest")]
-    [InlineData("manifest")]
+    [InlineData("candidate-archive")]
+    [InlineData("central-version")]
+    [InlineData("project-reference")]
     [InlineData("lock-entry")]
-    [InlineData("lock-root")]
+    [InlineData("lock-direct")]
     public void BrokenNamingScanWiringIsRejected(string defect)
     {
         string packageJson = defect switch
         {
             "script" => PackageJson.Replace("node tooling/project.ts naming", "echo skipped", StringComparison.Ordinal),
             "gate" => PackageJson.Replace("npm run policy && ", string.Empty, StringComparison.Ordinal),
-            "manifest" => PackageJson.Replace("\"@arcforges/proto\": \"1.0.0-ci.287.1\"", "\"@arcforges/proto\": \"1.0.0-ci.286.1\"", StringComparison.Ordinal),
             _ => PackageJson,
         };
         string script = defect switch
@@ -204,18 +213,21 @@ public sealed class RepositoryInventoryTests
         };
         string candidate = defect switch
         {
-            "candidate-version" => Candidate.Replace("1.0.0-ci.287.1", "latest", StringComparison.Ordinal),
-            "candidate-commit" => Candidate.Replace("ca45f36cccbdd31380f76b8f6cdecc958fdcb430", "main", StringComparison.Ordinal),
+            "candidate-version" => Candidate.Replace("1.0.0-ci.205.1", "latest", StringComparison.Ordinal),
+            "candidate-commit" => Candidate.Replace("696242d16034262ce8b7268e8d157cd0e5bee544", "main", StringComparison.Ordinal),
             "candidate-digest" => Candidate.Replace("7c4cd7041b8b53e1bfb6fc0016befcd50259ffaca512d389456e00d3c26d5eaf", "unknown", StringComparison.Ordinal),
+            "candidate-archive" => Candidate.Replace("OWvMF30zpN6ms2KlQCtax5P7TACrgK50Vb0drN5zy4iXgk2TZd+5UU+LDGaA2ioowA1EQIZx8ZUyRoayZaHadA==", "unknown", StringComparison.Ordinal),
             _ => Candidate,
         };
+        string props = defect == "central-version" ? Props.Replace("1.0.0-ci.205.1", "1.0.0-ci.204.1", StringComparison.Ordinal) : Props;
+        string project = defect == "project-reference" ? ArchitectureProject.Replace("PrivateAssets=\"all\"", string.Empty, StringComparison.Ordinal) : ArchitectureProject;
         string lockfile = defect switch
         {
-            "lock-entry" => Lock.Replace("\"node_modules/@arcforges/proto\": { \"version\": \"1.0.0-ci.287.1\" }", "\"node_modules/@arcforges/proto\": { \"version\": \"1.0.0-ci.286.1\" }", StringComparison.Ordinal),
-            "lock-root" => Lock.Replace("\"devDependencies\": { \"@arcforges/proto\": \"1.0.0-ci.287.1\" }", "\"devDependencies\": { }", StringComparison.Ordinal),
+            "lock-entry" => Lock.Replace("\"resolved\": \"1.0.0-ci.205.1\"", "\"resolved\": \"1.0.0-ci.204.1\"", StringComparison.Ordinal),
+            "lock-direct" => Lock.Replace("\"type\": \"Direct\"", "\"type\": \"Transitive\"", StringComparison.Ordinal),
             _ => Lock,
         };
-        Assert.NotEmpty(NamingWiring.Check(packageJson, script, candidate, lockfile));
+        Assert.NotEmpty(NamingWiring.Check(packageJson, script, candidate, lockfile, props, project));
     }
 
     private const string Workflow = """

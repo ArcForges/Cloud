@@ -114,10 +114,16 @@ internal static class RepositoryInventoryPolicy
     }
 }
 
-/// <summary>The forbidden-term scan wiring (WP-05.02): exact published scanner identity, the check gate and the hosted evidence order.</summary>
+/// <summary>The forbidden-term scan wiring (WP-05.02): the exact NuGet scanner identity, the check gate and the hosted evidence order.</summary>
 internal static class NamingWiring
 {
-    public static IReadOnlyList<string> Check(string packageJson, string projectScript, string candidateJson, string lockJson)
+    /// <param name="packageJson">The workspace manifest; its policy script and check gate run the scan.</param>
+    /// <param name="projectScript">The Node naming gate that verifies the restored package and runs the scanner.</param>
+    /// <param name="candidateJson">eng/policy/naming-candidate.json: the NuGet identity, archive digest and asset digests.</param>
+    /// <param name="lockJson">The architecture host's NuGet lock: the candidate is a direct, locked reference at the exact version.</param>
+    /// <param name="packagesProps">Directory.Packages.props: the central version of the candidate.</param>
+    /// <param name="architectureProject">The architecture host project: a build-only package reference to the candidate.</param>
+    public static IReadOnlyList<string> Check(string packageJson, string projectScript, string candidateJson, string lockJson, string packagesProps, string architectureProject)
     {
         var problems = new List<string>();
         using var package = JsonDocument.Parse(packageJson);
@@ -134,7 +140,7 @@ internal static class NamingWiring
             problems.Add("The check gate does not run the policy script.");
         }
 
-        foreach (string expected in new[] { "check_naming.py", "--repository", "Cloud=", "artifacts/evidence/naming.json", "naming-candidate.json" })
+        foreach (string expected in new[] { "check_naming.py", "--repository", "Cloud=", "artifacts/evidence/naming.json", "naming-candidate.json", "-I", "NUGET_PACKAGES", "archiveSha512", "nupkg" })
         {
             if (!projectScript.Contains(expected, StringComparison.Ordinal))
             {
@@ -144,10 +150,12 @@ internal static class NamingWiring
 
         var root = candidate.RootElement;
         string version = root.GetProperty("version").GetString() ?? string.Empty;
-        if (root.GetProperty("package").GetString() != "@arcforges/proto" || !Regex.IsMatch(version, @"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
-            || !Regex.IsMatch(root.GetProperty("sourceCommit").GetString() ?? string.Empty, "^[0-9a-f]{40}$"))
+        if (root.GetProperty("package").GetString() != "ArcForges.Contracts.Validation" || root.GetProperty("ecosystem").GetString() != "nuget"
+            || !Regex.IsMatch(version, @"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
+            || !Regex.IsMatch(root.GetProperty("sourceCommit").GetString() ?? string.Empty, "^[0-9a-f]{40}$")
+            || !Regex.IsMatch(root.GetProperty("archiveSha512").GetString() ?? string.Empty, "^[A-Za-z0-9+/]{86}==$"))
         {
-            problems.Add("The naming candidate does not identify an exact published @arcforges/proto.");
+            problems.Add("The naming candidate does not identify the exact NuGet ArcForges.Contracts.Validation archive.");
         }
 
         var assets = root.GetProperty("assets").EnumerateObject().ToArray();
@@ -156,16 +164,24 @@ internal static class NamingWiring
             problems.Add("The naming candidate asset digests are missing or malformed.");
         }
 
-        bool direct = package.RootElement.TryGetProperty("devDependencies", out var dev)
-            && dev.TryGetProperty("@arcforges/proto", out var pinned) && pinned.GetString() == version;
-        var locked = lockfile.RootElement.GetProperty("packages");
-        bool lockedVersion = locked.TryGetProperty("node_modules/@arcforges/proto", out var entry)
-            && entry.TryGetProperty("version", out var lockedValue) && lockedValue.GetString() == version;
-        bool rootEntry = locked.GetProperty(string.Empty).TryGetProperty("devDependencies", out var rootDev)
-            && rootDev.TryGetProperty("@arcforges/proto", out var rootPinned) && rootPinned.GetString() == version;
-        if (!direct || !lockedVersion || !rootEntry)
+        if (!Regex.IsMatch(packagesProps, $@"<PackageVersion Include=""ArcForges\.Contracts\.Validation"" Version=""{Regex.Escape(version)}"" />"))
         {
-            problems.Add("@arcforges/proto is not the exact locked devDependency named by the naming candidate.");
+            problems.Add("Directory.Packages.props does not centrally pin the naming candidate at its exact version.");
+        }
+
+        if (!architectureProject.Contains("<PackageReference Include=\"ArcForges.Contracts.Validation\"", StringComparison.Ordinal) || !architectureProject.Contains("PrivateAssets=\"all\"", StringComparison.Ordinal))
+        {
+            problems.Add("The architecture host does not reference the naming candidate as a build-only package.");
+        }
+
+        var locked = lockfile.RootElement.GetProperty("dependencies");
+        bool lockedVersion = locked.TryGetProperty("net10.0", out var framework)
+            && framework.TryGetProperty("ArcForges.Contracts.Validation", out var entry)
+            && entry.TryGetProperty("type", out var type) && type.GetString() == "Direct"
+            && entry.TryGetProperty("resolved", out var resolved) && resolved.GetString() == version;
+        if (!lockedVersion)
+        {
+            problems.Add("The architecture host lock does not hold the naming candidate as a direct package at its exact version.");
         }
 
         return problems;

@@ -63,7 +63,8 @@ const tableOf = (name: string): PhysicalTable => {
 };
 
 test("the manifest covers every owner and keeps every table inside its owner's prefix", () => {
-  assert.equal(schema.tables.length, 161);
+  // 162 tables: the task_harness_budget table of migration 0025 (HAR.40) joins the 161 of CLOUD.03 and COM.16.
+  assert.equal(schema.tables.length, 162);
   for (const owner of schema.owners) {
     const tables = schema.tables.filter((table) => table.owner === owner.owner);
     assert(tables.length > 0, `owner ${owner.owner} has no table`);

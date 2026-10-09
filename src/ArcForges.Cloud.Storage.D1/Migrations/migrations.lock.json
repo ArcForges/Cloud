@@ -175,6 +175,13 @@
       "module": "entitlement",
       "mode": "expand",
       "sha256": "61c9b10c0e34ee223fad5ddd7ebba7027d92dab112e096c8dc753798ac01eff3"
+    },
+    {
+      "sequence": 25,
+      "file": "0025_task__harness-executor.sql",
+      "module": "task",
+      "mode": "expand",
+      "sha256": "774bd516804d761b87eac7e23f7e173adbf98819047d7ebc8e1a11f8263f13e8"
     }
   ]
 }
