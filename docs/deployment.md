@@ -20,7 +20,7 @@ Publication consumes the candidate by its workflow artifact ID. Its deployment e
 
 `artifacts/deployment.json` records the source, version and image/digest after the provider operation succeeds. A prerelease preserves the candidate and deployment record. There is no automatic health/RPC/readiness polling, browser test or public archive download. A successful deployment is reported as deployment completion, not live runtime acceptance.
 
-Existing `test:live` and `test:kotlin:live` commands remain explicit local diagnostics for a concrete affected behavior. They are not merge/publication gates. The Web page may be exercised locally when needed; no mandatory cross-owner test is implied. Preserve the API route and Web's apex binding.
+Existing `test:live` command remains an explicit local diagnostic for a concrete affected behavior. They are not merge/publication gates. The Web page may be exercised locally when needed; no mandatory cross-owner test is implied. Preserve the API route and Web's apex binding.
 
 See [validation policy](validation-policy.md) for the retained checks and post-merge stopping boundary.
 

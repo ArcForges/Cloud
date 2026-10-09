@@ -62,13 +62,6 @@ jobs:
           dotnet restore Cloud.slnx --locked-mode
           dotnet build Cloud.slnx -c Release --no-restore
       - run: node tooling/project.ts licence-evaluated
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        if: runner.os == 'Linux'
-        with:
-          distribution: temurin
-          java-version-file: .java-version
-      - run: npm run check:kotlin
-        if: runner.os == 'Linux'
       - name: Retain evaluated licence and source provenance
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -77,7 +70,6 @@ jobs:
           path: |
             artifacts/evidence/licence-*.json
             artifacts/evidence/source-provenance.json
-            tests/kotlin-consumer/build/reports/licence-boundary.json
           if-no-files-found: error
           retention-days: 30
 
@@ -96,7 +88,6 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm audit --audit-level=high
-      - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
       - name: Check workflow syntax
         run: |
           curl --fail --silent --show-error --location https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz --output "$RUNNER_TEMP/actionlint.tar.gz"
@@ -151,8 +142,6 @@ jobs:
             build-mode: none
           - language: actions
             build-mode: none
-          - language: java-kotlin
-            build-mode: manual
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -162,31 +151,15 @@ jobs:
         if: matrix.language == 'csharp'
         with:
           global-json-file: global.json
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        if: matrix.language == 'java-kotlin'
-        with:
-          distribution: temurin
-          java-version-file: .java-version
-      # Same verified Kotlin 2.4.20-compatible bundle as Contracts; stable 2.27.0 cannot extract it.
-      # https://github.com/github/codeql/issues/22381#issuecomment-5620711447
-      - name: Download verified Kotlin-compatible CodeQL
-        if: matrix.language == 'java-kotlin'
-        run: |
-          curl --fail --silent --show-error --location https://github.com/dsp-testing/codeql-cli-nightlies/releases/download/codeql-bundle-20260913/codeql-bundle-java-linux64.tar.zst --output "$RUNNER_TEMP/codeql-kotlin.tar.zst"
-          echo '2f7435b506f062753a55e91e428df33bd0d9dfc8fed196114844f611334255de  '"$RUNNER_TEMP/codeql-kotlin.tar.zst" | sha256sum --check --strict
       - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          tools: ${{ matrix.language == 'java-kotlin' && format('{0}/codeql-kotlin.tar.zst', runner.temp) || '' }}
       - name: Build C# for analysis
         if: matrix.language == 'csharp'
         run: |
           dotnet restore src/ArcForges.Cloud --locked-mode
           dotnet build src/ArcForges.Cloud -c Release --no-restore
-      - name: Compile Kotlin for analysis
-        if: matrix.language == 'java-kotlin'
-        run: tests/kotlin-consumer/gradlew -p tests/kotlin-consumer --no-daemon --console=plain --no-build-cache --dependency-verification=strict clean classes
       - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           category: /language:${{ matrix.language }}

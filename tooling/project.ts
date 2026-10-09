@@ -8,7 +8,6 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
 import { verifyProtocol, waitForHealth } from "./protocol.ts";
-import { verifyKotlin } from "./kotlin.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
 import { auditProvenance } from "./provenance.ts";
 import {
@@ -182,7 +181,6 @@ export async function testContainer(image: string, revision: string, identity: I
     const health = await waitForHealth(web, revision, false, 60000);
     verifyHealthIdentity(health, identity);
     const grpcWeb = await verifyProtocol(web, false);
-    const kotlin = await verifyKotlin(web, revision, false, "container");
     await run("dotnet", [
       "run",
       "--project",
@@ -197,13 +195,10 @@ export async function testContainer(image: string, revision: string, identity: I
     const restartedWeb = await binding("8080/tcp");
     verifyHealthIdentity(await waitForHealth(restartedWeb, revision, false, 60000), identity);
     await verifyProtocol(restartedWeb, false);
-    const kotlinRestart = await verifyKotlin(restartedWeb, revision, false, "restart");
     await writeJson(path.join(root, "artifacts", "container-evidence.json"), {
       imageId: imageInfo.Id,
       health,
       grpcWeb,
-      kotlin,
-      kotlinRestart,
       nativeGrpc: true,
       restart: true,
       nonRoot: true,
@@ -262,18 +257,11 @@ async function testWorker(candidate: Candidate) {
     );
     verifyHealthIdentity(health, expectedIdentity(candidate.version));
     const result = await verifyProtocol("http://127.0.0.1:18787/api", true);
-    const kotlin = await verifyKotlin(
-      "http://127.0.0.1:18787/api",
-      candidate.revision,
-      true,
-      "worker",
-    );
     await writeJson(path.join(root, "artifacts", "worker-evidence.json"), {
       workerName,
       revision: candidate.revision,
       health,
       ...result,
-      kotlin,
     });
   } finally {
     // Own the process group; Wrangler and its runtime children cannot signal the test runner.
