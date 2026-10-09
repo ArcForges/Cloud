@@ -171,11 +171,11 @@ Fix:
 
 Checks at `54e243f` (clean tree, Windows, Node v24.20.0):
 
-| Check                                                                                                                                                                                 | Result                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| The release-candidate steps that run before the Docker build, replayed in the same order (`releaseProfile`, `stageImageNotices`, `legalBundle`, `verifyWorker` on the fresh bundle) | passed; `verifyWorker` returned the bundle `sha256` above, 313,077 bytes                                                  |
-| `node tooling/dependency-policy.ts` and `node --test tooling/dependency-policy.test.ts`                                                                                               | exit 0; 18 of 18 dependency tests passed                                                                                |
-| `node tooling/project.ts provenance` and `licence`                                                                                                                                    | exit 0                                                                                                                  |
+| Check                                                                                                                                                                               | Result                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| The release-candidate steps that run before the Docker build, replayed in the same order (`releaseProfile`, `stageImageNotices`, `legalBundle`, `verifyWorker` on the fresh bundle) | passed; `verifyWorker` returned the bundle `sha256` above, 313,077 bytes |
+| `node tooling/dependency-policy.ts` and `node --test tooling/dependency-policy.test.ts`                                                                                             | exit 0; 18 of 18 dependency tests passed                                 |
+| `node tooling/project.ts provenance` and `licence`                                                                                                                                  | exit 0                                                                   |
 
 Not run locally: the Docker image build, `verifyStoredImage`, the Docker-side `verifyImageFiles` and the container-side candidate test. The container image's NuGet restore stalled locally (see the next section), so the hosted `candidate` job is the authority for the image and the sealed candidate.
 
