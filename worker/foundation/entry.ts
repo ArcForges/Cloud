@@ -2,6 +2,7 @@
 // The Worker entry glue, kept free of Cloudflare-only imports so offline tests and the local
 // integration harness execute exactly the code the deployed Worker runs.
 import { routeRequest, type CloudBindings } from "../router.ts";
+import type { RouteTable } from "../ingress/routes.ts";
 import { jobSliceBody, postSigned } from "./container-client.ts";
 import { handleProof, isProofPath } from "./proof-routes.ts";
 import { parsePoison, processDeadLetter, processPoison } from "./poison.ts";
@@ -15,10 +16,11 @@ export function fetchEntry(
   request: Request,
   env: WorkerEnv,
   context: { waitUntil(promise: Promise<unknown>): void },
+  routes?: RouteTable,
 ): Promise<Response> {
   if (proofEnabled(env) && isProofPath(new URL(request.url).pathname))
     return handleProof(request, env as FoundationEnv);
-  return routeRequest(request, env, context);
+  return routeRequest(request, env, context, routes);
 }
 
 export async function queueEntry(

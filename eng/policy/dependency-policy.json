@@ -70,13 +70,13 @@
     "tests/ArchitectureTests/packages.lock.json": "32ce93118af6a518c20c35b0d5f7058e41b8872d8037883c71602c41d56b2904",
     "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
     "tools/ArcForges.Cloud.Generation/packages.lock.json": "fdad2d33c7dcfe1a67fb6ce5b0f40275254f20270bb1e29c01ca910798bcae82",
-    "wrangler.json": "54b032243498e8aff586c518b455b18d465b33b49c04451da1de5b40d26f508c"
+    "wrangler.json": "d2ca09f052ac8cad62ddc045ac000c2a23bfbfce7f22dbf023aaa3df2679c2a6"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "w-deku-20261009-rev-cloud-84",
     "date": "2026-10-10",
-    "rationale": "CLOUD.84 U5 moves the readiness evaluation to C# (S39(1)). The only change to package.json is the test list: tests/worker/readiness-evaluate.test.ts and readiness-model.test.ts are replaced one-for-one by readiness-transport.test.ts and readiness-wire.test.ts. No dependency, devDependency, version, integrity or resolved value changes, and package-lock.json is unchanged. The successor chains from cloud-84-r3, the receipt active before this group.",
+    "rationale": "CLOUD.84 U6 splits the proof Worker entry out of the production bundle (D1). wrangler.json changes only in env.proof: the proof environment declares its own main, worker/proof/entry.ts. The production configuration, its bindings, its migrations and its vars are unchanged, and no dependency, version, integrity or resolved value changes. The successor chains from cloud-84-r4, the receipt active before this group.",
     "inputs": {
       ".github/workflows/ci.yml": "e5c33bc17b1fe12b36cd4de6a7c8fea4a47a8e06891606a6f7bd41317dec81cf",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -144,7 +144,7 @@
       "tests/ArchitectureTests/packages.lock.json": "32ce93118af6a518c20c35b0d5f7058e41b8872d8037883c71602c41d56b2904",
       "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
       "tools/ArcForges.Cloud.Generation/packages.lock.json": "fdad2d33c7dcfe1a67fb6ce5b0f40275254f20270bb1e29c01ca910798bcae82",
-      "wrangler.json": "54b032243498e8aff586c518b455b18d465b33b49c04451da1de5b40d26f508c"
+      "wrangler.json": "d2ca09f052ac8cad62ddc045ac000c2a23bfbfce7f22dbf023aaa3df2679c2a6"
     },
     "checks": [
       "locked-restore",
@@ -157,7 +157,7 @@
     ],
     "runtimeAssessment": "No runtime change to the shipped closure. The tool project is never published, the host and the production Worker entry keep their behaviour, and the generated Worker tables carry the same values. No runtime capability, dependency class or native closure changes.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/cloud-84-r3.json",
+    "previous": "eng/policy/dependency-reviews/cloud-84-r4.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-10-10",
     "decision": "approved"
@@ -951,7 +951,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r4.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r5.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

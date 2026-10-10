@@ -24,7 +24,14 @@ import { guardResponse } from "./frames.ts";
 import { classifyStartFailureResponse, containerUnavailable } from "../readiness/container.ts";
 import { bounded, readBytes, reject, rpcError } from "./io.ts";
 import { healthRoute } from "../tables/cloud-tables.generated.ts";
-import { coldStartBudgetMs, findRoute, healthPath, streamLifetimeMs } from "./routes.ts";
+import {
+  coldStartBudgetMs,
+  findRoute,
+  healthPath,
+  productionTable,
+  streamLifetimeMs,
+  type RouteTable,
+} from "./routes.ts";
 
 export interface IngressEnv {
   SOURCE_REVISION: string;
@@ -64,11 +71,15 @@ function responseContentType(upstream: string | null): string {
   return isGrpcWeb(upstream) ? (upstream as string) : "application/grpc-web+proto";
 }
 
-export async function handleApiRequest(request: Request, env: IngressEnv): Promise<Response> {
+export async function handleApiRequest(
+  request: Request,
+  env: IngressEnv,
+  routes: RouteTable = productionTable,
+): Promise<Response> {
   const started = performance.now();
   const url = new URL(request.url);
   const health = url.pathname === healthPath;
-  const route = health ? healthRoute : findRoute(env, url.pathname);
+  const route = health ? healthRoute : findRoute(url.pathname, routes);
   if (!route) return reject(404, "Unknown API method.");
   if (url.search) return reject(400, "Query parameters are not supported.");
   if (request.method !== (health ? "GET" : "POST")) return reject(405, "Method not allowed.");

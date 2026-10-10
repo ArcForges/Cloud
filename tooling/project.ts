@@ -33,6 +33,9 @@ const payloadFiles = [
   "wrangler.json",
   "legal-notices.json",
   "worker-meta.json",
+  // CLOUD.84 D1: the isolated proof environment has its own entry, so its bundle is a second sealed member. Its metadata is sealed beside it.
+  "proof-worker.js",
+  "proof-worker-meta.json",
   "image-provenance.json",
   // CLOUD.84 S33(3)(b): the self-contained Hello probe, sealed here and run by CI through runProbe.
   "arcforges-probe",
@@ -368,6 +371,30 @@ async function buildCandidate() {
   await copyFile(
     path.join(root, "artifacts/worker-bundle/index.js"),
     path.join(candidateDir, "worker.js"),
+  );
+  // CLOUD.84 D1: the proof bundle is built from its own entry (worker/proof/entry.ts) and sealed with the candidate. The dry-run needs
+  // the proof asset directory to exist; its contents are uploaded only at deploy time and are not part of this bundle.
+  await mkdir(path.join(root, "artifacts", "proof-assets"), { recursive: true });
+  await run(process.execPath, [
+    wrangler,
+    "deploy",
+    "--dry-run",
+    "--env",
+    "proof",
+    "--containers-rollout",
+    "none",
+    "--outdir",
+    "artifacts/worker-bundle-proof",
+    "--metafile",
+    "artifacts/worker-bundle-proof/bundle-meta.json",
+  ]);
+  await copyFile(
+    path.join(root, "artifacts/worker-bundle-proof/bundle-meta.json"),
+    path.join(candidateDir, "proof-worker-meta.json"),
+  );
+  await copyFile(
+    path.join(root, "artifacts/worker-bundle-proof/entry.js"),
+    path.join(candidateDir, "proof-worker.js"),
   );
   const config = await readJson<WorkerConfig>(path.join(root, "wrangler.json"));
   delete config.$schema;

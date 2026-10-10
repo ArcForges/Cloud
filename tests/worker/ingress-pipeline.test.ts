@@ -3,7 +3,21 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { coldStartBudgetMs } from "../../worker/ingress/routes.ts";
 import { trailerFrame } from "../../worker/ingress/io.ts";
-import { routeRequest, type CloudBindings } from "../../worker/router.ts";
+import { proofRouteTable } from "../../worker/ingress/proof-table.ts";
+import { routeRequest as routeWith, type CloudBindings } from "../../worker/router.ts";
+
+// The proof methods are routed by the proof entry's table, and only when the proof flag is set (CLOUD.84 D1).
+const routeRequest = (
+  request: Request,
+  env: CloudBindings,
+  context?: { waitUntil(promise: Promise<unknown>): void },
+) =>
+  routeWith(
+    request,
+    env,
+    context,
+    env.FOUNDATION_PROOF === "enabled" ? proofRouteTable : undefined,
+  );
 
 const origin = "https://proof.example.test";
 const whoami = "/api/arcforges.proof.v1.PipelineProbe/Whoami";

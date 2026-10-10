@@ -6,15 +6,17 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { edgeCredentials } from "../../worker/ingress/edge-caller.ts";
+import { proofRouteTable } from "../../worker/ingress/proof-table.ts";
 import {
   findRoute,
   healthPath,
   helloPath,
   productionRoutes,
-  proofRoutes,
+  productionTable,
   streamLifetimeMs,
   type ApiRoute,
 } from "../../worker/ingress/routes.ts";
+import { proofRoutes } from "../../worker/tables/cloud-tables.generated.ts";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const namePattern =
@@ -29,7 +31,10 @@ test("production serves exactly the anonymous Hello method and the health route"
   assert.equal(hello.auth, "anonymous");
   assert.equal(hello.kind, "unary");
   assert.equal(hello.instance, "hello");
-  assert.equal(findRoute({}, healthPath), undefined, "health is the pipeline's own plain route");
+  assert.equal(findRoute(healthPath), undefined, "health is the pipeline's own plain route");
+  assert.equal(productionTable.size, 1, "the production table lists the Hello method only");
+  for (const route of proofRoutes)
+    assert.equal(findRoute(`/api${route.path}`), undefined, "no proof method in production");
 });
 
 test("every route is a well-formed method path with sane bounds, and none is an internal path", () => {
@@ -45,13 +50,13 @@ test("every route is a well-formed method path with sane bounds, and none is an 
   assert.equal(new Set(paths).size, paths.length, "no duplicate method");
 });
 
-test("proof routes exist only for the exact enabled value", () => {
+test("proof routes are listed by the proof table only, and only the proof entry routes with it", () => {
   for (const route of proofRoutes) {
     const pathname = `/api${route.path}`;
-    assert.equal(findRoute({ FOUNDATION_PROOF: "enabled" }, pathname), route);
-    for (const value of [undefined, "", "disabled", "Enabled", "true", "1"])
-      assert.equal(findRoute({ FOUNDATION_PROOF: value }, pathname), undefined);
+    assert.equal(findRoute(pathname, proofRouteTable), route);
+    assert.equal(findRoute(pathname), undefined, "the production table lists no proof method");
   }
+  assert.equal(findRoute(helloPath, proofRouteTable), productionRoutes[0]);
 });
 
 test("the edge credential check needs a whole Origin match and never reads a cookie as a bearer", () => {

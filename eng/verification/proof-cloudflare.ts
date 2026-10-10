@@ -822,7 +822,8 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
       imageDigest,
       revision: candidate.revision,
       databaseId: provisioned.d1DatabaseId,
-      main: "./candidate/worker.js",
+      // CLOUD.84 D1: the proof environment runs its own sealed bundle, built from worker/proof/entry.ts.
+      main: "./candidate/proof-worker.js",
       migrationsDir: "../worker/proof-migrations",
     },
   );

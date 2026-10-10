@@ -73,6 +73,7 @@
   "env": {
     "proof": {
       "name": "arcforges-cloud-proof",
+      "main": "worker/proof/entry.ts",
       "workers_dev": false,
       "preview_urls": false,
       "triggers": {},
