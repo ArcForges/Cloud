@@ -9,3 +9,11 @@ targetRules = ["generic-api-key"]
 paths = ['''^eng/provenance/artifact-profiles/cloud-release-r[0-9]+\.json$''']
 regexTarget = "secret"
 regexes = ['''^[0-9a-f]{64}$''']
+
+[[allowlists]]
+description = "S44: the reviewed SHA-256 schema digest of the Contracts source.json identity copy (eng/generated/contracts-identity.json), a byte-exact copy pinned by a test. The generic-api-key rule fires on the public native-auth schema digest key. Only 64-character lowercase hex values in that exact file are exempt."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^eng/generated/contracts-identity\.json$''']
+regexTarget = "secret"
+regexes = ['''^[0-9a-f]{64}$''']
