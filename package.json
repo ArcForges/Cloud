@@ -60,11 +60,11 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
-    "@cloudflare/workers-types": "5.20260926.1",
+    "@cloudflare/workers-types": "5.20261007.1",
     "@types/node": "24.13.5",
     "prettier": "3.9.8",
     "typescript": "7.0.2",
-    "wrangler": "4.143.1"
+    "wrangler": "4.148.0"
   },
   "overrides": {
     "miniflare": {
