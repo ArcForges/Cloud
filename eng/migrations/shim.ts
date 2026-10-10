@@ -50,9 +50,15 @@ export function verifySealedArchive(archive: Uint8Array, manifestText: string): 
 }
 
 /**
- * The migrator to run: the sealed archive when a candidate is present (checked and extracted), else the tool project. A deployment job
- * (GitHub Actions running the deploy command) never builds the migrator from source (AGENTS.md; CLOUD.84 S41(1), S45(3)): without the
- * candidate manifest it refuses. Only a local run, or a CI source check that reads the tree, may build from source.
+ * The read-only source check of the hosted Source job (`check --base origin/main`, run by check:physical). It reads the tree and changes no
+ * database, so it is the one command that GitHub Actions may run without a candidate.
+ */
+export const sourceCheckCommand = "check";
+
+/**
+ * The migrator to run: the sealed archive when a candidate is present (checked and extracted), else the tool project. Under GitHub Actions
+ * the migrator never falls back to a build from source (AGENTS.md; CLOUD.84 S41(1), S45(3)): without the candidate manifest every command
+ * refuses, except the read-only source check. Only a local run may build the migrator from the tree.
  */
 export function prepareInvocation(
   argv: readonly string[],
@@ -61,9 +67,9 @@ export function prepareInvocation(
 ): Invocation {
   const manifestPath = path.join(root, "artifacts", "candidate", "manifest.json");
   if (!existsSync(manifestPath)) {
-    if (env.GITHUB_ACTIONS === "true" && argv[0] === "deploy")
+    if (env.GITHUB_ACTIONS === "true" && argv[0] !== sourceCheckCommand)
       throw new Error(
-        "the candidate manifest is absent in a deployment job; nothing is built or run",
+        "the candidate manifest is absent in GitHub Actions; nothing is built or run",
       );
     return developmentInvocation(argv, env);
   }

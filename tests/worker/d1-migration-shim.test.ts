@@ -102,6 +102,37 @@ test("a GitHub Actions deploy without a candidate manifest refuses and builds no
   });
 });
 
+test("every other migrate command in GitHub Actions without a candidate manifest refuses (CLOUD.84 S45(3))", () => {
+  withoutCandidate((root) => {
+    for (const argv of [
+      ["deploy", "--target", "proof"],
+      ["backfill", "--target", "production"],
+      ["cutover", "--target", "production"],
+      ["anything-else"],
+    ]) {
+      assert.throws(
+        () => prepareInvocation(argv, { GITHUB_ACTIONS: "true" }, root),
+        /nothing is built or run/,
+        `the migrate command ${argv[0]} must refuse without a candidate`,
+      );
+    }
+  });
+});
+
+test("a GitHub Actions refusal names the candidate and never falls back to dotnet run", () => {
+  withoutCandidate((root) => {
+    let thrown: unknown;
+    try {
+      prepareInvocation(["deploy", "--target", "proof"], { GITHUB_ACTIONS: "true" }, root);
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown instanceof Error);
+    assert.match(thrown.message, /candidate manifest is absent/);
+    assert.doesNotMatch(thrown.message, /dotnet/);
+  });
+});
+
 test("a local deploy without a candidate manifest may build the migrator from the tree", () => {
   withoutCandidate((root) => {
     const invocation = prepareInvocation(["deploy", "--target", "proof"], {}, root);
