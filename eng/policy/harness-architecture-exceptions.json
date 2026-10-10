@@ -152,6 +152,36 @@
       "expires": "2027-03-31"
     },
     {
+      "id": "HAR40-EX-16",
+      "rule": "worker-literal-budget",
+      "file": "worker/ai/internal/envelope.ts",
+      "detail": "parseEnvelope",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S45(1)(b): the HAR.40 envelope admission function holds its refusal statuses and the admitted caps that the HAR.00 production executor owns; the values stay as is until HAR.00 (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-17",
+      "rule": "worker-literal-budget",
+      "file": "worker/harness/run-alarm-core.ts",
+      "detail": "afterFailure",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S45(1)(b): the wake retry seconds-to-milliseconds conversion belongs to the HAR.00 production executor; the schedule stays as is (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-18",
+      "rule": "worker-literal-budget",
+      "file": "worker/harness/run-alarm-core.ts",
+      "detail": "handleHarnessInternal",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S45(1)(b): the harness internal handler's refusal statuses belong to the HAR.00 production executor; they stay as is until HAR.00 owns the executor (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
       "id": "CLOUD84-EX-1",
       "rule": "worker-literal-budget",
       "file": "worker/foundation/coordination.ts",

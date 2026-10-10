@@ -46,6 +46,41 @@ public sealed class WorkerLiteralScanTests
             [(WorkerLiteralScan.BudgetRule, "f")]),
         new("a fixed-size byte array is refused", "worker/a.ts", "export function f() {\n  return new Uint8Array(16);\n}\n",
             [(WorkerLiteralScan.BudgetRule, "f")]),
+        new("a renamed budget is refused (CLOUD.84 S43 review fix)", "worker/a.ts", "const bound = 4096;\n",
+            [(WorkerLiteralScan.BudgetRule, "bound")]),
+        new("the reviewer's probe export const bound = 4096 is refused (S45)", "worker/a.ts", "export const bound = 4096;\n",
+            [(WorkerLiteralScan.BudgetRule, "bound")]),
+        new("the reviewer's probe return 65536 is refused (S45)", "worker/a.ts", "export function ceiling() {\n  return 65536;\n}\n",
+            [(WorkerLiteralScan.BudgetRule, "ceiling")]),
+        new("the reviewer's probe byteLength > 8192 is refused (S45)", "worker/a.ts",
+            "export function guard(buf: Uint8Array) {\n  if (buf.byteLength > 8192) throw new Error(\"too large\");\n}\n",
+            [(WorkerLiteralScan.BudgetRule, "guard")]),
+        new("a quota named with no limit word is refused", "worker/a.ts", "export const quota = 100;\nexport const threshold = 1000;\n",
+            [(WorkerLiteralScan.BudgetRule, "quota"), (WorkerLiteralScan.BudgetRule, "threshold")]),
+        new("a divided budget is refused on its dividend", "worker/a.ts", "export const cap = 65536 / 1;\n",
+            [(WorkerLiteralScan.BudgetRule, "cap")]),
+        new("a bare comparison is refused under its function (CLOUD.84 S43 review fix)", "worker/a.ts",
+            "export function f(buf: Uint8Array) {\n  if (buf.byteLength > 4096) throw new Error(\"too large\");\n  return buf.byteLength;\n}\n",
+            [(WorkerLiteralScan.BudgetRule, "f")]),
+        new("a comparison returned as a value is refused under its function", "worker/a.ts",
+            "export function f(buf: Uint8Array) {\n  return buf.byteLength > 4096;\n}\n",
+            [(WorkerLiteralScan.BudgetRule, "f")]),
+        new("a literal return is refused under its function (CLOUD.84 S43 review fix)", "worker/a.ts",
+            "export function defaultCap() {\n  return 4096;\n}\n",
+            [(WorkerLiteralScan.BudgetRule, "defaultCap")]),
+        new("a numeric string holding a budget is refused", "worker/a.ts", "const quotaText = \"4096\";\n",
+            [(WorkerLiteralScan.BudgetRule, "quotaText")]),
+        new("a destructured default is refused under its name", "worker/a.ts",
+            "export function f(opts: Options) {\n  const { cap = 4096 } = opts;\n  return cap;\n}\n",
+            [(WorkerLiteralScan.BudgetRule, "cap")]),
+        new("an object property budget is refused under its function", "worker/a.ts",
+            "export function f(store: Store) {\n  store.put({ maxBytes: 4096 });\n}\n",
+            [(WorkerLiteralScan.BudgetRule, "f")]),
+        new("an assigned budget is refused under its function", "worker/a.ts",
+            "let limit: number;\nexport function f() {\n  limit = 4096;\n  return limit;\n}\n",
+            [(WorkerLiteralScan.BudgetRule, "f")]),
+        new("comparisons of zero and one pass", "worker/a.ts",
+            "export function f(count: number) {\n  if (count === 0 || count > 1) return 1;\n  return 0;\n}\n", []),
         new("an admitted key list is refused", "worker/a.ts", "const envelopeKeys = \"admittedModels,maxBodyBytes\";\n",
             [(WorkerLiteralScan.AdmissionRule, "envelopeKeys")]),
         new("an RPC method path is refused", "worker/a.ts", "const helloMethod = \"/arcforges.hello.v1.HelloService/SayHello\";\n",
@@ -56,7 +91,8 @@ public sealed class WorkerLiteralScanTests
             "export const retries = 0;\nexport const aiEnvelopeVersion = 1;\nexport function f(text: string) {\n  return Number(text.padEnd(3, \"0\").slice(0, 3)) + new Uint8Array(text.length / 2).length;\n}\n",
             []),
         new("short length checks pass", "worker/a.ts", "export function f(bytes: Uint8Array) {\n  return bytes.length < 2 || bytes.length === 3;\n}\n", []),
-        new("a number that names no limit passes", "worker/a.ts", "const label = 7;\n", []),
+        new("a number that names no limit is refused: the rule is structural, not name-gated", "worker/a.ts", "const label = 7;\n",
+            [(WorkerLiteralScan.BudgetRule, "label")]),
         new("a timer with a named budget passes", "worker/a.ts", "export function f(ms: number) {\n  setTimeout(() => g(), ms);\n}\n", []),
         new("a regex without an identifier shape passes", "worker/a.ts", "const pattern = /checksum|digest/iu;\n", []),
         new("the generated module is not read", "worker/tables/cloud-tables.generated.ts", "export const maxFrameBytes = 65536;\n", []),
@@ -126,24 +162,72 @@ public sealed class WorkerLiteralScanTests
     [Fact]
     public void TheWorkerRepositoryHoldsNoBusinessLiteralOutsideTheNamedLists()
     {
-        // The real tree: every finding is an owned register row (HAR.00 carve-out or CLOUD.05 D16) or a closed protocol constant, and every row
-        // names a real finding.
+        // The real tree: every finding is an owned register row (HAR.00 carve-out or CLOUD.05 D16) or a closed protocol row, and every row
+        // names a real finding. The failure lists each unexempt literal with its value and line, so a classification is read from it.
         var sources = HarnessArchitecture.ReadSources(Root);
         using var register = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, ArchitectureExceptions.RegisterPath)));
         var result = WorkerLiteralScan.ApplyRegister(sources, register.RootElement, Today);
+        var unexempt = WorkerLiteralScan.Literals(sources).Where(literal => !WorkerLiteralScan.IsExempt(literal))
+            .Select(literal => $"{literal.Rule} {literal.File} {literal.Symbol} {literal.Value} L{literal.Line}");
         Assert.True(result.Problems.Count == 0 && result.Remaining.Count == 0,
             "Unregistered worker literals: " + string.Join("; ", result.Remaining.Select(finding => $"{finding.Rule} {finding.File} {finding.Detail}"))
-            + ". Register problems: " + string.Join("; ", result.Problems.Select(problem => $"{problem.Rule} {problem.Detail}")));
+            + ". Register problems: " + string.Join("; ", result.Problems.Select(problem => $"{problem.Rule} {problem.Detail}"))
+            + ". Unexempt literals: " + string.Join("; ", unexempt));
+    }
+
+    [Fact]
+    public void EveryNumberRowIsNamedByAStandardAndUsedByTheTree()
+    {
+        // A closed row must name the external standard that fixes its values, and must match a real literal: a row that matches nothing is stale.
+        var sources = HarnessArchitecture.ReadSources(Root);
+        var literals = WorkerLiteralScan.Literals(sources);
+        foreach (var row in WorkerLiteralScan.NumberRows)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(row.Source), "A number row has no source note: " + row.File + " " + row.Symbol);
+            Assert.True(sources.TryGetValue(row.File, out var text), "The number row names a file outside the tree: " + row.File);
+            Assert.True(row.Symbol == "<module>" || text!.Contains(row.Symbol, StringComparison.Ordinal), "The number row names a symbol outside its file: " + row.Symbol);
+            foreach (var value in row.Values)
+            {
+                Assert.True(literals.Any(literal => literal.Rule == WorkerLiteralScan.BudgetRule && literal.File == row.File && literal.Symbol == row.Symbol && literal.Value == value),
+                    $"The number row {row.File} {row.Symbol} {value} matches no literal (a stale row).");
+            }
+        }
+    }
+
+    [Fact]
+    public void EveryShapeRowIsNamedByAStandardAndUsedByTheTree()
+    {
+        var sources = HarnessArchitecture.ReadSources(Root);
+        var findings = WorkerLiteralScan.Literals(sources);
+        foreach (var row in WorkerLiteralScan.ShapeRows)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(row.Source), "A shape row has no source note: " + row.File + " " + row.Symbol);
+            Assert.True(findings.Any(literal => literal.Rule == row.Rule && literal.File == row.File && literal.Symbol == row.Symbol),
+                $"The shape row {row.File} {row.Symbol} {row.Rule} matches no finding (a stale row).");
+        }
+    }
+
+    [Fact]
+    public void NumberRowsAreClosedToTheirValues()
+    {
+        // A row exempts only the values it lists: a different value in the same symbol is still a finding, and so is the same value elsewhere.
+        foreach (var row in WorkerLiteralScan.NumberRows)
+        {
+            var listed = row.Values[0];
+            Assert.True(WorkerLiteralScan.IsExempt(new WorkerLiteralScan.Literal(WorkerLiteralScan.BudgetRule, row.File, row.Symbol, listed, 1)));
+            Assert.False(WorkerLiteralScan.IsExempt(new WorkerLiteralScan.Literal(WorkerLiteralScan.BudgetRule, row.File, row.Symbol, "987654321", 1)));
+            Assert.False(WorkerLiteralScan.IsExempt(new WorkerLiteralScan.Literal(WorkerLiteralScan.BudgetRule, "worker/elsewhere.ts", row.Symbol, listed, 1)));
+        }
     }
 
     [Fact]
     public void EveryProtocolConstantNamedByTheListExistsInItsFile()
     {
         var sources = HarnessArchitecture.ReadSources(Root);
-        foreach (var (file, symbol) in WorkerLiteralScan.ProtocolConstants)
+        foreach (var row in WorkerLiteralScan.ShapeRows)
         {
-            Assert.True(sources.TryGetValue(file, out var text), "The protocol list names a file outside the tree: " + file);
-            Assert.Matches(@"\b(?:const|let|var|function)\s+" + symbol + @"\b", text!);
+            Assert.True(sources.TryGetValue(row.File, out var text), "The shape list names a file outside the tree: " + row.File);
+            Assert.Matches(@"\b(?:const|let|var|function)\s+" + System.Text.RegularExpressions.Regex.Escape(row.Symbol) + @"\b", text!);
         }
     }
 
