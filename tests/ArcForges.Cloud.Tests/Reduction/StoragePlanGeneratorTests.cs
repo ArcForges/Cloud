@@ -229,6 +229,20 @@ public sealed class StoragePlanGeneratorTests
         "identity.credential-find",
         "identity.credential-list",
         "identity.credential-touch",
+
+        // CLOUD.72 (S54(1), S54(6)): the full credential row with its user, a user's full credential rows and the active-recovery-path
+        // predicate, read by realm and provider subject or by realm and user like the reads above.
+        "identity.credential-get",
+        "identity.credential-rows",
+        "identity.recovery-active",
+    ];
+
+    // CLOUD.72 (S54(1), S54(6)): the owner's workspace is found by realm and owner user before its id is known (an enrollment sign-in and
+    // every identity service write start from the user), so it carries no workspace scope. workspace.workspace-get binds the workspace id
+    // as the owner scope and is not exempt.
+    private static readonly HashSet<string> RealmLevelWorkspacePlans =
+    [
+        "workspace.workspace-by-owner",
     ];
 
     [Fact]
@@ -246,8 +260,22 @@ public sealed class StoragePlanGeneratorTests
 
             // Every plan names the owner scope in at least one parameter, except the schema probe and the realm-level platform plans,
             // whose rows are keyed by a command id, an inbox key or the one change archive and not by a scope.
-            if (plan.Id != "foundation.readiness" && !RealmLevelPlatformPlans.Contains(plan.Id) && !RealmLevelIdentityPlans.Contains(plan.Id))
+            if (plan.Id != "foundation.readiness" && !RealmLevelPlatformPlans.Contains(plan.Id) && !RealmLevelIdentityPlans.Contains(plan.Id)
+                && !RealmLevelWorkspacePlans.Contains(plan.Id))
                 Assert.True(plan.Statements.Any(statement => statement.Params.Any(param => param.Kind == "scope")), $"{plan.Id} is not scoped");
+        }
+    }
+
+    [Fact]
+    public void EveryRealmLevelExemptionNamesAnExistingPlanThatCarriesNoScope()
+    {
+        // An exemption may never hide a scoped plan or outlive the plan it names (S54(6): the rows are exact).
+        var manifest = StoragePlanParser.BuildManifest(T.RepoRoot().FullName);
+        var plans = manifest.Plans.ToDictionary(plan => plan.Id, StringComparer.Ordinal);
+        foreach (var id in RealmLevelPlatformPlans.Concat(RealmLevelIdentityPlans).Concat(RealmLevelWorkspacePlans).Order(StringComparer.Ordinal))
+        {
+            Assert.True(plans.TryGetValue(id, out var plan), $"{id} is not a checked-in plan");
+            Assert.DoesNotContain(plan!.Statements, statement => statement.Params.Any(param => param.Kind == "scope"));
         }
     }
 

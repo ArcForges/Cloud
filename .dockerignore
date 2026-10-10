@@ -37,6 +37,8 @@
 !src/ArcForges.Cloud.Storage.D1/SharedFamilies/*.cs
 !src/ArcForges.Cloud.Storage.D1/ModuleBinding/
 !src/ArcForges.Cloud.Storage.D1/ModuleBinding/*.cs
+!src/ArcForges.Cloud.Storage.D1/FamilyBinding/
+!src/ArcForges.Cloud.Storage.D1/FamilyBinding/*.cs
 !src/ArcForges.Cloud.Storage.D1/MigrationRunner/
 !src/ArcForges.Cloud.Storage.D1/MigrationRunner/*.cs
 !src/ArcForges.Cloud.Storage.D1/Deploy/
@@ -70,6 +72,8 @@
 !src/ArcForges.Cloud.Modules.Abstractions/Agent/*.cs
 !src/ArcForges.Cloud.Modules.Abstractions/Harness/
 !src/ArcForges.Cloud.Modules.Abstractions/Harness/*.cs
+!src/ArcForges.Cloud.Modules.Abstractions/Families/
+!src/ArcForges.Cloud.Modules.Abstractions/Families/*.cs
 !src/ArcForges.Cloud.Modules.*/Core/
 !src/ArcForges.Cloud.Modules.*/Core/Domain/
 !src/ArcForges.Cloud.Modules.*/Core/Domain/*.cs
