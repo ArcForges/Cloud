@@ -10,8 +10,9 @@ namespace ArcForges.Cloud.ArchitectureTests.WorkerAdapter;
 /// through the policy lexer. A number is a budget literal when it sits in a budget-shaped position, whatever its name: a declared value (a
 /// const, let, var, class field or destructuring default), a comparison operand, an assigned value, an expression body, a return, an object
 /// property value, a timer or delay argument, or a fixed-size byte array. The name of the holder does not decide it (S45(1)).
-/// Structural numbers are never budgets: 0 and 1, the operand of a division, the argument of a formatting call (padStart, slice and the
-/// like), a small index into an array (0 to 3), and a count of 0 to 3 compared with a length.
+/// Structural numbers are never budgets: 0 and 1; a formatting argument (padStart, padEnd, toString) of any value; an index argument (slice,
+/// substring, substr, charAt, charCodeAt) or the divisor of a division only when it is 0 to 3; a small array index (0 to 3); and a count of
+/// 0 to 3 compared with a length. A comparison reads each whole operand, so a shift or arithmetic operand is a budget too.
 /// Every other finding must be covered by a closed list: a number row (<see cref="NumberRows"/>) for values fixed by an external standard,
 /// keyed by file, symbol and value; a shape row (<see cref="ShapeRows"/>) for a shape that a standard fixes; or an owned, expiring row of the
 /// shared register (the HAR40-EX carve-out and the CLOUD84-EX D16 rows). The generated module and the generated plan tables are not read; their
@@ -93,11 +94,16 @@ internal static partial class WorkerLiteralScan
         new("worker/ingress/pipeline.ts", "handleApiRequest", ["200", "400", "404", "405", "408", "413", "415", "429", "499", "504"],
             "HTTP status codes (RFC 9110); 499 is the Worker's client-closed-request code (a de facto status, not an RFC status)"),
         new("worker/ingress/correlation.ts", "Reader",
-            ["2", "4", "7", "8", "9", "10", "0x7f", "2147483647"],
-            "protobuf wire format: varint seven-bit groups in ten bytes, wire types 0, 1, 2 and 5, the fixed sizes of wire types 1 and 5, and the int32 maximum of a field number"),
+            ["2", "4", "7", "8", "9", "10", "0x7f", "0x80", "2147483647"],
+            "protobuf wire format: varint seven-bit groups and their continuation bit (0x80) in ten bytes, wire types 0, 1, 2 and 5, the fixed sizes of wire types 1 and 5, and the int32 maximum of a field number"),
+        new("worker/ingress/correlation.ts", "field", ["8"], "protobuf tag: the field number is the tag shifted right by three bits (wire type in the low three bits), so a division by 8"),
+        new("worker/ingress/correlation.ts", "formatId", ["8", "12", "16", "20"],
+            "RFC 4122 canonical UUID hex layout: 8-4-4-4-12 digits, so the slice offsets are 8, 12, 16 and 20"),
         new("worker/ingress/correlation.ts", "readId", ["2"], "protobuf wire type 2 (length-delimited)"),
         new("worker/ingress/correlation.ts", "readRequestCorrelation", ["2"], "protobuf wire type 2 (length-delimited)"),
-        new("worker/private/encoding.ts", "base64UrlDecode", ["4"], "base64url group of four characters for three bytes (RFC 4648 section 5)"),
+        new("worker/private/encoding.ts", "base64UrlDecode", ["4", "0xff", "0xffff"],
+            "base64url group of four characters for three bytes and the one-byte and two-byte tail masks (RFC 4648 section 5)"),
+        new("worker/private/encoding.ts", "chunk", ["4"], "base64 group of four characters (RFC 4648 section 4)"),
         new("worker/private/encoding.ts", "base64UrlEncode", ["2", "3", "6", "12", "18", "63"],
             "base64url radix arithmetic: six-bit groups (mask 63, shifts 6, 12 and 18), three-byte groups and the two-character tail (RFC 4648)"),
         new("worker/private/encoding.ts", "hexDecode", ["16"], "hexadecimal radix of the base16 encoding (RFC 4648 section 8)"),
@@ -122,6 +128,11 @@ internal static partial class WorkerLiteralScan
             ["200", "400", "401", "404", "405", "413", "415", "501", "502", "503"], "HTTP status codes (RFC 9110)"),
         new("worker/foundation/proof-routes.ts", "unavailableRefusal", ["503"], "HTTP status code 503 (RFC 9110)"),
         new("worker/harness/run-alarm.ts", "HarnessRunAlarm", ["200"], "HTTP status code 200 (RFC 9110)"),
+        new("worker/harness/run-alarm.ts", "headers", ["1000"], "SI unit: one second is 1000 milliseconds (ISO 80000-3); Unix time is whole seconds (RFC 9110 Date header and the time field)"),
+        new("worker/foundation/container-client.ts", "headers", ["1000"], "SI unit: one second is 1000 milliseconds (ISO 80000-3); Unix time is whole seconds (RFC 9110 Date header and the time field)"),
+        new("worker/foundation/objects.ts", "verification", ["1000"], "SI unit: one second is 1000 milliseconds (ISO 80000-3); Unix time is whole seconds (RFC 9110 Date header and the time field)"),
+        new("worker/foundation/proof-routes.ts", "valid", ["1000"], "SI unit: one second is 1000 milliseconds (ISO 80000-3); Unix time is whole seconds (RFC 9110 Date header and the time field)"),
+        new("worker/storage/handler.ts", "verification", ["1000"], "SI unit: one second is 1000 milliseconds (ISO 80000-3); Unix time is whole seconds (RFC 9110 Date header and the time field)"),
     ];
 
     /// <summary>The closed shape rows. A row that matches no finding is itself a failure.</summary>
@@ -155,12 +166,26 @@ internal static partial class WorkerLiteralScan
         @"(?i)^\s*(?:select\s|insert\s+into\s|update\s+\w+\s+set\s|delete\s+from\s|create\s+table\s|alter\s+table\s|pragma\s)",
         RegexOptions.CultureInvariant);
 
-    private static readonly HashSet<string> StructuralCalls = new(StringComparer.Ordinal)
-    {
-        "padEnd", "padStart", "slice", "substring", "substr", "charCodeAt", "charAt", "toString",
-    };
+    /// <summary>Formatting calls: every number in their arguments is structural (a width, a radix or a pad), so they are never budgets.</summary>
+    private static readonly HashSet<string> FormattingCalls = new(StringComparer.Ordinal) { "padEnd", "padStart", "toString" };
+
+    /// <summary>
+    /// Index calls: a number in their arguments is structural only when it is 0 to 3 (an index, a short offset). A larger value passed to a
+    /// string or buffer index (slice, substring, substr, charAt, charCodeAt) is a size or a position budget, whatever the call (S45(1)).
+    /// </summary>
+    private static readonly HashSet<string> IndexCalls = new(StringComparer.Ordinal) { "slice", "substring", "substr", "charAt", "charCodeAt" };
+
+    /// <summary>The structural flag of a token: a formatting argument (every value) or an index argument (0 to 3 only); 0 is none.</summary>
+    private const byte FormattingArgument = 1;
+    private const byte IndexArgument = 2;
 
     private static readonly HashSet<string> ComparisonOperators = new(StringComparer.Ordinal) { "===", "!==", "==", "!=", ">=", "<=", ">", "<" };
+
+    /// <summary>The operators that end a comparison operand: a lower-precedence operator, a separator or an assignment.</summary>
+    private static readonly HashSet<string> OperandBoundaries = new(StringComparer.Ordinal)
+    {
+        "&&", "||", "??", "?", ":", ",", ";", "&", "|", "^", "=>", "===", "!==", "==", "!=", ">=", "<=", ">", "<",
+    };
 
     /// <summary>One literal the scan found: the rule it breaks, its file, its symbol (the declared name or the enclosing scope), its value text
     /// (empty when the rule has no value) and its line.</summary>
@@ -260,7 +285,7 @@ internal static partial class WorkerLiteralScan
             : new Literal(hit.Rule, path, symbol, ValueText(tokens[hit.Token]), tokens[hit.Token].Line);
 
     /// <summary>The rules that a declared initializer breaks. The symbol is the declared name itself.</summary>
-    private static IEnumerable<Hit> DeclaredHits(string name, IReadOnlyList<int> values, IReadOnlyList<Token> tokens, bool[] structural, bool readinessModule)
+    private static IEnumerable<Hit> DeclaredHits(string name, IReadOnlyList<int> values, IReadOnlyList<Token> tokens, byte[] structural, bool readinessModule)
     {
         var hits = new List<Hit>();
         var admissionName = AdmissionName.IsMatch(name);
@@ -290,7 +315,7 @@ internal static partial class WorkerLiteralScan
     /// The rules that one uncovered token breaks, for an inline literal in code. A value is a budget wherever it is held: returned, assigned,
     /// compared, an object property, a timer or delay argument, or a fixed-size byte array. The symbol is the enclosing scope.
     /// </summary>
-    private static IEnumerable<Hit> InlineHits(IReadOnlyList<Token> tokens, int index, bool[] structural, bool readinessModule)
+    private static IEnumerable<Hit> InlineHits(IReadOnlyList<Token> tokens, int index, byte[] structural, bool readinessModule)
     {
         var hits = new List<Hit>();
         var token = tokens[index];
@@ -344,15 +369,62 @@ internal static partial class WorkerLiteralScan
         foreach (var index in indices) hits.Add(new Hit(BudgetRule, index));
     }
 
-    /// <summary>The operands of a comparison operator that are budget tokens: the token before and the token after it.</summary>
-    private static IEnumerable<int> ComparisonOperands(IReadOnlyList<Token> tokens, int index, bool[] structural) =>
-        new[] { index - 1, index + 1 }.Where(operand => operand >= 0 && operand < tokens.Count && IsBudgetToken(tokens, operand, structural));
+    /// <summary>
+    /// The operands of a comparison operator that are budget tokens. Each side is read whole, to the next operator of lower precedence, a
+    /// separator, an assignment or an unmatched bracket, so a shift or an arithmetic operand (n &gt; 1 &lt;&lt; 16) is read in full (S45(1)).
+    /// </summary>
+    private static IEnumerable<int> ComparisonOperands(IReadOnlyList<Token> tokens, int index, byte[] structural)
+    {
+        var operands = new List<int>();
+        var depth = 0;
+        for (var j = index + 1; j < tokens.Count; j++)
+        {
+            var token = tokens[j];
+            if (token.Kind == TokenKind.Punct)
+            {
+                // A block or a statement ends every operand, whatever the depth, so the scan never runs across a block.
+                if (token.Value is "{" or "}") break;
+                if (token.Value is "(" or "[") depth++;
+                else if (token.Value is ")" or "]")
+                {
+                    if (depth == 0) break;
+                    depth--;
+                }
+                else if (depth == 0 && (IsOperandBoundary(token) || AssignmentOperators.Contains(token.Value))) break;
+            }
+
+            operands.Add(j);
+        }
+
+        depth = 0;
+        for (var j = index - 1; j >= 0; j--)
+        {
+            var token = tokens[j];
+            if (token.Kind == TokenKind.Punct)
+            {
+                if (token.Value is "{" or "}") break;
+                if (token.Value is ")" or "]") depth++;
+                else if (token.Value is "(" or "[")
+                {
+                    if (depth == 0) break;
+                    depth--;
+                }
+                else if (depth == 0 && (IsOperandBoundary(token) || AssignmentOperators.Contains(token.Value))) break;
+            }
+
+            operands.Add(j);
+        }
+
+        return operands.Where(operand => IsBudgetToken(tokens, operand, structural));
+    }
+
+    private static bool IsOperandBoundary(Token token) => token.Kind == TokenKind.Punct && OperandBoundaries.Contains(token.Value);
 
     /// <summary>The tokens of a value list that hold a budget: a number other than 0 and 1 that is not structural, or a duration or numeric text.</summary>
-    private static IEnumerable<int> BudgetTokens(IReadOnlyList<Token> tokens, IEnumerable<int> values, bool[] structural) =>
+    private static IEnumerable<int> BudgetTokens(IReadOnlyList<Token> tokens, IEnumerable<int> values, byte[] structural) =>
         values.Where(index => IsBudgetToken(tokens, index, structural));
 
-    private static bool IsBudgetToken(IReadOnlyList<Token> tokens, int index, bool[] structural)
+    private static bool IsBudgetToken(IReadOnlyList<Token> tokens, int index, byte[] structural)
     {
         var token = tokens[index];
         if (token.Kind == TokenKind.Number) return IsBudgetNumber(token.Value) && !IsStructural(tokens, index, structural);
@@ -363,11 +435,18 @@ internal static partial class WorkerLiteralScan
     private static string ValueText(Token token) => token.Kind == TokenKind.Number ? NormalizeNumber(token.Value) : token.Value;
 
     /// <summary>
-    /// Whether a number token is structural and so never a budget: a formatting argument (padStart, slice and the like), the divisor of a
-    /// division (a unit conversion or a byte pair), a small array index (0 to 3), or a count of 0 to 3 compared with a length.
+    /// Whether a number token is structural and so never a budget: a formatting argument (padStart, padEnd, toString), an index argument
+    /// (slice, substring and the like) or the divisor of a division, when the value is 0 to 3; a small array index (0 to 3); or a count of
+    /// 0 to 3 compared with a length. Any larger value in an index argument or a divisor is a budget (S45(1)).
     /// </summary>
-    private static bool IsStructural(IReadOnlyList<Token> tokens, int index, bool[] structural) =>
-        structural[index] || (index > 0 && IsPunct(tokens[index - 1], "/")) || IsSmallIndex(tokens, index) || IsLengthCount(tokens, index);
+    private static bool IsStructural(IReadOnlyList<Token> tokens, int index, byte[] structural) =>
+        structural[index] == FormattingArgument
+        || structural[index] == IndexArgument && IsSmallValue(tokens[index].Value)
+        || index > 0 && IsPunct(tokens[index - 1], "/") && IsSmallValue(tokens[index].Value)
+        || IsSmallIndex(tokens, index) || IsLengthCount(tokens, index);
+
+    /// <summary>A number of 0 to 3: the only values that are structural in an index argument or a divisor.</summary>
+    private static bool IsSmallValue(string raw) => NumericValue(raw) is >= 0 and <= 3;
 
     /// <summary>A number from 0 to 3 that is the whole index of an array access (a regular expression group index, a short tuple index).</summary>
     private static bool IsSmallIndex(IReadOnlyList<Token> tokens, int index) =>
@@ -675,17 +754,24 @@ internal static partial class WorkerLiteralScan
         return (scopes, inClass);
     }
 
-    /// <summary>The structural literals: the tokens inside a formatting call (padStart, padEnd, slice and the like), which are never budgets.</summary>
-    private static bool[] StructuralTokens(IReadOnlyList<Token> tokens)
+    /// <summary>
+    /// The structural flag of every token: the tokens inside a formatting call are formatting arguments, and those inside an index call are
+    /// index arguments. Where calls nest, the stricter flag wins (an index argument outranks a formatting one).
+    /// </summary>
+    private static byte[] StructuralTokens(IReadOnlyList<Token> tokens)
     {
-        var flags = new bool[tokens.Count];
+        var flags = new byte[tokens.Count];
         for (var i = 0; i + 1 < tokens.Count; i++)
         {
-            if (tokens[i].Kind != TokenKind.Word || !StructuralCalls.Contains(tokens[i].Value) || !IsPunct(tokens[i + 1], "(")) continue;
+            if (tokens[i].Kind != TokenKind.Word || !IsPunct(tokens[i + 1], "(")) continue;
+            byte flag;
+            if (FormattingCalls.Contains(tokens[i].Value)) flag = FormattingArgument;
+            else if (IndexCalls.Contains(tokens[i].Value)) flag = IndexArgument;
+            else continue;
             var depth = 0;
             for (var j = i + 1; j < tokens.Count; j++)
             {
-                flags[j] = true;
+                flags[j] = Math.Max(flags[j], flag);
                 if (IsPunct(tokens[j], "(")) depth++;
                 else if (IsPunct(tokens[j], ")") && --depth == 0) break;
             }
