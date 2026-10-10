@@ -49,14 +49,22 @@ export function verifySealedArchive(archive: Uint8Array, manifestText: string): 
     throw new Error("the sealed migrator does not match the candidate manifest; nothing is run");
 }
 
-/** The migrator to run: the sealed archive when a candidate is present (checked and extracted), else the tool project. */
-function prepareInvocation(
+/**
+ * The migrator to run: the sealed archive when a candidate is present (checked and extracted), else the tool project. A deployment job
+ * (GitHub Actions running the deploy command) never builds the migrator from source (AGENTS.md; CLOUD.84 S41(1), S45(3)): without the
+ * candidate manifest it refuses. Only a local run, or a CI source check that reads the tree, may build from source.
+ */
+export function prepareInvocation(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
   root: string,
 ): Invocation {
   const manifestPath = path.join(root, "artifacts", "candidate", "manifest.json");
-  if (!existsSync(manifestPath)) return developmentInvocation(argv, env);
+  if (!existsSync(manifestPath)) {
+    if (env.GITHUB_ACTIONS === "true" && argv[0] === "deploy")
+      throw new Error("the candidate manifest is absent in a deployment job; nothing is built or run");
+    return developmentInvocation(argv, env);
+  }
   const archivePath = path.join(root, "artifacts", "candidate", sealedArchiveName);
   if (!existsSync(archivePath))
     throw new Error("the candidate has no sealed migrator; nothing is run");

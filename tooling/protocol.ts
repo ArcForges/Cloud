@@ -82,16 +82,19 @@ export async function waitForHealth(
  * Runs the Hello protocol assertions against a base URL. CI spawns the sealed binary from the candidate, and local runs build and
  * run the same project with dotnet run. The probe prints one JSON line on success and exits non-zero on any failed assertion.
  */
+export function probeInvocation(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+): { command: string; args: string[] } {
+  // A GitHub Actions job runs only the sealed candidate probe (CLOUD.84 S45(3)): a missing binary fails, and nothing is built from source.
+  if (env.CI === "true" || env.GITHUB_ACTIONS === "true")
+    return { command: path.join(candidateDir, sealedProbeName), args: [...args] };
+  return { command: "dotnet", args: ["run", "--project", probeProject, "-c", "Release", "--", ...args] };
+}
+
 export async function runProbe(baseUrl: string, worker: boolean): Promise<ProbeResult> {
-  const args = ["probe", baseUrl, String(worker)];
-  const output =
-    process.env.CI === "true"
-      ? await run(path.join(candidateDir, sealedProbeName), args, true)
-      : await run(
-          "dotnet",
-          ["run", "--project", probeProject, "-c", "Release", "--", ...args],
-          true,
-        );
+  const invocation = probeInvocation(["probe", baseUrl, String(worker)]);
+  const output = await run(invocation.command, invocation.args, true);
   const line = output.split(/\r?\n/u).filter(Boolean).at(-1) ?? "";
   const result = JSON.parse(line) as ProbeResult;
   assert.equal(result.workerBoundary, worker, "The probe reports a different Worker boundary");

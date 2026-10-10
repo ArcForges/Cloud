@@ -4,15 +4,18 @@
 // tests are tests/ArcForges.Cloud.Tests/Reduction/MigrationRunnerTests.cs and DeployTests.cs.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
   developmentInvocation,
+  prepareInvocation,
   sealedArchiveName,
   sealedInvocation,
   verifySealedArchive,
 } from "../../eng/migrations/shim.ts";
+import { probeInvocation, probeProject, sealedProbeName } from "../../tooling/protocol.ts";
 
 const token = "cf-test-token-0123456789abcdef";
 
@@ -77,4 +80,52 @@ test("the candidate job seals the migrator under the name the shim checks", () =
   assert.match(project, /sealedMigratorName, "-C"|path\.join\(candidateDir, sealedMigratorName\)/u);
   const shim = readFileSync(path.join(import.meta.dirname, "../../eng/migrations/shim.ts"), "utf8");
   assert.match(shim, /export const sealedArchiveName = "arcforges-migrator\.tar"/u);
+});
+
+// CLOUD.84 S45(3): a deployment job never builds from source. Only a local run or a CI source check may.
+function withoutCandidate<T>(use: (root: string) => T): T {
+  const root = mkdtempSync(path.join(tmpdir(), "arcforges-shim-"));
+  try {
+    return use(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("a GitHub Actions deploy without a candidate manifest refuses and builds nothing", () => {
+  withoutCandidate((root) => {
+    assert.throws(
+      () => prepareInvocation(["deploy", "--target", "production"], { GITHUB_ACTIONS: "true" }, root),
+      /nothing is built or run/,
+    );
+  });
+});
+
+test("a local deploy without a candidate manifest may build the migrator from the tree", () => {
+  withoutCandidate((root) => {
+    const invocation = prepareInvocation(["deploy", "--target", "proof"], {}, root);
+    assert.equal(invocation.command, "dotnet");
+    assert.equal(invocation.args[0], "run");
+  });
+});
+
+test("a CI source check without a candidate manifest reads the tree, as the source job's check:physical does", () => {
+  withoutCandidate((root) => {
+    const invocation = prepareInvocation(["check", "--base", "origin/main"], { GITHUB_ACTIONS: "true" }, root);
+    assert.equal(invocation.command, "dotnet");
+    assert.deepEqual(invocation.args.slice(-4), ["migrate", "check", "--base", "origin/main"]);
+  });
+});
+
+test("the Hello probe in GitHub Actions runs only the sealed candidate binary", () => {
+  const invocation = probeInvocation(["probe", "https://example.test", "false"], { GITHUB_ACTIONS: "true" });
+  assert.equal(path.basename(invocation.command), sealedProbeName);
+  assert.notEqual(invocation.command, "dotnet");
+  assert.deepEqual(invocation.args, ["probe", "https://example.test", "false"]);
+});
+
+test("outside CI the Hello probe runs the tool project with dotnet run", () => {
+  const invocation = probeInvocation(["probe", "https://example.test", "true"], {});
+  assert.equal(invocation.command, "dotnet");
+  assert.ok(invocation.args.includes(probeProject));
 });
