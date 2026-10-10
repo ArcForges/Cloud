@@ -55,7 +55,7 @@
     "test:dependencies": "node --test tooling/dependency-policy.test.ts"
   },
   "dependencies": {
-    "@arcforges/ai-internal": "1.0.0-ci.287.1",
+    "@arcforges/ai-internal": "1.0.0-ci.350.1",
     "@cloudflare/containers": "0.3.7"
   },
   "devDependencies": {
