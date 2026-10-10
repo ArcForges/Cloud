@@ -28,9 +28,31 @@ public static class Program
             }
         }
 
+        if (args.Length == 2 && args[0] == "plans" && args[1] is "generate" or "check")
+        {
+            var planRoot = FindRoot(Directory.GetCurrentDirectory());
+            try
+            {
+                var planStale = StoragePlans.StoragePlanGenerator.Sync(planRoot, args[1] == "generate");
+                if (planStale.Count > 0)
+                {
+                    foreach (var path in planStale) Console.Error.WriteLine($"Out of date: {path}. Run npm run generate and commit the result.");
+                    return 1;
+                }
+
+                Console.WriteLine(args[1] == "generate" ? "Generated the storage plans." : "The storage plan outputs are current.");
+                return 0;
+            }
+            catch (StoragePlans.PlanRefusal refusal)
+            {
+                Console.Error.WriteLine(refusal.Message);
+                return 1;
+            }
+        }
+
         if (args.Length != 1 || args[0] is not ("generate" or "check"))
         {
-            Console.Error.WriteLine("usage: ArcForges.Cloud.Generation generate | check | probe <baseUrl> <true|false>");
+            Console.Error.WriteLine("usage: ArcForges.Cloud.Generation generate | check | plans generate | plans check | probe <baseUrl> <true|false>");
             return 2;
         }
 
@@ -56,6 +78,16 @@ public static class Program
             {
                 stale.Add(path);
             }
+        }
+
+        try
+        {
+            stale.AddRange(StoragePlans.StoragePlanGenerator.Sync(root, generate));
+        }
+        catch (StoragePlans.PlanRefusal refusal)
+        {
+            Console.Error.WriteLine(refusal.Message);
+            return 1;
         }
 
         if (stale.Count > 0)

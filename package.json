@@ -42,7 +42,7 @@
     "test:foundation:local": "node eng/verification/foundation-local.ts",
     "test:foundation:live": "node eng/verification/foundation-live.ts",
     "check:dependencies": "node tooling/dependency-policy.ts",
-    "check:plans": "node eng/verification/storage-plans.ts --check",
+    "check:plans": "dotnet run --project tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj -c Release -- plans check",
     "check:physical": "node eng/verification/physical-schema.ts --check && node eng/migrations/cli.ts check --base origin/main",
     "migrate:dry-run": "node eng/migrations/deploy.ts dry-run",
     "test:harness:ai": "node eng/verification/harness-proof.ts ai-binding",
