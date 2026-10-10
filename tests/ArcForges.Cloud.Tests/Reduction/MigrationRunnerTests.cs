@@ -521,6 +521,45 @@ public sealed class MigrationRunnerTests
     }
 
     [Fact]
+    public void MigrationNamesAreOrderedOrdinallyWhateverOrderTheyArriveIn()
+    {
+        // The TypeScript runner sorted with readdirSync(...).sort(), which is ordinal. The input order is whatever a file system returned.
+        var expected = new[] { "0001_chat__a.sql", "0002_chat__b.sql", "chat__add-pin.sql", "identity__add-nickname.sql" };
+        var arrivals = new[]
+        {
+            new[] { "identity__add-nickname.sql", "chat__add-pin.sql", "0002_chat__b.sql", "0001_chat__a.sql", "notes.txt" },
+            new[] { "0001_chat__a.sql", "0002_chat__b.sql", "chat__add-pin.sql", "identity__add-nickname.sql", "notes.txt" },
+            new[] { "notes.txt", "identity__add-nickname.sql", "0001_chat__a.sql", "chat__add-pin.sql", "0002_chat__b.sql" },
+        };
+        foreach (var arrival in arrivals)
+            Assert.Equal(expected, MigrationCatalog.SortedSqlNames(arrival));
+    }
+
+    [Fact]
+    public void PendingFilesAreReadInOrdinalOrderWhateverOrderTheDirectoryCreatedThem()
+    {
+        var root = Directory.CreateTempSubdirectory("af-pending-").FullName;
+        try
+        {
+            var pending = Path.Combine(root, MigrationFiles.PendingDirectory);
+            Directory.CreateDirectory(pending);
+            // Created in reverse name order: NTFS lists alphabetically and other file systems do not, so the result cannot depend on it.
+            File.WriteAllText(Path.Combine(pending, "zeta__last.sql"), "-- af-migration: module=zeta mode=expand\n");
+            File.WriteAllText(Path.Combine(pending, "identity__add-nickname.sql"), "-- af-migration: module=identity mode=expand\n");
+            File.WriteAllText(Path.Combine(pending, "chat__add-pin.sql"), "-- af-migration: module=chat mode=expand\n");
+            File.WriteAllText(Path.Combine(pending, "chat__a.sql"), "-- af-migration: module=chat mode=expand\n");
+            File.WriteAllText(Path.Combine(pending, "readme.txt"), "not a migration\n");
+            Assert.Equal(
+                new[] { "chat__a.sql", "chat__add-pin.sql", "identity__add-nickname.sql", "zeta__last.sql" },
+                MigrationFiles.ReadPending(root).Select(file => file.Name).ToArray());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AnExtendedCatalogAppliesOnTopOfAnAlreadyMigratedDatabaseInOrder()
     {
         var baseline = Baseline();

@@ -210,7 +210,7 @@ test("an anonymous method never reads or forwards a credential", async () => {
 // ---- deny by default ----
 
 test("outside the proof environment the probe methods do not exist and nothing wakes a Container", async () => {
-  for (const proof of [undefined, "", "disabled", "ENABLED", "true"]) {
+  for (const proof of [undefined, "", "disabled", "ENABLED", "Enabled", "true", "1"]) {
     const { env, seen } = bindings(async () => new Response(okReply), { FOUNDATION_PROOF: proof });
     for (const path of [whoami, stream, "/api/arcforges.proof.v1.PipelineProbe/Observation"]) {
       const response = await routeRequest(call(path, cookieHeaders), env);

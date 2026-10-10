@@ -81,7 +81,7 @@ const operator = (path: string, body: unknown, headers: Record<string, string> =
   });
 
 test("production answers none of the proof routes", async () => {
-  for (const flag of [undefined, "", "disabled", "ENABLED"]) {
+  for (const flag of [undefined, "", "disabled", "ENABLED", "Enabled", "1"]) {
     const { env, recorded } = environment({}, { FOUNDATION_PROOF: flag });
     for (const request of [
       operator("/proof/v1/readiness", {}),

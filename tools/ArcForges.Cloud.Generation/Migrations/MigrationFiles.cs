@@ -19,14 +19,19 @@ public static class MigrationFiles
     /// <summary>The text of a file as UTF-8, keeping a byte order mark as the TypeScript tooling did.</summary>
     public static string ReadText(string path) => Utf8.GetString(File.ReadAllBytes(path));
 
-    /// <summary>The numbered and the pending files of the migrations directory, by name.</summary>
+    /// <summary>
+    /// The .sql files of a directory, read and sorted by name in ordinal order. The order comes from MigrationCatalog.SortedSqlNames,
+    /// never from Directory.GetFiles: enumeration order differs between NTFS and Linux file systems, and the pending assignment
+    /// numbers the files in the order they are read.
+    /// </summary>
     public static List<SourceFile> ReadDirectory(string directory)
     {
         if (!Directory.Exists(directory)) return [];
-        return Directory.GetFiles(directory)
+        var names = Directory.GetFiles(directory)
             .Select(Path.GetFileName)
-            .Where(name => name is not null && name.EndsWith(".sql", StringComparison.Ordinal))
-            .Select(name => new SourceFile(name!, ReadText(Path.Combine(directory, name!))))
+            .OfType<string>();
+        return MigrationCatalog.SortedSqlNames(names)
+            .Select(name => new SourceFile(name, ReadText(Path.Combine(directory, name))))
             .ToList();
     }
 

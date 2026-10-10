@@ -22,11 +22,10 @@ updates:
       cloudflare:
         patterns: ["wrangler", "@cloudflare/*"]
       contracts:
-        patterns: ["@arcforges/*", "@connectrpc/*", "@bufbuild/*"]
+        patterns: ["@arcforges/*"]
       tooling:
         patterns: ["*"]
-        exclude-patterns:
-          ["wrangler", "@cloudflare/*", "@arcforges/*", "@connectrpc/*", "@bufbuild/*"]
+        exclude-patterns: ["wrangler", "@cloudflare/*", "@arcforges/*"]
     ignore:
       - dependency-name: "@types/node"
         versions: [">=25"]

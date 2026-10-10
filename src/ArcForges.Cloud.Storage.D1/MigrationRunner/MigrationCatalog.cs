@@ -30,7 +30,17 @@ public static class MigrationCatalog
     /// <summary>The lock file name and its schema version.</summary>
     public const string LockFileName = "migrations.lock.json";
 
-    /// <summary>The numbered files of a directory, sorted by name (ordinal, as the file system orders them).</summary>
+    /// <summary>
+    /// The names of the .sql files of a directory in ordinal order, the order the TypeScript runner used (readdirSync(...).sort()).
+    /// Directory enumeration order is not part of any contract (NTFS lists alphabetically, Linux file systems do not), so every
+    /// caller that numbers, locks or applies migrations takes its order from here and never from the file system.
+    /// </summary>
+    public static List<string> SortedSqlNames(IEnumerable<string> names) =>
+        names.Where(name => name.EndsWith(".sql", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>The .sql files of a directory, sorted by name in ordinal order (never in file system order).</summary>
     public static List<SourceFile> SortedSqlFiles(IEnumerable<SourceFile> files) =>
         files.Where(file => file.Name.EndsWith(".sql", StringComparison.Ordinal))
             .OrderBy(file => file.Name, StringComparer.Ordinal)
