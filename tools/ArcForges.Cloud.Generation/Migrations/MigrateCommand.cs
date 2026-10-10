@@ -47,16 +47,16 @@ public static class MigrateCommand
                 case "apply":
                     return await LiveAsync(command, rest, context, directory).ConfigureAwait(false);
                 case "deploy":
-                {
-                    var target = Flag(rest, "--target");
-                    if (target is not ("production" or "proof"))
                     {
-                        context.Error.WriteLine("usage: ArcForges.Cloud.Generation migrate deploy --target production|proof");
-                        return 2;
-                    }
+                        var target = Flag(rest, "--target");
+                        if (target is not ("production" or "proof"))
+                        {
+                            context.Error.WriteLine("usage: ArcForges.Cloud.Generation migrate deploy --target production|proof");
+                            return 2;
+                        }
 
-                    return await DeployAsync(target, context).ConfigureAwait(false);
-                }
+                        return await DeployAsync(target, context).ConfigureAwait(false);
+                    }
                 default:
                     context.Error.WriteLine(Usage);
                     return 2;

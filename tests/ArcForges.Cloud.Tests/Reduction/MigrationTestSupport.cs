@@ -90,20 +90,20 @@ internal static class MigrationTestSupport
         bool allowContract = false,
         EngineHooks? hooks = null,
         int maxBackfillPasses = 10) => new()
-    {
-        Client = client,
-        Migrations = migrations,
-        Runner = runner,
-        Now = time.Read,
-        Compatibility = Compat,
-        LeaseMs = leaseMs,
-        MaxChunkStatements = maxChunkStatements,
-        MaxChunkBytes = maxChunkBytes,
-        StopAfter = stopAfter,
-        AllowContract = allowContract,
-        Hooks = hooks,
-        MaxBackfillPasses = maxBackfillPasses,
-    };
+        {
+            Client = client,
+            Migrations = migrations,
+            Runner = runner,
+            Now = time.Read,
+            Compatibility = Compat,
+            LeaseMs = leaseMs,
+            MaxChunkStatements = maxChunkStatements,
+            MaxChunkBytes = maxChunkBytes,
+            StopAfter = stopAfter,
+            AllowContract = allowContract,
+            Hooks = hooks,
+            MaxBackfillPasses = maxBackfillPasses,
+        };
 
     /// <summary>A database with the scratch table, migrated through the expand and the seeded rows (the TypeScript seededScratch).</summary>
     public static async Task<(SqliteBatchOracle Client, TestClock Time, List<Migration> Chain)> SeededScratchAsync(int rows)

@@ -224,7 +224,7 @@ public static partial class MigrationSql
     private static string TrimLeadingComments(string text)
     {
         var rest = text;
-        for (;;)
+        for (; ; )
         {
             rest = rest.TrimStart();
             if (rest.StartsWith("--", StringComparison.Ordinal))

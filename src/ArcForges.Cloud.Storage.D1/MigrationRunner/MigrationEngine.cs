@@ -484,7 +484,7 @@ public static class MigrationEngine
         var passes = 0;
         long rowsConverted = 0;
         long rowsStale = 0;
-        for (;;)
+        for (; ; )
         {
             passes++;
             if (passes > maxPasses)
@@ -493,7 +493,7 @@ public static class MigrationEngine
             var cursor = checkpoint.Count == 0 || checkpoint[0][0] is null ? string.Empty : checkpoint[0][0]!;
             var beforeConverted = CellLong(checkpoint, 0, 1);
             var beforeStale = CellLong(checkpoint, 0, 2);
-            for (;;)
+            for (; ; )
             {
                 var page = await One(run, spec.Page, cursor, (long)spec.PageSize).ConfigureAwait(false);
                 if (page.Count == 0) break;
