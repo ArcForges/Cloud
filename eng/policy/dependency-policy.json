@@ -937,7 +937,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["cloud-84-cloud-runtime-notices-r2", "cloud-84-cloud-worker-bundle-r2"],
+  "artifactRecords": ["cloud-84-cloud-runtime-notices-r3", "cloud-84-cloud-worker-bundle-r3"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
