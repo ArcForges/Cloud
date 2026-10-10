@@ -52,6 +52,13 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   generator refuses a registered method without a budget and a budget without a registered method. `npm run check:generated`
   and the C# test `GeneratedTablesTests` fail on any drift, and a C# test pins the production table to the single Hello method.
   The Worker's transport budgets and edge-guard names (the session cookie and the CSRF header) come from the same module.
+  Every other limit and identifier shape the Worker applies is declared in C# as well: the production values in
+  `src/ArcForges.Cloud/Generation/WorkerWireLimits.cs` (the body and router read timers, the container sleep, the gRPC frame
+  header, the span id, the canonical UUID, the session token and bearer shapes) and the proof-only values in
+  `ProofWireLimits.cs` (the object part, reply and request bounds, the operator and signing bounds, the readiness report bounds,
+  and the named-plan deadline and integer grammars). The generator emits each into the same module, and a host value is referenced
+  rather than copied. The standing WorkerAdapter literal check (`tests/ArchitectureTests/WorkerAdapter`, CLOUD.84 S43) refuses any
+  other limit or shape literal in `worker/**`, except the closed protocol constants and the owned, expiring register rows.
 - **Admission.** A non-POST is 405, a media type other than `application/grpc-web` or `application/grpc-web+proto` is
   415, `content-encoding` or a `grpc-encoding` other than identity is 415, a query string is 400, a request body over
   the method bound is 413 (declared or actual bytes), the compressed flag in the first frame is 415. A malformed
