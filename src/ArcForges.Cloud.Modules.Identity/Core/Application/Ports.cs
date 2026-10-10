@@ -12,6 +12,24 @@ internal enum CommitOutcome
 
     /// <summary>A guard was false: nothing was written, so the caller rereads and recalculates (the guarded-batch contract of CLOUD.06).</summary>
     Refused,
+
+    /// <summary>
+    /// The command's receipt matches this commit (identifier, workspace, actor, operation and request hash) inside its replay window: the
+    /// original commit took effect and nothing was executed again.
+    /// </summary>
+    Replayed,
+
+    /// <summary>The command identifier is recorded with different content (<c>command.reused_identifier</c>): nothing was executed.</summary>
+    IdentifierConflict,
+
+    /// <summary>The command's receipt matches but its replay window has passed (<c>command.receipt_expired</c>): nothing was executed.</summary>
+    ReceiptExpired,
+
+    /// <summary>
+    /// The store could not establish whether the commit took effect (a lost response, an unavailable or overloaded database). The caller
+    /// resends the identical commit under the same command identifier, which either commits once or replays; it never allocates a new command.
+    /// </summary>
+    Unknown,
 }
 
 /// <summary>

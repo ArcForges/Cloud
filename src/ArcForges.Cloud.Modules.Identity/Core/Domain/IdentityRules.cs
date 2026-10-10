@@ -12,6 +12,12 @@ internal enum IdentityError
     LastCredential,
     NotPermitted,
     Conflict,
+
+    /// <summary>The command identifier is already recorded for a different request (<c>command.reused_identifier</c>): nothing was executed.</summary>
+    IdentifierConflict,
+
+    /// <summary>The command is recorded but its replay window has passed (<c>command.receipt_expired</c>): it is never executed as new.</summary>
+    ReceiptExpired,
 }
 
 /// <summary>
