@@ -24,6 +24,7 @@ import {
   proofHostname,
   proofQueueNames,
   proofWorkerName,
+  sealedProofBundle,
   siteArchiveAssetName,
   siteArchivePin,
   stageProofAssets,
@@ -822,8 +823,9 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
       imageDigest,
       revision: candidate.revision,
       databaseId: provisioned.d1DatabaseId,
-      // CLOUD.84 D1: the proof environment runs its own sealed bundle, built from worker/proof/entry.ts.
-      main: "./candidate/proof-worker.js",
+      // CLOUD.84 D1: the proof environment runs its own sealed bundle, which the candidate job built from worker/proof/entry.ts and
+      // verifyCandidate checked against the manifest above; the deploy below uploads it with --no-bundle.
+      main: sealedProofBundle,
       migrationsDir: "../worker/proof-migrations",
     },
   );
