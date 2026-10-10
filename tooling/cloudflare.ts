@@ -1,15 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { candidateDir, readJson, root, run, wrangler, writeJson } from "./process.ts";
 import { verifyCandidate, type WorkerConfig } from "./project.ts";
 import { runProbe, waitForHealth } from "./protocol.ts";
 
 import { expectedIdentity, verifyHealthIdentity } from "./build-identity.ts";
-import { requireGatePassed } from "../eng/migrations/deploy.ts";
 
 const productionBase = "https://arcforges.com/api";
 const deploymentFile = path.join(root, "artifacts", "deployment.json");
+
+// CLOUD.84 U10: promotion requires the gate record that the sealed migrator wrote for exactly this candidate and target (the decision is
+// C#; this check only reads the record and refuses to promote without a passed or not-applicable one).
+function requireGatePassed(target: "production" | "proof", revision: string): void {
+  const file = path.join(root, "artifacts", `migration-gate-${target}.json`);
+  let record: { target?: string; revision?: string; status?: string };
+  try {
+    record = JSON.parse(readFileSync(file, "utf8")) as typeof record;
+  } catch {
+    throw new Error("the migration step did not run; nothing is promoted");
+  }
+  assert.equal(record.target, target, "the gate record is for another target");
+  assert.equal(record.revision, revision, "the gate record is for another revision");
+  if (record.status !== "passed" && record.status !== "not-applicable")
+    throw new Error("the migration step did not pass; nothing is promoted");
+}
 
 interface Deployment {
   revision: string;

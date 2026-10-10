@@ -176,6 +176,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # CLOUD.84 S41(3): the candidate publishes the Hello probe and the migrator with the SDK of global.json; the deploy jobs have no .NET step.
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version

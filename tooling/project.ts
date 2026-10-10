@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -26,6 +26,9 @@ import {
   type Identity,
 } from "./build-identity.ts";
 
+/** The sealed migrator archive (CLOUD.84 S41(1)); the shim in eng/migrations/shim.ts names the same file. */
+export const sealedMigratorName = "arcforges-migrator.tar";
+
 const payloadFiles = [
   "build-identity.json",
   "docker-image.tar",
@@ -39,6 +42,8 @@ const payloadFiles = [
   "image-provenance.json",
   // CLOUD.84 S33(3)(b): the self-contained Hello probe, sealed here and run by CI through runProbe.
   "arcforges-probe",
+  // CLOUD.84 S41(1): the migrator (the same tool, with its migrate command), sealed as one archive; the deploy jobs check its digest.
+  "arcforges-migrator.tar",
 ] as const;
 export interface Candidate {
   schema: 1;
@@ -433,6 +438,41 @@ async function buildCandidate() {
     path.join(probeOutput, "ArcForges.Cloud.Generation"),
     path.join(candidateDir, sealedProbeName),
   );
+  // CLOUD.84 S41(1): the migrator is published self-contained for linux-x64 and not single-file (S38(2)), then archived in a fixed order
+  // with fixed metadata, so one member is sealed. The deploy jobs check its SHA-256 against this manifest before they run it, and the
+  // migration decisions run there: no .NET build runs in a deploy job.
+  const migratorOutput = path.join(root, "artifacts", "migrator-publish");
+  await rm(migratorOutput, { recursive: true, force: true });
+  try {
+    await run("dotnet", [
+      "publish",
+      probeProject,
+      "-c",
+      "Release",
+      "-r",
+      "linux-x64",
+      "--self-contained",
+      "true",
+      "-p:PublishSingleFile=false",
+      "-p:DebugType=none",
+      "-o",
+      migratorOutput,
+    ]);
+  } finally {
+    await writeFile(probeLock, reviewedProbeLock);
+  }
+  await run("tar", [
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "-cf",
+    path.join(candidateDir, sealedMigratorName),
+    "-C",
+    migratorOutput,
+    ".",
+  ]);
   const files: Record<string, string> = {};
   for (const file of payloadFiles) files[file] = await sha256(path.join(candidateDir, file));
   await writeJson(path.join(candidateDir, "manifest.json"), {

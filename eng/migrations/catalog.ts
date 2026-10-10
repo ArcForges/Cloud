@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test support only (CLOUD.84 U9, S41): the TypeScript migration module is kept for the offline local drivers and the
+// TypeScript suites that still import it. C# (src/ArcForges.Cloud.Storage.D1/MigrationRunner) is authoritative for every decision.
 // The migration catalog: the numbered, checksum-locked D1 migrations of RES-cloud-d1-migrations. One global
 // sequence; each module authors its migration as `pending/<module>__<slug>.sql` and the Cloud integration owner
 // assigns the next number at merge (`assign`), which moves the file and appends its entry to the lock. A merged

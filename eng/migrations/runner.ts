@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test support only (CLOUD.84 U9, S41): the TypeScript migration module is kept for the offline local drivers and the
+// TypeScript suites that still import it. C# (src/ArcForges.Cloud.Storage.D1/MigrationRunner) is authoritative for every decision.
 // The D1 migration runner (Design D1 profile section 6). It runs from the gated deployment job, never from the
 // Container. One global sequence, applied in order with receipts. Every chunk is one atomic batch whose first
 // statement advances the receipt under the current fence, so:
