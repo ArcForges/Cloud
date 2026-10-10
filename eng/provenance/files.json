@@ -201,6 +201,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r48.json",
     "eng/provenance/artifact-profiles/cloud-release-r49.json",
     "eng/provenance/artifact-profiles/cloud-release-r5.json",
+    "eng/provenance/artifact-profiles/cloud-release-r50.json",
     "eng/provenance/artifact-profiles/cloud-release-r6.json",
     "eng/provenance/artifact-profiles/cloud-release-r7.json",
     "eng/provenance/artifact-profiles/cloud-release-r8.json",
@@ -231,10 +232,12 @@
     "eng/provenance/records/cloud-84-cloud-runtime-notices-r2.json",
     "eng/provenance/records/cloud-84-cloud-runtime-notices-r3.json",
     "eng/provenance/records/cloud-84-cloud-runtime-notices-r4.json",
+    "eng/provenance/records/cloud-84-cloud-runtime-notices-r5.json",
     "eng/provenance/records/cloud-84-cloud-worker-bundle-r1.json",
     "eng/provenance/records/cloud-84-cloud-worker-bundle-r2.json",
     "eng/provenance/records/cloud-84-cloud-worker-bundle-r3.json",
     "eng/provenance/records/cloud-84-cloud-worker-bundle-r4.json",
+    "eng/provenance/records/cloud-84-cloud-worker-bundle-r5.json",
     "eng/provenance/records/cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r10.json",
     "eng/provenance/records/cloud-runtime-notices-r11.json",
@@ -926,5 +929,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["cloud-84-cloud-runtime-notices-r4", "cloud-84-cloud-worker-bundle-r4"]
+  "artifacts": ["cloud-84-cloud-runtime-notices-r5", "cloud-84-cloud-worker-bundle-r5"]
 }
