@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test support only (CLOUD.84 U9, S41): the narrow surface of the TypeScript migration runner, used by the offline local drivers
+// Test support only (CLOUD.84 U9, S41, S42(2)): the narrow surface of the TypeScript migration runner, used by the offline local drivers
 // (eng/verification/d1-*-local.ts). The live D1 REST transport is C# (tools/ArcForges.Cloud.Generation/Migrations/D1RestClient.cs);
 // C# is authoritative for every migration decision.
 // The narrow surface the migration runner needs from a D1 database: one atomic batch of positional-bind
@@ -7,6 +7,7 @@
 // local opt-in runtime test, or a Worker binding).
 // 64-bit values are never bound or read as JavaScript numbers: the runner binds canonical decimal text with
 // CAST(? AS INTEGER) and reads CAST(column AS TEXT), exactly as the named-plan bridge does.
+// The live D1 path is C# and no TypeScript REST transport remains; deleting this file is an open residual (D13, S42(2)).
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 export type Bind = string | number | null | Uint8Array;

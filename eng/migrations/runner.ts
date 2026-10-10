@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test support only (CLOUD.84 U9, S41): the TypeScript migration module is kept for the offline local drivers and the
+// Test support only (CLOUD.84 U9, S41, S42(2)): the TypeScript migration module is kept for the offline local drivers and the
 // TypeScript suites that still import it. C# (src/ArcForges.Cloud.Storage.D1/MigrationRunner) is authoritative for every decision.
 // The D1 migration runner (Design D1 profile section 6). It runs from the gated deployment job, never from the
 // Container. One global sequence, applied in order with receipts. Every chunk is one atomic batch whose first
@@ -10,6 +10,7 @@
 //   - a merged migration that was edited is refused, because its checksum is in the receipt.
 // Modes: expand (additive DDL), backfill (guarded 100-row pages with checkpoints and a verify gate), cutover
 // (one fenced switch of the read and write horizons) and contract (irreversible, after cutover and soak).
+// The live D1 path is C# and no TypeScript REST transport remains; deleting this file is an open residual (D13, S42(2)).
 import type { BatchResult, MigrationClient, MigrationStatement } from "./clients.ts";
 import type { Migration } from "./catalog.ts";
 import { type BackfillSpec, parseBackfill } from "./sql.ts";
