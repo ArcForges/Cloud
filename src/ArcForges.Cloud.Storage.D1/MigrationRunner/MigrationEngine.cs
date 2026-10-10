@@ -86,9 +86,6 @@ public static class MigrationEngine
     public const int StateApplying = 1;
     public const int StateApplied = 2;
 
-    private const string GuardSql =
-        "EXISTS (SELECT 1 FROM platform_schema_state WHERE singleton = 1 AND fence = CAST(? AS INTEGER) AND lease_holder = ? AND lease_expires_at > CAST(? AS INTEGER))";
-
     private static readonly System.Text.RegularExpressions.Regex ReceiptRefusal = new(
         "ck_platform_migration_receipt__progress|af_immutable_platform_migration_receipt",
         RegexOptions.CultureInvariant);
@@ -153,15 +150,13 @@ public static class MigrationEngine
 
     private static async Task<bool> TableExists(Run run)
     {
-        var rows = await One(run, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'platform_schema_state'").ConfigureAwait(false);
+        var rows = await One(run, RunnerSql.Get("table-exists")).ConfigureAwait(false);
         return CellLong(rows, 0, 0) == 1;
     }
 
     private static async Task<SchemaState> ReadState(Run run)
     {
-        var rows = await One(run,
-            "SELECT CAST(schema_version AS TEXT), CAST(read_horizon AS TEXT), CAST(write_horizon AS TEXT), CAST(fence AS TEXT), lease_holder, CAST(lease_expires_at AS TEXT) FROM platform_schema_state WHERE singleton = 1")
-            .ConfigureAwait(false);
+        var rows = await One(run, RunnerSql.Get("read-state")).ConfigureAwait(false);
         if (rows.Count == 0) throw new MigrationError("no-schema-state", "platform_schema_state has no row");
         var row = rows[0];
         return new SchemaState(
@@ -175,9 +170,7 @@ public static class MigrationEngine
 
     private static async Task<List<Receipt>> ReadReceipts(Run run)
     {
-        var rows = await One(run,
-            "SELECT CAST(sequence AS TEXT), file_name, checksum, state, statements_done, statement_count, CAST(applied_at AS TEXT) FROM platform_migration_receipt ORDER BY sequence")
-            .ConfigureAwait(false);
+        var rows = await One(run, RunnerSql.Get("read-receipts")).ConfigureAwait(false);
         var receipts = new List<Receipt>();
         foreach (var row in rows)
         {
@@ -208,8 +201,7 @@ public static class MigrationEngine
     }
 
     private static MigrationStatement ReceiptInsert(Run run, Migration migration, long statementCount) => new(
-        "INSERT INTO platform_migration_receipt (sequence, file_name, module, mode, checksum, state, statement_count, statements_done, runner, fence, started_at, applied_at, compatibility)\n" +
-        $"SELECT CAST(? AS INTEGER), ?, ?, ?, ?, {StateApplying}, ?, 0, ?, CAST(? AS INTEGER), CAST(? AS INTEGER), NULL, ? WHERE {GuardSql}",
+        RunnerSql.Get("receipt-insert"),
         [
             Text(migration.Sequence),
             migration.File,
@@ -234,11 +226,10 @@ public static class MigrationEngine
         var statements = new List<MigrationStatement>();
         statements.AddRange(first.Statements.Select(statement => new MigrationStatement(statement.Sql, [])));
         statements.Add(new MigrationStatement(
-            "INSERT INTO platform_schema_state (singleton, schema_version, read_horizon, write_horizon, fence, lease_holder, lease_expires_at, rev, updated_at) VALUES (1, 0, 0, 0, 1, ?, CAST(? AS INTEGER), 1, CAST(? AS INTEGER))",
+            RunnerSql.Get("bootstrap-schema-state"),
             [run.Options.Runner, Micros(run.Now + run.LeaseMs), now]));
         statements.Add(new MigrationStatement(
-            "INSERT INTO platform_migration_receipt (sequence, file_name, module, mode, checksum, state, statement_count, statements_done, runner, fence, started_at, applied_at, compatibility)\n" +
-            $"VALUES (0, ?, ?, ?, ?, {StateApplied}, ?, ?, ?, 1, CAST(? AS INTEGER), CAST(? AS INTEGER), ?)",
+            RunnerSql.Get("bootstrap-receipt"),
             [
                 first.File,
                 first.Module,
@@ -260,8 +251,7 @@ public static class MigrationEngine
         var now = Micros(run.Now);
         var results = await run.Options.Client.BatchAsync([
             new MigrationStatement(
-                "UPDATE platform_schema_state SET fence = fence + 1, lease_holder = ?, lease_expires_at = CAST(? AS INTEGER), rev = rev + 1, updated_at = CAST(? AS INTEGER)\n" +
-                "WHERE singleton = 1 AND (lease_holder IS NULL OR lease_expires_at <= CAST(? AS INTEGER) OR lease_holder = ?)",
+                RunnerSql.Get("acquire-lease"),
                 [run.Options.Runner, Micros(run.Now + run.LeaseMs), now, now, run.Options.Runner]),
         ], run.Cancel).ConfigureAwait(false);
         if (results[0].Changes != 1)
@@ -279,7 +269,7 @@ public static class MigrationEngine
     {
         await run.Options.Client.BatchAsync([
             new MigrationStatement(
-                "UPDATE platform_schema_state SET lease_holder = NULL, lease_expires_at = NULL, rev = rev + 1, updated_at = CAST(? AS INTEGER) WHERE singleton = 1 AND fence = CAST(? AS INTEGER) AND lease_holder = ?",
+                RunnerSql.Get("release-lease"),
                 [Micros(run.Now), Text(run.Fence), run.Options.Runner]),
         ], run.Cancel).ConfigureAwait(false);
     }
@@ -333,9 +323,10 @@ public static class MigrationEngine
     {
         var now = Micros(run.Now);
         var progress = new MigrationStatement(
-            $"UPDATE platform_migration_receipt SET statements_done = CASE WHEN statements_done = CAST(? AS INTEGER) AND state = {StateApplying} AND {GuardSql}{extraCondition} THEN CAST(? AS INTEGER) ELSE -1 END" +
-            (last ? $", state = {StateApplied}, applied_at = CAST(? AS INTEGER)" : string.Empty) +
-            " WHERE sequence = CAST(? AS INTEGER)",
+            RunnerSql.Get(
+                "progress",
+                ("extra", extraCondition),
+                ("finish", last ? RunnerSql.Get("progress-finish") : string.Empty)),
             [
                 Text(previous),
                 .. run.GuardParams(),
@@ -348,7 +339,7 @@ public static class MigrationEngine
 
     /// <summary>Keeps the lease alive from inside a guarded batch, after the guard statement, so a long run never outlives its lease.</summary>
     private static MigrationStatement RenewStatement(Run run) => new(
-        "UPDATE platform_schema_state SET lease_expires_at = CAST(? AS INTEGER) WHERE singleton = 1 AND fence = CAST(? AS INTEGER) AND lease_holder = ?",
+        RunnerSql.Get("renew-lease"),
         [Micros(run.Now + run.LeaseMs), Text(run.Fence), run.Options.Runner]);
 
     /// <summary>The verify queries of the backfills a cutover requires, as one condition of the cutover's own guard.</summary>
@@ -377,13 +368,13 @@ public static class MigrationEngine
             return
             [
                 new MigrationStatement(
-                    "UPDATE platform_schema_state SET read_horizon = COALESCE(CAST(? AS INTEGER), read_horizon), write_horizon = COALESCE(CAST(? AS INTEGER), write_horizon), schema_version = CAST(? AS INTEGER), rev = rev + 1, updated_at = CAST(? AS INTEGER) WHERE singleton = 1 AND fence = CAST(? AS INTEGER)",
+                    RunnerSql.Get("cutover-horizons"),
                     [read, write, Text(migration.Sequence), Micros(run.Now), Text(run.Fence)]),
             ];
         return
         [
             new MigrationStatement(
-                "UPDATE platform_schema_state SET schema_version = CAST(? AS INTEGER), rev = rev + 1, updated_at = CAST(? AS INTEGER) WHERE singleton = 1 AND fence = CAST(? AS INTEGER)",
+                RunnerSql.Get("schema-version"),
                 [Text(migration.Sequence), Micros(run.Now), Text(run.Fence)]),
         ];
     }
@@ -450,7 +441,7 @@ public static class MigrationEngine
             var found = TryJsInteger(entry, out var sequence) ? receipts.FirstOrDefault(item => item.Sequence == sequence) : null;
             if (found is null || found.State != StateApplied)
                 throw new MigrationError("cutover-blocked", $"{migration.File} requires backfill {entry} to be applied");
-            var rows = await One(run, "SELECT verified FROM platform_backfill_checkpoint WHERE sequence = CAST(? AS INTEGER)", Text(sequence)).ConfigureAwait(false);
+            var rows = await One(run, RunnerSql.Get("checkpoint-verified-select"), Text(sequence)).ConfigureAwait(false);
             if (CellLong(rows, 0, 0) != 1)
                 throw new MigrationError("cutover-blocked", $"{migration.File} requires backfill {entry} to be verified");
         }
@@ -482,8 +473,7 @@ public static class MigrationEngine
             var results = await run.Options.Client.BatchAsync([
                 ReceiptInsert(run, migration, 1),
                 new MigrationStatement(
-                    "INSERT INTO platform_backfill_checkpoint (sequence, last_key, pages_done, rows_converted, rows_stale, verified, updated_at)\n" +
-                    $"SELECT CAST(? AS INTEGER), NULL, 0, 0, 0, 0, CAST(? AS INTEGER) WHERE {GuardSql}",
+                    RunnerSql.Get("checkpoint-insert"),
                     [Text(migration.Sequence), Micros(run.Now), .. run.GuardParams()]),
             ], run.Cancel).ConfigureAwait(false);
             if (results[0].Changes != 1)
@@ -499,9 +489,7 @@ public static class MigrationEngine
             passes++;
             if (passes > maxPasses)
                 throw new MigrationError("backfill-not-converging", $"{migration.File} did not converge in {maxPasses} passes");
-            var checkpoint = await One(run,
-                "SELECT last_key, CAST(rows_converted AS TEXT), CAST(rows_stale AS TEXT) FROM platform_backfill_checkpoint WHERE sequence = CAST(? AS INTEGER)",
-                Text(migration.Sequence)).ConfigureAwait(false);
+            var checkpoint = await One(run, RunnerSql.Get("checkpoint-state"), Text(migration.Sequence)).ConfigureAwait(false);
             var cursor = checkpoint.Count == 0 || checkpoint[0][0] is null ? string.Empty : checkpoint[0][0]!;
             var beforeConverted = CellLong(checkpoint, 0, 1);
             var beforeStale = CellLong(checkpoint, 0, 2);
@@ -516,7 +504,7 @@ public static class MigrationEngine
                 var statements = new List<MigrationStatement>
                 {
                     new(
-                        "UPDATE platform_backfill_checkpoint SET pages_done = CASE WHEN COALESCE(last_key, '') = ? AND verified = 0 AND " + GuardSql + " THEN pages_done + 1 ELSE -1 END, last_key = ?, updated_at = CAST(? AS INTEGER) WHERE sequence = CAST(? AS INTEGER)",
+                        RunnerSql.Get("checkpoint-page"),
                         [cursor, .. run.GuardParams(), lastKey, Micros(run.Now), Text(migration.Sequence)]),
                     // After the guard and before any apply statement: changes() below reads the apply statement that precedes it.
                     RenewStatement(run),
@@ -525,7 +513,7 @@ public static class MigrationEngine
                 {
                     statements.Add(new MigrationStatement(spec.Apply, [row[0] ?? "null", row[1] ?? "null"]));
                     statements.Add(new MigrationStatement(
-                        "UPDATE platform_backfill_checkpoint SET rows_converted = rows_converted + changes(), rows_stale = rows_stale + (1 - changes()) WHERE sequence = CAST(? AS INTEGER)",
+                        RunnerSql.Get("checkpoint-counters"),
                         [Text(migration.Sequence)]));
                 }
 
@@ -543,9 +531,7 @@ public static class MigrationEngine
 
             var verify = await One(run, spec.Verify).ConfigureAwait(false);
             var remaining = CellLong(verify, 0, 0);
-            var after = await One(run,
-                "SELECT CAST(rows_converted AS TEXT), CAST(rows_stale AS TEXT) FROM platform_backfill_checkpoint WHERE sequence = CAST(? AS INTEGER)",
-                Text(migration.Sequence)).ConfigureAwait(false);
+            var after = await One(run, RunnerSql.Get("checkpoint-counts"), Text(migration.Sequence)).ConfigureAwait(false);
             rowsConverted = CellLong(after, 0, 0);
             rowsStale = CellLong(after, 0, 1);
             if (remaining == 0) break;
@@ -557,7 +543,7 @@ public static class MigrationEngine
             {
                 await run.Options.Client.BatchAsync([
                     new MigrationStatement(
-                        "UPDATE platform_backfill_checkpoint SET pages_done = CASE WHEN " + GuardSql + " THEN pages_done ELSE -1 END, last_key = NULL, updated_at = CAST(? AS INTEGER) WHERE sequence = CAST(? AS INTEGER)",
+                        RunnerSql.Get("checkpoint-restart"),
                         [.. run.GuardParams(), Micros(run.Now), Text(migration.Sequence)]),
                     RenewStatement(run),
                 ], run.Cancel).ConfigureAwait(false);
@@ -572,7 +558,7 @@ public static class MigrationEngine
             FenceGuardedProgress(run, migration, 0, 1, true,
             [
                 new MigrationStatement(
-                    "UPDATE platform_backfill_checkpoint SET verified = 1, updated_at = CAST(? AS INTEGER) WHERE sequence = CAST(? AS INTEGER)",
+                    RunnerSql.Get("checkpoint-verified"),
                     [Micros(run.Now), Text(migration.Sequence)]),
                 .. SchemaVersionStatements(run, migration),
             ]),

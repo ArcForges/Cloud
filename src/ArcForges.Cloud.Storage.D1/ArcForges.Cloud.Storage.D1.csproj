@@ -5,6 +5,11 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <ItemGroup>
+    <!-- CLOUD.84 S42(1): the runner's SQL and classifier patterns are embedded, so C# holds no SQL text. -->
+    <EmbeddedResource Include="MigrationRunner/Statements.sql" LogicalName="ArcForges.Cloud.Storage.D1.MigrationRunner.Statements.sql" />
+    <EmbeddedResource Include="MigrationRunner/Classifiers.txt" LogicalName="ArcForges.Cloud.Storage.D1.MigrationRunner.Classifiers.txt" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="ArcForges.Contracts.CloudInternal" />
     <ProjectReference Include="../ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj" />
     <InternalsVisibleTo Include="ArcForges.Cloud" />

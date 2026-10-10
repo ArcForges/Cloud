@@ -287,32 +287,35 @@ public static partial class MigrationSql
         "PRAGMA", "ATTACH", "DETACH", "VACUUM", "BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE", "END",
     };
 
-    [GeneratedRegex(@"^PRAGMA\s+defer_foreign_keys\s*=\s*(?:ON|OFF|1|0)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex DeferForeignKeys();
+    private const string ClassifierResource = "ArcForges.Cloud.Storage.D1.MigrationRunner.Classifiers.txt";
 
-    [GeneratedRegex(@"^CREATE (?:UNIQUE )?(?:TABLE|INDEX|TRIGGER|VIRTUAL TABLE)\b", RegexOptions.CultureInvariant)]
-    private static partial Regex CreateObject();
+    private static readonly Lazy<Dictionary<string, Regex>> Classifiers = new(LoadClassifiers, isThreadSafe: true);
 
-    [GeneratedRegex(@"^CREATE (?:UNIQUE )?INDEX\b", RegexOptions.CultureInvariant)]
-    private static partial Regex CreateIndex();
+    /// <summary>
+    /// The statement classifiers (MigrationRunner/Classifiers.txt, an embedded resource, CLOUD.84 S42(1)). They are the only SQL
+    /// keyword patterns of the runner; the text file keeps the SQL keywords out of C# source.
+    /// </summary>
+    private static Regex Classifier(string name) =>
+        Classifiers.Value.TryGetValue(name, out var regex) ? regex : throw new MigrationError("unexpected-value", $"classifier {name} is missing");
 
-    [GeneratedRegex(@"^ALTER TABLE\b", RegexOptions.CultureInvariant)]
-    private static partial Regex AlterTable();
+    private static Dictionary<string, Regex> LoadClassifiers()
+    {
+        using var stream = typeof(MigrationSql).Assembly.GetManifestResourceStream(ClassifierResource)
+            ?? throw new MigrationError("unexpected-value", "the statement classifiers are not embedded");
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var map = new Dictionary<string, Regex>(StringComparer.Ordinal);
+        foreach (var raw in reader.ReadToEnd().Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            if (raw.Length == 0 || raw.StartsWith('#')) continue;
+            var parts = raw.Split(' ', 3);
+            if (parts.Length != 3 || parts[1] is not ("i" or "-"))
+                throw new MigrationError("unexpected-value", $"malformed classifier line \"{raw}\"");
+            var options = RegexOptions.CultureInvariant | (parts[1] == "i" ? RegexOptions.IgnoreCase : RegexOptions.None);
+            map[parts[0]] = new Regex(parts[2], options);
+        }
 
-    [GeneratedRegex(@"\bADD(?: COLUMN)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex AddColumn();
-
-    [GeneratedRegex(@"\b(?:DROP|RENAME)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex DropOrRename();
-
-    [GeneratedRegex(@"^ALTER\s+TABLE\s+\S+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex AlterTablePrefix();
-
-    [GeneratedRegex(@"^(?:DROP|ALTER)\b", RegexOptions.CultureInvariant)]
-    private static partial Regex DropOrAlter();
-
-    [GeneratedRegex(@"^(?:INSERT|UPDATE|DELETE)\b", RegexOptions.CultureInvariant)]
-    private static partial Regex DataChange();
+        return map;
+    }
 
     /// <summary>
     /// The statements one mode may contain. The runner owns transactions, so no migration controls them. An expand migration
@@ -329,28 +332,28 @@ public static partial class MigrationSql
             var first = statement.Head.Count > 0 ? statement.Head[0] : string.Empty;
             if (BaseForbidden.Contains(first))
             {
-                if (first == "PRAGMA" && DeferForeignKeys().IsMatch(statement.Sql)) continue;
+                if (first == "PRAGMA" && Classifier("defer-foreign-keys").IsMatch(statement.Sql)) continue;
                 problems.Add($"{where}: {first} is not allowed in a migration");
                 continue;
             }
 
-            var isCreate = CreateObject().IsMatch(head) || CreateIndex().IsMatch(head);
+            var isCreate = Classifier("create-object").IsMatch(head) || Classifier("create-index").IsMatch(head);
             if (mode == MigrationMode.Expand)
             {
                 if (isCreate) continue;
-                if (AlterTable().IsMatch(head) && AddColumn().IsMatch(statement.Sql) &&
-                    !DropOrRename().IsMatch(AlterTablePrefix().Replace(statement.Sql, string.Empty, 1)))
+                if (Classifier("alter-table").IsMatch(head) && Classifier("add-column").IsMatch(statement.Sql) &&
+                    !Classifier("drop-or-rename").IsMatch(Classifier("alter-table-prefix").Replace(statement.Sql, string.Empty, 1)))
                     continue;
                 problems.Add($"{where}: an expand migration may only create tables, indexes, triggers and virtual tables or add a column");
             }
             else if (mode == MigrationMode.Contract)
             {
-                if (isCreate || DropOrAlter().IsMatch(head) || DataChange().IsMatch(head)) continue;
+                if (isCreate || Classifier("drop-or-alter").IsMatch(head) || Classifier("data-change").IsMatch(head)) continue;
                 problems.Add($"{where}: unsupported statement in a contract migration");
             }
             else if (mode == MigrationMode.Cutover)
             {
-                if (DataChange().IsMatch(head) || isCreate) continue;
+                if (Classifier("data-change").IsMatch(head) || isCreate) continue;
                 problems.Add($"{where}: a cutover migration contains data and index statements only");
             }
         }
