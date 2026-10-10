@@ -125,6 +125,20 @@ export const correlationGuard = {
   traceparentFlags: "01",
 } as const;
 
+/** The named-plan transport guards (Design D1 profile, section 3): deadline, clock tolerance and value bounds. Plan decisions stay in the generated plan tables. */
+export const storageGuards = {
+  maxDeadlineAheadMs: 10000,
+  deadlineClockToleranceMs: 2000,
+  guardConstraintName: "af_guard_failed",
+  maxTextLength: 262144,
+  maxBytesLength: 262144,
+  int64Min: "-9223372036854775808",
+  int64Max: "9223372036854775807",
+  uint64Max: "18446744073709551615",
+  maxDecimalSignificantDigits: 28,
+  maxDecimalFractionDigits: 9,
+} as const;
+
 /** The report schema identifier; the report schema is stable (docs/cloud-readiness.md). */
 export const readinessSchema = "cloud.readiness.v1";
 /** Seconds a client is advised to wait before a retry after a transient refusal (Design D1 profile, section 3). */

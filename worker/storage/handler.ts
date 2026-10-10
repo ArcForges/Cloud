@@ -12,6 +12,7 @@ import { sha256Hex } from "../private/encoding.ts";
 import { loadKeys, verificationKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import { verify } from "../private/signing.ts";
 import type { D1Like } from "./d1.ts";
+import { correlationGuard } from "../tables/cloud-tables.generated.ts";
 import { executePlan, planKey } from "./execute-plan.ts";
 import { manifestHash, plans } from "./plans.generated.ts";
 
@@ -25,7 +26,8 @@ export interface StorageEnv extends PrivateKeyEnv {
 }
 
 const planIndex = new Map(plans.map((plan) => [planKey(plan.id, plan.version), plan]));
-const nilUuid = "00000000-0000-0000-0000-000000000000";
+/** The nil identity is refused as a request id; the value is the generated correlation guard (CR-01), not a copy. */
+const nilUuid = correlationGuard.nilUuid;
 
 function reply(body: Uint8Array): Response {
   return new Response(body as BodyInit, {

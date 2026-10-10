@@ -28,6 +28,19 @@ public sealed record CorrelationGuardRow(
     string TraceparentVersion,
     string TraceparentFlags);
 
+/// <summary>The transport guards of a named-plan call the Worker applies before it binds or runs SQL (CLOUD.84 S34(1) and S40(2)).</summary>
+public sealed record StorageGuardRow(
+    int MaxDeadlineAheadMilliseconds,
+    int DeadlineClockToleranceMilliseconds,
+    string GuardConstraintName,
+    int MaxTextLength,
+    int MaxBytesLength,
+    string Int64Min,
+    string Int64Max,
+    string Uint64Max,
+    int MaxDecimalSignificantDigits,
+    int MaxDecimalFractionDigits);
+
 /// <summary>One declared binding of the readiness vocabulary: the component, the name and the environments that declare it.</summary>
 public sealed record ReadinessBindingRow(string Component, string Name, IReadOnlyList<string> Environments);
 
@@ -60,7 +73,8 @@ public sealed record TableModel(
     string SessionCookieName,
     string CsrfHeader,
     CorrelationGuardRow Correlation,
-    ReadinessRow Readiness);
+    ReadinessRow Readiness,
+    StorageGuardRow Storage);
 
 /// <summary>
 /// Reads the transport tables by reflection over the host's registrations: HelloModule (the production policies and the plain health
@@ -75,6 +89,7 @@ public static class HostReader
     private const string IngressPipelineType = "ArcForges.Cloud.Ingress.IngressPipeline";
     private const string BudgetsType = "ArcForges.Cloud.Generation.TransportBudgets";
     private const string GuardsType = "ArcForges.Cloud.Generation.CorrelationGuards";
+    private const string StorageGuardsType = "ArcForges.Cloud.Generation.StorageGuards";
     private const string ApiPrefix = "/api";
     private const string HelloMethod = "/arcforges.hello.v1.HelloService/SayHello";
     private const BindingFlags AnyMember = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
@@ -139,8 +154,22 @@ public static class HostReader
                 IdValueField: Constant(guards, "IdValueField"),
                 IdByteLength: Constant(guards, "IdByteLength"),
                 TraceparentVersion: Text(guards, "TraceparentVersion"),
-                TraceparentFlags: Text(guards, "TraceparentFlags")));
+                TraceparentFlags: Text(guards, "TraceparentFlags")),
+            Storage: ReadStorageGuards(LoadType(assembly, StorageGuardsType)));
     }
+
+    /// <summary>Reads the named-plan transport guards (S40(2)); a missing member stops the generator.</summary>
+    private static StorageGuardRow ReadStorageGuards(Type guards) => new(
+        MaxDeadlineAheadMilliseconds: Constant(guards, "MaxDeadlineAheadMilliseconds"),
+        DeadlineClockToleranceMilliseconds: Constant(guards, "DeadlineClockToleranceMilliseconds"),
+        GuardConstraintName: Text(guards, "GuardConstraintName"),
+        MaxTextLength: Constant(guards, "MaxTextLength"),
+        MaxBytesLength: Constant(guards, "MaxBytesLength"),
+        Int64Min: Text(guards, "Int64Min"),
+        Int64Max: Text(guards, "Int64Max"),
+        Uint64Max: Text(guards, "Uint64Max"),
+        MaxDecimalSignificantDigits: Constant(guards, "MaxDecimalSignificantDigits"),
+        MaxDecimalFractionDigits: Constant(guards, "MaxDecimalFractionDigits"));
 
     private const string ReadinessVocabularyType = "ArcForges.Cloud.Readiness.ReadinessVocabulary";
 

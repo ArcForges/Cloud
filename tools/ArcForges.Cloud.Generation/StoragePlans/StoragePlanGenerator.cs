@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The storage-plan generator entry point (CLOUD.84 U7, D3): reads the reviewed plan files, renders the three outputs and either checks
-// the committed files against them or writes them. The Node generator (eng/verification/storage-plans.ts) is the parity reference until
-// U8 retires it; `npm run check:plans` runs this check.
+// the committed files against them or writes them. This C# generator is the only generator of the three outputs (CLOUD.84 S40(1)): the Node
+// generator eng/verification/storage-plans.ts was retired in U8 and keeps only test-support helpers. `npm run check:plans` runs this check.
 using System.Text;
 
 namespace ArcForges.Cloud.Tools.Generation.StoragePlans;

@@ -172,6 +172,22 @@ public sealed class StoragePlanGeneratorTests
     }
 
     [Fact]
+    public void TheManifestCarriesFamilyRolesAndTheCatalogAndTheWorkerDictionaryCarriesNone()
+    {
+        // The rendering cases of the retired TypeScript family-plans suite (CLOUD.84 S40(1)): the C# manifest carries the family
+        // roles and the catalog, and the Worker dictionary keeps the one plan shape with no role.
+        var root = T.RepoRoot().FullName;
+        var csharp = File_ReadAllText(Path.Combine(root, "src", "ArcForges.Cloud.Storage.D1", "PlanManifest.g.cs"));
+        Assert.Contains("internal static class Families", csharp);
+        Assert.Contains("new(FamilyModule.Identity, FamilyPhase.Guard, FamilyClass.Revision, \"credential-id\")", csharp);
+        Assert.Contains("FamilyModule.Identity, true, null", csharp);
+        var worker = File_ReadAllText(Path.Combine(root, "worker", "storage", "plans.generated.ts"));
+        var dictionary = worker[worker.IndexOf("export const plans", StringComparison.Ordinal)..];
+        Assert.DoesNotContain("family", dictionary, StringComparison.Ordinal);
+        Assert.DoesNotContain("phase", dictionary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ForeignFilesInThePlanDirectoryAreRefused()
     {
         var root = TemporaryRoot();

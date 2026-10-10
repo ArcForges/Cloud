@@ -109,8 +109,27 @@ public static class TypeScriptTables
         text.Append("  traceparentFlags: ").Append(Quote(correlation.TraceparentFlags)).Append(",\n");
         text.Append("} as const;\n\n");
 
+        AppendStorage(text, model.Storage);
         AppendReadiness(text, model.Readiness);
         return text.ToString();
+    }
+
+    /// <summary>The named-plan transport guards the Worker applies before it binds or runs SQL (CLOUD.84 S34(1) and S40(2)).</summary>
+    private static void AppendStorage(StringBuilder text, StorageGuardRow storage)
+    {
+        text.Append("/** The named-plan transport guards (Design D1 profile, section 3): deadline, clock tolerance and value bounds. Plan decisions stay in the generated plan tables. */\n");
+        text.Append("export const storageGuards = {\n");
+        text.Append("  maxDeadlineAheadMs: ").Append(Number(storage.MaxDeadlineAheadMilliseconds)).Append(",\n");
+        text.Append("  deadlineClockToleranceMs: ").Append(Number(storage.DeadlineClockToleranceMilliseconds)).Append(",\n");
+        text.Append("  guardConstraintName: ").Append(Quote(storage.GuardConstraintName)).Append(",\n");
+        text.Append("  maxTextLength: ").Append(Number(storage.MaxTextLength)).Append(",\n");
+        text.Append("  maxBytesLength: ").Append(Number(storage.MaxBytesLength)).Append(",\n");
+        text.Append("  int64Min: ").Append(Quote(storage.Int64Min)).Append(",\n");
+        text.Append("  int64Max: ").Append(Quote(storage.Int64Max)).Append(",\n");
+        text.Append("  uint64Max: ").Append(Quote(storage.Uint64Max)).Append(",\n");
+        text.Append("  maxDecimalSignificantDigits: ").Append(Number(storage.MaxDecimalSignificantDigits)).Append(",\n");
+        text.Append("  maxDecimalFractionDigits: ").Append(Number(storage.MaxDecimalFractionDigits)).Append(",\n");
+        text.Append("} as const;\n\n");
     }
 
     /// <summary>The readiness vocabulary and the binding declarations per environment, as closed constants (WP-21.07, CLOUD.84 S39(1)).</summary>

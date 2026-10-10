@@ -33,8 +33,9 @@ public static class Program
             var planRoot = FindRoot(Directory.GetCurrentDirectory());
             try
             {
+                // In generate mode the paths returned are the ones just written, which is the success case, not a stale output.
                 var planStale = StoragePlans.StoragePlanGenerator.Sync(planRoot, args[1] == "generate");
-                if (planStale.Count > 0)
+                if (args[1] == "check" && planStale.Count > 0)
                 {
                     foreach (var path in planStale) Console.Error.WriteLine($"Out of date: {path}. Run npm run generate and commit the result.");
                     return 1;
@@ -82,7 +83,9 @@ public static class Program
 
         try
         {
-            stale.AddRange(StoragePlans.StoragePlanGenerator.Sync(root, generate));
+            // In generate mode the paths returned were written just now; only check mode reports them as stale.
+            var planStale = StoragePlans.StoragePlanGenerator.Sync(root, generate);
+            if (!generate) stale.AddRange(planStale);
         }
         catch (StoragePlans.PlanRefusal refusal)
         {
