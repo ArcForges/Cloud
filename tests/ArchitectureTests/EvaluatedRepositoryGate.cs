@@ -119,6 +119,13 @@ public sealed class EvaluatedRepositoryGate
         ("ArcForges.Cloud.Modules.IModulePlanPortFactory", "For", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
             ["APlanOfAnotherOwnerIsRefusedBeforeAnythingIsSent", "AnUnknownPlanAndAnAccessMismatchAreCallerDefectsThatNeverReachTheExecutor"]),
         ("ArcForges.Cloud.Modules.ModulePlanOutcome", "Of", "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests", ["EveryPlanFailureBecomesATypedStatus"]),
+        // CLOUD.72: the generic family-execution port. It is exercised through the FamilyBinding adapter over the shared-family engine (the refusals
+        // before the executor, the sealed call and the outcome mapping) and on the real account-enrollment plan through the SQLite oracle bridge.
+        ("ArcForges.Cloud.Modules.IModuleFamilyPort", "ExecuteAsync", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests",
+            ["TheSealedCallIsTheEnginesUnitOfWorkWithTheCommandInFrontOfEveryGuardAndTheTailInPlanOrder", "EveryExecutorAndReceiptOutcomeBecomesATypedStatusAndNothingIsRetried",
+                "AStatementOfAnotherModuleIsRefusedForEveryCallerOtherThanTheOneReviewedException", "ArgumentsOfTheWrongKindCountOrScopeAreRejectedWithoutReachingTheExecutor"]),
+        ("ArcForges.Cloud.Modules.IModuleFamilyPortFactory", "For", "ArcForges.Cloud.Tests.Families.ModuleFamilyPortTests",
+            ["ACallerThatIsNotAParticipantIsRefusedBeforeTheExecutor", "TheExceptionDoesNotHoldInAnotherFamilyWithTheSameParticipantsAndShape"]),
         // HAR.40: the model dispatch port and its client (Agent module), the wake port (Task module) and the wake route. The real tests are the
         // offline dispatch and wake suites of ArcForges.Cloud.Tests.HarnessFoundation; the wake route is exercised through the composed host.
         ("ArcForges.Cloud.Modules.IModelDispatchPort", "SnapshotOf", "ArcForges.Cloud.Tests.HarnessFoundation.AgentDispatchTests", ["ASnapshotExistsOnlyForAnAdmittedModel"]),
