@@ -95,7 +95,8 @@ function withoutCandidate<T>(use: (root: string) => T): T {
 test("a GitHub Actions deploy without a candidate manifest refuses and builds nothing", () => {
   withoutCandidate((root) => {
     assert.throws(
-      () => prepareInvocation(["deploy", "--target", "production"], { GITHUB_ACTIONS: "true" }, root),
+      () =>
+        prepareInvocation(["deploy", "--target", "production"], { GITHUB_ACTIONS: "true" }, root),
       /nothing is built or run/,
     );
   });
@@ -111,14 +112,20 @@ test("a local deploy without a candidate manifest may build the migrator from th
 
 test("a CI source check without a candidate manifest reads the tree, as the source job's check:physical does", () => {
   withoutCandidate((root) => {
-    const invocation = prepareInvocation(["check", "--base", "origin/main"], { GITHUB_ACTIONS: "true" }, root);
+    const invocation = prepareInvocation(
+      ["check", "--base", "origin/main"],
+      { GITHUB_ACTIONS: "true" },
+      root,
+    );
     assert.equal(invocation.command, "dotnet");
     assert.deepEqual(invocation.args.slice(-4), ["migrate", "check", "--base", "origin/main"]);
   });
 });
 
 test("the Hello probe in GitHub Actions runs only the sealed candidate binary", () => {
-  const invocation = probeInvocation(["probe", "https://example.test", "false"], { GITHUB_ACTIONS: "true" });
+  const invocation = probeInvocation(["probe", "https://example.test", "false"], {
+    GITHUB_ACTIONS: "true",
+  });
   assert.equal(path.basename(invocation.command), sealedProbeName);
   assert.notEqual(invocation.command, "dotnet");
   assert.deepEqual(invocation.args, ["probe", "https://example.test", "false"]);

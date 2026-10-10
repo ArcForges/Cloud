@@ -62,7 +62,9 @@ export function prepareInvocation(
   const manifestPath = path.join(root, "artifacts", "candidate", "manifest.json");
   if (!existsSync(manifestPath)) {
     if (env.GITHUB_ACTIONS === "true" && argv[0] === "deploy")
-      throw new Error("the candidate manifest is absent in a deployment job; nothing is built or run");
+      throw new Error(
+        "the candidate manifest is absent in a deployment job; nothing is built or run",
+      );
     return developmentInvocation(argv, env);
   }
   const archivePath = path.join(root, "artifacts", "candidate", sealedArchiveName);

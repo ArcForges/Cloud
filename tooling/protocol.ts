@@ -89,7 +89,10 @@ export function probeInvocation(
   // A GitHub Actions job runs only the sealed candidate probe (CLOUD.84 S45(3)): a missing binary fails, and nothing is built from source.
   if (env.CI === "true" || env.GITHUB_ACTIONS === "true")
     return { command: path.join(candidateDir, sealedProbeName), args: [...args] };
-  return { command: "dotnet", args: ["run", "--project", probeProject, "-c", "Release", "--", ...args] };
+  return {
+    command: "dotnet",
+    args: ["run", "--project", probeProject, "-c", "Release", "--", ...args],
+  };
 }
 
 export async function runProbe(baseUrl: string, worker: boolean): Promise<ProbeResult> {
