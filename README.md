@@ -3,7 +3,7 @@
 A C# 14 / .NET 10 Native AOT Hello service in a Linux x64 Docker image, hosted in Cloudflare Containers. A small TypeScript Worker routes the public binary gRPC-Web endpoint to the container. The repository is independently buildable and consumes published Contracts packages.
 
 ```text
-Web / published TypeScript or Kotlin gRPC-Web client
+Web or published gRPC-Web client
   https://arcforges.com/api/arcforges.hello.v1.HelloService/SayHello
         → arcforges-cloud Worker (route /api/*)
         → fixed Cloudflare Container (HTTP/1.1 :8080)
