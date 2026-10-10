@@ -190,6 +190,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r43.json",
     "eng/provenance/artifact-profiles/cloud-release-r44.json",
     "eng/provenance/artifact-profiles/cloud-release-r45.json",
+    "eng/provenance/artifact-profiles/cloud-release-r46.json",
     "eng/provenance/artifact-profiles/cloud-release-r5.json",
     "eng/provenance/artifact-profiles/cloud-release-r6.json",
     "eng/provenance/artifact-profiles/cloud-release-r7.json",
@@ -217,6 +218,8 @@
     "eng/provenance/records/cloud-69-cloud-worker-bundle-r1.json",
     "eng/provenance/records/cloud-71-cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-71-cloud-worker-bundle-r1.json",
+    "eng/provenance/records/cloud-84-cloud-runtime-notices-r1.json",
+    "eng/provenance/records/cloud-84-cloud-worker-bundle-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-runtime-notices-r10.json",
     "eng/provenance/records/cloud-runtime-notices-r11.json",
@@ -818,6 +821,7 @@
     "worker/ai/internal/envelope.ts",
     "worker/ai/internal/handler.ts",
     "worker/ai/internal/outbound.ts",
+    "worker/foundation/cloud-container.ts",
     "worker/foundation/container-client.ts",
     "worker/foundation/container-env.ts",
     "worker/foundation/coordination.ts",
@@ -877,5 +881,5 @@
     "tests/ArcForges.Cloud.Tests/BuildMetadataTests.cs": "arcnotes-build-identity-r2",
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2"
   },
-  "artifacts": ["har-40-cloud-runtime-notices-r8", "har-40-cloud-worker-bundle-r8"]
+  "artifacts": ["cloud-84-cloud-runtime-notices-r1", "cloud-84-cloud-worker-bundle-r1"]
 }
