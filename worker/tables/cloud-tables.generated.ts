@@ -279,3 +279,46 @@ export const readinessBindings = [
   },
 ] as const;
 export type ReadinessBindingName = (typeof readinessBindings)[number]["name"];
+/** Limits and identifier shapes the Worker applies before it forwards a call (CLOUD.84 S34, S39(3) and S43(3)), declared in src/ArcForges.Cloud/Generation. */
+export const bearerCredentialPattern = /^Bearer ([A-Za-z0-9._~+/=-]{16,4096})$/u;
+export const bindingUint64TextPattern = /^(0|[1-9][0-9]{0,19})$/u;
+export const bodyReadMilliseconds = 5000;
+export const canonicalUuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+export const classifiedPrefixBytes = 128;
+export const containerSleepAfter = "60s";
+export const deadlinePattern =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,7}))?Z$/u;
+export const emptyBodyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+export const epochSecondsPattern = /^[1-9][0-9]{0,15}$/u;
+export const grpcFrameHeaderBytes = 5;
+export const hexBytesPattern = /^(?:[0-9a-f]{2})*$/u;
+export const int64TextPattern = /^(?:0|-?[1-9][0-9]*)$/u;
+export const keyIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+export const macBytes = 32;
+export const maxElapsedMs = 60000;
+export const maxPartBytes = 8388608;
+export const maxReplyBytes = 65536;
+export const maxRequestBytes = 16384;
+export const maxRevisionLength = 80;
+export const maxSchemaVersionLength = 8;
+export const maxSkewSeconds = 60;
+export const noncePattern = /^[A-Za-z0-9_-]{22}$/u;
+export const nonceRandomBytes = 16;
+export const objectsContentLengthPattern = /^[1-9][0-9]{0,8}$/u;
+export const objectsRangePattern = /^bytes=(\d{1,12})-(\d{1,12})$/u;
+export const operatorHeaderPattern =
+  /^AF-Operator t=(\d{10}),n=([A-Za-z0-9_-]{22}),s=([A-Za-z0-9_-]{86})$/u;
+export const operatorMaxSkewSeconds = 60;
+export const operatorPublicKeyBytes = 32;
+export const operatorSignatureBytes = 64;
+export const proofMinimumTokenBytes = 32;
+export const proofRetryDelaySeconds = 60;
+export const realmPattern = /^[a-z0-9][a-z0-9-]{0,31}$/u;
+export const routerBodyReadMilliseconds = 1000;
+export const scopePattern = /^proof\/[A-Za-z0-9._/-]{1,200}$/u;
+export const secretByteLength = 32;
+export const sessionTokenPattern = /^[A-Za-z0-9_-]{43}$/u;
+export const sha256HexPattern = /^[0-9a-f]{64}$/u;
+export const spanIdByteLength = 8;
+export const uint64TextPattern = /^(?:0|[1-9][0-9]*)$/u;

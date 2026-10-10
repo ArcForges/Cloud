@@ -2,7 +2,7 @@
 // Executes one reviewed named plan against D1 (Design D1 profile sections 3 and 4). The Worker runs
 // fixed SQL and encodes exact results; every business decision stays in the C# host.
 import type { D1Scalar, ExecutePlanRequest, ExecutePlanResponse } from "@arcforges/ai-internal";
-import { storageGuards } from "../tables/cloud-tables.generated.ts";
+import { deadlinePattern, storageGuards } from "../tables/cloud-tables.generated.ts";
 import type { D1Like, D1PreparedStatement } from "./d1.ts";
 import type { PlanDefinition } from "./plan-types.ts";
 import { bindValue, encodeResult, PlanResultError } from "./scalars.ts";
@@ -37,7 +37,6 @@ export function planKey(id: string, version: number): string {
   return `${id}@${version}`;
 }
 
-const deadlinePattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,7}))?Z$/u;
 export function parseDeadline(text: string): number | null {
   const match = deadlinePattern.exec(text);
   if (!match) return null;

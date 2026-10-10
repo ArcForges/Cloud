@@ -111,7 +111,45 @@ public static class TypeScriptTables
 
         AppendStorage(text, model.Storage);
         AppendReadiness(text, model.Readiness);
+        AppendLimits(text, model.Limits);
         return text.ToString();
+    }
+
+    /// <summary>
+    /// The production and proof limits and identifier shapes (CLOUD.84 S34, S39(3) and S43(3)), one exported constant each. A name ending in
+    /// Pattern is a regular expression literal; the others are numbers or strings. A line over the print width is broken after the equals sign.
+    /// </summary>
+    private static void AppendLimits(StringBuilder text, IReadOnlyList<LimitRow> limits)
+    {
+        text.Append("/** Limits and identifier shapes the Worker applies before it forwards a call (CLOUD.84 S34, S39(3) and S43(3)), declared in src/ArcForges.Cloud/Generation. */\n");
+        foreach (var row in limits)
+        {
+            var name = char.ToLowerInvariant(row.Name[0]) + row.Name[1..];
+            var literal = row.Value switch
+            {
+                int number => Number(number),
+                string value when row.Name.EndsWith("Pattern", StringComparison.Ordinal) => RegexLiteral(value),
+                string value => Quote(value),
+                _ => throw new InvalidOperationException($"The limit {row.Name} has an unsupported type."),
+            };
+            var inline = "export const " + name + " = " + literal + ";";
+            if (inline.Length <= 100)
+            {
+                text.Append(inline).Append('\n');
+            }
+            else
+            {
+                text.Append("export const ").Append(name).Append(" =\n  ").Append(literal).Append(";\n");
+            }
+        }
+    }
+
+    /// <summary>A regular expression literal with the unicode flag. The declared pattern is the source text, so it must not break a line.</summary>
+    private static string RegexLiteral(string source)
+    {
+        if (source.Any(character => character is '\n' or '\r'))
+            throw new InvalidOperationException("A generated regular expression may not contain a line break.");
+        return "/" + source + "/u";
     }
 
     /// <summary>The named-plan transport guards the Worker applies before it binds or runs SQL (CLOUD.84 S34(1) and S40(2)).</summary>

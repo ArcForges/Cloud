@@ -23,7 +23,7 @@ import {
 import { guardResponse } from "./frames.ts";
 import { classifyStartFailureResponse, containerUnavailable } from "../readiness/container.ts";
 import { bounded, readBytes, reject, rpcError } from "./io.ts";
-import { healthRoute } from "../tables/cloud-tables.generated.ts";
+import { bodyReadMilliseconds, healthRoute } from "../tables/cloud-tables.generated.ts";
 import {
   coldStartBudgetMs,
   findRoute,
@@ -140,7 +140,7 @@ export async function handleApiRequest(
 
     let body: Uint8Array<ArrayBuffer> | undefined;
     if (!health) {
-      const bodyTimer = setTimeout(() => controller.abort(bodyTimeoutError), 5000);
+      const bodyTimer = setTimeout(() => controller.abort(bodyTimeoutError), bodyReadMilliseconds);
       try {
         body = await readBytes(request.body, route.maxRequestBytes, signal);
       } catch (error) {

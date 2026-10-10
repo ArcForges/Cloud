@@ -5,7 +5,11 @@
 // never forwarded to the host, so the refusal is safe to retry (effect: did not happen). A reply the host
 // itself wrote is JSON or gRPC-Web, never this plain text, and a failure after forwarding stays unclassified
 // because the effect of a possibly forwarded call is not known (ordinary uncertainty recovery).
-import { retryAfterSeconds, type Reason } from "../tables/cloud-tables.generated.ts";
+import {
+  classifiedPrefixBytes,
+  retryAfterSeconds,
+  type Reason,
+} from "../tables/cloud-tables.generated.ts";
 
 /** The start-failure classes; their names are the generated readiness reasons (CLOUD.84 S34). */
 export type StartFailure = Extract<
@@ -20,8 +24,7 @@ export type StartFailure = Extract<
  */
 export const noInstanceText = "There is no Container instance available at this time.";
 export const startFailedText = "Failed to start container:";
-/** More than the longest opening is never read. */
-export const classifiedPrefixBytes = 128;
+export { classifiedPrefixBytes };
 
 /** Classifies a Container response from its status, media type and the first bytes of its body. */
 export function classifyStartFailure(

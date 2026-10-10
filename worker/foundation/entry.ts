@@ -7,6 +7,7 @@ import { jobSliceBody, postSigned } from "./container-client.ts";
 import { handleProof, isProofPath } from "./proof-routes.ts";
 import { parsePoison, processDeadLetter, processPoison } from "./poison.ts";
 import { maxSliceItems, maxSliceMilliseconds, processWake, type MessageLike } from "./queue.ts";
+import { proofRetryDelaySeconds } from "../tables/cloud-tables.generated.ts";
 import { proofEnabled, type FoundationEnv } from "./types.ts";
 
 /** Production binds only the Hello bindings; the isolated proof environment adds the rest. */
@@ -31,7 +32,7 @@ export async function queueEntry(
   for (const message of batch.messages) {
     if (!proofEnabled(env)) {
       // No consumer work exists outside the proof environment.
-      message.retry({ delaySeconds: 60 });
+      message.retry({ delaySeconds: proofRetryDelaySeconds });
       continue;
     }
     // The dead-letter queue of the wake queue has its own consumer: it records what the retry probe produced.

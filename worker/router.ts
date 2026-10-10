@@ -5,6 +5,7 @@ import { bodyTimeoutError } from "./ingress/errors.ts";
 import { readBytes } from "./ingress/io.ts";
 import { handleApiRequest } from "./ingress/pipeline.ts";
 import { healthPath, helloPath, maxBodyBytes, type RouteTable } from "./ingress/routes.ts";
+import { routerBodyReadMilliseconds } from "./tables/cloud-tables.generated.ts";
 
 export { healthPath, helloPath, maxBodyBytes };
 
@@ -36,7 +37,10 @@ export async function routeRequest(
       // Dispose a small upload in the background without extending the RPC deadline or
       // accepting an unlimited body. A stalled/large upload is canceled instead.
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(bodyTimeoutError), 1000);
+      const timer = setTimeout(
+        () => controller.abort(bodyTimeoutError),
+        routerBodyReadMilliseconds,
+      );
       const cleanup = readBytes(request.body, maxBodyBytes + 1, controller.signal)
         .then(() => {})
         .catch(() => {})

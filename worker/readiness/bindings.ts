@@ -6,7 +6,9 @@
 import { proofEnabled } from "../foundation/types.ts";
 import { loadKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import {
+  bindingUint64TextPattern as uint64Text,
   readinessBindings,
+  storageGuards,
   type ComponentId,
   type ReadinessBindingName,
   type ReadinessEnvironment,
@@ -32,8 +34,7 @@ export function environmentOf(env: ReadinessEnv): ReadinessEnvironment {
   return proofEnabled(env) ? "proof" : "production";
 }
 
-const uint64Text = /^(0|[1-9][0-9]{0,19})$/u;
-const maxUint64 = 2n ** 64n - 1n;
+const maxUint64 = BigInt(storageGuards.uint64Max);
 
 function text(value: unknown): boolean {
   return typeof value === "string" && value !== "";

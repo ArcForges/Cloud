@@ -6,15 +6,20 @@ import { BodyTooLarge, jsonResponse, readBounded, refusal } from "../private/bou
 import { sha256Hex } from "../private/encoding.ts";
 import { loadKeys, verificationKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import { verify } from "../private/signing.ts";
+import {
+  canonicalUuidPattern as uuid,
+  emptyBodyHash,
+  maxPartBytes,
+  objectsContentLengthPattern,
+  objectsRangePattern,
+  realmPattern,
+  sha256HexPattern as hash,
+} from "../tables/cloud-tables.generated.ts";
 import type { R2Like } from "./types.ts";
 
+export { maxPartBytes };
 export const objectsHost = "objects.internal";
-export const maxPartBytes = 8 * 1024 * 1024;
 const prefix = "/internal/objects/v1/probe/";
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-const hash = /^[0-9a-f]{64}$/u;
-const emptyBodyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-const realmPattern = /^[a-z0-9][a-z0-9-]{0,31}$/u;
 
 export interface ObjectsEnv extends PrivateKeyEnv {
   OBJECTS: R2Like;
@@ -28,7 +33,7 @@ function objectKey(realm: string, workspace: string, resource: string, sha256: s
 type Range = { start: number; end: number };
 /** `bytes=a-b` with both ends present, inside the object and at most one part long. */
 export function parseRange(header: string, size: number): Range | "unsatisfiable" | null {
-  const match = /^bytes=(\d{1,12})-(\d{1,12})$/u.exec(header);
+  const match = objectsRangePattern.exec(header);
   if (!match) return null;
   const start = Number(match[1]);
   const end = Number(match[2]);
@@ -70,7 +75,7 @@ export async function handleObjects(
       Math.floor(nowMs() / 1000),
     );
     if (!verification.ok) return refusal(401);
-    if (length === null || !/^[1-9][0-9]{0,8}$/u.test(length)) return refusal(411);
+    if (length === null || !objectsContentLengthPattern.test(length)) return refusal(411);
     const declaredLength = Number(length);
     if (declaredLength > maxPartBytes) return refusal(413);
     if (!request.body) return refusal(400);

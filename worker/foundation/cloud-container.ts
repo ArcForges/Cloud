@@ -5,10 +5,11 @@
 // environment hook, and enableInternet stays false, so the container reaches nothing but the exact virtual host registered below.
 import { Container, type OutboundHandler } from "@cloudflare/containers";
 import { aiInternalOutbound } from "../ai/internal/outbound.ts";
+import { containerSleepAfter } from "../tables/cloud-tables.generated.ts";
 
 export class CloudContainer extends Container {
   override defaultPort = 8080;
-  override sleepAfter = "60s";
+  override sleepAfter = containerSleepAfter;
   override enableInternet = false;
 }
 

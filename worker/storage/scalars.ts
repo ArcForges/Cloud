@@ -4,7 +4,11 @@
 // returned as CAST(column AS TEXT).
 import type { D1Scalar } from "@arcforges/ai-internal";
 import { base64UrlDecode, base64UrlEncode } from "../private/encoding.ts";
-import { storageGuards } from "../tables/cloud-tables.generated.ts";
+import {
+  int64TextPattern as int64Text,
+  storageGuards,
+  uint64TextPattern as uint64Text,
+} from "../tables/cloud-tables.generated.ts";
 import type { PlanKind, PlanParam } from "./plan-types.ts";
 
 // The value bounds are generated from the C# declarations in src/ArcForges.Cloud/Generation (CLOUD.84 S40(2)); none is a literal here.
@@ -16,8 +20,6 @@ export const maxBytesLength = storageGuards.maxBytesLength;
 
 /** The longest spelling of a 64-bit integer text: the longest bound, with its sign. */
 const maxIntegerTextLength = storageGuards.uint64Max.length;
-const int64Text = /^(?:0|-?[1-9][0-9]*)$/u;
-const uint64Text = /^(?:0|[1-9][0-9]*)$/u;
 const decimalText = new RegExp(
   `^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,${storageGuards.maxDecimalFractionDigits}})?$`,
   "u",
@@ -43,7 +45,11 @@ export function isUint64Text(value: unknown): value is string {
 /** At most the generated significant digits and fractional digits; no exponent, no negative zero. */
 export function isCanonicalDecimal(value: unknown): value is string {
   if (typeof value !== "string" || !decimalText.test(value)) return false;
-  if (value.startsWith("-") && !/[1-9]/u.test(value)) return false;
+  if (
+    value.startsWith("-") &&
+    ![...value].some((character) => character >= "1" && character <= "9")
+  )
+    return false;
   return (
     value.replace(/[-.]/gu, "").replace(/^0+/u, "").length <=
     storageGuards.maxDecimalSignificantDigits

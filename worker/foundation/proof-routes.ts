@@ -4,7 +4,13 @@
 import { BodyTooLarge, jsonResponse, readBounded, refusal } from "../private/bounded-body.ts";
 import { sha256, sha256Hex } from "../private/encoding.ts";
 import { isCorrelationId, newCorrelationId } from "../ingress/correlation.ts";
-import { edgeGuard } from "../tables/cloud-tables.generated.ts";
+import {
+  canonicalUuidPattern as uuid,
+  edgeGuard,
+  maxRequestBytes,
+  proofMinimumTokenBytes,
+  scopePattern,
+} from "../tables/cloud-tables.generated.ts";
 import { poisonName } from "./poison.ts";
 import { isOperatorAuthorization, verifyOperatorSignature } from "./operator-signature.ts";
 import { ContainerCallError, postSigned } from "./container-client.ts";
@@ -20,9 +26,7 @@ import {
 } from "./types.ts";
 
 export const sessionCookieName = edgeGuard.sessionCookieName;
-export const maxRequestBytes = 16_384;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-const scopePattern = /^proof\/[A-Za-z0-9._/-]{1,200}$/u;
+export { maxRequestBytes };
 const operations = new Set([
   "readiness",
   "exact",
@@ -150,7 +154,7 @@ async function operatorOperation(
   const operation = url.pathname.slice("/proof/v1/".length);
   const token = env.PROOF_OPERATOR_TOKEN ?? "";
   const publicKey = env.PROOF_OPERATOR_VERIFIER ?? "";
-  const tokenEnabled = token.length >= 32;
+  const tokenEnabled = token.length >= proofMinimumTokenBytes;
   // A missing or short operator credential disables the surface instead of weakening it.
   if (!tokenEnabled && publicKey === "") return refusal(503);
   const authorizationHeader = request.headers.get("authorization");

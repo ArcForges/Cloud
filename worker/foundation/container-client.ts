@@ -3,11 +3,12 @@
 import { sha256Hex } from "../private/encoding.ts";
 import { loadKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import { newNonce, sign } from "../private/signing.ts";
+import { maxReplyBytes } from "../tables/cloud-tables.generated.ts";
 import type { ContainerNamespaceLike, WakeMessage } from "./types.ts";
 import { foundationContainerName } from "./types.ts";
 
+export { maxReplyBytes };
 export const foundationRoutePrefix = "/internal/foundation/v1/";
-export const maxReplyBytes = 65_536;
 
 export interface ContainerClientEnv extends PrivateKeyEnv {
   CLOUD_CONTAINER: ContainerNamespaceLike;

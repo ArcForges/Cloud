@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Private request signing of contracts 05 section 2. Defense in depth behind the outbound-handler
 // and service-binding boundary: it never replaces them and it keeps no nonce ledger.
+import {
+  canonicalUuidPattern as uuid,
+  epochSecondsPattern,
+  keyIdPattern as keyId,
+  macBytes,
+  maxSkewSeconds,
+  nonceRandomBytes,
+  noncePattern as nonceText,
+  secretByteLength,
+  sha256HexPattern as hash,
+} from "../tables/cloud-tables.generated.ts";
 import { base64UrlDecode, base64UrlEncode } from "./encoding.ts";
 
-export const maxSkewSeconds = 60;
-export const secretByteLength = 32;
+export { maxSkewSeconds, secretByteLength };
 
 export interface SigningKey {
   readonly id: string;
@@ -29,12 +39,6 @@ export interface SignedRequestParts {
   time: string;
   nonce: string;
 }
-
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-const keyId = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-const epochSeconds = /^[1-9][0-9]{0,15}$/u;
-const nonceText = /^[A-Za-z0-9_-]{22}$/u;
-const hash = /^[0-9a-f]{64}$/u;
 
 /** A deployment secret is exactly 256 random bits as unpadded base64url. */
 export function parseSecret(text: string | undefined): Uint8Array | null {
@@ -80,7 +84,7 @@ export async function sign(parts: SignedRequestParts, key: SigningKey): Promise<
 }
 
 export function newNonce(): string {
-  return base64UrlEncode(crypto.getRandomValues(new Uint8Array(16)));
+  return base64UrlEncode(crypto.getRandomValues(new Uint8Array(nonceRandomBytes)));
 }
 
 export type Verification = { ok: true; keyId: string; requestId: string } | { ok: false };
@@ -103,7 +107,7 @@ export async function verify(
   const signature = headers.get("x-af-signature") ?? "";
   if (
     !keyId.test(id) ||
-    !epochSeconds.test(time) ||
+    !epochSecondsPattern.test(time) ||
     !nonceText.test(nonce) ||
     !uuid.test(requestId) ||
     !hash.test(request.bodySha256Hex)
@@ -111,7 +115,7 @@ export async function verify(
     return fail;
   if (Math.abs(nowSeconds - Number(time)) > maxSkewSeconds) return fail;
   const provided = base64UrlDecode(signature);
-  if (provided?.length !== 32) return fail;
+  if (provided?.length !== macBytes) return fail;
   const key = keys.find((candidate) => candidate.id === id);
   if (!key) return fail;
   const valid = await crypto.subtle.verify(

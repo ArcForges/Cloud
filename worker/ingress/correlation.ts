@@ -10,7 +10,11 @@
 // The identity reaches the host as the trace id of one W3C traceparent the Worker builds itself (a UUID is exactly 128 bits), so the
 // Worker, the host and a wake message are joined by the identifier alone and no new header, field or contract meaning exists. Nothing a
 // client sends is ever copied into a header: every value here is produced from 16 validated bytes or from the platform's random source.
-import { correlationGuard } from "../tables/cloud-tables.generated.ts";
+import {
+  correlationGuard,
+  grpcFrameHeaderBytes,
+  spanIdByteLength,
+} from "../tables/cloud-tables.generated.ts";
 
 const uuidPattern = new RegExp(correlationGuard.uuidPattern, "u");
 const nilUuid = correlationGuard.nilUuid;
@@ -31,7 +35,7 @@ export function newCorrelationId(): string {
 
 /** Sixteen lowercase hex characters, never all zero: the span id of one hop. */
 export function newSpanId(): string {
-  const bytes = new Uint8Array(8);
+  const bytes = new Uint8Array(spanIdByteLength);
   do crypto.getRandomValues(bytes);
   while (bytes.every((byte) => byte === 0));
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -200,7 +204,7 @@ export function readRequestCorrelation(message: Uint8Array): RequestCorrelation 
 
 /** The one message of a unary or server-streaming gRPC-Web request body, or null for any other framing. */
 export function singleMessage(body: Uint8Array): Uint8Array | null {
-  if (body.length < 5 || body[0] !== 0) return null;
+  if (body.length < grpcFrameHeaderBytes || body[0] !== 0) return null;
   const length = new DataView(body.buffer, body.byteOffset, body.byteLength).getUint32(1);
-  return length === body.length - 5 ? body.subarray(5) : null;
+  return length === body.length - grpcFrameHeaderBytes ? body.subarray(grpcFrameHeaderBytes) : null;
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Strict byte encodings shared by the private request signing and the exact D1 scalars.
+import { hexBytesPattern } from "../tables/cloud-tables.generated.ts";
 
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const character = (index: number) => alphabet.charAt(index);
@@ -61,7 +62,7 @@ export function hexEncode(bytes: Uint8Array): string {
 }
 
 export function hexDecode(text: string): Uint8Array | null {
-  if (!/^(?:[0-9a-f]{2})*$/u.test(text)) return null;
+  if (!hexBytesPattern.test(text)) return null;
   const bytes = new Uint8Array(text.length / 2);
   for (let index = 0; index < bytes.length; index++)
     bytes[index] = Number.parseInt(text.slice(index * 2, index * 2 + 2), 16);

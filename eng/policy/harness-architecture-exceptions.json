@@ -50,6 +50,216 @@
       "reason": "A test-only encoder builds client protobuf frames as input for the CLOUD.69 correlation reader. It produces test bytes only, is never shipped and expires with the reader exception HAR40-EX-4. HAR.40 registers it because the ported wire-codec rule covers the test tree of the Worker; HAR.40 does not change this file.",
       "created": "2026-10-08",
       "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-6",
+      "rule": "worker-literal-budget",
+      "file": "worker/ai/internal/envelope.ts",
+      "detail": "hardByteCap",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the envelope byte cap has no C# home yet; the production executor is HAR.00's and the value stays as is until then (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-7",
+      "rule": "worker-literal-budget",
+      "file": "worker/ai/internal/envelope.ts",
+      "detail": "maxAdmittedModels",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the admitted-model count has no C# home yet; the value stays as is until HAR.00 owns the production executor (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-8",
+      "rule": "worker-literal-admission",
+      "file": "worker/ai/internal/envelope.ts",
+      "detail": "envelopeKeys",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the envelope key list is the closed shape the HAR.40 envelope admits; it has no C# home yet and stays as is until HAR.00 (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-9",
+      "rule": "worker-literal-identifier",
+      "file": "worker/ai/internal/envelope.ts",
+      "detail": "modelToken",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the model token shape has no C# home yet; it is the HAR.40 envelope's own admission pattern and stays as is until HAR.00 (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-10",
+      "rule": "worker-literal-budget",
+      "file": "worker/harness/run-alarm-core.ts",
+      "detail": "leaseTermSeconds",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the run lease term belongs to the HAR.00 production executor; the value is HAR.40's and stays as is (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-11",
+      "rule": "worker-literal-budget",
+      "file": "worker/harness/run-alarm-core.ts",
+      "detail": "wakeBackoffSeconds",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the wake retry schedule belongs to the HAR.00 production executor (coordinator adjudication 2026-10-08); the schedule stays as is (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-12",
+      "rule": "worker-literal-budget",
+      "file": "worker/harness/run-alarm-core.ts",
+      "detail": "maxAlarmMs",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the alarm horizon belongs to the HAR.00 production executor; the value is HAR.40's and stays as is (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-13",
+      "rule": "worker-literal-budget",
+      "file": "worker/harness/run-alarm-core.ts",
+      "detail": "maxHarnessBodyBytes",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the harness body bound belongs to the HAR.00 production executor; the value is HAR.40's and stays as is (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-14",
+      "rule": "worker-literal-identifier",
+      "file": "worker/harness/run-alarm-core.ts",
+      "detail": "canonicalUuid",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the harness run identifier shape is HAR.40's wake key check; it stays as is until HAR.00 owns the production executor (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "HAR40-EX-15",
+      "rule": "worker-literal-identifier",
+      "file": "worker/harness/run-alarm-core.ts",
+      "detail": "workerVersionPattern",
+      "owner": "HAR.00",
+      "reason": "CLOUD.84 S43(1) and S34(2): the worker version shape is HAR.40's wake claim check; it stays as is until HAR.00 owns the production executor (P2-021 item 6 follow-up).",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-1",
+      "rule": "worker-literal-budget",
+      "file": "worker/foundation/coordination.ts",
+      "detail": "maxSeenEvents",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only coordination policy stays TypeScript in the proof bundle until CLOUD.05 moves it to src/ArcForges.Cloud.Jobs; never extended silently.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-2",
+      "rule": "worker-literal-budget",
+      "file": "worker/foundation/coordination.ts",
+      "detail": "inflightLeaseMs",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only coordination lease stays TypeScript in the proof bundle until CLOUD.05 moves it to src/ArcForges.Cloud.Jobs; never extended silently.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-3",
+      "rule": "worker-literal-identifier",
+      "file": "worker/foundation/durable.ts",
+      "detail": "uuid",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only coordination identifier shape stays TypeScript in the proof bundle until CLOUD.05 moves it to src/ArcForges.Cloud.Jobs.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-4",
+      "rule": "worker-literal-identifier",
+      "file": "worker/foundation/poison.ts",
+      "detail": "uuid",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only poison-policy identifier shape stays TypeScript in the proof bundle until CLOUD.05 moves it to src/ArcForges.Cloud.Jobs.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-5",
+      "rule": "worker-literal-budget",
+      "file": "worker/foundation/poison.ts",
+      "detail": "maxRecordedAttempts",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only poison attempt bound stays TypeScript in the proof bundle until CLOUD.05 moves it to src/ArcForges.Cloud.Jobs.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-6",
+      "rule": "worker-literal-budget",
+      "file": "worker/foundation/queue.ts",
+      "detail": "maxSliceItems",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only job slice budget (100 items) comes from the CLOUD.05 finite-job runner, which owns it; it stays TypeScript until then.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-7",
+      "rule": "worker-literal-budget",
+      "file": "worker/foundation/queue.ts",
+      "detail": "maxSliceMilliseconds",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only job slice time budget (20 seconds) comes from the CLOUD.05 finite-job runner, which owns it; it stays TypeScript until then.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-8",
+      "rule": "worker-literal-identifier",
+      "file": "worker/foundation/queue.ts",
+      "detail": "uuid",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only queue identifier shape stays TypeScript in the proof bundle until CLOUD.05 moves it to src/ArcForges.Cloud.Jobs.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-9",
+      "rule": "worker-literal-identifier",
+      "file": "worker/foundation/queue.ts",
+      "detail": "scopePattern",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only queue scope shape stays TypeScript in the proof bundle until CLOUD.05 moves it to src/ArcForges.Cloud.Jobs.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-10",
+      "rule": "worker-literal-budget",
+      "file": "worker/foundation/queue.ts",
+      "detail": "backoffSeconds",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only queue retry backoff (capped at 60 seconds) stays TypeScript until CLOUD.05 moves the coordination policy to C#.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
+    },
+    {
+      "id": "CLOUD84-EX-11",
+      "rule": "worker-literal-budget",
+      "file": "worker/foundation/queue.ts",
+      "detail": "processWake",
+      "owner": "CLOUD.05 (D16)",
+      "reason": "CLOUD.84 S43(4) and D16: the proof-only slice consumer's retry delays (5 and 10 seconds) stay in the TypeScript coordination policy until CLOUD.05 moves it to C#.",
+      "created": "2026-10-10",
+      "expires": "2027-03-31"
     }
   ]
 }

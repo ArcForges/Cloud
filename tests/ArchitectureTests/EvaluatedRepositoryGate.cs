@@ -143,6 +143,21 @@ public sealed class EvaluatedRepositoryGate
                 new[] { "PlanValuesAreExactAndNeverDescribeTheirContent", "ARoundTripCarriesExactTypedValuesTheScopeAndTheRecoveryGeneration" })),
     ];
 
+    /// <summary>
+    /// The standing WorkerAdapter literal check (CLOUD.84 D9 and S43) runs in the hosted architecture gate as well as in check:dotnet: every
+    /// worker literal is either a closed protocol constant or an owned, expiring register row, and every register row names a finding.
+    /// </summary>
+    [Fact]
+    public void TheWorkerAdapterHoldsNoBusinessLiteralOutsideTheNamedLists()
+    {
+        var root = CloudRepository.FindRoot();
+        var sources = ArcForges.Cloud.ArchitectureTests.AiHarness.HarnessArchitecture.ReadSources(root);
+        using var register = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, ArcForges.Cloud.ArchitectureTests.AiHarness.ArchitectureExceptions.RegisterPath)));
+        var result = ArcForges.Cloud.ArchitectureTests.WorkerAdapter.WorkerLiteralScan.ApplyRegister(sources, register.RootElement, DateOnly.FromDateTime(DateTime.UtcNow));
+        Assert.Empty(result.Problems);
+        Assert.Empty(result.Remaining);
+    }
+
     [Fact]
     public void ActualCloudProjectsSatisfyTheSharedArchitecturePolicy()
     {

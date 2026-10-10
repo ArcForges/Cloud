@@ -60,6 +60,9 @@ public sealed record ReadinessRow(
     IReadOnlyList<string> ProbeOutcomes,
     IReadOnlyList<ReadinessBindingRow> Bindings);
 
+/// <summary>One declared limit or identifier shape: the C# constant's name and its value (CLOUD.84 S34, S39(3) and S43(3)).</summary>
+public sealed record LimitRow(string Name, object Value);
+
 /// <summary>Everything the Worker's transport tables are generated from, read from the C# host and its declarations.</summary>
 public sealed record TableModel(
     string HelloPath,
@@ -74,7 +77,8 @@ public sealed record TableModel(
     string CsrfHeader,
     CorrelationGuardRow Correlation,
     ReadinessRow Readiness,
-    StorageGuardRow Storage);
+    StorageGuardRow Storage,
+    IReadOnlyList<LimitRow> Limits);
 
 /// <summary>
 /// Reads the transport tables by reflection over the host's registrations: HelloModule (the production policies and the plain health
@@ -146,6 +150,7 @@ public static class HostReader
             SessionCookieName: Text(ingress, "SessionCookieName"),
             CsrfHeader: Text(ingress, "CsrfHeader").ToLowerInvariant(),
             Readiness: ReadReadiness(assembly),
+            Limits: ReadLimits(assembly),
             Correlation: new CorrelationGuardRow(
                 UuidPattern: Text(guards, "UuidPattern"),
                 NilUuid: Text(guards, "NilUuid"),
@@ -156,6 +161,32 @@ public static class HostReader
                 TraceparentVersion: Text(guards, "TraceparentVersion"),
                 TraceparentFlags: Text(guards, "TraceparentFlags")),
             Storage: ReadStorageGuards(LoadType(assembly, StorageGuardsType)));
+    }
+
+    private const string WorkerLimitsType = "ArcForges.Cloud.Generation.WorkerWireLimits";
+    private const string ProofLimitsType = "ArcForges.Cloud.Generation.ProofWireLimits";
+
+    /// <summary>
+    /// Reads every public literal of the production and proof limit declarations (CLOUD.84 S34, S39(3) and S43(3)). The reading is
+    /// fail-closed: a non-literal member or a name declared in both classes stops the generator.
+    /// </summary>
+    private static IReadOnlyList<LimitRow> ReadLimits(Assembly assembly)
+    {
+        var rows = new List<LimitRow>();
+        foreach (var typeName in new[] { WorkerLimitsType, ProofLimitsType })
+        {
+            var type = LoadType(assembly, typeName);
+            foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (!field.IsLiteral) throw new InvalidOperationException($"{typeName}.{field.Name} must be a constant.");
+                var value = field.GetRawConstantValue() ?? throw new InvalidOperationException($"{typeName}.{field.Name} is null.");
+                rows.Add(new LimitRow(field.Name, value));
+            }
+        }
+
+        var duplicate = rows.GroupBy(row => row.Name, StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null) throw new InvalidOperationException($"The limit {duplicate.Key} is declared more than once.");
+        return rows.OrderBy(row => row.Name, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>Reads the named-plan transport guards (S40(2)); a missing member stops the generator.</summary>

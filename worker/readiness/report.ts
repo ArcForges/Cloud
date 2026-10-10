@@ -3,6 +3,9 @@
 // The host judges the report (C# ReadinessEvaluator). This reader only refuses a reply outside the closed shape, so a malformed or foreign
 // reply is never believed. Nothing here carries content.
 import {
+  maxElapsedMs,
+  maxRevisionLength,
+  maxSchemaVersionLength,
   readinessComponentIds,
   readinessEnvironments,
   readinessEvidence,
@@ -10,6 +13,7 @@ import {
   readinessSchema,
   readinessStates,
   readinessStatuses,
+  sha256HexPattern as hex64,
   type ComponentId,
   type ComponentState,
   type Evidence,
@@ -47,11 +51,6 @@ export interface ReadinessReport {
   readonly components: Components;
   readonly host?: ReadinessHost;
 }
-
-const hex64 = /^[0-9a-f]{64}$/u;
-const maxRevisionLength = 80;
-const maxSchemaVersionLength = 8;
-const maxElapsedMs = 60_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

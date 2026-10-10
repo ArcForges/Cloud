@@ -7,6 +7,7 @@
 //   - the deadline or a cancellation fires on a frame boundary: DEADLINE_EXCEEDED or CANCELED trailer;
 //   - anything else (a malformed or oversized frame, a source error, an abort inside a frame) errors the
 //     stream, which a client observes as a failed transfer, never as end of data.
+import { grpcFrameHeaderBytes } from "../tables/cloud-tables.generated.ts";
 import { canceledError, deadlineError, grpcStatus } from "./errors.ts";
 import { trailerFrame } from "./io.ts";
 
@@ -46,7 +47,7 @@ export function guardResponse(
   options: GuardOptions,
 ): ReadableStream<Uint8Array> {
   const reader = source.getReader();
-  const header = new Uint8Array(5);
+  const header = new Uint8Array(grpcFrameHeaderBytes);
   let headerBytes = 0;
   let payloadLeft = 0;
   let inTrailer = false;
