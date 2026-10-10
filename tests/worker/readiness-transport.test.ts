@@ -97,40 +97,68 @@ test("the production Worker declares only the ingress and the Container, and a H
     assert.equal(hello.components[id].state, "not_required", id);
 });
 
-test("a missing binding is forwarded as not met, and a missing container binding is judged without calling the Container", async () => {
-  const bindingCases: [string, "host" | "container"][] = [
-    ["SOURCE_REVISION", "host"],
-    ["HELLO_RATE_LIMITER", "host"],
-    ["ALLOWED_ORIGIN", "host"],
-    ["CLOUD_CONTAINER", "container"],
-    ["CSRF_SECRET", "container"],
-    ["DB", "host"],
-    ["RECOVERY_GENERATION", "host"],
-    ["JOB_COORDINATOR", "host"],
-    ["OBJECTS", "host"],
-    ["REALM_ID", "host"],
-    ["WAKE_QUEUE", "host"],
+test("a missing binding is forwarded as not met, and only the Container binding stops the call", async () => {
+  // Every declared binding except the Container is forwarded and judged by the host, the one that owns each verdict.
+  const forwarded = [
+    "SOURCE_REVISION",
+    "HELLO_RATE_LIMITER",
+    "ALLOWED_ORIGIN",
+    "CSRF_SECRET",
+    "DB",
+    "RECOVERY_GENERATION",
+    "JOB_COORDINATOR",
+    "OBJECTS",
+    "REALM_ID",
+    "WAKE_QUEUE",
   ];
-  for (const [name, path] of bindingCases) {
+  for (const name of forwarded) {
     const { env } = proofEnvironment({ [name]: undefined });
     const host = deps(healthy);
-    const report = await evaluateReadiness(env, host.deps);
-    if (path === "container") {
-      assert.equal(host.calls.host, 0, `${name}: no Container call`);
-      assert.equal(report.components.container.state, "misconfigured");
-      assert.deepEqual(report.components.container.missing, [name]);
-      assert.equal(
-        report.components.d1.state,
-        "unknown",
-        "D1 cannot be judged without the Container",
-      );
-      assert.equal(report.status, "misconfigured");
-      assert.equal(readinessResponse(report).headers.get("retry-after"), null);
-    } else {
-      assert.equal(host.calls.host, 1, `${name}: the host judges the whole report`);
-      assert.equal(host.calls.forwarded[0]?.bindings[name], false, name);
-    }
+    await evaluateReadiness(env, host.deps);
+    assert.equal(host.calls.host, 1, `${name}: the host judges the whole report`);
+    assert.equal(host.calls.forwarded[0]?.bindings[name], false, name);
   }
+  // Without the Container binding there is no call to make: the report names it and judges nothing else.
+  const { env } = proofEnvironment({ CLOUD_CONTAINER: undefined });
+  const host = deps(healthy);
+  const report = await evaluateReadiness(env, host.deps);
+  assert.equal(host.calls.host, 0, "CLOUD_CONTAINER: no Container call");
+  assert.equal(report.components.container.state, "unavailable");
+  assert.equal(report.components.container.reason, "unreachable");
+  assert.deepEqual(report.components.container.missing, ["CLOUD_CONTAINER"]);
+  assert.equal(report.components.container.elapsedMs, undefined, "nothing was awaited");
+  assert.equal(report.components.d1.state, "unknown", "D1 cannot be judged without the Container");
+  assert.equal(report.components.d1.reason, "container_not_ready");
+  assert.equal(report.status, "unavailable");
+  assert.equal(report.ready, false);
+  assert.equal(readinessResponse(report).headers.get("retry-after"), "2");
+});
+
+test("a missing CSRF secret reaches the host, which judges it as the Container's key_missing", async () => {
+  // The host's own report for a deployment without the secret: the verdict is its, and the Worker passes it through.
+  const judged = JSON.parse(hostReport()) as Record<string, unknown>;
+  const judgedComponents = judged.components as Record<string, unknown>;
+  const body = JSON.stringify({
+    ...judged,
+    status: "misconfigured",
+    ready: false,
+    components: {
+      ...judgedComponents,
+      container: { state: "misconfigured", reason: "key_missing", missing: ["CSRF_SECRET"] },
+    },
+  });
+  const host = deps(() => Promise.resolve(reply(503, body)));
+  const report = await evaluateReadiness(
+    proofEnvironment({ CSRF_SECRET: undefined }).env,
+    host.deps,
+  );
+  assert.equal(host.calls.host, 1);
+  assert.equal(host.calls.forwarded[0]?.bindings.CSRF_SECRET, false);
+  assert.equal(report.components.container.state, "misconfigured");
+  assert.equal(report.components.container.reason, "key_missing");
+  assert.deepEqual(report.components.container.missing, ["CSRF_SECRET"]);
+  assert.equal(report.status, "misconfigured");
+  assert.equal(readinessResponse(report).headers.get("retry-after"), null);
 });
 
 test("a binding of the wrong shape is not met, and so is a recovery generation outside the unsigned 64-bit range", () => {
@@ -151,15 +179,15 @@ test("a binding of the wrong shape is not met, and so is a recovery generation o
     );
 });
 
-test("a missing signing key is judged by the Worker without calling the Container", async () => {
+test("a missing signing key is not forwarded: no call is made, and the report names the key", async () => {
   const host = deps(healthy);
   const w2c = await evaluateReadiness(
     proofEnvironment({ HMAC_W2C_SECRET: undefined }).env,
     host.deps,
   );
-  assert.equal(host.calls.host, 0);
-  assert.equal(w2c.components.container.state, "misconfigured");
-  assert.equal(w2c.components.container.reason, "key_missing");
+  assert.equal(host.calls.host, 0, "nothing can be signed, so nothing is forwarded");
+  assert.equal(w2c.components.container.state, "unavailable");
+  assert.equal(w2c.components.container.reason, "unreachable");
   assert.deepEqual(w2c.components.container.missing, ["HMAC_W2C_KEY"]);
   assert.equal(w2c.components.d1.state, "unknown", "D1 cannot be judged without the Container");
   assert.equal(w2c.ready, false);
@@ -185,9 +213,10 @@ test("a half-configured previous key makes the direction unusable instead of bei
     proofEnvironment({ HMAC_W2C_PREVIOUS_KEY_ID: "w2c-0" }).env,
     host.deps,
   );
-  assert.equal(host.calls.host, 0);
-  assert.equal(report.components.container.state, "misconfigured");
-  assert.equal(report.components.container.reason, "key_missing");
+  assert.equal(host.calls.host, 0, "the direction is unusable, so nothing is signed or forwarded");
+  assert.equal(report.components.container.state, "unavailable");
+  assert.deepEqual(report.components.container.missing, ["HMAC_W2C_KEY"]);
+  assert.equal(report.ready, false);
 });
 
 test("the Worker forwards its plan manifest and never compares it: the host's verdict on a mismatch is passed through", async () => {
@@ -351,7 +380,7 @@ test("a Container call that throws is unavailable, and its error text is never r
   assert(!JSON.stringify(report).includes("details"));
 });
 
-test("a transport-only report carries the Worker's own probes: the Durable Object and R2 outcomes, with no D1 verdict", async () => {
+test("a transport-only report judges nothing but the Container: the probes are not reported as verdicts", async () => {
   const failing = proofEnvironment({
     JOB_COORDINATOR: { getByName: () => ({ readPoison: () => Promise.reject(new Error("x")) }) },
     OBJECTS: {
@@ -365,12 +394,13 @@ test("a transport-only report carries the Worker's own probes: the Durable Objec
     failing.env,
     deps(() => Promise.reject(new Error("down")), 20).deps,
   );
-  assert.equal(report.components.durableObject.state, "unavailable");
-  assert.equal(report.components.durableObject.reason, "unreachable");
-  assert.equal(report.components.r2.state, "unavailable");
-  assert.equal(report.components.r2.reason, "no_answer_in_wait");
   assert.equal(report.components.container.state, "unavailable");
-  assert.equal(report.components.d1.state, "unknown");
+  assert.equal(report.components.container.reason, "unreachable");
+  for (const id of ["ingress", "d1", "durableObject", "r2", "queue"] as const) {
+    assert.equal(report.components[id].state, "unknown", id);
+    assert.equal(report.components[id].reason, "container_not_ready", id);
+    assert.equal(report.components[id].elapsedMs, undefined, `${id} carries no timing`);
+  }
   assert.equal(report.status, "unavailable");
 });
 
@@ -404,7 +434,10 @@ test("nothing in the report or its wire form carries a secret, a value or an err
 test("the real default wiring reports a missing deployment instead of throwing", async () => {
   const report = await evaluateReadiness({});
   assert.equal(report.environment, "production");
-  assert.equal(report.status, "misconfigured");
+  // Without the Container binding the Worker makes no call: the status is the Container's class, and the missing names are its observations.
+  assert.equal(report.status, "unavailable");
+  assert.equal(report.ready, false);
+  assert.equal(report.components.ingress.state, "unknown");
   assert.deepEqual(report.components.ingress.missing, ["SOURCE_REVISION", "HELLO_RATE_LIMITER"]);
   assert.deepEqual(report.components.container.missing, ["CLOUD_CONTAINER"]);
 });

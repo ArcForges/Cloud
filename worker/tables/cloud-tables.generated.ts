@@ -210,6 +210,42 @@ export const readinessKeyBindings = ["HMAC_W2C_KEY", "HMAC_C2W_KEY", "CSRF_SECRE
 /** The outcomes of one bounded Worker probe of a Durable Object or R2. */
 export const readinessProbeOutcomes = ["ready", "no_answer_in_wait", "unreachable"] as const;
 
+/** Every readiness term the Worker names, keyed by itself (CLOUD.84 S43). */
+export const readinessTerms = {
+  production: "production",
+  proof: "proof",
+  ingress: "ingress",
+  container: "container",
+  d1: "d1",
+  durableObject: "durableObject",
+  r2: "r2",
+  queue: "queue",
+  ready: "ready",
+  starting: "starting",
+  unavailable: "unavailable",
+  misconfigured: "misconfigured",
+  unknown: "unknown",
+  not_required: "not_required",
+  probed: "probed",
+  bound: "bound",
+  binding_missing: "binding_missing",
+  key_missing: "key_missing",
+  key_mismatch: "key_mismatch",
+  host_route_missing: "host_route_missing",
+  host_reply_invalid: "host_reply_invalid",
+  host_error: "host_error",
+  no_instance_available: "no_instance_available",
+  start_failed: "start_failed",
+  rate_limited: "rate_limited",
+  no_answer_in_wait: "no_answer_in_wait",
+  unreachable: "unreachable",
+  container_not_ready: "container_not_ready",
+  plan_hash_mismatch: "plan_hash_mismatch",
+  schema_mismatch: "schema_mismatch",
+  recovery_generation_mismatch: "recovery_generation_mismatch",
+  d1_unavailable: "d1_unavailable",
+} as const;
+
 /** The declared bindings per component and environment. Only names are declared, never values. */
 export const readinessBindings = [
   {

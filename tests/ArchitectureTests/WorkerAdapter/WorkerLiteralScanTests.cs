@@ -66,6 +66,20 @@ public sealed class WorkerLiteralScanTests
             [(WorkerLiteralScan.BudgetRule, "grpcStatus")]),
         new("a renamed protocol constant is refused", "worker/ingress/pipeline.ts", "const units2 = {\n  H: 3600000,\n};\n",
             [(WorkerLiteralScan.BudgetRule, "units2")]),
+        new("an inline readiness term is refused under its function", "worker/readiness/a.ts",
+            "export function f() {\n  return \"unavailable\";\n}\n",
+            [(WorkerLiteralScan.ReadinessRule, "f")]),
+        new("a declared readiness term is refused", "worker/readiness/a.ts", "const fallback = \"misconfigured\";\n",
+            [(WorkerLiteralScan.ReadinessRule, "fallback")]),
+        new("a readiness term outside the readiness module is not read as readiness", "worker/storage/a.ts",
+            "export function f() {\n  return \"unavailable\";\n}\n", []),
+        new("a readiness-named declaration is refused", "worker/a.ts", "const readinessLabel = \"label\";\n",
+            [(WorkerLiteralScan.ReadinessRule, "readinessLabel")]),
+        new("a correlation constant is refused", "worker/a.ts", "const traceparentFlags = \"01\";\n",
+            [(WorkerLiteralScan.CorrelationRule, "traceparentFlags")]),
+        new("a readiness term named through the generated object passes", "worker/a.ts",
+            "import { readinessTerms } from \"./tables.ts\";\nexport function f() {\n  return readinessTerms.unavailable;\n}\n", []),
+        new("a string that only contains a readiness term passes", "worker/a.ts", "export const label = \"unavailableSoon\";\n", []),
     ];
 
     public static IEnumerable<object[]> FixtureCases() => Fixtures.Select(fixture => new object[] { fixture.Name });
@@ -88,9 +102,25 @@ public sealed class WorkerLiteralScanTests
         Assert.True(refused.SetEquals(new[]
         {
             WorkerLiteralScan.BudgetRule, WorkerLiteralScan.IdentifierRule, WorkerLiteralScan.AdmissionRule, WorkerLiteralScan.MethodTableRule,
-            WorkerLiteralScan.PlanAuthorityRule,
+            WorkerLiteralScan.PlanAuthorityRule, WorkerLiteralScan.ReadinessRule, WorkerLiteralScan.CorrelationRule,
         }), "A rule of the check has no refused fixture.");
         Assert.Equal(WorkerLiteralScan.Rules.Count, WorkerLiteralScan.Rules.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void ReadinessTermsMatchTheGeneratedVocabulary()
+    {
+        // The readinessTerms object of the generated module names every term of the readiness vocabulary, keyed by itself. The check's list is
+        // pinned to it, so a term that the generator adds is refused in the Worker until the check knows it too.
+        var generated = File.ReadAllText(Path.Combine(Root, WorkerLiteralScan.GeneratedTablesPath));
+        var block = System.Text.RegularExpressions.Regex.Match(generated, @"export const readinessTerms = \{(?<body>[\s\S]*?)\} as const;");
+        Assert.True(block.Success, "The generated module has no readinessTerms object.");
+        var entries = System.Text.RegularExpressions.Regex.Matches(block.Groups["body"].Value, @"^\s+([A-Za-z][A-Za-z0-9_]*): ""([^""]+)"",$",
+            System.Text.RegularExpressions.RegexOptions.Multiline).Select(match => (Key: match.Groups[1].Value, Value: match.Groups[2].Value)).ToList();
+        Assert.NotEmpty(entries);
+        Assert.All(entries, entry => Assert.Equal(entry.Key, entry.Value));
+        Assert.True(WorkerLiteralScan.ReadinessTerms.SetEquals(entries.Select(entry => entry.Value)),
+            "The check's readiness terms differ from the generated vocabulary.");
     }
 
     [Fact]

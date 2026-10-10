@@ -7,6 +7,7 @@
 // because the effect of a possibly forwarded call is not known (ordinary uncertainty recovery).
 import {
   classifiedPrefixBytes,
+  readinessTerms,
   retryAfterSeconds,
   type Reason,
 } from "../tables/cloud-tables.generated.ts";
@@ -14,7 +15,9 @@ import {
 /** The start-failure classes; their names are the generated readiness reasons (CLOUD.84 S34). */
 export type StartFailure = Extract<
   Reason,
-  "no_instance_available" | "start_failed" | "rate_limited"
+  | typeof readinessTerms.no_instance_available
+  | typeof readinessTerms.start_failed
+  | typeof readinessTerms.rate_limited
 >;
 
 /**
@@ -33,10 +36,11 @@ export function classifyStartFailure(
   prefix: string,
 ): StartFailure | null {
   if (contentType?.split(";")[0]?.trim().toLowerCase() !== "text/plain") return null;
-  if (status === 503 && prefix.startsWith(noInstanceText)) return "no_instance_available";
-  if (status === 500 && prefix.startsWith(startFailedText)) return "start_failed";
+  if (status === 503 && prefix.startsWith(noInstanceText))
+    return readinessTerms.no_instance_available;
+  if (status === 500 && prefix.startsWith(startFailedText)) return readinessTerms.start_failed;
   // The library forwards the platform's own rate-limit message; the host never answers 429 as plain text.
-  if (status === 429) return "rate_limited";
+  if (status === 429) return readinessTerms.rate_limited;
   return null;
 }
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using System.Globalization;
+using System.Linq;
 using System.Text;
 
 namespace ArcForges.Cloud.Tools.Generation;
@@ -188,6 +189,7 @@ public static class TypeScriptTables
         Closed(text, "readinessReasons", "Reason", "The closed reason codes; a component that is not ready carries one.", readiness.Reasons);
         Closed(text, "readinessKeyBindings", null, "The bindings and secrets whose absence is a key problem.", readiness.KeyBindings);
         Closed(text, "readinessProbeOutcomes", null, "The outcomes of one bounded Worker probe of a Durable Object or R2.", readiness.ProbeOutcomes);
+        AppendTerms(text, readiness);
         text.Append("/** The declared bindings per component and environment. Only names are declared, never values. */\n");
         text.Append("export const readinessBindings = [\n");
         foreach (var binding in readiness.Bindings)
@@ -201,6 +203,26 @@ public static class TypeScriptTables
 
         text.Append("] as const;\n");
         text.Append("export type ReadinessBindingName = (typeof readinessBindings)[number][\"name\"];\n");
+    }
+
+    /// <summary>
+    /// Every readiness term as one object keyed by itself (CLOUD.84 S43). The Worker names a term from here and writes no literal of its own,
+    /// so the WorkerAdapter literal check finds no readiness vocabulary outside this generated module. A term must be an identifier.
+    /// </summary>
+    private static void AppendTerms(StringBuilder text, ReadinessRow readiness)
+    {
+        var terms = readiness.Environments.Concat(readiness.Components).Concat(readiness.States).Concat(readiness.Statuses)
+            .Concat(readiness.Evidence).Concat(readiness.Reasons).Concat(readiness.ProbeOutcomes).Distinct(StringComparer.Ordinal).ToList();
+        foreach (var term in terms)
+        {
+            if (!char.IsAsciiLetter(term[0]) || !term.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+                throw new InvalidOperationException($"The readiness term {term} is not an identifier, so the Worker cannot name it.");
+        }
+
+        text.Append("/** Every readiness term the Worker names, keyed by itself (CLOUD.84 S43). */\n");
+        text.Append("export const readinessTerms = {\n");
+        foreach (var term in terms) text.Append("  ").Append(term).Append(": ").Append(Quote(term)).Append(",\n");
+        text.Append("} as const;\n\n");
     }
 
     /// <summary>One closed list as a readonly tuple, with its literal union type when a type name is given.</summary>

@@ -11,7 +11,7 @@ flag, so a failing dependency never hides behind a healthy one and a healthy dep
 The evaluation is C# (CLOUD.84 S39(1)). The Worker measures what only it can see, its own bindings and one bounded read each
 of its Durable Object and of R2, and forwards those raw observations on the signed readiness call. The Container host judges
 the whole report in `ReadinessEvaluator` (`src/ArcForges.Cloud/Readiness`), from the observations and its own D1 check. When
-the Container cannot answer, the Worker reports what it observed, with no verdict beyond `container unreachable: <class>`
+the Container cannot be called or cannot answer, the Worker reports its class, with no verdict beyond `container unreachable: <class>`
 (see "A report the Container could not judge" below).
 
 | Component       | Where it is judged                                                                                                     | What a `ready` answer proves                                                                                                                                                                                       |
@@ -33,37 +33,37 @@ keyed by the generated name, so a binding without a shape check does not compile
 Each component has one state and, when it is not ready, one reason from a closed list. Nothing else is ever reported: no
 request, identifier, binding value, secret, SQL, error text or object key.
 
-| State           | Meaning                                                                                                         | Retry helps                          |
-| --------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `ready`         | The check passed at its evidence level.                                                                         | n/a                                  |
-| `starting`      | The dependency did not answer within the bounded wait, so a start may be in progress.                           | yes                                  |
-| `unavailable`   | The dependency failed or could not be provided.                                                                 | yes                                  |
-| `misconfigured` | A declared binding, key, plan manifest or recovery generation is missing or wrong.                              | no, until the deployment is repaired |
-| `unknown`       | Not determined because the Container, which D1 is judged through, is not ready. It never counts as ready.       | follows the Container                |
-| `not_required`  | The environment does not declare this component. The production Worker declares only `ingress` and `container`. | n/a                                  |
+| State           | Meaning                                                                                                                           | Retry helps                          |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `ready`         | The check passed at its evidence level.                                                                                           | n/a                                  |
+| `starting`      | The dependency did not answer within the bounded wait, so a start may be in progress.                                             | yes                                  |
+| `unavailable`   | The dependency failed or could not be provided.                                                                                   | yes                                  |
+| `misconfigured` | A declared binding, key, plan manifest or recovery generation is missing or wrong.                                                | no, until the deployment is repaired |
+| `unknown`       | Not determined because the Container, which the host judges the other components through, is not ready. It never counts as ready. | follows the Container                |
+| `not_required`  | The environment does not declare this component. The production Worker declares only `ingress` and `container`.                   | n/a                                  |
 
 The whole is `ready` only when every component is `ready` or `not_required`. Otherwise its status is the first that applies
 of `misconfigured`, `unavailable`, `starting`, and a lone `unknown` is `unavailable`. `ReadinessEvaluator.Summarize` decides
 it, and `ReadinessEvaluatorTests` enumerates every combination of component states and checks this rule.
 
-| Reason                         | Component(s)                       | Cause                                                                                                                           |
-| ------------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `binding_missing`              | any                                | A required binding is absent or has the wrong shape. The report lists its name in `missing`.                                    |
-| `key_missing`                  | `container`, `d1`                  | A signing key or the CSRF secret is absent or malformed. A half-configured previous key counts as malformed.                    |
-| `key_mismatch`                 | `container`, `d1`                  | The host answered 401 (or the Worker refused the host's signature): the keys differ, or a clock is beyond the 60 second window. |
-| `host_route_missing`           | `container`                        | The host answered 404: an older image without the route, or a host with the foundation module disabled.                         |
-| `host_reply_invalid`           | `container`                        | The host answered 200 with a reply outside the closed shape, or one whose two statements disagree.                              |
-| `host_error`                   | `container`                        | Any other status, or a 503 without the closed report.                                                                           |
-| `no_instance_available`        | `container`                        | The Containers platform could not provide an instance: the instance limit is reached, or the application is still provisioning. |
-| `start_failed`                 | `container`                        | The platform started the Container and it failed to come up.                                                                    |
-| `rate_limited`                 | `container`                        | The platform rate limited the start.                                                                                            |
-| `no_answer_in_wait`            | `container`, `durableObject`, `r2` | Nothing answered within the bounded wait. For the Container this includes a cold start that is still running.                   |
-| `unreachable`                  | `container`, `durableObject`, `r2` | The call failed before an answer.                                                                                               |
-| `container_not_ready`          | `d1`                               | D1 is judged through the Container and the Container is not ready.                                                              |
-| `plan_hash_mismatch`           | `d1`                               | The Worker's generated plans and the host's compiled plans were built from different manifests.                                 |
-| `schema_mismatch`              | `d1`                               | The readiness plan returned a schema version other than 1, or no row.                                                           |
-| `recovery_generation_mismatch` | `d1`                               | The Worker's active recovery generation differs from the host's.                                                                |
-| `d1_unavailable`               | `d1`                               | D1 could not be reached or answered with a failure.                                                                             |
+| Reason                         | Component(s)                                              | Cause                                                                                                                           |
+| ------------------------------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `binding_missing`              | any                                                       | A required binding is absent or has the wrong shape. The report lists its name in `missing`.                                    |
+| `key_missing`                  | `container`, `d1`                                         | A signing key or the CSRF secret is absent or malformed. A half-configured previous key counts as malformed.                    |
+| `key_mismatch`                 | `container`, `d1`                                         | The host answered 401 (or the Worker refused the host's signature): the keys differ, or a clock is beyond the 60 second window. |
+| `host_route_missing`           | `container`                                               | The host answered 404: an older image without the route, or a host with the foundation module disabled.                         |
+| `host_reply_invalid`           | `container`                                               | The host answered 200 with a reply outside the closed shape, or one whose two statements disagree.                              |
+| `host_error`                   | `container`                                               | Any other status, or a 503 without the closed report.                                                                           |
+| `no_instance_available`        | `container`                                               | The Containers platform could not provide an instance: the instance limit is reached, or the application is still provisioning. |
+| `start_failed`                 | `container`                                               | The platform started the Container and it failed to come up.                                                                    |
+| `rate_limited`                 | `container`                                               | The platform rate limited the start.                                                                                            |
+| `no_answer_in_wait`            | `container`, `durableObject`, `r2`                        | Nothing answered within the bounded wait. For the Container this includes a cold start that is still running.                   |
+| `unreachable`                  | `container`, `durableObject`, `r2`                        | The call failed before an answer.                                                                                               |
+| `container_not_ready`          | `d1`, and each other component of a transport-only report | The Container, which judges them, is not ready.                                                                                 |
+| `plan_hash_mismatch`           | `d1`                                                      | The Worker's generated plans and the host's compiled plans were built from different manifests.                                 |
+| `schema_mismatch`              | `d1`                                                      | The readiness plan returned a schema version other than 1, or no row.                                                           |
+| `recovery_generation_mismatch` | `d1`                                                      | The Worker's active recovery generation differs from the host's.                                                                |
+| `d1_unavailable`               | `d1`                                                      | D1 could not be reached or answered with a failure.                                                                             |
 
 ## Surfaces
 
@@ -83,17 +83,13 @@ it, and `ReadinessEvaluatorTests` enumerates every combination of component stat
 
 ## A report the Container could not judge
 
-When the Container cannot answer a signed call, the Worker reports its own observations and the class of the failure, and no
-verdict beyond `container unreachable: <class>`. The report keeps the same schema and the same closed vocabulary:
+A transport-only report is the Worker's answer when the Container is not called, or does not answer a signed call. It keeps the same schema and the same closed vocabulary, and its one verdict is the Container's own class (CLOUD.84 S39(1)):
 
-- `container` is `starting` with `no_answer_in_wait` when the bounded wait ends, and `unavailable` with `unreachable` when the
-  call fails before an answer. A start failure, a 500 or a reply the Worker cannot read keep their classes from the table
-  above; a 401 or a 404 is `misconfigured`, because the deployment is at fault.
-- `d1` is `unknown` with `container_not_ready`: D1 is judged through the Container, which is not ready.
-- Any component whose binding is not met is `misconfigured` with its names in `missing`, because the Worker sees its own
-  bindings. The Durable Object and R2 keep the outcome of their own bounded probes.
-- The whole status is `misconfigured` when any component is, otherwise the Container's class: `starting` or `unavailable`.
-  It is never `ready`.
+- When the Worker cannot make the call, because its Container binding or its signing key is absent or malformed, it makes no call and forwards nothing. `container` is `unavailable` with `unreachable`, and `missing` names the binding or key. Nothing is awaited, so the component has no `elapsedMs`.
+- `container` is `starting` with `no_answer_in_wait` when the bounded wait ends, and `unavailable` with `unreachable` when the call fails before an answer. A start failure, a 500 or a reply the Worker cannot read keep their classes from the table above; a 401 or a 404 is `misconfigured`, because the deployment is at fault.
+- Every other component is `unknown` with `container_not_ready`, or `not_required` where the environment does not declare it, because the host that judges it did not answer. The Worker's own probes are forwarded only on a call that is made, so a transport-only report reports no probe outcome and no binding verdict.
+- The whole status is the Container's class: `misconfigured`, `unavailable` or `starting`. It is never `ready`.
+- A missing CSRF secret is not a transport condition: the Worker still makes the call, and the host judges the secret as the Container's `key_missing`.
 
 ## A Container that could not be started
 

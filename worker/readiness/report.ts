@@ -13,6 +13,7 @@ import {
   readinessSchema,
   readinessStates,
   readinessStatuses,
+  readinessTerms,
   sha256HexPattern as hex64,
   type ComponentId,
   type ComponentState,
@@ -133,11 +134,12 @@ export function parseHostReport(bytes: Uint8Array): ReadinessReport | null {
     return null;
   }
   if (!isRecord(value)) return null;
+  // The member named ready carries the readiness term of the same spelling, so it is read from the generated term.
   if (
     !closed(value, [
       "schema",
       "status",
-      "ready",
+      readinessTerms.ready,
       "environment",
       "workerRevision",
       "components",
@@ -149,7 +151,7 @@ export function parseHostReport(bytes: Uint8Array): ReadinessReport | null {
   if (schema !== readinessSchema) return null;
   if (!isOneOf(status, readinessStatuses)) return null;
   // The two statements must agree: a host cannot be ready in one member and not in the other.
-  if (typeof ready !== "boolean" || ready !== (status === "ready")) return null;
+  if (typeof ready !== "boolean" || ready !== (status === readinessTerms.ready)) return null;
   if (!isOneOf(environment, readinessEnvironments)) return null;
   if (typeof workerRevision !== "string" || workerRevision.length > maxRevisionLength) return null;
   const parsedComponents = parseComponents(components);

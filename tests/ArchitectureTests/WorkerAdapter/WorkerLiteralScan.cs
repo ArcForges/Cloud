@@ -49,6 +49,24 @@ internal static partial class WorkerLiteralScan
     public static readonly IReadOnlyList<string> Rules =
         [BudgetRule, IdentifierRule, AdmissionRule, MethodTableRule, PlanAuthorityRule, ReadinessRule, CorrelationRule];
 
+    /// <summary>
+    /// The readiness terms of the generated vocabulary (S43): every state, status, reason, component, environment, evidence level and probe
+    /// outcome. The Worker names each one through the generated readinessTerms object, so a term written as a string literal in worker code is
+    /// a finding. A test pins this list to the generated module.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ReadinessTerms = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "production", "proof", "ingress", "container", "d1", "durableObject", "r2", "queue",
+        "ready", "starting", "unavailable", "misconfigured", "unknown", "not_required",
+        "probed", "bound",
+        "binding_missing", "key_missing", "key_mismatch", "host_route_missing", "host_reply_invalid", "host_error",
+        "no_instance_available", "start_failed", "rate_limited", "no_answer_in_wait", "unreachable", "container_not_ready",
+        "plan_hash_mismatch", "schema_mismatch", "recovery_generation_mismatch", "d1_unavailable",
+    };
+
+    /// <summary>The generated module that holds the readiness terms; the one file that names them as literals.</summary>
+    public const string GeneratedTablesPath = "worker/tables/cloud-tables.generated.ts";
+
     /// <summary>The generated Worker outputs: the only worker files the check does not read.</summary>
     public static readonly IReadOnlySet<string> GeneratedFiles = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -119,6 +137,12 @@ internal static partial class WorkerLiteralScan
         return ArchitectureExceptions.Apply(findings, document, today, Rules);
     }
 
+    /// <summary>
+    /// Whether a file is in the readiness module, where the readiness taxonomy lives. A term is read as a readiness literal only there: the
+    /// storage and foundation modules use the same spelling for their own error classes (unavailable), which is not readiness vocabulary.
+    /// </summary>
+    public static bool InReadinessModule(string path) => path.StartsWith("worker/readiness/", StringComparison.Ordinal);
+
     /// <summary>Whether a path is worker TypeScript that the check reads: a Worker source, never a declaration or a generated output.</summary>
     public static bool IsScanned(string path) =>
         path.StartsWith("worker/", StringComparison.Ordinal) && path.EndsWith(".ts", StringComparison.Ordinal)
@@ -141,14 +165,14 @@ internal static partial class WorkerLiteralScan
             covered[equals] = true;
             var values = Initializer(tokens, equals + 1, covered);
             if (ProtocolConstants.Contains((path, name))) continue;
-            foreach (var rule in DeclaredRules(name, values, tokens, structural)) results.Add(new HarnessFinding(rule, path, name));
+            foreach (var rule in DeclaredRules(name, values, tokens, structural, InReadinessModule(path))) results.Add(new HarnessFinding(rule, path, name));
         }
 
         // Inline literals outside a declared initializer, keyed by the function that holds them.
         for (var i = 0; i < tokens.Count; i++)
         {
             if (covered[i]) continue;
-            foreach (var rule in InlineRules(tokens, i, structural))
+            foreach (var rule in InlineRules(tokens, i, structural, InReadinessModule(path)))
             {
                 if (ProtocolConstants.Contains((path, scopes[i]))) continue;
                 results.Add(new HarnessFinding(rule, path, scopes[i]));
@@ -159,7 +183,7 @@ internal static partial class WorkerLiteralScan
     }
 
     /// <summary>The rules that a declared initializer breaks. The finding's detail is the declared symbol itself.</summary>
-    private static IEnumerable<string> DeclaredRules(string name, IReadOnlyList<int> values, IReadOnlyList<Token> tokens, bool[] structural)
+    private static IEnumerable<string> DeclaredRules(string name, IReadOnlyList<int> values, IReadOnlyList<Token> tokens, bool[] structural, bool readinessModule)
     {
         var rules = new HashSet<string>(StringComparer.Ordinal);
         var budgetName = BudgetName.IsMatch(name);
@@ -184,11 +208,12 @@ internal static partial class WorkerLiteralScan
         var textual = values.Any(index => tokens[index].Kind is TokenKind.String or TokenKind.Number);
         if (textual && ReadinessName.IsMatch(name)) rules.Add(ReadinessRule);
         if (textual && CorrelationName.IsMatch(name)) rules.Add(CorrelationRule);
+        if (readinessModule && values.Any(index => tokens[index].Kind == TokenKind.String && ReadinessTerms.Contains(tokens[index].Value))) rules.Add(ReadinessRule);
         return rules;
     }
 
     /// <summary>The rules that one uncovered token breaks, for an inline literal in code.</summary>
-    private static IEnumerable<string> InlineRules(IReadOnlyList<Token> tokens, int index, bool[] structural)
+    private static IEnumerable<string> InlineRules(IReadOnlyList<Token> tokens, int index, bool[] structural, bool readinessModule)
     {
         var rules = new HashSet<string>(StringComparer.Ordinal);
         var token = tokens[index];
@@ -198,6 +223,7 @@ internal static partial class WorkerLiteralScan
             if (HexOrUuid.IsMatch(token.Value)) rules.Add(IdentifierRule);
             if (IsMethodTable(token.Value)) rules.Add(MethodTableRule);
             if (SqlStatement.IsMatch(token.Value)) rules.Add(PlanAuthorityRule);
+            if (readinessModule && ReadinessTerms.Contains(token.Value)) rules.Add(ReadinessRule);
         }
 
         if (token.Kind != TokenKind.Word) return rules;

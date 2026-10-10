@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Worker's half of readiness (WP-21.07, CLOUD.84 S39(1)). The Worker measures what it can see itself: whether each declared binding
-// is met, and the outcome of one bounded Durable Object read and one bounded R2 head. It forwards those raw observations on the signed
-// readiness call, and the Container host returns the whole report, judged in C#. When the Container cannot answer, the Worker keeps a
-// transport-only report: the class of the reply it could not get, its own observations, and no readiness verdict beyond
-// "container unreachable: <class>". Nothing is retried, replayed or written.
+// The Worker's half of readiness (WP-21.07, CLOUD.84 S39(1)). The Worker measures what only it can see: whether each declared binding is met,
+// and the outcome of one bounded Durable Object read and one bounded R2 head. It forwards those raw observations on the signed readiness
+// call, and the Container host judges the whole report in C# (ReadinessEvaluator). When the Container cannot be called, or cannot answer, the
+// Worker keeps a transport-only report: the Container's class and no readiness verdict beyond "container unreachable: <class>". Nothing is
+// retried, replayed or written.
 import { postSigned, type ContainerClientEnv } from "../foundation/container-client.ts";
 import type { CoordinatorNamespaceLike, R2Like } from "../foundation/types.ts";
 import { manifestHash as workerManifestHash } from "../storage/plans.generated.ts";
 import {
-  readinessKeyBindings,
   type readinessProbeOutcomes,
   readinessSchema,
+  readinessTerms,
   readinessWaitMs,
   type ComponentId,
   type ComponentState,
-  type ReadinessBindingName,
   type ReadinessEnvironment,
-  type ReadinessStatus,
 } from "../tables/cloud-tables.generated.ts";
 import {
   bindingObservations,
@@ -35,6 +33,9 @@ import {
 
 export const durableObjectProbeName = "readiness-probe";
 export const r2ProbeKey = "readiness/absent-probe";
+
+/** The bindings the signed call needs. Without them the Worker has no call to make, so it forwards nothing (S39(1)). */
+const callBindings: readonly string[] = ["CLOUD_CONTAINER", "HMAC_W2C_KEY"];
 
 export type ProbeOutcome = (typeof readinessProbeOutcomes)[number];
 
@@ -55,7 +56,7 @@ export interface ReadinessObservations {
   readonly environment: ReadinessEnvironment;
   readonly workerRevision: string;
   readonly manifestHash: string;
-  readonly bindings: Record<ReadinessBindingName, boolean>;
+  readonly bindings: Record<string, boolean>;
   readonly durableObject: ProbeObservation | null;
   readonly r2: ProbeObservation | null;
 }
@@ -109,8 +110,8 @@ async function waited<T>(
 }
 
 function probeOutcome<T>(outcome: Waited<T>): ProbeOutcome {
-  if (outcome.ok) return "ready";
-  return outcome.why === "timeout" ? "no_answer_in_wait" : "unreachable";
+  if (outcome.ok) return readinessTerms.ready;
+  return outcome.why === "timeout" ? readinessTerms.no_answer_in_wait : readinessTerms.unreachable;
 }
 
 function elapsed(deps: ReadinessDeps, started: number): number {
@@ -139,14 +140,25 @@ export async function probeR2(env: ReadinessEnv, deps: ReadinessDeps): Promise<P
   return { outcome: probeOutcome(outcome), elapsedMs: elapsed(deps, started) };
 }
 
-/** A transport class of the Container's reply: the component it puts the Container in. */
-function transport(container: ComponentReport): HostAnswer {
-  return { kind: "transport", container };
+/** The Container's class on a transport-only report: the one verdict such a report carries (S39(1)). */
+type TransportState = Extract<
+  ComponentState,
+  | typeof readinessTerms.starting
+  | typeof readinessTerms.unavailable
+  | typeof readinessTerms.misconfigured
+>;
+
+export interface TransportClass extends ComponentReport {
+  readonly state: TransportState;
 }
 
 export type HostAnswer =
   | { readonly kind: "report"; readonly report: ReadinessReport }
-  | { readonly kind: "transport"; readonly container: ComponentReport };
+  | { readonly kind: "transport"; readonly container: TransportClass };
+
+function transport(container: TransportClass): HostAnswer {
+  return { kind: "transport", container };
+}
 
 /**
  * Classifies what the Container answered. A plain-text start failure proves the request never reached the host (safe to retry). A 401 or
@@ -156,95 +168,85 @@ export function classifyHostReply(reply: HostReply): HostAnswer {
   const prefix = new TextDecoder().decode(reply.body.subarray(0, classifiedPrefixBytes));
   const startFailure = classifyStartFailure(reply.status, reply.contentType, prefix);
   if (startFailure)
-    return transport({ state: "unavailable", reason: startFailure, evidence: "probed" });
+    return transport({
+      state: readinessTerms.unavailable,
+      reason: startFailure,
+      evidence: readinessTerms.probed,
+    });
   // The host answers an unsigned or wrongly signed call with an empty 401, whichever check failed.
   if (reply.status === 401)
-    return transport({ state: "misconfigured", reason: "key_mismatch", evidence: "probed" });
+    return transport({
+      state: readinessTerms.misconfigured,
+      reason: readinessTerms.key_mismatch,
+      evidence: readinessTerms.probed,
+    });
   if (reply.status === 404)
-    return transport({ state: "misconfigured", reason: "host_route_missing", evidence: "probed" });
+    return transport({
+      state: readinessTerms.misconfigured,
+      reason: readinessTerms.host_route_missing,
+      evidence: readinessTerms.probed,
+    });
   if (reply.status !== 200 && reply.status !== 503)
-    return transport({ state: "unavailable", reason: "host_error", evidence: "probed" });
+    return transport({
+      state: readinessTerms.unavailable,
+      reason: readinessTerms.host_error,
+      evidence: readinessTerms.probed,
+    });
   const report = parseHostReport(reply.body);
   if (!report)
     return transport({
-      state: "unavailable",
-      reason: reply.status === 200 ? "host_reply_invalid" : "host_error",
-      evidence: "probed",
+      state: readinessTerms.unavailable,
+      reason: reply.status === 200 ? readinessTerms.host_reply_invalid : readinessTerms.host_error,
+      evidence: readinessTerms.probed,
     });
   // A 200 is ready and a ready report is a 200: a reply where the two disagree is not believed.
   if ((reply.status === 200) !== report.ready)
     return transport({
-      state: "unavailable",
-      reason: reply.status === 200 ? "host_reply_invalid" : "host_error",
-      evidence: "probed",
+      state: readinessTerms.unavailable,
+      reason: reply.status === 200 ? readinessTerms.host_reply_invalid : readinessTerms.host_error,
+      evidence: readinessTerms.probed,
     });
   return { kind: "report", report };
 }
 
-const probeComponent = (probe: ProbeObservation): ComponentReport =>
-  probe.outcome === "ready"
-    ? { state: "ready", evidence: "probed", elapsedMs: probe.elapsedMs }
-    : {
-        state: "unavailable",
-        reason: probe.outcome === "no_answer_in_wait" ? "no_answer_in_wait" : "unreachable",
-        evidence: "probed",
-        elapsedMs: probe.elapsedMs,
-      };
-
-const misconfigured = (names: readonly string[]): ComponentReport => ({
-  state: "misconfigured",
-  reason: names.every((name) => readinessKeyBindings.some((key) => key === name))
-    ? "key_missing"
-    : "binding_missing",
-  missing: names,
-});
-
 /**
- * The report of a Container that could not answer. The components the Worker can see are reported from its own observations: a binding that
- * is not met is misconfigured with its names, and each probe is its outcome. D1 depends on the Container and is not judged (unknown). A
- * component the environment does not declare is not_required. The status is the fail-closed order of the whole.
+ * The report of a Container that was not called, or did not answer (S39(1)). Its one verdict is the Container's class. Nothing else is judged
+ * here: the host that judges the other components did not answer, so each component the environment requires is undetermined, and one it
+ * does not declare is not_required. The status is the Container's class, the only state of this report that is not ready.
  */
 function transportReport(
   env: ReadinessEnv,
   workerRevision: string,
-  container: ComponentReport,
-  durableObject: ProbeObservation | null,
-  r2: ProbeObservation | null,
+  container: TransportClass,
 ): ReadinessReport {
   const environment = environmentOf(env);
   const required = requiredComponents(environment);
-  const judge = (id: ComponentId, observed: ComponentReport): ComponentReport => {
-    if (!required.has(id)) return { state: "not_required" };
-    const names = missingBindings(env, id);
-    return names.length > 0 ? misconfigured(names) : observed;
+  // The names of the bindings that are not met are the Worker's own observation, so they are reported without a verdict.
+  const undetermined = (id: ComponentId): ComponentReport => {
+    if (!required.has(id)) return { state: readinessTerms.not_required };
+    const missing = missingBindings(env, id);
+    return {
+      state: readinessTerms.unknown,
+      reason: readinessTerms.container_not_ready,
+      ...(missing.length > 0 ? { missing } : {}),
+    };
   };
-  const unknown: ComponentReport = { state: "unknown", reason: "container_not_ready" };
   const components: Components = {
-    ingress: judge("ingress", { state: "ready", evidence: "bound" }),
-    container: required.has("container") ? container : { state: "not_required" },
-    d1: judge("d1", unknown),
-    durableObject: judge("durableObject", durableObject ? probeComponent(durableObject) : unknown),
-    r2: judge("r2", r2 ? probeComponent(r2) : unknown),
-    queue: judge("queue", { state: "ready", evidence: "bound" }),
+    ingress: undetermined(readinessTerms.ingress),
+    container,
+    d1: undetermined(readinessTerms.d1),
+    durableObject: undetermined(readinessTerms.durableObject),
+    r2: undetermined(readinessTerms.r2),
+    queue: undetermined(readinessTerms.queue),
   };
-  const states: ComponentState[] = Object.values(components).map((component) => component.state);
   return {
     schema: readinessSchema,
-    status: transportStatus(states),
+    status: container.state,
     ready: false,
     environment,
     workerRevision,
     components,
   };
-}
-
-/** The fail-closed order of a transport-only report: misconfigured, unavailable, starting, then an undetermined component. */
-function transportStatus(states: readonly ComponentState[]): ReadinessStatus {
-  if (states.includes("misconfigured")) return "misconfigured";
-  if (states.includes("unavailable")) return "unavailable";
-  if (states.includes("starting")) return "starting";
-  // The Container is never ready in a transport-only report, so an undetermined component is never ready either.
-  return "unavailable";
 }
 
 /** The readiness of the Worker's deployment: every declared component, separately, and the whole. */
@@ -255,21 +257,27 @@ export async function evaluateReadiness(
   const deps: ReadinessDeps = { ...defaultDeps, ...overrides };
   const environment = environmentOf(env);
   const required = requiredComponents(environment);
+  const workerRevision = typeof env.SOURCE_REVISION === "string" ? env.SOURCE_REVISION : "";
+  const unmetCallBindings = missingBindings(env, readinessTerms.container).filter((name) =>
+    callBindings.includes(name),
+  );
+  if (unmetCallBindings.length > 0) {
+    return transportReport(env, workerRevision, {
+      state: readinessTerms.unavailable,
+      reason: readinessTerms.unreachable,
+      missing: unmetCallBindings,
+    });
+  }
   const probesDurable =
-    required.has("durableObject") && missingBindings(env, "durableObject").length === 0;
-  const probesR2 = required.has("r2") && missingBindings(env, "r2").length === 0;
-  // The probes run first, each bounded, because their outcomes are part of what the host judges.
+    required.has(readinessTerms.durableObject) &&
+    missingBindings(env, readinessTerms.durableObject).length === 0;
+  const probesR2 =
+    required.has(readinessTerms.r2) && missingBindings(env, readinessTerms.r2).length === 0;
+  // The probes run first, each bounded, because their outcomes are forwarded for the host to judge.
   const [durableObject, r2] = await Promise.all([
     probesDurable ? probeDurableObject(env, deps) : Promise.resolve(null),
     probesR2 ? probeR2(env, deps) : Promise.resolve(null),
   ]);
-  const workerRevision = typeof env.SOURCE_REVISION === "string" ? env.SOURCE_REVISION : "";
-  const containerMissing = missingBindings(env, "container");
-  if (containerMissing.length > 0) {
-    const container = misconfigured(containerMissing);
-    return transportReport(env, workerRevision, container, durableObject, r2);
-  }
-
   const observations: ReadinessObservations = {
     environment,
     workerRevision,
@@ -283,21 +291,25 @@ export async function evaluateReadiness(
   const outcome = await waited((signal) => deps.callHost(env, body, signal), deps.waitMs);
   const took = elapsed(deps, started);
   if (!outcome.ok) {
-    const container: ComponentReport =
+    const container: TransportClass =
       outcome.why === "timeout"
-        ? { state: "starting", reason: "no_answer_in_wait", evidence: "probed", elapsedMs: took }
-        : { state: "unavailable", reason: "unreachable", evidence: "probed", elapsedMs: took };
-    return transportReport(env, workerRevision, container, durableObject, r2);
+        ? {
+            state: readinessTerms.starting,
+            reason: readinessTerms.no_answer_in_wait,
+            evidence: readinessTerms.probed,
+            elapsedMs: took,
+          }
+        : {
+            state: readinessTerms.unavailable,
+            reason: readinessTerms.unreachable,
+            evidence: readinessTerms.probed,
+            elapsedMs: took,
+          };
+    return transportReport(env, workerRevision, container);
   }
   const answer = classifyHostReply(outcome.value);
   if (answer.kind === "transport") {
-    return transportReport(
-      env,
-      workerRevision,
-      { ...answer.container, elapsedMs: took },
-      durableObject,
-      r2,
-    );
+    return transportReport(env, workerRevision, { ...answer.container, elapsedMs: took });
   }
   // The host's own report, with the Worker's measure of how long the Container took.
   const { report } = answer;

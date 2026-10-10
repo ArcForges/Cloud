@@ -8,6 +8,7 @@ import { loadKeys, type PrivateKeyEnv } from "../private/hmac-settings.ts";
 import {
   bindingUint64TextPattern as uint64Text,
   readinessBindings,
+  readinessTerms,
   storageGuards,
   type ComponentId,
   type ReadinessBindingName,
@@ -31,7 +32,7 @@ export interface ReadinessEnv extends PrivateKeyEnv {
 }
 
 export function environmentOf(env: ReadinessEnv): ReadinessEnvironment {
-  return proofEnabled(env) ? "proof" : "production";
+  return proofEnabled(env) ? readinessTerms.proof : readinessTerms.production;
 }
 
 const maxUint64 = BigInt(storageGuards.uint64Max);

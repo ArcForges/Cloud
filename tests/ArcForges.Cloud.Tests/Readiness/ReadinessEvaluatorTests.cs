@@ -90,6 +90,9 @@ public sealed class ReadinessEvaluatorTests
     [InlineData("OBJECTS", "r2", "binding_missing")]
     [InlineData("REALM_ID", "r2", "binding_missing")]
     [InlineData("WAKE_QUEUE", "queue", "binding_missing")]
+    [InlineData("CLOUD_CONTAINER", "container", "binding_missing")]
+    [InlineData("CSRF_SECRET", "container", "key_missing")]
+    [InlineData("HMAC_W2C_KEY", "container", "key_missing")]
     public void AMissingBindingFailsReadinessInItsComponentAndNothingElse(string name, string component, string reason)
     {
         var bindings = ReadinessVocabulary.Bindings.ToDictionary(binding => binding.Name, _ => true);
