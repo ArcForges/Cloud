@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using ArcForges.Cloud.Modules.Workspace.Persistence;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
 namespace ArcForges.Cloud.Modules.Workspace;
 
 /// <summary>
@@ -12,4 +16,12 @@ public sealed class WorkspaceModule : IModuleBoundary
     public static WorkspaceModule Instance { get; } = new();
 
     public ModuleDescriptor Descriptor { get; } = ModuleDescriptor.Create("Workspace", "workspace");
+
+    /// <summary>
+    /// Lists the published workspace read port (CLOUD.72, S54(1)) over the module's own read plans. It is created only when something asks for
+    /// it and opens no route or method policy. It needs the host's plan port factory, which a composition binds to the signed Worker executor,
+    /// so until a composition supplies that factory nothing here is resolved.
+    /// </summary>
+    void IModuleBoundary.Register(IServiceCollection services) =>
+        services.TryAddSingleton<IWorkspaceDirectory>(provider => new D1WorkspaceDirectory(provider.GetRequiredService<IModulePlanPortFactory>().For(Descriptor)));
 }

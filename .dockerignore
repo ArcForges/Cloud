@@ -74,6 +74,8 @@
 !src/ArcForges.Cloud.Modules.Abstractions/Harness/*.cs
 !src/ArcForges.Cloud.Modules.Abstractions/Families/
 !src/ArcForges.Cloud.Modules.Abstractions/Families/*.cs
+!src/ArcForges.Cloud.Modules.Abstractions/Workspace/
+!src/ArcForges.Cloud.Modules.Abstractions/Workspace/*.cs
 !src/ArcForges.Cloud.Modules.*/Core/
 !src/ArcForges.Cloud.Modules.*/Core/Domain/
 !src/ArcForges.Cloud.Modules.*/Core/Domain/*.cs

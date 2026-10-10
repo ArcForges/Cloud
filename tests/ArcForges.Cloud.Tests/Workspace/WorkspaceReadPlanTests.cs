@@ -16,9 +16,9 @@ namespace ArcForges.Cloud.Tests.WorkspaceDirectory;
 /// </summary>
 public sealed class WorkspaceReadPlanTests : IDisposable
 {
-    private const string WorkspaceA = "40000000-0000-4000-8000-000000000001";
-    private const string WorkspaceB = "40000000-0000-4000-8000-000000000002";
-    private const string WorkspaceC = "40000000-0000-4000-8000-000000000003";
+    internal const string WorkspaceA = "40000000-0000-4000-8000-000000000001";
+    internal const string WorkspaceB = "40000000-0000-4000-8000-000000000002";
+    internal const string WorkspaceC = "40000000-0000-4000-8000-000000000003";
 
     private static readonly ModuleDescriptor WorkspaceModule = ModuleDescriptor.Create("Workspace", "workspace");
 
@@ -32,7 +32,10 @@ public sealed class WorkspaceReadPlanTests : IDisposable
 
     private IModulePlanPort Port() => new ModulePlanPortFactory(bridge, 1, time).For(WorkspaceModule);
 
-    private async Task SeedAsync()
+    private Task SeedAsync() => SeedAsync(bridge);
+
+    /// <summary>The identity rows of <see cref="IdentityReadPlanTests.SeedAsync"/> and one workspace per user: A (realm A, active), B (realm A, pending deletion), C (realm B, suspended).</summary>
+    internal static async Task SeedAsync(SqliteBridgeExecutor bridge)
     {
         await IdentityReadPlanTests.SeedAsync(bridge);
         await bridge.ExecAsync(
