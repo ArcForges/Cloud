@@ -152,7 +152,7 @@ internal sealed class IdentityService(IIdentityStore store, IIdentityIdSource id
             var home = await store.FindWorkspaceByOwnerAsync(caller.Realm, caller.User, cancellationToken).ConfigureAwait(false);
             if (user is null || home is null) return Fail<AuthIdentity>(IdentityError.NotFound);
             var credentials = await store.ListCredentialsAsync(caller.Realm, caller.User, cancellationToken).ConfigureAwait(false);
-            var recovery = await store.HasActiveRecoveryPathAsync(caller.User, cancellationToken).ConfigureAwait(false);
+            var recovery = await store.HasActiveRecoveryPathAsync(caller.Realm, caller.User, cancellationToken).ConfigureAwait(false);
             if (IdentityRules.CheckRevocation(user, credentials, target, recovery) is { } refusal) return Fail<AuthIdentity>(refusal);
             var current = credentials.First(c => c.Id == target);
             var at = Now();

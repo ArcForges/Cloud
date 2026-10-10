@@ -158,9 +158,9 @@ internal sealed class InMemoryIdentityStore(TimeProvider? time = null) : IIdenti
         }
     }
 
-    public ValueTask<bool> HasActiveRecoveryPathAsync(UserId id, CancellationToken cancellationToken)
+    public ValueTask<bool> HasActiveRecoveryPathAsync(RealmId realm, UserId id, CancellationToken cancellationToken)
     {
-        lock (gate) return ValueTask.FromResult(recoveryPaths.Contains(id));
+        lock (gate) return ValueTask.FromResult(users.TryGetValue(id, out var user) && user.Realm == realm && recoveryPaths.Contains(id));
     }
 
     public ValueTask<CommitOutcome> CommitAsync(IdentityCommit commit, CancellationToken cancellationToken)
