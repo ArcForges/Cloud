@@ -354,6 +354,35 @@ public sealed class DeployTests
     }
 
     [Fact]
+    public async Task AMissingTokenRefusesBeforeTheTargetIsSelectedSoATargetWithoutADatabaseIsNeverReportedNotApplicable()
+    {
+        // S42(3): the TypeScript order is kept. Context, account and token presence are checked first, then the candidate manifest,
+        // then target selection. A missing secret therefore refuses even for a target that declares no database, with no network call
+        // and no not-applicable record. The token-present not-applicable path is pinned by ProductionDeclaresNoDatabase...NoNetworkCall.
+        var root = Stage();
+        try
+        {
+            var env = Env("deploy", "push");
+            env["CLOUDFLARE_API_TOKEN"] = string.Empty;
+            var handler = new ScriptedHandler((request, body) =>
+            {
+                Assert.Fail("no network call is expected when the token is missing");
+                return Task.FromResult(ScriptedHandler.Json("{}"));
+            });
+            var (code, output) = await Deploy("production", root, env, handler);
+            Assert.Equal(1, code);
+            Assert.Empty(handler.Bodies);
+            Assert.Matches("REFUSED \\(context\\)", output);
+            Assert.DoesNotMatch("not applicable", output);
+            Assert.Equal("refused", DeployGateRecord(root, "production").Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task TheLiveStepRefusesAPullRequestAForkAnotherBranchAnotherRepositoryAndACandidateOfAnotherCommit()
     {
         var root = Stage();
