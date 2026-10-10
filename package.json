@@ -59,10 +59,10 @@
     "@cloudflare/containers": "0.3.7"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.5.15",
     "@cloudflare/workers-types": "5.20260926.1",
-    "@types/node": "24.13.5",
-    "prettier": "3.9.8",
+    "@types/node": "24.19.1",
+    "prettier": "3.9.9",
     "typescript": "7.0.2",
     "wrangler": "4.143.1"
   },
