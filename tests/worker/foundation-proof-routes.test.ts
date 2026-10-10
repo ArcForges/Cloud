@@ -557,14 +557,35 @@ test("the egress probe is an operator operation signed toward the Container and 
 
 // ---- readiness (CLOUD.08) ----
 
+const readyComponents = {
+  ingress: { state: "ready", evidence: "bound" },
+  container: { state: "ready", evidence: "probed" },
+  d1: { state: "ready", evidence: "probed" },
+  durableObject: { state: "ready", evidence: "probed" },
+  r2: { state: "ready", evidence: "probed" },
+  queue: { state: "ready", evidence: "bound" },
+};
+
+/** The complete report the host returns: its own judgement, which the C# evaluator makes from the Worker's observations. */
 const readyHost = (overrides: Record<string, unknown> = {}) =>
   JSON.stringify({
+    schema: "cloud.readiness.v1",
+    status: "ready",
     ready: true,
-    manifestHash,
-    schemaVersion: "1",
-    revision: "r".repeat(40),
-    components: { d1: { state: "ready" } },
+    environment: "proof",
+    workerRevision: "",
+    components: readyComponents,
+    host: { manifestHash, schemaVersion: "1", revision: "r".repeat(40) },
     ...overrides,
+  });
+
+/** A host report whose D1 is misconfigured: the whole is misconfigured and not ready. */
+const misconfiguredHost = (d1: Record<string, unknown>, host: Record<string, unknown> = {}) =>
+  readyHost({
+    status: "misconfigured",
+    ready: false,
+    components: { ...readyComponents, d1: { ...d1, evidence: "probed" } },
+    host: { manifestHash, schemaVersion: "1", revision: "r".repeat(40), ...host },
   });
 
 /** A complete proof environment: every binding present, and the Container answers as stated. */
@@ -591,7 +612,15 @@ function readinessEnvironment(
   return built;
 }
 
-test("the operator readiness operation reports every component, signed toward the Container once", async () => {
+/** The forwarded observations of a call to the host: the Worker sends its facts, and the host returns the verdict. */
+function forwardedObservations(recorded: Recorded[]): Record<string, unknown> {
+  return JSON.parse(new TextDecoder().decode((recorded[0] as Recorded).body)) as Record<
+    string,
+    unknown
+  >;
+}
+
+test("the operator readiness operation forwards the Worker's observations and returns the host's whole report", async () => {
   const lines: string[] = [];
   const { env, recorded } = readinessEnvironment({ body: readyHost() });
   const response = await handleProof(operator("/proof/v1/readiness", {}), env, (line) =>
@@ -620,13 +649,22 @@ test("the operator readiness operation reports every component, signed toward th
     "/internal/foundation/v1/readiness",
   );
   assert.equal((recorded[0] as Recorded).request.headers.get("authorization"), null);
+  const observed = forwardedObservations(recorded);
+  assert.equal(observed.manifestHash, manifestHash, "the Worker forwards its own plan manifest");
+  assert.equal(observed.environment, "proof");
   // One closed log line, no content.
   assert.equal(lines.length, 1);
   assert.equal((JSON.parse(lines[0] as string) as { event: string }).event, "cloud.readiness");
 });
 
-test("the operator readiness operation fails readiness for a mismatching plan manifest", async () => {
-  const { env } = readinessEnvironment({ body: readyHost({ manifestHash: "b".repeat(64) }) });
+test("the operator readiness operation passes a mismatching plan manifest verdict through as a 503 with no retry", async () => {
+  const { env, recorded } = readinessEnvironment({
+    body: misconfiguredHost(
+      { state: "misconfigured", reason: "plan_hash_mismatch" },
+      { manifestHash: "b".repeat(64) },
+    ),
+    status: 503,
+  });
   const response = await handleProof(operator("/proof/v1/readiness", {}), env, () => {});
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("retry-after"), null);
@@ -636,23 +674,20 @@ test("the operator readiness operation fails readiness for a mismatching plan ma
   };
   assert.equal(body.ready, false);
   assert.equal(body.components.d1?.reason, "plan_hash_mismatch");
+  assert.equal(forwardedObservations(recorded).manifestHash, manifestHash);
 });
 
-test("the operator readiness operation fails readiness for a missing binding without waking the Container", async () => {
+test("the operator readiness operation forwards a missing binding as not met and keeps the Container's answer", async () => {
   const { env, recorded } = readinessEnvironment(
     { body: readyHost() },
     { OBJECTS: undefined as never },
   );
   const response = await handleProof(operator("/proof/v1/readiness", {}), env, () => {});
-  assert.equal(response.status, 503);
-  const body = (await response.json()) as {
-    status: string;
-    components: Record<string, { state: string; missing?: string[] }>;
-  };
-  assert.equal(body.status, "misconfigured");
-  assert.deepEqual(body.components.r2?.missing, ["OBJECTS"]);
-  assert.equal(body.components.container?.state, "ready", "components fail independently");
+  assert.equal(response.status, 200, "the host's verdict is the one returned");
   assert.equal(recorded.length, 1);
+  const bindings = forwardedObservations(recorded).bindings as Record<string, boolean>;
+  assert.equal(bindings.OBJECTS, false);
+  assert.equal(bindings.DB, true);
 });
 
 test("a Container the platform could not start is reported, with retry guidance, not relayed", async () => {

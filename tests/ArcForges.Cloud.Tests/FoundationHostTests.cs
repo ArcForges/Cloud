@@ -6,6 +6,7 @@ using System.Text.Json;
 using ArcForges.Cloud.Composition;
 using ArcForges.Cloud.Foundation;
 using ArcForges.Cloud.Hmac;
+using ArcForges.Cloud.Readiness;
 using ArcForges.Cloud.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -93,6 +94,24 @@ public sealed class FoundationHostTests
 
     private static Task<(HttpStatusCode Status, JsonElement Json, HttpResponseHeaders Headers, string Text)> Operation(Running host, string operation, object body) =>
         Send(host, Signed(host, "/internal/foundation/v1/" + operation, JsonSerializer.SerializeToUtf8Bytes(body)));
+
+    /// <summary>A complete observation of a proof Worker: every declared binding met and both probes answered (CLOUD.84 S39(1)).</summary>
+    private static object ReadinessObservation() => new
+    {
+        environment = "proof",
+        workerRevision = "0123456789abcdef0123456789abcdef01234567",
+        manifestHash = PlanManifest.Hash,
+        bindings = ReadinessVocabulary.Bindings.ToDictionary(binding => binding.Name, _ => true),
+        durableObject = new { outcome = "ready", elapsedMs = 1 },
+        r2 = new { outcome = "ready", elapsedMs = 1 },
+    };
+
+    /// <summary>The same observation as signed-call bytes, with padding spaces after the opening brace.</summary>
+    private static byte[] ReadinessBody(int padding = 0)
+    {
+        var json = Encoding.UTF8.GetString(JsonSerializer.SerializeToUtf8Bytes(ReadinessObservation()));
+        return Encoding.UTF8.GetBytes("{" + new string(' ', padding) + json[1..]);
+    }
 
     private static HttpRequestMessage Browser(string method, string path, string? cookie = null, string? origin = null, string? csrf = null, string? body = null)
     {
@@ -257,7 +276,7 @@ public sealed class FoundationHostTests
     public async Task SignedRequestsAreCheckedForContentTypeSizeShapeAndRoute()
     {
         await using var host = await StartAsync();
-        var json = "{}"u8.ToArray();
+        var json = ReadinessBody();
         Assert.Equal(HttpStatusCode.UnsupportedMediaType, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", json, contentType: "text/plain"))).Status);
         Assert.Equal(HttpStatusCode.UnsupportedMediaType, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", json, contentType: null))).Status);
         Assert.Equal(HttpStatusCode.OK, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", json, contentType: "application/json; charset=utf-8"))).Status);
@@ -271,12 +290,13 @@ public sealed class FoundationHostTests
         Assert.Equal(HttpStatusCode.MethodNotAllowed, wrongMethod.StatusCode);
         var ok = await Send(host, Signed(host, "/internal/foundation/v1/readiness", json));
         Assert.True(ok.Json.GetProperty("ready").GetBoolean());
-        Assert.Equal(PlanManifest.Hash, ok.Json.GetProperty("manifestHash").GetString());
+        // The host's own identity is nested under host; the Worker lifts it to the wire form.
+        Assert.Equal(PlanManifest.Hash, ok.Json.GetProperty("host").GetProperty("manifestHash").GetString());
         // The host reports its own compiled revision, which the live runner compares with the deployed one.
-        Assert.Equal(HostRevision.Current, ok.Json.GetProperty("revision").GetString());
+        Assert.Equal(HostRevision.Current, ok.Json.GetProperty("host").GetProperty("revision").GetString());
         Assert.Matches("^[0-9a-f]{40}(-dirty)?$", HostRevision.Current);
         // The host-wide bound of 4096 bytes protects Hello; the foundation routes raise only their own bound.
-        var padded = Encoding.UTF8.GetBytes("{" + new string(' ', 5000) + "}");
+        var padded = ReadinessBody(5000);
         Assert.Equal(HttpStatusCode.OK, (await Send(host, Signed(host, "/internal/foundation/v1/readiness", padded))).Status);
     }
 
@@ -284,21 +304,21 @@ public sealed class FoundationHostTests
     public async Task AFailedReadinessIsA503WithTheClosedReportNotAnOpaqueError()
     {
         await using var host = await StartAsync();
-        var ready = await Operation(host, "readiness", new { });
+        var ready = await Operation(host, "readiness", ReadinessObservation());
         Assert.Equal(HttpStatusCode.OK, ready.Status);
         Assert.Equal("ready", ready.Json.GetProperty("components").GetProperty("d1").GetProperty("state").GetString());
 
         host.Storage.Fault = call => call.Plan.Id == "foundation.readiness" ? PlanFailureKind.ManifestMismatch : null;
-        var mismatch = await Operation(host, "readiness", new { });
+        var mismatch = await Operation(host, "readiness", ReadinessObservation());
         Assert.Equal(HttpStatusCode.ServiceUnavailable, mismatch.Status);
         Assert.False(mismatch.Json.GetProperty("ready").GetBoolean());
         var d1 = mismatch.Json.GetProperty("components").GetProperty("d1");
         Assert.Equal("misconfigured", d1.GetProperty("state").GetString());
         Assert.Equal("plan_hash_mismatch", d1.GetProperty("reason").GetString());
-        Assert.Equal(PlanManifest.Hash, mismatch.Json.GetProperty("manifestHash").GetString());
+        Assert.Equal(PlanManifest.Hash, mismatch.Json.GetProperty("host").GetProperty("manifestHash").GetString());
 
         host.Storage.Fault = call => call.Plan.Id == "foundation.readiness" ? PlanFailureKind.Unavailable : null;
-        var outage = await Operation(host, "readiness", new { });
+        var outage = await Operation(host, "readiness", ReadinessObservation());
         Assert.Equal(HttpStatusCode.ServiceUnavailable, outage.Status);
         Assert.Equal("unavailable", outage.Json.GetProperty("components").GetProperty("d1").GetProperty("state").GetString());
         Assert.Equal(3, host.Storage.Executions("foundation.readiness"));
@@ -342,7 +362,7 @@ public sealed class FoundationHostTests
         await using var host = await StartAsync();
         // Above the host-wide 4096 bytes that protect Hello, but within the route's own bound. (Kestrel counts the
         // chunk framing against the limit, so a chunked body exactly at the bound is not asserted either way.)
-        var within = Encoding.UTF8.GetBytes("{" + new string(' ', 8190) + "}");
+        var within = ReadinessBody(8190);
         Assert.Equal(HttpStatusCode.OK, (await Send(host, Chunked(host, within))).Status);
         var over = Encoding.UTF8.GetBytes("{" + new string(' ', FoundationEndpoints.MaxBodyBytes - 1) + "}");
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await Send(host, Chunked(host, over))).Status);

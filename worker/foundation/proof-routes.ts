@@ -9,9 +9,9 @@ import { poisonName } from "./poison.ts";
 import { isOperatorAuthorization, verifyOperatorSignature } from "./operator-signature.ts";
 import { ContainerCallError, postSigned } from "./container-client.ts";
 import { classifyStartFailureResponse } from "../readiness/container.ts";
-import { evaluateReadiness } from "../readiness/evaluate.ts";
+import { evaluateReadiness } from "../readiness/transport.ts";
 import { readinessLogEvent, readinessResponse } from "../readiness/http.ts";
-import { retryAfterSeconds } from "../readiness/model.ts";
+import { retryAfterSeconds } from "../tables/cloud-tables.generated.ts";
 import {
   foundationContainerName,
   proofEnabled,

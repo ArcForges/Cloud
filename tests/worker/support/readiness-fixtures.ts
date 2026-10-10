@@ -2,7 +2,7 @@
 // Shared fixtures of the readiness tests: a complete proof environment whose every binding is a recording fake,
 // and the replies the Container host can give.
 import type { ReadinessEnv } from "../../../worker/readiness/bindings.ts";
-import type { HostReply } from "../../../worker/readiness/evaluate.ts";
+import type { HostReply } from "../../../worker/readiness/transport.ts";
 import { base64UrlEncode } from "../../../worker/private/encoding.ts";
 
 export const secretMaterial = {
@@ -75,18 +75,49 @@ export function productionEnvironment(): ReadinessEnv {
   };
 }
 
-export function hostBody(
+/**
+ * The complete report the Container host returns for a proof environment, as the C# evaluator judges it. The fixture only states
+ * the verdict the host would give for the given D1 state; the judging itself is tested in C# (CLOUD.84 S39(1)).
+ */
+export function hostReport(
   d1: { state: string; reason?: string } = { state: "ready" },
   overrides: Record<string, unknown> = {},
 ): string {
+  const status =
+    d1.state === "misconfigured"
+      ? "misconfigured"
+      : d1.state === "unavailable"
+        ? "unavailable"
+        : "ready";
   return JSON.stringify({
-    ready: d1.state === "ready",
-    manifestHash: manifest,
-    schemaVersion: "1",
-    revision: "fedcba9876543210fedcba9876543210fedcba98",
-    components: { d1 },
+    schema: "cloud.readiness.v1",
+    status,
+    ready: status === "ready",
+    environment: "proof",
+    workerRevision: "",
+    components: {
+      ingress: { state: "ready", evidence: "bound" },
+      container: { state: "ready", evidence: "probed" },
+      d1: { ...d1, evidence: "probed" },
+      durableObject: { state: "ready", evidence: "probed", elapsedMs: 3 },
+      r2: { state: "ready", evidence: "probed", elapsedMs: 3 },
+      queue: { state: "ready", evidence: "bound" },
+    },
+    host: {
+      manifestHash: manifest,
+      schemaVersion: "1",
+      revision: "fedcba9876543210fedcba9876543210fedcba98",
+    },
     ...overrides,
   });
+}
+
+/** The reply the host gives for a report: 200 when ready, 503 otherwise. */
+export function hostReply(
+  d1: { state: string; reason?: string } = { state: "ready" },
+  overrides: Record<string, unknown> = {},
+): HostReply {
+  return reply(d1.state === "ready" ? 200 : 503, hostReport(d1, overrides));
 }
 
 export function reply(

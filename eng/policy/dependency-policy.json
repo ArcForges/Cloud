@@ -17,7 +17,7 @@
     "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "0c3988a778265e1211eee50ffeb98e38b0759dabebbb1502a0b38ae09f97f344",
-    "package.json": "0588fbf5b273d8ebf8287ffd9adbd0bb4638b8712dec1ce54fc706e58cc66864",
+    "package.json": "0e4b3d9ca4b9d1a08f0ec8cce406e6bfbade187b02779fa0bd87e2e08d5e0f69",
     "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
     "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
     "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -75,8 +75,8 @@
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "w-deku-20261009-rev-cloud-84",
-    "date": "2026-10-09",
-    "rationale": "CLOUD.84 U2 retires the npm Contracts SDK identities. This receipt removes @arcforges/proto and @arcforges/api-client from package.json and package-lock.json (npm install --ignore-scripts). The lock diff is those two packages, the three packages only they required (@bufbuild/protobuf, @connectrpc/connect and @connectrpc/connect-web) and the root manifest entries, with no version, integrity or resolved value changed for any remaining coordinate. They are removed from the first-party and foundation-candidate lists. @arcforges/ai-internal stays the one npm Contracts dependency. The Hello protocol probe moves to the NuGet Contracts generated client in tools/ArcForges.Cloud.Generation, and the Contracts identity is read from the committed eng/generated/contracts-identity.json. The tool project declares RuntimeIdentifiers linux-x64 for the self-contained probe; its lock gains the linux-x64 target section and no package version changes. The candidate publish's build-only trimming package is not committed (buildCandidate restores the reviewed lock). The tool is not published. The successor chains from cloud-84-r2, the receipt active before this group.",
+    "date": "2026-10-10",
+    "rationale": "CLOUD.84 U5 moves the readiness evaluation to C# (S39(1)). The only change to package.json is the test list: tests/worker/readiness-evaluate.test.ts and readiness-model.test.ts are replaced one-for-one by readiness-transport.test.ts and readiness-wire.test.ts. No dependency, devDependency, version, integrity or resolved value changes, and package-lock.json is unchanged. The successor chains from cloud-84-r3, the receipt active before this group.",
     "inputs": {
       ".github/workflows/ci.yml": "e5c33bc17b1fe12b36cd4de6a7c8fea4a47a8e06891606a6f7bd41317dec81cf",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -91,7 +91,7 @@
       "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "0c3988a778265e1211eee50ffeb98e38b0759dabebbb1502a0b38ae09f97f344",
-      "package.json": "0588fbf5b273d8ebf8287ffd9adbd0bb4638b8712dec1ce54fc706e58cc66864",
+      "package.json": "0e4b3d9ca4b9d1a08f0ec8cce406e6bfbade187b02779fa0bd87e2e08d5e0f69",
       "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
       "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
       "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -157,9 +157,9 @@
     ],
     "runtimeAssessment": "No runtime change to the shipped closure. The tool project is never published, the host and the production Worker entry keep their behaviour, and the generated Worker tables carry the same values. No runtime capability, dependency class or native closure changes.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/cloud-84-r2.json",
+    "previous": "eng/policy/dependency-reviews/cloud-84-r3.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
-    "reviewedOn": "2026-10-09",
+    "reviewedOn": "2026-10-10",
     "decision": "approved"
   },
   "closure": {
@@ -951,7 +951,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r3.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r4.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

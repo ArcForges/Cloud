@@ -28,6 +28,25 @@ public sealed record CorrelationGuardRow(
     string TraceparentVersion,
     string TraceparentFlags);
 
+/// <summary>One declared binding of the readiness vocabulary: the component, the name and the environments that declare it.</summary>
+public sealed record ReadinessBindingRow(string Component, string Name, IReadOnlyList<string> Environments);
+
+/// <summary>The readiness vocabulary the Worker names (WP-21.07, cloud.readiness.v1; CLOUD.84 S34 and S39(1)), read from ReadinessVocabulary.</summary>
+public sealed record ReadinessRow(
+    string Schema,
+    int RetryAfterSeconds,
+    int WaitMilliseconds,
+    IReadOnlyList<string> Environments,
+    IReadOnlyList<string> Components,
+    IReadOnlyList<string> States,
+    IReadOnlyList<string> Statuses,
+    IReadOnlyList<string> RetryableStatuses,
+    IReadOnlyList<string> Evidence,
+    IReadOnlyList<string> Reasons,
+    IReadOnlyList<string> KeyBindings,
+    IReadOnlyList<string> ProbeOutcomes,
+    IReadOnlyList<ReadinessBindingRow> Bindings);
+
 /// <summary>Everything the Worker's transport tables are generated from, read from the C# host and its declarations.</summary>
 public sealed record TableModel(
     string HelloPath,
@@ -40,7 +59,8 @@ public sealed record TableModel(
     int StreamLifetimeMilliseconds,
     string SessionCookieName,
     string CsrfHeader,
-    CorrelationGuardRow Correlation);
+    CorrelationGuardRow Correlation,
+    ReadinessRow Readiness);
 
 /// <summary>
 /// Reads the transport tables by reflection over the host's registrations: HelloModule (the production policies and the plain health
@@ -110,6 +130,7 @@ public static class HostReader
             StreamLifetimeMilliseconds: Constant(budgets, "StreamLifetimeMilliseconds"),
             SessionCookieName: Text(ingress, "SessionCookieName"),
             CsrfHeader: Text(ingress, "CsrfHeader").ToLowerInvariant(),
+            Readiness: ReadReadiness(assembly),
             Correlation: new CorrelationGuardRow(
                 UuidPattern: Text(guards, "UuidPattern"),
                 NilUuid: Text(guards, "NilUuid"),
@@ -120,6 +141,35 @@ public static class HostReader
                 TraceparentVersion: Text(guards, "TraceparentVersion"),
                 TraceparentFlags: Text(guards, "TraceparentFlags")));
     }
+
+    private const string ReadinessVocabularyType = "ArcForges.Cloud.Readiness.ReadinessVocabulary";
+
+    /// <summary>Reads the readiness vocabulary and its binding declarations; a missing member stops the generator.</summary>
+    private static ReadinessRow ReadReadiness(Assembly assembly)
+    {
+        var vocabulary = LoadType(assembly, ReadinessVocabularyType);
+        var bindings = Enumerate(Member(null, vocabulary, "Bindings")).Select(item =>
+        {
+            var itemType = item.GetType();
+            return new ReadinessBindingRow(Text(item, itemType, "Component"), Text(item, itemType, "Name"), Strings(Member(item, itemType, "Environments")));
+        }).ToList();
+        return new ReadinessRow(
+            Schema: Text(vocabulary, "Schema"),
+            RetryAfterSeconds: Constant(vocabulary, "RetryAfterSeconds"),
+            WaitMilliseconds: Constant(vocabulary, "ReadinessWaitMilliseconds"),
+            Environments: Strings(Member(null, vocabulary, "Environments")),
+            Components: Strings(Member(null, vocabulary, "Components")),
+            States: Strings(Member(null, vocabulary, "States")),
+            Statuses: Strings(Member(null, vocabulary, "Statuses")),
+            RetryableStatuses: Strings(Member(null, vocabulary, "RetryableStatuses")),
+            Evidence: Strings(Member(null, vocabulary, "Evidence")),
+            Reasons: Strings(Member(null, vocabulary, "Reasons")),
+            KeyBindings: Strings(Member(null, vocabulary, "KeyBindings")),
+            ProbeOutcomes: Strings(Member(null, vocabulary, "ProbeOutcomes")),
+            Bindings: bindings);
+    }
+
+    private static IReadOnlyList<string> Strings(object value) => Enumerate(value).Select(item => (string)item).ToList();
 
     private static Type LoadType(Assembly assembly, string name) =>
         assembly.GetType(name, throwOnError: true) ?? throw new InvalidOperationException($"Missing type {name}.");

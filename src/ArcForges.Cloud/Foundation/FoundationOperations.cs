@@ -96,10 +96,11 @@ internal sealed class FoundationOperations(IPlanExecutor executor, SessionServic
 
     private async Task<OperationReply> ReadinessAsync(byte[] body, CancellationToken cancellationToken)
     {
-        if (!TryParse(body, FoundationJsonContext.Default.ReadinessRequest, out _)) return OperationReply.Invalid;
+        // The Worker forwards its raw observations (CLOUD.84 S39(1)); a malformed or incomplete observation is refused, never evaluated.
+        if (!TryParse(body, FoundationJsonContext.Default.ReadinessObservations, out var observations) || !ReadinessEvaluator.IsWellFormed(observations)) return OperationReply.Invalid;
         // Ready is 200; anything else is 503 with the same closed report, so the Worker can tell a plan mismatch from an outage.
-        var report = await new HostReadiness(executor, options).ReportAsync(cancellationToken);
-        return OperationReply.Json(report.Ready ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable, report, FoundationJsonContext.Default.ReadinessResponse);
+        var report = await new HostReadiness(executor, options).ReportAsync(observations, cancellationToken);
+        return OperationReply.Json(report.Ready ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable, report, FoundationJsonContext.Default.ReadinessReport);
     }
 
     // ---- exact ----------------------------------------------------------------------------------------------------

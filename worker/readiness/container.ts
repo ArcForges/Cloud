@@ -5,9 +5,13 @@
 // never forwarded to the host, so the refusal is safe to retry (effect: did not happen). A reply the host
 // itself wrote is JSON or gRPC-Web, never this plain text, and a failure after forwarding stays unclassified
 // because the effect of a possibly forwarded call is not known (ordinary uncertainty recovery).
-import { retryAfterSeconds } from "./model.ts";
+import { retryAfterSeconds, type Reason } from "../tables/cloud-tables.generated.ts";
 
-export type StartFailure = "no_instance_available" | "start_failed" | "rate_limited";
+/** The start-failure classes; their names are the generated readiness reasons (CLOUD.84 S34). */
+export type StartFailure = Extract<
+  Reason,
+  "no_instance_available" | "start_failed" | "rate_limited"
+>;
 
 /**
  * The opening of each library message, taken from the locked @cloudflare/containers (container.js). A test reads

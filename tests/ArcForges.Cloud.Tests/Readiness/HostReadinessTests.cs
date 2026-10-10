@@ -9,9 +9,9 @@ using Xunit;
 namespace ArcForges.Cloud.Tests.Readiness;
 
 /// <summary>
-/// WP-21.07, host half: D1 readiness runs the named readiness plan once, and a failure is classified instead of collapsed,
-/// so a plan-manifest or recovery-generation mismatch and a refused signature are reported as a misconfigured deployment,
-/// never as a transient outage, and the report is ready only when its component is.
+/// WP-21.07, host half (CLOUD.84 S39(1)): D1 readiness runs the named readiness plan once, and a failure is classified instead of collapsed,
+/// so a plan-manifest or recovery-generation mismatch and a refused signature are reported as a misconfigured deployment, never as a
+/// transient outage. The whole report is judged from the Worker's observations, and it is ready only when every required component is.
 /// </summary>
 public sealed class HostReadinessTests
 {
@@ -30,18 +30,29 @@ public sealed class HostReadinessTests
 
     private static IPlanExecutor Failing(PlanFailureKind kind) => new Executor(_ => throw new PlanFailureException(kind));
 
-    private static Task<ReadinessResponse> Report(IPlanExecutor executor) => new HostReadiness(executor, T.Options()).ReportAsync(T.Ct);
+    private static Task<ReadinessReport> Report(IPlanExecutor executor) => new HostReadiness(executor, T.Options()).ReportAsync(ObservationsOfAHealthyWorker(), T.Ct);
+
+    /// <summary>What a Worker whose every declared binding is met and whose probes answered forwards.</summary>
+    private static ReadinessObservations ObservationsOfAHealthyWorker() => new(
+        ReadinessVocabulary.Proof,
+        "0123456789abcdef0123456789abcdef01234567",
+        PlanManifest.Hash,
+        ReadinessVocabulary.Bindings.ToDictionary(binding => binding.Name, _ => true),
+        new ReadinessProbe("ready", 3),
+        new ReadinessProbe("ready", 3));
 
     [Fact]
     public async Task AHealthyReadinessPlanIsReadyAndCarriesTheHostIdentity()
     {
         var executor = new Executor(_ => Rows(1));
-        var report = await Report(executor);
+        var report = await new HostReadiness(executor, T.Options()).ReportAsync(ObservationsOfAHealthyWorker(), T.Ct);
         Assert.True(report.Ready);
-        Assert.Equal(new ReadinessComponent("ready"), report.Components.D1);
-        Assert.Equal(PlanManifest.Hash, report.ManifestHash);
-        Assert.Equal("1", report.SchemaVersion);
-        Assert.Equal(HostRevision.Current, report.Revision);
+        Assert.Equal("ready", report.Status);
+        Assert.Equal(new ReadinessComponent("ready", null, "probed"), report.Components.D1);
+        Assert.NotNull(report.Host);
+        Assert.Equal(PlanManifest.Hash, report.Host.ManifestHash);
+        Assert.Equal("1", report.Host.SchemaVersion);
+        Assert.Equal(HostRevision.Current, report.Host.Revision);
         Assert.Equal([PlanManifest.Foundation.Readiness.Id], executor.Calls);
     }
 
@@ -59,9 +70,10 @@ public sealed class HostReadinessTests
     {
         var kind = Enum.Parse<PlanFailureKind>(kindName);
         var executor = new Executor(_ => throw new PlanFailureException(kind));
-        var report = await Report(executor);
+        var report = await new HostReadiness(executor, T.Options()).ReportAsync(ObservationsOfAHealthyWorker(), T.Ct);
         Assert.False(report.Ready);
-        Assert.Equal(new ReadinessComponent(state, reason), report.Components.D1);
+        Assert.Equal(state, report.Status);
+        Assert.Equal(new ReadinessComponent(state, reason, "probed"), report.Components.D1);
         Assert.Single(executor.Calls);
     }
 
@@ -70,10 +82,10 @@ public sealed class HostReadinessTests
     [InlineData(2)]
     public async Task AnyReadinessRowOtherThanSchemaVersionOneIsAMisconfiguration(long version)
     {
-        var report = await Report(new Executor(_ => version == 0 ? Rows() : Rows(version)));
+        var report = await new HostReadiness(new Executor(_ => version == 0 ? Rows() : Rows(version)), T.Options()).ReportAsync(ObservationsOfAHealthyWorker(), T.Ct);
         Assert.False(report.Ready);
-        Assert.Equal(new ReadinessComponent("misconfigured", "schema_mismatch"), report.Components.D1);
-        var twoRows = await Report(new Executor(_ => Rows(1, 1)));
+        Assert.Equal(new ReadinessComponent("misconfigured", "schema_mismatch", "probed"), report.Components.D1);
+        var twoRows = await new HostReadiness(new Executor(_ => Rows(1, 1)), T.Options()).ReportAsync(ObservationsOfAHealthyWorker(), T.Ct);
         Assert.False(twoRows.Ready);
         Assert.Equal("schema_mismatch", twoRows.Components.D1.Reason);
     }
@@ -82,10 +94,10 @@ public sealed class HostReadinessTests
     public async Task ARecoveryGenerationThatDiffersFromTheWorkersIsAMismatchNotAnOutage()
     {
         var storage = new FakeStorage { ActiveGeneration = 5 };
-        var report = await new HostReadiness(storage, T.Options(generation: 0)).ReportAsync(T.Ct);
+        var report = await new HostReadiness(storage, T.Options(generation: 0)).ReportAsync(ObservationsOfAHealthyWorker(), T.Ct);
         Assert.False(report.Ready);
-        Assert.Equal(new ReadinessComponent("misconfigured", "recovery_generation_mismatch"), report.Components.D1);
-        var agreed = await new HostReadiness(new FakeStorage { ActiveGeneration = 5 }, T.Options(generation: 5)).ReportAsync(T.Ct);
+        Assert.Equal(new ReadinessComponent("misconfigured", "recovery_generation_mismatch", "probed"), report.Components.D1);
+        var agreed = await new HostReadiness(new FakeStorage { ActiveGeneration = 5 }, T.Options(generation: 5)).ReportAsync(ObservationsOfAHealthyWorker(), T.Ct);
         Assert.True(agreed.Ready);
     }
 
@@ -95,25 +107,28 @@ public sealed class HostReadinessTests
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
         var executor = new Executor(_ => throw new OperationCanceledException());
-        await Assert.ThrowsAsync<OperationCanceledException>(() => new HostReadiness(executor, T.Options()).ReportAsync(cancelled.Token));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new HostReadiness(executor, T.Options()).ReportAsync(ObservationsOfAHealthyWorker(), cancelled.Token));
         Assert.Single(executor.Calls);
     }
 
     [Fact]
     public async Task TheReportIsClosedAndCarriesNoContent()
     {
-        var failed = await Report(Failing(PlanFailureKind.ManifestMismatch));
-        var json = JsonSerializer.Serialize(failed, FoundationJsonContext.Default.ReadinessResponse);
+        var failed = await new HostReadiness(Failing(PlanFailureKind.ManifestMismatch), T.Options()).ReportAsync(ObservationsOfAHealthyWorker(), T.Ct);
+        var json = JsonSerializer.Serialize(failed, FoundationJsonContext.Default.ReadinessReport);
         using var document = JsonDocument.Parse(json);
-        Assert.Equal(["ready", "manifestHash", "schemaVersion", "revision", "components"], document.RootElement.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["schema", "status", "ready", "environment", "workerRevision", "components", "host"], document.RootElement.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["ingress", "container", "d1", "durableObject", "r2", "queue"], document.RootElement.GetProperty("components").EnumerateObject().Select(p => p.Name));
         var d1 = document.RootElement.GetProperty("components").GetProperty("d1");
-        Assert.Equal(["state", "reason"], d1.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["state", "reason", "evidence"], d1.EnumerateObject().Select(p => p.Name));
         Assert.Equal("misconfigured", d1.GetProperty("state").GetString());
-        // A ready component omits its reason.
-        var ready = JsonSerializer.Serialize(await Report(new Executor(_ => Rows(1))), FoundationJsonContext.Default.ReadinessResponse);
-        using var readyDocument = JsonDocument.Parse(ready);
-        Assert.Equal(["state"], readyDocument.RootElement.GetProperty("components").GetProperty("d1").EnumerateObject().Select(p => p.Name));
+        // A ready component omits its reason and its missing list.
+        var ready = await new HostReadiness(new Executor(_ => Rows(1)), T.Options()).ReportAsync(ObservationsOfAHealthyWorker(), T.Ct);
+        var readyJson = JsonSerializer.Serialize(ready, FoundationJsonContext.Default.ReadinessReport);
+        using var readyDocument = JsonDocument.Parse(readyJson);
+        Assert.Equal(["state", "evidence"], readyDocument.RootElement.GetProperty("components").GetProperty("d1").EnumerateObject().Select(p => p.Name));
         Assert.DoesNotContain("SELECT", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PRAGMA", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

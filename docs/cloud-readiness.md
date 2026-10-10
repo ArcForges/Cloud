@@ -6,19 +6,27 @@ check proves and what it does not. Nothing here adds a public production route, 
 ## What readiness is
 
 Readiness answers one question: can this deployment serve work right now. It is reported **per component**, never as one
-flag, so a failing dependency never hides behind a healthy one and a healthy dependency never vouches for a failing one:
+flag, so a failing dependency never hides behind a healthy one and a healthy dependency never vouches for a failing one.
 
-| Component       | Where it is judged                                                        | What a `ready` answer proves                                                                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ingress`       | Worker                                                                    | The declared ingress bindings are present with the expected shape (`SOURCE_REVISION`, the rate limiter, and in the proof environment the allowed origin). The Worker answered, so it is serving. Evidence `bound`. |
-| `container`     | Worker, from the host's own reply                                         | The Container started and answered one signed private readiness call within the bounded wait, so it trusts this Worker's key and runs a host with the readiness route. Evidence `probed`.                          |
-| `d1`            | Host (D1 reached through the real plan path), checked again by the Worker | The named readiness plan ran through the Worker's storage handler and returned schema version 1, the plan-manifest hashes of Worker and host are equal, and the recovery generations agree. Evidence `probed`.     |
-| `durableObject` | Worker                                                                    | One read of an observation that nothing writes, on a Durable Object with a fixed name, answered. Evidence `probed`.                                                                                                |
-| `r2`            | Worker                                                                    | A `head` of a key that holds nothing answered (absent is the healthy answer). No object is ever written. Evidence `probed`.                                                                                        |
-| `queue`         | Worker                                                                    | The producer binding is present with a `send` method. A Queue producer has no read-only probe, and a send would enqueue work, so this is evidence `bound` only: it does **not** prove that messages are delivered. |
+The evaluation is C# (CLOUD.84 S39(1)). The Worker measures what only it can see, its own bindings and one bounded read each
+of its Durable Object and of R2, and forwards those raw observations on the signed readiness call. The Container host judges
+the whole report in `ReadinessEvaluator` (`src/ArcForges.Cloud/Readiness`), from the observations and its own D1 check. When
+the Container cannot answer, the Worker reports what it observed, with no verdict beyond `container unreachable: <class>`
+(see "A report the Container could not judge" below).
+
+| Component       | Where it is judged                                                                                                     | What a `ready` answer proves                                                                                                                                                                                       |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ingress`       | Host evaluator, from the Worker's binding observations                                                                 | The declared ingress bindings are present with the expected shape (`SOURCE_REVISION`, the rate limiter, and in the proof environment the allowed origin). The Worker answered, so it is serving. Evidence `bound`. |
+| `container`     | Host evaluator, from the host's own answer to the signed call                                                          | The Container started and answered one signed private readiness call within the bounded wait, so it trusts this Worker's key and runs a host with the readiness route. Evidence `probed`.                          |
+| `d1`            | Host evaluator: the named readiness plan run once by the host, and the Worker's plan manifest compared with the host's | The named readiness plan ran through the Worker's storage handler and returned schema version 1, the plan-manifest hashes of Worker and host are equal, and the recovery generations agree. Evidence `probed`.     |
+| `durableObject` | Host evaluator, from the Worker's probe                                                                                | One read of an observation that nothing writes, on a Durable Object with a fixed name, answered. Evidence `probed`.                                                                                                |
+| `r2`            | Host evaluator, from the Worker's probe                                                                                | A `head` of a key that holds nothing answered (absent is the healthy answer). No object is ever written. Evidence `probed`.                                                                                        |
+| `queue`         | Host evaluator, from the Worker's binding observation                                                                  | The producer binding is present with a `send` method. A Queue producer has no read-only probe, and a send would enqueue work, so this is evidence `bound` only: it does **not** prove that messages are delivered. |
 
 Not checked, because no such component exists yet: Vectorize, Workers AI, the Workflow, provider adapters. Each owning task
-appends its declarations to `worker/readiness/bindings.ts` in its own section.
+declares its bindings in `ReadinessVocabulary.Bindings` (C#). The generator writes the names into
+`worker/tables/cloud-tables.generated.ts`, and the Worker's shape check for each name lives in `worker/readiness/bindings.ts`,
+keyed by the generated name, so a binding without a shape check does not compile.
 
 ## States and reasons
 
@@ -35,8 +43,8 @@ request, identifier, binding value, secret, SQL, error text or object key.
 | `not_required`  | The environment does not declare this component. The production Worker declares only `ingress` and `container`. | n/a                                  |
 
 The whole is `ready` only when every component is `ready` or `not_required`. Otherwise its status is the first that applies
-of `misconfigured`, `unavailable`, `starting`, and a lone `unknown` is `unavailable`. A test enumerates every combination of
-component states and checks this rule.
+of `misconfigured`, `unavailable`, `starting`, and a lone `unknown` is `unavailable`. `ReadinessEvaluator.Summarize` decides
+it, and `ReadinessEvaluatorTests` enumerates every combination of component states and checks this rule.
 
 | Reason                         | Component(s)                       | Cause                                                                                                                           |
 | ------------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -63,11 +71,29 @@ component states and checks this rule.
   environment only. It returns the closed report: `schema`, `status`, `ready`, `environment`, `workerRevision`, `components`,
   and, from the host's own valid reply, `manifestHash`, `schemaVersion` and `revision` (the names the deployed scenarios
   already read). Status 200 when ready; 503 otherwise, with `Retry-After: 2` only when `starting` or `unavailable`.
-  Each call asks the Container once, reads the Durable Object and R2 once, and never retries, replays or writes.
-- **Host readiness** `POST /internal/foundation/v1/readiness`, signed by the Worker, never public. 200 when D1 is ready, 503
-  with the same closed report otherwise (a 503 is the host's own answer, so the Worker can tell a plan mismatch from an outage).
+  Each call reads the Durable Object and R2 once, asks the Container once, and never retries, replays or writes.
+- **Host readiness** `POST /internal/foundation/v1/readiness`, signed by the Worker, never public. The body is the Worker's
+  observations: its environment, its revision, its plan manifest hash, the met flag of every declared binding (names only),
+  and the outcome and elapsed time of its Durable Object and R2 probes (`null` where the environment does not require the
+  component or its binding is not met). A malformed or incomplete observation is a 400, and nothing is evaluated from it.
+  The reply is the whole report, with the host's own identity under `host`: 200 when ready, 503 otherwise, the same closed
+  report, so the Worker can tell a plan mismatch from an outage.
 - **Production** serves no new route: the production Worker keeps the anonymous Hello method and `/api/healthz` only
   ([cloud-ingress](cloud-ingress.md)). The Container start-failure classification below applies there too.
+
+## A report the Container could not judge
+
+When the Container cannot answer a signed call, the Worker reports its own observations and the class of the failure, and no
+verdict beyond `container unreachable: <class>`. The report keeps the same schema and the same closed vocabulary:
+
+- `container` is `starting` with `no_answer_in_wait` when the bounded wait ends, and `unavailable` with `unreachable` when the
+  call fails before an answer. A start failure, a 500 or a reply the Worker cannot read keep their classes from the table
+  above; a 401 or a 404 is `misconfigured`, because the deployment is at fault.
+- `d1` is `unknown` with `container_not_ready`: D1 is judged through the Container, which is not ready.
+- Any component whose binding is not met is `misconfigured` with its names in `missing`, because the Worker sees its own
+  bindings. The Durable Object and R2 keep the outcome of their own bounded probes.
+- The whole status is `misconfigured` when any component is, otherwise the Container's class: `starting` or `unavailable`.
+  It is never `ready`.
 
 ## A Container that could not be started
 
@@ -114,9 +140,11 @@ response only loses its retry hint and is never treated as a success.
 
 ## The wait is bounded
 
-The operator readiness call waits at most `readinessWaitMs` (eight seconds, Design D1 profile section 3) for each component
-and aborts the Container call at the bound; a Container that is still starting is reported `starting` with `Retry-After: 2`,
-and the next call finds it further along. launch-capacity.v1 (CLOUD.10) carries the same value as `readinessTimeoutMs`.
+Each readiness check waits at most `readinessWaitMs` (eight seconds, Design D1 profile section 3) and is aborted at that
+bound. The Worker runs the Durable Object and R2 probes first, each within its own bound, because their outcomes are part of
+the observations the host judges; then it makes the one signed call to the Container, within its own bound, so the whole can
+take up to two bounds. A Container that is still starting is reported `starting` with `Retry-After: 2`, and the next call finds
+it further along. launch-capacity.v1 (CLOUD.10) carries the same value as `readinessTimeoutMs`.
 
 What is **not** bounded by this task: the library's own start wait inside the Durable Object (about eight seconds to acquire an
 instance plus up to twenty for the port) when a public request or an operator operation other than readiness meets a cold
