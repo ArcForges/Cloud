@@ -58,7 +58,7 @@
     "src/ArcForges.Cloud.Modules.TrustSafety/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
     "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
-    "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "ac3a8660e4e99aed60247cffe8d43805610639c0efcd8c7e90d90c4f9002f280",
+    "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "063d9974b3044dad6c97e8dd226d4cf60aba2ec15c85a910c120191e2a08e217",
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
@@ -76,7 +76,7 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "w-deku-20261009-rev-cloud-84",
     "date": "2026-10-10",
-    "rationale": "CLOUD.84 U9 and U10 (S41 option A) move the D1 migration runner and the deploy-time decisions to C# in src/ArcForges.Cloud.Storage.D1 (MigrationRunner and Deploy), with the migrate command in the non-published tool project tools/ArcForges.Cloud.Generation. The candidate job gains a pinned setup-dotnet step (S41(3)) and seals one deterministic self-contained non-single-file migrator archive, whose SHA-256 is in the candidate manifest. eng/migrations/cli.ts and deploy.ts become argument shims, tooling/cloudflare.ts reads the gate record, package.json drops the retired migrate:dry-run script and the two superseded test files and adds the shim test, and ci.yml gains only the candidate setup-dotnet step. No package, NuGet coordinate, lock file, closure entry or shipped artifact class changes; the tool project is never published.",
+    "rationale": "CLOUD.84 S42(1) moves the D1 runner's SQL statements and its classifier patterns into embedded resources (src/ArcForges.Cloud.Storage.D1/MigrationRunner/Statements.sql and Classifiers.txt), so that the standing NoSqlTextExistsInCSharpSource rule passes unchanged. The Storage.D1 project file gains two EmbeddedResource items with explicit logical names; it is the only bound input that changes, and its digest is rebound here. No package, NuGet coordinate, lock file, closure entry or shipped artifact class changes. The tool project is never published.",
     "inputs": {
       ".github/workflows/ci.yml": "e8c42f2a810d6ddfc51a728bf62affd4e34422db02da41346fc1ba34ef7e5238",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -132,7 +132,7 @@
       "src/ArcForges.Cloud.Modules.TrustSafety/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
       "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
-      "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "ac3a8660e4e99aed60247cffe8d43805610639c0efcd8c7e90d90c4f9002f280",
+      "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "063d9974b3044dad6c97e8dd226d4cf60aba2ec15c85a910c120191e2a08e217",
       "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
@@ -155,9 +155,9 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No runtime change to the shipped closure. The tool project is never published, the host and the production Worker entry keep their behaviour, and the generated Worker tables carry the same values. No runtime capability, dependency class or native closure changes.",
+    "runtimeAssessment": "No runtime change to the shipped closure. The embedded SQL text is the text the engine already ran, with the same placeholder order and parameter binding. No runtime capability, dependency class or native closure changes.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/cloud-84-r8.json",
+    "previous": "eng/policy/dependency-reviews/cloud-84-r9.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-10-10",
     "decision": "approved"
@@ -951,7 +951,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r9.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r10.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
