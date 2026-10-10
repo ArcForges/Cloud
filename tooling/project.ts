@@ -7,7 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
-import { probeProject, runProbe, sealedProbeName, waitForHealth } from "./protocol.ts";
+import { probeProject, runProbe, waitForHealth } from "./protocol.ts";
+import { sealedToolName } from "./sealed-tool.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
 import { auditProvenance } from "./provenance.ts";
 import {
@@ -26,8 +27,27 @@ import {
   type Identity,
 } from "./build-identity.ts";
 
-/** The sealed migrator archive (CLOUD.84 S41(1)); the shim in eng/migrations/shim.ts names the same file. */
-export const sealedMigratorName = "arcforges-migrator.tar";
+/**
+ * The publish of the sealed tool (CLOUD.84 S38(2), S41(1)): tools/ArcForges.Cloud.Generation, self-contained for linux-x64 and not
+ * single-file. Nothing here may imply the ILLink pack (single-file, trimming or AOT analysis), because the reviewed tool lock does not hold
+ * it and the CI restore is locked.
+ */
+export function toolPublishArguments(output: string): string[] {
+  return [
+    "publish",
+    probeProject,
+    "-c",
+    "Release",
+    "-r",
+    "linux-x64",
+    "--self-contained",
+    "true",
+    "-p:PublishSingleFile=false",
+    "-p:DebugType=none",
+    "-o",
+    output,
+  ];
+}
 
 const payloadFiles = [
   "build-identity.json",
@@ -40,10 +60,9 @@ const payloadFiles = [
   "proof-worker.js",
   "proof-worker-meta.json",
   "image-provenance.json",
-  // CLOUD.84 S33(3)(b): the self-contained Hello probe, sealed here and run by CI through runProbe.
-  "arcforges-probe",
-  // CLOUD.84 S41(1): the migrator (the same tool, with its migrate command), sealed as one archive; the deploy jobs check its digest.
-  "arcforges-migrator.tar",
+  // CLOUD.84 S33(3)(b), S38(2), S41(1): the self-contained, non-single-file tool archive (tooling/sealed-tool.ts). CI runs its Hello
+  // `probe` through runProbe and the deploy jobs its `migrate` command through eng/migrations/shim.ts, each after checking its digest.
+  sealedToolName,
 ] as const;
 export interface Candidate {
   schema: 1;
@@ -410,57 +429,21 @@ async function buildCandidate() {
   config.containers[0].image = image;
   await writeJson(path.join(candidateDir, "wrangler.json"), config);
   await run("docker", ["save", "--output", "artifacts/candidate/docker-image.tar", image]);
-  // CLOUD.84 S33(3)(b): publish the Hello probe self-contained for linux-x64 and seal it with the other payload files. The publish
-  // restore adds a build-only trimming package to the probe's lock file, so the reviewed lock is put back at once: the committed
-  // inputs stay as admitted, and the sealed binary is the output of that restore.
-  const probeLock = path.join(root, "tools", "ArcForges.Cloud.Generation", "packages.lock.json");
-  const reviewedProbeLock = await readFile(probeLock);
-  const probeOutput = path.join(root, "artifacts", "probe");
-  try {
-    await run("dotnet", [
-      "publish",
-      probeProject,
-      "-c",
-      "Release",
-      "-r",
-      "linux-x64",
-      "--self-contained",
-      "true",
-      "-p:PublishSingleFile=true",
-      "-p:DebugType=none",
-      "-o",
-      probeOutput,
-    ]);
-  } finally {
-    await writeFile(probeLock, reviewedProbeLock);
-  }
-  await copyFile(
-    path.join(probeOutput, "ArcForges.Cloud.Generation"),
-    path.join(candidateDir, sealedProbeName),
+  // CLOUD.84 S33(3)(b), S38(2), S41(1): the tool (its Hello `probe` and its D1 `migrate` command) is published once, self-contained for
+  // linux-x64 and NOT single-file. A single-file publish turns on the single-file analyzer, whose implicit Microsoft.NET.ILLink.Tasks
+  // reference is not in the reviewed tool lock, so the locked CI restore refuses it (NU1004). The publish output is archived in a fixed
+  // order with fixed metadata as one sealed member; the probe runner and the deploy jobs check its SHA-256 against this manifest before they
+  // extract and run it, so no .NET build runs in a deploy job. The reviewed tool lock must come out of the publish byte-identical: it is
+  // never rewritten or restored here, and a changed lock fails the candidate.
+  const toolLockFile = path.join(root, "tools", "ArcForges.Cloud.Generation", "packages.lock.json");
+  const reviewedToolLock = await readFile(toolLockFile);
+  const toolOutput = path.join(root, "artifacts", "tool-publish");
+  await rm(toolOutput, { recursive: true, force: true });
+  await run("dotnet", toolPublishArguments(toolOutput));
+  assert.ok(
+    reviewedToolLock.equals(await readFile(toolLockFile)),
+    "The tool publish changed the reviewed tools/ArcForges.Cloud.Generation/packages.lock.json.",
   );
-  // CLOUD.84 S41(1): the migrator is published self-contained for linux-x64 and not single-file (S38(2)), then archived in a fixed order
-  // with fixed metadata, so one member is sealed. The deploy jobs check its SHA-256 against this manifest before they run it, and the
-  // migration decisions run there: no .NET build runs in a deploy job.
-  const migratorOutput = path.join(root, "artifacts", "migrator-publish");
-  await rm(migratorOutput, { recursive: true, force: true });
-  try {
-    await run("dotnet", [
-      "publish",
-      probeProject,
-      "-c",
-      "Release",
-      "-r",
-      "linux-x64",
-      "--self-contained",
-      "true",
-      "-p:PublishSingleFile=false",
-      "-p:DebugType=none",
-      "-o",
-      migratorOutput,
-    ]);
-  } finally {
-    await writeFile(probeLock, reviewedProbeLock);
-  }
   await run("tar", [
     "--sort=name",
     "--mtime=@0",
@@ -468,9 +451,9 @@ async function buildCandidate() {
     "--group=0",
     "--numeric-owner",
     "-cf",
-    path.join(candidateDir, sealedMigratorName),
+    path.join(candidateDir, sealedToolName),
     "-C",
-    migratorOutput,
+    toolOutput,
     ".",
   ]);
   const files: Record<string, string> = {};

@@ -846,6 +846,7 @@
     "tooling/protocol.ts",
     "tooling/provenance.ts",
     "tooling/release-provenance.ts",
+    "tooling/sealed-tool.ts",
     "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj",
     "tools/ArcForges.Cloud.Generation/ContractsIdentity.cs",
     "tools/ArcForges.Cloud.Generation/HelloProbe.cs",

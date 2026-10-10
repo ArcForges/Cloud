@@ -9,8 +9,9 @@ Since CLOUD.84 U9 and U10 (S41), every decision of the step is C#: the migration
 `src/ArcForges.Cloud.Storage.D1/MigrationRunner`, its REST transport, and the deploy decisions in
 `src/ArcForges.Cloud.Storage.D1/Deploy` (the environment-to-database selection, the release plan and the excluded-build and
 gate refusals). They run in the sealed migrator, `migrate` in `tools/ArcForges.Cloud.Generation`. The candidate job publishes that
-binary self-contained for linux-x64 and seals its SHA-256 in the candidate manifest; the deploy jobs verify the hash and run the sealed
-binary, with no .NET build. `eng/migrations/deploy.ts` is a shim that forwards argv and environment only. The one authority that
+tool once, self-contained for linux-x64 and not single-file (so its locked restore needs no ILLink pack and the reviewed tool lock is
+never rewritten), archives it deterministically as `arcforges-tool.tar` (the same archive carries the Hello `probe`) and seals its SHA-256
+in the candidate manifest; the deploy jobs verify the hash and run the sealed binary, with no .NET build. `eng/migrations/deploy.ts` is a shim that forwards argv and environment only. The one authority that
 decides is the C# step; Node only starts it.
 
 ## Where it runs

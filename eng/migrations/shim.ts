@@ -3,17 +3,17 @@
 // migration decision: the decisions are the C# rules in src/ArcForges.Cloud.Storage.D1 (MigrationRunner and Deploy), run by the
 // `migrate` command of tools/ArcForges.Cloud.Generation.
 //
-// In a deployment job the migrator is the sealed archive that the candidate job produced (artifacts/candidate/arcforges-migrator.tar).
-// The shim checks its SHA-256 against the candidate manifest before it extracts and runs it, so a job never runs a migrator that the
-// candidate did not seal. Outside a candidate (local development and the quality job) it runs the same tool project with dotnet run.
+// In a deployment job the migrator is the sealed tool archive that the candidate job produced (artifacts/candidate/arcforges-tool.tar,
+// tooling/sealed-tool.ts). Its SHA-256 is checked against the candidate manifest before it is extracted and run, so a job never runs a
+// migrator that the candidate did not seal. Outside a candidate (local development and the quality job) it runs the same tool project with
+// dotnet run.
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { candidateManifestPath, extractSealedTool } from "../../tooling/sealed-tool.ts";
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const sealedArchiveName = "arcforges-migrator.tar";
 export const toolProject = "tools/ArcForges.Cloud.Generation";
 
 export interface Invocation {
@@ -40,15 +40,6 @@ export function sealedInvocation(
   return { command: executable, args: ["migrate", ...argv], env };
 }
 
-/** The SHA-256 of the sealed archive, which must equal the digest the candidate manifest records for it. */
-export function verifySealedArchive(archive: Uint8Array, manifestText: string): void {
-  const manifest = JSON.parse(manifestText) as { files?: Record<string, string> };
-  const expected = manifest.files?.[sealedArchiveName];
-  const actual = createHash("sha256").update(archive).digest("hex");
-  if (expected === undefined || expected !== actual)
-    throw new Error("the sealed migrator does not match the candidate manifest; nothing is run");
-}
-
 /**
  * The read-only source check of the hosted Source job (`check --base origin/main`, run by check:physical). It reads the tree and changes no
  * database, so it is the one command that GitHub Actions may run without a candidate.
@@ -65,29 +56,14 @@ export function prepareInvocation(
   env: NodeJS.ProcessEnv,
   root: string,
 ): Invocation {
-  const manifestPath = path.join(root, "artifacts", "candidate", "manifest.json");
-  if (!existsSync(manifestPath)) {
+  if (!existsSync(candidateManifestPath(root))) {
     if (env.GITHUB_ACTIONS === "true" && argv[0] !== sourceCheckCommand)
       throw new Error(
         "the candidate manifest is absent in GitHub Actions; nothing is built or run",
       );
     return developmentInvocation(argv, env);
   }
-  const archivePath = path.join(root, "artifacts", "candidate", sealedArchiveName);
-  if (!existsSync(archivePath))
-    throw new Error("the candidate has no sealed migrator; nothing is run");
-  verifySealedArchive(readFileSync(archivePath), readFileSync(manifestPath, "utf8"));
-  const directory = mkdtempSync(path.join(root, "artifacts", "migrator-"));
-  mkdirSync(directory, { recursive: true });
-  // Relative, forward-slash paths keep a drive letter out of the archive arguments (a GNU tar on Windows reads "C:" as a host).
-  const posix = (file: string) => path.relative(root, file).split(path.sep).join("/");
-  const extracted = spawnSync("tar", ["-xf", posix(archivePath), "-C", posix(directory)], {
-    cwd: root,
-    stdio: "inherit",
-  });
-  if (extracted.status !== 0)
-    throw new Error("the sealed migrator could not be extracted; nothing is run");
-  return sealedInvocation(path.join(directory, "ArcForges.Cloud.Generation"), argv, env);
+  return sealedInvocation(extractSealedTool(root).executable, argv, env);
 }
 
 /** Runs the migrator with the given arguments and the process environment, and returns its exit code. */
