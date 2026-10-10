@@ -282,10 +282,10 @@ test("the generated proof config points the assets at the staged directory and k
 
 test("the pins name the WEB.40 release assets by their own digests, one release for both", () => {
   assert.equal(profileBundlePin.repository, "ArcForges/Web");
-  assert.equal(profileBundlePin.release, "web-0.1.0-ci.111.1");
+  assert.equal(profileBundlePin.release, "web-0.1.0-ci.117.1");
   assert.equal(
     profileBundlePin.digest,
-    "4afc8f285a7a64202ce221bc4e3011a9f8b6de641d50eef0a537677e80eaef9a",
+    "2070acd93565eceb190f872505c85fcd6c40ef71643aff4924ba1f026ff87001",
   );
   assert.equal(
     profileBundleAssetName(profileBundlePin.digest),
@@ -295,7 +295,7 @@ test("the pins name the WEB.40 release assets by their own digests, one release 
   assert.equal(siteArchivePin.release, profileBundlePin.release);
   assert.equal(
     siteArchivePin.digest,
-    "573575617dec11d2d3678bf5ccd92728190b64a79e7907e050764fd8a1d131ac",
+    "735374a56bce3e63dabcb0a4abaa25a1d6ae23a0890eade5c8273bf110bfb0a8",
   );
   assert.equal(
     siteArchiveAssetName(siteArchivePin.digest),
@@ -601,7 +601,28 @@ test("each profile's policy is the one its page derives, with the exact WebAssem
   const derived = policyOf();
   assert.equal(
     derived,
-    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'",
+  );
+  // The shells carry <base href="/">, so an App profile's base URI is 'self' and no other value (CLOUD.85 D1, S36).
+  refuses(
+    { csp: { account: derived.replace("base-uri 'self'", "base-uri 'none'") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { chat: derived.replace("base-uri 'self'", "base-uri 'none'") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { account: derived.replace("base-uri 'self'", "base-uri *") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { chat: derived.replace("base-uri 'self'", "base-uri 'self' https:") } },
+    /does not match its page/u,
+  );
+  refuses(
+    { csp: { chat: derived.replace("base-uri 'self'", "base-uri https://example.test") } },
+    /does not match its page/u,
   );
   // An inline script of the page is covered by its hash in script-src, and by nothing else.
   const inline = profileShell.replace("</body>", "<script>window.p=1;</script></body>");
@@ -1081,6 +1102,17 @@ test("the Site archive is refused for a non-canonical header, an order, a member
     { files: { "assets/site.0123456789abcdef.css": "x" } },
     /exactly one content-hashed stylesheet/u,
   );
+});
+
+test("the Site policy keeps base-uri 'none', and a Site with any other base URI is refused", () => {
+  const policy = acceptsSite().policy;
+  assert.match(policy, /base-uri 'none';/u);
+  for (const baseUri of ["'self'", "*", "https://example.test", "'self' 'none'"]) {
+    refusesSite(
+      { headers: expectedSiteHeaders(policy.replace("base-uri 'none'", `base-uri ${baseUri}`)) },
+      /The Site headers file differs from the reviewed rules\./u,
+    );
+  }
 });
 
 test("the Site policy never carries WebAssembly, and its headers file is the reviewed one", () => {
