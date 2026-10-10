@@ -5,16 +5,27 @@
 // batch whose statements run in the fixed order under D1's immediate foreign-key enforcement (the user row before its credential and
 // workspace), the whole-batch rollback of a false guard, and simultaneous writers through the binding (several "Containers" enrolling
 // or linking the same credential, revoking a user's last two credentials) committing exactly once.
+// Transcript mode (CLOUD.72): the identity store's plan calls exactly as C# built them, recorded with the SQLite oracle's answers by
+// tests/ArcForges.Cloud.Tests/Identity/IdentityStoreTranscriptTests.cs into tests/ArcForges.Cloud.Tests/Identity/Vectors/
+// identity-store-transcript.json, are executed in order through the same production Worker executor on a fresh workerd D1, and each
+// answer (status, changes, rows) and the row counts after each step are compared with the recorded ones generically; a concurrent group
+// is executed simultaneously and compared as a multiset. The transcript carries no TypeScript business assertion: what the calls mean is
+// decided and asserted in C#; this run only shows that workerd's D1 answers C#-built calls as the oracle did.
 // It is NOT a Cloudflare provider result: no deployed D1, no network path, no provider limit and no REST batch are exercised (the
 // provider's REST batch atomicity stays a deferred live check under the RES-cloud-deployment lease, and CLOUD.70 owns the deployment
 // migration step). Never CI; it starts local workerd, reads no credential and writes an evidence file under artifacts/.
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import type { D1Scalar, ExecutePlanResponse } from "@arcforges/ai-internal";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { loadCatalog } from "../migrations/catalog.ts";
 import { D1BindingMigrationClient, type D1BindingLike } from "../migrations/clients.ts";
 import { applyPending } from "../migrations/runner.ts";
+import type { D1Like } from "../../worker/storage/d1.ts";
+import { executePlan, planKey } from "../../worker/storage/execute-plan.ts";
+import { manifestHash, plans } from "../../worker/storage/plans.generated.ts";
 import {
   addArguments,
   credential,
@@ -117,6 +128,147 @@ function addCall(account: Account, subject: string, userRevision: number) {
   };
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------
+// Transcript mode: C#-built calls replayed generically
+// ---------------------------------------------------------------------------------------------------------------------------
+
+export const transcriptPath = path.join(
+  root,
+  "tests",
+  "ArcForges.Cloud.Tests",
+  "Identity",
+  "Vectors",
+  "identity-store-transcript.json",
+);
+
+export interface TranscriptCall {
+  plan: string;
+  version: number;
+  ownerScope: string;
+  recoveryGeneration: string;
+  arguments: D1Scalar[][];
+}
+
+export type TranscriptOutcome =
+  { status: "ok"; changes: string; rows: D1Scalar[][] } | { status: string };
+
+export interface TranscriptStep {
+  scenario: string;
+  call?: TranscriptCall;
+  expect?: TranscriptOutcome;
+  group?: TranscriptCall[];
+  outcomes?: TranscriptOutcome[];
+  counts: number[];
+}
+
+export interface Transcript {
+  schemaVersion: number;
+  recoveryGeneration: string;
+  tables: string[];
+  steps: TranscriptStep[];
+}
+
+const plainIdentifier = /^[a-z][a-z0-9_]*$/u;
+
+/** Structural checks only: the shape the C# generator writes, and table names that can be counted safely. */
+export function parseTranscript(text: string): Transcript {
+  const value = JSON.parse(text) as Transcript;
+  assert.equal(value.schemaVersion, 1, "unknown transcript schema version");
+  assert.match(value.recoveryGeneration, /^\d+$/u);
+  assert.ok(
+    Array.isArray(value.tables) && value.tables.length > 0,
+    "the transcript names no table",
+  );
+  for (const table of value.tables) assert.match(table, plainIdentifier);
+  assert.ok(Array.isArray(value.steps) && value.steps.length > 0, "the transcript has no step");
+  for (const [index, step] of value.steps.entries()) {
+    const single = step.call !== undefined && step.expect !== undefined;
+    const group = Array.isArray(step.group) && Array.isArray(step.outcomes);
+    assert.ok(single !== group, `step ${index} is neither one call nor one group`);
+    if (group) assert.equal(step.group?.length, step.outcomes?.length, `step ${index}`);
+    assert.equal(step.counts.length, value.tables.length, `step ${index} counts`);
+  }
+  return value;
+}
+
+/** Key-sorted JSON, so outcomes compare as values whichever side serialized them. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value !== null && typeof value === "object")
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`)
+      .join(",")}}`;
+  return JSON.stringify(value);
+}
+
+function outcomeOf(response: ExecutePlanResponse): TranscriptOutcome {
+  return "failure" in response
+    ? { status: response.failure }
+    : { status: "ok", changes: response.changes, rows: response.rows };
+}
+
+const transcriptPlans = new Map(plans.map((plan) => [planKey(plan.id, plan.version), plan]));
+
+async function executeCall(
+  db: D1Like,
+  call: TranscriptCall,
+  generation: string,
+): Promise<TranscriptOutcome> {
+  const response = await executePlan(
+    {
+      planId: call.plan,
+      planVersion: call.version,
+      manifestHash,
+      requestId: randomUUID(),
+      recoveryGeneration: call.recoveryGeneration,
+      ownerScope: call.ownerScope,
+      arguments: call.arguments,
+      deadlineUtc: new Date(Date.now() + 5_000).toISOString().replace(/\.(\d{3})Z$/u, ".$10000Z"),
+    },
+    { db, plans: transcriptPlans, manifestHash, recoveryGeneration: generation, nowMs: Date.now },
+  );
+  return outcomeOf(response);
+}
+
+async function tableCounts(db: D1Like, tables: string[]): Promise<number[]> {
+  const row = (
+    await db
+      .prepare(`SELECT ${tables.map((table) => `(SELECT COUNT(*) FROM ${table})`).join(", ")}`)
+      .bind()
+      .raw()
+  )[0];
+  return (row ?? []).map(Number);
+}
+
+/** Replays every step on the database and fails at the first answer or count that differs from the transcript. */
+export async function replayTranscript(db: D1Like, transcript: Transcript): Promise<string> {
+  let calls = 0;
+  let groups = 0;
+  for (const [index, step] of transcript.steps.entries()) {
+    const where = `step ${index} (${step.scenario})`;
+    if (step.call && step.expect) {
+      const actual = await executeCall(db, step.call, transcript.recoveryGeneration);
+      assert.equal(canonical(actual), canonical(step.expect), `${where} ${step.call.plan}`);
+      calls++;
+    } else {
+      const members = step.group ?? [];
+      const actual = await Promise.all(
+        members.map((call) => executeCall(db, call, transcript.recoveryGeneration)),
+      );
+      assert.deepEqual(
+        actual.map(canonical).sort(),
+        (step.outcomes ?? []).map(canonical).sort(),
+        `${where}: concurrent group of ${members.length}`,
+      );
+      calls += members.length;
+      groups++;
+    }
+    assert.deepEqual(await tableCounts(db, transcript.tables), step.counts, `${where} row counts`);
+  }
+  return `${calls} C#-built plan calls in ${transcript.steps.length} steps (${groups} concurrent groups) answered with the recorded statuses, changes and rows, and the row counts of ${transcript.tables.length} tables matched after every step`;
+}
+
 export async function main(): Promise<void> {
   assert.notEqual(process.env.CI, "true", "The local D1 run is opt-in, never CI.");
   const started = new Date().toISOString();
@@ -132,6 +284,7 @@ export async function main(): Promise<void> {
         ENROLL: "identity-enroll",
         LINK: "identity-link",
         REVOKE: "identity-revoke",
+        TRANSCRIPT: "identity-transcript",
       },
     }),
   );
@@ -304,6 +457,14 @@ export async function main(): Promise<void> {
       void uid;
       return `${rounds} rounds of two simultaneous revocations of a user's only two credentials: one committed, one refused, one credential always remained; the last credential is refused`;
     });
+
+    await scenario(
+      "the-csharp-store-transcript-replays-on-workerd-d1-as-on-the-oracle",
+      async () => {
+        const transcript = parseTranscript(await readFile(transcriptPath, "utf8"));
+        return replayTranscript((await database(mf, "TRANSCRIPT")) as never, transcript);
+      },
+    );
   } finally {
     await mf.dispose();
   }
@@ -313,6 +474,11 @@ export async function main(): Promise<void> {
     startedAt: started,
     finishedAt: new Date().toISOString(),
     kind: "local-emulation",
+    cloudflareResult: false,
+    sourceRevision: compat.sourceRevision,
+    transcriptSha256: createHash("sha256")
+      .update(await readFile(transcriptPath))
+      .digest("hex"),
     emulated: "workerd D1 (SQLite) under Miniflare through the production Worker plan executor",
     notEmulated:
       "Cloudflare provider network path, REST batch semantics, real D1 limits and latency, a deployed database",
