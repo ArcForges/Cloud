@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using System.Net;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using ArcForges.Cloud.Storage.D1.MigrationRunner;
 using ArcForges.Cloud.Tools.Generation.Migrations;
 using Xunit;
@@ -120,16 +122,132 @@ internal static class MigrationTestSupport
         return (client, time, chain);
     }
 
-    /// <summary>Every table of the physical manifest exists with the manifest's columns, in order (the reduced column-level comparison).</summary>
-    public static void AssertPhysicalColumns(SqliteBatchOracle database)
+    /// <summary>
+    /// The physical comparison of the TypeScript runner tests (compareShapes over readShape and expectedShape), restored in the C# port
+    /// (CLOUD.84 S42(4)). The migrated database and the physical manifest agree on the base-table set (virtual tables and their shadow
+    /// tables are excluded, as readShape excludes them). Every column, in column order, has the manifest's SQLite type, its nullability
+    /// (NOT NULL, or a primary-key column) and its primary-key position. Every index the migrations create (origin c) has the manifest's
+    /// name, uniqueness, columns (DESC kept) and partial condition. The foreign keys, checks, triggers, index and trigger definitions and
+    /// STRICT are compared only by the Node physical drift gate (eng/verification/physical-schema.ts, D4 and D5), not here.
+    /// </summary>
+    public static void AssertPhysicalShape(SqliteBatchOracle database)
     {
-        foreach (var table in ArcForges.Cloud.Storage.Physical.PhysicalSchema.Tables)
+        var tables = database.Query("SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'");
+        var virtualNames = tables
+            .Where(row => row[1] is not null && row[1]!.StartsWith("CREATE VIRTUAL TABLE", StringComparison.OrdinalIgnoreCase))
+            .Select(row => row[0] ?? string.Empty)
+            .ToHashSet(StringComparer.Ordinal);
+        var shadows = virtualNames
+            .SelectMany(name => new[] { "_data", "_idx", "_content", "_docsize", "_config" }.Select(suffix => name + suffix))
+            .ToHashSet(StringComparer.Ordinal);
+        var migratedNames = tables
+            .Select(row => row[0] ?? string.Empty)
+            .Where(name => !virtualNames.Contains(name) && !shadows.Contains(name))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        var manifestTables = ArcForges.Cloud.Storage.Physical.PhysicalSchema.Tables;
+        Assert.Equal(manifestTables.Select(table => table.Name).Order(StringComparer.Ordinal).ToList(), migratedNames);
+
+        var columnRows = database.Query(
+            "SELECT m.name, p.name, p.type, p.\"notnull\", p.pk FROM sqlite_master m, pragma_table_info(m.name) p " +
+            "WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' ORDER BY m.name, p.cid");
+        var migratedColumns = columnRows
+            .GroupBy(row => row[0] ?? string.Empty, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(row => $"{row[1]}|{row[2]}|{(row[3] == "1" || row[4] != "0" ? 1 : 0)}|{row[4]}").ToList(),
+                StringComparer.Ordinal);
+        foreach (var table in manifestTables)
         {
-            var columns = database.Query($"SELECT name FROM pragma_table_info('{table.Name}') ORDER BY cid")
-                .Select(row => row[0] ?? string.Empty)
-                .ToList();
-            Assert.Equal(table.Columns.Select(column => column.Name).ToList(), columns);
+            var expected = table.Columns.Select(column =>
+            {
+                var keyIndex = table.PrimaryKey.ToList().IndexOf(column.Name);
+                var notNull = !column.Nullable || keyIndex >= 0;
+                return $"{column.Name}|{SqlTypeOf(column.Kind)}|{(notNull ? 1 : 0)}|{(keyIndex < 0 ? 0 : keyIndex + 1)}";
+            }).ToList();
+            Assert.True(migratedColumns.TryGetValue(table.Name, out var actual), $"{table.Name} is in the manifest but not in the migrations");
+            Assert.Equal(expected, actual);
         }
+
+        var indexRows = database.Query(
+            "SELECT m.name, il.name, il.\"unique\", il.origin FROM sqlite_master m, pragma_index_list(m.name) il " +
+            "WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.sql NOT LIKE 'CREATE VIRTUAL TABLE%'");
+        var indexColumns = database.Query(
+            "SELECT ix.name, xi.name, xi.\"desc\", xi.\"key\" FROM sqlite_master ix, pragma_index_xinfo(ix.name) xi " +
+            "WHERE ix.type = 'index' AND xi.\"key\" = 1 ORDER BY ix.name, xi.seqno")
+            .GroupBy(row => row[0] ?? string.Empty, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(row => row[1] + (row[2] == "1" ? " DESC" : string.Empty)).ToList(),
+                StringComparer.Ordinal);
+        var indexSql = database.Query("SELECT name, sql FROM sqlite_master WHERE type = 'index'")
+            .ToDictionary(row => row[0] ?? string.Empty, row => row[1] ?? string.Empty, StringComparer.Ordinal);
+        var migratedIndexes = indexRows
+            .Where(row => row[3] == "c")
+            .GroupBy(row => row[0] ?? string.Empty, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(row =>
+                {
+                    var name = row[1] ?? string.Empty;
+                    var columns = indexColumns.GetValueOrDefault(name) ?? [];
+                    var where = Regex.Match(indexSql.GetValueOrDefault(name) ?? string.Empty, @"\sWHERE\s(.*)$", RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value;
+                    return $"{name}|{(row[2] == "1" ? "unique" : "plain")}|{string.Join(",", columns)}|{where}";
+                }).Order(StringComparer.Ordinal).ToList(),
+                StringComparer.Ordinal);
+        foreach (var (table, expected) in ManifestIndexes())
+            Assert.Equal(expected, migratedIndexes.GetValueOrDefault(table) ?? []);
+    }
+
+    /// <summary>The SQLite storage type of a physical kind (the mapping of eng/verification/physical-schema.ts, sqliteType).</summary>
+    private static string SqlTypeOf(ArcForges.Cloud.Storage.Physical.PhysicalKind kind) => kind switch
+    {
+        ArcForges.Cloud.Storage.Physical.PhysicalKind.Bool
+            or ArcForges.Cloud.Storage.Physical.PhysicalKind.Int32
+            or ArcForges.Cloud.Storage.Physical.PhysicalKind.Int64
+            or ArcForges.Cloud.Storage.Physical.PhysicalKind.Rev
+            or ArcForges.Cloud.Storage.Physical.PhysicalKind.Instant
+            or ArcForges.Cloud.Storage.Physical.PhysicalKind.Enum => "INTEGER",
+        ArcForges.Cloud.Storage.Physical.PhysicalKind.Hash
+            or ArcForges.Cloud.Storage.Physical.PhysicalKind.Bytes
+            or ArcForges.Cloud.Storage.Physical.PhysicalKind.Proto => "BLOB",
+        _ => "TEXT",
+    };
+
+    /// <summary>
+    /// The expected index entries of every table, read from the committed physical manifest (the generated schema carries no indexes).
+    /// An index without an explicit name takes the manifest's generated name (ux_ or ix_, the table, and the columns without ASC or DESC).
+    /// </summary>
+    private static Dictionary<string, List<string>> ManifestIndexes()
+    {
+        var directory = Path.Combine(ArcForges.Cloud.Tests.T.RepoRoot().FullName, "src", "ArcForges.Cloud.Storage.D1", "Physical", "manifest");
+        var entries = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var file in Directory.GetFiles(directory, "*.json").Where(file => Path.GetFileName(file) != "enums.json").Order(StringComparer.Ordinal))
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(file));
+            foreach (var table in document.RootElement.GetProperty("tables").EnumerateArray())
+            {
+                var name = table.GetProperty("name").GetString() ?? string.Empty;
+                var list = new List<string>();
+                if (table.TryGetProperty("indexes", out var indexes))
+                {
+                    foreach (var index in indexes.EnumerateArray())
+                    {
+                        var columns = index.GetProperty("columns").EnumerateArray().Select(column => column.GetString() ?? string.Empty).ToList();
+                        var unique = index.TryGetProperty("unique", out var uniqueValue) && uniqueValue.ValueKind == JsonValueKind.True;
+                        var where = index.TryGetProperty("where", out var whereValue) ? whereValue.GetString() ?? string.Empty : string.Empty;
+                        var indexName = index.TryGetProperty("name", out var nameValue)
+                            ? nameValue.GetString() ?? string.Empty
+                            : $"{(unique ? "ux" : "ix")}_{name}__{string.Join("_", columns.Select(column => Regex.Replace(column, @"\s+(?:ASC|DESC)$", string.Empty, RegexOptions.IgnoreCase)))}";
+                        list.Add($"{indexName}|{(unique ? "unique" : "plain")}|{string.Join(",", columns)}|{where}");
+                    }
+                }
+
+                entries[name] = list.Order(StringComparer.Ordinal).ToList();
+            }
+        }
+
+        return entries;
     }
 
     /// <summary>A crash in the simulated process: every later batch fails as a client error.</summary>

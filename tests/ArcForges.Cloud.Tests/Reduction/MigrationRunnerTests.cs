@@ -10,9 +10,9 @@ namespace ArcForges.Cloud.Tests.Reduction;
 
 /// <summary>
 /// CLOUD.84 U9: one-for-one C# replacement of tests/worker/d1-migration-runner.test.ts (30 test blocks). The same cases, negatives and
-/// limits run against the C# engine in src/ArcForges.Cloud.Storage.D1/MigrationRunner, on the SQLite batch oracle (D8). The column-level
-/// comparison of the physical manifest is reduced to table and column names and order; the full definitions stay checked by the physical
-/// drift gate (eng/verification/physical-schema.ts, Node build tooling under D4 and D5).
+/// limits run against the C# engine in src/ArcForges.Cloud.Storage.D1/MigrationRunner, on the SQLite batch oracle (D8). The physical
+/// comparison restores the TypeScript shape check for columns and indexes (S42(4)); foreign keys, checks, triggers and definitions are
+/// still compared by the Node physical drift gate (eng/verification/physical-schema.ts, Node build tooling under D4 and D5).
 /// </summary>
 public sealed class MigrationRunnerTests
 {
@@ -53,13 +53,25 @@ public sealed class MigrationRunnerTests
         var state = client.Query("SELECT schema_version, fence, lease_holder FROM platform_schema_state");
         Assert.Equal((baseline.Count - 1).ToString(System.Globalization.CultureInfo.InvariantCulture), state[0][0]);
         Assert.Null(state[0][2]);
-        AssertPhysicalColumns(client);
+        AssertPhysicalShape(client);
         Assert.Empty(client.Query("PRAGMA foreign_key_check"));
         var compatibilityRecord = JsonNode.Parse(client.Query("SELECT compatibility FROM platform_migration_receipt WHERE sequence = 3")[0][0]!)!;
         var expected = JsonNode.Parse($$"""
             {"sourceRevision":"{{Compat.SourceRevision}}","schemaVersion":3,"planManifestHash":"{{Compat.PlanManifestHash}}","abi":"{{Compat.Abi}}","runtime":"{{Compat.Runtime}}"}
             """)!;
         Assert.True(JsonNode.DeepEquals(expected, compatibilityRecord));
+    }
+
+    [Fact]
+    public async Task ThePhysicalShapeCheckRefusesADatabaseMissingAManifestIndex()
+    {
+        // S42(4) strength control: the restored comparison must fail on drift, not only pass on the migrated database.
+        using var client = new SqliteBatchOracle();
+        await MigrationEngine.ApplyPendingAsync(Options(client, Baseline(), "run-shape", new TestClock()));
+        AssertPhysicalShape(client);
+        var index = client.Query("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'ix_%' ORDER BY name LIMIT 1")[0][0]!;
+        client.Exec($"DROP INDEX \"{index}\"");
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => AssertPhysicalShape(client));
     }
 
     [Fact]
@@ -148,7 +160,7 @@ public sealed class MigrationRunnerTests
         Assert.True(long.Parse(partial[1]!, System.Globalization.CultureInfo.InvariantCulture) > 4);
         time.Advance(120_000);
         await MigrationEngine.ApplyPendingAsync(Options(live, Baseline(), "b", time, maxChunkStatements: 4));
-        AssertPhysicalColumns(live);
+        AssertPhysicalShape(live);
     }
 
     [Fact]
@@ -176,7 +188,7 @@ public sealed class MigrationRunnerTests
             })));
         Assert.Equal("stale-migrator", error.Code);
         // The stale migrator's chunk rolled back as a whole: nothing partial, and B's schema is intact and complete.
-        AssertPhysicalColumns(client);
+        AssertPhysicalShape(client);
         Assert.Equal(baseline.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), client.Query("SELECT COUNT(*) FROM platform_migration_receipt")[0][0]);
         var runners = client.Query("SELECT DISTINCT runner FROM platform_migration_receipt WHERE sequence > 0 ORDER BY runner").Select(row => row[0]).ToList();
         Assert.Contains("takeover-b", runners);
