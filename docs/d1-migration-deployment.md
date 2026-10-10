@@ -2,8 +2,17 @@
 
 CLOUD.70 adds the one place where migrations reach a deployed D1 database: a gated step of the deployment jobs of
 `.github/workflows/ci.yml`, run before the Worker or image is promoted. It is never run from the Container, and it
-adds no runner behavior: the caller is `eng/migrations/deploy.ts`, which uses the CLOUD.03 runner, catalog and REST
-client unchanged ([D1 physical schema](d1-physical-schema.md)).
+adds no runner behavior: the migration engine (lease, fence, receipts and gating) is the CLOUD.03 design
+([D1 physical schema](d1-physical-schema.md)).
+
+Since CLOUD.84 U9 and U10 (S41), every decision of the step is C#: the migration engine in
+`src/ArcForges.Cloud.Storage.D1/MigrationRunner`, its REST transport, and the deploy decisions in
+`src/ArcForges.Cloud.Storage.D1/Deploy` (the environment-to-database selection, the release plan and the excluded-build and
+gate refusals). They run in the sealed migrator, `migrate` in `tools/ArcForges.Cloud.Generation`. The candidate job publishes that
+tool once, self-contained for linux-x64 and not single-file (so its locked restore needs no ILLink pack and the reviewed tool lock is
+never rewritten), archives it deterministically as `arcforges-tool.tar` (the same archive carries the Hello `probe`) and seals its SHA-256
+in the candidate manifest; the deploy jobs verify the hash and run the sealed binary, with no .NET build. `eng/migrations/deploy.ts` is a shim that forwards argv and environment only. The one authority that
+decides is the C# step; Node only starts it.
 
 ## Where it runs
 
@@ -84,9 +93,11 @@ the earlier build is still within the horizons and is compatible.
 
 ## Offline proof and the proof-environment run
 
-`npm run migrate:dry-run` applies the real catalog to an in-memory SQLite database through the same gated flow
-(`node eng/migrations/deploy.ts dry-run [--through N] [--allow-contract]`). `tests/worker/d1-migration-deploy.test.ts`
-runs the step against the SQLite oracle directly and through a fake Cloudflare REST endpoint backed by it: the order,
+The offline proof is the C# suite `tests/ArcForges.Cloud.Tests/Reduction` (`DeployTests` and `MigrationRunnerTests`, the one-for-one
+replacement of the retired `tests/worker/d1-migration-deploy.test.ts` and `d1-migration-runner.test.ts`; S41(4) and S42(5)). The
+`npm run migrate:dry-run` command is retired: its statement lists are covered by `DeployTests`, and the dry run needs no token.
+The suite runs the step against the SQLite bridge (`SqliteBridgeExecutor`) directly and through a fake Cloudflare REST endpoint
+backed by it: the order,
 the printed receipts, the plan, a contract refused without consent and before its soak, an excluded build, a failing
 step that stops promotion, no secret in any output (including an error message that echoes the token), the
 pull-request and fork refusal, and the workflow shape. SQLite and a fake endpoint do not prove Cloudflare's D1: that

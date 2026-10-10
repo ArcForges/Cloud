@@ -12,7 +12,7 @@ pipeline behind it, in the real Container image.
 
 | Part                       | What is implemented                                                                                                                                                                      | Where                                                                                      |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Worker method table        | Exact `/api/<package>.<Service>/<Method>` routes, deny by default; one entry per public method with its kind, authentication, bounds and Container instance                              | `worker/ingress/routes.ts`                                                                 |
+| Worker method table        | Exact `/api/<package>.<Service>/<Method>` routes, deny by default; one entry per public method with its kind, authentication, bounds and Container instance                              | `worker/tables/cloud-tables.generated.ts` (generated), `worker/ingress/routes.ts` (lookup) |
 | Worker admission           | Binary gRPC-Web only, no compression, no query, deadline and cancellation budget, bounded request body, rate limit, edge credential checks                                               | `worker/ingress/pipeline.ts`, `worker/ingress/edge-caller.ts`                              |
 | Frame-guarded pass-through | A server stream is passed frame by frame and never buffered; a stream can never end without a gRPC status; deadline and cancellation reach the Container                                 | `worker/ingress/frames.ts`                                                                 |
 | Host method policy         | Every public method declares kind, authentication, owner scope and body bound; a method without a policy is refused                                                                      | `src/ArcForges.Cloud/Ingress/RpcPolicy.cs`                                                 |
@@ -46,8 +46,19 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
 ## Worker rules
 
 - **Method table.** `findRoute` returns a route only for an exact path; the proof-only probe methods exist only when
-  `FOUNDATION_PROOF` is exactly `enabled`. A test pins the production table to the single Hello method and compares the
-  Worker table with the host policies (same methods, kind, authentication, request bound).
+  `FOUNDATION_PROOF` is exactly `enabled`. The rows are generated, never hand-written: `tools/ArcForges.Cloud.Generation`
+  reads the host's registrations (`HelloModule`, `PipelineProbe`) and the transport budgets in
+  `src/ArcForges.Cloud/Generation/TransportBudgets.cs`, and writes `worker/tables/cloud-tables.generated.ts`. The
+  generator refuses a registered method without a budget and a budget without a registered method. `npm run check:generated`
+  and the C# test `GeneratedTablesTests` fail on any drift, and a C# test pins the production table to the single Hello method.
+  The Worker's transport budgets and edge-guard names (the session cookie and the CSRF header) come from the same module.
+  Every other limit and identifier shape the Worker applies is declared in C# as well: the production values in
+  `src/ArcForges.Cloud/Generation/WorkerWireLimits.cs` (the body and router read timers, the container sleep, the gRPC frame
+  header, the span id, the canonical UUID, the session token and bearer shapes) and the proof-only values in
+  `ProofWireLimits.cs` (the object part, reply and request bounds, the operator and signing bounds, the readiness report bounds,
+  and the named-plan deadline and integer grammars). The generator emits each into the same module, and a host value is referenced
+  rather than copied. The standing WorkerAdapter literal check (`tests/ArchitectureTests/WorkerAdapter`, CLOUD.84 S43) refuses any
+  other limit or shape literal in `worker/**`, except the closed protocol constants and the owned, expiring register rows.
 - **Admission.** A non-POST is 405, a media type other than `application/grpc-web` or `application/grpc-web+proto` is
   415, `content-encoding` or a `grpc-encoding` other than identity is 415, a query string is 400, a request body over
   the method bound is 413 (declared or actual bytes), the compressed flag in the first frame is 415. A malformed
@@ -129,6 +140,12 @@ in the job wake message and the private job-slice call. It uses only fields the 
 `traceparent` request header between the Worker and the host. It adds no wire field, no client-visible header and no
 contract meaning, and it is never an authorization input.
 
+The Worker's guards on this identity (the canonical UUID shape, the nil value, the field numbers that carry it and the
+traceparent version and flags) are declared in `src/ArcForges.Cloud/Generation/CorrelationGuards.cs` and generated into
+`worker/tables/cloud-tables.generated.ts` (CLOUD.84). `worker/ingress/correlation.ts` applies those guards and forwards the
+values; the host's rule (`CorrelationContext.IsValidId`) is unchanged, and `GeneratedTablesTests` and `CorrelationGuardTests`
+check the declarations against it.
+
 | Hop                    | What happens                                                                                                                                                                                                                                                                      | Where                                                                                    |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | Client to Worker       | A route that declares `requestMeta` has the client's `RequestMeta.correlationId` read from the request message. Only a canonical `Id` (exactly 16 bytes, not all zero, stated once) is accepted; an absent value is created (`crypto.randomUUID`); a malformed one is refused.    | `worker/ingress/correlation.ts`, `worker/ingress/pipeline.ts`                            |
@@ -191,9 +208,10 @@ On the proof origin only, static assets answer the two Web profile shells (`/acc
 ## Adding a public method
 
 A module appends its method in its own section, in two places that a test compares: its `RpcPolicy` in the module's
-`RpcPolicies` (host) and its `ApiRoute` in `worker/ingress/routes.ts`. Both state whether the request carries a
-`RequestMeta` (`carriesRequestMeta` on the policy, always true for a workspace-scoped method; `requestMeta` on the
-route): the test compares that too, and it decides whether the correlation of a call is read from the body. A generated service mapped without a policy fails
+`RpcPolicies` (host) and its transport budget in `TransportBudgets.ByMethod`; its `ApiRoute` row is generated from the two
+(`worker/tables/cloud-tables.generated.ts`). The policy states whether the request carries a `RequestMeta`
+(`carriesRequestMeta` on the policy, always true for a workspace-scoped method; `requestMeta` on the generated route), and that
+decides whether the correlation of a call is read from the body. A generated service mapped without a policy fails
 `EveryMappedGrpcMethodHasAnIngressPolicyAndEveryPolicyHasAnEndpoint`. The host composition only lists modules
 (RES-cloud-host-composition).
 

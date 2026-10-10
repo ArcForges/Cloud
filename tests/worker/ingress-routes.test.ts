@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The public method table, its agreement with the C# host's policies, and the static shape of the
+// The public method table (generated from the C# host), the edge credential check and the static shape of the
 // deployment configuration that keeps the Container reachable only through the Worker.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { edgeCredentials } from "../../worker/ingress/edge-caller.ts";
+import { proofRouteTable } from "../../worker/ingress/proof-table.ts";
 import {
   findRoute,
   healthPath,
   helloPath,
   productionRoutes,
-  proofRoutes,
+  productionTable,
   streamLifetimeMs,
   type ApiRoute,
 } from "../../worker/ingress/routes.ts";
+import { proofRoutes } from "../../worker/tables/cloud-tables.generated.ts";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const namePattern =
@@ -29,7 +31,10 @@ test("production serves exactly the anonymous Hello method and the health route"
   assert.equal(hello.auth, "anonymous");
   assert.equal(hello.kind, "unary");
   assert.equal(hello.instance, "hello");
-  assert.equal(findRoute({}, healthPath), undefined, "health is the pipeline's own plain route");
+  assert.equal(findRoute(healthPath), undefined, "health is the pipeline's own plain route");
+  assert.equal(productionTable.size, 1, "the production table lists the Hello method only");
+  for (const route of proofRoutes)
+    assert.equal(findRoute(`/api${route.path}`), undefined, "no proof method in production");
 });
 
 test("every route is a well-formed method path with sane bounds, and none is an internal path", () => {
@@ -45,13 +50,13 @@ test("every route is a well-formed method path with sane bounds, and none is an 
   assert.equal(new Set(paths).size, paths.length, "no duplicate method");
 });
 
-test("proof routes exist only for the exact enabled value", () => {
+test("proof routes are listed by the proof table only, and only the proof entry routes with it", () => {
   for (const route of proofRoutes) {
     const pathname = `/api${route.path}`;
-    assert.equal(findRoute({ FOUNDATION_PROOF: "enabled" }, pathname), route);
-    for (const value of [undefined, "", "disabled", "Enabled", "true", "1"])
-      assert.equal(findRoute({ FOUNDATION_PROOF: value }, pathname), undefined);
+    assert.equal(findRoute(pathname, proofRouteTable), route);
+    assert.equal(findRoute(pathname), undefined, "the production table lists no proof method");
   }
+  assert.equal(findRoute(helloPath, proofRouteTable), productionRoutes[0]);
 });
 
 test("the edge credential check needs a whole Origin match and never reads a cookie as a bearer", () => {
@@ -76,72 +81,8 @@ test("the edge credential check needs a whole Origin match and never reads a coo
   assert.equal(edgeCredentials(request({ authorization: cookie }), "https://o.test").ok, false);
 });
 
-// ---- agreement with the C# host ----
-
-function csharpSources(directory: string): string[] {
-  const found: string[] = [];
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.isDirectory() && !["bin", "obj"].includes(entry.name))
-      found.push(...csharpSources(path.join(directory, entry.name)));
-    else if (entry.isFile() && entry.name.endsWith(".cs"))
-      found.push(path.join(directory, entry.name));
-  }
-  return found;
-}
-
-interface HostPolicy {
-  kind: "unary" | "serverStream";
-  auth: "anonymous" | "session";
-  maxRequestBytes: number;
-  /** The host reads a correlation id from a RequestMeta: every workspace-scoped method, or one that opts in. */
-  readsRequestMeta: boolean;
-}
-
-function hostPolicies(): Map<string, HostPolicy> {
-  const source = csharpSources(path.join(root, "src/ArcForges.Cloud"))
-    .map((file) => readFileSync(file, "utf8"))
-    .join("\n");
-  const constants = new Map<string, string>();
-  for (const match of source.matchAll(/const string (\w+) = "(\/[^"]+)";/gu))
-    constants.set(match[1] as string, match[2] as string);
-  const policies = new Map<string, HostPolicy>();
-  const call =
-    /RpcPolicy\.(Unary|ServerStream)\(\s*("[^"]+"|\w+)\s*,\s*RpcAuthentication\.(Anonymous|Session)\s*,\s*RpcScope\.(\w+)\s*(?:,\s*(\d+)\s*)?(?:,\s*(carriesRequestMeta:\s*true)\s*)?\)/gu;
-  for (const match of source.matchAll(call)) {
-    const name = match[2] as string;
-    const resolved = name.startsWith('"') ? name.slice(1, -1) : constants.get(name);
-    assert.ok(resolved, `unresolved policy name ${name}`);
-    assert.equal(policies.has(resolved), false, `duplicate host policy ${resolved}`);
-    policies.set(resolved, {
-      kind: match[1] === "Unary" ? "unary" : "serverStream",
-      auth: match[3] === "Anonymous" ? "anonymous" : "session",
-      maxRequestBytes: match[5] ? Number(match[5]) : 4096,
-      readsRequestMeta: match[4] === "Workspace" || match[6] !== undefined,
-    });
-  }
-  return policies;
-}
-
-test("the Worker method table and the host policies list the same methods with the same shape", () => {
-  const host = hostPolicies();
-  const worker = new Map([...productionRoutes, ...proofRoutes].map((route) => [route.path, route]));
-  assert.deepEqual([...worker.keys()].sort(), [...host.keys()].sort());
-  for (const [name, route] of worker) {
-    const policy = host.get(name) as HostPolicy;
-    assert.equal(policy.kind, route.kind, name);
-    assert.equal(policy.auth, route.auth, name);
-    assert.equal(policy.maxRequestBytes, route.maxRequestBytes, name);
-    assert.equal(policy.readsRequestMeta, route.requestMeta, name);
-  }
-});
-
-test("a workspace-scoped host method is always a session method", () => {
-  const source = csharpSources(path.join(root, "src/ArcForges.Cloud"))
-    .map((file) => readFileSync(file, "utf8"))
-    .join("\n");
-  for (const match of source.matchAll(/RpcAuthentication\.Anonymous\s*,\s*RpcScope\.Workspace/gu))
-    assert.fail(`anonymous method with an owner scope: ${match[0]}`);
-});
+// The agreement of this table with the C# host's registrations is no longer a regex over C# sources: the table is generated
+// from the registrations (CLOUD.84 S34), and tests/ArcForges.Cloud.Tests/Generation proves the committed table is current.
 
 // ---- deployment configuration: the Container is reachable only through the Worker ----
 

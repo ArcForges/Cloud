@@ -3,10 +3,15 @@
 // (a plain variable), so the private key can live with the operator who runs the live scenarios and
 // no shared secret has to travel between CI, Cloudflare and a workstation.
 import { base64UrlDecode } from "../private/encoding.ts";
+import {
+  operatorHeaderPattern as header,
+  operatorMaxSkewSeconds,
+  operatorPublicKeyBytes,
+  operatorSignatureBytes,
+} from "../tables/cloud-tables.generated.ts";
 
+export { operatorMaxSkewSeconds };
 export const operatorScheme = "AF-Operator";
-export const operatorMaxSkewSeconds = 60;
-const header = /^AF-Operator t=(\d{10}),n=([A-Za-z0-9_-]{22}),s=([A-Za-z0-9_-]{86})$/u;
 
 /** The exact text the operator signs: scheme, method, exact host and path, time, nonce and body hash. */
 export function operatorMessage(
@@ -41,7 +46,8 @@ export async function verifyOperatorSignature(
   if (Math.abs(nowSeconds - Number(time)) > operatorMaxSkewSeconds) return false;
   const raw = base64UrlDecode(publicKey);
   const signature = base64UrlDecode(signatureText);
-  if (raw?.length !== 32 || signature?.length !== 64) return false;
+  if (raw?.length !== operatorPublicKeyBytes || signature?.length !== operatorSignatureBytes)
+    return false;
   try {
     const key = await crypto.subtle.importKey("raw", raw as BufferSource, "Ed25519", false, [
       "verify",

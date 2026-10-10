@@ -7,6 +7,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="xunit.v3.mtp-v2" />
     <ProjectReference Include="../../src/ArcForges.Cloud/ArcForges.Cloud.csproj" />
+    <ProjectReference Include="../../tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj" />
   </ItemGroup>
   <PropertyGroup>
     <LicenceBoundary>AGPL</LicenceBoundary>

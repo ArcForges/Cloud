@@ -6,8 +6,6 @@ namespace ArcForges.Cloud.Foundation;
 
 // Requests of the internal proof routes. 64-bit integers and decimals are canonical strings; the few small
 // bounded integers (sizes, counts, windows, the seed) are JSON numbers. Unknown, missing or duplicate members refuse.
-internal sealed record ReadinessRequest;
-
 internal sealed record ExactRequest(string Scope, string Id, string Signed, string Unsigned, string Decimal, string ExpectedRevision,
     string CommandId, string? PayloadBase64Url = null);
 
@@ -82,7 +80,7 @@ internal sealed record JobSlicePayload(string JobId, string Cursor, string Proce
     RespectRequiredConstructorParameters = true,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     WriteIndented = false)]
-[JsonSerializable(typeof(ReadinessRequest))]
+[JsonSerializable(typeof(ReadinessObservations))]
 [JsonSerializable(typeof(ExactRequest))]
 [JsonSerializable(typeof(GuardRequest))]
 [JsonSerializable(typeof(IssueRequest))]
@@ -92,7 +90,7 @@ internal sealed record JobSlicePayload(string JobId, string Cursor, string Proce
 [JsonSerializable(typeof(JobSliceRequest))]
 [JsonSerializable(typeof(JobStatusRequest))]
 [JsonSerializable(typeof(ErrorBody))]
-[JsonSerializable(typeof(ReadinessResponse))]
+[JsonSerializable(typeof(ReadinessReport))]
 [JsonSerializable(typeof(ExactResponse))]
 [JsonSerializable(typeof(GuardResponse))]
 [JsonSerializable(typeof(IssueResponse))]

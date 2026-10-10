@@ -34,6 +34,8 @@ internal static class CloudRepository
         new(ServiceTests, ProjectRole.Test, Owner, Production: false, Aot: false),
         new(Consumer, ProjectRole.Test, Owner, Production: false, Aot: false),
         new(Host, ProjectRole.Test, Owner, Production: false, Aot: false),
+        // CLOUD.84 (ADP-07 supporting inventory row, S35(1)): the non-published generator of the Worker tables and the Contracts identity (D3).
+        new("tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj", ProjectRole.BuildTool, Owner, Production: false, Aot: false),
         // CLOUD.02 (ADP-07 inventory binding): the shared boundary types, the named-plan bridge and the nineteen module boundaries.
         // The bridge is Persistence so that the host, a shell, may reference it (AT-14) and no module may (AT-07). A module boundary
         // is classified as an Abstractions seam owned by its module, whether or not it holds layered code. No layered role fits a module:

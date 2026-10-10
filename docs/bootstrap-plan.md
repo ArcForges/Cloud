@@ -14,7 +14,7 @@ This is a public, stateless transport demonstration. It does not implement accou
 
 - Cloud starts at `1e0c378` with only a license. Work happens on `codex/cloud-aot-containers` in `.worktree/aot-containers`.
 - The local machine has SDK 10.0.401, runtime 10.0.12 and a working Linux x64 Docker daemon accessed through WSL.
-- Contracts publishes `ArcForges.Contracts.PublicApi` and `@arcforges/api-client` at `1.0.0-ci.25.1`. Hello accepts a nonempty name, returns `Hello, <name>!`, and rejects an empty name with `INVALID_ARGUMENT`.
+- Contracts publishes `ArcForges.Contracts.PublicApi` and `@arcforges/api-client` at `1.0.0-ci.25.1`; Cloud no longer consumes the npm client (CLOUD.84 S45(4), c8193f0). Hello accepts a nonempty name, returns `Hello, <name>!`, and rejects an empty name with `INVALID_ARGUMENT`.
 - The old repository's C# settings are reference material. Its JIT/SignalR architecture is not the architecture of this bootstrap.
 - Web PR #5 prepares a real gRPC-Web call from `/cloud-hello/` to the same-origin `/api/arcforges.hello.v1.HelloService/SayHello`. It is not yet deployed.
 - `arcforges.com` already uses the separate `arcforges-web` Worker Custom Domain. Cloud must use a route for `arcforges.com/api/*`, not replace that domain binding.

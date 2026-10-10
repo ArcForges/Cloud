@@ -3,12 +3,15 @@
 // 503, with a two second `Retry-After` only when waiting can help (starting or unavailable) and none for a
 // misconfigured deployment, which a retry cannot repair. The body holds the closed report and nothing else.
 import {
-  componentIds,
-  isTransient,
+  readinessComponentIds,
+  readinessRetryableStatuses,
   retryAfterSeconds,
-  type ComponentReport,
-  type ReadinessReport,
-} from "./model.ts";
+} from "../tables/cloud-tables.generated.ts";
+import type { ComponentReport, ReadinessReport } from "./report.ts";
+
+/** Only a transient status is worth a retry: a misconfigured deployment will not heal by itself. */
+const isTransient = (status: string): boolean =>
+  (readinessRetryableStatuses as readonly string[]).includes(status);
 
 export function readinessResponse(report: ReadinessReport): Response {
   const headers = new Headers({
@@ -58,6 +61,8 @@ export function readinessLogEvent(report: ReadinessReport): Record<string, unkno
     event: "cloud.readiness",
     status: report.status,
     environment: report.environment,
-    components: Object.fromEntries(componentIds.map((id) => [id, describe(report.components[id])])),
+    components: Object.fromEntries(
+      readinessComponentIds.map((id) => [id, describe(report.components[id])]),
+    ),
   };
 }

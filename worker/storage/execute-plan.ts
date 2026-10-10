@@ -2,6 +2,7 @@
 // Executes one reviewed named plan against D1 (Design D1 profile sections 3 and 4). The Worker runs
 // fixed SQL and encodes exact results; every business decision stays in the C# host.
 import type { D1Scalar, ExecutePlanRequest, ExecutePlanResponse } from "@arcforges/ai-internal";
+import { deadlinePattern, storageGuards } from "../tables/cloud-tables.generated.ts";
 import type { D1Like, D1PreparedStatement } from "./d1.ts";
 import type { PlanDefinition } from "./plan-types.ts";
 import { bindValue, encodeResult, PlanResultError } from "./scalars.ts";
@@ -15,11 +16,13 @@ export type PlanFailure =
   | "unavailable"
   | "unknownOutcome";
 
-/** The caller deadline is at most ten seconds ahead (Design D1 profile section 3). */
-export const maxDeadlineAheadMs = 10_000;
+// The deadline budget, the clock tolerance and the guard constraint name are generated from C# (CLOUD.84 S40(2)); the Worker holds no copy.
+/** The caller deadline is at most this far ahead (Design D1 profile section 3). */
+export const maxDeadlineAheadMs = storageGuards.maxDeadlineAheadMs;
 /** Tolerance for clock difference between the Container and the Worker. */
-export const deadlineClockToleranceMs = 2_000;
-export const guardConstraintName = "af_guard_failed";
+export const deadlineClockToleranceMs = storageGuards.deadlineClockToleranceMs;
+/** The D1 constraint a failed guard raises; a refused guard is a precondition, never a constraint. */
+export const guardConstraintName = storageGuards.guardConstraintName;
 
 export interface ExecuteDeps {
   readonly db: D1Like;
@@ -34,7 +37,6 @@ export function planKey(id: string, version: number): string {
   return `${id}@${version}`;
 }
 
-const deadlinePattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,7}))?Z$/u;
 export function parseDeadline(text: string): number | null {
   const match = deadlinePattern.exec(text);
   if (!match) return null;

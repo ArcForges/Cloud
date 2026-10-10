@@ -30,10 +30,10 @@ before(() => {
 
 test("real locked Wrangler output matches the approved exact Worker closure", () => {
   const result = verifyWorker(root, worker, metadata);
-  assert.equal(result.sha256, "b46b7d53bbb7a8ee1c6c6b5c0532b879b6f19e2bccfac6df67422e8bb73f415c");
-  assert.equal(result.bytes, 279659);
-  assert.equal(Object.keys(result.inputs).length, 107);
-  assert.equal(result.outputInputs.length, 38);
+  assert.equal(result.sha256, "14f6a5dfabce25250fb26e664e3b029f7ca63f59a6f1b41e7fa20e56cd9715e8");
+  assert.equal(result.bytes, 92603);
+  assert.equal(Object.keys(result.inputs).length, 19);
+  assert.equal(result.outputInputs.length, 18);
 });
 test("reject changed Worker bytes independently of any supplied outer hash", () => {
   const changed = Buffer.concat([worker, Buffer.from("\nexport const injected = true;\n")]);

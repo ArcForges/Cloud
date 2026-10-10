@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   axes,
   candidateEnvironment,
+  contractsIdentityRecord,
   expectedIdentity,
   imageBuildVariables,
   resolveAxes,
@@ -225,4 +226,14 @@ test("the current Contracts receipt shape resolves through the Hello schema sour
     f.sources["ContractSet.json"] = bad;
     assert.throws(() => resolveAxes(f.catalog, f.read));
   }
+});
+
+test("the Contracts identity is the committed record, pinned to the restored NuGet version (CLOUD.84 S33(3)(a))", () => {
+  const record = JSON.parse(
+    readFileSync(new URL(`../../${contractsIdentityRecord}`, import.meta.url), "utf8"),
+  ) as { repository?: unknown; version?: unknown };
+  const pins = readFileSync(new URL("../../Directory.Packages.props", import.meta.url), "utf8");
+  const pinned = /Include="ArcForges\.Contracts\.PublicApi" Version="([^"]+)"/u.exec(pins)?.[1];
+  assert.equal(record.repository, "https://github.com/ArcForges/Contracts");
+  assert.equal(record.version, pinned);
 });

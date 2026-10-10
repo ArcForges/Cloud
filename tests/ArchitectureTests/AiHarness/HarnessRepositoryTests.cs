@@ -14,9 +14,8 @@ public sealed class HarnessRepositoryTests
     public void TheCurrentRepositorySatisfiesEveryArchitectureRuleOutsideTheOwnedRegister()
     {
         var sources = HarnessArchitecture.ReadSources(Root);
-        var findings = HarnessArchitecture.Audit(sources);
         var register = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, ArchitectureExceptions.RegisterPath)));
-        var result = ArchitectureExceptions.Apply(findings, register.RootElement, DateOnly.FromDateTime(DateTime.UtcNow));
+        var result = WorkerAdapter.WorkerLiteralScan.ApplyRegister(sources, register.RootElement, DateOnly.FromDateTime(DateTime.UtcNow));
         register.Dispose();
         Assert.Empty(result.Problems);
         Assert.Empty(result.Remaining);

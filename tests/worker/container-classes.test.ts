@@ -30,13 +30,18 @@ register(`data:text/javascript,${encodeURIComponent(hooks)}`);
 type Statics = { outboundByHost?: Record<string, unknown>; outboundHandlers?: unknown };
 type Constructable = (new (ctx: object, env: object) => Record<string, unknown>) & Statics;
 // Imported through a variable so the Node-side project does not type-check the workerd-only module.
+// The production entry carries the production class only; the proof entry carries the proof class (CLOUD.84 D1).
 const workerModule = "../../worker/index.ts";
+const proofModule = "../../worker/proof/entry.ts";
 const worker = (await import(workerModule)) as unknown as {
   CloudContainer: Constructable;
-  FoundationContainer: Constructable;
   ContainerProxy: unknown;
 };
-const { CloudContainer, FoundationContainer } = worker;
+const proof = (await import(proofModule)) as unknown as {
+  FoundationContainer: Constructable;
+};
+const { CloudContainer } = worker;
+const { FoundationContainer } = proof;
 
 // Only what the constructor touches; the deferred start-up callback is deliberately not run.
 const containerContext = {

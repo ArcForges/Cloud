@@ -155,9 +155,11 @@ The live steps above are open. None of these results is a Cloudflare provider re
 
 ### Decision: the root `@arcforges/proto` devDependency stays (ADP-07)
 
-`@arcforges/proto` 1.0.0-ci.287.1 remains a root devDependency. No successor receipt was written, and no manifest or lock file changed. Reasons:
+> Superseded (CLOUD.84, S45(4)): commit c8193f0 removed `@arcforges/proto` and `@arcforges/api-client` from the root manifest. The decision below records the HAR.40 state and is no longer the current state. Under CLOUD.84 S38(1) the pin is required only when the package is declared or imported.
 
-- The architecture rule `WirePackagePin` in `tests/ArchitectureTests/AiHarness/HarnessArchitectureRules.cs` requires an exact, registry-locked pin of the public wire package in the root manifest and its lock. Removing the entry would make the wire-package rule refuse.
+`@arcforges/proto` 1.0.0-ci.287.1 remained a root devDependency at HAR.40. No successor receipt was written, and no manifest or lock file changed. Reasons:
+
+- The architecture rule `WirePackagePin` in `tests/ArchitectureTests/AiHarness/HarnessArchitectureRules.cs` requires an exact, registry-locked pin of the public wire package in the root manifest and its lock whenever the manifest declares it (CLOUD.84 S38(1)). A package that is neither declared nor imported passes; a declared but unpinned one, or an import without a runtime dependency, is refused.
 - `@arcforges/api-client`, also a root devDependency, depends on `@arcforges/proto`, so its lock entry stays whatever the root says.
 - No Worker or product source imports the package. `tests/worker/identity-structure.test.ts` reads its generated `dist/gen` files, and `tooling/licence-boundary.ts` names it.
 

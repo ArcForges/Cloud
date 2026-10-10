@@ -48,8 +48,9 @@ const gitEnvironment = () =>
   );
 const sections = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
 const exact = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
-// Public client packages and the one private generated package the Cloud Worker may import.
-const publicPackages = ["@arcforges/proto", "@arcforges/api-client"];
+// Public client packages admitted by name. None remains: CLOUD.84 U2 retired @arcforges/proto and @arcforges/api-client, and the
+// Contracts identity is the committed record. A new public client needs its name admitted here by review.
+const publicPackages: string[] = [];
 const internalPackages = ["@arcforges/ai-internal"];
 // Only the production Worker runtime imports the private generated records (exact package root).
 const internalImportRoots = ["worker/"];
@@ -294,6 +295,54 @@ export function validateImports(root: string, file: string, source: string, poli
     } else if (["import", "from"].includes(token.value) && next?.literal) check(next.value);
   }
 }
+const gitIn = (root: string, ...args: string[]) =>
+  execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+    env: gitEnvironment(),
+  }).trim();
+// A receipt is admitted when it enters main's first-parent history. Merge commits are
+// compared with their first parent (--diff-merges=first-parent), so a receipt added inside
+// a merge commit (cloud-85-r2 in 3980212) is found; without it git log lists no change for a
+// merge. Side-branch drafts that never reached main (com-16-r1 at 67a3428) are not admitted
+// versions and are excluded by --first-parent.
+export function historicalReviews(root: string) {
+  return [
+    ...new Set(
+      gitIn(
+        root,
+        "log",
+        "HEAD",
+        "--first-parent",
+        "--diff-filter=A",
+        "--diff-merges=first-parent",
+        "--name-only",
+        "--format=",
+        "--",
+        "eng/policy/dependency-reviews/",
+      )
+        .split("\n")
+        .filter(Boolean),
+    ),
+  ];
+}
+export function introducingCommit(root: string, file: string) {
+  return gitIn(
+    root,
+    "log",
+    "HEAD",
+    "--first-parent",
+    "--diff-filter=A",
+    "--diff-merges=first-parent",
+    "--no-patch",
+    "--format=%H",
+    "--",
+    file,
+  )
+    .split("\n")
+    .at(-1);
+}
 export function auditDependencies(root: string) {
   root = realpathSync(root);
   const read = (file: string) => {
@@ -309,28 +358,8 @@ export function auditDependencies(root: string) {
     supersedes: string | null;
   };
   assert.deepEqual(activeReview.review, policy.review, "Missing reviewed successor receipt");
-  const git = (...args: string[]) =>
-    execFileSync("git", args, {
-      cwd: root,
-      encoding: "utf8",
-      windowsHide: true,
-      env: gitEnvironment(),
-    }).trim();
-  const historical = [
-    ...new Set(
-      git(
-        "log",
-        "HEAD",
-        "--diff-filter=A",
-        "--name-only",
-        "--format=",
-        "--",
-        "eng/policy/dependency-reviews/",
-      )
-        .split("\n")
-        .filter(Boolean),
-    ),
-  ];
+  const git = (...args: string[]) => gitIn(root, ...args);
+  const historical = historicalReviews(root);
   const coordinates = immutableCoordinates(policy.closure);
   assert.deepEqual(
     activeReview.packages,
@@ -338,9 +367,7 @@ export function auditDependencies(root: string) {
     "Review does not bind immutable package coordinates",
   );
   for (const file of historical) {
-    const introduced = git("log", "HEAD", "--diff-filter=A", "--format=%H", "--", file)
-      .split("\n")
-      .at(-1);
+    const introduced = introducingCommit(root, file);
     assert(introduced, `Missing original review commit: ${file}`);
     const original = git("show", `${introduced}:${file}`);
     assert.equal(read(file).trim(), original, `Immutable review modified: ${file}`);

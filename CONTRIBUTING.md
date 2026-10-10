@@ -10,7 +10,6 @@ dotnet restore Cloud.slnx --locked-mode
 npm run hooks
 npm run check
 npm run check:dotnet
-npm run check:kotlin
 ```
 
 The candidate build belongs to hosted Linux CI. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). Hooks are opt-in, scoped to this worktree and check whitespace without rebuilding or testing. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.

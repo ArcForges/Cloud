@@ -4,22 +4,31 @@
 // returned as CAST(column AS TEXT).
 import type { D1Scalar } from "@arcforges/ai-internal";
 import { base64UrlDecode, base64UrlEncode } from "../private/encoding.ts";
+import {
+  int64TextPattern as int64Text,
+  storageGuards,
+  uint64TextPattern as uint64Text,
+} from "../tables/cloud-tables.generated.ts";
 import type { PlanKind, PlanParam } from "./plan-types.ts";
 
-export const int64Min = -(2n ** 63n);
-export const int64Max = 2n ** 63n - 1n;
-export const uint64Max = 2n ** 64n - 1n;
-export const maxTextLength = 262144;
-export const maxBytesLength = 262144;
+// The value bounds are generated from the C# declarations in src/ArcForges.Cloud/Generation (CLOUD.84 S40(2)); none is a literal here.
+export const int64Min = BigInt(storageGuards.int64Min);
+export const int64Max = BigInt(storageGuards.int64Max);
+export const uint64Max = BigInt(storageGuards.uint64Max);
+export const maxTextLength = storageGuards.maxTextLength;
+export const maxBytesLength = storageGuards.maxBytesLength;
 
-const int64Text = /^(?:0|-?[1-9][0-9]*)$/u;
-const uint64Text = /^(?:0|[1-9][0-9]*)$/u;
-const decimalText = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,9})?$/u;
+/** The longest spelling of a 64-bit integer text: the longest bound, with its sign. */
+const maxIntegerTextLength = storageGuards.uint64Max.length;
+const decimalText = new RegExp(
+  `^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,${storageGuards.maxDecimalFractionDigits}})?$`,
+  "u",
+);
 
 export function isInt64Text(value: unknown): value is string {
   return (
     typeof value === "string" &&
-    value.length <= 20 &&
+    value.length <= maxIntegerTextLength &&
     int64Text.test(value) &&
     BigInt(value) >= int64Min &&
     BigInt(value) <= int64Max
@@ -28,16 +37,23 @@ export function isInt64Text(value: unknown): value is string {
 export function isUint64Text(value: unknown): value is string {
   return (
     typeof value === "string" &&
-    value.length <= 20 &&
+    value.length <= maxIntegerTextLength &&
     uint64Text.test(value) &&
     BigInt(value) <= uint64Max
   );
 }
-/** At most 28 significant digits, nine fractional digits, no exponent, no negative zero. */
+/** At most the generated significant digits and fractional digits; no exponent, no negative zero. */
 export function isCanonicalDecimal(value: unknown): value is string {
   if (typeof value !== "string" || !decimalText.test(value)) return false;
-  if (value.startsWith("-") && !/[1-9]/u.test(value)) return false;
-  return value.replace(/[-.]/gu, "").replace(/^0+/u, "").length <= 28;
+  if (
+    value.startsWith("-") &&
+    ![...value].some((character) => character >= "1" && character <= "9")
+  )
+    return false;
+  return (
+    value.replace(/[-.]/gu, "").replace(/^0+/u, "").length <=
+    storageGuards.maxDecimalSignificantDigits
+  );
 }
 
 const scalarKind: Record<PlanKind, string> = {

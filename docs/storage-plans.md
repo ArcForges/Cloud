@@ -58,7 +58,7 @@ normalized text and not from paths, and `worker/storage/plans.generated.ts` is b
 the generated C# and the table prefix. It is an append-only registry owned by the Cloud integration owner under
 RES-cloud-storage-plans: a module task adds nothing to it, because all nineteen modules are already registered.
 
-`node eng/verification/storage-plans.ts` parses every plan file and refuses it unless:
+The C# generator in `tools/ArcForges.Cloud.Generation` (CLOUD.84 S40(1); `plans generate` writes, `plans check` verifies, run as `npm run check:plans`) is the only generator of the plan outputs. It parses every plan file and refuses it unless:
 
 - its directory is a registered owner and its plan id is `<owner>.<name>`;
 - the SQL is DML or SELECT only, with typed `params=` and `returns=` kinds, anonymous placeholders, every `int64` bound as
@@ -71,14 +71,17 @@ RES-cloud-storage-plans: a module task adds nothing to it, because all nineteen 
   SELECT, WITH or VALUES subquery. Everything else is refused: single- or double-quoted, backtick and bracket names, parenthesised tables,
   schema-qualified names, numbers and keywords in a table position, comma joins (also after a JOIN, a subquery or a table function) and
   malformed WITH lists. A FROM clause ends only at a word SQLite reserves (WHERE, GROUP, ORDER, LIMIT, HAVING, UNION, INTERSECT, EXCEPT, SET), never at a word it also accepts as an alias or column name (DO, CONFLICT, WINDOW, KEY, REPLACE and the like); an oracle test tries about 100 such words in four alias and column shapes. A consequence is that a comma after a FROM clause at the same depth is refused until such a word appears, so an `INSERT ... SELECT ... FROM ... ON CONFLICT ... DO UPDATE SET a = ?, b = ?` is refused; use VALUES. A CTE name must start with `cte_`, which no owner prefix may, so a CTE can never stand in for a foreign table.
-  `storage-plan-ownership.test.ts` checks every bypass spelling found in review against `node:sqlite` as the oracle (valid SQLite that
+  `StoragePlanOwnershipTests` (tests/ArcForges.Cloud.Tests/Reduction) checks every bypass spelling found in review against `node:sqlite` as the oracle (valid SQLite that
   reaches a foreign table) and the allowed constructs plans use. Plans were not changed by this rule: the manifest hash is unchanged.
   The rule checks which tables a statement names; it does not prove a column or function reference is harmless, which review of the plan does.
 
 It then writes `worker/storage/plans.generated.ts` (the Worker dictionary) and `src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs`
 (typed definitions, one nested class per owner so that two owners can share a plan name, for example `PlanManifest.Foundation.Readiness`) with one
-SHA-256 manifest identity. `--check` (part of `npm run check`) fails when either file is stale. After a rebase regenerate with
-`node eng/verification/storage-plans.ts` and commit the result (RES-cloud-storage-plans).
+SHA-256 manifest identity. `plans check` (part of `npm run check`) fails when either file is stale. After a rebase regenerate with
+`dotnet run --project tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj -c Release -- plans generate` and commit the result (RES-cloud-storage-plans).
+The TypeScript helpers that remain in `eng/verification/storage-plans.ts` only parse and validate for the test suites that still import them and
+have no generate, write or command-line entry point (CLOUD.84 S40(1)); `tests/worker/storage-plan-parity.test.ts` proves that the manifest they
+build has the C# hash and plans.
 
 A guarded cross-module transaction family is not an owner plan, and this rule is not weakened for owner plans. CLOUD.06 added the closed family
 registry (`storage/plans/families.json`) and the family plan grammar (`storage/plans/families/`, id `families.<family>.<name>`), which the same generator
@@ -94,6 +97,25 @@ version in its own dictionary and refuses an unknown plan, a different manifest 
 deadline and any argument that does not match the plan statement by statement. Writes run as one `D1Database.batch()`; an uncertain write
 is `unknownOutcome` and is never retried automatically. These behaviors, and the signed `storage.internal` ingress that only the proof
 Container's outbound handler reaches, were delivered and observed by PRF.07 ([foundation proof](prf-07-foundation-proof.md)).
+
+## Worker adapter (CLOUD.84 S40(2))
+
+The Worker runs a checked-in plan on the C# host's behalf and holds no plan decision. Where each function now sits:
+
+- `handleExecutePlan` (`worker/storage/handler.ts`): transport only. It checks the private host, path, method, content type, body bound and
+  signature, then parses the generated request. The nil identity it refuses is `correlationGuard.nilUuid` from the generated table.
+- `executePlan`, `parseDeadline`, `bindStatements`, `classifyError` and `withDeadline` (`worker/storage/execute-plan.ts`): transport only.
+  The plans come from `worker/storage/plans.generated.ts`, which only the C# generator writes. The deadline budget, the clock tolerance and the
+  guard constraint name come from the generated `storageGuards`. The driver-message classes are transport classification of library text.
+  The checks on `access` and `returns` only refuse a plan whose generated shape does not match its statements, so they make no decision.
+- `bindValue`, `encodeResult` and the integer and decimal checks (`worker/storage/scalars.ts`): exact scalar binding and result encoding. The
+  value bounds come from the generated `storageGuards`, which the C# declarations in `src/ArcForges.Cloud/Generation/StorageGuards.cs` supply.
+- `plan-types.ts` and `d1.ts`: types only.
+- Plan decisions (the statements, their order, ownership, commit tails and write targets): none in the Worker. They are the generated tables
+  in `worker/storage/plans.generated.ts`, produced by the C# generator.
+
+The adapter tests `tests/worker/storage-executor.test.ts` and `tests/worker/storage-handler.test.ts` stay, because they exercise this transport
+layer. `tests/worker/storage-boundary.test.ts` covers the same ingress from the foundation entry.
 
 ## Shared architecture policy host
 
@@ -113,14 +135,16 @@ build time, not correctness.
 
 ## Checks
 
-| Check                                                                                                                                                        | Where                          |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ |
-| `npm run check:plans`, `tests/worker/storage-plans-generator.test.ts`, `storage-plan-ownership.test.ts` (generator rules, ownership, owner registry)         | hosted CI and locally          |
-| `tests/worker/storage-boundary.test.ts` (a signed plan request is refused on every public path; only the Container's direction of the signature is accepted) | hosted CI and locally          |
-| `tests/worker/module-layout.test.ts`, `tests/worker/docker-context.test.ts` (projects, references, context)                                                  | hosted CI and locally          |
-| `ModuleBoundaryTests`, `LayeringTests`, `StoragePlanBoundaryTests` (architecture, import, plan-hash, no SQL in C#, nothing the bridge sends names SQL)       | hosted CI and locally          |
-| `FoundationHostTests` (the host serves no storage endpoint and refuses the wrong direction of the signature)                                                 | hosted CI and locally          |
-| Native AOT publish of the host with its twenty-one referenced projects                                                                                       | hosted CI image build, locally |
+| Check                                                                                                                                                                       | Where                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `npm run check:plans`, `tests/ArcForges.Cloud.Tests/Reduction/StoragePlanGeneratorTests.cs` and `StoragePlanOwnershipTests.cs` (generator rules, ownership, owner registry) | hosted CI and locally          |
+| `tests/worker/storage-plan-parity.test.ts` (the TypeScript test-support manifest equals the C# hash and plans)                                                              | hosted CI and locally          |
+| `tests/ArcForges.Cloud.Tests/Generation/StorageGuardsTests.cs` (the Worker value guards equal the host values they mirror)                                                  | hosted CI and locally          |
+| `tests/worker/storage-boundary.test.ts` (a signed plan request is refused on every public path; only the Container's direction of the signature is accepted)                | hosted CI and locally          |
+| `tests/worker/module-layout.test.ts`, `tests/worker/docker-context.test.ts` (projects, references, context)                                                                 | hosted CI and locally          |
+| `ModuleBoundaryTests`, `LayeringTests`, `StoragePlanBoundaryTests` (architecture, import, plan-hash, no SQL in C#, nothing the bridge sends names SQL)                      | hosted CI and locally          |
+| `FoundationHostTests` (the host serves no storage endpoint and refuses the wrong direction of the signature)                                                                | hosted CI and locally          |
+| Native AOT publish of the host with its twenty-one referenced projects                                                                                                      | hosted CI image build, locally |
 
 ## Adding a module's plans
 
@@ -128,7 +152,7 @@ build time, not correctness.
    `platform_` tables. A write plan starts with its guard inserts, holds your mutations and ends with the canonical commit tail and the guard release
    (`-- tail: v1 events=N [inbox]` in its header; `node eng/verification/commit-tail.ts print --events N` prints the blocks), or states
    `-- tail: none <reason>` ([receipts and outbox](d1-receipts-outbox.md)).
-2. Run `node eng/verification/storage-plans.ts` and commit both generated files.
+2. Run `dotnet run --project tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj -c Release -- plans generate` and commit the generated files.
 3. Call the plan through the typed repository API your task adds to `Storage.D1`. The executor and the exact scalar values are internal
    to the bridge today (`InternalsVisibleTo` for the host and its tests); a module reaches them only through that API, never through the
    Contracts wire records.

@@ -5,9 +5,20 @@
 // never forwarded to the host, so the refusal is safe to retry (effect: did not happen). A reply the host
 // itself wrote is JSON or gRPC-Web, never this plain text, and a failure after forwarding stays unclassified
 // because the effect of a possibly forwarded call is not known (ordinary uncertainty recovery).
-import { retryAfterSeconds } from "./model.ts";
+import {
+  classifiedPrefixBytes,
+  readinessTerms,
+  retryAfterSeconds,
+  type Reason,
+} from "../tables/cloud-tables.generated.ts";
 
-export type StartFailure = "no_instance_available" | "start_failed" | "rate_limited";
+/** The start-failure classes; their names are the generated readiness reasons (CLOUD.84 S34). */
+export type StartFailure = Extract<
+  Reason,
+  | typeof readinessTerms.no_instance_available
+  | typeof readinessTerms.start_failed
+  | typeof readinessTerms.rate_limited
+>;
 
 /**
  * The opening of each library message, taken from the locked @cloudflare/containers (container.js). A test reads
@@ -16,8 +27,7 @@ export type StartFailure = "no_instance_available" | "start_failed" | "rate_limi
  */
 export const noInstanceText = "There is no Container instance available at this time.";
 export const startFailedText = "Failed to start container:";
-/** More than the longest opening is never read. */
-export const classifiedPrefixBytes = 128;
+export { classifiedPrefixBytes };
 
 /** Classifies a Container response from its status, media type and the first bytes of its body. */
 export function classifyStartFailure(
@@ -26,10 +36,11 @@ export function classifyStartFailure(
   prefix: string,
 ): StartFailure | null {
   if (contentType?.split(";")[0]?.trim().toLowerCase() !== "text/plain") return null;
-  if (status === 503 && prefix.startsWith(noInstanceText)) return "no_instance_available";
-  if (status === 500 && prefix.startsWith(startFailedText)) return "start_failed";
+  if (status === 503 && prefix.startsWith(noInstanceText))
+    return readinessTerms.no_instance_available;
+  if (status === 500 && prefix.startsWith(startFailedText)) return readinessTerms.start_failed;
   // The library forwards the platform's own rate-limit message; the host never answers 429 as plain text.
-  if (status === 429) return "rate_limited";
+  if (status === 429) return readinessTerms.rate_limited;
   return null;
 }
 

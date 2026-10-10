@@ -4,13 +4,20 @@
 import { BodyTooLarge, jsonResponse, readBounded, refusal } from "../private/bounded-body.ts";
 import { sha256, sha256Hex } from "../private/encoding.ts";
 import { isCorrelationId, newCorrelationId } from "../ingress/correlation.ts";
+import {
+  canonicalUuidPattern as uuid,
+  edgeGuard,
+  maxRequestBytes,
+  proofMinimumTokenBytes,
+  scopePattern,
+} from "../tables/cloud-tables.generated.ts";
 import { poisonName } from "./poison.ts";
 import { isOperatorAuthorization, verifyOperatorSignature } from "./operator-signature.ts";
 import { ContainerCallError, postSigned } from "./container-client.ts";
 import { classifyStartFailureResponse } from "../readiness/container.ts";
-import { evaluateReadiness } from "../readiness/evaluate.ts";
+import { evaluateReadiness } from "../readiness/transport.ts";
 import { readinessLogEvent, readinessResponse } from "../readiness/http.ts";
-import { retryAfterSeconds } from "../readiness/model.ts";
+import { retryAfterSeconds } from "../tables/cloud-tables.generated.ts";
 import {
   foundationContainerName,
   proofEnabled,
@@ -18,10 +25,8 @@ import {
   type WakeMessage,
 } from "./types.ts";
 
-export const sessionCookieName = "__Host-af_session";
-export const maxRequestBytes = 16_384;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-const scopePattern = /^proof\/[A-Za-z0-9._/-]{1,200}$/u;
+export const sessionCookieName = edgeGuard.sessionCookieName;
+export { maxRequestBytes };
 const operations = new Set([
   "readiness",
   "exact",
@@ -78,7 +83,7 @@ async function forwardSession(request: Request, env: FoundationEnv): Promise<Res
   const headers = new Headers();
   const cookie = sessionCookieOnly(request.headers.get("cookie"));
   if (cookie) headers.set("cookie", cookie);
-  for (const name of ["origin", "x-af-csrf"]) {
+  for (const name of ["origin", edgeGuard.csrfHeader]) {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
   }
@@ -149,7 +154,7 @@ async function operatorOperation(
   const operation = url.pathname.slice("/proof/v1/".length);
   const token = env.PROOF_OPERATOR_TOKEN ?? "";
   const publicKey = env.PROOF_OPERATOR_VERIFIER ?? "";
-  const tokenEnabled = token.length >= 32;
+  const tokenEnabled = token.length >= proofMinimumTokenBytes;
   // A missing or short operator credential disables the surface instead of weakening it.
   if (!tokenEnabled && publicKey === "") return refusal(503);
   const authorizationHeader = request.headers.get("authorization");

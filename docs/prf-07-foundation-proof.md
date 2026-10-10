@@ -83,8 +83,8 @@ new command id. A violated named guard is `precondition`; any other SQLite const
 `storage/plans/<owner>/<name>.sql` (moved there by CLOUD.02, see [storage plans](storage-plans.md)) are the reviewed plans. A header declares
 `plan`, `version`, `access` and `maxRows`; each `-- statement:` block declares `params=` and `returns=`
 kinds (`int64 uint64 decimal text bytes bool scope`, a trailing `?` marks a nullable value). The
-generator `node eng/verification/storage-plans.ts` validates the files and writes
-`worker/storage/plans.generated.ts` and `src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs`; `--check` is
+generator (the C# `plans generate` in `tools/ArcForges.Cloud.Generation`, CLOUD.84 S40(1); the TypeScript generator was retired) validates the files and writes
+`worker/storage/plans.generated.ts` and `src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs`; `plans check` is
 part of `npm run check`. It refuses comments, several statements in one block, DDL, `PRAGMA`,
 `RETURNING`, named placeholders, an int64 argument that is not wrapped as `CAST(? AS INTEGER)` and any
 other argument that is.

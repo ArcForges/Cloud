@@ -9,7 +9,6 @@ import {
   isCorrelationId,
   newCorrelationId,
   newSpanId,
-  parseTraceparent,
   readRequestCorrelation,
   singleMessage,
   traceparentFor,
@@ -20,8 +19,23 @@ import { trailerFrame } from "../../worker/ingress/io.ts";
 import type { MessageLike } from "../../worker/foundation/queue.ts";
 import type { CoordinatorLike, FoundationEnv, WakeMessage } from "../../worker/foundation/types.ts";
 import { base64UrlEncode } from "../../worker/private/encoding.ts";
-import { routeRequest, type CloudBindings } from "../../worker/router.ts";
+import { proofRouteTable } from "../../worker/ingress/proof-table.ts";
+import { routeRequest as routeWith, type CloudBindings } from "../../worker/router.ts";
+
+// The proof methods are routed by the proof entry's table, and only when the proof flag is set (CLOUD.84 D1).
+const routeRequest = (
+  request: Request,
+  env: CloudBindings,
+  context?: { waitUntil(promise: Promise<unknown>): void },
+) =>
+  routeWith(
+    request,
+    env,
+    context,
+    env.FOUNDATION_PROOF === "enabled" ? proofRouteTable : undefined,
+  );
 import { createFakeR2 } from "./support/fake-r2.ts";
+import { parseTraceparent } from "./support/traceparent.ts";
 
 const origin = "https://proof.example.test";
 const whoami = "/api/arcforges.proof.v1.PipelineProbe/Whoami";

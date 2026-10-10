@@ -4,7 +4,8 @@
 import { bodyTimeoutError } from "./ingress/errors.ts";
 import { readBytes } from "./ingress/io.ts";
 import { handleApiRequest } from "./ingress/pipeline.ts";
-import { healthPath, helloPath, maxBodyBytes } from "./ingress/routes.ts";
+import { healthPath, helloPath, maxBodyBytes, type RouteTable } from "./ingress/routes.ts";
+import { routerBodyReadMilliseconds } from "./tables/cloud-tables.generated.ts";
 
 export { healthPath, helloPath, maxBodyBytes };
 
@@ -25,9 +26,10 @@ export async function routeRequest(
   request: Request,
   env: CloudBindings,
   context?: { waitUntil(promise: Promise<unknown>): void },
+  routes?: RouteTable,
 ): Promise<Response> {
   try {
-    return await handleApiRequest(request, env);
+    return await handleApiRequest(request, env, routes);
   } finally {
     if (request.body && !request.bodyUsed) {
       // Early rejection can leave an HTTP connection with unread upload bytes. Wrangler's
@@ -35,7 +37,10 @@ export async function routeRequest(
       // Dispose a small upload in the background without extending the RPC deadline or
       // accepting an unlimited body. A stalled/large upload is canceled instead.
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(bodyTimeoutError), 1000);
+      const timer = setTimeout(
+        () => controller.abort(bodyTimeoutError),
+        routerBodyReadMilliseconds,
+      );
       const cleanup = readBytes(request.body, maxBodyBytes + 1, controller.signal)
         .then(() => {})
         .catch(() => {})

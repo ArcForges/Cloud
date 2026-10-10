@@ -109,8 +109,8 @@
       "kind": "msbuild"
     },
     {
-      "path": "tests/kotlin-consumer/build.gradle.kts",
-      "kind": "gradle"
+      "path": "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj",
+      "kind": "msbuild"
     }
   ]
 }

@@ -39,9 +39,12 @@ an error. After an approved binding change, run
 `node tooling/project.ts provenance-notice` to regenerate
 `eng/provenance/NOTICE.txt`. The summary supplements full legal texts.
 
-The initial reconciliation covers the retained AGPL text and three standard
-Gradle 9.7.1 wrapper files. Independent generation matched all three files. Gradle
-is build/test-only. New full upstream legal files were admitted under reviewed
+The initial reconciliation covered the retained AGPL text and three standard
+Gradle 9.7.1 wrapper files. Independent generation matched all three files. The
+wrapper record (`gradle-wrapper-9-7-1-r1`) became inactive when the Kotlin consumer
+gate was removed (CLOUD.84 U1), and the repository no longer builds with Gradle.
+The Gradle licence text stays in `third-party/` under its active record
+(`gradle-legal-r1`). New full upstream legal files were admitted under reviewed
 records before copying. A legal-document record permits notice reproduction only;
 it does not admit or relicense the implementation mentioned by that document.
 

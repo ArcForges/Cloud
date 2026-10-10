@@ -1,14 +1,5 @@
 version: 2
 updates:
-  - package-ecosystem: gradle
-    directory: /tests/kotlin-consumer
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    groups:
-      kotlin-consumer:
-        patterns: ["*"]
   - package-ecosystem: nuget
     directory: /
     schedule:
@@ -31,11 +22,10 @@ updates:
       cloudflare:
         patterns: ["wrangler", "@cloudflare/*"]
       contracts:
-        patterns: ["@arcforges/*", "@connectrpc/*", "@bufbuild/*"]
+        patterns: ["@arcforges/*"]
       tooling:
         patterns: ["*"]
-        exclude-patterns:
-          ["wrangler", "@cloudflare/*", "@arcforges/*", "@connectrpc/*", "@bufbuild/*"]
+        exclude-patterns: ["wrangler", "@cloudflare/*", "@arcforges/*"]
     ignore:
       - dependency-name: "@types/node"
         versions: [">=25"]

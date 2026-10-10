@@ -34,7 +34,7 @@ internal static partial class ArchitectureExceptions
     /// Applies the register to the findings of one audit. <paramref name="document"/> is the parsed register (null when it is not valid JSON),
     /// and <paramref name="today"/> is the audit date. The register is valid only with exactly the keys schemaVersion and exceptions.
     /// </summary>
-    public static ExceptionResult Apply(IReadOnlyList<HarnessFinding> findings, JsonElement? document, DateOnly today)
+    public static ExceptionResult Apply(IReadOnlyList<HarnessFinding> findings, JsonElement? document, DateOnly today, IEnumerable<string>? extraRules = null)
     {
         var problems = new List<HarnessFinding>();
         void Problem(string rule, string detail) => problems.Add(new HarnessFinding(rule, RegisterPath, detail));
@@ -47,7 +47,8 @@ internal static partial class ArchitectureExceptions
             return new ExceptionResult(findings, problems);
         }
 
-        var known = HarnessArchitecture.Rules.Select(rule => rule.Id).ToHashSet(StringComparer.Ordinal);
+        // The GOV.10 catalogue plus the standing checks that register their own rules (the WorkerAdapter literal check, CLOUD.84 S43).
+        var known = HarnessArchitecture.Rules.Select(rule => rule.Id).Concat(extraRules ?? Array.Empty<string>()).ToHashSet(StringComparer.Ordinal);
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var remaining = findings.ToList();
         foreach (var raw in entries.EnumerateArray())

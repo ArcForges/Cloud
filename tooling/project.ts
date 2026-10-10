@@ -2,13 +2,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
-import { verifyProtocol, waitForHealth } from "./protocol.ts";
-import { verifyKotlin } from "./kotlin.ts";
+import { probeProject, runProbe, waitForHealth } from "./protocol.ts";
+import { sealedToolName } from "./sealed-tool.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
 import { auditProvenance } from "./provenance.ts";
 import {
@@ -27,6 +27,28 @@ import {
   type Identity,
 } from "./build-identity.ts";
 
+/**
+ * The publish of the sealed tool (CLOUD.84 S38(2), S41(1)): tools/ArcForges.Cloud.Generation, self-contained for linux-x64 and not
+ * single-file. Nothing here may imply the ILLink pack (single-file, trimming or AOT analysis), because the reviewed tool lock does not hold
+ * it and the CI restore is locked.
+ */
+export function toolPublishArguments(output: string): string[] {
+  return [
+    "publish",
+    probeProject,
+    "-c",
+    "Release",
+    "-r",
+    "linux-x64",
+    "--self-contained",
+    "true",
+    "-p:PublishSingleFile=false",
+    "-p:DebugType=none",
+    "-o",
+    output,
+  ];
+}
+
 const payloadFiles = [
   "build-identity.json",
   "docker-image.tar",
@@ -34,7 +56,13 @@ const payloadFiles = [
   "wrangler.json",
   "legal-notices.json",
   "worker-meta.json",
+  // CLOUD.84 D1: the isolated proof environment has its own entry, so its bundle is a second sealed member. Its metadata is sealed beside it.
+  "proof-worker.js",
+  "proof-worker-meta.json",
   "image-provenance.json",
+  // CLOUD.84 S33(3)(b), S38(2), S41(1): the self-contained, non-single-file tool archive (tooling/sealed-tool.ts). CI runs its Hello
+  // `probe` through runProbe and the deploy jobs its `migrate` command through eng/migrations/shim.ts, each after checking its digest.
+  sealedToolName,
 ] as const;
 export interface Candidate {
   schema: 1;
@@ -181,8 +209,7 @@ export async function testContainer(image: string, revision: string, identity: I
     const native = await binding("8081/tcp");
     const health = await waitForHealth(web, revision, false, 60000);
     verifyHealthIdentity(health, identity);
-    const grpcWeb = await verifyProtocol(web, false);
-    const kotlin = await verifyKotlin(web, revision, false, "container");
+    const grpcWeb = await runProbe(web, false);
     await run("dotnet", [
       "run",
       "--project",
@@ -196,14 +223,11 @@ export async function testContainer(image: string, revision: string, identity: I
     await run("docker", ["restart", id]);
     const restartedWeb = await binding("8080/tcp");
     verifyHealthIdentity(await waitForHealth(restartedWeb, revision, false, 60000), identity);
-    await verifyProtocol(restartedWeb, false);
-    const kotlinRestart = await verifyKotlin(restartedWeb, revision, false, "restart");
+    await runProbe(restartedWeb, false);
     await writeJson(path.join(root, "artifacts", "container-evidence.json"), {
       imageId: imageInfo.Id,
       health,
       grpcWeb,
-      kotlin,
-      kotlinRestart,
       nativeGrpc: true,
       restart: true,
       nonRoot: true,
@@ -261,19 +285,12 @@ async function testWorker(candidate: Candidate) {
       expectedIdentity(candidate.version).build,
     );
     verifyHealthIdentity(health, expectedIdentity(candidate.version));
-    const result = await verifyProtocol("http://127.0.0.1:18787/api", true);
-    const kotlin = await verifyKotlin(
-      "http://127.0.0.1:18787/api",
-      candidate.revision,
-      true,
-      "worker",
-    );
+    const result = await runProbe("http://127.0.0.1:18787/api", true);
     await writeJson(path.join(root, "artifacts", "worker-evidence.json"), {
       workerName,
       revision: candidate.revision,
       health,
       ...result,
-      kotlin,
     });
   } finally {
     // Own the process group; Wrangler and its runtime children cannot signal the test runner.
@@ -379,6 +396,30 @@ async function buildCandidate() {
     path.join(root, "artifacts/worker-bundle/index.js"),
     path.join(candidateDir, "worker.js"),
   );
+  // CLOUD.84 D1: the proof bundle is built from its own entry (worker/proof/entry.ts) and sealed with the candidate. The dry-run needs
+  // the proof asset directory to exist; its contents are uploaded only at deploy time and are not part of this bundle.
+  await mkdir(path.join(root, "artifacts", "proof-assets"), { recursive: true });
+  await run(process.execPath, [
+    wrangler,
+    "deploy",
+    "--dry-run",
+    "--env",
+    "proof",
+    "--containers-rollout",
+    "none",
+    "--outdir",
+    "artifacts/worker-bundle-proof",
+    "--metafile",
+    "artifacts/worker-bundle-proof/bundle-meta.json",
+  ]);
+  await copyFile(
+    path.join(root, "artifacts/worker-bundle-proof/bundle-meta.json"),
+    path.join(candidateDir, "proof-worker-meta.json"),
+  );
+  await copyFile(
+    path.join(root, "artifacts/worker-bundle-proof/entry.js"),
+    path.join(candidateDir, "proof-worker.js"),
+  );
   const config = await readJson<WorkerConfig>(path.join(root, "wrangler.json"));
   delete config.$schema;
   config.main = "./worker.js";
@@ -388,6 +429,33 @@ async function buildCandidate() {
   config.containers[0].image = image;
   await writeJson(path.join(candidateDir, "wrangler.json"), config);
   await run("docker", ["save", "--output", "artifacts/candidate/docker-image.tar", image]);
+  // CLOUD.84 S33(3)(b), S38(2), S41(1): the tool (its Hello `probe` and its D1 `migrate` command) is published once, self-contained for
+  // linux-x64 and NOT single-file. A single-file publish turns on the single-file analyzer, whose implicit Microsoft.NET.ILLink.Tasks
+  // reference is not in the reviewed tool lock, so the locked CI restore refuses it (NU1004). The publish output is archived in a fixed
+  // order with fixed metadata as one sealed member; the probe runner and the deploy jobs check its SHA-256 against this manifest before they
+  // extract and run it, so no .NET build runs in a deploy job. The reviewed tool lock must come out of the publish byte-identical: it is
+  // never rewritten or restored here, and a changed lock fails the candidate.
+  const toolLockFile = path.join(root, "tools", "ArcForges.Cloud.Generation", "packages.lock.json");
+  const reviewedToolLock = await readFile(toolLockFile);
+  const toolOutput = path.join(root, "artifacts", "tool-publish");
+  await rm(toolOutput, { recursive: true, force: true });
+  await run("dotnet", toolPublishArguments(toolOutput));
+  assert.ok(
+    reviewedToolLock.equals(await readFile(toolLockFile)),
+    "The tool publish changed the reviewed tools/ArcForges.Cloud.Generation/packages.lock.json.",
+  );
+  await run("tar", [
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "-cf",
+    path.join(candidateDir, sealedToolName),
+    "-C",
+    toolOutput,
+    ".",
+  ]);
   const files: Record<string, string> = {};
   for (const file of payloadFiles) files[file] = await sha256(path.join(candidateDir, file));
   await writeJson(path.join(candidateDir, "manifest.json"), {

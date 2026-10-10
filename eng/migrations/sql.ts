@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test support only (CLOUD.84 U9, S41, S42(2)): the TypeScript migration module is kept for the offline local drivers and the
+// TypeScript suites that still import it. C# (src/ArcForges.Cloud.Storage.D1/MigrationRunner) is authoritative for every decision.
 // SQL text handling for the D1 migration runner: statement splitting that understands strings, quoted
 // identifiers, comments and trigger bodies, the migration header, the statement classes each migration mode
 // may contain, and the content checksum that locks a merged migration (RES-cloud-d1-migrations).
+// The live D1 path is C# and no TypeScript REST transport remains; deleting this file is an open residual (D13, S42(2)).
 import { createHash } from "node:crypto";
 
 export const migrationModes = ["expand", "backfill", "cutover", "contract"] as const;

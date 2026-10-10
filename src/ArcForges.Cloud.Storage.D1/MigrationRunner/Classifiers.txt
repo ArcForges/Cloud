@@ -1,0 +1,12 @@
+# The statement classifiers of the D1 migration runner (CLOUD.84 U9, S42(1)). MigrationSql.ModeViolations applies them to the
+# upper-cased head of each statement and, for the ALTER TABLE rules, to its text. Each line is: name, flag, pattern.
+# The flag is `i` for case-insensitive matching and `-` otherwise. Lines starting with `#` are comments.
+create-object - ^CREATE (?:UNIQUE )?(?:TABLE|INDEX|TRIGGER|VIRTUAL TABLE)\b
+create-index - ^CREATE (?:UNIQUE )?INDEX\b
+alter-table - ^ALTER TABLE\b
+add-column i \bADD(?: COLUMN)?\b
+drop-or-rename i \b(?:DROP|RENAME)\b
+alter-table-prefix i ^ALTER\s+TABLE\s+\S+
+drop-or-alter - ^(?:DROP|ALTER)\b
+data-change - ^(?:INSERT|UPDATE|DELETE)\b
+defer-foreign-keys i ^PRAGMA\s+defer_foreign_keys\s*=\s*(?:ON|OFF|1|0)\s*$

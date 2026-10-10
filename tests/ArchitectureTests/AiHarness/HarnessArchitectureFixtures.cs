@@ -6,7 +6,7 @@ namespace ArcForges.Cloud.ArchitectureTests.AiHarness;
 
 /// <summary>
 /// One pass or refuse fixture of the ported AI policy suite (HAR.40 validation (d)). A pass fixture yields no finding for any rule; a refuse
-/// fixture yields a finding of its own rule. The fixture set is the AI policy's 84 fixtures (27 pass, 57 refuse), each keeping the AI rule,
+/// fixture yields a finding of its own rule. The fixture set is the AI policy's 84 fixtures (27 pass, 57 refuse) and two CLOUD.84 S38(1) wire-package fixtures (one pass, one refuse), each keeping the AI rule,
 /// kind and name, applied to the Cloud layout: the Worker entry is worker/index.ts, the Workers AI adapter is worker/ai/internal, and the AI
 /// src/ files become worker/ files. <see cref="Name"/> is the AI fixture name.
 /// </summary>
@@ -289,6 +289,26 @@ internal static partial class HarnessArchitectureFixtures
             m["dependencies"]!.AsObject().Remove("@arcforges/proto");
             m["devDependencies"]!.AsObject()["@arcforges/proto"] = Pin;
         }))),
+        // CLOUD.84 S38(1): a package that nothing declares or imports has nothing to pin; a declared one must still be exact.
+        Pass("wire-package", "neither declared nor imported", files =>
+        {
+            files["package.json"] = Manifest(m => m["dependencies"]!.AsObject().Remove("@arcforges/proto"));
+            files["package-lock.json"] = Lock(p =>
+            {
+                p.Remove("node_modules/@arcforges/proto");
+                p[""]!.AsObject()["dependencies"]!.AsObject().Remove("@arcforges/proto");
+            });
+            files["worker/hello.ts"] = "export const hello = \"no wire package\";\n";
+        }),
+        Fail("wire-package", "declared floating in development and not imported", files =>
+        {
+            files["package.json"] = Manifest(m =>
+            {
+                m["dependencies"]!.AsObject().Remove("@arcforges/proto");
+                m["devDependencies"]!.AsObject()["@arcforges/proto"] = "^" + Pin;
+            });
+            files["worker/hello.ts"] = "export const hello = \"no wire package\";\n";
+        }),
         Pass("wire-import", "package root"),
         Fail("wire-import", "build output subpath", Put("worker/deployment.ts",
             "import { SayHelloRequestSchema } from \"@arcforges/proto/dist/index.js\";\nvoid SayHelloRequestSchema;\n")),

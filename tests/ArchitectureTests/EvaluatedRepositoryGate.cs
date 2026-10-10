@@ -53,6 +53,43 @@ public sealed class EvaluatedRepositoryGate
     /// <summary>The public Cloud API and the real test methods that exercise each member. A new public member fails RP-10 until mapped here.</summary>
     private static readonly (string Api, string Method, string TestType, string[] Tests)[] ApiTests =
     [
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "DatabaseNameFor", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["ProductionDeclaresNoBusinessDatabaseAndProofNamesItsReservedOneFromWranglerJson"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "FormatReport", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["TheProofStepMigratesTheRealCatalogThroughTheRestClientPrintsReceiptsAndTheCompatibilityRecordAndNoSecret", "TheDryRunAppliesTheRealCatalogToAnEmptyDatabaseWithTheSameGatedFlow"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "IsAccountId", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["TheLiveStepRefusesAPullRequestAForkAnotherBranchAnotherRepositoryAndACandidateOfAnotherCommit"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "IsDatabaseId", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["TheDatabaseIdComesFromAnExactNameLookupAMissingDuplicatedOrFailedLookupRefusesAndNothingIsCreated"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "IsRevision", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["TheLiveStepRefusesAPullRequestAForkAnotherBranchAnotherRepositoryAndACandidateOfAnotherCommit"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "OverrideDatabaseId", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["TheDatabaseIdComesFromAnExactNameLookupAMissingDuplicatedOrFailedLookupRefusesAndNothingIsCreated"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "PlanFor", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["AMalformedOrUnknownPlanIsRefused", "TheManifestNamesTheBackfillAndTheCutoverAContractNeedsConsentAndTheSoak"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "RequireContext", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["TheLiveStepRefusesAPullRequestAForkAnotherBranchAnotherRepositoryAndACandidateOfAnotherCommit"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "RequireGatePassed", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["AFailingMigrationStepStopsPromotionWithExitCode1ARefusedGateRecordAndNoPromotionWithoutAPassedRecord"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "RunGateAsync", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["WithoutAManifestPlanOnlyExpandMigrationsAreAppliedAndTheStepStopsBeforeBackfillCutoverAndContract", "TheManifestNamesTheBackfillAndTheCutoverAContractNeedsConsentAndTheSoak"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "RunnerIdentity", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["TheProofStepMigratesTheRealCatalogThroughTheRestClientPrintsReceiptsAndTheCompatibilityRecordAndNoSecret"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "Scrub", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["ScrubRemovesASecretWhereverItAppearsAndIgnoresEmptyValues"]),
+        ("ArcForges.Cloud.Storage.D1.Deploy.DeployGate", "SelectDatabaseId", "ArcForges.Cloud.Tests.Reduction.DeployTests", ["TheDatabaseIdComesFromAnExactNameLookupAMissingDuplicatedOrFailedLookupRefusesAndNothingIsCreated"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.IMigrationClient", "BatchAsync", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["FreshDatabaseReceivesEveryMigrationInOrderWithReceiptsAndEqualsTheManifest"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationCatalog", "AppendOnlyProblems", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["TheIntegrationOwnerNumbersPendingMigrationsInOrderAndLocksThemAndTheLockStaysAppendOnlyAgainstItsBase"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationCatalog", "CheckPendingFile", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["TheIntegrationOwnerNumbersPendingMigrationsInOrderAndLocksThemAndTheLockStaysAppendOnlyAgainstItsBase"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationCatalog", "Load", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["EditingALockedMigrationLeavingAGapOrMismatchingAHeaderIsRefused", "TheCommittedCatalogIsGaplessLockedAndParsesInItsModes"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationCatalog", "LockIdentity", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["TheCommittedCatalogIsGaplessLockedAndParsesInItsModes"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationCatalog", "LockNumbered", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["TheCommittedCatalogIsGaplessLockedAndParsesInItsModes", "TheIntegrationOwnerNumbersPendingMigrationsInOrderAndLocksThemAndTheLockStaysAppendOnlyAgainstItsBase"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationCatalog", "NumberedName", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["TheIntegrationOwnerNumbersPendingMigrationsInOrderAndLocksThemAndTheLockStaysAppendOnlyAgainstItsBase"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationCatalog", "SortedSqlFiles", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["EditingALockedMigrationLeavingAGapOrMismatchingAHeaderIsRefused"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationCatalog", "SortedSqlNames", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["MigrationNamesAreOrderedOrdinallyWhateverOrderTheyArriveIn", "PendingFilesAreReadInOrdinalOrderWhateverOrderTheDirectoryCreatedThem"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationEngine", "ApplyPendingAsync", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["FreshDatabaseReceivesEveryMigrationInOrderWithReceiptsAndEqualsTheManifest"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationEngine", "Compatibility", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["CutoverWaitsForItsVerifiedBackfillsAndMovesTheHorizonsAndAContractWaitsForSoakAndConsent"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationEngine", "Micros", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["ABackfillLongerThanItsLeaseRenewsItPageByPageAndIsNeverMistakenForAStaleMigrator"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationEngine", "StatusAsync", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["SecondRunAppliesNothingTakesAHigherFenceAndReleasesTheLease"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "ChecksumOf", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["LineEndingsDoNotChangeAChecksumOrTheStatements"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "ModeName", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["EveryModeAcceptsOnlyItsOwnStatementsAndNoMigrationControlsTransactionsOrPragmas"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "ModeViolations", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["EveryModeAcceptsOnlyItsOwnStatementsAndNoMigrationControlsTransactionsOrPragmas"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "NormalizeNewlines", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["LineEndingsDoNotChangeAChecksumOrTheStatements"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "ParseBackfill", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["TheBackfillSectionsAreValidatedOneStatementEachRevisionGuardKeyCursorAndAtMost100Rows"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "ParseHeader", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["EditingALockedMigrationLeavingAGapOrMismatchingAHeaderIsRefused"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "ParseMode", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["EditingALockedMigrationLeavingAGapOrMismatchingAHeaderIsRefused"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "ParseNumberedFileName", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["TheIntegrationOwnerNumbersPendingMigrationsInOrderAndLocksThemAndTheLockStaysAppendOnlyAgainstItsBase"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "ParsePendingModule", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["TheIntegrationOwnerNumbersPendingMigrationsInOrderAndLocksThemAndTheLockStaysAppendOnlyAgainstItsBase"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "ShortChecksum", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["EditedMergedMigrationIsRefusedByItsReceiptChecksumAndDatabaseAheadIsRefused"]),
+        ("ArcForges.Cloud.Storage.D1.MigrationRunner.MigrationSql", "SplitStatements", "ArcForges.Cloud.Tests.Reduction.MigrationRunnerTests", ["TheStatementSplitterKeepsTriggerBodiesStringsAndCommentsWhole"]),
         ("ArcForges.Cloud.HelloEndpoint", "SayHello", "ArcForges.Cloud.Tests.HelloEndpointTests",
             ["PreservesThePublishedGreeting", "EmptyNameHasThePublishedStatus", "OversizedNameIsResourceExhausted"]),
         ("ArcForges.Cloud.BuildIdentity", "Resolve", "ArcForges.Cloud.Tests.BuildIdentityTests",
@@ -106,6 +143,21 @@ public sealed class EvaluatedRepositoryGate
             .Select(member => ("ArcForges.Cloud.Modules.PlanValue", member, "ArcForges.Cloud.Tests.Entitlement.ModulePlanPortTests",
                 new[] { "PlanValuesAreExactAndNeverDescribeTheirContent", "ARoundTripCarriesExactTypedValuesTheScopeAndTheRecoveryGeneration" })),
     ];
+
+    /// <summary>
+    /// The standing WorkerAdapter literal check (CLOUD.84 D9 and S43) runs in the hosted architecture gate as well as in check:dotnet: every
+    /// worker literal is either a closed protocol constant or an owned, expiring register row, and every register row names a finding.
+    /// </summary>
+    [Fact]
+    public void TheWorkerAdapterHoldsNoBusinessLiteralOutsideTheNamedLists()
+    {
+        var root = CloudRepository.FindRoot();
+        var sources = ArcForges.Cloud.ArchitectureTests.AiHarness.HarnessArchitecture.ReadSources(root);
+        using var register = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, ArcForges.Cloud.ArchitectureTests.AiHarness.ArchitectureExceptions.RegisterPath)));
+        var result = ArcForges.Cloud.ArchitectureTests.WorkerAdapter.WorkerLiteralScan.ApplyRegister(sources, register.RootElement, DateOnly.FromDateTime(DateTime.UtcNow));
+        Assert.Empty(result.Problems);
+        Assert.Empty(result.Remaining);
+    }
 
     [Fact]
     public void ActualCloudProjectsSatisfyTheSharedArchitecturePolicy()

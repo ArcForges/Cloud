@@ -41,7 +41,7 @@ public sealed class ArchitectureExceptionTests
     {
         var sources = HarnessArchitecture.ReadSources(Root);
         var register = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, ArchitectureExceptions.RegisterPath)));
-        var result = ArchitectureExceptions.Apply(HarnessArchitecture.Audit(sources), register.RootElement, DateOnly.FromDateTime(DateTime.UtcNow));
+        var result = WorkerAdapter.WorkerLiteralScan.ApplyRegister(sources, register.RootElement, DateOnly.FromDateTime(DateTime.UtcNow));
         Assert.Empty(result.Problems);
         register.Dispose();
     }

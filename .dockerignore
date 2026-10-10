@@ -13,6 +13,8 @@
 !src/ArcForges.Cloud/Composition/*.cs
 !src/ArcForges.Cloud/Foundation/
 !src/ArcForges.Cloud/Foundation/*.cs
+!src/ArcForges.Cloud/Generation/
+!src/ArcForges.Cloud/Generation/*.cs
 !src/ArcForges.Cloud/Ingress/
 !src/ArcForges.Cloud/Ingress/*.cs
 !src/ArcForges.Cloud/Readiness/
@@ -35,6 +37,10 @@
 !src/ArcForges.Cloud.Storage.D1/SharedFamilies/*.cs
 !src/ArcForges.Cloud.Storage.D1/ModuleBinding/
 !src/ArcForges.Cloud.Storage.D1/ModuleBinding/*.cs
+!src/ArcForges.Cloud.Storage.D1/MigrationRunner/
+!src/ArcForges.Cloud.Storage.D1/MigrationRunner/*.cs
+!src/ArcForges.Cloud.Storage.D1/Deploy/
+!src/ArcForges.Cloud.Storage.D1/Deploy/*.cs
 !src/ArcForges.Cloud.Storage.D1/*.csproj
 !src/ArcForges.Cloud.Storage.D1/packages.lock.json
 !src/ArcForges.Cloud.Modules.*/

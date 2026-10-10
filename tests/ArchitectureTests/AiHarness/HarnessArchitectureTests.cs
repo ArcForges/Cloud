@@ -4,7 +4,7 @@ using Xunit;
 namespace ArcForges.Cloud.ArchitectureTests.AiHarness;
 
 /// <summary>
-/// The architecture suite of the ported AI policy (architecture.test.ts, HAR.40 validation (d)): the 84 pass and refuse fixtures, one
+/// The architecture suite of the ported AI policy (architecture.test.ts, HAR.40 validation (d)): the 86 pass and refuse fixtures (the AI policy's 84 and two CLOUD.84 S38(1) wire-package fixtures), one
 /// test per fixture; the coverage, documentation and obligation checks; and the earlier C# refusals.
 /// </summary>
 public sealed class HarnessArchitectureTests
@@ -36,9 +36,9 @@ public sealed class HarnessArchitectureTests
     [Fact]
     public void TheFixtureSetIsTheAiPolicySuiteWithTwentySevenPassingAndFiftySevenRefusedFixtures()
     {
-        Assert.Equal(84, Fixtures.Count);
-        Assert.Equal(27, Fixtures.Count(fixture => fixture.Kind == "pass"));
-        Assert.Equal(57, Fixtures.Count(fixture => fixture.Kind == "fail"));
+        Assert.Equal(86, Fixtures.Count);
+        Assert.Equal(28, Fixtures.Count(fixture => fixture.Kind == "pass"));
+        Assert.Equal(58, Fixtures.Count(fixture => fixture.Kind == "fail"));
         Assert.Equal(Fixtures.Count, Fixtures.Select(fixture => (fixture.Rule, fixture.Name)).Distinct().Count());
     }
 

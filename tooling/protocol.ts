@@ -1,11 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createHelloClient } from "@arcforges/api-client";
-import { Code, ConnectError } from "@connectrpc/connect";
 import type { Identity } from "./build-identity.ts";
-import { readJson, root } from "./process.ts";
+import { root, run } from "./process.ts";
+import { extractSealedTool } from "./sealed-tool.ts";
+
+// The Hello protocol probe is the NuGet Contracts generated client, built and run from tools/ArcForges.Cloud.Generation (CLOUD.84
+// S33(3)(b)). The candidate job publishes that tool self-contained for linux-x64, not single-file (S38(2)), and seals it as one archive in
+// the candidate manifest (tooling/sealed-tool.ts); the probe is its `probe` command.
+export const probeProject = path.join(
+  root,
+  "tools",
+  "ArcForges.Cloud.Generation",
+  "ArcForges.Cloud.Generation.csproj",
+);
+export interface ProbeResult {
+  transport: "binary gRPC-Web";
+  publishedClient: string;
+  greeting: true;
+  unicode: true;
+  invalidArgument: true;
+  resourceExhausted: true;
+  workerBoundary: boolean;
+}
 
 export async function waitForHealth(
   baseUrl: string,
@@ -60,103 +79,44 @@ export async function waitForHealth(
   throw new Error(`Container readiness did not converge within ${timeoutMs / 1000}s: ${last}`);
 }
 
-export async function verifyProtocol(baseUrl: string, worker: boolean) {
-  const client = createHelloClient({
-    baseUrl,
-    fetch: (input, init) => fetch(input, { ...init, credentials: "omit", redirect: "error" }),
-  });
-  for (const name of ["ArcForges", "世界 👋"]) {
-    const response = await client.sayHello({ name }, { timeoutMs: 20000 });
-    assert.equal(response.message, `Hello, ${name}!`);
-  }
-  await assert.rejects(
-    client.sayHello({ name: "" }, { timeoutMs: 20000 }),
-    (error: unknown) => error instanceof ConnectError && error.code === Code.InvalidArgument,
-  );
-  await assert.rejects(
-    client.sayHello({ name: "x".repeat(257) }, { timeoutMs: 20000 }),
-    (error: unknown) => error instanceof ConnectError && error.code === Code.ResourceExhausted,
-  );
+export interface ProbeInvocation {
+  command: string;
+  args: string[];
+  /** The extracted sealed tool, removed after the run; absent for a local dotnet run. */
+  directory?: string;
+}
 
-  if (worker) {
-    // Exercise real router normalization using the published serializer, not handmade protobuf.
-    for (const contentType of [
-      "application/grpc-web",
-      "Application/GRPC-Web+Proto; charset=utf-8",
-    ]) {
-      const normalized = createHelloClient({
-        baseUrl,
-        fetch: (input, init) => {
-          const headers = new Headers(init?.headers);
-          headers.set("content-type", contentType);
-          return fetch(input, { ...init, headers, redirect: "error" });
-        },
-      });
-      assert.equal(
-        (await normalized.sayHello({ name: "Content-Type" }, { timeoutMs: 5000 })).message,
-        "Hello, Content-Type!",
-      );
-    }
-    for (const [deadline, code] of [
-      ["0m", Code.DeadlineExceeded],
-      ["invalid", Code.InvalidArgument],
-    ] as const) {
-      const expired = createHelloClient({
-        baseUrl,
-        fetch: (input, init) => {
-          const headers = new Headers(init?.headers);
-          headers.set("grpc-timeout", deadline);
-          return fetch(input, { ...init, headers, redirect: "error" });
-        },
-      });
-      await assert.rejects(
-        expired.sayHello({ name: "Deadline" }, { timeoutMs: 5000 }),
-        (error: unknown) => error instanceof ConnectError && error.code === code,
-      );
-    }
-    for (const [endpoint, method, expected] of [
-      ["/unknown", "GET", 404],
-      ["/api/arcforges.hello.v1.HelloService/SayHello", "POST", 404],
-      ["/arcforges.hello.v1.HelloService/SayHello", "GET", 405],
-    ] as const) {
-      const response = await fetch(baseUrl + endpoint, {
-        method,
-        redirect: "error",
-        signal: AbortSignal.timeout(10000),
-      });
-      assert.equal(response.status, expected);
-      await response.arrayBuffer();
-    }
-    const unsupported = await fetch(`${baseUrl}/arcforges.hello.v1.HelloService/SayHello`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-      signal: AbortSignal.timeout(10000),
-      redirect: "error",
-    });
-    assert.equal(unsupported.status, 415);
-    await unsupported.arrayBuffer();
-    const oversized = await fetch(`${baseUrl}/arcforges.hello.v1.HelloService/SayHello`, {
-      method: "POST",
-      headers: { "content-type": "application/grpc-web+proto" },
-      body: new Uint8Array(4097),
-      signal: AbortSignal.timeout(10000),
-      redirect: "error",
-    });
-    assert.equal(oversized.status, 413);
-    await oversized.arrayBuffer();
+/**
+ * Runs the Hello protocol assertions against a base URL. CI runs only the sealed tool of the candidate: its digest is checked against the
+ * candidate manifest before it is extracted and run, and a missing manifest, a missing archive or a different digest refuses (CLOUD.84
+ * S45(3)); nothing is built from source. Local runs build and run the same project with dotnet run. The probe prints one JSON line on
+ * success and exits non-zero on any failed assertion.
+ */
+export function probeInvocation(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+  repositoryRoot: string = root,
+): ProbeInvocation {
+  if (env.CI === "true" || env.GITHUB_ACTIONS === "true") {
+    const sealed = extractSealedTool(repositoryRoot);
+    return { command: sealed.executable, args: [...args], directory: sealed.directory };
   }
   return {
-    transport: "binary gRPC-Web",
-    publishedClient: (
-      await readJson<{ version: string }>(
-        path.join(root, "node_modules/@arcforges/api-client/package.json"),
-      )
-    ).version,
-    greeting: true,
-    unicode: true,
-    invalidArgument: true,
-    resourceExhausted: true,
-    workerBoundary: worker,
+    command: "dotnet",
+    args: ["run", "--project", probeProject, "-c", "Release", "--", ...args],
   };
+}
+
+export async function runProbe(baseUrl: string, worker: boolean): Promise<ProbeResult> {
+  const invocation = probeInvocation(["probe", baseUrl, String(worker)]);
+  let output: string;
+  try {
+    output = await run(invocation.command, invocation.args, true);
+  } finally {
+    if (invocation.directory) await rm(invocation.directory, { recursive: true, force: true });
+  }
+  const line = output.split(/\r?\n/u).filter(Boolean).at(-1) ?? "";
+  const result = JSON.parse(line) as ProbeResult;
+  assert.equal(result.workerBoundary, worker, "The probe reports a different Worker boundary");
+  return result;
 }

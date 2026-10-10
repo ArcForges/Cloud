@@ -4,8 +4,7 @@
   "sourceCommit": "eaaafb11e6b3bd8af5b3bc9d770ea309fdb275cf",
   "manifests": ["package.json"],
   "inputs": {
-    ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
-    ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
+    ".github/workflows/ci.yml": "e8c42f2a810d6ddfc51a728bf62affd4e34422db02da41346fc1ba34ef7e5238",
     ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
     ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
     "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
@@ -17,8 +16,8 @@
     "eng/provenance/records/har-40-cloud-runtime-notices-r8.json": "1f0116101e7b07cff32a2c5813fcec19f8a67691f594b52568f3d47511785c68",
     "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
-    "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-    "package.json": "ce87b2c0fefad980cf71d5ee224e0078f409eb91ed5af1074276229731c3c74d",
+    "package-lock.json": "0c3988a778265e1211eee50ffeb98e38b0759dabebbb1502a0b38ae09f97f344",
+    "package.json": "85c50bfe1f5d036bd9f69105bc93422ed86f71cca0f562e9fe94020234e7e25b",
     "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
     "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
     "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -59,31 +58,27 @@
     "src/ArcForges.Cloud.Modules.TrustSafety/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
     "src/ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
     "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
-    "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "ac3a8660e4e99aed60247cffe8d43805610639c0efcd8c7e90d90c4f9002f280",
+    "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "063d9974b3044dad6c97e8dd226d4cf60aba2ec15c85a910c120191e2a08e217",
     "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
     "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
     "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
     "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
     "tests/ArcForges.Cloud.Consumer/packages.lock.json": "4c1c255b6f8ddd1d3a5fc577f47aa1f9f065b2482336792530a19f136e7909ff",
-    "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "fd3a353d1de9cb23fd0c7849e353f982c246b83c2e3103d71b7ca5947460c13e",
-    "tests/ArcForges.Cloud.Tests/packages.lock.json": "94fb6841e591445132e29d80743eee666ba172cdae993457e3c98a2456c6243c",
+    "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "eb0af2275c7f33bcaf60e0ebebe3e22a17fda6955be9279c387f9d6ce6dd5b5c",
+    "tests/ArcForges.Cloud.Tests/packages.lock.json": "090af91fa87f14e8caa622adef31a74f15b4a3cacf83f9dd7d1dcefa7d351ddb",
     "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj": "93123c0f27e3816e951938a556298a209e25851757b0cc7c43bf2baf37c23cf1",
     "tests/ArchitectureTests/packages.lock.json": "32ce93118af6a518c20c35b0d5f7058e41b8872d8037883c71602c41d56b2904",
-    "tests/kotlin-consumer/build.gradle.kts": "05c1cb296b5f5b66c4f75282c44383a32a8a596c330c14fd782e1912919c8394",
-    "tests/kotlin-consumer/gradle.lockfile": "0a6640ce98f60bf6e38bf19158fc87e68e33e1934eb3ede2df75b614a6b18c47",
-    "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
-    "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
-    "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-    "wrangler.json": "54b032243498e8aff586c518b455b18d465b33b49c04451da1de5b40d26f508c"
+    "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
+    "tools/ArcForges.Cloud.Generation/packages.lock.json": "fdad2d33c7dcfe1a67fb6ce5b0f40275254f20270bb1e29c01ca910798bcae82",
+    "wrangler.json": "d2ca09f052ac8cad62ddc045ac000c2a23bfbfce7f22dbf023aaa3df2679c2a6"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "w-deku-20261009-rev-cloud-85",
-    "date": "2026-10-09",
-    "rationale": "CLOUD.85 successor of har-40-r14, the receipt active on origin/main at this merge (the HAR.40 chain head), derived by the repository tooling after merging origin/main into task/cloud-85. Its only change to a hash-bound input is wrangler.json: the env.proof static-assets block sets not_found_handling to \"404-page\" (CLOUD.85 D6), so the proof origin answers unknown paths with the Site's own not-found page. The Worker-first route list, the production configuration, the bindings, the migrations, the Containers and the triggers are unchanged. No npm or NuGet coordinate, integrity value or closure entry changes, and no new native capability or broader source reuse permission is created. The branch receipt cloud-85-r1, chained from capacity-pacer-retire-r2, stays as committed immutable history and is not on the active chain: its committed bytes cannot be corrected in place, so this successor supersedes the main head instead.",
+    "reviewer": "w-deku-20261009-rev-cloud-84",
+    "date": "2026-10-10",
+    "rationale": "CLOUD.84 S42(1) moves the D1 runner's SQL statements and its classifier patterns into embedded resources (src/ArcForges.Cloud.Storage.D1/MigrationRunner/Statements.sql and Classifiers.txt), so that the standing NoSqlTextExistsInCSharpSource rule passes unchanged. The Storage.D1 project file gains two EmbeddedResource items with explicit logical names; it is the only bound input that changes, and its digest is rebound here. No package, NuGet coordinate, lock file, closure entry or shipped artifact class changes. The tool project is never published.",
     "inputs": {
-      ".github/workflows/ci.yml": "c0484fe2563041e26e5c5172cf5fe6e0cc657b09568f1f58a67a2fd7265e4066",
-      ".java-version": "b8481af4c809b46f02fc334825116cbe9e6d6a7bc8e2363511fa77044fca8016",
+      ".github/workflows/ci.yml": "e8c42f2a810d6ddfc51a728bf62affd4e34422db02da41346fc1ba34ef7e5238",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
       ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
       "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
@@ -95,8 +90,8 @@
       "eng/provenance/records/har-40-cloud-runtime-notices-r8.json": "1f0116101e7b07cff32a2c5813fcec19f8a67691f594b52568f3d47511785c68",
       "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
-      "package-lock.json": "eeddd6b0c32f8f6794482f3f7a5dd0a2a7a9cd8371e0f99960f78dda18d4d316",
-      "package.json": "ce87b2c0fefad980cf71d5ee224e0078f409eb91ed5af1074276229731c3c74d",
+      "package-lock.json": "0c3988a778265e1211eee50ffeb98e38b0759dabebbb1502a0b38ae09f97f344",
+      "package.json": "85c50bfe1f5d036bd9f69105bc93422ed86f71cca0f562e9fe94020234e7e25b",
       "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
       "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
       "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -137,22 +132,19 @@
       "src/ArcForges.Cloud.Modules.TrustSafety/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
       "src/ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
       "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json": "6bdcb8c29ec5c1772e6b659273bda681fe4d66370078ca00e7742293fa979841",
-      "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "ac3a8660e4e99aed60247cffe8d43805610639c0efcd8c7e90d90c4f9002f280",
+      "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj": "063d9974b3044dad6c97e8dd226d4cf60aba2ec15c85a910c120191e2a08e217",
       "src/ArcForges.Cloud.Storage.D1/packages.lock.json": "b231ce6e208025bfedf4099fd852d0f09923822fb6661196fc3dfa410d3753c2",
       "src/ArcForges.Cloud/ArcForges.Cloud.csproj": "3fe398d1d05acb3d5fe9b9add96a7d7948410722c5e2135d326799fd4840f948",
       "src/ArcForges.Cloud/packages.lock.json": "678ec163f70ad67b846ce014c2271c6d4984f466e369dc9f03d5cc56e4aeb92c",
       "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj": "8fe4c5800be3ea425701ac46d4134424a896a00b3d7e7c2bb37ee5c1168d81f4",
       "tests/ArcForges.Cloud.Consumer/packages.lock.json": "4c1c255b6f8ddd1d3a5fc577f47aa1f9f065b2482336792530a19f136e7909ff",
-      "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "fd3a353d1de9cb23fd0c7849e353f982c246b83c2e3103d71b7ca5947460c13e",
-      "tests/ArcForges.Cloud.Tests/packages.lock.json": "94fb6841e591445132e29d80743eee666ba172cdae993457e3c98a2456c6243c",
+      "tests/ArcForges.Cloud.Tests/ArcForges.Cloud.Tests.csproj": "eb0af2275c7f33bcaf60e0ebebe3e22a17fda6955be9279c387f9d6ce6dd5b5c",
+      "tests/ArcForges.Cloud.Tests/packages.lock.json": "090af91fa87f14e8caa622adef31a74f15b4a3cacf83f9dd7d1dcefa7d351ddb",
       "tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj": "93123c0f27e3816e951938a556298a209e25851757b0cc7c43bf2baf37c23cf1",
       "tests/ArchitectureTests/packages.lock.json": "32ce93118af6a518c20c35b0d5f7058e41b8872d8037883c71602c41d56b2904",
-      "tests/kotlin-consumer/build.gradle.kts": "05c1cb296b5f5b66c4f75282c44383a32a8a596c330c14fd782e1912919c8394",
-      "tests/kotlin-consumer/gradle.lockfile": "0a6640ce98f60bf6e38bf19158fc87e68e33e1934eb3ede2df75b614a6b18c47",
-      "tests/kotlin-consumer/gradle/verification-metadata.xml": "a3636c4a18cfc8319359129f8c037bf0e2c455512beeff6846414301e8f99639",
-      "tests/kotlin-consumer/gradle/wrapper/gradle-wrapper.properties": "176fcae7ef9cfcdd82903d41888fe11fe197a674f752e9275aa51d0d8427a2c5",
-      "tests/kotlin-consumer/settings.gradle.kts": "64675e4ff0bb4d84e56a315bb017e2adac9e58eb1efb86e409fb148806b38a55",
-      "wrangler.json": "54b032243498e8aff586c518b455b18d465b33b49c04451da1de5b40d26f508c"
+      "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
+      "tools/ArcForges.Cloud.Generation/packages.lock.json": "fdad2d33c7dcfe1a67fb6ce5b0f40275254f20270bb1e29c01ca910798bcae82",
+      "wrangler.json": "d2ca09f052ac8cad62ddc045ac000c2a23bfbfce7f22dbf023aaa3df2679c2a6"
     },
     "checks": [
       "locked-restore",
@@ -163,11 +155,11 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No production runtime change: the change is confined to the env.proof static-assets block, which only the proof environment deploys. Worker source, bindings and the production Worker bundle are unchanged. The offline tests in tests/worker/proof-assets.test.ts and tests/worker/proof-cloudflare.test.ts run in npm test. The deployed proof-origin observation is an operator step under the RES-cloud-deployment lease and is not asserted by this receipt. No local runtime or performance scenario is asserted.",
-    "maintenance": "wrangler.json is bound by this receipt. A later change to it needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/har-40-r14.json",
+    "runtimeAssessment": "No runtime change to the shipped closure. The embedded SQL text is the text the engine already ran, with the same placeholder order and parameter binding. No runtime capability, dependency class or native closure changes.",
+    "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
+    "previous": "eng/policy/dependency-reviews/cloud-84-r9.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
-    "reviewedOn": "2026-10-09",
+    "reviewedOn": "2026-10-10",
     "decision": "approved"
   },
   "closure": {
@@ -175,18 +167,6 @@
       "version": "1.0.0-ci.287.1",
       "resolved": "https://registry.npmjs.org/@arcforges/ai-internal/-/ai-internal-1.0.0-ci.287.1.tgz",
       "integrity": "sha512-9GI/sXAnlOkWbmzpw0c9BYh9+dJHclf9/ey+SFZFnegQu+RZVE3TQSEuTw5x7HqeBL+IEIjvJW4jrmBzZUDylw==",
-      "license": "Apache-2.0"
-    },
-    "node_modules/@arcforges/api-client": {
-      "version": "1.0.0-ci.287.1",
-      "resolved": "https://registry.npmjs.org/@arcforges/api-client/-/api-client-1.0.0-ci.287.1.tgz",
-      "integrity": "sha512-Nzr25VLIi8nSRQcO46gs2QobNp8yiw51Tf+5th4ZpB19Q6DoweWVs0CYSDhbtAAH8uAIC1IzLiKywEsoD48Geg==",
-      "license": "Apache-2.0"
-    },
-    "node_modules/@arcforges/proto": {
-      "version": "1.0.0-ci.287.1",
-      "resolved": "https://registry.npmjs.org/@arcforges/proto/-/proto-1.0.0-ci.287.1.tgz",
-      "integrity": "sha512-lJNdv4ReiG1KF54tziiJpkHgDHS96XsO504no07Ly7cnXCqqK9O0d5o6AaufIn08K7J7C5IR+Hpbq2ZFCrL8+w==",
       "license": "Apache-2.0"
     },
     "node_modules/@biomejs/biome": {
@@ -243,12 +223,6 @@
       "integrity": "sha512-oJWmBhoHsnhUKIke+0gXDX0mltJrWHA1UyHsrTlXwX0TL64ilVZAo+TYZm97baecV0esBdpzy3k96q+09JaZUQ==",
       "license": "MIT OR Apache-2.0"
     },
-    "node_modules/@bufbuild/protobuf": {
-      "version": "2.15.0",
-      "resolved": "https://registry.npmjs.org/@bufbuild/protobuf/-/protobuf-2.15.0.tgz",
-      "integrity": "sha512-DAheWUkVr/SJTWCc+lg9dhY0eN4SaWlf4+bG1KzHeXbnqt0AfB/NX0Z+VunGlM1ki1B4zVvye27MpKh/svySUA==",
-      "license": "(Apache-2.0 AND BSD-3-Clause)"
-    },
     "node_modules/@cloudflare/containers": {
       "version": "0.3.7",
       "resolved": "https://registry.npmjs.org/@cloudflare/containers/-/containers-0.3.7.tgz",
@@ -302,18 +276,6 @@
       "resolved": "https://registry.npmjs.org/@cloudflare/workers-types/-/workers-types-5.20260926.1.tgz",
       "integrity": "sha512-jLtwSjBFtXucrEIj584vNk/k9OwgW4ij7/nK40hnCw137/0ilqfkTlYIUTWlTEbUX2V/+XVBijzZha9spdQTUw==",
       "license": "MIT OR Apache-2.0"
-    },
-    "node_modules/@connectrpc/connect": {
-      "version": "2.2.0",
-      "resolved": "https://registry.npmjs.org/@connectrpc/connect/-/connect-2.2.0.tgz",
-      "integrity": "sha512-M63OQ1ZFcPUm85CuewJ9G9CMV8LjzGR9935xOnXNQGSazAbwMb3x2W7vXBYM1zqrP7XFD8uxp/dUAhirclgwnQ==",
-      "license": "Apache-2.0"
-    },
-    "node_modules/@connectrpc/connect-web": {
-      "version": "2.2.0",
-      "resolved": "https://registry.npmjs.org/@connectrpc/connect-web/-/connect-web-2.2.0.tgz",
-      "integrity": "sha512-uuBUcBTYfb/r1o98LzCCZk1H90yx0vmZ5m21dpw/q4EUwsKwkCDGI8H0aEdjcZld+Q2jJ5A5ADvPqfb6lzQ/sg==",
-      "license": "Apache-2.0"
     },
     "node_modules/@cspotcode/source-map-support": {
       "version": "0.8.1",
@@ -965,27 +927,17 @@
     }
   },
   "foundationCandidates": {
-    "@arcforges/ai-internal": "1.0.0-ci.287.1",
-    "@arcforges/api-client": "1.0.0-ci.287.1",
-    "@arcforges/proto": "1.0.0-ci.287.1"
+    "@arcforges/ai-internal": "1.0.0-ci.287.1"
   },
   "firstParty": {
     "@arcforges/ai-internal": {
       "publisher": "ArcForges/Contracts",
       "visibility": "internal"
-    },
-    "@arcforges/api-client": {
-      "publisher": "ArcForges/Contracts",
-      "visibility": "public"
-    },
-    "@arcforges/proto": {
-      "publisher": "ArcForges/Contracts",
-      "visibility": "public"
     }
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["har-40-cloud-runtime-notices-r8", "har-40-cloud-worker-bundle-r8"],
+  "artifactRecords": ["cloud-84-cloud-runtime-notices-r5", "cloud-84-cloud-worker-bundle-r5"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -999,7 +951,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-85-r2.json",
+  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r10.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

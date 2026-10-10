@@ -3,7 +3,7 @@
 A C# 14 / .NET 10 Native AOT Hello service in a Linux x64 Docker image, hosted in Cloudflare Containers. A small TypeScript Worker routes the public binary gRPC-Web endpoint to the container. The repository is independently buildable and consumes published Contracts packages.
 
 ```text
-Web / published TypeScript or Kotlin gRPC-Web client
+Web or published gRPC-Web client
   https://arcforges.com/api/arcforges.hello.v1.HelloService/SayHello
         → arcforges-cloud Worker (route /api/*)
         → fixed Cloudflare Container (HTTP/1.1 :8080)
@@ -19,13 +19,12 @@ The separate `arcforges-web` Worker continues serving the website. This reposito
 
 ## Quick start
 
-Prerequisites: .NET SDK **10.0.401**, Node **24.21.0**, npm **11.19.0**, **JDK 17** (`JAVA_HOME`), and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The Kotlin verification client uses published Contracts **1.0.0-ci.42.1**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
+Prerequisites: .NET SDK **10.0.401**, Node **24.21.0**, npm **11.19.0**, and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
 
 ```sh
 npm ci --ignore-scripts
 npm run check
 npm run check:dotnet
-npm run check:kotlin
 npm run candidate
 ```
 
@@ -34,9 +33,9 @@ Runtime checks such as `npm run test:container` and `npm run test:worker` are ex
 ## Delivery
 
 The existing checks enforce [project licence declarations](docs/licence-boundary.md)
-across managed, npm and Gradle scopes, including the final Docker build.
+across managed and npm scopes, including the final Docker build.
 
-PRs run locked restores, relevant offline units, C#/TS/Kotlin compilation, formatting, dependency audit/review, CodeQL, secret scanning and a Linux Native AOT image build. Candidate construction inspects image metadata and legal contents without launching the application. No PR deploys to Cloudflare.
+PRs run locked restores, relevant offline units, C#/TS compilation, formatting, dependency audit/review, CodeQL, secret scanning and a Linux Native AOT image build. Candidate construction inspects image metadata and legal contents without launching the application. No PR deploys to Cloudflare.
 
 Main promotes the same sealed image and Worker after successful checks. CI loads that image, checks its identity, pushes it to the registry, pins the remote digest and deploys the Worker. Provider completion creates a prerelease with the candidate and deployment record. No live RPC, health polling or public download verification runs automatically.
 

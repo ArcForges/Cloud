@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { grpcFrameHeaderBytes } from "../tables/cloud-tables.generated.ts";
 import { bodySizeError } from "./errors.ts";
 
 // Enforce the budget even if a binding does not observe Request.signal.
@@ -58,10 +59,10 @@ export function rpcError(code: number, message: string): Response {
   const trailer = new TextEncoder().encode(
     `grpc-status: ${code}\r\ngrpc-message: ${encodeURIComponent(message)}\r\n`,
   );
-  const frame = new Uint8Array(5 + trailer.length);
+  const frame = new Uint8Array(grpcFrameHeaderBytes + trailer.length);
   frame[0] = 0x80;
   new DataView(frame.buffer).setUint32(1, trailer.length);
-  frame.set(trailer, 5);
+  frame.set(trailer, grpcFrameHeaderBytes);
   return new Response(frame, {
     headers: { "content-type": "application/grpc-web+proto", "cache-control": "no-store" },
   });
@@ -81,9 +82,9 @@ export function trailerFrame(code: number, message?: string): Uint8Array<ArrayBu
     `grpc-status: ${code}\r\n` +
     (message === undefined ? "" : `grpc-message: ${encodeURIComponent(message)}\r\n`);
   const payload = new TextEncoder().encode(text);
-  const frame = new Uint8Array(5 + payload.length);
+  const frame = new Uint8Array(grpcFrameHeaderBytes + payload.length);
   frame[0] = 0x80;
   new DataView(frame.buffer).setUint32(1, payload.length);
-  frame.set(payload, 5);
+  frame.set(payload, grpcFrameHeaderBytes);
   return frame;
 }

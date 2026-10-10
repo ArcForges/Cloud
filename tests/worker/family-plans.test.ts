@@ -3,23 +3,18 @@
 // five guard primitives expanded against the physical manifest, the SU-04 order and the participant, ownership and guard-coverage
 // rules. The fixture family is a test fixture; the repository's own registry ships empty.
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import {
   buildManifest,
   expandGuard,
   familyIdentity,
-  renderFamilyExpansion,
   familyOrderProblems,
-  generate,
   guardKinds,
   lockOrder,
   mutationClasses,
   parseFamilyRegistry,
-  renderCSharp,
-  renderTypeScript,
   sha256Hex,
   normalizePlanText,
   type FamilyStatementMeta,
@@ -626,99 +621,27 @@ test("a family plan in the owner directories, and an owner plan named families, 
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------
-// The generated outputs
+// The generated outputs: the C# generator is the only generator (CLOUD.84 S40(1)). Its rendering, check and stale-output cases are
+// one-for-one C# tests in tests/ArcForges.Cloud.Tests/Reduction (StoragePlanGeneratorTests and the SharedFamilies expansion tests).
+// tests/worker/storage-plan-parity.test.ts compares the manifest built here with the committed outputs. Only the vectors stay here.
 // ---------------------------------------------------------------------------------------------------------------------------
 
-test("the Worker dictionary keeps the one plan shape and carries no family role; the C# manifest carries roles and the catalog", async () => {
-  const manifest = fixtureManifest();
-  const worker = await renderTypeScript(manifest);
-  assert(worker.includes(fixturePlanId));
-  assert(
-    !/family|"module"|phase/u.test(worker.slice(worker.indexOf("export const plans"))),
-    "no role in the dictionary",
-  );
-  const csharp = renderCSharp(manifest);
-  assert(csharp.includes("internal static class Families"));
-  assert(csharp.includes("public static readonly PlanDefinition FixturePairCommit"));
-  assert(
-    csharp.includes('new("fixture-pair", "Fixture family for the shared-family engine tests"'),
-  );
-  assert(
-    csharp.includes(
-      'new(FamilyModule.Entitlement, FamilyPhase.Guard, FamilyClass.Revision, "workspace-revision")',
-    ),
-  );
-  assert(
-    csharp.includes(
-      'new(FamilyModule.Platform, FamilyPhase.Release, FamilyClass.Release, "release")',
-    ),
-  );
-  assert(csharp.includes("FamilyModule.Notification, true, null"));
-  assert(csharp.includes('FamilyModule.Policy, false, "when a source policy applies"'));
-  assert(
-    csharp.includes("Foundation.Readiness, Families.FixturePairCommit"),
-    "the family plan is part of All",
-  );
-});
-
-test("generation over a root with a family writes both outputs, and a stale output fails the check", async () => {
-  const root = fixtureRoot();
-  mkdirSync(path.join(root, "worker/storage"), { recursive: true });
-  mkdirSync(path.join(root, "src/ArcForges.Cloud.Storage.D1"), { recursive: true });
-  cpSync(physicalDirectory, path.join(root, "src/ArcForges.Cloud.Storage.D1/Physical/manifest"), {
-    recursive: true,
-  });
-  const result = await generate(root, false);
-  assert.equal(result.plans, 2);
-  await generate(root, true);
-  const csharp = path.join(root, "src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs");
-  writeFileSync(
-    csharp,
-    readFileSync(csharp, "utf8").replace("FamilyModule.Notification", "FamilyModule.Sync"),
-  );
-  await assert.rejects(() => generate(root, true), /stale/u);
-  const empty = mkdtempSync(path.join(tmpdir(), "families-empty-"));
-  assert(empty.length > 0);
-});
-
-test("the repository's checked-in registry and outputs are current", async () => {
-  const manifest = buildManifest(repositoryRoot);
-  for (const plan of manifest.plans.filter((candidate) => candidate.family !== undefined))
-    assert(manifest.families.families.some((family) => family.family === plan.family));
-  await generate(repositoryRoot, true);
-});
-
-test("the identity formula and the expansion listing are the shared vector", async () => {
+test("the identity formula and the family role vector are the shared vectors", () => {
   assert.equal(
     familyIdentity(vectors.identity.normalizedText, vectors.identity.statementSql),
     vectors.identity.sha256,
   );
-  const manifest = fixtureManifest();
-  const listing = JSON.parse(await renderFamilyExpansion(manifest)) as {
-    plans: {
-      id: string;
-      sha256: string;
-      family: string;
-      statements: { role: string; sql: string; params: string[] }[];
-    }[];
-  };
-  const plan = manifest.plans.find((candidate) => candidate.id === fixturePlanId);
+  const plan = fixtureManifest().plans.find((candidate) => candidate.id === fixturePlanId);
   assert(plan);
-  assert.equal(listing.plans.length, 1);
-  assert.equal(listing.plans[0]?.sha256, plan.sha256);
   assert.deepEqual(
-    listing.plans[0]?.statements.map((statement) => statement.sql),
-    plan.statements.map((statement) => statement.sql),
-  );
-  assert.deepEqual(
-    listing.plans[0]?.statements.map((statement) => statement.role),
+    plan.statements.map((statement) => (statement.family ? roleText(statement.family) : "")),
     vectors.fixturePlan.statements.map((statement) => statement.role),
   );
-  // The identity is recomputable from the authored file and the listed SQL alone, as the C# check does.
+  // The identity is recomputable from the authored file and the statement SQL alone, as the C# check does.
   assert.equal(
     familyIdentity(
       normalizePlanText(fixturePlan),
-      listing.plans[0]?.statements.map((statement) => statement.sql) ?? [],
+      plan.statements.map((statement) => statement.sql),
     ),
     plan.sha256,
   );

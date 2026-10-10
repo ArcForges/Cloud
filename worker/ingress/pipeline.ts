@@ -23,12 +23,14 @@ import {
 import { guardResponse } from "./frames.ts";
 import { classifyStartFailureResponse, containerUnavailable } from "../readiness/container.ts";
 import { bounded, readBytes, reject, rpcError } from "./io.ts";
+import { bodyReadMilliseconds, healthRoute } from "../tables/cloud-tables.generated.ts";
 import {
-  type ApiRoute,
   coldStartBudgetMs,
   findRoute,
   healthPath,
+  productionTable,
   streamLifetimeMs,
+  type RouteTable,
 } from "./routes.ts";
 
 export interface IngressEnv {
@@ -41,18 +43,6 @@ export interface IngressEnv {
   };
   HELLO_RATE_LIMITER: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
-
-const healthRoute: ApiRoute = {
-  path: healthPath.slice(4),
-  kind: "unary",
-  auth: "anonymous",
-  maxRequestBytes: 0,
-  maxFrameBytes: 0,
-  maxUnaryResponseBytes: 8192,
-  maxDurationMs: 15_000,
-  instance: "hello",
-  requestMeta: false,
-};
 
 /** The stable message key of the registered refusal for a request that cannot be admitted as stated. */
 export const invalidRequestKey = "validation.invalid_request";
@@ -81,11 +71,15 @@ function responseContentType(upstream: string | null): string {
   return isGrpcWeb(upstream) ? (upstream as string) : "application/grpc-web+proto";
 }
 
-export async function handleApiRequest(request: Request, env: IngressEnv): Promise<Response> {
+export async function handleApiRequest(
+  request: Request,
+  env: IngressEnv,
+  routes: RouteTable = productionTable,
+): Promise<Response> {
   const started = performance.now();
   const url = new URL(request.url);
   const health = url.pathname === healthPath;
-  const route = health ? healthRoute : findRoute(env, url.pathname);
+  const route = health ? healthRoute : findRoute(url.pathname, routes);
   if (!route) return reject(404, "Unknown API method.");
   if (url.search) return reject(400, "Query parameters are not supported.");
   if (request.method !== (health ? "GET" : "POST")) return reject(405, "Method not allowed.");
@@ -146,7 +140,7 @@ export async function handleApiRequest(request: Request, env: IngressEnv): Promi
 
     let body: Uint8Array<ArrayBuffer> | undefined;
     if (!health) {
-      const bodyTimer = setTimeout(() => controller.abort(bodyTimeoutError), 5000);
+      const bodyTimer = setTimeout(() => controller.abort(bodyTimeoutError), bodyReadMilliseconds);
       try {
         body = await readBytes(request.body, route.maxRequestBytes, signal);
       } catch (error) {
