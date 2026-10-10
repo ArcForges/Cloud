@@ -16,6 +16,13 @@ export const proofQueueNames = ["arcforges-proof-wake", "arcforges-proof-wake-dl
 export const proofHostname = "proof.arcforges.com";
 /** The route families that the Worker answers before any static asset. */
 export const workerFirst = ["/api/*", "/session/v1/*", "/proof/v1/*"];
+/**
+ * The proof environment's own source entry (CLOUD.84 D1), as env.proof.main declares it. Only the candidate job reads it: it
+ * bundles it once, with a Wrangler dry run, into the sealed candidate member `proof-worker.js`. A deployment never reads it.
+ */
+export const proofSourceEntry = "worker/proof/entry.ts";
+/** The sealed proof bundle of the downloaded candidate, relative to the generated configuration file (artifacts/). */
+export const sealedProofBundle = "./candidate/proof-worker.js";
 /** Where the verified bundle is staged, beside the generated configuration (artifacts/). */
 export const proofAssetsDirName = "proof-assets";
 
@@ -43,6 +50,7 @@ export const siteArchiveAssetName = (digest: string) => `web-site-${digest}.tar`
 
 interface ProofEnvironment {
   name?: string;
+  main?: string;
   assets?: Record<string, unknown>;
   containers: { image: string; [key: string]: unknown }[];
   vars: Record<string, string>;
@@ -88,10 +96,25 @@ export function buildProofConfig(
   assert.equal(candidate.env.proof.workers_dev, false, "workers.dev must stay disabled.");
   assert.equal(candidate.env.proof.preview_urls, false, "Preview URLs must stay disabled.");
   assert.deepEqual(candidate.env.proof.routes, [{ pattern: proofHostname, custom_domain: true }]);
+  // Only a sealed candidate bundle is published: the deploy uploads it with --no-bundle, so nothing is bundled or rebuilt.
+  assert.match(
+    options.main,
+    /^\.\/candidate\/[a-z-]+\.js$/u,
+    "Only a sealed candidate bundle can be deployed.",
+  );
+  assert.equal(
+    candidate.env.proof.main,
+    proofSourceEntry,
+    "The proof environment must declare its own source entry.",
+  );
   const config = structuredClone(candidate);
   config.main = options.main;
   (config as Record<string, unknown>).account_id = options.account;
   const proof = config.env.proof;
+  // CLOUD.84 D1: env.proof declares its own `main`, which overrides the top-level one under `--env proof`. The sealed bundle therefore
+  // replaces env.proof.main itself; replacing only the top level left Wrangler resolving the source entry beside the generated file
+  // (artifacts/worker/proof/entry.ts), which no deploy job has, and would otherwise have uploaded unbundled source.
+  proof.main = options.main;
   assert.equal(proof.containers.length, 1);
   (proof.containers[0] as { image: string }).image = options.imageDigest;
   // Wrangler validates the top-level container image of the file even for `--env proof`; the

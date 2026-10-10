@@ -10,7 +10,9 @@ import {
   buildProofConfig,
   generateSecrets,
   proofHostname,
+  proofSourceEntry,
   proofWorkerName,
+  sealedProofBundle,
   secretSources,
   type CandidateConfig,
 } from "../../eng/verification/proof-deploy.ts";
@@ -122,9 +124,12 @@ test("the proof config pins the registry digest, revision and account and nothin
     account,
     imageDigest: digest,
     revision: "b".repeat(40),
-    main: "./candidate/worker.js",
+    main: sealedProofBundle,
   });
-  assert.equal(config.main, "./candidate/worker.js");
+  assert.equal(config.main, sealedProofBundle);
+  // CLOUD.84 D1: env.proof.main overrides the top level under --env proof, so it must name the sealed bundle itself.
+  assert.equal(config.env.proof.main, sealedProofBundle);
+  assert.equal(wrangler.env.proof.main, proofSourceEntry, "the input is not mutated");
   assert.equal(config.env.proof.containers[0]?.image, digest);
   assert.equal(config.env.proof.vars.SOURCE_REVISION, "b".repeat(40));
   assert.equal((config as Record<string, unknown>).account_id, account);
@@ -134,7 +139,7 @@ test("the proof config pins the registry digest, revision and account and nothin
     account,
     imageDigest: digest,
     revision: "b".repeat(40),
-    main: "./candidate/worker.js",
+    main: sealedProofBundle,
     databaseId: "11111111-1111-4111-8111-111111111111",
   });
   assert.equal(
@@ -151,7 +156,7 @@ test("the proof config pins the registry digest, revision and account and nothin
         account,
         imageDigest: digest,
         revision: "b".repeat(40),
-        main: "x",
+        main: sealedProofBundle,
         ...bad,
       }),
     );
@@ -162,9 +167,57 @@ test("the proof config pins the registry digest, revision and account and nothin
         account,
         imageDigest: digest,
         revision: "b".repeat(40),
-        main: "x",
+        main: sealedProofBundle,
       },
     ),
+  );
+});
+
+test("the proof deploy uploads the sealed proof bundle and never resolves the source entry", () => {
+  const config = buildProofConfig(wrangler, {
+    account,
+    imageDigest: digest,
+    revision: "b".repeat(40),
+    main: sealedProofBundle,
+  });
+  // The generated file is written to artifacts/ and the candidate is downloaded to artifacts/candidate/, so under --env proof
+  // Wrangler resolves exactly the sealed member that verifyCandidate checked, never worker/proof/entry.ts.
+  const artifacts = path.resolve("artifacts");
+  assert.equal(
+    path.resolve(artifacts, config.env.proof.main ?? ""),
+    path.join(artifacts, "candidate", "proof-worker.js"),
+  );
+  assert(
+    !JSON.stringify(config).includes(proofSourceEntry),
+    "no source entry is left in the config",
+  );
+  // A source entry or any path outside the sealed candidate is refused, so nothing is bundled at publication.
+  for (const main of [
+    proofSourceEntry,
+    "./worker/proof/entry.ts",
+    "../worker/index.ts",
+    "/tmp/x.js",
+  ])
+    assert.throws(
+      () =>
+        buildProofConfig(wrangler, {
+          account,
+          imageDigest: digest,
+          revision: "b".repeat(40),
+          main,
+        }),
+      /sealed candidate bundle/u,
+    );
+  // A candidate whose proof environment lost its own entry would fall back to the production entry: refused.
+  const withoutEntry = { ...wrangler.env.proof };
+  delete withoutEntry.main;
+  assert.throws(
+    () =>
+      buildProofConfig(
+        { ...wrangler, env: { proof: withoutEntry } },
+        { account, imageDigest: digest, revision: "b".repeat(40), main: sealedProofBundle },
+      ),
+    /own source entry/u,
   );
 });
 
@@ -192,7 +245,7 @@ test("the proof config carries the migrations directory and refuses an unsafe en
     account,
     imageDigest: digest,
     revision: "b".repeat(40),
-    main: "./candidate/worker.js",
+    main: sealedProofBundle,
     migrationsDir: "../worker/proof-migrations",
   });
   assert.equal(
@@ -208,7 +261,7 @@ test("the proof config carries the migrations directory and refuses an unsafe en
     assert.throws(() =>
       buildProofConfig(
         { ...wrangler, env: { proof: { ...wrangler.env.proof, ...unsafe } } },
-        { account, imageDigest: digest, revision: "b".repeat(40), main: "x" },
+        { account, imageDigest: digest, revision: "b".repeat(40), main: sealedProofBundle },
       ),
     );
 });
