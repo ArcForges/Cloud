@@ -7,6 +7,7 @@ using ArcForges.Cloud.Ingress;
 using ArcForges.Cloud.Modules;
 using ArcForges.Cloud.Modules.Task.Harness.Wake;
 using ArcForges.Cloud.Storage;
+using ArcForges.Cloud.Storage.FamilyBinding;
 using ArcForges.Cloud.Storage.ModuleBinding;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TaskModule = ArcForges.Cloud.Modules.Task.TaskModule;
@@ -35,7 +36,7 @@ internal static class HostModules
     /// <summary>The ingress module comes first so its pipeline runs before the gRPC-Web adapter; it reads the other modules' policies when mapping.</summary>
     public static IReadOnlyList<IHostModule> All(JsonObject identity)
     {
-        IHostModule[] served = [new HelloModule(identity), new FoundationModule(), new ModulePlanBindingModule(), .. ModuleBoundaries.All.Select(boundary => new ModuleBoundaryHost(boundary)), new HarnessWakeModule(identity)];
+        IHostModule[] served = [new HelloModule(identity), new FoundationModule(), new ModulePlanBindingModule(), new ModuleFamilyBindingModule(), .. ModuleBoundaries.All.Select(boundary => new ModuleBoundaryHost(boundary)), new HarnessWakeModule(identity)];
         return [new IngressModule(served), .. served];
     }
 }
@@ -136,6 +137,24 @@ internal sealed class ModulePlanBindingModule : IHostModule
 {
     public void Register(WebApplicationBuilder builder) =>
         builder.Services.TryAddSingleton<IModulePlanPortFactory>(provider => new ModulePlanPortFactory(
+            provider.GetRequiredService<IPlanExecutor>(), provider.GetRequiredService<FoundationOptions>().RecoveryGeneration, provider.GetRequiredService<TimeProvider>()));
+
+    public void Map(WebApplication app)
+    {
+    }
+}
+
+/// <summary>
+/// Binds the generic family-execution port of the Abstractions project to the shared-family engine over the signed Worker executor
+/// (CLOUD.72), beside the plan-execution binding: a module asks the factory for the port of its own descriptor and runs a registered
+/// shared family only with its own statements (and the one reviewed exception of the FamilyBinding policy). Like the plan binding it is
+/// created only when a module asks for it and needs the executor and the recovery generation of the foundation configuration, so without
+/// that configuration (production today) nothing resolves it and no route, method or request changes.
+/// </summary>
+internal sealed class ModuleFamilyBindingModule : IHostModule
+{
+    public void Register(WebApplicationBuilder builder) =>
+        builder.Services.TryAddSingleton<IModuleFamilyPortFactory>(provider => new ModuleFamilyPortFactory(
             provider.GetRequiredService<IPlanExecutor>(), provider.GetRequiredService<FoundationOptions>().RecoveryGeneration, provider.GetRequiredService<TimeProvider>()));
 
     public void Map(WebApplication app)

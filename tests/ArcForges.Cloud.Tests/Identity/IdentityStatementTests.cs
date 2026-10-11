@@ -23,7 +23,7 @@ namespace ArcForges.Cloud.Tests.IdentityCore;
 /// </summary>
 public sealed class IdentityStatementTests
 {
-    private static readonly JsonElement Vector = JsonDocument.Parse(File.ReadAllText(
+    internal static readonly JsonElement Vector = JsonDocument.Parse(File.ReadAllText(
         Path.Combine(T.RepoRoot().FullName, "tests", "ArcForges.Cloud.Tests", "Vectors", "identity-plan-calls.json"))).RootElement;
 
     public static TheoryData<int> StepIndexes()
@@ -63,7 +63,7 @@ public sealed class IdentityStatementTests
 
     private static Principal Caller(JsonElement input) => new(RealmId.Parse(S(input, "realm")), UserId.Parse(S(input, "user")));
 
-    private static (IdentityCommit Commit, CommitContext Context) Commit(string op, JsonElement input)
+    internal static (IdentityCommit Commit, CommitContext Context) Commit(string op, JsonElement input)
     {
         var context = Context(input);
         var command = S(input, "command");
@@ -110,7 +110,7 @@ public sealed class IdentityStatementTests
         return new CommitTailValues(receipt, events, new ChangeRecord(tail.SchemaVersion, tail.ChangeRecordJson));
     }
 
-    private static string Describe(D1Scalar scalar) => scalar switch
+    internal static string Describe(D1Scalar scalar) => scalar switch
     {
         D1ScalarD1NullValue => "null",
         D1ScalarD1TextValue t => "text:" + t.Value.Value,
@@ -119,7 +119,7 @@ public sealed class IdentityStatementTests
         _ => scalar.GetType().Name,
     };
 
-    private static string[][] Expected(JsonElement step) =>
+    internal static string[][] Expected(JsonElement step) =>
         [.. step.GetProperty("expected").EnumerateArray().Select(statement => statement.EnumerateArray()
             .Select(a => a.GetProperty("kind").GetString() switch
             {

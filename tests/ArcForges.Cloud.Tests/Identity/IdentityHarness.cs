@@ -2,6 +2,7 @@
 using System.Collections.Immutable;
 using ArcForges.Cloud.Modules.Identity.Core.Application;
 using ArcForges.Cloud.Modules.Identity.Core.Domain;
+using ArcForges.Cloud.Modules.Identity.Core.Infrastructure;
 using Xunit;
 
 namespace ArcForges.Cloud.Tests.IdentityCore;
@@ -27,9 +28,22 @@ internal sealed class SequentialIdentityIds : IIdentityIdSource
 /// named plans (storage/plans/identity and the family account-enrollment) as one atomic step under a lock, and it can be told to
 /// refuse the next commits to simulate a lost race. It proves the service and the rules against that contract; the SQL itself is proven
 /// by the SQLite oracle (tests/worker/identity-core-oracle.test.ts), and neither says anything about real D1.
+/// <para>
+/// Command receipts are modelled as the platform receipt store classifies them (CommandReplay): a committed commit records its tail's
+/// command identifier, workspace, actor, operation, request hash and expiry (the tail built by <see cref="IdentityStatements"/>, so the
+/// identity is the real one); a later commit under a recorded identifier is never applied and answers IdentifierConflict when any part
+/// differs, ReceiptExpired when the window has passed, and Replayed otherwise. Lost responses and forced outcomes are scripted.
+/// </para>
 /// </summary>
-internal sealed class InMemoryIdentityStore : IIdentityStore
+internal sealed class InMemoryIdentityStore(TimeProvider? time = null) : IIdentityStore
 {
+    private const string ProbeOutboxId = "00000000-0000-4000-8000-0000000000ff";
+
+    private readonly TimeProvider clock = time ?? TimeProvider.System;
+    private readonly Dictionary<string, TailContent> receipts = new(StringComparer.Ordinal);
+    private readonly Queue<CommitOutcome> forced = new();
+    private readonly List<IdentityCommit> sent = [];
+    private int loseResponses;
     private readonly Lock gate = new();
     private readonly Dictionary<UserId, User> users = [];
     private readonly Dictionary<AuthIdentityId, AuthIdentity> credentials = [];
@@ -44,10 +58,36 @@ internal sealed class InMemoryIdentityStore : IIdentityStore
 
     public IReadOnlyList<IdentityCommit> Committed => committed;
 
+    /// <summary>Every commit handed to the store, in order, whatever its outcome (resends and receipt probes included).</summary>
+    public IReadOnlyList<IdentityCommit> Sent { get { lock (gate) return [.. sent]; } }
+
+    public int Receipts { get { lock (gate) return receipts.Count; } }
+
     private readonly List<IdentityCommit> committed = [];
 
     /// <summary>The next <paramref name="count"/> commits are refused without effect, as a lost race would be.</summary>
     public void RefuseNext(int count) => refuseNext = count;
+
+    /// <summary>The next commits answer these outcomes in order without any effect (no row, no receipt).</summary>
+    public void ForceNext(params CommitOutcome[] outcomes)
+    {
+        lock (gate)
+        {
+            foreach (var outcome in outcomes) forced.Enqueue(outcome);
+        }
+    }
+
+    /// <summary>The next <paramref name="count"/> commits are decided normally (applied with their receipt, replayed or refused) but answer Unknown, as a lost response would.</summary>
+    public void LoseNextResponses(int count)
+    {
+        lock (gate) loseResponses = count;
+    }
+
+    /// <summary>Removes every receipt, as the retention purge eventually does.</summary>
+    public void PurgeReceipts()
+    {
+        lock (gate) receipts.Clear();
+    }
 
     /// <summary>Runs once, inside the next commit's critical section before its guards, to model a writer that wins the race.</summary>
     public void BeforeNextCommit(Action action) => beforeCommit = action;
@@ -118,15 +158,17 @@ internal sealed class InMemoryIdentityStore : IIdentityStore
         }
     }
 
-    public ValueTask<bool> HasActiveRecoveryPathAsync(UserId id, CancellationToken cancellationToken)
+    public ValueTask<bool> HasActiveRecoveryPathAsync(RealmId realm, UserId id, CancellationToken cancellationToken)
     {
-        lock (gate) return ValueTask.FromResult(recoveryPaths.Contains(id));
+        lock (gate) return ValueTask.FromResult(users.TryGetValue(id, out var user) && user.Realm == realm && recoveryPaths.Contains(id));
     }
 
     public ValueTask<CommitOutcome> CommitAsync(IdentityCommit commit, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(commit);
         lock (gate)
         {
+            sent.Add(commit);
             var hook = beforeCommit;
             beforeCommit = null;
             hook?.Invoke();
@@ -136,16 +178,53 @@ internal sealed class InMemoryIdentityStore : IIdentityStore
                 return ValueTask.FromResult(CommitOutcome.Refused);
             }
 
-            var outcome = Apply(commit);
-            if (outcome == CommitOutcome.Committed)
+            if (forced.TryDequeue(out var scripted)) return ValueTask.FromResult(scripted);
+            var outcome = Decide(commit);
+            if (loseResponses > 0)
             {
-                Commits++;
-                committed.Add(commit);
+                loseResponses--;
+                return ValueTask.FromResult(CommitOutcome.Unknown);
             }
 
             return ValueTask.FromResult(outcome);
         }
     }
+
+    /// <summary>The receipt decides first (the receipt insert of the tail conflicts whatever the guards say); otherwise the guards, and a committed change records its receipt in the same step.</summary>
+    private CommitOutcome Decide(IdentityCommit commit)
+    {
+        var now = UtcMicros.FromDateTimeOffset(clock.GetUtcNow());
+        var tail = TailOf(commit, new CommitContext(now, ProbeOutboxId, commit.CommandId, null, 1));
+        if (receipts.TryGetValue(commit.CommandId, out var stored))
+        {
+            var same = string.Equals(stored.WorkspaceId, tail.WorkspaceId, StringComparison.Ordinal)
+                && string.Equals(stored.ActorRef, tail.ActorRef, StringComparison.Ordinal)
+                && string.Equals(stored.Operation, tail.Operation, StringComparison.Ordinal)
+                && string.Equals(stored.RequestHash, tail.RequestHash, StringComparison.Ordinal);
+            if (!same) return CommitOutcome.IdentifierConflict;
+            return now.Value >= stored.ExpiresAt ? CommitOutcome.ReceiptExpired : CommitOutcome.Replayed;
+        }
+
+        var outcome = Apply(commit);
+        if (outcome == CommitOutcome.Committed)
+        {
+            receipts[commit.CommandId] = tail;
+            Commits++;
+            committed.Add(commit);
+        }
+
+        return outcome;
+    }
+
+    private static TailContent TailOf(IdentityCommit commit, CommitContext context) => commit switch
+    {
+        IdentityCommit.Enroll enroll => IdentityStatements.Enroll(enroll, context).Tail,
+        IdentityCommit.AddCredential add => IdentityStatements.CredentialAdd(add, context).Tail,
+        IdentityCommit.RevokeCredential revoke => IdentityStatements.CredentialRevoke(revoke, context).Tail,
+        IdentityCommit.RelabelCredential relabel => IdentityStatements.CredentialRelabel(relabel, context).Tail,
+        IdentityCommit.RenameUser rename => IdentityStatements.UserRename(rename, context).Tail,
+        _ => throw new ArgumentOutOfRangeException(nameof(commit)),
+    };
 
     private CommitOutcome Apply(IdentityCommit commit)
     {
@@ -210,7 +289,7 @@ internal sealed class IdentityHarness
     public IdentityHarness()
     {
         Clock = new IdentityClock(new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero));
-        Store = new InMemoryIdentityStore();
+        Store = new InMemoryIdentityStore(Clock);
         Ids = new SequentialIdentityIds();
         Service = new IdentityService(Store, Ids, Clock);
     }

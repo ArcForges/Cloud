@@ -400,7 +400,7 @@ public sealed class StoragePlanOwnershipTests
         var owned = manifest.Plans.Where(entry => entry.Family is null).ToList();
         foreach (var definition in owned) StoragePlanParser.AssertOwnership(definition, manifest.Registry);
         Assert.Equal(
-            ["entitlement", "foundation", "identity", "platform", "task"],
+            ["entitlement", "foundation", "identity", "platform", "task", "workspace"],
             owned.Select(entry => entry.Id.Split('.')[0]).Distinct(StringComparer.Ordinal));
         Assert.Equal(
             ["families.account-enrollment.create-user"],

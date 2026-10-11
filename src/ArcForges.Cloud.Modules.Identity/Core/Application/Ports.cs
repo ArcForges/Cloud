@@ -12,6 +12,24 @@ internal enum CommitOutcome
 
     /// <summary>A guard was false: nothing was written, so the caller rereads and recalculates (the guarded-batch contract of CLOUD.06).</summary>
     Refused,
+
+    /// <summary>
+    /// The command's receipt matches this commit (identifier, workspace, actor, operation and request hash) inside its replay window: the
+    /// original commit took effect and nothing was executed again.
+    /// </summary>
+    Replayed,
+
+    /// <summary>The command identifier is recorded with different content (<c>command.reused_identifier</c>): nothing was executed.</summary>
+    IdentifierConflict,
+
+    /// <summary>The command's receipt matches but its replay window has passed (<c>command.receipt_expired</c>): nothing was executed.</summary>
+    ReceiptExpired,
+
+    /// <summary>
+    /// The store could not establish whether the commit took effect (a lost response, an unavailable or overloaded database). The caller
+    /// resends the identical commit under the same command identifier, which either commits once or replays; it never allocates a new command.
+    /// </summary>
+    Unknown,
 }
 
 /// <summary>
@@ -43,8 +61,9 @@ internal abstract record IdentityCommit(string CommandId, WorkspaceId Scope)
 /// <summary>
 /// The persistence port of the core model. Every read is scoped by realm, so a row of another realm is never returned; one commit
 /// applies a whole <see cref="IdentityCommit"/> atomically or returns <see cref="CommitOutcome.Refused"/> and changes nothing. The D1
-/// implementation is the named plans under <c>storage/plans/identity</c> and the family <c>account-enrollment</c>; the Abstractions
-/// port that connects the two is owned by the plan-execution task, so no production implementation exists here.
+/// implementation (Persistence, CLOUD.72) runs the named plans under <c>storage/plans/identity</c> through the Abstractions plan port, the
+/// family <c>account-enrollment</c> through the Abstractions family port, and reads workspaces through the Workspace module's published
+/// directory. A store that cannot serve a call throws <see cref="IdentityStoreException"/>; it never returns a partial or guessed value.
 /// </summary>
 internal interface IIdentityStore
 {
@@ -58,10 +77,29 @@ internal interface IIdentityStore
 
     ValueTask<Workspace?> FindWorkspaceByOwnerAsync(RealmId realm, UserId owner, CancellationToken cancellationToken);
 
-    /// <summary>Whether the user has a live recovery-code set (an active recovery path that lets the last credential be removed).</summary>
-    ValueTask<bool> HasActiveRecoveryPathAsync(UserId id, CancellationToken cancellationToken);
+    /// <summary>
+    /// Whether the user of this realm has a live recovery-code set (an active recovery path that lets the last credential be removed). A
+    /// user that is not in the realm has none.
+    /// </summary>
+    ValueTask<bool> HasActiveRecoveryPathAsync(RealmId realm, UserId id, CancellationToken cancellationToken);
 
     ValueTask<CommitOutcome> CommitAsync(IdentityCommit commit, CancellationToken cancellationToken);
+}
+
+/// <summary>Why a store call could not be served. Neither carries a value of the request or of a stored row.</summary>
+internal enum IdentityStoreFailure
+{
+    /// <summary>The database was overloaded, unreachable or at another recovery generation: nothing was executed, so the same call may be sent again later.</summary>
+    Unavailable,
+
+    /// <summary>A plan was refused, or a stored row or a plan answer is not what the physical schema and the plans promise: a defect or a deployment skew, never a retry.</summary>
+    Defect,
+}
+
+/// <summary>A store call that could not be served (<see cref="IdentityStoreFailure"/>). The message names the plan and the reason, never a value.</summary>
+internal sealed class IdentityStoreException(IdentityStoreFailure failure, string message) : Exception(message)
+{
+    public IdentityStoreFailure Failure { get; } = failure;
 }
 
 /// <summary>Allocates identifiers. A port so that the service stays deterministic under test; every value is a canonical lower-case UUID.</summary>
