@@ -20,7 +20,7 @@ RUN test -n "$SOURCE_REVISION" && dotnet publish src/ArcForges.Cloud -c Release 
     -p:ArcForgesBuildId="$BUILD_ID" -p:ArcForgesPipelineRun="$PIPELINE_RUN" -p:ArcForgesSourceDateEpoch="$SOURCE_EPOCH" \
     -o /out && test -x /out/ArcForges.Cloud
 
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0.12-noble-chiseled@sha256:18d4848091a40d13dbfdd6a8340c1657dc3e2f2d7fa2f042e9d162e68669dbc9
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0.13-noble-chiseled@sha256:8d23bb82cd8345ee51738b36c6da8e2f89ded7a547bc25fa52d5cc60e37f6d7a
 ARG SOURCE_REVISION=local
 LABEL org.opencontainers.image.source="https://github.com/ArcForges/Cloud" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
