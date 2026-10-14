@@ -12,16 +12,18 @@ These are the three early proofs of P2-021 item 5 and brief section 4.3: the Wor
 ## Commands
 
 ```sh
-# Fixture proof of the ai.internal adapter (node only, no build slot needed)
+# Fixture proof of the ai.internal adapter (node only)
 npm run test:harness:ai
 
-# Offline C# crash injection and executor suites (CPU-heavy: run through the build slot, after a build)
-python C:\MyFile\Projects\Plan\tools\delivery.py build-slot run --worker <worker> --task HAR.40 -- npm run test:harness:executor
+# Offline C# crash injection and executor suites (CPU-heavy, after a build)
+npm run test:harness:executor
 
 # Container launch values, plus an optional live probe of a deployed proof Worker
 npm run test:harness:capacity
 HARNESS_CAPACITY_URL=https://<proof-origin> HARNESS_CAPACITY_PATH=/healthz HARNESS_CAPACITY_CONCURRENCY=4 npm run test:harness:capacity
 ```
+
+The workstation build slot that the recorded runs below went through is retired (serial delivery, ArcForges/Plan `execution-policy.md`); run the commands directly.
 
 The live probe sends no credential, requires an `https` origin with no query, fragment or userinfo, refuses redirects, and bounds each request by `HARNESS_CAPACITY_TIMEOUT_MS` (default 120000, at most 180000).
 

@@ -1,9 +1,9 @@
 # Receipts, outbox, inbox dedup and change archive
 
 This document describes what CLOUD.04 (Design WP-21.04) delivers, the checks that enforce it, what each check proves and what it does not. The binding rules are the Design
-[D1 execution profile](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/data-model/04-d1-execution-profile.md) (the commit tail in section 4,
+[D1 execution profile](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/04-d1-execution-profile.md) (the commit tail in section 4,
 publication in section 5, the change archive in section 7) and the
-[Cloud data model](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/data-model/01-cloud-data-model.md) (section 2, the platform records). Plans and
+[Cloud data model](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/01-cloud-data-model.md) (section 2, the platform records). Plans and
 module boundaries are described in [storage plans](storage-plans.md), the physical schema in [D1 physical schema](d1-physical-schema.md).
 
 ## Decision in one sentence

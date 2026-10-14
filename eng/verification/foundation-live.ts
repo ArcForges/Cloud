@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Explicit local opt-in run of the foundation scenarios against the DEPLOYED proof environment.
-// Holding the resource lease RES-cloud-deployment for the duration of this run is the operator's
-// obligation (python tools/delivery.py claim RES-cloud-deployment --worker W --task PRF.07, released
-// immediately afterwards). Never CI. The evidence file records results, never a secret.
+// PRF.07 held the resource lease RES-cloud-deployment for its run; leases and claims are retired under
+// serial delivery (ArcForges/Plan execution-policy.md), so none is taken now. Never CI. The evidence file records results, never a secret.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";

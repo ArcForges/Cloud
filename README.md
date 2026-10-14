@@ -17,6 +17,10 @@ The separate `arcforges-web` Worker continues serving the website. This reposito
 - [Bootstrap plan and acceptance scope](docs/bootstrap-plan.md)
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
+## Flagship role
+
+Cloud is an active repository of the ArcForges flagship ([AD-0001](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/decisions/AD-0001-flagship-pivot.md)). It hosts the flagship cloud: accounts and sign-in, node enrollment, entitlements, commerce (Paddle and Google Play), the fleet relay, remote commands, push notifications, support and operator endpoints, built on the reused host, Worker ingress, deploy scripts and D1 storage layer ([architecture 01 §5](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/01-system-overview.md#5-repository-and-project-map), [architecture 10](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/10-cloud.md), [reuse classification](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/reuse/inventory-and-classification.md#3-cloud)). Modules the flagship does not need are retained and not composed. Work is scheduled in the [ArcForges/Plan delivery graph](https://github.com/ArcForges/Plan/blob/main/delivery-graph.json) and delivered serially under its [execution policy](https://github.com/ArcForges/Plan/blob/main/execution-policy.md); flagship surfaces deploy dark until production activation.
+
 ## Quick start
 
 Prerequisites: .NET SDK **10.0.401**, Node **24.21.0**, npm **11.19.0**, and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.

@@ -1,6 +1,6 @@
 # Shared atomic families and the guarded-batch engine
 
-This document describes what CLOUD.06 (Design WP-21.05, generic engine and fixed module lock order only) delivers, the checks that enforce it, what each check proves and what it does not. The binding rules are the Design [D1 execution profile](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/data-model/04-d1-execution-profile.md) (section 4, "Shared family plans and the guard table") and the shared units of work [SU-01 to SU-07](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/data-model/00-data-model-overview.md#611-shared-units-of-work).
+This document describes what CLOUD.06 (Design WP-21.05, generic engine and fixed module lock order only) delivers, the checks that enforce it, what each check proves and what it does not. The binding rules are the Design [D1 execution profile](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/04-d1-execution-profile.md) (section 4, "Shared family plans and the guard table") and the shared units of work [SU-01 to SU-07](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/00-data-model-overview.md#611-shared-units-of-work).
 
 ## Decision in one sentence
 

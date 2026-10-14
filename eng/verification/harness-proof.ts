@@ -4,9 +4,8 @@
 //   node eng/verification/harness-proof.ts ai-binding        fixture-binding proof of the ai.internal adapter (node-fixture)
 //   node eng/verification/harness-proof.ts executor-crash    offline C# crash-injection and executor suites (dotnet-local, run after build)
 //   node eng/verification/harness-proof.ts container-capacity wrangler launch values, plus an optional live probe via HARNESS_CAPACITY_URL
-//   node eng/verification/harness-proof.ts all               ai-binding and container-capacity (executor-crash needs the build slot)
-// The Workstation build slot is required for executor-crash (CPU-heavy):
-//   python C:\MyFile\Projects\Plan\tools\delivery.py build-slot run --worker <worker> --task HAR.40 -- node eng/verification/harness-proof.ts executor-crash
+//   node eng/verification/harness-proof.ts all               ai-binding and container-capacity (executor-crash runs separately)
+// executor-crash is CPU-heavy; run it on its own after a build (the former workstation build slot is retired).
 // Evidence templates and the live steps that remain operator runs are in docs/harness-proofs.md.
 import { fileURLToPath } from "node:url";
 import path from "node:path";

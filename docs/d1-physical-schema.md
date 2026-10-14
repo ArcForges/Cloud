@@ -1,9 +1,9 @@
 # D1 physical schema, exact adapters and migrations
 
 This document describes what CLOUD.03 (Design WP-21.03) delivers, the checks that enforce it, what each check proves and what it does
-not. The binding rules are the Design [D1 execution profile](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/data-model/04-d1-execution-profile.md)
+not. The binding rules are the Design [D1 execution profile](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/04-d1-execution-profile.md)
 (sections 2 and 6, including the physical manifest conventions and the migration bookkeeping) and the
-[Cloud data model](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/data-model/01-cloud-data-model.md). Plans and the module
+[Cloud data model](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/01-cloud-data-model.md). Plans and the module
 boundaries are described in [storage plans](storage-plans.md).
 
 ## What exists

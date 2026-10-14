@@ -1,8 +1,8 @@
 # Module boundaries and the D1 named-plan bridge
 
 This document describes what CLOUD.02 (Design WP-21.02) delivers, which checks enforce it, and what is not claimed. The binding
-rules are the Design [D1 execution profile](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/data-model/04-d1-execution-profile.md)
-sections 2 and 3 and the [Cloud module projects](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/01-solution-and-project-layout.md#5-cloud-module-projects)
+rules are the Design [D1 execution profile](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/04-d1-execution-profile.md)
+sections 2 and 3 and the [Cloud module projects](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/01-solution-and-project-layout.md#5-cloud-module-projects)
 rules CM-01 to CM-04 and RD-01 to RD-04.
 
 ## Decision in one sentence

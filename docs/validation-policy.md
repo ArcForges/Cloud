@@ -1,6 +1,6 @@
 # Validation policy
 
-The accepted [Design policy](https://github.com/ArcForges/ArcForges-Design/blob/47db6670a727317939b91245e8c0b288834acf99/docs/assurance/ci-and-local-validation-policy.md) replaces earlier mandatory runtime and publication verification during WP02.04.
+The accepted [Design policy](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/47db6670a727317939b91245e8c0b288834acf99/docs/assurance/ci-and-local-validation-policy.md) replaces earlier mandatory runtime and publication verification during WP02.04.
 
 - CI has no macOS runner, device/emulator, desktop GUI, browser E2E, live API, real inference/Workflow, installed-consumer or public-release installation/upgrade execution. This includes nested scripts and scheduled/manual workflows.
 - Retain necessary Windows/Linux compilation, packaging, static checks, targeted offline units and non-duplicated security scans. Pure fixtures do not establish live runtime behavior.
