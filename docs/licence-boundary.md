@@ -1,6 +1,6 @@
 # Project licence boundaries (WP00.02)
 
-The [accepted Design profile](https://github.com/ArcForges/ArcForges-Design/blob/6ba885ad38dd71de532c74d7b69f439d01d19a0a/docs/architecture/01-solution-and-project-layout.md#41-project-declaration-and-verification-profile)
+The [accepted Design profile](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/6ba885ad38dd71de532c74d7b69f439d01d19a0a/docs/architecture/01-solution-and-project-layout.md#41-project-declaration-and-verification-profile)
 assigns Cloud's original code, tests and tooling to AGPL-3.0-only / AGPL.
 `eng/policy/licence-boundary.json` enumerates every current project/build manifest.
 The inventory check discovers tracked and nonignored files independently; changing

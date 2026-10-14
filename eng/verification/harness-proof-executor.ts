@@ -2,8 +2,9 @@
 // Local opt-in proof 2 of HAR.40 (P2-021 item 5, the executor): runs the offline C# crash-injection and executor suites against the real
 // D1 plan oracle (the SQLite oracle with the checked-in plans). It kills the executor before and after every fenced write (claim, reserve,
 // dispatch intent, outcome, yield), restarts it as a new process after the lease expires, and asserts that no effect is repeated. It is
-// dotnet-local realness: no Cloudflare D1, Durable Object alarm or Container is exercised. Run it through the workstation build slot:
-//   python C:\MyFile\Projects\Plan\tools\delivery.py build-slot run --worker <w> --task HAR.40 -- node eng/verification/harness-proof.ts executor-crash
+// dotnet-local realness: no Cloudflare D1, Durable Object alarm or Container is exercised. Run it on its own after a build (the former
+// workstation build slot is retired):
+//   node eng/verification/harness-proof.ts executor-crash
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

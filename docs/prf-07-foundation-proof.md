@@ -206,10 +206,10 @@ Cloudflare. Nothing is deployed by a push or a pull request.
    `arcforges.com/api/*` still serves `arcforges-cloud` and no route of the zone serves the proof Worker. The job
    writes `proof-deployment.json` (revision, version, image digest, hostname, database id, receipts; no secret) as the
    artifact `proof-evidence-<run>-<attempt>`. No request is sent to the deployed service by CI.
-4. **Live scenarios** (explicit local opt-in, once, under the lease): hold
-   `python tools/delivery.py claim RES-cloud-deployment --worker W --task PRF.07` only for the run, then
-   `npm run test:foundation:live` (default target `https://proof.arcforges.com`; `PROOF_BASE_URL` overrides it) and
-   release the lease immediately. The run writes `artifacts/foundation-live-evidence.json`; it never records a secret.
+4. **Live scenarios** (explicit local opt-in, once): run
+   `npm run test:foundation:live` (default target `https://proof.arcforges.com`; `PROOF_BASE_URL` overrides it).
+   PRF.07 held the `RES-cloud-deployment` lease (`delivery.py claim`) for its run; leases and claims are retired
+   under serial delivery (ArcForges/Plan `execution-policy.md`). The run writes `artifacts/foundation-live-evidence.json`; it never records a secret.
 
 ### Operator access
 

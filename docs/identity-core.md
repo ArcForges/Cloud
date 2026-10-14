@@ -1,8 +1,8 @@
 # Core identity model: realm, user, authentication identity, single-owner workspace
 
 This document describes what CLOUD.11 (Design WP-22.00) delivers, the checks that enforce it, what each check proves and what it does not. The binding rules are the Design
-[Cloud data model](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/architecture/data-model/01-cloud-data-model.md) (sections 3 and 4, including WO-01 to WO-05) and the
-[identity requirements](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/requirements/02-identity-account-and-workspace.md) (ID-10 to ID-15, WS-01 to WS-10).
+[Cloud data model](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/01-cloud-data-model.md) (sections 3 and 4, including WO-01 to WO-05) and the
+[identity requirements](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/requirements/02-identity-account-and-workspace.md) (ID-10 to ID-15, WS-01 to WS-10).
 The planning repair that bound this task's write scope and recorded its decisions is Design #248.
 CLOUD.72 (Design WP-22.00 part) adds the production store of this model: the D1 identity store, its random identifier source, the Abstractions family-execution port and its adapter, the
 Workspace read port, the read plans that back them and the replay mapping of the service ([The production store](#the-production-store-cloud72), [Replay mapping](#replay-mapping-cloud72)). Its
