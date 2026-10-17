@@ -1,4 +1,8 @@
 name: CI
+# Owner (deku2026) PRs are verified by the local pre-push hook (eng/verify.py, AD-0016), so the validation and security
+# jobs skip for them; every other PR (Dependabot included) and a manual dispatch keep the full coverage. A main push runs
+# only delivery: the candidate build and its deployment. The weekly schedule runs the security analysis: CodeQL and the
+# quality job (dependency audit, secret scan and the hosted architecture gate that must follow the scan in that job).
 on:
   pull_request:
   push:
@@ -32,6 +36,7 @@ env:
 jobs:
   source:
     name: Source (${{ matrix.os }})
+    if: github.event_name != 'push' && github.event_name != 'schedule' && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +80,7 @@ jobs:
 
   quality:
     name: Dependency audit and repository checks
+    if: github.event_name != 'push' && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -113,7 +119,7 @@ jobs:
 
   dependency-review:
     name: Dependency review
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -127,6 +133,7 @@ jobs:
 
   codeql:
     name: CodeQL (${{ matrix.language }})
+    if: github.event_name != 'push' && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -166,7 +173,13 @@ jobs:
 
   candidate:
     name: Native AOT image and Worker build
+    # Delivery on a main push (the bytes deploy ships; the PR was verified before merge, so nothing re-validates it);
+    # validation after source and quality for every other PR and a dispatch. Owner PRs build it in the local hook.
     needs: [source, quality]
+    if: >-
+      !cancelled() && (github.event_name == 'push' || (github.event_name != 'schedule'
+      && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
+      && needs.source.result == 'success' && needs.quality.result == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -197,7 +210,7 @@ jobs:
 
   verify:
     name: Verify
-    if: always()
+    if: always() && github.event_name != 'push' && github.event_name != 'schedule' && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
     needs: [source, quality, dependency-review, codeql, candidate]
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -221,8 +234,8 @@ jobs:
     name: Deploy Cloudflare
     if: >-
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-      && needs.verify.result == 'success' && needs.candidate.result == 'success'
-    needs: [verify, candidate]
+      && needs.candidate.result == 'success'
+    needs: [candidate]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: cloudflare

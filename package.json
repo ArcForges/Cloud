@@ -15,7 +15,6 @@
   },
   "packageManager": "npm@11.19.0",
   "scripts": {
-    "hooks": "node tooling/project.ts hooks",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "biome lint --error-on-warnings .",

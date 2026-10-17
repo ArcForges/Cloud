@@ -7,12 +7,12 @@ Use the existing pinned toolchains for relevant checks:
 ```sh
 npm ci --ignore-scripts
 dotnet restore Cloud.slnx --locked-mode
-npm run hooks
 npm run check
 npm run check:dotnet
+npm run candidate
 ```
 
-The candidate build belongs to hosted Linux CI. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). Hooks are opt-in, scoped to this worktree and check whitespace without rebuilding or testing. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
+The owner's pull requests are verified before the push by the pre-push hook (`python eng/verify.py install` once per clone; see [AGENTS.md](AGENTS.md), Local verification), which runs these checks and the candidate build on Windows and WSL Debian; external pull requests run the full hosted CI and need no hook. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). The pre-commit hook checks only the staged whitespace. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
 
 Update central NuGet versions and regenerate the per-project locks with `dotnet restore Cloud.slnx --force-evaluate`; use `npm install --ignore-scripts` for npm lock changes. Do not hand-edit lock dependency graphs or disable locked mode. The Cloud host explicitly lists Windows/Linux x64 restore targets so its lock is portable between development and production builds.
 

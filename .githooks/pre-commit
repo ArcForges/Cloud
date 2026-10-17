@@ -1,4 +1,5 @@
 #!/bin/sh
 set -eu
-# Compilation and tests are explicit; hooks do not repeat them.
-git diff --check
+# Whitespace errors in the staged changes. Builds and tests run before a push, in the pre-push verification
+# (eng/verify.py; AGENTS.md, Local verification), not on commit.
+git diff --cached --check

@@ -10,5 +10,7 @@
 *.tar binary
 *.jar binary
 *.bat text eol=crlf
+.githooks/* text eol=lf
+eng/*.py text eol=lf
 # Preserve exact upstream legal whitespace; provenance hashes verify these bytes.
 third-party/** whitespace=-blank-at-eol,-blank-at-eof
