@@ -159,8 +159,9 @@ def fingerprint(repo: Repository, hosts: set[str]) -> dict[str, str]:
                 values[f"wsl:{name}"] = wsl_run(repo, probe, timeout=300)
                 continue
             try:
-                result = subprocess.run(probe, capture_output=True, text=True, timeout=300, cwd=repo.top,
-                                        shell=isinstance(probe, str), stdin=subprocess.DEVNULL)
+                result = subprocess.run(probe, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                        timeout=300, cwd=repo.top, shell=isinstance(probe, str),
+                                        stdin=subprocess.DEVNULL)
             except (OSError, subprocess.TimeoutExpired) as error:
                 raise VerifyError(f"the Windows tool probe '{name}' cannot run: {error}") from error
             if result.returncode != 0:
@@ -408,7 +409,7 @@ def plan(repo: Repository, sha: str, remote: str) -> tuple[str, str, list[str], 
     # A stale remote-tracking branch would give an older base, so it is refreshed first (pushing is online anyway).
     branch = upstream.removeprefix(f"refs/remotes/{remote}/")
     fetched = subprocess.run(["git", "fetch", "--quiet", "--no-tags", remote, f"+refs/heads/{branch}:{upstream}"],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, encoding="utf-8", errors="replace")
     if fetched.returncode != 0:
         raise VerifyError(f"cannot refresh {upstream} from {remote}: {fetched.stderr.strip()}; check the network "
                           "access to the remote and push again")
@@ -503,9 +504,28 @@ def command_install(repo: Repository) -> None:
     source = repo.top / ".githooks"
     if not (source / "pre-push").exists():
         raise VerifyError(f"{source / 'pre-push'} is missing")
-    if git("config", "--get", "core.hooksPath", cwd=repo.top, check=False):
-        git("config", "--unset-all", "core.hooksPath", cwd=repo.top)
-        say("removed core.hooksPath (the hooks now live in the common hooks directory)")
+    # core.hooksPath can be set in the shared config and, with extensions.worktreeConfig, in any worktree's own config
+    # (older repository scripts did that); every one of them, even an empty value, would bypass the common hooks directory.
+    # Presence is decided by git's exit code (0 = set, 1 = not set), never by the printed value.
+    configs = [repo.common / "config"]
+    configs += sorted((repo.common / "worktrees").glob("*/config.worktree"))
+    configs += [repo.common / "config.worktree"]
+    for config in (c for c in configs if c.exists()):
+        found = subprocess.run(["git", "config", "--file", str(config), "--get-all", "core.hooksPath"],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if found.returncode == 0:
+            git("config", "--file", str(config), "--unset-all", "core.hooksPath")
+            say(f"removed core.hooksPath from {config} (the hooks now live in the common hooks directory)")
+    # What each worktree actually reads (its includes, includeIf gitdir and global or system values) must leave it unset.
+    worktrees = [Path(line[len("worktree "):]) for line in git("worktree", "list", "--porcelain", cwd=repo.top).splitlines()
+                 if line.startswith("worktree ")]
+    for worktree in (w for w in worktrees if w.exists()):
+        effective = subprocess.run(["git", "-C", str(worktree), "config", "--get-all", "core.hooksPath"],
+                                   capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if effective.returncode != 1:
+            reason = "is still set" if effective.returncode == 0 else f"cannot be read ({effective.stderr.strip()})"
+            raise VerifyError(f"core.hooksPath {reason} for the worktree {worktree} (`git -C \"{worktree}\" config "
+                              "--show-origin --get-all core.hooksPath` shows where); remove it and install again")
     target = repo.common / "hooks"
     target.mkdir(exist_ok=True)
     for hook in sorted(p for p in source.iterdir() if p.is_file()):
@@ -514,7 +534,8 @@ def command_install(repo: Repository) -> None:
             say(f"replacing the existing {destination} (it differed from {hook})")
         destination.write_bytes(content)
         say(f"installed {hook.name} -> {destination}")
-    say("every worktree of this clone now runs the pre-push verification")
+    say("every worktree of this clone now runs the pre-push verification (a branch-conditional includeIf that sets "
+        "core.hooksPath would still bypass it; none is checked for)")
 
 
 def main() -> int:
