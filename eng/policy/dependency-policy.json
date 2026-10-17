@@ -4,7 +4,7 @@
   "sourceCommit": "eaaafb11e6b3bd8af5b3bc9d770ea309fdb275cf",
   "manifests": ["package.json"],
   "inputs": {
-    ".github/workflows/ci.yml": "e8c42f2a810d6ddfc51a728bf62affd4e34422db02da41346fc1ba34ef7e5238",
+    ".github/workflows/ci.yml": "b0aadb3cf686e0b74d4c45adc730b19cf81b4ac812e08afb13397163e0089277",
     ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
     ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
     "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
@@ -17,7 +17,7 @@
     "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "0c3988a778265e1211eee50ffeb98e38b0759dabebbb1502a0b38ae09f97f344",
-    "package.json": "85c50bfe1f5d036bd9f69105bc93422ed86f71cca0f562e9fe94020234e7e25b",
+    "package.json": "8e187ab30336420517874ba77d344b77547386c6363883a481256e10ba05cbb0",
     "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
     "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
     "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -74,11 +74,11 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "w-deku-20261009-rev-cloud-84",
-    "date": "2026-10-10",
-    "rationale": "CLOUD.84 S42(1) moves the D1 runner's SQL statements and its classifier patterns into embedded resources (src/ArcForges.Cloud.Storage.D1/MigrationRunner/Statements.sql and Classifiers.txt), so that the standing NoSqlTextExistsInCSharpSource rule passes unchanged. The Storage.D1 project file gains two EmbeddedResource items with explicit logical names; it is the only bound input that changes, and its digest is rebound here. No package, NuGet coordinate, lock file, closure entry or shipped artifact class changes. The tool project is never published.",
+    "reviewer": "ArcForges local-first verification worker (Cloud, AD-0016; maintainer-authorized; independent pull-request review is recorded on the pull request)",
+    "date": "2026-10-17",
+    "rationale": "AD-0016 local-first verification. Two bound inputs change and are rebound here: .github/workflows/ci.yml, whose validation and security jobs (source, quality, dependency review, CodeQL, Verify) skip for pull requests by deku2026 (verified by the pre-push hook, eng/verify.py) and for main pushes, CodeQL and the quality job keep the weekly schedule, and the candidate and deploy jobs run on a main push without the skipped validation (deploy needs the candidate only; its environment, concurrency, secrets, migration gate and steps are unchanged); and package.json, which drops the `hooks` script that set a per-worktree core.hooksPath (the hook is installed by `python eng/verify.py install`). No package, NuGet coordinate, lock file, closure entry, toolchain pin, base image or shipped artifact class changes. The existing Gitleaks command and configuration are unchanged.",
     "inputs": {
-      ".github/workflows/ci.yml": "e8c42f2a810d6ddfc51a728bf62affd4e34422db02da41346fc1ba34ef7e5238",
+      ".github/workflows/ci.yml": "b0aadb3cf686e0b74d4c45adc730b19cf81b4ac812e08afb13397163e0089277",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
       ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
       "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
@@ -91,7 +91,7 @@
       "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "0c3988a778265e1211eee50ffeb98e38b0759dabebbb1502a0b38ae09f97f344",
-      "package.json": "85c50bfe1f5d036bd9f69105bc93422ed86f71cca0f562e9fe94020234e7e25b",
+      "package.json": "8e187ab30336420517874ba77d344b77547386c6363883a481256e10ba05cbb0",
       "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
       "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "1b2719a5bd0a484d28194ab3ddb3af6c16874828219f15d71326bde1abb7eb56",
       "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -155,11 +155,11 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "No runtime change to the shipped closure. The embedded SQL text is the text the engine already ran, with the same placeholder order and parameter binding. No runtime capability, dependency class or native closure changes.",
+    "runtimeAssessment": "No runtime change to the shipped closure: the image, the Worker bundles and the sealed tool are built from the same inputs by the same candidate job.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/cloud-84-r9.json",
+    "previous": "eng/policy/dependency-reviews/cloud-84-r10.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
-    "reviewedOn": "2026-10-10",
+    "reviewedOn": "2026-10-17",
     "decision": "approved"
   },
   "closure": {
@@ -951,7 +951,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/cloud-84-r10.json",
+  "reviewRecord": "eng/policy/dependency-reviews/local-first-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

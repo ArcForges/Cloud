@@ -334,6 +334,24 @@ async function testWorker(candidate: Candidate) {
   }
 }
 
+/**
+ * The network of the image build's RUN steps (the Dockerfile's locked NuGet restore). Hosted CI uses Docker's default. The local
+ * pre-push verification (eng/verify_steps.py) selects `host` through ARCFORGES_LOCAL_DOCKER_BUILD_NETWORK, because the workstation's
+ * WSL container network cannot reach NuGet. Only the route of the fetches changes: the restore is locked (each package is checked
+ * against the content hash of its packages.lock.json) and both base images are pinned by digest, and the network mode enters neither
+ * the image nor the manifest. Refused in CI, so hosted candidates build exactly as before.
+ */
+export function dockerBuildNetwork(environment: NodeJS.ProcessEnv = process.env): string[] {
+  const network = environment.ARCFORGES_LOCAL_DOCKER_BUILD_NETWORK;
+  if (!network) return [];
+  assert(
+    environment.GITHUB_ACTIONS !== "true" && environment.CI !== "true",
+    "ARCFORGES_LOCAL_DOCKER_BUILD_NETWORK is for local verification only.",
+  );
+  assert.equal(network, "host", "ARCFORGES_LOCAL_DOCKER_BUILD_NETWORK accepts only host.");
+  return ["--network", "host"];
+}
+
 async function buildCandidate() {
   await writeJson(path.join(root, "artifacts/evidence/licence-boundary.json"), auditLicences(root));
   const head = await run("git", ["rev-parse", "HEAD"], true);
@@ -353,8 +371,12 @@ async function buildCandidate() {
   );
   stageImageNotices(root, revision);
   await writeJson(path.join(candidateDir, "legal-notices.json"), legalBundle(root, revision));
+  const network = dockerBuildNetwork();
+  if (network.length > 0)
+    console.log("Local verification: the image build fetches over the host network.");
   await run("docker", [
     "build",
+    ...network,
     "--platform",
     "linux/amd64",
     "--provenance=false",
@@ -598,11 +620,6 @@ async function main() {
       await run(process.execPath, [wrangler, "dev", "--config", "artifacts/dev.wrangler.json"]);
       break;
     }
-    case "hooks":
-      // Worktree-specific settings keep the primary checkout and other tasks untouched.
-      await run("git", ["config", "extensions.worktreeConfig", "true"]);
-      await run("git", ["config", "--worktree", "core.hooksPath", ".githooks"]);
-      break;
     case "candidate":
       await buildCandidate();
       break;
@@ -618,7 +635,7 @@ async function main() {
       break;
     }
     default:
-      throw new Error("Use hooks, candidate, verify, worker or container.");
+      throw new Error("Use candidate, verify, worker or container.");
   }
 }
 

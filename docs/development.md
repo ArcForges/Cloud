@@ -15,7 +15,6 @@
 
 ```sh
 npm ci --ignore-scripts
-npm run hooks
 npm run check
 npm run check:dotnet
 npm run candidate
@@ -27,7 +26,7 @@ npm run candidate
 
 ## Windows and WSL
 
-Source checks work in Windows PowerShell. Use a native Docker CLI where available. No automatic WSL wrapper is supported. If a Linux environment is required, use a directly available WSL terminal; do not invoke wsl.exe, reinstall tools or introduce a proxy for validation. Hosted Linux compilation remains available without local Docker.
+Source checks work in Windows PowerShell. The pre-push verification (`eng/verify.py`, [AGENTS.md](../AGENTS.md) Local verification) runs the Windows source checks in a verification worktree and the Linux source checks and the candidate in a Linux-native clone in WSL Debian through `wsl.exe`, with WSL's Docker Engine for the image. For other Linux work use a directly available WSL terminal; do not reinstall tools or introduce a proxy for validation. External pull requests keep the hosted Linux and Windows compilation.
 
 `npm run dev` uses source and the Dockerfile in an existing suitable local environment. It supplies complete source/build arguments from the checkout. It is an explicit development command, not a CI validation step. See [validation policy](validation-policy.md).
 
