@@ -70,9 +70,11 @@ FINGERPRINT = {
 # allow a cold NuGet cache and base-image pull.
 
 # The environment of ci.yml, without CI=true (see above). MSBuild node reuse is off, so that no build node outlives its step
-# (a step's process tree is what a timeout or a failure stops).
+# (a step's process tree is what a timeout or a failure stops). RestoreLockedMode (an MSBuild property read from the
+# environment) locks the implicit restores of `dotnet run`/`dotnet publish` in check:plans, check:generated and the candidate's
+# tool publish, as the hosted jobs' explicit `--locked-mode` restores do.
 ENV = {"DOTNET_NOLOGO": "true", "DOTNET_CLI_TELEMETRY_OPTOUT": "true", "WRANGLER_SEND_METRICS": "false",
-       "MSBUILDDISABLENODEREUSE": "1"}
+       "MSBUILDDISABLENODEREUSE": "1", "RestoreLockedMode": "true"}
 
 # ci.yml's secret scan (same pinned image digest, redaction and config), over the pushed range, without network and with
 # a read-only mount of the verification clone.

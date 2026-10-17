@@ -628,13 +628,29 @@ public sealed class FoundationHostTests
         Assert.Equal(HttpStatusCode.BadRequest, (await Operation(host, "job/start", new { scope = "../x", total = 5 })).Status);
     }
 
-    private static Uri ClosedLoopbackAddress()
+    /// <summary>
+    /// A loopback address that refuses connections for as long as it lives: a socket bound to an OS-chosen port that never listens.
+    /// The bound port stays reserved, so the port-0 server of a concurrently running test can never be given it (a port that was
+    /// only probed and released could be, and the "refused" target then answered).
+    /// </summary>
+    private sealed class ClosedLoopbackPort : IDisposable
     {
-        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return new Uri($"http://127.0.0.1:{port}/");
+        private readonly System.Net.Sockets.Socket socket = new(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+
+        public ClosedLoopbackPort()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                socket.ExclusiveAddressUse = true;
+            }
+
+            socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            Address = new Uri($"http://127.0.0.1:{((IPEndPoint)socket.LocalEndPoint!).Port}/");
+        }
+
+        public Uri Address { get; }
+
+        public void Dispose() => socket.Dispose();
     }
 
     private static async Task<(WebApplication App, Uri Address)> StartAnsweringServerAsync()
@@ -697,8 +713,10 @@ public sealed class FoundationHostTests
     [Fact]
     public async Task TheEgressProbeReportsBlockedOnlyWhenNoTargetAnswersAndTheControlAnswers()
     {
-        var closedA = ClosedLoopbackAddress();
-        var closedB = ClosedLoopbackAddress();
+        using var portA = new ClosedLoopbackPort();
+        using var portB = new ClosedLoopbackPort();
+        var closedA = portA.Address;
+        var closedB = portB.Address;
         // The real HTTP stack and the real host route: a refused connection is the blocked outcome.
         await using var blocked = await StartAsync(probe: new EgressProbe(FoundationModule.NewClient, [closedA, closedB], _ => Task.FromResult(true)));
         var reply = await Operation(blocked, "egress/probe", new { });
@@ -733,10 +751,12 @@ public sealed class FoundationHostTests
     [Fact]
     public async Task TheEgressProbeFailsClosedWithoutTheControlTargetsOrAnyAnswerAndCountsSilenceAsNoResponse()
     {
-        var closed = ClosedLoopbackAddress();
+        using var port = new ClosedLoopbackPort();
+        using var otherPort = new ClosedLoopbackPort();
+        var closed = port.Address;
         // A broken control path means the probe proves nothing: never blocked.
         // Two targets, so the two-attempt rule cannot mask a control that was dropped from the verdict.
-        var noControl = await new EgressProbe(FoundationModule.NewClient, [closed, ClosedLoopbackAddress()], _ => Task.FromResult(false)).RunAsync(T.Ct);
+        var noControl = await new EgressProbe(FoundationModule.NewClient, [closed, otherPort.Address], _ => Task.FromResult(false)).RunAsync(T.Ct);
         Assert.False(noControl.Blocked);
         Assert.False(noControl.ControlOk);
         Assert.False((await new EgressProbe(FoundationModule.NewClient, [], _ => Task.FromResult(true)).RunAsync(T.Ct)).Blocked);
