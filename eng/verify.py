@@ -12,10 +12,11 @@ Every step runs on one host, 'win' (native Windows) or 'linux' (native Linux); t
 leg for that host. A machine runs only the leg of its own operating system, never another one through WSL, a VM or a
 remote shell: on Windows in a detached verification worktree (<main checkout>/.worktree/_verify), on Linux in a
 Linux-native clone (~/.cache/arcforges-verify/<repo>), both checked out at the commit and cleaned of untracked files
-(ignored build output stays, so builds are incremental). The pushed commit is verified, never the working tree, and the
-step table and this script are read from the commit itself. Steps run in lanes: lanes run concurrently, the steps of a
-lane in order, and steps marked exclusive run alone afterwards. Any step that fails, times out or cannot run fails the
-leg (fail closed).
+(ignored build output stays, so builds are incremental). That clone is shared by every clone of the repository on the
+host, so one Linux leg of a repository runs on a host at a time. The pushed commit is verified, never the working tree,
+and the step table and this script are read from the commit itself. Steps run in lanes: lanes run concurrently, the
+steps of a lane in order, and steps marked exclusive run alone afterwards. Any step that fails, times out or cannot run
+fails the leg (fail closed).
 
 A passed leg is recorded under the Git common directory, keyed by the commit's tree (its exact commits when a step reads
 history), the merge base, the profile, the leg's host and step set, these scripts and the step table's CONTEXT (inputs
@@ -28,6 +29,7 @@ every leg of every pushed commit, and is rejected while one is missing.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ctypes
 import datetime as _dt
 import hashlib
@@ -209,6 +211,8 @@ def prepare_linux(repo: Repository, sha: str, base: str) -> str:
         f"d={LINUX_STATE}/{repo.name}; "
         f"fill() {{ mkdir -p \"$d\" && cd \"$d\" && {{ [ -d .git ] || git init -q; }} && "
         f"git fetch -q --no-tags --upload-pack={shlex.quote(pack)} {shlex.quote(source)} {sha} {base} && "
+        # rev-list treats a shallow boundary as a root, so a clone that is itself shallow would still walk.
+        "test \"$(git rev-parse --is-shallow-repository)\" = false && "
         f"git rev-list --quiet {sha} {base} >/dev/null 2>&1; }}; "
         "if ! fill; then echo \"the Linux clone $d is incomplete; making it again\"; cd /; rm -rf \"$d\"; fill || "
         "{ echo \"the Linux clone $d cannot be filled from the commit's history\" >&2; exit 1; }; fi; "
@@ -414,6 +418,36 @@ class Lock:
         self.path.unlink(missing_ok=True)
 
 
+class HostLock:
+    """The Linux leg's lock across every clone of the repository on this host. Its Linux-native clone, its pid files and
+    the step table's caches under ~/.cache/arcforges-verify are named by the repository, not by the clone, so a second
+    clone's leg would check out, clean or stop them under the first one's running steps. flock(2) is released when its
+    holder ends, so a crashed run leaves nothing to clear."""
+
+    def __init__(self, repo: Repository) -> None:
+        self.path = Path.home() / ".cache" / "arcforges-verify" / "locks" / f"{repo.name}.lock"
+        self.fd = -1
+
+    def __enter__(self) -> "HostLock":
+        import fcntl  # noqa: PLC0415 - POSIX only; the Linux leg runs only on Linux
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            holder = os.pread(self.fd, 64, 0).decode(errors="replace").strip() or "?"
+            os.close(self.fd)
+            raise VerifyError(f"another clone's Linux leg of this repository (process {holder}) is running on this "
+                              f"host ({self.path}); verify again when it has finished") from error
+        os.ftruncate(self.fd, 0)
+        os.pwrite(self.fd, str(os.getpid()).encode(), 0)
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        os.close(self.fd)  # releases the flock; the file stays, so no other run can lock a different inode
+
+
 # ------------------------------------------------------------------------------------------------------------- commands
 
 def upstream_ref(remote: str) -> str:
@@ -536,7 +570,7 @@ def run_leg(repo: Repository, t: Target, leg: Leg, tools: dict[str, str], keep_g
     if git("rev-parse", "--is-shallow-repository", check=False) == "true":
         raise VerifyError("this clone is shallow: run `git fetch --unshallow` (or clone it in full) and verify again")
     started = time.monotonic()
-    with Lock(repo.state / "lock"):
+    with Lock(repo.state / "lock"), HostLock(repo) if leg.host == "linux" else contextlib.nullcontext():
         workdir = prepare_windows(repo, t.sha) if leg.host == "win" else prepare_linux(repo, t.sha, t.base)
         runner = Runner(repo, logs, t.sha, t.base, workdir, keep_going)
         ok = runner.execute(leg.steps)
