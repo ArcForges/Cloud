@@ -3,17 +3,27 @@
 """Local pre-push verification (the same file in every ArcForges repository; the steps live in eng/verify_steps.py).
 
   python eng/verify.py install                    install .githooks/* for every worktree of this clone (once)
-  python eng/verify.py run [--rev REV] [--force]  verify a commit now (default HEAD); a pass is reused by the push
-  python eng/verify.py list [--rev REV]           show the profile and steps a commit would run
+  python eng/verify.py run [--rev REV] [--force]  verify this machine's leg of a commit now (default HEAD)
+  python eng/verify.py list [--rev REV]           show the profile, the steps and the state of each leg
+  python eng/verify.py import RECORD              accept the pass record of a leg verified on another machine
   python eng/verify.py pre-push REMOTE [URL]      the hook entry point (refs on stdin)
 
-The pushed commit is verified, never the working tree: a detached verification worktree on Windows
-(<main checkout>/.worktree/_verify) and a Linux-native clone in WSL (~/.cache/arcforges-verify/<repo>), both checked
-out at the commit and cleaned of untracked files (ignored build output stays, so builds are incremental). The step table
-and this script are read from the commit itself. Steps run in lanes: lanes run concurrently, the steps of a lane in
-order, and steps marked exclusive run alone afterwards. Any step that fails, times out or cannot run rejects the push
-(fail closed). A pass is recorded under the Git common directory, keyed by the commit's tree, these scripts and the tool
-versions; an identical key is not verified again.
+Every step runs on one host, 'win' (native Windows) or 'linux' (native Linux); the steps of one host are the commit's
+leg for that host. A machine runs only the leg of its own operating system, never another one through WSL, a VM or a
+remote shell: on Windows in a detached verification worktree (<main checkout>/.worktree/_verify), on Linux in a
+Linux-native clone (~/.cache/arcforges-verify/<repo>), both checked out at the commit and cleaned of untracked files
+(ignored build output stays, so builds are incremental). The pushed commit is verified, never the working tree, and the
+step table and this script are read from the commit itself. Steps run in lanes: lanes run concurrently, the steps of a
+lane in order, and steps marked exclusive run alone afterwards. Any step that fails, times out or cannot run fails the
+leg (fail closed).
+
+A passed leg is recorded under the Git common directory, keyed by the commit's tree (its exact commits when a step reads
+history), the merge base, the profile, the leg's host and step set, these scripts and the step table's CONTEXT (inputs
+other than the commit, such as the Plan's Design main commit). A local record also holds the tool versions it ran with
+and is reused only while they are unchanged. The record of a leg that passed on another machine at the same commit is
+accepted with `import`, which recomputes the key here and refuses a record whose commit, tree, merge base, profile, step
+set, scripts or context differ, or which holds a step that did not pass. A push needs a passed or imported record for
+every leg of every pushed commit, and is rejected while one is missing.
 """
 from __future__ import annotations
 
@@ -23,6 +33,8 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import platform
+import re
 import shlex
 import subprocess
 import sys
@@ -34,12 +46,14 @@ from typing import Callable
 
 ZERO = "0" * 40
 TAIL_LINES = 60
-WSL_STATE = "$HOME/.cache/arcforges-verify"
+LINUX_STATE = "$HOME/.cache/arcforges-verify"
+HOSTS = {"win": "Windows", "linux": "Linux"}
+RECORD_FORMAT = "arcforges-verify-leg/1"
 
 
 @dataclass(frozen=True)
 class Step:
-    """One verification step. `cmd` is an argv list on the 'win' host and a bash command string on the 'wsl' host.
+    """One verification step. `cmd` is an argv list on the 'win' host and a bash command string on the 'linux' host.
     The placeholders {sha}, {base} and {range} are replaced; a step that reads history must use them (never a
     hard-coded range), because they are what keys its pass to the exact commits. `profiles` names the profiles that
     include the step;
@@ -117,56 +131,50 @@ class Repository:
 
 # ---------------------------------------------------------------------------------------------------------------- hosts
 
-def wsl_distribution(repo: Repository) -> str:
-    return getattr(repo.steps, "WSL_DISTRIBUTION", "Debian")
+def this_host() -> str:
+    """The host this machine verifies: its own operating system, natively."""
+    if os.name == "nt":
+        return "win"
+    if sys.platform.startswith("linux"):
+        return "linux"
+    raise VerifyError(f"no verification host runs on {sys.platform}; the hosts are native Windows and native Linux")
 
 
-def to_wsl_path(path: Path) -> str:
-    resolved = str(path.resolve())
-    if len(resolved) < 2 or resolved[1] != ":":
-        raise VerifyError(f"cannot map {resolved} into WSL")
-    return "/mnt/" + resolved[0].lower() + resolved[2:].replace("\\", "/")
+def bash_argv(command: str) -> list[str]:
+    return ["bash", "-lc", command]
 
 
-def wsl_argv(repo: Repository, command: str, cwd: str | None = None) -> list[str]:
-    argv = ["wsl.exe", "-d", wsl_distribution(repo)]
-    if cwd:
-        argv += ["--cd", cwd]
-    return argv + ["--exec", "bash", "-lc", command]
-
-
-def wsl_run(repo: Repository, command: str, timeout: int = 600) -> str:
+def bash_run(command: str, timeout: int = 600) -> str:
     try:
-        result = subprocess.run(wsl_argv(repo, command), capture_output=True, text=True, encoding="utf-8",
+        result = subprocess.run(bash_argv(command), capture_output=True, text=True, encoding="utf-8",
                                 errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
     except FileNotFoundError as error:
-        raise VerifyError("wsl.exe was not found; WSL Debian is required for the Linux steps") from error
+        raise VerifyError("bash was not found; the Linux steps need bash") from error
     except subprocess.TimeoutExpired as error:
-        raise VerifyError(f"a WSL command timed out after {timeout}s: {command}") from error
+        raise VerifyError(f"a Linux command timed out after {timeout}s: {command}") from error
     if result.returncode != 0:
-        raise VerifyError(f"WSL ({wsl_distribution(repo)}) command failed with exit code {result.returncode}: "
+        raise VerifyError(f"a Linux command failed with exit code {result.returncode}: "
                           f"{command}\n{(result.stdout + result.stderr).strip()[-2000:]}")
     return result.stdout.strip()
 
 
-def fingerprint(repo: Repository, hosts: set[str]) -> dict[str, str]:
-    """Tool versions that are part of the pass key (FINGERPRINT in the step table: {host: {name: probe}})."""
+def fingerprint(repo: Repository, host: str) -> dict[str, str]:
+    """Tool versions of this machine's leg (FINGERPRINT in the step table: {host: {name: probe}})."""
     probes = getattr(repo.steps, "FINGERPRINT", {})
     values: dict[str, str] = {"python": sys.version.split()[0]}
-    for host in sorted(hosts):
-        for name, probe in probes.get(host, {}).items():
-            if host == "wsl":
-                values[f"wsl:{name}"] = wsl_run(repo, probe, timeout=300)
-                continue
-            try:
-                result = subprocess.run(probe, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                        timeout=300, cwd=repo.top, shell=isinstance(probe, str),
-                                        stdin=subprocess.DEVNULL)
-            except (OSError, subprocess.TimeoutExpired) as error:
-                raise VerifyError(f"the Windows tool probe '{name}' cannot run: {error}") from error
-            if result.returncode != 0:
-                raise VerifyError(f"the Windows tool probe '{name}' failed: {result.stderr.strip()}")
-            values[f"win:{name}"] = result.stdout.strip()
+    for name, probe in probes.get(host, {}).items():
+        if host == "linux":
+            values[f"linux:{name}"] = bash_run(probe, timeout=300)
+            continue
+        try:
+            result = subprocess.run(probe, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                    timeout=300, cwd=repo.top, shell=isinstance(probe, str),
+                                    stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise VerifyError(f"the Windows tool probe '{name}' cannot run: {error}") from error
+        if result.returncode != 0:
+            raise VerifyError(f"the Windows tool probe '{name}' failed: {result.stderr.strip()}")
+        values[f"win:{name}"] = result.stdout.strip()
     return values
 
 
@@ -186,20 +194,20 @@ def prepare_windows(repo: Repository, sha: str) -> Path:
     return path
 
 
-def prepare_wsl(repo: Repository, sha: str, base: str) -> str:
-    source = to_wsl_path(repo.common)
+def prepare_linux(repo: Repository, sha: str, base: str) -> str:
+    source = str(repo.common)
     pack = "git -c uploadpack.allowAnySHA1InWant=true upload-pack"
     script = (
         "set -euo pipefail; "
         # Sessions left by an aborted earlier run (Runner.argv) stop before the sources change under them.
-        f"for f in {WSL_STATE}/pids/{repo.name}.*.pid; do [ -e \"$f\" ] || continue; g=\"$(cat \"$f\")\"; "
+        f"for f in {LINUX_STATE}/pids/{repo.name}.*.pid; do [ -e \"$f\" ] || continue; g=\"$(cat \"$f\")\"; "
         "if grep -qa arcforges-verify /proc/$g/cmdline 2>/dev/null; then pkill -KILL -s $g || true; fi; "
         "rm -f \"$f\"; done; "
-        f"d={WSL_STATE}/{repo.name}; mkdir -p \"$d\"; cd \"$d\"; [ -d .git ] || git init -q; "
+        f"d={LINUX_STATE}/{repo.name}; mkdir -p \"$d\"; cd \"$d\"; [ -d .git ] || git init -q; "
         f"git fetch -q --no-tags --upload-pack={shlex.quote(pack)} {shlex.quote(source)} {sha} {base}; "
         f"git checkout -q --force --detach {sha}; git clean -ffdq; test \"$(git rev-parse HEAD)\" = {sha}; pwd"
     )
-    return wsl_run(repo, script, timeout=1800).splitlines()[-1]
+    return bash_run(script, timeout=1800).splitlines()[-1]
 
 
 # ------------------------------------------------------------------------------------------------------------ execution
@@ -223,10 +231,9 @@ class Outcome:
 
 
 class Runner:
-    def __init__(self, repo: Repository, logs: Path, sha: str, base: str, win_dir: Path | None, wsl_dir: str | None,
-                 keep_going: bool):
+    def __init__(self, repo: Repository, logs: Path, sha: str, base: str, workdir: Path | str, keep_going: bool):
         self.repo, self.logs, self.sha, self.base = repo, logs, sha, base
-        self.win_dir, self.wsl_dir, self.keep_going = win_dir, wsl_dir, keep_going
+        self.workdir, self.keep_going = workdir, keep_going
         self.stop = threading.Event()
         self.live: dict[subprocess.Popen, Step] = {}
         self.lock = threading.Lock()
@@ -237,41 +244,42 @@ class Runner:
         return text.replace("{sha}", self.sha).replace("{base}", self.base).replace("{range}", f"{self.base}..{self.sha}")
 
     def pidfile(self, step: Step) -> str:
-        return f"{WSL_STATE}/pids/{self.repo.name}.{step.id}.pid"
+        return f"{LINUX_STATE}/pids/{self.repo.name}.{step.id}.pid"
 
     def argv(self, step: Step) -> list[str]:
         if step.host == "win":
             if not isinstance(step.cmd, list):
                 raise VerifyError(f"step {step.id}: a win step needs an argv list")
             return [self.expand(part) for part in step.cmd]
-        if step.host != "wsl" or not isinstance(step.cmd, str):
-            raise VerifyError(f"step {step.id}: a wsl step needs a bash command string")
+        if step.host != "linux" or not isinstance(step.cmd, str):
+            raise VerifyError(f"step {step.id}: a linux step needs a bash command string")
         exports = "".join(f"export {key}={shlex.quote(value)}; " for key, value in step.env.items())
         inner = f"export ARCFORGES_VERIFY=1; {exports}{self.expand(step.cmd)}"
-        # The step runs in its own session, recorded until it ends so that an abort can stop all of it (ending wsl.exe
-        # does not stop the Linux processes); timeout(1) signals its process group when the step runs too long.
+        # The step runs in its own session, recorded until it ends so that an abort can stop all of it (ending the bash
+        # that started it does not stop its other processes); timeout(1) signals its process group when the step runs too
+        # long.
         guarded = (f"echo $$ > {self.pidfile(step)}; timeout --kill-after=30 {step.timeout} bash -c {shlex.quote(inner)}; "
                    f"rc=$?; rm -f {self.pidfile(step)}; exit $rc")
-        command = f"mkdir -p {WSL_STATE}/pids; exec setsid --wait bash -c {shlex.quote(guarded)}"
-        return wsl_argv(self.repo, command, cwd=self.wsl_dir)
+        command = f"mkdir -p {LINUX_STATE}/pids; exec setsid --wait bash -c {shlex.quote(guarded)}"
+        return bash_argv(command)
 
-    def stop_wsl(self, step: Step) -> None:
-        """Stops a WSL step's session (setsid): TERM, up to 15 s for it to end, then KILL."""
+    def stop_linux(self, step: Step) -> None:
+        """Stops a Linux step's session (setsid): TERM, up to 15 s for it to end, then KILL."""
         script = (f"g=\"$(cat {self.pidfile(step)} 2>/dev/null)\"; [ -n \"$g\" ] || exit 0; "
                   "grep -qa arcforges-verify /proc/$g/cmdline 2>/dev/null || exit 0; "
                   "pkill -TERM -s $g || exit 0; "
                   "for i in $(seq 30); do pgrep -s $g >/dev/null || exit 0; sleep 0.5; done; "
                   "pkill -KILL -s $g; true")
         try:
-            wsl_run(self.repo, script, timeout=120)
+            bash_run(script, timeout=120)
         except VerifyError as error:
-            say(f"could not stop the WSL step {step.id}: {error}")
+            say(f"could not stop the Linux step {step.id}: {error}")
 
     def abort(self, process: subprocess.Popen, step: Step) -> None:
         with self.lock:
             self.aborted.add(step.id)
-        if step.host == "wsl":
-            self.stop_wsl(step)
+        if step.host == "linux":
+            self.stop_linux(step)
         kill_tree(process)
 
     def run(self, step: Step) -> Outcome:
@@ -287,7 +295,7 @@ class Runner:
             with open(log, "w", encoding="utf-8", errors="replace") as sink:
                 sink.write(f"# {step.id} on {step.host} at {self.sha}\n# {argv}\n")
                 sink.flush()
-                process = subprocess.Popen(argv, cwd=self.win_dir if step.host == "win" else None, stdout=sink,
+                process = subprocess.Popen(argv, cwd=self.workdir, stdout=sink,
                                            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env)
                 with self.lock:
                     self.live[process] = step
@@ -295,8 +303,8 @@ class Runner:
                 if stopped:
                     self.abort(process, step)
                 try:
-                    code = process.wait(timeout=step.timeout + (90 if step.host == "wsl" else 0))
-                    if code == 124 and step.host == "wsl":
+                    code = process.wait(timeout=step.timeout + (90 if step.host == "linux" else 0))
+                    if code == 124 and step.host == "linux":
                         reason = f"timed out after {step.timeout}s"
                     elif code != 0:
                         reason = f"exit code {code}"
@@ -428,45 +436,103 @@ def plan(repo: Repository, sha: str, remote: str) -> tuple[str, str, list[str], 
     return base, profile, changed, steps
 
 
-def verify(repo: Repository, rev: str, remote: str, force: bool = False, keep_going: bool = False) -> None:
+@dataclass
+class Leg:
+    """The steps of one host for one commit, and where its pass record lives."""
+
+    host: str
+    steps: list[Step]
+    key: str
+    record: Path
+
+
+@dataclass
+class Target:
+    sha: str
+    tree: str
+    base: str
+    profile: str
+    changed: list[str]
+    context: dict[str, str]
+    legs: dict[str, Leg]
+
+
+def target(repo: Repository, rev: str, remote: str) -> Target:
     sha = git("rev-parse", "--verify", f"{rev}^{{commit}}")
     repo.load_steps(sha)
     base, profile, changed, steps = plan(repo, sha, remote)
+    unknown = sorted({s.host for s in steps} - set(HOSTS))
+    if unknown:
+        raise VerifyError(f"eng/verify_steps.py names unknown hosts {', '.join(unknown)} (the hosts are {', '.join(HOSTS)})")
     tree = git("rev-parse", f"{sha}^{{tree}}")
-    hosts = {s.host for s in steps}
-    if os.name != "nt" and "win" in hosts:
-        raise VerifyError("verification needs the Windows host; push from Windows, not from WSL")
-    tools = fingerprint(repo, hosts)
     # The key is the source state the steps actually see: the tree, plus the exact commits when a step reads history
-    # ({sha}, {base}, {range}, e.g. a secret scan of the pushed commits), and the selected step set.
-    history = any(marker in (s.cmd if isinstance(s.cmd, str) else " ".join(s.cmd))
-                  for s in steps for marker in ("{sha}", "{base}", "{range}"))
-    source = [tree, base, sha] if history else [tree]
-    key = hashlib.sha256(json.dumps([source, profile, sorted(s.id for s in steps), repo.digest, tools],
-                                    sort_keys=True).encode()).hexdigest()
-    record = repo.state / f"pass-{key[:32]}.json"
-    if record.exists() and not force:
-        say(f"{'commit' if history else 'tree'} {(sha if history else tree)[:12]} already passed profile '{profile}' "
-            f"with these steps, scripts and tools ({record.name})")
-        print(f"arcforges-verify: PASS {sha} tree {tree} profile {profile} reused {record}", flush=True)
-        return
+    # ({sha}, {base}, {range}, e.g. a secret scan of the pushed commits), the merge base, which selects the profile and
+    # the steps, the leg's host and step set, and CONTEXT: inputs other than the commit that every leg checks against
+    # (for example the Plan's Design main commit), declared by the step table as {name: value}.
+    context = {str(k): str(v) for k, v in getattr(repo.steps, "CONTEXT", {}).items()}
+    legs: dict[str, Leg] = {}
+    for host in HOSTS:
+        host_steps = [s for s in steps if s.host == host]
+        if not host_steps:
+            continue
+        history = any(marker in (s.cmd if isinstance(s.cmd, str) else " ".join(s.cmd))
+                      for s in host_steps for marker in ("{sha}", "{base}", "{range}"))
+        source = [tree, base, sha] if history else [tree, base]
+        key = hashlib.sha256(json.dumps([source, profile, host, sorted(s.id for s in host_steps), repo.digest, context],
+                                        sort_keys=True).encode()).hexdigest()
+        legs[host] = Leg(host, host_steps, key, repo.state / f"leg-{host}-{key[:32]}.json")
+    return Target(sha, tree, base, profile, changed, context, legs)
+
+
+def read_record(leg: Leg) -> dict | None:
+    """The leg's pass record, or None. A record that is unreadable or not a pass of exactly this leg is ignored."""
+    try:
+        data = json.loads(leg.record.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    ok = (isinstance(data, dict) and data.get("format") == RECORD_FORMAT and data.get("key") == leg.key
+          and data.get("host") == leg.host and results_cover(data.get("results"), leg))
+    return data if ok else None
+
+
+def results_cover(results: object, leg: Leg) -> bool:
+    """True when the results hold exactly the leg's steps, each passed."""
+    if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
+        return False
+    return (sorted(str(r.get("step")) for r in results) == sorted(s.id for s in leg.steps)
+            and all(r.get("ok") is True for r in results))
+
+
+def describe(data: dict) -> str:
+    origin = "imported" if data.get("origin") == "imported" else "local"
+    return f"{data.get('host')}@{data.get('machine', '?')} ({origin}, {data.get('finished', '?')})"
+
+
+def log_digest(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def run_leg(repo: Repository, t: Target, leg: Leg, tools: dict[str, str], keep_going: bool) -> dict:
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    logs = repo.state / "logs" / f"{stamp}-{sha[:12]}"
+    logs = repo.state / "logs" / f"{stamp}-{t.sha[:12]}-{leg.host}"
     logs.mkdir(parents=True, exist_ok=True)
-    say(f"verifying {sha[:12]} (base {base[:12]}, {len(changed)} changed paths), profile '{profile}', "
-        f"{len(steps)} steps; logs in {logs}")
+    say(f"verifying the {leg.host} leg of {t.sha[:12]} (base {t.base[:12]}, {len(t.changed)} changed paths), profile "
+        f"'{t.profile}', {len(leg.steps)} steps; logs in {logs}")
     started = time.monotonic()
     with Lock(repo.state / "lock"):
-        win_dir = prepare_windows(repo, sha) if "win" in hosts else None
-        wsl_dir = prepare_wsl(repo, sha, base) if "wsl" in hosts else None
-        runner = Runner(repo, logs, sha, base, win_dir, wsl_dir, keep_going)
-        ok = runner.execute(steps)
+        workdir = prepare_windows(repo, t.sha) if leg.host == "win" else prepare_linux(repo, t.sha, t.base)
+        runner = Runner(repo, logs, t.sha, t.base, workdir, keep_going)
+        ok = runner.execute(leg.steps)
     seconds = time.monotonic() - started
-    summary = [{"step": o.step.id, "host": o.step.host, "ok": o.ok, "seconds": round(o.seconds, 1), "reason": o.reason}
-               for o in runner.outcomes]
-    (logs / "summary.json").write_text(json.dumps({"sha": sha, "tree": tree, "base": base, "profile": profile,
-                                                    "tools": tools, "ok": ok, "seconds": round(seconds),
-                                                    "steps": summary}, indent=2), encoding="utf-8")
+    results = [{"step": o.step.id, "ok": o.ok, "seconds": round(o.seconds, 1), "reason": o.reason,
+                "log_sha256": log_digest(o.log)} for o in runner.outcomes]
+    (logs / "summary.json").write_text(json.dumps({"sha": t.sha, "tree": t.tree, "base": t.base, "profile": t.profile,
+                                                    "host": leg.host, "tools": tools, "ok": ok,
+                                                    "seconds": round(seconds), "steps": results}, indent=2),
+                                       encoding="utf-8")
     if not ok:
         failed = [o for o in runner.outcomes if not o.ok]
         first = failed[0] if failed else None
@@ -474,13 +540,93 @@ def verify(repo: Repository, rev: str, remote: str, force: bool = False, keep_go
             lines = first.log.read_text(encoding="utf-8", errors="replace").splitlines()[-TAIL_LINES:]
             print("\n".join(["", f"---- last {len(lines)} lines of {first.log} ----", *lines, "----"]), flush=True)
         ran = {o.step.id for o in runner.outcomes}
-        raise VerifyError("verification failed: " + "; ".join(
-            [f"{o.step.id} ({o.reason})" for o in failed] + [f"{s.id} (not run)" for s in steps if s.id not in ran]))
-    record.write_text(json.dumps({"sha": sha, "tree": tree, "profile": profile, "tools": tools,
-                                  "seconds": round(seconds), "logs": str(logs), "steps": summary}, indent=2),
-                      encoding="utf-8")
-    print(f"arcforges-verify: PASS {sha} tree {tree} profile {profile} {len(steps)} steps {seconds:.0f}s "
-          f"record {record}", flush=True)
+        raise VerifyError(f"the {leg.host} leg failed: " + "; ".join(
+            [f"{o.step.id} ({o.reason})" for o in failed] + [f"{s.id} (not run)" for s in leg.steps if s.id not in ran]))
+    data = {"format": RECORD_FORMAT, "origin": "local", "repository": repo.name, "sha": t.sha, "tree": t.tree,
+            "base": t.base, "profile": t.profile, "host": leg.host, "key": leg.key, "digest": repo.digest,
+            "steps": sorted(s.id for s in leg.steps), "context": t.context, "tools": tools, "machine": platform.node(),
+            "platform": platform.platform(), "finished": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "seconds": round(seconds), "logs": str(logs), "results": results}
+    leg.record.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    print(f"arcforges-verify: LEG PASS {t.sha} host {leg.host} on {data['machine']} tree {t.tree} profile {t.profile} "
+          f"{len(leg.steps)} steps {seconds:.0f}s record {leg.record}", flush=True)
+    return data
+
+
+def missing_leg(t: Target, host: str) -> str:
+    return (f"the {host} leg of {t.sha[:12]} has no pass record here: run `python eng/verify.py run --rev {t.sha}` on "
+            f"native {HOSTS[host]}, in a checkout of this exact commit, then `python eng/verify.py import <its record>` "
+            "in this clone")
+
+
+def verify(repo: Repository, rev: str, remote: str, force: bool = False, keep_going: bool = False,
+           require_all: bool = False) -> bool:
+    """Runs this machine's leg of the commit unless it already passed, then checks every other leg's record. Returns
+    True when every leg passed; with require_all, a missing leg raises instead."""
+    t = target(repo, rev, remote)
+    here = this_host()
+    passed: dict[str, dict] = {}
+    pending: list[str] = []
+    for host, leg in t.legs.items():
+        data = read_record(leg)
+        tools: dict[str, str] = {}
+        if host == here and (data is None or data.get("origin") == "local" or force):
+            tools = fingerprint(repo, host)
+            if data is not None and data.get("origin") == "local" and data.get("tools") != tools and not force:
+                say(f"the tool versions of the {host} leg changed since {leg.record.name}; verifying it again")
+                data = None
+        if data is not None and not (force and host == here):
+            say(f"the {host} leg of {t.sha[:12]} already passed profile '{t.profile}' with these steps and scripts: "
+                f"{describe(data)}, {leg.record.name}")
+            passed[host] = data
+        elif host == here:
+            passed[host] = run_leg(repo, t, leg, tools, keep_going)
+        else:
+            pending.append(host)
+    if pending:
+        if require_all:
+            raise VerifyError("; ".join(missing_leg(t, host) for host in pending))
+        for host in pending:
+            say(missing_leg(t, host))
+        print(f"arcforges-verify: INCOMPLETE {t.sha} tree {t.tree} profile {t.profile}: passed "
+              f"{', '.join(sorted(passed)) or 'no leg'}; missing {', '.join(pending)} (not a pass)", flush=True)
+        return False
+    print(f"arcforges-verify: PASS {t.sha} tree {t.tree} profile {t.profile} legs "
+          + "; ".join(f"{describe(passed[h])} {t.legs[h].record.name}" for h in sorted(passed)), flush=True)
+    return True
+
+
+def command_import(repo: Repository, path: str, remote: str) -> None:
+    """Accepts the pass record of a leg verified on another machine, after checking it against the commit here."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as error:
+        raise VerifyError(f"cannot read the pass record {path}: {error}") from error
+    if not isinstance(data, dict) or data.get("format") != RECORD_FORMAT:
+        raise VerifyError(f"{path} is not a pass record of eng/verify.py ({RECORD_FORMAT})")
+    sha = str(data.get("sha", ""))
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise VerifyError(f"{path} names no full commit id")
+    if subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], capture_output=True).returncode != 0:
+        raise VerifyError(f"the commit {sha} of {path} is not in this clone; fetch it first")
+    t = target(repo, sha, remote)
+    host = str(data.get("host", ""))
+    leg = t.legs.get(host)
+    if leg is None:
+        raise VerifyError(f"{sha[:12]} has no {host or '(unnamed)'} leg here (its legs: {', '.join(t.legs) or 'none'})")
+    expected = {"repository": repo.name, "tree": t.tree, "base": t.base, "profile": t.profile, "digest": repo.digest,
+                "context": t.context, "key": leg.key, "steps": sorted(s.id for s in leg.steps)}
+    differ = [name for name, value in expected.items() if data.get(name) != value]
+    if not results_cover(data.get("results"), leg):
+        differ.append("results (every step of the leg, each passed)")
+    if differ:
+        raise VerifyError(f"the record {path} does not match the {host} leg of {sha[:12]} here: {', '.join(differ)} "
+                          "differ. Verify that leg again at this exact commit (a moved main can change the merge base)")
+    data.update(origin="imported", imported_from=str(Path(path).resolve()),
+                imported_at=_dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    leg.record.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    print(f"arcforges-verify: IMPORTED {sha} host {host} from {data.get('machine', '?')} ({data.get('platform', '?')}, "
+          f"finished {data.get('finished', '?')}, logs {data.get('logs', '?')} there) record {leg.record}", flush=True)
 
 
 def command_pre_push(repo: Repository, remote: str) -> None:
@@ -493,7 +639,7 @@ def command_pre_push(repo: Repository, remote: str) -> None:
                 ["git", "merge-base", "--is-ancestor", local_sha, upstream]).returncode == 0:
             say(f"{local_ref}: already contained in {upstream}; nothing to verify")
             continue
-        verify(repo, local_sha, remote)
+        verify(repo, local_sha, remote, require_all=True)
 
 
 def command_install(repo: Repository) -> None:
@@ -548,8 +694,11 @@ def main() -> int:
         command.add_argument("--rev", default="HEAD")
         command.add_argument("--remote", default="origin")
         if name == "run":
-            command.add_argument("--force", action="store_true", help="verify even when a pass record exists")
+            command.add_argument("--force", action="store_true", help="verify this machine's leg even when it passed")
             command.add_argument("--keep-going", action="store_true", help="run every step even after a failure")
+    imported = sub.add_parser("import")
+    imported.add_argument("record", help="a leg's pass record from another machine (leg-<host>-<key>.json)")
+    imported.add_argument("--remote", default="origin")
     hook = sub.add_parser("pre-push")
     hook.add_argument("remote")
     hook.add_argument("url", nargs="?")
@@ -568,15 +717,19 @@ def main() -> int:
         if args.command == "install":
             command_install(repo)
         elif args.command == "list":
-            sha = git("rev-parse", "--verify", f"{args.rev}^{{commit}}")
-            repo.load_steps(sha)
-            base, profile, changed, steps = plan(repo, sha, args.remote)
-            print(f"{sha} base {base} profile {profile} ({len(changed)} changed paths)")
-            for step in steps:
-                print(f"  {step.id:30} {step.host:4} lane={step.lane_name:8} timeout={step.timeout}s"
-                      f"{' exclusive' if step.exclusive else ''}")
+            t = target(repo, args.rev, args.remote)
+            print(f"{t.sha} base {t.base} profile {t.profile} ({len(t.changed)} changed paths)")
+            for host, leg in t.legs.items():
+                data = read_record(leg)
+                state = f"passed: {describe(data)}" if data else "no pass record"
+                print(f"leg {host} ({HOSTS[host]}, {len(leg.steps)} steps): {state}; {leg.record.name}")
+                for step in leg.steps:
+                    print(f"  {step.id:30} lane={step.lane_name:12} timeout={step.timeout}s"
+                          f"{' exclusive' if step.exclusive else ''}")
         elif args.command == "run":
             verify(repo, args.rev, args.remote, args.force, args.keep_going)
+        elif args.command == "import":
+            command_import(repo, args.record, args.remote)
         else:
             command_pre_push(repo, args.remote)
     except VerifyError as error:

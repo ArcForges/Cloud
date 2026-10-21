@@ -244,7 +244,7 @@ async function testWorker(candidate: Candidate) {
   assert.equal(
     process.platform,
     "linux",
-    "The real local Containers runtime requires Linux (WSL is supported).",
+    "The real local Containers runtime requires Linux.",
   );
   const testDir = path.join(root, "artifacts", "worker-test");
   await mkdir(testDir, { recursive: true });
@@ -336,8 +336,8 @@ async function testWorker(candidate: Candidate) {
 
 /**
  * The network of the image build's RUN steps (the Dockerfile's locked NuGet restore). Hosted CI uses Docker's default. The local
- * pre-push verification (eng/verify_steps.py) selects `host` through ARCFORGES_LOCAL_DOCKER_BUILD_NETWORK, because the workstation's
- * WSL container network cannot reach NuGet. Only the route of the fetches changes: the restore is locked (each package is checked
+ * pre-push verification (eng/verify_steps.py) selects `host` through ARCFORGES_LOCAL_DOCKER_BUILD_NETWORK, because Docker's default
+ * bridge network could not reach NuGet on the workstation's former Linux environment. Only the route of the fetches changes: the restore is locked (each package is checked
  * against the content hash of its packages.lock.json) and both base images are pinned by digest, and the network mode enters neither
  * the image nor the manifest. Refused in CI, so hosted candidates build exactly as before.
  */
