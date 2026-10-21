@@ -24,9 +24,9 @@ npm run candidate
 
 `test:container` and `test:worker` remain explicit local diagnostics for affected behavior when an existing native Docker/Linux environment is available. They reject CI execution. `test:artifact` is a separate local packaging investigation; normal source checks do not rebuild candidates for adversarial archive tests. Do not run these commands as routine PR or post-merge gates.
 
-## Windows and WSL
+## Windows and Linux
 
-Source checks work in Windows PowerShell. The pre-push verification (`eng/verify.py`, [AGENTS.md](../AGENTS.md) Local verification) runs the Windows source checks in a verification worktree and the Linux source checks and the candidate in a Linux-native clone in WSL Debian through `wsl.exe`, with WSL's Docker Engine for the image. For other Linux work use a directly available WSL terminal; do not reinstall tools or introduce a proxy for validation. External pull requests keep the hosted Linux and Windows compilation.
+Source checks work in Windows PowerShell. The pre-push verification (`eng/verify.py`, [AGENTS.md](../AGENTS.md) Local verification) runs the Windows source checks in a verification worktree on native Windows and the Linux source checks and the candidate in a Linux-native clone on a native Linux machine, with that machine's Docker Engine for the image; each leg records a pass and the other machine's record is imported (ArcForges-Design AD-0018; never through local WSL). For other Linux work use a native Linux machine; do not reinstall tools or introduce a proxy for validation. External pull requests keep the hosted Linux and Windows compilation.
 
 `npm run dev` uses source and the Dockerfile in an existing suitable local environment. It supplies complete source/build arguments from the checkout. It is an explicit development command, not a CI validation step. See [validation policy](validation-policy.md).
 

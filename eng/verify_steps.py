@@ -2,17 +2,18 @@
 """Local verification steps of Cloud, loaded by eng/verify.py (which injects `Step`).
 
 The full profile is every validation job of .github/workflows/ci.yml plus `candidate` (the Native AOT image and Worker
-build that `deploy` ships; main pushes no longer re-validate it), each on the host the hosted job used:
+build that `deploy` ships; main pushes no longer re-validate it), each on the host the hosted job used, in two legs on
+two native machines (eng/verify.py; AGENTS.md):
 - lane `win` (Windows, in <main checkout>/.worktree/_verify): `source (windows-latest)`: npm ci, the locked restore and
   Release build of Cloud.slnx, and the evaluated licence report.
-- lane `wsl` (WSL Debian, in ~/.cache/arcforges-verify/Cloud): `clone-identity`, `fresh-intermediates` (see
+- lane `linux` (Linux, in ~/.cache/arcforges-verify/Cloud): `clone-identity`, `fresh-intermediates` (see
   FRESH_INTERMEDIATES), then `source (ubuntu-latest)`: npm ci,
   `npm run check`, `npm run check:dotnet` and the evaluated licence report; the dependency audit of `quality`; then
-  `candidate` (`npm run candidate`: the Linux Native AOT image in WSL Docker, both Worker bundles, the sealed tool and the
+  `candidate` (`npm run candidate`: the Linux Native AOT image in the Linux host's Docker, both Worker bundles, the sealed tool and the
   manifest, verified). Everything that runs dotnet or npm in the clone is in this lane: concurrent restores or builds of
   shared projects in one checkout would race.
 - lane `scan`: the whitespace check of the pushed range (the former pre-push hook, `git diff --check`) and the secret
-  scan of `quality` (the pinned gitleaks image digest, .gitleaks.toml) over the pushed range ({range}), in WSL Docker
+  scan of `quality` (the pinned gitleaks image digest, .gitleaks.toml) over the pushed range ({range}), in Docker
   without network and with a read-only mount of the clone; lane `actionlint` only when .github/workflows/** changed.
 `quality`'s build and forbidden-term scan are the same commands as `check:dotnet`'s build and `check`'s `npm run policy`
 on the same commit, so they run once.
@@ -54,7 +55,7 @@ FINGERPRINT = {
         "node": ["node", "--version"],
         "npm": ["node", "-p", "require(" + _BUNDLED_NPM.replace("'bin', 'npm-cli.js'", "'package.json'") + ").version"],
     },
-    "wsl": {
+    "linux": {
         "dotnet-sdks": "dotnet --list-sdks | tr '\\n' ' '",
         "dotnet-runtimes": "dotnet --list-runtimes | tr '\\n' ' '",
         "node": "node --version",
@@ -86,7 +87,7 @@ SECRET_SCAN = (
     "--log-opts=\"--full-history {range}\""
 )
 
-# actionlint as pinned in ci.yml, cached once in WSL; the archive is checked on every run.
+# actionlint as pinned in ci.yml, cached once on the Linux host; the archive is checked on every run.
 ACTIONLINT = (
     "set -euo pipefail; v=1.7.12; "
     "sum=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8; "
@@ -102,8 +103,9 @@ ACTIONLINT = (
 
 # ci.yml `candidate`, from the clean checkout CI builds it from; the image tag is removed after the verified build. The
 # image build's RUN steps fetch over the host network (ARCFORGES_LOCAL_DOCKER_BUILD_NETWORK=host, which
-# tooling/project.ts honours only outside CI): containers on WSL Docker's default network cannot reach NuGet on this
-# workstation. Only the route changes: the restore is locked to the packages.lock.json content hashes, both base images
+# tooling/project.ts honours only outside CI): containers on Docker's default bridge network could not reach NuGet on the
+# workstation's former Linux environment, and the host network is the route that works wherever the host reaches NuGet.
+# Only the route changes: the restore is locked to the packages.lock.json content hashes, both base images
 # are pinned by digest, and the network mode enters neither the image nor the manifest.
 CANDIDATE = (
     "set -euo pipefail; unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_KEY CLOUDFLARE_EMAIL; "
@@ -147,8 +149,8 @@ def win(step_id: str, cmd: list[str], timeout: int, **options) -> Step:
     return Step(step_id, "win", cmd, timeout=timeout, env=ENV, **options)
 
 
-def wsl(step_id: str, cmd: str, timeout: int, **options) -> Step:
-    return Step(step_id, "wsl", cmd, timeout=timeout, env=ENV, **options)
+def linux(step_id: str, cmd: str, timeout: int, **options) -> Step:
+    return Step(step_id, "linux", cmd, timeout=timeout, env=ENV, **options)
 
 
 STEPS = [
@@ -158,17 +160,17 @@ STEPS = [
     win("win-build", ["dotnet", "build", "Cloud.slnx", "-c", "Release", "--no-restore"], 900),
     win("win-licence-evaluated", ["node", "tooling/project.ts", "licence-evaluated"], 600),
     # ci.yml source (ubuntu-latest), the dependency audit of quality, then candidate
-    wsl("clone-identity", "set -e; git config remote.origin.url https://github.com/ArcForges/Cloud.git; "
+    linux("clone-identity", "set -e; git config remote.origin.url https://github.com/ArcForges/Cloud.git; "
         "git checkout -q -B arcforges-verify {sha}; git update-ref refs/remotes/origin/main {base}", 60),
-    wsl("fresh-intermediates", FRESH_INTERMEDIATES, 60),
-    wsl("npm-ci", "npm ci --ignore-scripts", 300),
-    wsl("npm-audit", "npm audit --audit-level=high", 300),
-    wsl("check", "npm run check", 1200),
-    wsl("check-dotnet", "npm run check:dotnet", 1200),
-    wsl("licence-evaluated", "node tooling/project.ts licence-evaluated", 300),
-    wsl("candidate", CANDIDATE, 900),
+    linux("fresh-intermediates", FRESH_INTERMEDIATES, 60),
+    linux("npm-ci", "npm ci --ignore-scripts", 300),
+    linux("npm-audit", "npm audit --audit-level=high", 300),
+    linux("check", "npm run check", 1200),
+    linux("check-dotnet", "npm run check:dotnet", 1200),
+    linux("licence-evaluated", "node tooling/project.ts licence-evaluated", 300),
+    linux("candidate", CANDIDATE, 900),
     # the former pre-push hook, and quality's secret scan, over the pushed range; actionlint when a workflow changed
-    wsl("whitespace", "git diff --check {base} {sha}", 120, lane="scan"),
-    wsl("secret-scan", SECRET_SCAN, 600, lane="scan"),
-    wsl("actionlint", ACTIONLINT, 300, lane="actionlint", when=workflows_changed),
+    linux("whitespace", "git diff --check {base} {sha}", 120, lane="scan"),
+    linux("secret-scan", SECRET_SCAN, 600, lane="scan"),
+    linux("actionlint", ACTIONLINT, 300, lane="actionlint", when=workflows_changed),
 ]
