@@ -707,7 +707,7 @@ def command_pre_push(repo: Repository, remote: str) -> None:
 
 def command_install(repo: Repository) -> None:
     """Copies .githooks/* of this checkout (run it from the main checkout on main) into the clone's common hooks
-    directory, which every worktree uses. A relative
+    directory, which every worktree uses, and makes them executable (git ignores a hook that is not). A relative
     core.hooksPath would resolve per worktree and silently run no hook in a worktree whose commit lacks .githooks, so it
     is removed; the installed pre-push rejects a push from a worktree without eng/verify.py."""
     source = repo.top / ".githooks"
@@ -742,6 +742,13 @@ def command_install(repo: Repository) -> None:
         if destination.exists() and destination.read_bytes() != content:
             say(f"replacing the existing {destination} (it differed from {hook})")
         destination.write_bytes(content)
+        # Git skips a hook that is not executable with only a hint, so a push would go out unverified. write_bytes
+        # creates the file without the executable bit (and keeps the mode of an existing one); Windows has no such bit.
+        if os.name != "nt":
+            destination.chmod(destination.stat().st_mode | 0o755)
+            if not os.access(destination, os.X_OK):
+                raise VerifyError(f"{destination} is still not executable after install, so git would skip it; make "
+                                  "the hooks directory executable (e.g. not on a noexec mount) and install again")
         say(f"installed {hook.name} -> {destination}")
     say("every worktree of this clone now runs the pre-push verification (a branch-conditional includeIf that sets "
         "core.hooksPath would still bypass it; none is checked for)")
