@@ -203,11 +203,21 @@ def prepare_linux(repo: Repository, sha: str, base: str) -> str:
         f"for f in {LINUX_STATE}/pids/{repo.name}.*.pid; do [ -e \"$f\" ] || continue; g=\"$(cat \"$f\")\"; "
         "if grep -qa arcforges-verify /proc/$g/cmdline 2>/dev/null; then pkill -KILL -s $g || true; fi; "
         "rm -f \"$f\"; done; "
-        f"d={LINUX_STATE}/{repo.name}; mkdir -p \"$d\"; cd \"$d\"; [ -d .git ] || git init -q; "
-        f"git fetch -q --no-tags --upload-pack={shlex.quote(pack)} {shlex.quote(source)} {sha} {base}; "
+        # A fetch that git cannot complete (an earlier fetch from a shallow source, an interrupted one) can leave the
+        # clone without some history while still exiting 0; a clone whose history from the commit and the base does
+        # not walk is made again from scratch, and a second failure stops the leg.
+        f"d={LINUX_STATE}/{repo.name}; "
+        f"fill() {{ mkdir -p \"$d\" && cd \"$d\" && {{ [ -d .git ] || git init -q; }} && "
+        f"git fetch -q --no-tags --upload-pack={shlex.quote(pack)} {shlex.quote(source)} {sha} {base} && "
+        f"git rev-list --quiet {sha} {base} >/dev/null 2>&1; }}; "
+        "if ! fill; then echo \"the Linux clone $d is incomplete; making it again\"; cd /; rm -rf \"$d\"; fill || "
+        "{ echo \"the Linux clone $d cannot be filled from the commit's history\" >&2; exit 1; }; fi; "
         f"git checkout -q --force --detach {sha}; git clean -ffdq; test \"$(git rev-parse HEAD)\" = {sha}; pwd"
     )
-    return bash_run(script, timeout=1800).splitlines()[-1]
+    *notes, path = bash_run(script, timeout=1800).splitlines()
+    for note in notes:
+        say(note)
+    return path
 
 
 # ------------------------------------------------------------------------------------------------------------ execution
@@ -521,6 +531,10 @@ def run_leg(repo: Repository, t: Target, leg: Leg, tools: dict[str, str], keep_g
     logs.mkdir(parents=True, exist_ok=True)
     say(f"verifying the {leg.host} leg of {t.sha[:12]} (base {t.base[:12]}, {len(t.changed)} changed paths), profile "
         f"'{t.profile}', {len(leg.steps)} steps; logs in {logs}")
+    # A shallow clone lacks the history that steps reading {base}..{sha} need, and a clone fetched from it is left
+    # incomplete without an error, so it is refused instead of verified partially.
+    if git("rev-parse", "--is-shallow-repository", check=False) == "true":
+        raise VerifyError("this clone is shallow: run `git fetch --unshallow` (or clone it in full) and verify again")
     started = time.monotonic()
     with Lock(repo.state / "lock"):
         workdir = prepare_windows(repo, t.sha) if leg.host == "win" else prepare_linux(repo, t.sha, t.base)
@@ -567,6 +581,12 @@ def verify(repo: Repository, rev: str, remote: str, force: bool = False, keep_go
     here = this_host()
     passed: dict[str, dict] = {}
     pending: list[str] = []
+    # Before a push, the other machines' records are checked first, so a missing one rejects it without running this
+    # machine's leg.
+    if require_all:
+        missing = [host for host, leg in t.legs.items() if host != here and read_record(leg) is None]
+        if missing:
+            raise VerifyError("; ".join(missing_leg(t, host) for host in missing))
     for host, leg in t.legs.items():
         data = read_record(leg)
         tools: dict[str, str] = {}
@@ -619,6 +639,8 @@ def command_import(repo: Repository, path: str, remote: str) -> None:
     differ = [name for name, value in expected.items() if data.get(name) != value]
     if not results_cover(data.get("results"), leg):
         differ.append("results (every step of the leg, each passed)")
+    if not str(data.get("platform", "")).startswith(f"{HOSTS[host]}-"):
+        differ.append(f"platform (a {host} record is written on {HOSTS[host]})")
     if differ:
         raise VerifyError(f"the record {path} does not match the {host} leg of {sha[:12]} here: {', '.join(differ)} "
                           "differ. Verify that leg again at this exact commit (a moved main can change the merge base)")
