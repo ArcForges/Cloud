@@ -25,6 +25,11 @@ and is reused only while they are unchanged. The record of a leg that passed on 
 accepted with `import`, which recomputes the key here and refuses a record whose commit, tree, merge base, profile, step
 set, scripts or context differ, or which holds a step that did not pass. A push needs a passed or imported record for
 every leg of every pushed commit, and is rejected while one is missing.
+
+Agents reach each leg's host through its standard MCP server (ArcForges-Design AD-0019): the Windows leg through the
+Windows MCP server on the workstation, the Linux leg through the Linux MCP server on an independent Linux host. This
+script knows nothing of MCP; it runs on the host and records the leg there. Local WSL is never a venue, not even as a
+fallback. If a leg's MCP server is unavailable, verification stops: the leg has no record and the push is rejected.
 """
 from __future__ import annotations
 
@@ -602,9 +607,11 @@ def run_leg(repo: Repository, t: Target, leg: Leg, tools: dict[str, str], keep_g
 
 
 def missing_leg(t: Target, host: str) -> str:
-    return (f"the {host} leg of {t.sha[:12]} has no pass record here: run `python eng/verify.py run --rev {t.sha}` on "
-            f"native {HOSTS[host]}, in a checkout of this exact commit, then `python eng/verify.py import <its record>` "
-            "in this clone")
+    return (f"the {host} leg of {t.sha[:12]} has no pass record here: through the {HOSTS[host]} MCP server, run "
+            f"`python eng/verify.py run --rev {t.sha}` on its native {HOSTS[host]} host, in a checkout of this exact "
+            "commit, then `python eng/verify.py import <its record>` in this clone. If that MCP server is unavailable, "
+            "stop: this push stays rejected; never skip a step, use another host such as local WSL, or bypass the hook "
+            "(ArcForges-Design AD-0019)")
 
 
 def verify(repo: Repository, rev: str, remote: str, force: bool = False, keep_going: bool = False,
