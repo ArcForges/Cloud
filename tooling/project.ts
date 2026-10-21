@@ -241,11 +241,7 @@ export async function testContainer(image: string, revision: string, identity: I
 
 async function testWorker(candidate: Candidate) {
   assert.notEqual(process.env.CI, "true", "Worker runtime tests are local opt-in only.");
-  assert.equal(
-    process.platform,
-    "linux",
-    "The real local Containers runtime requires Linux.",
-  );
+  assert.equal(process.platform, "linux", "The real local Containers runtime requires Linux.");
   const testDir = path.join(root, "artifacts", "worker-test");
   await mkdir(testDir, { recursive: true });
   // A FROM-only test wrapper reuses the tested binary/image; it does not restore or compile source.
