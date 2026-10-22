@@ -59,7 +59,7 @@ Every PR into `main` is verified after the push, on the two verification hosts, 
   - `success` only when every step of its leg ran and passed;
   - `failure` when a step failed, `error` when the leg could not complete.
 
-  The command exits 0 after success, 1 when a step failed and 2 when the leg could not complete or be reported. The host reports with `ARCFORGES_STATUS_TOKEN` when set (a token limited to commit statuses), otherwise with its own `gh` login; steps never receive either through their environment, and neither is printed. The `gh` login stays readable on disk to the code being verified, so set `ARCFORGES_STATUS_TOKEN` on the host.
+  The command exits 0 after success, 1 when a step failed and 2 when the leg could not complete or be reported. The host reports with `ARCFORGES_STATUS_TOKEN` when set (a token limited to commit statuses), otherwise with its own `gh` login; steps never receive either through their environment, and neither is printed. The `gh` login stays readable from the host's `gh` configuration by the code being verified, so set `ARCFORGES_STATUS_TOKEN` on the host.
 
 - **Required checks.** The `main` ruleset and branch protection require both statuses for every PR, with no bypass, alongside the hosted `Verify` check (skipped for the owner's PRs). The branch must be up to date with `main`, and every new push needs verifying again on both hosts.
 - **Stop rule** (AD-0019 §5). If the Linux (or Windows) MCP server is unavailable, unreachable or its host lacks a prerequisite, stop and report the exact failure: the status stays missing and the PR cannot merge. Never skip, mock or weaken a step, or run the leg on another host (local WSL or an agent's own sandbox included).
