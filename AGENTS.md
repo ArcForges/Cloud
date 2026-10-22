@@ -52,7 +52,7 @@ Every PR into `main` is verified after the push, on the two verification hosts, 
   git worktree remove --force .worktree/verify-<sha>
   ```
 
-  For a pull request from a fork, read the diff first, then fetch `refs/pull/<n>/head`.
+  For an external PR (Dependabot included), read the diff first; for one from a fork, fetch `refs/pull/<n>/head`.
 
 - **Report status.** Each host reports the commit status `arcforges/windows` or `arcforges/linux` on that exact commit:
   - `pending` when it starts;
