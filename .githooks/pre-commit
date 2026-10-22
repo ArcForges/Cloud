@@ -1,5 +1,5 @@
 #!/bin/sh
 set -eu
-# Whitespace errors in the staged changes. Builds and tests run before a push, in the pre-push verification
-# (eng/verify.py; AGENTS.md, Local verification), not on commit.
+# Whitespace errors in the staged changes. Builds and tests run after the push, in the host verification
+# (eng/verify.py run-and-report; AGENTS.md, Verification after the push), not on commit.
 git diff --cached --check

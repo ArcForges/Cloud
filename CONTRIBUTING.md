@@ -12,7 +12,7 @@ npm run check:dotnet
 npm run candidate
 ```
 
-The owner's pull requests are verified before the push by the pre-push hook (`python eng/verify.py install` once per clone; see [AGENTS.md](AGENTS.md), Local verification), which runs these checks and the candidate build in a Windows leg on native Windows and a Linux leg on native Linux; external pull requests run the full hosted CI and need no hook. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). The pre-commit hook checks only the staged whitespace. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
+Every pull request is verified after the push on the owner's two verification hosts, a Windows leg on native Windows and a Linux leg on native Linux, which run these checks and the candidate build and report the commit statuses `arcforges/windows` and `arcforges/linux` that `main` requires (see [AGENTS.md](AGENTS.md), Verification after the push); external pull requests also run the full hosted CI and need no local hook. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). The pre-commit hook checks only the staged whitespace. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
 
 Update central NuGet versions and regenerate the per-project locks with `dotnet restore Cloud.slnx --force-evaluate`; use `npm install --ignore-scripts` for npm lock changes. Do not hand-edit lock dependency graphs or disable locked mode. The Cloud host explicitly lists Windows/Linux x64 restore targets so its lock is portable between development and production builds.
 

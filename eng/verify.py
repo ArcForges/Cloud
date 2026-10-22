@@ -1,35 +1,44 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Local pre-push verification (the same file in every ArcForges repository; the steps live in eng/verify_steps.py).
+"""Host-local verification (the same file in every ArcForges repository; the steps live in eng/verify_steps.py).
 
-  python eng/verify.py install                    install .githooks/* for every worktree of this clone (once)
-  python eng/verify.py run [--rev REV] [--force]  verify this machine's leg of a commit now (default HEAD)
-  python eng/verify.py list [--rev REV]           show the profile, the steps and the state of each leg
-  python eng/verify.py import RECORD              accept the pass record of a leg verified on another machine
-  python eng/verify.py pre-push REMOTE [URL]      the hook entry point (refs on stdin)
+  python eng/verify.py run-and-report [--rev REV]  verify this host's leg of a pushed commit and report it to GitHub
+  python eng/verify.py run [--rev REV]             verify this host's leg without reporting (a local check)
+  python eng/verify.py list [--rev REV]            show the profile and the steps of each host's leg
+  python eng/verify.py install                     install .githooks/* for every worktree of this clone (once)
+
+Verification runs after a push (ArcForges-Design AD-0020): Push -> Fetch -> Local verification -> Report status ->
+Required checks -> Review -> Merge. A commit is pushed to GitHub without verifying it first; each verification host
+fetches that exact commit from GitHub, checks it out (a worktree of its clone, so this script is the commit's own), and
+runs `python eng/verify.py run-and-report` there. The script reports the commit status `arcforges/windows` or
+`arcforges/linux` on GitHub: `pending` when the leg starts, `success` only when every step of the leg passed, `failure`
+when a step failed and `error` when the leg could not complete. GitHub's required status checks on `main` then refuse to
+merge a pull request until every applicable host reported success for its head commit; a new push has no status, so it
+needs verifying again.
 
 Every step runs on one host, 'win' (native Windows) or 'linux' (native Linux); the steps of one host are the commit's
 leg for that host. A machine runs only the leg of its own operating system, never another one through WSL, a VM or a
 remote shell: on Windows in a detached verification worktree (<main checkout>/.worktree/_verify), on Linux in a
 Linux-native clone (~/.cache/arcforges-verify/<repo>), both checked out at the commit and cleaned of untracked files
 (ignored build output stays, so builds are incremental). That clone is shared by every clone of the repository on the
-host, so one Linux leg of a repository runs on a host at a time. The pushed commit is verified, never the working tree,
-and the step table and this script are read from the commit itself. Steps run in lanes: lanes run concurrently, the
-steps of a lane in order, and steps marked exclusive run alone afterwards. Any step that fails, times out or cannot run
-fails the leg (fail closed).
+host, so one Linux leg of a repository runs on a host at a time. The commit is verified, never the working tree, and
+the step table and this script are read from the commit itself. Steps run in lanes: lanes run concurrently, the steps
+of a lane in order, and steps marked exclusive run alone afterwards. Any step that fails, times out or cannot run fails
+the leg (fail closed). A host whose leg has no steps for the commit (the step table selects none for its profile)
+reports success saying so. The step logs and a summary.json of each leg stay on the host under
+<git common dir>/arcforges-verify/logs.
 
-A passed leg is recorded under the Git common directory, keyed by the commit's tree (its exact commits when a step reads
-history), the merge base, the profile, the leg's host and step set, these scripts and the step table's CONTEXT (inputs
-other than the commit, such as the Plan's Design main commit). A local record also holds the tool versions it ran with
-and is reused only while they are unchanged. The record of a leg that passed on another machine at the same commit is
-accepted with `import`, which recomputes the key here and refuses a record whose commit, tree, merge base, profile, step
-set, scripts or context differ, or which holds a step that did not pass. A push needs a passed or imported record for
-every leg of every pushed commit, and is rejected while one is missing.
+The status is posted to github.com with the GitHub CLI (`gh api`), authenticated by ARCFORGES_STATUS_TOKEN when it is
+set (a token limited to commit statuses is enough) and otherwise by the host's own `gh` login. That token and the other
+GitHub tokens of the environment (GH_TOKEN, GITHUB_TOKEN and their enterprise forms) are removed from the environment of
+every step, again inside each Linux step after its login profile has run, and are never printed. The remote must be a
+github.com URL (https, ssh://git@github.com/ or git@github.com:). The exit code is 0 after success, 1 when a step
+failed and 2 when the leg could not complete or could not be reported. An interruption (Ctrl+C, SIGTERM, SIGHUP)
+reports `error`; a process killed outright leaves `pending`, which keeps the merge blocked.
 
-Agents reach each leg's host through its standard MCP server (ArcForges-Design AD-0019): the Windows leg through the
-Windows MCP server on the workstation, the Linux leg through the Linux MCP server on an independent Linux host. This
-script knows nothing of MCP; it runs on the host and records the leg there. Local WSL is never a venue, not even as a
-fallback. If a leg's MCP server is unavailable, verification stops: the leg has no record and the push is rejected.
+Agents reach each host through its standard MCP server (ArcForges-Design AD-0019): the Windows leg through the Windows
+MCP server on the workstation, the Linux leg through the Linux MCP server on an independent Linux host. This script
+knows nothing of MCP; it runs on the host and reports from there. Local WSL is never a venue, not even as a fallback.
 """
 from __future__ import annotations
 
@@ -43,6 +52,7 @@ import os
 import platform
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -51,18 +61,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-ZERO = "0" * 40
 TAIL_LINES = 60
 LINUX_STATE = "$HOME/.cache/arcforges-verify"
 HOSTS = {"win": "Windows", "linux": "Linux"}
-RECORD_FORMAT = "arcforges-verify-leg/1"
+# The commit status context each host reports; the required status checks of `main` name exactly these.
+CONTEXTS = {"win": "arcforges/windows", "linux": "arcforges/linux"}
+STATUS_TOKEN = "ARCFORGES_STATUS_TOKEN"
+# Credentials no step may see: the reporting token and any GitHub token of the environment.
+CREDENTIALS = (STATUS_TOKEN, "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+# What an earlier eng/verify.py installed as the pre-push hook; `install` removes it (verification is after the push).
+RETIRED_HOOK = "eng/verify.py\" pre-push"
 
 
 @dataclass(frozen=True)
 class Step:
     """One verification step. `cmd` is an argv list on the 'win' host and a bash command string on the 'linux' host.
     The placeholders {sha}, {base} and {range} are replaced; a step that reads history must use them (never a
-    hard-coded range), because they are what keys its pass to the exact commits. `profiles` names the profiles that
+    hard-coded range), so that it reads exactly the commits being verified. `profiles` names the profiles that
     include the step;
     `when` (changed paths -> bool) can narrow it further. Exclusive steps run alone after every lane has finished."""
 
@@ -83,6 +98,10 @@ class Step:
 
 class VerifyError(Exception):
     pass
+
+
+class StepsFailed(VerifyError):
+    """A step of the leg failed (as opposed to the leg being unable to run)."""
 
 
 def git(*args: str, cwd: Path | None = None, check: bool = True) -> str:
@@ -108,14 +127,13 @@ class Repository:
         self.state = self.common / "arcforges-verify"
         self.state.mkdir(parents=True, exist_ok=True)
         self.steps = None
-        self.digest = ""
 
     @property
     def name(self) -> str:
         return getattr(self.steps, "REPOSITORY", self.main.name)
 
     def load_steps(self, sha: str):
-        """Reads the step table and this script from the commit being verified, so a push is verified by its own
+        """Reads the step table and this script from the commit being verified, so a commit is verified by its own
         definition. The running script must be that commit's eng/verify.py."""
         try:
             core = subprocess.run(["git", "show", f"{sha}:eng/verify.py"], cwd=self.top, capture_output=True,
@@ -125,9 +143,8 @@ class Repository:
         except subprocess.CalledProcessError as error:
             raise VerifyError(f"{sha[:12]} has no committed eng/verify.py and eng/verify_steps.py") from error
         if normalized(core) != normalized(Path(__file__).read_bytes()):
-            raise VerifyError(f"the running {Path(__file__)} differs from eng/verify.py in {sha[:12]}; push from a "
-                              "worktree whose eng/verify.py matches the pushed commit")
-        self.digest = hashlib.sha256(normalized(core) + b"\0" + normalized(table)).hexdigest()
+            raise VerifyError(f"the running {Path(__file__)} differs from eng/verify.py in {sha[:12]}; run it from a "
+                              "checkout of that commit (git worktree add --detach <dir> <commit>)")
         module = type(sys)("verify_steps")
         module.__dict__["Step"] = Step
         sys.modules["verify_steps"] = module
@@ -148,7 +165,9 @@ def this_host() -> str:
 
 
 def bash_argv(command: str) -> list[str]:
-    return ["bash", "-lc", command]
+    # A login shell reads the host's profile, which may export a credential again; it is unset after the profile, so no
+    # Linux command of the step table (steps and tool probes) sees one.
+    return ["bash", "-lc", f"unset {' '.join(CREDENTIALS)}; {command}"]
 
 
 def bash_run(command: str, timeout: int = 600) -> str:
@@ -353,8 +372,11 @@ class Runner:
                     return
 
     def fail_fast(self) -> None:
-        if self.keep_going:
-            return
+        if not self.keep_going:
+            self.stop_all()
+
+    def stop_all(self) -> None:
+        """Starts no further step and stops every running one (a failure without --keep-going, or an interruption)."""
         self.stop.set()
         with self.lock:
             running = list(self.live.items())
@@ -463,13 +485,13 @@ def upstream_ref(remote: str) -> str:
 
 def plan(repo: Repository, sha: str, remote: str) -> tuple[str, str, list[str], list[Step]]:
     upstream = upstream_ref(remote)
-    # A stale remote-tracking branch would give an older base, so it is refreshed first (pushing is online anyway).
+    # A stale remote-tracking branch would give an older base, so it is refreshed first.
     branch = upstream.removeprefix(f"refs/remotes/{remote}/")
     fetched = subprocess.run(["git", "fetch", "--quiet", "--no-tags", remote, f"+refs/heads/{branch}:{upstream}"],
                              capture_output=True, text=True, encoding="utf-8", errors="replace")
     if fetched.returncode != 0:
         raise VerifyError(f"cannot refresh {upstream} from {remote}: {fetched.stderr.strip()}; check the network "
-                          "access to the remote and push again")
+                          "access to the remote and verify again")
     if not git("rev-parse", "--verify", "--quiet", upstream, check=False):
         raise VerifyError(f"{upstream} is missing after fetching {remote}")
     base = git("merge-base", sha, upstream)
@@ -486,16 +508,6 @@ def plan(repo: Repository, sha: str, remote: str) -> tuple[str, str, list[str], 
 
 
 @dataclass
-class Leg:
-    """The steps of one host for one commit, and where its pass record lives."""
-
-    host: str
-    steps: list[Step]
-    key: str
-    record: Path
-
-
-@dataclass
 class Target:
     sha: str
     tree: str
@@ -503,58 +515,21 @@ class Target:
     profile: str
     changed: list[str]
     context: dict[str, str]
-    legs: dict[str, Leg]
+    legs: dict[str, list[Step]]
 
 
-def target(repo: Repository, rev: str, remote: str) -> Target:
-    sha = git("rev-parse", "--verify", f"{rev}^{{commit}}")
+def target(repo: Repository, sha: str, remote: str) -> Target:
     repo.load_steps(sha)
     base, profile, changed, steps = plan(repo, sha, remote)
     unknown = sorted({s.host for s in steps} - set(HOSTS))
     if unknown:
         raise VerifyError(f"eng/verify_steps.py names unknown hosts {', '.join(unknown)} (the hosts are {', '.join(HOSTS)})")
     tree = git("rev-parse", f"{sha}^{{tree}}")
-    # The key is the source state the steps actually see: the tree, plus the exact commits when a step reads history
-    # ({sha}, {base}, {range}, e.g. a secret scan of the pushed commits), the merge base, which selects the profile and
-    # the steps, the leg's host and step set, and CONTEXT: inputs other than the commit that every leg checks against
-    # (for example the Plan's Design main commit), declared by the step table as {name: value}.
+    # CONTEXT: inputs other than the commit that every leg checks against (for example the Plan's Design main commit),
+    # declared by the step table as {name: value} and kept in the leg's summary.
     context = {str(k): str(v) for k, v in getattr(repo.steps, "CONTEXT", {}).items()}
-    legs: dict[str, Leg] = {}
-    for host in HOSTS:
-        host_steps = [s for s in steps if s.host == host]
-        if not host_steps:
-            continue
-        history = any(marker in (s.cmd if isinstance(s.cmd, str) else " ".join(s.cmd))
-                      for s in host_steps for marker in ("{sha}", "{base}", "{range}"))
-        source = [tree, base, sha] if history else [tree, base]
-        key = hashlib.sha256(json.dumps([source, profile, host, sorted(s.id for s in host_steps), repo.digest, context],
-                                        sort_keys=True).encode()).hexdigest()
-        legs[host] = Leg(host, host_steps, key, repo.state / f"leg-{host}-{key[:32]}.json")
+    legs = {host: [s for s in steps if s.host == host] for host in HOSTS if any(s.host == host for s in steps)}
     return Target(sha, tree, base, profile, changed, context, legs)
-
-
-def read_record(leg: Leg) -> dict | None:
-    """The leg's pass record, or None. A record that is unreadable or not a pass of exactly this leg is ignored."""
-    try:
-        data = json.loads(leg.record.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    ok = (isinstance(data, dict) and data.get("format") == RECORD_FORMAT and data.get("key") == leg.key
-          and data.get("host") == leg.host and results_cover(data.get("results"), leg))
-    return data if ok else None
-
-
-def results_cover(results: object, leg: Leg) -> bool:
-    """True when the results hold exactly the leg's steps, each passed."""
-    if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
-        return False
-    return (sorted(str(r.get("step")) for r in results) == sorted(s.id for s in leg.steps)
-            and all(r.get("ok") is True for r in results))
-
-
-def describe(data: dict) -> str:
-    origin = "imported" if data.get("origin") == "imported" else "local"
-    return f"{data.get('host')}@{data.get('machine', '?')} ({origin}, {data.get('finished', '?')})"
 
 
 def log_digest(path: Path) -> str:
@@ -564,28 +539,39 @@ def log_digest(path: Path) -> str:
         return ""
 
 
-def run_leg(repo: Repository, t: Target, leg: Leg, tools: dict[str, str], keep_going: bool) -> dict:
+def run_leg(repo: Repository, t: Target, host: str, keep_going: bool) -> dict:
+    """Runs this host's leg of the commit and returns its summary; raises when any step did not pass."""
+    steps = t.legs[host]
+    tools = fingerprint(repo, host)
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    logs = repo.state / "logs" / f"{stamp}-{t.sha[:12]}-{leg.host}"
+    logs = repo.state / "logs" / f"{stamp}-{t.sha[:12]}-{host}"
     logs.mkdir(parents=True, exist_ok=True)
-    say(f"verifying the {leg.host} leg of {t.sha[:12]} (base {t.base[:12]}, {len(t.changed)} changed paths), profile "
-        f"'{t.profile}', {len(leg.steps)} steps; logs in {logs}")
+    say(f"verifying the {host} leg of {t.sha[:12]} (base {t.base[:12]}, {len(t.changed)} changed paths), profile "
+        f"'{t.profile}', {len(steps)} steps; logs in {logs}")
     # A shallow clone lacks the history that steps reading {base}..{sha} need, and a clone fetched from it is left
     # incomplete without an error, so it is refused instead of verified partially.
     if git("rev-parse", "--is-shallow-repository", check=False) == "true":
         raise VerifyError("this clone is shallow: run `git fetch --unshallow` (or clone it in full) and verify again")
     started = time.monotonic()
-    with Lock(repo.state / "lock"), HostLock(repo) if leg.host == "linux" else contextlib.nullcontext():
-        workdir = prepare_windows(repo, t.sha) if leg.host == "win" else prepare_linux(repo, t.sha, t.base)
+    with Lock(repo.state / "lock"), HostLock(repo) if host == "linux" else contextlib.nullcontext():
+        workdir = prepare_windows(repo, t.sha) if host == "win" else prepare_linux(repo, t.sha, t.base)
         runner = Runner(repo, logs, t.sha, t.base, workdir, keep_going)
-        ok = runner.execute(leg.steps)
+        try:
+            ok = runner.execute(steps)
+        except BaseException:
+            runner.stop_all()  # an interruption leaves no step running
+            raise
     seconds = time.monotonic() - started
     results = [{"step": o.step.id, "ok": o.ok, "seconds": round(o.seconds, 1), "reason": o.reason,
                 "log_sha256": log_digest(o.log)} for o in runner.outcomes]
-    (logs / "summary.json").write_text(json.dumps({"sha": t.sha, "tree": t.tree, "base": t.base, "profile": t.profile,
-                                                    "host": leg.host, "tools": tools, "ok": ok,
-                                                    "seconds": round(seconds), "steps": results}, indent=2),
-                                       encoding="utf-8")
+    # Every step of the leg must have run and passed; a step that never ran is a failure, not a skip.
+    ok = ok and sorted(r["step"] for r in results) == sorted(s.id for s in steps) and all(r["ok"] for r in results)
+    summary = {"repository": repo.name, "sha": t.sha, "tree": t.tree, "base": t.base, "profile": t.profile,
+               "host": host, "steps": sorted(s.id for s in steps), "context": t.context, "tools": tools,
+               "machine": platform.node(), "platform": platform.platform(), "ok": ok,
+               "finished": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+               "seconds": round(seconds), "logs": str(logs), "results": results}
+    (logs / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     if not ok:
         failed = [o for o in runner.outcomes if not o.ok]
         first = failed[0] if failed else None
@@ -593,126 +579,109 @@ def run_leg(repo: Repository, t: Target, leg: Leg, tools: dict[str, str], keep_g
             lines = first.log.read_text(encoding="utf-8", errors="replace").splitlines()[-TAIL_LINES:]
             print("\n".join(["", f"---- last {len(lines)} lines of {first.log} ----", *lines, "----"]), flush=True)
         ran = {o.step.id for o in runner.outcomes}
-        raise VerifyError(f"the {leg.host} leg failed: " + "; ".join(
-            [f"{o.step.id} ({o.reason})" for o in failed] + [f"{s.id} (not run)" for s in leg.steps if s.id not in ran]))
-    data = {"format": RECORD_FORMAT, "origin": "local", "repository": repo.name, "sha": t.sha, "tree": t.tree,
-            "base": t.base, "profile": t.profile, "host": leg.host, "key": leg.key, "digest": repo.digest,
-            "steps": sorted(s.id for s in leg.steps), "context": t.context, "tools": tools, "machine": platform.node(),
-            "platform": platform.platform(), "finished": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "seconds": round(seconds), "logs": str(logs), "results": results}
-    leg.record.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    print(f"arcforges-verify: LEG PASS {t.sha} host {leg.host} on {data['machine']} tree {t.tree} profile {t.profile} "
-          f"{len(leg.steps)} steps {seconds:.0f}s record {leg.record}", flush=True)
-    return data
+        raise StepsFailed(f"the {host} leg failed: " + "; ".join(
+            [f"{o.step.id} ({o.reason})" for o in failed] + [f"{s.id} (not run)" for s in steps if s.id not in ran]))
+    print(f"arcforges-verify: LEG PASS {t.sha} host {host} on {summary['machine']} tree {t.tree} profile {t.profile} "
+          f"{len(steps)} steps {seconds:.0f}s logs {logs}", flush=True)
+    return summary
 
 
-def missing_leg(t: Target, host: str) -> str:
-    return (f"the {host} leg of {t.sha[:12]} has no pass record here: through the {HOSTS[host]} MCP server, run "
-            f"`python eng/verify.py run --rev {t.sha}` on its native {HOSTS[host]} host, in a checkout of this exact "
-            "commit, then `python eng/verify.py import <its record>` in this clone. If that MCP server is unavailable, "
-            "stop: this push stays rejected; never skip a step, use another host such as local WSL, or bypass the hook "
-            "(ArcForges-Design AD-0019)")
+# ------------------------------------------------------------------------------------------------------------ reporting
+
+def github_repository(remote: str) -> str:
+    """owner/name of the GitHub repository behind the remote, from its URL (https, ssh or scp-like)."""
+    # The configured URL, not `git remote get-url`, which applies url.<base>.insteadOf rewrites.
+    url = git("config", "--get", f"remote.{remote}.url")
+    match = re.fullmatch(r"(?:https://(?:[^@/]+@)?github\.com/|ssh://git@github\.com/|git@github\.com:)"
+                         r"([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?", url)
+    if not match or {match.group(1), match.group(2)} & {".", ".."}:
+        shown = re.sub(r"//[^@/]+@", "//<credentials>@", url)  # never print a credential embedded in the URL
+        raise VerifyError(f"the remote {remote} ({shown}) is not a github.com repository, so there is nowhere to report "
+                          "to (an SSH host alias is not recognised; use https://github.com/<owner>/<repo>.git)")
+    return f"{match.group(1)}/{match.group(2)}"
 
 
-def verify(repo: Repository, rev: str, remote: str, force: bool = False, keep_going: bool = False,
-           require_all: bool = False) -> bool:
-    """Runs this machine's leg of the commit unless it already passed, then checks every other leg's record. Returns
-    True when every leg passed; with require_all, a missing leg raises instead."""
-    t = target(repo, rev, remote)
-    here = this_host()
-    passed: dict[str, dict] = {}
-    pending: list[str] = []
-    # Before a push, the other machines' records are checked first, so a missing one rejects it without running this
-    # machine's leg.
-    if require_all:
-        missing = [host for host, leg in t.legs.items() if host != here and read_record(leg) is None]
-        if missing:
-            raise VerifyError("; ".join(missing_leg(t, host) for host in missing))
-    for host, leg in t.legs.items():
-        data = read_record(leg)
-        tools: dict[str, str] = {}
-        if host == here and (data is None or data.get("origin") == "local" or force):
-            tools = fingerprint(repo, host)
-            if data is not None and data.get("origin") == "local" and data.get("tools") != tools and not force:
-                say(f"the tool versions of the {host} leg changed since {leg.record.name}; verifying it again")
-                data = None
-        if data is not None and not (force and host == here):
-            say(f"the {host} leg of {t.sha[:12]} already passed profile '{t.profile}' with these steps and scripts: "
-                f"{describe(data)}, {leg.record.name}")
-            passed[host] = data
-        elif host == here:
-            passed[host] = run_leg(repo, t, leg, tools, keep_going)
-        else:
-            pending.append(host)
-    if pending:
-        if require_all:
-            raise VerifyError("; ".join(missing_leg(t, host) for host in pending))
-        for host in pending:
-            say(missing_leg(t, host))
-        print(f"arcforges-verify: INCOMPLETE {t.sha} tree {t.tree} profile {t.profile}: passed "
-              f"{', '.join(sorted(passed)) or 'no leg'}; missing {', '.join(pending)} (not a pass)", flush=True)
-        return False
-    print(f"arcforges-verify: PASS {t.sha} tree {t.tree} profile {t.profile} legs "
-          + "; ".join(f"{describe(passed[h])} {t.legs[h].record.name}" for h in sorted(passed)), flush=True)
-    return True
+class Reporter:
+    """Posts this host's commit status for one commit through `gh api` (repos/{owner}/{repo}/statuses/{sha})."""
+
+    def __init__(self, slug: str, sha: str, host: str, credentials: dict[str, str]) -> None:
+        self.slug, self.sha, self.context = slug, sha, CONTEXTS[host]
+        # gh gets back the GitHub tokens taken from the environment; the reporting token, when set, wins.
+        self.env = dict(os.environ, **{k: v for k, v in credentials.items() if k != STATUS_TOKEN})
+        if credentials.get(STATUS_TOKEN):
+            self.env["GH_TOKEN"] = credentials[STATUS_TOKEN]
+
+    def post(self, state: str, description: str) -> None:
+        description = description if len(description) <= 140 else description[:137] + "..."
+        argv = ["gh", "api", "--hostname", "github.com", "--method", "POST", f"repos/{self.slug}/statuses/{self.sha}",
+                "--silent",
+                "-f", f"state={state}", "-f", f"context={self.context}", "-f", f"description={description}"]
+        error = ""
+        for attempt in range(3):
+            if attempt:
+                time.sleep(5 * attempt)
+            try:
+                result = subprocess.run(argv, env=self.env, capture_output=True, text=True, encoding="utf-8",
+                                        errors="replace", timeout=60, stdin=subprocess.DEVNULL)
+            except FileNotFoundError as missing:
+                raise VerifyError("the GitHub CLI (gh) was not found; the host reports its status with `gh api`") from missing
+            except subprocess.TimeoutExpired:
+                error = "gh api timed out after 60s"
+                continue
+            if result.returncode == 0:
+                say(f"reported {self.context} {state} for {self.sha[:12]} on {self.slug}: {description}")
+                return
+            error = (result.stderr or result.stdout).strip()[-500:]
+            if "HTTP 4" in error:  # not found, unprocessable, forbidden: a retry gives the same answer
+                break
+        raise VerifyError(f"cannot report {self.context} {state} for {self.sha[:12]} on {self.slug}: {error}. Is the "
+                          "commit pushed to GitHub, and may this host's credentials write commit statuses?")
 
 
-def command_import(repo: Repository, path: str, remote: str) -> None:
-    """Accepts the pass record of a leg verified on another machine, after checking it against the commit here."""
+def verify_here(repo: Repository, rev: str, remote: str, keep_going: bool, report: bool,
+                credentials: dict[str, str] | None = None) -> None:
+    """Runs this host's leg of the commit; with report, posts its status around the run. Raises unless it passed."""
+    sha = git("rev-parse", "--verify", f"{rev}^{{commit}}")
+    host = this_host()
+    reporter = Reporter(github_repository(remote), sha, host, credentials or {}) if report else None
+    if reporter:
+        reporter.post("pending", f"verifying on {platform.node()}")
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError) as error:
-        raise VerifyError(f"cannot read the pass record {path}: {error}") from error
-    if not isinstance(data, dict) or data.get("format") != RECORD_FORMAT:
-        raise VerifyError(f"{path} is not a pass record of eng/verify.py ({RECORD_FORMAT})")
-    sha = str(data.get("sha", ""))
-    if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise VerifyError(f"{path} names no full commit id")
-    if subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], capture_output=True).returncode != 0:
-        raise VerifyError(f"the commit {sha} of {path} is not in this clone; fetch it first")
-    t = target(repo, sha, remote)
-    host = str(data.get("host", ""))
-    leg = t.legs.get(host)
-    if leg is None:
-        raise VerifyError(f"{sha[:12]} has no {host or '(unnamed)'} leg here (its legs: {', '.join(t.legs) or 'none'})")
-    expected = {"repository": repo.name, "tree": t.tree, "base": t.base, "profile": t.profile, "digest": repo.digest,
-                "context": t.context, "key": leg.key, "steps": sorted(s.id for s in leg.steps)}
-    differ = [name for name, value in expected.items() if data.get(name) != value]
-    if not results_cover(data.get("results"), leg):
-        differ.append("results (every step of the leg, each passed)")
-    if not str(data.get("platform", "")).startswith(f"{HOSTS[host]}-"):
-        differ.append(f"platform (a {host} record is written on {HOSTS[host]})")
-    if differ:
-        raise VerifyError(f"the record {path} does not match the {host} leg of {sha[:12]} here: {', '.join(differ)} "
-                          "differ. Verify that leg again at this exact commit (a moved main can change the merge base)")
-    data.update(origin="imported", imported_from=str(Path(path).resolve()),
-                imported_at=_dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
-    leg.record.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    print(f"arcforges-verify: IMPORTED {sha} host {host} from {data.get('machine', '?')} ({data.get('platform', '?')}, "
-          f"finished {data.get('finished', '?')}, logs {data.get('logs', '?')} there) record {leg.record}", flush=True)
-
-
-def command_pre_push(repo: Repository, remote: str) -> None:
-    refs = [line.split() for line in sys.stdin.read().splitlines() if line.strip()]
-    for local_ref, local_sha, _remote_ref, _remote_sha in refs:
-        if local_sha == ZERO:
-            continue
-        upstream = upstream_ref(remote)
-        if git("rev-parse", "--verify", "--quiet", upstream, check=False) and subprocess.run(
-                ["git", "merge-base", "--is-ancestor", local_sha, upstream]).returncode == 0:
-            say(f"{local_ref}: already contained in {upstream}; nothing to verify")
-            continue
-        verify(repo, local_sha, remote, require_all=True)
+        t = target(repo, sha, remote)
+        if host not in t.legs:
+            note = f"no {HOSTS[host]} steps apply to {sha[:12]} (profile '{t.profile}')"
+            say(note)
+            if reporter:
+                reporter.post("success", note)
+            print(f"arcforges-verify: PASS {sha} host {host}: {note}", flush=True)
+            return
+        summary = run_leg(repo, t, host, keep_going)
+    except StepsFailed as error:
+        if reporter:
+            try:
+                reporter.post("failure", f"{platform.node()}: {error}")
+            except VerifyError as unreported:  # the status stays pending, which still blocks the merge
+                raise VerifyError(f"{error}; {unreported}") from error
+        raise
+    except BaseException as error:
+        if reporter:
+            reason = str(error) if isinstance(error, VerifyError) else type(error).__name__
+            with contextlib.suppress(VerifyError):
+                reporter.post("error", f"{platform.node()}: not completed: {reason}")
+        raise
+    if reporter:
+        reporter.post("success", f"{len(summary['steps'])} steps passed in {summary['seconds']}s on {summary['machine']} "
+                                 f"(profile {summary['profile']})")
+    print(f"arcforges-verify: PASS {sha} host {host} profile {t.profile}", flush=True)
 
 
 def command_install(repo: Repository) -> None:
     """Copies .githooks/* of this checkout (run it from the main checkout on main) into the clone's common hooks
-    directory, which every worktree uses, and makes them executable (git ignores a hook that is not). A relative
-    core.hooksPath would resolve per worktree and silently run no hook in a worktree whose commit lacks .githooks, so it
-    is removed; the installed pre-push rejects a push from a worktree without eng/verify.py."""
+    directory, which every worktree uses, makes them executable (git ignores a hook that is not), and removes the
+    pre-push hook an earlier eng/verify.py installed. A relative core.hooksPath would resolve per worktree and silently
+    run no hook in a worktree whose commit lacks .githooks, so it is removed."""
     source = repo.top / ".githooks"
-    if not (source / "pre-push").exists():
-        raise VerifyError(f"{source / 'pre-push'} is missing")
+    hooks = sorted(p for p in source.iterdir() if p.is_file()) if source.is_dir() else []
     # core.hooksPath can be set in the shared config and, with extensions.worktreeConfig, in any worktree's own config
     # (older repository scripts did that); every one of them, even an empty value, would bypass the common hooks directory.
     # Presence is decided by git's exit code (0 = set, 1 = not set), never by the printed value.
@@ -737,21 +706,26 @@ def command_install(repo: Repository) -> None:
                               "--show-origin --get-all core.hooksPath` shows where); remove it and install again")
     target = repo.common / "hooks"
     target.mkdir(exist_ok=True)
-    for hook in sorted(p for p in source.iterdir() if p.is_file()):
+    retired = target / "pre-push"
+    if not (source / "pre-push").exists() and retired.is_file() and \
+            RETIRED_HOOK in retired.read_text(encoding="utf-8", errors="replace"):
+        retired.unlink()
+        say(f"removed the retired pre-push verification hook {retired} (verification now runs after the push)")
+    for hook in hooks:
         content, destination = normalized(hook.read_bytes()), target / hook.name
         if destination.exists() and destination.read_bytes() != content:
             say(f"replacing the existing {destination} (it differed from {hook})")
         destination.write_bytes(content)
-        # Git skips a hook that is not executable with only a hint, so a push would go out unverified. write_bytes
-        # creates the file without the executable bit (and keeps the mode of an existing one); Windows has no such bit.
+        # Git skips a hook that is not executable with only a hint. write_bytes creates the file without the
+        # executable bit (and keeps the mode of an existing one); Windows has no such bit.
         if os.name != "nt":
             destination.chmod(destination.stat().st_mode | 0o755)
             if not os.access(destination, os.X_OK):
                 raise VerifyError(f"{destination} is still not executable after install, so git would skip it; make "
                                   "the hooks directory executable (e.g. not on a noexec mount) and install again")
         say(f"installed {hook.name} -> {destination}")
-    say("every worktree of this clone now runs the pre-push verification (a branch-conditional includeIf that sets "
-        "core.hooksPath would still bypass it; none is checked for)")
+    if not hooks:
+        say(f"{source} holds no hooks to install")
 
 
 def main() -> int:
@@ -759,59 +733,67 @@ def main() -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("install")
-    for name in ("run", "list"):
+    for name in ("run", "run-and-report", "list"):
         command = sub.add_parser(name)
         command.add_argument("--rev", default="HEAD")
         command.add_argument("--remote", default="origin")
-        if name == "run":
-            command.add_argument("--force", action="store_true", help="verify this machine's leg even when it passed")
+        if name != "list":
             command.add_argument("--keep-going", action="store_true", help="run every step even after a failure")
-    imported = sub.add_parser("import")
-    imported.add_argument("record", help="a leg's pass record from another machine (leg-<host>-<key>.json)")
-    imported.add_argument("--remote", default="origin")
-    hook = sub.add_parser("pre-push")
-    hook.add_argument("remote")
-    hook.add_argument("url", nargs="?")
+    # A pre-push hook installed by an earlier eng/verify.py still calls this; pushing no longer waits for verification.
+    retired = sub.add_parser("pre-push")
+    retired.add_argument("remote")
+    retired.add_argument("url", nargs="?")
     args = parser.parse_args()
+    # No credential reaches a step (whose output is logged) or a child process other than gh.
+    credentials = {name: os.environ.pop(name) for name in CREDENTIALS if name in os.environ}
+    # A terminated or hung-up run reports `error` like Ctrl+C, instead of leaving `pending` behind.
+    for name in ("SIGTERM", "SIGHUP"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), interrupted)
     # Step logs carry arbitrary text (e.g. test-runner symbols); a console or pipe without UTF-8 must not turn printing a
     # failure into a second failure that hides it.
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(errors="replace")
-    # Git runs hooks with GIT_DIR and related variables set for the pushing worktree; left in place they would make
+    # Git runs hooks with GIT_DIR and related variables set for the running worktree; left in place they would make
     # every git command (and every step) below act on that worktree instead of the verification checkouts.
     local = subprocess.run(["git", "rev-parse", "--local-env-vars"], capture_output=True, text=True)
     for name in local.stdout.split():
         os.environ.pop(name, None)
+    if args.command == "pre-push":
+        sys.stdin.read()
+        print("arcforges-verify: verification runs after the push (`python eng/verify.py run-and-report` on each host); "
+              "run `python eng/verify.py install` to remove this retired pre-push hook", file=sys.stderr, flush=True)
+        return 0
     try:
         repo = Repository()
         if args.command == "install":
             command_install(repo)
         elif args.command == "list":
-            t = target(repo, args.rev, args.remote)
+            sha = git("rev-parse", "--verify", f"{args.rev}^{{commit}}")
+            t = target(repo, sha, args.remote)
             print(f"{t.sha} base {t.base} profile {t.profile} ({len(t.changed)} changed paths)")
-            for host, leg in t.legs.items():
-                data = read_record(leg)
-                state = f"passed: {describe(data)}" if data else "no pass record"
-                print(f"leg {host} ({HOSTS[host]}, {len(leg.steps)} steps): {state}; {leg.record.name}")
-                for step in leg.steps:
+            for host in HOSTS:
+                steps = t.legs.get(host, [])
+                print(f"leg {host} ({HOSTS[host]}, status {CONTEXTS[host]}): {len(steps)} steps")
+                for step in steps:
                     print(f"  {step.id:30} lane={step.lane_name:12} timeout={step.timeout}s"
                           f"{' exclusive' if step.exclusive else ''}")
-        elif args.command == "run":
-            verify(repo, args.rev, args.remote, args.force, args.keep_going)
-        elif args.command == "import":
-            command_import(repo, args.record, args.remote)
         else:
-            command_pre_push(repo, args.remote)
+            verify_here(repo, args.rev, args.remote, args.keep_going, args.command == "run-and-report", credentials)
     except VerifyError as error:
         print(f"arcforges-verify: FAIL {error}", file=sys.stderr, flush=True)
-        if args.command == "pre-push":
-            print("arcforges-verify: push rejected. Fix the cause and push again; never bypass or weaken the hook "
-                  "(AGENTS.md, Local verification).", file=sys.stderr, flush=True)
-        return 1
+        return 1 if isinstance(error, StepsFailed) else 2
     except KeyboardInterrupt:
         print("arcforges-verify: FAIL interrupted", file=sys.stderr, flush=True)
-        return 1
+        return 2
+    except Exception as error:  # noqa: BLE001 - a broken step table must still end as a reported, non-zero error
+        print(f"arcforges-verify: FAIL {type(error).__name__}: {error}", file=sys.stderr, flush=True)
+        return 2
     return 0
+
+
+def interrupted(signum: int, _frame: object) -> None:
+    raise KeyboardInterrupt(f"signal {signum}")
 
 
 if __name__ == "__main__":

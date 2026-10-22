@@ -6,7 +6,6 @@
     ".editorconfig",
     ".gitattributes",
     ".githooks/pre-commit",
-    ".githooks/pre-push",
     ".github/CODEOWNERS",
     ".github/ISSUE_TEMPLATE/bug.yml",
     ".github/ISSUE_TEMPLATE/config.yml",

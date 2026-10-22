@@ -39,7 +39,7 @@ Runtime checks such as `npm run test:container` and `npm run test:worker` are ex
 The existing checks enforce [project licence declarations](docs/licence-boundary.md)
 across managed and npm scopes, including the final Docker build.
 
-PRs run locked restores, relevant offline units, C#/TS compilation, formatting, dependency audit/review, CodeQL, secret scanning and a Linux Native AOT image build: external PRs in hosted CI, the owner's PRs in the pre-push verification, a Windows leg on native Windows and a Linux leg on native Linux (`eng/verify.py`; dependency review and CodeQL stay hosted). Candidate construction inspects image metadata and legal contents without launching the application. No PR deploys to Cloudflare.
+PRs run locked restores, relevant offline units, C#/TS compilation, formatting, dependency audit/review, CodeQL, secret scanning and a Linux Native AOT image build: external PRs in hosted CI, and every PR on the owner's two hosts after the push, a Windows leg on native Windows and a Linux leg on native Linux whose statuses `main` requires (`eng/verify.py run-and-report`; dependency review and CodeQL stay hosted). Candidate construction inspects image metadata and legal contents without launching the application. No PR deploys to Cloudflare.
 
 A main push builds the sealed candidate image and Worker and promotes them without re-running the PR checks. CI loads that image, checks its identity, pushes it to the registry, pins the remote digest and deploys the Worker. Provider completion creates a prerelease with the candidate and deployment record. No live RPC, health polling or public download verification runs automatically.
 
