@@ -35,7 +35,8 @@ Differences from the hosted jobs:
   unset for the candidate: its Wrangler bundles are `--dry-run` builds, and nothing contacts Cloudflare.
 - npm on Windows is the npm bundled with the selected Node (hosted: setup-node's Node with its bundled npm), because a
   globally installed newer npm earlier on PATH fails the repository's engine-strict pin.
-- The secret scan covers the pushed range, not the full history: history before it was scanned when it was pushed.
+- The secret scan covers the commits since the merge base, not the full history: history before it is main, scanned
+  when its own PRs were verified.
 - Not reproduced: GitHub dependency review (a GitHub service; external PRs keep it; the locked restores with NuGet audit
   and `npm audit` cover vulnerable packages locally) and CodeQL (external PRs, dispatch and the weekly schedule).
 Every change runs the full profile: the forbidden-term scan, Prettier and the provenance inventory read Markdown too.
@@ -77,7 +78,7 @@ FINGERPRINT = {
 ENV = {"DOTNET_NOLOGO": "true", "DOTNET_CLI_TELEMETRY_OPTOUT": "true", "WRANGLER_SEND_METRICS": "false",
        "MSBUILDDISABLENODEREUSE": "1", "RestoreLockedMode": "true"}
 
-# ci.yml's secret scan (same pinned image digest, redaction and config), over the pushed range, without network and with
+# ci.yml's secret scan (same pinned image digest, redaction and config), over the commits since the merge base, without network and with
 # a read-only mount of the verification clone.
 SECRET_SCAN = (
     "docker run --rm --network none -v \"$PWD:/repo:ro\" "
