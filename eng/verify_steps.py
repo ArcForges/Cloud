@@ -12,8 +12,8 @@ two native machines (eng/verify.py; AGENTS.md):
   `candidate` (`npm run candidate`: the Linux Native AOT image in the Linux host's Docker, both Worker bundles, the sealed tool and the
   manifest, verified). Everything that runs dotnet or npm in the clone is in this lane: concurrent restores or builds of
   shared projects in one checkout would race.
-- lane `scan`: the whitespace check of the pushed range (the former pre-push hook, `git diff --check`) and the secret
-  scan of `quality` (the pinned gitleaks image digest, .gitleaks.toml) over the pushed range ({range}), in Docker
+- lane `scan`: the whitespace check of the commits since the merge base (`git diff --check`) and the secret
+  scan of `quality` (the pinned gitleaks image digest, .gitleaks.toml) over the same range ({range}), in Docker
   without network and with a read-only mount of the clone; lane `actionlint` only when .github/workflows/** changed.
 `quality`'s build and forbidden-term scan are the same commands as `check:dotnet`'s build and `check`'s `npm run policy`
 on the same commit, so they run once.
@@ -35,7 +35,8 @@ Differences from the hosted jobs:
   unset for the candidate: its Wrangler bundles are `--dry-run` builds, and nothing contacts Cloudflare.
 - npm on Windows is the npm bundled with the selected Node (hosted: setup-node's Node with its bundled npm), because a
   globally installed newer npm earlier on PATH fails the repository's engine-strict pin.
-- The secret scan covers the pushed range, not the full history: history before it was scanned when it was pushed.
+- The secret scan covers the commits since the merge base, not the full history: history before it is main, scanned
+  when its own PRs were verified.
 - Not reproduced: GitHub dependency review (a GitHub service; external PRs keep it; the locked restores with NuGet audit
   and `npm audit` cover vulnerable packages locally) and CodeQL (external PRs, dispatch and the weekly schedule).
 Every change runs the full profile: the forbidden-term scan, Prettier and the provenance inventory read Markdown too.
@@ -47,7 +48,7 @@ REPOSITORY = "Cloud"
 _BUNDLED_NPM = ("require('path').join(require('path').dirname(process.execPath), 'node_modules', 'npm', "
                 "'bin', 'npm-cli.js')")
 
-# Tool versions that key a reusable pass (the python running eng/verify.py is added by the core).
+# Tool versions recorded in each leg's summary (the python running eng/verify.py is added by the core).
 FINGERPRINT = {
     "win": {
         "dotnet-sdks": ["dotnet", "--list-sdks"],
@@ -77,7 +78,7 @@ FINGERPRINT = {
 ENV = {"DOTNET_NOLOGO": "true", "DOTNET_CLI_TELEMETRY_OPTOUT": "true", "WRANGLER_SEND_METRICS": "false",
        "MSBUILDDISABLENODEREUSE": "1", "RestoreLockedMode": "true"}
 
-# ci.yml's secret scan (same pinned image digest, redaction and config), over the pushed range, without network and with
+# ci.yml's secret scan (same pinned image digest, redaction and config), over the commits since the merge base, without network and with
 # a read-only mount of the verification clone.
 SECRET_SCAN = (
     "docker run --rm --network none -v \"$PWD:/repo:ro\" "
@@ -169,7 +170,7 @@ STEPS = [
     linux("check-dotnet", "npm run check:dotnet", 1200),
     linux("licence-evaluated", "node tooling/project.ts licence-evaluated", 300),
     linux("candidate", CANDIDATE, 900),
-    # the former pre-push hook, and quality's secret scan, over the pushed range; actionlint when a workflow changed
+    # the whitespace check and quality's secret scan over the commits since the merge base; actionlint when a workflow changed
     linux("whitespace", "git diff --check {base} {sha}", 120, lane="scan"),
     linux("secret-scan", SECRET_SCAN, 600, lane="scan"),
     linux("actionlint", ACTIONLINT, 300, lane="actionlint", when=workflows_changed),

@@ -1,8 +1,0 @@
-#!/bin/sh
-# Mandatory local verification of the pushed commits (AGENTS.md, Local verification). Never bypass it.
-top=$(git rev-parse --show-toplevel) || exit 1
-if [ ! -f "$top/eng/verify.py" ]; then
-  echo "arcforges-verify: FAIL $top has no eng/verify.py; rebase this branch onto main before pushing" >&2
-  exit 1
-fi
-exec python "$top/eng/verify.py" pre-push "$@"
