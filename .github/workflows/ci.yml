@@ -66,6 +66,12 @@ jobs:
         run: |
           dotnet restore Cloud.slnx --locked-mode
           dotnet build Cloud.slnx -c Release --no-restore
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: hello-go/go.sum
+      - name: Verify the Go Hello
+        run: python eng/hello-go.py check
       - run: node tooling/project.ts licence-evaluated
       - name: Retain evaluated licence and source provenance
         if: always()

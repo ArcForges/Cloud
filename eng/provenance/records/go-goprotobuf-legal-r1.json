@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-goprotobuf-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://go.googlesource.com/protobuf",
+  "sourceCommit": "cdd4c5f7406e82462949c7a65defa9f3029c162d",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "BSD-3-Clause",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20",
+        "finding": "Complete licence from the exact Go module/toolchain source; module/archive integrity is pinned."
+      }
+    ],
+    "scope": "google.golang.org/protobuf v1.36.12: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "google.golang.org/protobuf v1.36.12: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained."
+  ],
+  "targets": [
+    {
+      "path": "third-party/GoProtobuf.LICENSE.txt",
+      "sha256": "4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "google.golang.org/protobuf v1.36.12: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/GoProtobuf.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "google.golang.org/protobuf v1.36.12: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, maintainer-authorized source and dependency review; PR review is recorded separately",
+    "reviewedOn": "2026-10-27",
+    "decision": "approved",
+    "rationale": "google.golang.org/protobuf v1.36.12: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "baselineCommit": "7bea9f4b9a9802eb2ca52db7748dfabd9a007c94",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

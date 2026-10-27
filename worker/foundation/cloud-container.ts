@@ -8,6 +8,7 @@ import { containerSleepAfter } from "../tables/cloud-tables.generated.ts";
 interface NeonEnvironment {
   ARCFORGES_NEON_HELLO?: string;
   NEON_DATABASE_URL?: string;
+  ARCFORGES_HELLO_RUNTIME?: string;
 }
 
 export class CloudContainer extends Container {
@@ -19,6 +20,10 @@ export class CloudContainer extends Container {
     super(ctx, env);
     if (new.target !== CloudContainer) return;
     const neon = env as NeonEnvironment;
+    const runtime = neon.ARCFORGES_HELLO_RUNTIME;
+    if (runtime === "go") this.entrypoint = ["/app/arcforges-hello-go"];
+    else if (runtime !== undefined && runtime !== "" && runtime !== "csharp")
+      throw new Error("Unknown Hello runtime.");
     const enabled = neon.ARCFORGES_NEON_HELLO;
     if (enabled === undefined || enabled === "" || enabled === "disabled") return;
     if (enabled !== "enabled" || !neon.NEON_DATABASE_URL)

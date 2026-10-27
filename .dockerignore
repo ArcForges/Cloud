@@ -112,3 +112,15 @@
 !package-lock.json
 !eng/
 !eng/version-sources.json
+
+!hello-go/
+!hello-go/go.mod
+!hello-go/go.sum
+!hello-go/contracts.lock.json
+!hello-go/toolchain.json
+!hello-go/cmd/
+!hello-go/cmd/server/
+!hello-go/cmd/server/*.go
+!hello-go/tools/
+!hello-go/tools/contractgen/
+!hello-go/tools/contractgen/*.go

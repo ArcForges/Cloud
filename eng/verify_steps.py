@@ -54,12 +54,14 @@ FINGERPRINT = {
         "dotnet-sdks": ["dotnet", "--list-sdks"],
         "dotnet-runtimes": ["dotnet", "--list-runtimes"],
         "node": ["node", "--version"],
+        "go": ["go", "version"],
         "npm": ["node", "-p", "require(" + _BUNDLED_NPM.replace("'bin', 'npm-cli.js'", "'package.json'") + ").version"],
     },
     "linux": {
         "dotnet-sdks": "dotnet --list-sdks | tr '\\n' ' '",
         "dotnet-runtimes": "dotnet --list-runtimes | tr '\\n' ' '",
         "node": "node --version",
+        "go": "go version",
         "npm": "npm --version",
         "python": "python --version",
         "docker": "docker version --format '{{.Server.Version}}'",
@@ -159,6 +161,7 @@ STEPS = [
     win("win-npm-ci", pwsh(f"node (node -p \"{_BUNDLED_NPM}\") ci --ignore-scripts"), 300),
     win("win-restore", ["dotnet", "restore", "Cloud.slnx", "--locked-mode"], 600),
     win("win-build", ["dotnet", "build", "Cloud.slnx", "-c", "Release", "--no-restore"], 900),
+    win("win-go-hello", ["python", "eng/hello-go.py", "check"], 600),
     win("win-licence-evaluated", ["node", "tooling/project.ts", "licence-evaluated"], 600),
     # ci.yml source (ubuntu-latest), the dependency audit of quality, then candidate
     linux("clone-identity", "set -e; git config remote.origin.url https://github.com/ArcForges/Cloud.git; "
@@ -168,6 +171,7 @@ STEPS = [
     linux("npm-audit", "npm audit --audit-level=high", 300),
     linux("check", "npm run check", 1200),
     linux("check-dotnet", "npm run check:dotnet", 1200),
+    linux("go-hello", "python eng/hello-go.py check", 600),
     linux("licence-evaluated", "node tooling/project.ts licence-evaluated", 300),
     linux("candidate", CANDIDATE, 900),
     # the whitespace check and quality's secret scan over the commits since the merge base; actionlint when a workflow changed

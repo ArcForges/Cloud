@@ -140,3 +140,20 @@ test("the 60 second sleep timer never stops a Container that has a request or a 
   assert.equal(container.isActivityExpired(), false, "an open request or stream keeps it awake");
   assert.ok(container.sleepAfterMs > Date.now(), "and the sleep window is renewed");
 });
+
+test("Go is selected only for the production class and proof remains C#", () => {
+  const environment = {
+    ARCFORGES_HELLO_RUNTIME: "go",
+    ARCFORGES_NEON_HELLO: "enabled",
+    NEON_DATABASE_URL: "synthetic",
+  };
+  const production = new CloudContainer(containerContext, environment);
+  assert.deepEqual(production.entrypoint, ["/app/arcforges-hello-go"]);
+  const proof = new FoundationContainer(containerContext, environment);
+  assert.equal(proof.entrypoint, undefined);
+  assert.equal(proof.enableInternet, false);
+  assert.throws(
+    () => new CloudContainer(containerContext, { ARCFORGES_HELLO_RUNTIME: "unknown" }),
+    /Unknown Hello runtime/u,
+  );
+});

@@ -83,7 +83,12 @@ export type WorkerConfig = {
   name: string;
   main: string;
   no_bundle?: boolean;
-  vars: { SOURCE_REVISION: string; BUILD_IDENTITY?: string; ARCFORGES_NEON_HELLO?: string };
+  vars: {
+    SOURCE_REVISION: string;
+    BUILD_IDENTITY?: string;
+    ARCFORGES_NEON_HELLO?: string;
+    ARCFORGES_HELLO_RUNTIME?: string;
+  };
   containers: [
     {
       image: string;
@@ -253,6 +258,8 @@ async function testWorker(candidate: Candidate) {
   config.routes = [];
   config.containers[0].image = "./Dockerfile";
   config.dev = { ip: "127.0.0.1", port: 18787 };
+  // This opt-in check verifies local transport only; live Neon acceptance is separate.
+  config.vars.ARCFORGES_NEON_HELLO = "disabled";
   await writeJson(path.join(testDir, "wrangler.json"), config);
   const child = spawn(
     process.execPath,
@@ -279,6 +286,7 @@ async function testWorker(candidate: Candidate) {
       true,
       180000,
       expectedIdentity(candidate.version).build,
+      config.vars.ARCFORGES_HELLO_RUNTIME === "go" ? "go" : "csharp",
     );
     verifyHealthIdentity(health, expectedIdentity(candidate.version));
     const result = await runProbe("http://127.0.0.1:18787/api", true);

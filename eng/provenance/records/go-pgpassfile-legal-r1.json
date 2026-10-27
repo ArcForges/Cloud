@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-pgpassfile-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/jackc/pgpassfile",
+  "sourceCommit": "99d8e8e28945ffceaf75b0299fcb2bb656b8a683",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "MIT",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "adb1663fda031df8f4344aa68f299fd87d80353e31339406742ded21dae65702",
+        "finding": "Complete licence from the exact Go module/toolchain source; module/archive integrity is pinned."
+      }
+    ],
+    "scope": "github.com/jackc/pgpassfile v1.0.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "github.com/jackc/pgpassfile v1.0.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained."
+  ],
+  "targets": [
+    {
+      "path": "third-party/PgPassFile.LICENSE.txt",
+      "sha256": "adb1663fda031df8f4344aa68f299fd87d80353e31339406742ded21dae65702",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "github.com/jackc/pgpassfile v1.0.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/PgPassFile.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "github.com/jackc/pgpassfile v1.0.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, maintainer-authorized source and dependency review; PR review is recorded separately",
+    "reviewedOn": "2026-10-27",
+    "decision": "approved",
+    "rationale": "github.com/jackc/pgpassfile v1.0.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "baselineCommit": "7bea9f4b9a9802eb2ca52db7748dfabd9a007c94",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

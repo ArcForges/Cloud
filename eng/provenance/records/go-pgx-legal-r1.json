@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-pgx-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/jackc/pgx",
+  "sourceCommit": "5e583fa7aabfa88b796292f849fc9d7d75ac159d",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "MIT",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "467f95e074fe23079a5623ed652619682692041b8551da27e3c2ddb9659a1507",
+        "finding": "Complete licence from the exact Go module/toolchain source; module/archive integrity is pinned."
+      }
+    ],
+    "scope": "github.com/jackc/pgx/v5 v5.11.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "github.com/jackc/pgx/v5 v5.11.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained."
+  ],
+  "targets": [
+    {
+      "path": "third-party/Pgx.LICENSE.txt",
+      "sha256": "467f95e074fe23079a5623ed652619682692041b8551da27e3c2ddb9659a1507",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "github.com/jackc/pgx/v5 v5.11.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/Pgx.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "github.com/jackc/pgx/v5 v5.11.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, maintainer-authorized source and dependency review; PR review is recorded separately",
+    "reviewedOn": "2026-10-27",
+    "decision": "approved",
+    "rationale": "github.com/jackc/pgx/v5 v5.11.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "baselineCommit": "7bea9f4b9a9802eb2ca52db7748dfabd9a007c94",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

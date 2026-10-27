@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-connectgo-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/connectrpc/connect-go",
+  "sourceCommit": "8f69fe4e4b2d861700b00983b2f55c8cf97e235b",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "Apache-2.0",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "595c92e7a9bc933c07da143f527d199e2fc3010e2afd8a8c0654c1f43bfa076c",
+        "finding": "Complete licence from the exact Go module/toolchain source; module/archive integrity is pinned."
+      }
+    ],
+    "scope": "connectrpc.com/connect/v2 v2.0.2: Apache-2.0. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "connectrpc.com/connect/v2 v2.0.2: Apache-2.0. Complete upstream copyright, permission and disclaimer terms are retained."
+  ],
+  "targets": [
+    {
+      "path": "third-party/ConnectGo.LICENSE.txt",
+      "sha256": "595c92e7a9bc933c07da143f527d199e2fc3010e2afd8a8c0654c1f43bfa076c",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "connectrpc.com/connect/v2 v2.0.2: Apache-2.0. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/ConnectGo.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "connectrpc.com/connect/v2 v2.0.2: Apache-2.0. Complete upstream copyright, permission and disclaimer terms are retained."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, maintainer-authorized source and dependency review; PR review is recorded separately",
+    "reviewedOn": "2026-10-27",
+    "decision": "approved",
+    "rationale": "connectrpc.com/connect/v2 v2.0.2: Apache-2.0. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "baselineCommit": "7bea9f4b9a9802eb2ca52db7748dfabd9a007c94",
+    "reconciliation": false
+  },
+  "supersedes": null
+}
