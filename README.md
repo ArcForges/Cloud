@@ -23,12 +23,13 @@ Cloud is an active repository of the ArcForges flagship ([AD-0001](https://githu
 
 ## Quick start
 
-Prerequisites: .NET SDK **10.0.401**, Node **24.21.0**, npm **11.19.0**, and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
+Prerequisites: .NET SDK **10.0.401**, Node **24.21.0**, npm **11.19.0**, Go **1.27.3**, and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
 
 ```sh
 npm ci --ignore-scripts
 npm run check
 npm run check:dotnet
+python eng/hello-go.py check
 npm run candidate
 ```
 
