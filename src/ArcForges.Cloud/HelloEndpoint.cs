@@ -5,9 +5,15 @@ using Npgsql;
 
 namespace ArcForges.Cloud;
 
-public sealed class HelloEndpoint(IHelloGreeting? greeting = null) : HelloService.HelloServiceBase
+public sealed class HelloEndpoint : HelloService.HelloServiceBase
 {
-    private readonly IHelloGreeting greeting = greeting ?? new StatelessHelloGreeting();
+    private readonly IHelloGreeting greeting;
+
+    public HelloEndpoint() : this(new StatelessHelloGreeting())
+    {
+    }
+
+    internal HelloEndpoint(IHelloGreeting greeting) => this.greeting = greeting;
 
     public override async Task<SayHelloResponse> SayHello(SayHelloRequest request, ServerCallContext context)
     {

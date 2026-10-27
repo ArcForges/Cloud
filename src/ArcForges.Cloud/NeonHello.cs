@@ -5,7 +5,7 @@ using Npgsql;
 namespace ArcForges.Cloud;
 
 /// <summary>The Hello source is stateless locally, or a bounded read-only PostgreSQL query when explicitly enabled.</summary>
-public interface IHelloGreeting
+internal interface IHelloGreeting
 {
     Task<string> GetAsync(string name, CancellationToken cancellation);
 }

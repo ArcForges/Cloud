@@ -115,6 +115,7 @@ internal sealed class HelloModule(JsonObject identity) : IHostModule
         {
             builder.Services.AddSingleton<IHelloGreeting, StatelessHelloGreeting>();
         }
+        builder.Services.AddTransient(provider => new HelloEndpoint(provider.GetRequiredService<IHelloGreeting>()));
         builder.Services.AddGrpc(options =>
         {
             options.EnableDetailedErrors = false;

@@ -103,23 +103,22 @@ async function deploy() {
   config.containers[0].image = imageDigest;
   await writeJson(path.join(root, "artifacts", "deploy.wrangler.json"), config);
   await requireCurrentMain(candidate.revision);
+  const deployArguments = [
+    wrangler,
+    "deploy",
+    "--config",
+    "artifacts/deploy.wrangler.json",
+    "--no-bundle",
+    // An explicit empty environment selects the top-level (production) Worker.
+    "--env",
+    "",
+    "--containers-rollout",
+    "immediate",
+    "--tag",
+    candidate.version,
+  ];
   await withNeonRuntimeSecret(runtimeSecret, async (secretArguments) => {
-    await run(process.execPath, [
-      wrangler,
-      "deploy",
-      "--config",
-      "artifacts/deploy.wrangler.json",
-      "--no-bundle",
-      // An explicit empty environment selects the top-level (production) Worker and keeps Wrangler from
-      // warning that the proof environment exists in the same file.
-      "--env",
-      "",
-      "--containers-rollout",
-      "immediate",
-      "--tag",
-      candidate.version,
-      ...secretArguments,
-    ]);
+    await run(process.execPath, [...deployArguments, ...secretArguments]);
   });
   await writeJson(deploymentFile, {
     revision: candidate.revision,

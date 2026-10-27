@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+using System.Text.Json.Nodes;
+using ArcForges.Cloud.Composition;
 using ArcForges.Contracts.Hello.V1;
 using Grpc.Core;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
 
@@ -69,6 +73,18 @@ public sealed class NeonHelloTests
         var source = new Greeting((_, _) => { calls++; return Task.FromResult("unexpected"); });
         await Assert.ThrowsAsync<RpcException>(() => new HelloEndpoint(source).SayHello(new SayHelloRequest(), null!));
         Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public async Task HostActivationUsesTheRegisteredGreetingSource()
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        new HelloModule(new JsonObject()).Register(builder);
+        builder.Services.AddSingleton<IHelloGreeting>(new Greeting((name, _) => Task.FromResult("configured:" + name)));
+        await using var app = builder.Build();
+        var endpoint = app.Services.GetRequiredService<HelloEndpoint>();
+        var reply = await endpoint.SayHello(new SayHelloRequest { Name = "ArcForges" }, null!);
+        Assert.Equal("configured:ArcForges", reply.Message);
     }
 
     private sealed class Greeting(Func<string, CancellationToken, Task<string>> run) : IHelloGreeting
