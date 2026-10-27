@@ -20,7 +20,7 @@ internal sealed class NeonHelloGreeting : IHelloGreeting, IDisposable
     private readonly NpgsqlDataSource source;
 
     public NeonHelloGreeting(NpgsqlConnectionStringBuilder settings) =>
-        source = new NpgsqlSlimDataSourceBuilder(settings.ConnectionString).Build();
+        source = new NpgsqlSlimDataSourceBuilder(settings.ConnectionString).EnableTransportSecurity().Build();
 
     public async Task<string> GetAsync(string name, CancellationToken cancellation)
     {

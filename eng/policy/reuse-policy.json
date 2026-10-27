@@ -35,6 +35,7 @@
     "BSD-2-Clause": "permissive",
     "BSD-3-Clause": "permissive",
     "ISC": "permissive",
+    "PostgreSQL": "permissive",
     "AGPL-3.0-only": "agpl-compatible",
     "GPL-2.0-only": "gpl-only",
     "GPL-3.0-only": "gpl-only",

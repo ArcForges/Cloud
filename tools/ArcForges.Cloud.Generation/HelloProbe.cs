@@ -36,7 +36,7 @@ public static class HelloProbe
         };
 
         var client = Client(http, baseUrl, null);
-        foreach (var name in new[] { "ArcForges", "世界 👋" })
+        foreach (var name in new[] { "NUL\0check", "ArcForges", "世界 👋" })
         {
             var reply = await client.SayHelloAsync(new SayHelloRequest { Name = name }, deadline: Deadline(20), cancellationToken: cancellation);
             Expect(reply.Message == $"Hello, {name}!", $"greeting for {name}");
