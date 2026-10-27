@@ -139,6 +139,7 @@
     "eng/policy/dependency-reviews/har-40-r9.json",
     "eng/policy/dependency-reviews/local-first-r1.json",
     "eng/policy/dependency-reviews/neon-hello-r1.json",
+    "eng/policy/dependency-reviews/neon-hello-r2.json",
     "eng/policy/dependency-reviews/ops-01-r1.json",
     "eng/policy/dependency-reviews/prf-07-r1.json",
     "eng/policy/dependency-reviews/prf-07-r10.json",
@@ -206,6 +207,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r50.json",
     "eng/provenance/artifact-profiles/cloud-release-r51.json",
     "eng/provenance/artifact-profiles/cloud-release-r52.json",
+    "eng/provenance/artifact-profiles/cloud-release-r53.json",
     "eng/provenance/artifact-profiles/cloud-release-r6.json",
     "eng/provenance/artifact-profiles/cloud-release-r7.json",
     "eng/provenance/artifact-profiles/cloud-release-r8.json",
@@ -326,7 +328,9 @@
     "eng/provenance/records/har-40-cloud-worker-bundle-r7.json",
     "eng/provenance/records/har-40-cloud-worker-bundle-r8.json",
     "eng/provenance/records/neon-hello-runtime-r1.json",
+    "eng/provenance/records/neon-hello-runtime-r2.json",
     "eng/provenance/records/neon-hello-worker-r1.json",
+    "eng/provenance/records/neon-hello-worker-r2.json",
     "eng/provenance/records/npgsql-postgresql-legal-r1.json",
     "eng/provenance/records/protobuf-bsd-legal-r1.json",
     "eng/provenance/records/sharp-0-35-5-cloud-runtime-notices-r1.json",
@@ -976,5 +980,5 @@
     "third-party/Contracts.NOTICE.txt": "contracts-notice-legal-r2",
     "third-party/Npgsql.LICENSE.txt": "npgsql-postgresql-legal-r1"
   },
-  "artifacts": ["neon-hello-runtime-r1", "neon-hello-worker-r1"]
+  "artifacts": ["neon-hello-runtime-r2", "neon-hello-worker-r2"]
 }

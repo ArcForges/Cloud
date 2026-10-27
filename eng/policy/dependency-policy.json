@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "1a0759b2a2d652391f44a75911b53f64b536c13e",
+  "sourceCommit": "5a289828cfe9047ea59cfd0733ac5c6ce716c2a3",
   "manifests": ["package.json"],
   "inputs": {
     ".github/workflows/ci.yml": "87b19bb942553d76427a2688b55892eb0a8e9f8f63a9445c07daf45918f828be",
@@ -14,10 +14,13 @@
     "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
     "eng/provenance/artifact-profiles/cloud-release-r45.json": "d0fec3a81b20cd236eb713de3a3857f19f1c219175ac51c60aa62344f12084b6",
     "eng/provenance/artifact-profiles/cloud-release-r52.json": "f5d2c7d64f08eedad77ba64979458a47548d1678e0ca493947179da74ce20fc6",
+    "eng/provenance/artifact-profiles/cloud-release-r53.json": "760b5e025bcc5de22c0270e882211dd65ecb97e77ef75adad0959b4f10863862",
     "eng/provenance/records/har-40-cloud-runtime-notices-r8.json": "1f0116101e7b07cff32a2c5813fcec19f8a67691f594b52568f3d47511785c68",
     "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
     "eng/provenance/records/neon-hello-runtime-r1.json": "3d4b0350e6c16fec11dcbad32cdb2c4c5e361af394fda07288b23dfc281e7f3b",
+    "eng/provenance/records/neon-hello-runtime-r2.json": "6dd54219d150697e2660a426b0f3fff5fd56bad84cc2e1e150152b3e6476fcd6",
     "eng/provenance/records/neon-hello-worker-r1.json": "6afd59357e3192d2016b7a9ac65ded4b336d49103f181c300cb857e764b3524c",
+    "eng/provenance/records/neon-hello-worker-r2.json": "473032930abfe367d496b342a5797be5ce37acf54f2b5556f575c9347df9331c",
     "eng/provenance/records/npgsql-postgresql-legal-r1.json": "8578bd9ad7ddb4b1ea420c47cf517e733335011a6dbd9808bb79f9e4c9dcce25",
     "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
     "package-lock.json": "9c97c1a409c01c0a705ad32139f4806cfd31f9729dcd62e84015389cfea5248a",
@@ -81,7 +84,7 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "Codex, maintainer-authorized source and dependency review; PR review is recorded separately",
     "date": "2026-10-27",
-    "rationale": "User-authorized C# deployment Hello proof. Npgsql 10.0.3 uses native PostgreSQL TCP with verified TLS, required channel binding, a two-connection pool and bounded read-only SELECT transactions. Only the pooled URL is injected at trusted main deployment; credentials never enter builds or artifacts. Production-only TCP egress is explicit; proof subclasses retain closed egress. No D1/schema/business-data migration. The Npgsql upstream PostgreSQL licence is retained. Undici 7.30.1 is the minimal build-tool security correction for GHSA-xjj6-f33q-929c; Wrangler and Containers pins stay unchanged.",
+    "rationale": "User-authorized C# deployment Hello proof. Npgsql 10.0.3 uses native PostgreSQL TCP with verified TLS, required channel binding, a two-connection pool and bounded read-only SELECT transactions. Only the pooled URL is injected at trusted main deployment; credentials never enter builds or artifacts. Production-only TCP egress is explicit; proof subclasses retain closed egress. No D1/schema/business-data migration. The Npgsql upstream PostgreSQL licence is retained. Undici 7.30.1 is the minimal build-tool security correction for GHSA-xjj6-f33q-929c; Wrangler and Containers pins stay unchanged. Successor for the Hello integration repair: keep IHelloGreeting and the injected endpoint constructor internal, explicitly register the endpoint factory, and preserve the existing gated deployment argument ordering. The public contract and dependency coordinates are unchanged. Historical committed receipts and profiles are preserved byte-for-byte.",
     "inputs": {
       ".github/workflows/ci.yml": "87b19bb942553d76427a2688b55892eb0a8e9f8f63a9445c07daf45918f828be",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -93,10 +96,13 @@
       "NuGet.Config": "cb93c65e28718aa9075fce221e9f9cea9e72d3fe1b30462383448a591f5b3aa1",
       "eng/provenance/artifact-profiles/cloud-release-r45.json": "d0fec3a81b20cd236eb713de3a3857f19f1c219175ac51c60aa62344f12084b6",
       "eng/provenance/artifact-profiles/cloud-release-r52.json": "f5d2c7d64f08eedad77ba64979458a47548d1678e0ca493947179da74ce20fc6",
+      "eng/provenance/artifact-profiles/cloud-release-r53.json": "760b5e025bcc5de22c0270e882211dd65ecb97e77ef75adad0959b4f10863862",
       "eng/provenance/records/har-40-cloud-runtime-notices-r8.json": "1f0116101e7b07cff32a2c5813fcec19f8a67691f594b52568f3d47511785c68",
       "eng/provenance/records/har-40-cloud-worker-bundle-r8.json": "80d19a251f43717134ff951c60228ecd21474566b7accc48a17db18acaa2ecd5",
       "eng/provenance/records/neon-hello-runtime-r1.json": "3d4b0350e6c16fec11dcbad32cdb2c4c5e361af394fda07288b23dfc281e7f3b",
+      "eng/provenance/records/neon-hello-runtime-r2.json": "6dd54219d150697e2660a426b0f3fff5fd56bad84cc2e1e150152b3e6476fcd6",
       "eng/provenance/records/neon-hello-worker-r1.json": "6afd59357e3192d2016b7a9ac65ded4b336d49103f181c300cb857e764b3524c",
+      "eng/provenance/records/neon-hello-worker-r2.json": "473032930abfe367d496b342a5797be5ce37acf54f2b5556f575c9347df9331c",
       "eng/provenance/records/npgsql-postgresql-legal-r1.json": "8578bd9ad7ddb4b1ea420c47cf517e733335011a6dbd9808bb79f9e4c9dcce25",
       "global.json": "67381be18aa807c04218165844967cf58235875477f30495ba98c3648248a9d4",
       "package-lock.json": "9c97c1a409c01c0a705ad32139f4806cfd31f9729dcd62e84015389cfea5248a",
@@ -167,7 +173,7 @@
     ],
     "runtimeAssessment": "User-authorized C# deployment Hello proof. Npgsql 10.0.3 uses native PostgreSQL TCP with verified TLS, required channel binding, a two-connection pool and bounded read-only SELECT transactions. Only the pooled URL is injected at trusted main deployment; credentials never enter builds or artifacts. Production-only TCP egress is explicit; proof subclasses retain closed egress. No D1/schema/business-data migration. The Npgsql upstream PostgreSQL licence is retained. Undici 7.30.1 is the minimal build-tool security correction for GHSA-xjj6-f33q-929c; Wrangler and Containers pins stay unchanged.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/local-first-r1.json",
+    "previous": "eng/policy/dependency-reviews/neon-hello-r1.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-10-27",
     "decision": "approved"
@@ -947,7 +953,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["neon-hello-runtime-r1", "neon-hello-worker-r1"],
+  "artifactRecords": ["neon-hello-runtime-r2", "neon-hello-worker-r2"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -961,7 +967,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/neon-hello-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/neon-hello-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
