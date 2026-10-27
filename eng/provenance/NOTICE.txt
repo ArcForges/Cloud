@@ -42,6 +42,66 @@ https://github.com/evanw/esbuild @ bb9db84c02433fbe37b3509f53f9f3e3cc48725e
 MIT
 Copyright 2020 Evan Wallace. Complete MIT notice for inserted esbuild runtime helper.
 
+go-connectgo-legal-r1
+https://github.com/connectrpc/connect-go @ 8f69fe4e4b2d861700b00983b2f55c8cf97e235b
+Apache-2.0
+connectrpc.com/connect/v2 v2.0.2: Apache-2.0. Complete upstream copyright, permission and disclaimer terms are retained.
+
+go-go-legal-r1
+https://github.com/golang/go @ 2aae1000ea1d4b28923b96db28acf4e3b99d6aff
+BSD-3-Clause
+Go 1.27.3 runtime and standard library: Copyright 2009 The Go Authors, BSD-3-Clause. Complete terms are retained.
+
+go-gonet-legal-r1
+https://go.googlesource.com/net @ c1d31df183e51b1075a2fd670d6f6f4efb871773
+BSD-3-Clause
+golang.org/x/net v0.61.0: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.
+
+go-goprotobuf-legal-r1
+https://go.googlesource.com/protobuf @ cdd4c5f7406e82462949c7a65defa9f3029c162d
+BSD-3-Clause
+google.golang.org/protobuf v1.36.12: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.
+
+go-gosync-legal-r1
+https://go.googlesource.com/sync @ 36f2d70ecde9857dc4e363242a1369c7645d6770
+BSD-3-Clause
+golang.org/x/sync v0.24.0: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.
+
+go-gotext-legal-r1
+https://go.googlesource.com/text @ ac40b0f06c159afb5bfca4d1860f8b4b60dbc160
+BSD-3-Clause
+golang.org/x/text v0.43.0: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.
+
+go-hello-runtime-r1
+https://github.com/ArcForges/Cloud @ ed347c273aa71834b1ac01790b6761a4cd3f9d42
+AGPL-3.0-only
+ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped. Copyright (c) 2002-2025, Npgsql. Npgsql 10.0.3 is distributed under the PostgreSQL licence; its complete copyright and permission terms accompany the application. Go Hello and its nine locked runtime modules are included alongside the retained C# executable. Go and Go protobuf use BSD-3-Clause; Connect uses Apache-2.0; pgx and its helper modules use MIT. Complete original texts are shipped.
+
+go-hello-worker-r1
+https://github.com/ArcForges/Cloud @ ed347c273aa71834b1ac01790b6761a4cd3f9d42
+AGPL-3.0-only
+Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. @arcforges/ai-internal generated validators: Copyright ArcForges contributors, Apache-2.0 (published Contracts NOTICE retained in third-party/Contracts.NOTICE.txt). Complete respective terms accompany the actual Worker bundle.
+
+go-pgpassfile-legal-r1
+https://github.com/jackc/pgpassfile @ 99d8e8e28945ffceaf75b0299fcb2bb656b8a683
+MIT
+github.com/jackc/pgpassfile v1.0.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained.
+
+go-pgservicefile-legal-r1
+https://github.com/jackc/pgservicefile @ 5a60cdf6a76120dc3d5152b95f3b5fd8aa7cc9eb
+MIT
+github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761: MIT. Complete upstream copyright, permission and disclaimer terms are retained.
+
+go-pgx-legal-r1
+https://github.com/jackc/pgx @ 5e583fa7aabfa88b796292f849fc9d7d75ac159d
+MIT
+github.com/jackc/pgx/v5 v5.11.0: MIT. Complete upstream copyright, permission and disclaimer terms are retained.
+
+go-puddle-legal-r1
+https://github.com/jackc/puddle @ bd09d14bd4018b6d65a9d7770e2f3ddf8b00af1c
+MIT
+github.com/jackc/puddle/v2 v2.2.2: MIT. Complete upstream copyright, permission and disclaimer terms are retained.
+
 gradle-legal-r1
 https://github.com/gradle/gradle @ 92f0512e7f06d84621afba191f75e265363890cf
 Apache-2.0
@@ -51,16 +111,6 @@ grpc-apache-legal-r1
 https://github.com/grpc/grpc-dotnet @ 4301104498e53898a452e8fb2fea6c0b1492b755
 Apache-2.0
 Copyright the gRPC Authors. Apache-2.0 for the locked compiled gRPC library scope.
-
-neon-hello-runtime-r2
-https://github.com/ArcForges/Cloud @ 5a289828cfe9047ea59cfd0733ac5c6ce716c2a3
-AGPL-3.0-only
-ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped. Copyright (c) 2002-2025, Npgsql. Npgsql 10.0.3 is distributed under the PostgreSQL licence; its complete copyright and permission terms accompany the application.
-
-neon-hello-worker-r2
-https://github.com/ArcForges/Cloud @ 5a289828cfe9047ea59cfd0733ac5c6ce716c2a3
-AGPL-3.0-only
-Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. @arcforges/ai-internal generated validators: Copyright ArcForges contributors, Apache-2.0 (published Contracts NOTICE retained in third-party/Contracts.NOTICE.txt). Complete respective terms accompany the actual Worker bundle.
 
 npgsql-postgresql-legal-r1
 https://github.com/npgsql/npgsql @ d3768398c17877b3a916c3c4d87e8e11698991fc

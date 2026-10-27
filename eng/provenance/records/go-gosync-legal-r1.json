@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-gosync-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://go.googlesource.com/sync",
+  "sourceCommit": "36f2d70ecde9857dc4e363242a1369c7645d6770",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "BSD-3-Clause",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+        "finding": "Complete licence from the exact Go module/toolchain source; module/archive integrity is pinned."
+      }
+    ],
+    "scope": "golang.org/x/sync v0.24.0: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "golang.org/x/sync v0.24.0: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained."
+  ],
+  "targets": [
+    {
+      "path": "third-party/GoSync.LICENSE.txt",
+      "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "golang.org/x/sync v0.24.0: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/GoSync.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "golang.org/x/sync v0.24.0: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, maintainer-authorized source and dependency review; PR review is recorded separately",
+    "reviewedOn": "2026-10-27",
+    "decision": "approved",
+    "rationale": "golang.org/x/sync v0.24.0: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "baselineCommit": "7bea9f4b9a9802eb2ca52db7748dfabd9a007c94",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

@@ -1,0 +1,12 @@
+{
+  "goVersion": "go1.27.3",
+  "sourceCommit": "2aae1000ea1d4b28923b96db28acf4e3b99d6aff",
+  "linuxAmd64": {
+    "url": "https://go.dev/dl/go1.27.3.linux-amd64.tar.gz",
+    "sha256": "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
+  },
+  "windowsAmd64": {
+    "url": "https://go.dev/dl/go1.27.3.windows-amd64.zip",
+    "sha256": "f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff"
+  }
+}

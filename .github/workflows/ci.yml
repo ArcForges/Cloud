@@ -66,6 +66,12 @@ jobs:
         run: |
           dotnet restore Cloud.slnx --locked-mode
           dotnet build Cloud.slnx -c Release --no-restore
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: hello-go/go.sum
+      - name: Verify the Go Hello
+        run: python eng/hello-go.py check
       - run: node tooling/project.ts licence-evaluated
       - name: Retain evaluated licence and source provenance
         if: always()
@@ -145,6 +151,8 @@ jobs:
         include:
           - language: csharp
             build-mode: manual
+          - language: go
+            build-mode: manual
           - language: javascript-typescript
             build-mode: none
           - language: actions
@@ -155,9 +163,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
-        if: matrix.language == 'csharp'
+        if: matrix.language == 'csharp' || matrix.language == 'go'
         with:
           global-json-file: global.json
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        if: matrix.language == 'go'
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: hello-go/go.sum
       - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           languages: ${{ matrix.language }}
@@ -167,6 +180,17 @@ jobs:
         run: |
           dotnet restore src/ArcForges.Cloud --locked-mode
           dotnet build src/ArcForges.Cloud -c Release --no-restore
+      - name: Build Go for analysis
+        if: matrix.language == 'go'
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -mod=readonly
+        run: |
+          dotnet restore src/ArcForges.Cloud --locked-mode
+          cd hello-go
+          go mod download
+          go run ./tools/contractgen
+          go build ./cmd/server
       - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           category: /language:${{ matrix.language }}

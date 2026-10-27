@@ -1,6 +1,6 @@
 # ArcForges Cloud
 
-A C# 14 / .NET 10 Native AOT Hello service in a Linux x64 Docker image, hosted in Cloudflare Containers. A small TypeScript Worker routes the public binary gRPC-Web endpoint to the container. The repository is independently buildable and consumes published Contracts packages.
+The production Hello diagnostic runs in Go and queries Neon from a Linux x64 Cloudflare Container. A small TypeScript Worker preserves the public binary gRPC-Web endpoint. The image retains the C# 14 / .NET 10 Native AOT executable for the isolated proof environment and rollback. Both implementations consume the same exact published Contracts package; this is a [bounded Go Hello proof](docs/go-hello.md), not a migration of the other Cloud business modules.
 
 ```text
 Web or published gRPC-Web client
@@ -23,12 +23,13 @@ Cloud is an active repository of the ArcForges flagship ([AD-0001](https://githu
 
 ## Quick start
 
-Prerequisites: .NET SDK **10.0.401**, Node **24.21.0**, npm **11.19.0**, and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
+Prerequisites: .NET SDK **10.0.401**, Node **24.21.0**, npm **11.19.0**, Go **1.27.3**, and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
 
 ```sh
 npm ci --ignore-scripts
 npm run check
 npm run check:dotnet
+python eng/hello-go.py check
 npm run candidate
 ```
 

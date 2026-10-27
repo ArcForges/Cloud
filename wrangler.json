@@ -69,7 +69,8 @@
   },
   "vars": {
     "SOURCE_REVISION": "local",
-    "ARCFORGES_NEON_HELLO": "enabled"
+    "ARCFORGES_NEON_HELLO": "enabled",
+    "ARCFORGES_HELLO_RUNTIME": "go"
   },
   "env": {
     "proof": {

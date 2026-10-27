@@ -36,6 +36,7 @@ interface ReleaseProfile {
     inputs: Record<string, string>;
     baseLegal: Record<string, string>;
     legalFiles: string[];
+    executables?: string[];
   };
 }
 function list(value: unknown): string[] {
@@ -89,7 +90,14 @@ export function releaseProfile(owner: string) {
     "sha256 inputs outputInputs externalImports exports packages legalFiles",
   );
   digest(worker.sha256);
-  const image = object(p.image, "baseImage buildImage inputs baseLegal legalFiles");
+  const image = object(p.image);
+  object(
+    image,
+    "baseImage buildImage inputs baseLegal legalFiles" +
+      (image.executables === undefined ? "" : " executables"),
+  );
+  if (image.executables !== undefined)
+    assert.deepEqual(list(image.executables).sort(), ["ArcForges.Cloud", "arcforges-hello-go"]);
   for (const inputs of [object(worker.inputs), object(image.inputs)]) {
     assert(Object.keys(inputs).length > 0, "Empty source closure");
     for (const [name, expected] of Object.entries(inputs))
@@ -254,7 +262,7 @@ export function stageImageNotices(owner: string, revision: string) {
 export function verifyImageFiles(owner: string, revision: string, directory: string) {
   const { profile } = releaseProfile(owner);
   const expected = [
-    "ArcForges.Cloud",
+    ...(profile.image.executables ?? ["ArcForges.Cloud"]),
     "LICENSE",
     "notices/provenance.json",
     ...profile.image.legalFiles.map((name) => `notices/${name}`),
@@ -274,12 +282,14 @@ export function verifyImageFiles(owner: string, revision: string, directory: str
   for (const name of expected) members[name] = hash(readOwned(directory, name));
   for (const [name, expectedHash] of Object.entries(receipt.legal))
     assert.equal(members[`notices/${name}`], expectedHash, `Changed image legal text: ${name}`);
-  assert(
-    readOwned(directory, "ArcForges.Cloud")
-      .subarray(0, 4)
-      .equals(Buffer.from([127, 69, 76, 70])),
-    "Missing native ELF executable",
-  );
+  for (const executable of profile.image.executables ?? ["ArcForges.Cloud"]) {
+    assert(
+      readOwned(directory, executable)
+        .subarray(0, 4)
+        .equals(Buffer.from([127, 69, 76, 70])),
+      `Missing native ELF executable: ${executable}`,
+    );
+  }
   return {
     revision,
     profile: receipt.profile,
@@ -350,8 +360,9 @@ export function verifyReleaseFiles(
     "notices/provenance.json": hash(json(expected)),
   };
   for (const [file, value] of Object.entries(expected.legal)) known[`notices/${file}`] = value;
-  assert.deepEqual(Object.keys(members).sort(), [...Object.keys(known), "ArcForges.Cloud"].sort());
-  digest(members["ArcForges.Cloud"]);
+  const executables = releaseProfile(owner).profile.image.executables ?? ["ArcForges.Cloud"];
+  assert.deepEqual(Object.keys(members).sort(), [...Object.keys(known), ...executables].sort());
+  for (const executable of executables) digest(members[executable]);
   for (const [file, value] of Object.entries(known))
     assert.equal(members[file], value, `Altered legal image receipt: ${file}`);
   return verifyWorker(

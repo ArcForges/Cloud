@@ -32,6 +32,7 @@ export async function waitForHealth(
   worker: boolean,
   timeoutMs: number,
   expectedWorkerBuild?: Identity["build"],
+  expectedRuntime: "csharp" | "go" = "csharp",
 ) {
   const deadline = Date.now() + timeoutMs;
   let last = "no response";
@@ -48,13 +49,17 @@ export async function waitForHealth(
           service: string;
           revision: string;
           nativeAot: boolean;
+          runtime?: string;
+          helloBackend?: string;
           workerBuild?: unknown;
         };
         last = JSON.stringify(health);
         if (
           health.service === "arcforges-cloud" &&
           health.revision === revision &&
-          health.nativeAot === true &&
+          (expectedRuntime === "go"
+            ? health.runtime === "go" && health.nativeAot === false
+            : health.nativeAot === true) &&
           (!worker || response.headers.get("x-arcforges-worker-revision") === revision)
         ) {
           if (expectedWorkerBuild) {
@@ -73,7 +78,7 @@ export async function waitForHealth(
     } catch (error) {
       last = error instanceof Error ? error.message : String(error);
     }
-    console.log(`Waiting for the Native AOT container revision ${revision}: ${last}`);
+    console.log(`Waiting for the container revision ${revision}: ${last}`);
     await delay(5000);
   }
   throw new Error(`Container readiness did not converge within ${timeoutMs / 1000}s: ${last}`);

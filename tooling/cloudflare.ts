@@ -134,6 +134,11 @@ async function smoke() {
   assert.notEqual(process.env.CI, "true", "Live service tests are local opt-in only.");
   const candidate = await verifyCandidate();
   const deployment = await readJson<Deployment>(deploymentFile);
+  const runtime =
+    (await readJson<WorkerConfig>(path.join(candidateDir, "wrangler.json"))).vars
+      .ARCFORGES_HELLO_RUNTIME === "go"
+      ? "go"
+      : "csharp";
   assert.equal(deployment.revision, candidate.revision);
   assert.equal(deployment.imageId, candidate.imageId);
   assert.equal(deployment.baseUrl, productionBase);
@@ -146,6 +151,7 @@ async function smoke() {
     true,
     600000,
     expectedIdentity(candidate.version).build,
+    runtime,
   );
   verifyHealthIdentity(health, expectedIdentity(candidate.version));
   const protocol = await runProbe(productionBase, true);
@@ -159,7 +165,7 @@ async function smoke() {
   await home.body?.cancel();
   deployment.verified = { at: new Date().toISOString(), health, protocol, webHome: true };
   await writeJson(deploymentFile, deployment);
-  console.log("Production Native AOT gRPC-Web and Web home verified.");
+  console.log("Production Hello gRPC-Web and Web home verified.");
 }
 
 if (process.argv[2] === "deploy") await deploy();

@@ -30,8 +30,8 @@ before(() => {
 
 test("real locked Wrangler output matches the approved exact Worker closure", () => {
   const result = verifyWorker(root, worker, metadata);
-  assert.equal(result.sha256, "14f6a5dfabce25250fb26e664e3b029f7ca63f59a6f1b41e7fa20e56cd9715e8");
-  assert.equal(result.bytes, 92603);
+  assert.equal(result.sha256, "26b238ad1e81724f9cf5716aaed50edda2a8d1ffc0e0085ae25bdb66d5c5f645");
+  assert.equal(result.bytes, 93399);
   assert.equal(Object.keys(result.inputs).length, 19);
   assert.equal(result.outputInputs.length, 18);
 });
@@ -67,6 +67,7 @@ function imageFixture() {
   cpSync(path.join(root, "LICENSE"), path.join(directory, "LICENSE"));
   // An explicitly synthetic ELF prefix tests legal packaging only; Docker tests execute the real binary.
   writeFileSync(path.join(directory, "ArcForges.Cloud"), Buffer.from([127, 69, 76, 70, 1]));
+  writeFileSync(path.join(directory, "arcforges-hello-go"), Buffer.from([127, 69, 76, 70, 2]));
   const cleanup = () => {
     assert.equal(path.dirname(directory), os.tmpdir());
     assert(path.basename(directory).startsWith("cloud-image-provenance-"));
@@ -80,7 +81,7 @@ test("complete image legal fixture validates and binds source and concrete membe
     const result = verifyImageFiles(root, revision, f.directory);
     assert.equal(result.revision, revision);
     assert.equal(Object.keys(result.baseLegal).length, 6);
-    assert.equal(Object.keys(result.members).length, 12);
+    assert.equal(Object.keys(result.members).length, 24);
   } finally {
     f.cleanup();
   }
@@ -148,5 +149,20 @@ test("distribution cannot omit legal text or substitute a source receipt", () =>
     assert.throws(() => verifyReleaseFiles(root, candidate, revision, imageId));
   } finally {
     f.cleanup();
+  }
+});
+
+test("reject a missing or non-native Go executable in the dual-runtime image", () => {
+  const fixture = imageFixture();
+  try {
+    writeFileSync(path.join(fixture.directory, "arcforges-hello-go"), "not an ELF executable");
+    assert.throws(() => verifyImageFiles(root, revision, fixture.directory), /Missing native ELF/u);
+    rmSync(path.join(fixture.directory, "arcforges-hello-go"));
+    assert.throws(
+      () => verifyImageFiles(root, revision, fixture.directory),
+      /Unclassified or missing image member/u,
+    );
+  } finally {
+    fixture.cleanup();
   }
 });

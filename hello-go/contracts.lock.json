@@ -1,0 +1,10 @@
+{
+  "package": "ArcForges.Contracts.PublicApi",
+  "version": "1.0.0-ci.287.1",
+  "sha512": "8GhvcOg/Dn3Hi9/ooV0XJJzEMC5wLZG478XwSbgww4uctcTRLrC5yJh2Ugfw0XeDaXRvwu09CP9bLfCSv6QhJg==",
+  "sourceCommit": "ca45f36cccbdd31380f76b8f6cdecc958fdcb430",
+  "descriptorSha256": "8f441f66daa3fd8af580d1bddb4dd2c881d0f6336188f98caaaf5cb30fba619c",
+  "schema": "public/proto/arcforges/hello/v1/hello.proto",
+  "schemaSha256": "92489f89d1898a3d3bbea56c72116416cd0152ae8866c98745739437020c67d9",
+  "goPackage": "github.com/ArcForges/Cloud/hello-go/internal/gen/arcforges/hello/v1;hellov1"
+}
