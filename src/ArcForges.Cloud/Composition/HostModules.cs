@@ -101,13 +101,27 @@ internal sealed class IngressModule(IReadOnlyList<IHostModule> served) : IHostMo
 /// <summary>The anonymous Hello gRPC service, its gRPC-Web adapter and the health route, unchanged from the bootstrap host.</summary>
 internal sealed class HelloModule(JsonObject identity) : IHostModule
 {
-    public void Register(WebApplicationBuilder builder) =>
+    private string helloBackend = "stateless";
+
+    public void Register(WebApplicationBuilder builder)
+    {
+        var neon = NeonHelloOptions.FromEnvironment(Environment.GetEnvironmentVariable);
+        if (neon is not null)
+        {
+            helloBackend = "neon-postgresql";
+            builder.Services.AddSingleton<IHelloGreeting>(_ => new NeonHelloGreeting(neon));
+        }
+        else
+        {
+            builder.Services.AddSingleton<IHelloGreeting, StatelessHelloGreeting>();
+        }
         builder.Services.AddGrpc(options =>
         {
             options.EnableDetailedErrors = false;
             options.MaxReceiveMessageSize = 4091;
             options.MaxSendMessageSize = 4091;
         });
+    }
 
     public IEnumerable<RpcPolicy> RpcPolicies { get; } =
         [RpcPolicy.Unary("/arcforges.hello.v1.HelloService/SayHello", RpcAuthentication.Anonymous, RpcScope.None)];
@@ -122,7 +136,7 @@ internal sealed class HelloModule(JsonObject identity) : IHostModule
         var build = identity["build"]!.AsObject();
         var revision = build["sourceCommit"]!.GetValue<string>() + (build["dirty"]!.GetValue<bool>() ? "-dirty" : "");
         var health = new HealthStatus("arcforges-cloud", revision, !RuntimeFeature.IsDynamicCodeSupported,
-            identity["artifact"]!.AsObject(), build);
+            identity["artifact"]!.AsObject(), build, helloBackend);
         app.MapGet("/healthz", () => Results.Json(health, HealthJsonContext.Default.HealthStatus));
     }
 }

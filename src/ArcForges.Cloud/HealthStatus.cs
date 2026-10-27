@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace ArcForges.Cloud;
 
-public sealed record HealthStatus(string Service, string Revision, bool NativeAot, JsonObject Artifact, JsonObject Build);
+public sealed record HealthStatus(string Service, string Revision, bool NativeAot, JsonObject Artifact, JsonObject Build, string HelloBackend = "stateless");
 
 [JsonSerializable(typeof(HealthStatus))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
