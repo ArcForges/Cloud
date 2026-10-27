@@ -32,7 +32,9 @@ test("only the pooled runtime credential is staged and the secret file is remove
   let secretFile = "";
   await withNeonRuntimeSecret(secret, async (arguments_) => {
     assert.equal(arguments_[0], "--secrets-file");
-    secretFile = arguments_[1]!;
+    const file = arguments_[1];
+    assert.ok(file);
+    secretFile = file;
     assert.deepEqual(JSON.parse(await readFile(secretFile, "utf8")), {
       NEON_DATABASE_URL: fixture,
     });
@@ -45,7 +47,9 @@ test("a failed deployment also removes the temporary secret", async () => {
   let secretFile = "";
   await assert.rejects(
     withNeonRuntimeSecret({ NEON_DATABASE_URL: fixture }, async (arguments_) => {
-      secretFile = arguments_[1]!;
+      const file = arguments_[1];
+      assert.ok(file);
+      secretFile = file;
       throw new Error("synthetic provider failure");
     }),
     /synthetic provider failure/u,
