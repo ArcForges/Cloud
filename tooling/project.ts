@@ -83,7 +83,7 @@ export type WorkerConfig = {
   name: string;
   main: string;
   no_bundle?: boolean;
-  vars: { SOURCE_REVISION: string; BUILD_IDENTITY?: string };
+  vars: { SOURCE_REVISION: string; BUILD_IDENTITY?: string; ARCFORGES_NEON_HELLO?: string };
   containers: [
     {
       image: string;

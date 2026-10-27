@@ -221,7 +221,8 @@
           "ArcForges.Contracts.CloudInternal": "[1.0.0-ci.287.1, )",
           "ArcForges.Contracts.PublicApi": "[1.0.0-ci.287.1, )",
           "Grpc.AspNetCore": "[2.84.0, )",
-          "Grpc.AspNetCore.Web": "[2.84.0, )"
+          "Grpc.AspNetCore.Web": "[2.84.0, )",
+          "Npgsql": "[10.0.3, )"
         }
       },
       "arcforges.cloud.generation": {
@@ -403,6 +404,12 @@
         "dependencies": {
           "Grpc.Net.Common": "2.84.0"
         }
+      },
+      "Npgsql": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.3, )",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
       }
     }
   }

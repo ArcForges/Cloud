@@ -63,10 +63,26 @@ test("the production Container class registers exactly the ai.internal outbound 
   );
 });
 
-test("the production Container class has no constructor, environment hook or foundation import", () => {
-  assert.deepEqual(Object.getOwnPropertyNames(CloudContainer.prototype), ["constructor"]);
-  const source = CloudContainer.toString();
-  assert.doesNotMatch(source, /constructor|envVars|containerEnvironment|Foundation/u);
+test("the production Container forwards only Neon configuration and keeps proof classes isolated", () => {
+  const environment = {
+    ARCFORGES_NEON_HELLO: "enabled",
+    NEON_DATABASE_URL: "synthetic-runtime-secret",
+    NEON_DATABASE_URL_DIRECT: "never-forward",
+    HMAC_C2W_SECRET: "never-forward",
+  };
+  const enabled = new CloudContainer(containerContext, environment);
+  assert.equal(enabled.enableInternet, true);
+  assert.deepEqual(enabled.envVars, {
+    ARCFORGES_NEON_HELLO: "enabled",
+    NEON_DATABASE_URL: "synthetic-runtime-secret",
+  });
+  assert.throws(
+    () => new CloudContainer(containerContext, { ARCFORGES_NEON_HELLO: "enabled" }),
+    /configuration/u,
+  );
+  const proof = new FoundationContainer(containerContext, environment);
+  assert.equal(proof.enableInternet, false);
+  assert.deepEqual(proof.envVars, {});
 });
 
 test("the production Container keeps the Hello settings and no environment variables", () => {

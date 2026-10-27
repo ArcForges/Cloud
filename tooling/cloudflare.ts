@@ -5,6 +5,7 @@ import path from "node:path";
 import { candidateDir, readJson, root, run, wrangler, writeJson } from "./process.ts";
 import { verifyCandidate, type WorkerConfig } from "./project.ts";
 import { runProbe, waitForHealth } from "./protocol.ts";
+import { neonRuntimeSecret, withNeonRuntimeSecret } from "./neon-runtime.ts";
 
 import { expectedIdentity, verifyHealthIdentity } from "./build-identity.ts";
 
@@ -66,6 +67,11 @@ async function deploy() {
     process.env.CLOUDFLARE_API_TOKEN,
     "Set the CLOUDFLARE_API_TOKEN environment secret; see docs/deployment.md.",
   );
+  const runtimeSecret = neonRuntimeSecret(
+    (await readJson<WorkerConfig>(path.join(candidateDir, "wrangler.json"))).vars
+      .ARCFORGES_NEON_HELLO,
+    process.env,
+  );
   await requireCurrentMain(candidate.revision);
   // CLOUD.70: nothing is pushed or promoted unless the gated D1 migration step passed for this very candidate
   // (a failing or missing step stops promotion; the workflow step before this one writes the record).
@@ -97,21 +103,23 @@ async function deploy() {
   config.containers[0].image = imageDigest;
   await writeJson(path.join(root, "artifacts", "deploy.wrangler.json"), config);
   await requireCurrentMain(candidate.revision);
-  await run(process.execPath, [
+  const deployArguments = [
     wrangler,
     "deploy",
     "--config",
     "artifacts/deploy.wrangler.json",
     "--no-bundle",
-    // An explicit empty environment selects the top-level (production) Worker and keeps Wrangler from
-    // warning that the proof environment exists in the same file.
+    // An explicit empty environment selects the top-level (production) Worker.
     "--env",
     "",
     "--containers-rollout",
     "immediate",
     "--tag",
     candidate.version,
-  ]);
+  ];
+  await withNeonRuntimeSecret(runtimeSecret, async (secretArguments) => {
+    await run(process.execPath, [...deployArguments, ...secretArguments]);
+  });
   await writeJson(deploymentFile, {
     revision: candidate.revision,
     version: candidate.version,

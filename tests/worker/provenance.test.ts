@@ -392,3 +392,15 @@ test("reject ambiguous JSON, unsafe paths and invalid UTF-8 text", () => {
   assert.throws(() => hash(Buffer.from([255]), "lf"));
   assert.equal(hash(Buffer.from("a\r\nb\n"), "lf"), hash(Buffer.from("a\nb\n")));
 });
+
+test("the exact Npgsql licence is admitted while unknown licence claims remain refused", () => {
+  const record = JSON.parse(
+    readFileSync(
+      path.join(owner, "eng/provenance/records/npgsql-postgresql-legal-r1.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(validateRecord(record).id, "npgsql-postgresql-legal-r1");
+  record.licence.spdx = "Unreviewed-Database-License";
+  assert.throws(() => validateRecord(record), /Unreviewed licence/u);
+});

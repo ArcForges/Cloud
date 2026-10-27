@@ -1,21 +1,38 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The production Container class (CLOUD.84 D1): the Hello class plus one outbound host, ai.internal, the thin Workers AI transport of
-// HAR.40. It is a lifecycle adapter in the foundation folder rather than in an entry, so the production entry (worker/index.ts), which
-// exports it, and the proof entry (worker/proof/entry.ts), which extends it, both import it, and nothing imports an entry. It has no
-// environment hook, and enableInternet stays false, so the container reaches nothing but the exact virtual host registered below.
+// Only the explicitly enabled production Hello passes a Neon credential and enables TCP egress.
+// Proof subclasses keep their closed outbound policy and their own environment hook.
 import { Container, type OutboundHandler } from "@cloudflare/containers";
 import { aiInternalOutbound } from "../ai/internal/outbound.ts";
 import { containerSleepAfter } from "../tables/cloud-tables.generated.ts";
+
+interface NeonEnvironment {
+  ARCFORGES_NEON_HELLO?: string;
+  NEON_DATABASE_URL?: string;
+}
 
 export class CloudContainer extends Container {
   override defaultPort = 8080;
   override sleepAfter = containerSleepAfter;
   override enableInternet = false;
+
+  constructor(ctx: ConstructorParameters<typeof Container>[0], env: object) {
+    super(ctx, env);
+    if (new.target !== CloudContainer) return;
+    const neon = env as NeonEnvironment;
+    const enabled = neon.ARCFORGES_NEON_HELLO;
+    if (enabled === undefined || enabled === "" || enabled === "disabled") return;
+    if (enabled !== "enabled" || !neon.NEON_DATABASE_URL)
+      throw new Error("Neon Hello runtime configuration is missing or invalid.");
+    // Native PostgreSQL TCP is not handled by the HTTP outbound proxy. This is a deliberate
+    // production-only egress change; allowedHosts would NOT restrict TCP port 5432.
+    this.enableInternet = true;
+    this.envVars = {
+      ARCFORGES_NEON_HELLO: enabled,
+      NEON_DATABASE_URL: neon.NEON_DATABASE_URL,
+    };
+  }
 }
 
-// Assigned (not declared as a static field) so the base class setter registers the handler under
-// the production class name only. The proof class in worker/proof/entry.ts extends this class and
-// registers its own handlers under its own name.
 CloudContainer.outboundByHost = {
   "ai.internal": aiInternalOutbound as OutboundHandler,
 };
