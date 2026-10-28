@@ -110,9 +110,14 @@ executable:
   session ends) rolls back and releases the lock.
 - After the migrations the runner reconciles the runtime role's grants (below).
 - `migrate status` and `migrate plan` report without the lock and without changing anything.
-- The output is one JSON document on stdout: the database, the roles, the state (`uninitialized`, `pending`, `current` or
-  `refused`), the applied versions with their checksums, the pending names, the migrations run and their durations, and any
-  problems. Log lines go to stderr. Neither ever holds a credential.
+- The output is one JSON document on stdout: the database, the roles, the server's `server_version_num` (`serverVersionNum`,
+  for example `180004` for PostgreSQL 18.4), the state (`uninitialized`, `pending`, `current` or `refused`), the applied
+  versions with their checksums, the pending names, the migrations run and their durations, and any problems. Log lines go to
+  stderr. Neither ever holds a credential. The output also names the tested major (`testedMajor`, 18: the integration tests and
+  the restore drill run `postgres:18-alpine`, PostgreSQL 18.4) and whether the server's major matches it
+  (`serverMajorMatchesTested`); a mismatch is logged as a warning, not refused. It records the logging settings too (`logging`: `pg_stat_statements.track`, `log_statement`,
+  `log_min_duration_statement`). The repository records no Neon major; each
+  deployment's gate record does.
 
 A merged migration is never edited or removed: a change is a new migration, written as expand and contract (below). A migration
 that cannot run in a transaction (for example `CREATE INDEX CONCURRENTLY`) is not supported.
@@ -123,7 +128,7 @@ that cannot run in a transaction (for example `CREATE INDEX CONCURRENTLY`) is no
 | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | Migration role                                                                           | Owns the schemas and tables; needs `CREATEROLE` (and `CREATEDB` for `admin ensure-database`), which Neon's owner role has through `neon_superuser`                                                                                                                                                   | The direct (unpooled) URL: `ARCFORGES_CENTER_MIGRATION_DATABASE_URL` |
 | Runtime group role (`ARCFORGES_CENTER_RUNTIME_ROLE`, default `arcforges_center_runtime`) | `NOLOGIN`, no elevated attribute, member of no role; `USAGE` on the module schemas it uses and exactly the table privileges of `center/internal/schema` (`RuntimeGrants`); no `DELETE`, `TRUNCATE`, DDL, `CREATE` on the database or on `public`; `CONNECT` on the center's database, no `TEMPORARY` | none                                                                 |
-| Login roles `<group>_a`, `<group>_b`                                                     | `LOGIN`, `INHERIT`, `CONNECTION LIMIT 16`, members of the runtime group only, no grant of their own                                                                                                                                                                                                  | The pooled URL: `ARCFORGES_CENTER_DATABASE_URL`                      |
+| Login roles `<group>_a`, `<group>_b`                                                     | `LOGIN`, `INHERIT`, `CONNECTION LIMIT 16`, members of the runtime group only (from PostgreSQL 16 `WITH INHERIT TRUE`), no grant of their own                                                                                                                                                         | The pooled URL: `ARCFORGES_CENTER_DATABASE_URL`                      |
 
 On every run, `migrate` creates the group role if it is missing. It refuses a group role that can log in, has an elevated
 attribute or is a member of another role. It revokes everything from `PUBLIC` and from the group on the module schemas, their
@@ -146,15 +151,36 @@ checks that `PUBLIC` holds neither privilege and that the runtime role can conne
 migration role must own the database: another role's revocation would be ignored, and the check refuses the run. The owner keeps
 its own rights.
 
-- **Who else connects.** The C# rollback path and the C# Hello connect with `NEON_DATABASE_URL`, which
-  [Neon Hello](neon-hello.md) records as the provisioned Neon owner credential (`src/ArcForges.Cloud/NeonHello.cs` reads user
-  and database from it). The owner's rights do not depend on `PUBLIC`, so that path keeps working. If `NEON_DATABASE_URL` ever
-  named a role that is not the database owner, that role would need `GRANT CONNECT` on the database before the C# rollback is
-  used.
-- **What remains.** Databases the center does not own (for example a branch's `postgres` database) keep their owners' settings:
-  a runtime role may connect there but holds no privilege on their tables.
-- **The pooler.** The rotation's pooled probe connects through the Neon pooler with the new credential before promotion. Had
-  the revocation broken pooler logins, the deployment would stop there and the running revision would stay.
+- **Who connects.** The center's database admits only its owner and the runtime group. Nothing is granted to
+  `neon_superuser` or to any other role.
+  - The C# rollback path and the C# Hello connect with `NEON_DATABASE_URL`, which [Neon Hello](neon-hello.md) records as the
+    provisioned Neon owner credential (`src/ArcForges.Cloud/NeonHello.cs` reads user and database from it). The owner's rights
+    do not depend on `PUBLIC`. The deployment's migration step checks it before anything runs: it compares the role name (and,
+    for production, the database name) of `NEON_DATABASE_URL` with those of the migration URL and refuses when the roles
+    differ, because the revocation would lock that role out until it is granted `CONNECT` ([Deployment](#deployment)). The live
+    revision at the merge of this store still uses that credential.
+  - **Neon roles that may lose access.** Neon system roles whose `neon_superuser` membership is undocumented may no longer
+    connect to the center's databases: `web_access` (older documentation: the SQL Editor and passwordless login), the Data API's
+    `authenticator` and Managed Better Auth. ArcForges uses none of them; use the SQL Editor as the owner role.
+  - **Self-hosted poolers.** A PgBouncer whose `auth_user` is not a superuser, and whose auth query connects to the center's
+    database, fails after this revocation ("pgbouncer cannot connect to server"; CrunchyData postgres-operator issue #2800).
+    Grant the pooler's auth role `CONNECT ON DATABASE <db>`. That adds one role that can connect to the center's database; it
+    holds no table privilege there, and runtime roles of other centers stay excluded as long as they are not members of it.
+    Neon avoids the failure only because its PgBouncer's `auth_user` is `cloud_admin`, a superuser, with `auth_dbname=postgres`.
+    That comes from Neon's open-source compute configuration, not from documented behaviour; Neon does not publish its
+    production auth lines.
+- **What remains.** The runtime login roles can still connect to databases the migration role does not own, such as Neon's
+  `postgres` database (owned by `cloud_admin`). They hold no table privileges there.
+- **The proof.** Before promotion, the rotation checks that the login role inherits the runtime group
+  (`pg_has_role(…, 'USAGE')`) and may connect (`has_database_privilege(…, 'CONNECT')`). It then opens one unpooled connection
+  as the login role: only a server login to the center's database exercises `CONNECT`, and a direct connection always starts a
+  new backend. The pooled probe proves the login through the Neon pooler, but its success says nothing about the revocation:
+  the pooler's auth lookup goes to `postgres`, and it could answer with a server connection opened before the revocation.
+- **If the revocation broke logins.** `migrate` revokes before any probe runs, so a revocation that broke Neon pooler logins
+  would also break the running revision, not only stop the deployment. It should not happen: Neon's PgBouncer runs its auth
+  lookup as `cloud_admin` in the `postgres` database, and Neon's proxy logs in as the client role (Neon's open-source compute;
+  the production configuration is not published). Recovery: as the owner in the Neon SQL Editor,
+  `GRANT CONNECT ON DATABASE <db> TO PUBLIC`, then re-run the deployment and report the failure.
 
 ### Runtime credential rotation
 
@@ -163,11 +189,14 @@ migration lock, and has five steps:
 
 1. It picks the slot other than the most recently promoted one (`a` when none was promoted) and sets a new password on its
    login role, creating that role and its membership if needed. A slot rotated by a deployment that was never promoted is
-   simply rotated again; the most recently promoted slot, which the running revision uses, is never touched.
+   simply rotated again; the most recently promoted slot, which the running revision uses, is never touched. From PostgreSQL
+   16 the membership is granted `WITH INHERIT TRUE`, which also corrects an existing membership that does not inherit. The
+   rotation then checks that the login role inherits the runtime group and may connect.
 2. It records the rotation in `platform.runtime_credential` as not yet promoted (`promoted_at` cleared).
 3. It composes the pooled runtime URL. For Neon it derives the `-pooler` endpoint from the direct host; any other host is kept,
    or `ARCFORGES_CENTER_RUNTIME_POOLED_HOST` names one.
-4. Through that URL it proves that the new credential:
+4. One unpooled connection as the login role proves `CONNECT` on a new backend. Through the pooled URL it then proves that
+   the new credential:
    - connects as the login role to the center's database;
    - reads a granted table;
    - can neither create a table, nor a temporary table, nor read an ungranted one.
@@ -183,20 +212,84 @@ password was confirmed keeps its time. It refuses a slot other than `a` or `b` (
 (exit 1). The deployment runs it only after `wrangler deploy` succeeded.
 
 So a failed deployment, retried any number of times, rotates only its own unpromoted slot, and the running revision keeps its
-credential. One narrow window remains: if the confirmation fails after a successful promotion (three attempts with a growing
-delay), the record is behind the live revision, and the next rotation would set a new password on the live slot. The deployment
-command then exits non-zero with a message naming the slot and the recovery: before the next deployment, run
-`admin confirm-runtime-credential --slot <slot>` with the migration role's direct URL, or as the owner in the Neon SQL editor
-`UPDATE platform.runtime_credential SET promoted_at = now() WHERE slot = '<slot>' AND promoted_at IS NULL`. Without that, the
-running revision's new connections would fail from the next rotation until that deployment is promoted.
+credential.
+
+**The live slot comes from Cloudflare.** A confirmation can still be lost: the job is cancelled or times out between
+`wrangler deploy` and the confirmation, or the confirmation fails and someone simply re-runs the deployment. So the deployment
+does not trust the record alone:
+
+- Every Worker version it publishes carries its slot in the version message, `runtime-slot=<a|b>` (`wrangler deploy --message`).
+  The message is visible to the account's Cloudflare users only, never on a public route: health does not report the slot.
+- Before rotating, it reads the live versions with the pinned Wrangler's machine-readable output, using the same token and
+  environment as the deployment: `wrangler deployments status --json` (the live versions and their percentages), then
+  `wrangler versions view <id> --json` (the annotation `workers/message`).
+- If the live version is labelled, it first confirms that slot (self-heal; idempotent), then rotates with
+  `admin rotate-runtime-credential --live-slot <slot>`, which takes the other slot whatever the record says.
+- If the live version carries no label (the first deployment of the store; the live revision then uses no runtime
+  credential) or cannot be read, the record decides, and the job log says so.
+- If several versions are live on different slots, or on a labelled and an unlabelled credential (a gradual rollout), it
+  refuses to rotate.
+
+A confirmation that keeps failing after a successful promotion (three attempts with a growing delay) still fails the
+deployment command, naming the slot. The next deployment then reads the live slot and repairs the record before rotating. Only
+if Cloudflare cannot be read at that moment would it rotate the live slot, breaking the running revision's new connections
+until that deployment is promoted. To close that gap by hand, before the next deployment: run
+`admin confirm-runtime-credential --slot <slot>` with the migration role's direct URL, or as the owner in the Neon SQL Editor
+`UPDATE platform.runtime_credential SET promoted_at = now() WHERE slot = '<slot>' AND promoted_at IS NULL`.
 
 The password has 40 base64url characters (240 random bits), with lowercase, uppercase, a digit and a symbol and no character
-three times in a row. Neon requires at least 60 bits of entropy and accepts no pre-hashed (SCRAM) password, so the password
-travels inside the `ALTER ROLE` statement over the verified TLS connection. It is never printed, logged or returned except
-inside the URL written to the secret file, and an error of that statement reports its SQLSTATE only. Neon's documentation does
-not state whether roles created with SQL can connect through its pooler. The rotation's pooled probe establishes it on every
-deployment, before promotion: if the pooler refused the role, the deployment would stop there and the running revision would
-stay.
+three times in a row. Neon requires at least 60 bits of entropy. The password is returned only inside the URL written to the
+secret file, and the center never prints or logs it.
+
+**How the secret reaches the server.** Neither the password nor a verifier ever appears in statement text, in a bind parameter
+or in an error:
+
+- The rotation loads the secret into a temporary table (`ON COMMIT DROP`) with binary `COPY FROM STDIN`, so the value travels
+  in CopyData messages.
+- A temporary PL/pgSQL function reads it from that table and runs `CREATE ROLE` or `ALTER ROLE … PASSWORD` with `EXECUTE`. The
+  call is `SELECT pg_temp.arcforges_set_login($1, $2, $3)`, whose arguments are only the role name, the connection limit and
+  whether to create the role.
+- `pg_stat_statements` with `track = 'top'` (its default, which only a superuser can change) records top-level statements only:
+  the `COPY`, the function's definition and the call, never the nested role statement.
+  - The rotation reads `pg_stat_statements.track` first and refuses `all`.
+  - It records that value, with `log_statement` and `log_min_duration_statement`, in its output; `migrate` records them in the
+    gate record.
+  - The log settings are not refused: a logged statement text (`log_statement` `all` or `mod`, or a duration line with its
+    parameters) holds no secret.
+- The function's exception handler re-raises with the SQLSTATE and the fixed message `login role update failed`, so the dynamic
+  statement never reaches an error's context, the client or the server log.
+- **Tests.** They run on PostgreSQL 18.4 with `pg_stat_statements` preloaded, `log_statement = 'all'` and
+  `log_min_duration_statement = 0`, and check that:
+  - no `pg_stat_statements` row and no server log line holds the password or the verifier;
+  - a forced failure's error and context fields hold neither (without the handler they would);
+  - `track = 'all'` refuses the rotation.
+
+What the secret is depends on one predicate, the one that derives the `-pooler` host (`provision.NeonHost`: a host
+`ep-….<region>….neon.tech`):
+
+- **Self-hosted (any other host): only a verifier leaves the center.** The rotation computes a SCRAM-SHA-256 verifier
+  client-side: `SCRAM-SHA-256$4096:<salt>$<StoredKey>:<ServerKey>` (standard base64) with a random 16-byte salt.
+  - SaltedPassword is PBKDF2-HMAC-SHA-256 (`crypto/pbkdf2`). ClientKey and ServerKey are HMAC-SHA-256 of it with `Client Key`
+    and `Server Key`, and StoredKey is SHA-256 of ClientKey.
+  - SASLprep is the identity on the generated alphabet, which the code asserts.
+  - PostgreSQL stores a verifier as it is.
+  - Tests check that the stored secret is the verifier of the runtime password, that a SCRAM login with the password succeeds,
+    and that the verifier equals PostgreSQL's own for the same salt.
+- **Neon: the password itself.** Neon does not support hashed passwords ("Passwords must be supplied in plain text but are
+  encrypted when stored. Hashed passwords are not supported.", neon.com/docs/manage/roles). What remains by design:
+  - Neon's compute forwards the nested role statement to Neon's control plane on commit, through its DDL forwarding (the 60-bit
+    entropy check and the control-plane synchronization). The project setting `store_passwords` governs whether Neon keeps the
+    password.
+  - The client's TLS session ends at Neon's proxy, which routes by SNI. So the proxy sees everything the rotation sends, the
+    `COPY` data included, and the rotation is not protected end to end to Postgres.
+  - Neon documents neither `log_statement` nor `log_min_duration_statement`. The rotation records both; neither can expose the
+    secret, which is in no statement text or parameter.
+  - A `neon_superuser` member cannot set `pg_stat_statements.track` or `log_statement` (`42501`). The rotation therefore sets
+    neither and only reads them.
+
+Neon's documentation does not state whether roles created with SQL can connect through its pooler. The rotation's pooled probe
+establishes it on every deployment, before promotion: if the pooler refused the role, the deployment would stop there and the
+running revision would stay.
 
 ## Deployment
 
@@ -207,15 +300,23 @@ The protected main-push deployment (`.github/workflows/ci.yml`, job `deploy`, Gi
    - It loads the sealed candidate image, checks its id and runs the image's own `arcforges-center migrate`.
    - The executable runs in a read-only container without capabilities and with `no-new-privileges`.
    - It connects with `NEON_DATABASE_URL_DIRECT`, which Docker receives by variable name, never on a command line.
-   - It writes `artifacts/postgres-gate-production.json`: target, revision, status, database, version, the migrations applied and
-     the runtime role. No credential is in it, and it is kept as deployment evidence.
+   - Before anything runs it compares `NEON_DATABASE_URL` (the C# Hello's credential) with the migration URL: the same role
+     (and, here, the same database) passes; another role refuses the step, because the revocation of `PUBLIC`'s `CONNECT`
+     would lock that role out until it is granted `CONNECT`; an absent variable is skipped and recorded. Acceptance, which has
+     its own database, compares the role only, and only when its job carries the variable (today it does not). Neither value
+     is printed.
+   - It writes `artifacts/postgres-gate-production.json`: target, revision, status, database, version, the migrations applied,
+     the runtime role, `serverVersionNum`, the tested major and whether the server's major matches it (a mismatch is a warning
+     in the record and the log, not a failure), the logging settings, and the result of the `NEON_DATABASE_URL` comparison. No credential is in it,
+     and it is kept as deployment evidence.
 3. **`npm run deploy`** (`tooling/cloudflare.ts`):
    - It refuses without both passed gate records for this candidate.
    - It loads and pushes the image.
-   - It rotates the runtime credential with the image's `admin rotate-runtime-credential`. The secret file goes to a private
-     directory under the runner's temporary directory, outside every artifact directory.
+   - It reads the live version's runtime slot from Cloudflare and rotates the other slot with the image's
+     `admin rotate-runtime-credential` ([rotation](#runtime-credential-rotation)). The secret file goes to a private directory
+     under the runner's temporary directory, outside every artifact directory.
    - It uploads the file with the Worker version (`--secrets-file`, together with the C# rollback path's unchanged
-     `NEON_DATABASE_URL`) and removes the directory, whatever happens.
+     `NEON_DATABASE_URL`), labels the version `runtime-slot=<slot>` (`--message`) and removes the directory, whatever happens.
    - Only after `wrangler deploy` succeeded, it confirms the slot with the image's `admin confirm-runtime-credential`, retried
      up to three times; a confirmation that keeps failing fails the command with the recovery above.
    - The Container passes `ARCFORGES_CENTER_DATABASE_URL` to the Go center, which then reads the Hello greeting through the runtime
@@ -313,12 +414,25 @@ Alert conditions for AF-OPS-01:
 
 ## Recovery
 
-- **Neon history retention.** Neon restores a branch to any point within the project's history retention window (point-in-time
-  restore through a branch).
-  - This repository has no Neon API credential, so the window is not read here.
-  - The operator reads it, read-only, in the Neon console (project settings, history retention) or with
-    `GET /api/v2/projects/{project_id}` (`history_retention_seconds`), and records it on the delivery.
-  - Changing it is an owner decision.
+- **Neon history window and instant restore.** Neon's instant restore (point-in-time restore) returns a branch to any moment
+  within the project's history window.
+  - **Where to read the window.** This repository has no Neon credential, so it does not read the window. The operator reads
+    it read-only:
+    - in the Console, under Settings → Instant restore (Neon's pages also call it the History window);
+    - through the API, `GET /api/v2/projects/{project_id}`, field `history_retention_seconds` (needs a Neon credential);
+    - with the CLI, `neon projects get`.
+  - **The human action** records three values on the delivery: `history_retention_seconds`, `pg_version` and the plan.
+  - **Choosing the window** is an owner decision. Neon recommends 7 days for production; the paid plans' default is 1 day.
+  - **Limits of instant restore:**
+    - it works only on root branches and only inside the window;
+    - it overwrites every database on the branch. `arcforges_acceptance` is on the production branch: it is reached through the
+      same direct endpoint (`NEON_DATABASE_URL_DIRECT`), and a Neon endpoint belongs to one branch. A production restore
+      always rewinds acceptance too;
+    - whether it reverts the rotated runtime role passwords is unknown. The restored `pg_authid` holds the older passwords,
+      but Neon forwards `ALTER ROLE … PASSWORD` to its control plane, and the compute re-applies the control plane's stored
+      verifier when it starts, so the newest password may be pushed back. Neon documents neither outcome. So rotate and
+      redeploy right after any restore.
+  - **Beyond the window**, snapshot schedules (paid plans, up to 35 days) keep restore points.
 - **Logical backup restore drill.** It runs on every Linux verification leg (`python eng/center.py check`, step
   `restore-drill`):
   1. Migrate a database with the native executable and rotate its runtime credential.
