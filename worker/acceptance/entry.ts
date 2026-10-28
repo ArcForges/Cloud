@@ -13,7 +13,7 @@ import {
   CloudContainer,
   type CenterEnvironment,
 } from "../foundation/cloud-container.ts";
-import production from "../index.ts";
+import { routeRequest, type CloudBindings } from "../router.ts";
 
 export { ContainerProxy };
 
@@ -40,4 +40,8 @@ export class HarnessRunAlarm extends DurableObjectBase {
   async alarm(): Promise<void> {}
 }
 
-export default production;
+/** The production Worker's routing, as worker/index.ts exports it (no module imports the Worker entry itself). */
+export default {
+  fetch: (request: Request, env: CloudBindings, context: ExecutionContext) =>
+    routeRequest(request, env, context),
+};

@@ -257,7 +257,18 @@ test("the acceptance entry runs the Go center under the proof Container class an
     "synthetic-runtime-credential",
   );
   assert.equal((container.envVars as Record<string, string>).NEON_DATABASE_URL, undefined);
-  assert.equal(acceptance.default, ((await import(workerModule)) as { default: unknown }).default);
+  // The acceptance entry routes like the production entry without importing it (layer-entry: nothing imports the Worker entry).
+  assert(source.includes('from "../router.ts"') && !source.includes("../index.ts"));
+  type Entry = { fetch(request: Request, env: never, context: never): Promise<Response> };
+  const production = ((await import(workerModule)) as { default: Entry }).default;
+  for (const entry of [acceptance.default as Entry, production]) {
+    const response = await entry.fetch(
+      new Request("https://proof.arcforges.com/not-a-route"),
+      {} as never,
+      { waitUntil() {} } as never,
+    );
+    assert.equal(response.status, 404);
+  }
   for (const Retained of [FoundationJobCoordinator, HarnessRunAlarm]) {
     const instance = new Retained({ storage: {} }, {});
     assert.equal((instance as { fetch?: unknown }).fetch, undefined, "no fetch handler");
