@@ -516,6 +516,12 @@ needs `sslmode=require` or `verify-full` (upgraded to `verify-full`) and `channe
 | Hello's own Neon pool | 2, only while no store is configured (the C# rollback has its own)                               | `internal/config`                                        |
 | Neon pooler           | transaction mode, up to 10,000 clients, server pool 90 % of `max_connections` (not configurable) | Neon                                                     |
 
+The identity surface (AF-CTR-03) keeps the runtime pool at four. Its calls hold short transactions only: a rate-limit count and a
+flow attempt are each their own transaction before the work, no transaction is open while PBKDF2, WebAuthn or the mail provider
+runs, and a success transaction ends with its audit event; the per-call counts are in
+[accounts, sessions and devices](center-identity.md#transactions-per-request). The owner bootstrap's creating transaction takes a
+transaction-scoped advisory lock (`pg_advisory_xact_lock`), which the transaction pooler admits.
+
 ## Observability and alert conditions
 
 These are exposed today:
@@ -532,6 +538,10 @@ These are exposed today:
   - `arcforges_center_db_pool_acquire_seconds_total{pool}`;
   - `arcforges_center_db_schema_version{source}` (database, build).
 - **Migrations:** the deployment's gate record and the job log hold each migration's name, checksum and duration.
+- **Identity surface** (AF-CTR-03): `arcforges_center_identity_events_total{event,outcome}` counts sign-in stages
+  (`sign_in_begin` by method, `sign_in_complete` succeeded or refused), refreshes (rotated, refused, reused), rate-limit refusals
+  by bucket kind (`rate_limited`), bootstrap outcomes and e-mail deliveries (`email_send` sent or failed); the periodic metrics log
+  line carries them.
 
 Alert conditions for AF-OPS-01:
 
@@ -541,6 +551,9 @@ Alert conditions for AF-OPS-01:
 - a failed migration or rotation step of the deployment job;
 - dead-lettered outbox rows or jobs (`state = 3` in `platform.outbox`, `state = 4` in `platform.job_lease`). This needs a
   metric of AF-PLAT-01's sweeps; until then it is a query.
+- identity: any `refresh` `reused` (a stolen or replayed refresh token), `rate_limited` growing for one bucket kind (an attack
+  or a misconfigured client), `bootstrap` outcomes other than `completed` on a deployment that has an owner, `email_send` `failed`,
+  and `access.refused` audit events (a node, push or automation credential calling account methods).
 
 ## Recovery
 

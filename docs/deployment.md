@@ -40,6 +40,13 @@ PostgreSQL database and runtime role, and the C# proof routes no longer deployed
 
 The production Container runs the Go center (`/app/arcforges-center`, [center](center.md)); `wrangler.json` selects it with `ARCFORGES_HELLO_RUNTIME=go` and states its explicit mode and public base URL (`ARCFORGES_CENTER_MODE=official-hosted`, `ARCFORGES_CENTER_PUBLIC_BASE_URL=https://arcforges.com/api`), which the Container class passes through unchanged; the center refuses to start without them. In official-hosted mode no gated feature is enabled until the plan configuration exists (AF-CTR-03); Hello and health are not gated. The runtime secrets are the runtime role's pooled URL `ARCFORGES_CENTER_DATABASE_URL`, rotated by every deployment and passed to the Go center, which reads the Hello greeting through it, and the Hello's pooled `NEON_DATABASE_URL`, which only the C# rollback path receives (`tooling/neon-runtime.ts`). The migration role's `NEON_DATABASE_URL_DIRECT` stays in the deployment job and never reaches the Worker or the Container. The deployment token is a GitHub CI credential, not an application credential and not forwarded into the Container. The C# Native AOT executable stays in the image as its default entrypoint and as the Hello rollback (`ARCFORGES_HELLO_RUNTIME=csharp` through a reviewed main push).
 
+The `identity` surface (AF-CTR-03, [accounts, sessions and devices](center-identity.md#surface-switch)) is switched by
+`FLAGSHIP_SURFACES`: production carries `""` (no surface; Hello only), the acceptance environment `identity` with `ALLOWED_ORIGIN`
+set to its own origin. The Worker passes the parsed list to the Container as `ARCFORGES_CENTER_SURFACES` and always
+`ARCFORGES_CENTER_CLIENT_IP_HEADER`; a disabled surface is answered at the edge without waking the Container. Both environments bind
+an `IDENTITY_RATE_LIMITER` (60 per minute per location and address) for the surface methods. No bootstrap or mail value is ever in
+`wrangler.json`; e-mail delivery stays disabled in every environment.
+
 Structural cost bounds stay in configuration: one `lite` Container instance (`max_instances: 1`), a 60-second idle `sleepAfter`, a 50 ms Worker CPU limit, the per-location Hello rate limit, at most 64 connections per center listener and a runtime database pool of four ([center](center.md#hosted-deployment), [PostgreSQL store](postgres-store.md#connection-budgets)).
 
 Anyone can construct a valid Hello request. Rate limiting is per Cloudflare location and IP, not authorization or a hard spending cap. A single lite instance, idle sleep, request limits and disabled egress reduce exposure; sustained traffic can still keep it running and incur Worker/Container charges. Configure Cloudflare usage alerts and inspect logs/metrics.
