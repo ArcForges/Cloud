@@ -222,13 +222,20 @@ def center_command(executable: Path, server: Postgres, owner_password: str, runt
     return json.loads(result.stdout)
 
 
-def rotate(executable: Path, server: Postgres, owner_password: str, runtime_role: str) -> str:
-    """Rotates the drill's runtime credential and returns the runtime URL (the secret file is removed at once)."""
+def rotate(executable: Path, server: Postgres, owner_password: str, runtime_role: str) -> tuple[str, str]:
+    """Rotates the drill's runtime credential and confirms its slot as the deployment does after a promotion; returns the runtime
+    URL (the secret file is removed at once) and the slot."""
     with tempfile.TemporaryDirectory() as directory:
         secret_file = Path(directory) / "runtime.json"
-        center_command(executable, server, owner_password, runtime_role, "admin", "rotate-runtime-credential", secret_file=secret_file)
+        rotation = center_command(executable, server, owner_password, runtime_role, "admin", "rotate-runtime-credential",
+                                  secret_file=secret_file)
         runtime_url = json.loads(secret_file.read_text(encoding="utf-8"))["ARCFORGES_CENTER_DATABASE_URL"]
-    return runtime_url
+    slot = str(rotation["slot"])
+    confirmation = center_command(executable, server, owner_password, runtime_role, "admin", "confirm-runtime-credential",
+                                  "--slot", slot)
+    if confirmation.get("slot") != slot or not confirmation.get("promotedAt"):
+        raise SystemExit("[center] the restore drill could not confirm its runtime credential")
+    return runtime_url, slot
 
 
 def drill_phase(phase: str, runtime_url: str) -> None:
@@ -241,8 +248,9 @@ def drill_phase(phase: str, runtime_url: str) -> None:
 
 def drill(executable: Path) -> dict[str, object]:
     """The logical-backup restore drill (docs/postgres-store.md): migrate and seed a database with the native executable and
-    the runtime credential, dump it with pg_dump, restore it into a second, isolated server, migrate and rotate there and run
-    the verify phase (receipt replay, outbox publication, job lease, audit chain) against the restored database."""
+    the runtime credential, dump it with pg_dump, restore it into a second, isolated server, migrate, rotate and confirm there
+    (the restored promotion record steers the rotation to the other slot) and run the verify phase (receipt replay, outbox
+    publication, job lease, audit chain) against the restored database."""
     dump = ARTIFACTS / "drill" / "center.dump"
     dump.parent.mkdir(parents=True, exist_ok=True)
     owner_password = secrets.token_hex(24)
@@ -253,7 +261,8 @@ def drill(executable: Path) -> dict[str, object]:
         migrated = center_command(executable, source, owner_password, "drill_runtime", "migrate")
         if migrated["state"] != "current":
             raise SystemExit("[center] the drill database did not migrate")
-        drill_phase("seed", rotate(executable, source, owner_password, "drill_runtime"))
+        seed_url, seed_slot = rotate(executable, source, owner_password, "drill_runtime")
+        drill_phase("seed", seed_url)
         with dump.open("wb") as output:
             dumped = subprocess.run(["docker", "exec", source.name, "pg_dump", "-U", "postgres", "--format=custom", "-d", "drill"],
                                     stdout=output, stderr=subprocess.PIPE)
@@ -272,8 +281,13 @@ def drill(executable: Path) -> dict[str, object]:
         reconciled = center_command(executable, target, owner_password, "drill_runtime", "migrate")
         if reconciled["state"] != "current" or reconciled.get("ran") or reconciled.get("grants") != "reconciled":
             raise SystemExit("[center] the restored database did not reconcile its runtime grants")
-        drill_phase("verify", rotate(executable, target, owner_password, "drill_runtime"))
-    return {"dumpBytes": dump.stat().st_size, "schemaVersion": status["version"], "phases": ["seed", "dump", "restore", "migrate", "verify"]}
+        # The restored record says slot a is promoted (the live revision's), so the restored database rotates slot b.
+        verify_url, verify_slot = rotate(executable, target, owner_password, "drill_runtime")
+        if (seed_slot, verify_slot) != ("a", "b"):
+            raise SystemExit(f"[center] the restore drill rotated slots {seed_slot} and {verify_slot}, expected a and b")
+        drill_phase("verify", verify_url)
+    return {"dumpBytes": dump.stat().st_size, "schemaVersion": status["version"], "slots": [seed_slot, verify_slot],
+            "phases": ["seed", "dump", "restore", "migrate", "verify"]}
 
 
 def check_fuzz() -> None:

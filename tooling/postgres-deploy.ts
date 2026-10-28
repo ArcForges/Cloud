@@ -4,9 +4,10 @@
 // connection: `admin ensure-database` for the acceptance database, then `migrate`, which applies the embedded migrations under the
 // migration lock and reconciles the runtime role's grants; the result is the gate record that promotion requires. At promotion the
 // runtime credential is rotated in the same process that uploads it as the Worker secret: the executable writes the pooled runtime
-// URL into a runner-local file outside the artifact directories, Wrangler uploads it, and the file is removed. No value of a
-// credential is printed, logged, written to an artifact or passed on a command line: Docker receives the variables by name from the
-// environment of its own process.
+// URL into a runner-local file outside the artifact directories, Wrangler uploads it, and the file is removed. Only after Wrangler
+// succeeded is the slot confirmed as promoted (`admin confirm-runtime-credential`), so a failed and retried deployment rotates the
+// unpromoted slot again and never the one the running revision uses. No value of a credential is printed, logged, written to an
+// artifact or passed on a command line: Docker receives the variables by name from the environment of its own process.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -34,7 +35,10 @@ export interface TargetSettings {
 
 /**
  * Production uses the database of the direct URL and the runtime role arcforges_center_runtime. The acceptance environment (the
- * `proof` Worker) has its own database and its own runtime role in the same Neon project, so neither credential reaches the other.
+ * `proof` Worker) has its own database (arcforges_acceptance) and its own runtime role in the same Neon project and branch. Each
+ * migration revokes CONNECT and TEMPORARY on its database from PUBLIC and grants CONNECT to its own runtime role only, so neither
+ * runtime credential can connect to the other environment's database (and neither holds any privilege on the other's tables). Both
+ * environments are migrated with the same owner credential (NEON_DATABASE_URL_DIRECT), which reaches both databases.
  */
 export const postgresTargets: Record<PostgresTarget, TargetSettings> = {
   production: { runtimeRole: "arcforges_center_runtime", ensureDatabase: false },
@@ -101,6 +105,14 @@ export function dockerArguments(
   args.push("--entrypoint", centerEntrypoint, image, ...command);
   return args;
 }
+
+/** Runs one command of the sealed executable and returns its JSON output (replaced by a fake in the offline tests). */
+export type CenterRunner = (
+  image: string,
+  variables: Record<string, string>,
+  command: string[],
+  options?: { user?: string; secretsDirectory?: string },
+) => Promise<Record<string, unknown>>;
 
 /** Runs the sealed executable with the variables in the docker CLI's environment and returns its JSON output. */
 async function center(
@@ -207,18 +219,84 @@ export async function readGate(target: PostgresTarget): Promise<GateRecord | und
   }
 }
 
+export interface CredentialOptions {
+  /** Runs the sealed executable; the default runs it in Docker. */
+  runner?: CenterRunner;
+  /** The deployment environment that holds the direct URL; the default is this process's environment. */
+  environment?: Readonly<Record<string, string | undefined>>;
+  /** Attempts of the confirmation after a successful promotion (default 3) and the delay before the second one (default 5 s). */
+  confirmAttempts?: number;
+  confirmDelayMs?: number;
+}
+
+/** The message of a confirmation that failed after the promotion: the slot, the state left behind and the recovery. */
+export function confirmationFailure(
+  target: PostgresTarget,
+  slot: string,
+  attempts: number,
+  reason: string,
+): string {
+  const settings = postgresTargets[target];
+  const database =
+    settings.databaseName === undefined
+      ? ""
+      : ` and ARCFORGES_CENTER_DATABASE_NAME=${settings.databaseName}`;
+  return [
+    `The ${target} Worker version is deployed with the runtime credential of slot ${slot}, but recording that promotion failed after ${attempts} attempts (${reason}).`,
+    `The runtime credential record is now behind the live revision: until slot ${slot} is confirmed, the next rotation would set a new password on the slot the live revision uses, and its new database connections would fail until that next deployment is promoted.`,
+    `Recover before the next deployment: run \`arcforges-center admin confirm-runtime-credential --slot ${slot}\` with the owner's direct URL in ARCFORGES_CENTER_MIGRATION_DATABASE_URL, ARCFORGES_CENTER_MODE=official-hosted, ARCFORGES_CENTER_RUNTIME_ROLE=${settings.runtimeRole}${database}, or, as the owner in the Neon SQL editor of that database, \`UPDATE platform.runtime_credential SET promoted_at = now() WHERE slot = '${slot}' AND promoted_at IS NULL\` (docs/postgres-store.md).`,
+  ].join(" ");
+}
+
+/**
+ * Records that the deployment carrying the slot's credential was promoted, with bounded retries; it throws the recovery message
+ * of confirmationFailure when every attempt failed.
+ */
+export async function confirmRuntimeCredential(
+  target: PostgresTarget,
+  image: string,
+  slot: string,
+  options: CredentialOptions = {},
+): Promise<Record<string, unknown>> {
+  assert.match(slot, /^[ab]$/u, "the rotation reported no slot");
+  const runner = options.runner ?? center;
+  const attempts = options.confirmAttempts ?? 3;
+  const delay = options.confirmDelayMs ?? 5000;
+  const variables = centerVariables(target, options.environment ?? process.env);
+  let reason = "";
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await runner(image, variables, [
+        "admin",
+        "confirm-runtime-credential",
+        "--slot",
+        slot,
+      ]);
+    } catch (error) {
+      // The executable's errors name no credential (its stderr is the job log).
+      reason = error instanceof Error ? error.message : String(error);
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delay * attempt));
+    }
+  }
+  throw new Error(confirmationFailure(target, slot, attempts, reason));
+}
+
 /**
  * Rotates the target's runtime credential with the loaded candidate image and hands the Worker secret to publish, which uploads
  * it; the runner-local file is removed afterwards whatever happens. The rotation proves through the pooled endpoint that the new
- * credential connects as its login role and can neither create a table nor read an ungranted one.
+ * credential connects as its login role and can neither create a table nor read an ungranted one. Only when publish succeeded
+ * is the slot confirmed as promoted; a failed publish leaves it unconfirmed, so the retry rotates it again.
  */
 export async function withRuntimeCredential(
   target: PostgresTarget,
   image: string,
   publish: (secrets: Record<string, string>) => Promise<void>,
+  options: CredentialOptions = {},
 ): Promise<Record<string, unknown>> {
-  const variables = centerVariables(target, process.env);
+  const runner = options.runner ?? center;
+  const variables = centerVariables(target, options.environment ?? process.env);
   const directory = await mkdtemp(path.join(os.tmpdir(), "arcforges-runtime-"));
+  let rotation: Record<string, unknown>;
   try {
     await chmod(directory, 0o700);
     variables.ARCFORGES_CENTER_RUNTIME_SECRET_FILE = "/secrets/runtime.json";
@@ -227,7 +305,7 @@ export async function withRuntimeCredential(
       typeof process.getuid === "function" && typeof process.getgid === "function"
         ? `${process.getuid()}:${process.getgid()}`
         : undefined;
-    const rotation = await center(image, variables, ["admin", "rotate-runtime-credential"], {
+    rotation = await runner(image, variables, ["admin", "rotate-runtime-credential"], {
       secretsDirectory: directory,
       user,
     });
@@ -240,10 +318,16 @@ export async function withRuntimeCredential(
       "unexpected runtime secret file",
     );
     await publish(secrets);
-    return rotation;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+  const confirmation = await confirmRuntimeCredential(
+    target,
+    image,
+    String(rotation.slot),
+    options,
+  );
+  return { ...rotation, promotedAt: confirmation.promotedAt };
 }
 
 async function main(): Promise<void> {

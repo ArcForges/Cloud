@@ -2,16 +2,22 @@
 // Offline checks of the PostgreSQL deployment step (tooling/postgres-deploy.ts) and of the center's provisioning targets
 // (eng/verification/center-provision.ts): the sealed executable receives credentials by variable name only, promotion requires
 // the passed gate record of exactly its target and revision, production and acceptance never share a database or a runtime
-// role, and the production resources are refused outside AF-PROD-01.
+// role, the runtime credential's slot is confirmed only after a successful promotion, and the production resources are refused
+// outside AF-PROD-01.
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import {
+  type CenterRunner,
   centerEntrypoint,
   centerVariables,
   directUrlSecret,
   dockerArguments,
   postgresTargets,
   requirePostgresGate,
+  withRuntimeCredential,
 } from "../../tooling/postgres-deploy.ts";
 import {
   centerLifecycle,
@@ -113,4 +119,143 @@ test("the center's resources: acceptance only, with the declared lifecycle", asy
     ],
   );
   assert.equal(centerLifecycle[0]?.deleteObjectsTransition?.condition.maxAge, 30 * 24 * 60 * 60);
+});
+
+/** A fake of the sealed executable: rotate writes the secret file, confirm fails as told. */
+function fakeCenter(confirmFailures: number) {
+  const calls: string[][] = [];
+  const directories: string[] = [];
+  let failures = confirmFailures;
+  const runner: CenterRunner = async (_image, variables, command, options) => {
+    calls.push(command);
+    assert.equal(
+      variables[directUrlSecret],
+      undefined,
+      "the deployment secret is passed under the executable's own name",
+    );
+    if (command[1] === "rotate-runtime-credential") {
+      assert(options?.secretsDirectory);
+      directories.push(options.secretsDirectory);
+      await writeFile(
+        path.join(options.secretsDirectory, "runtime.json"),
+        JSON.stringify({ ARCFORGES_CENTER_DATABASE_URL: "postgresql://synthetic-runtime" }),
+      );
+      return { slot: "b", loginRole: "arcforges_center_runtime_b" };
+    }
+    assert.deepEqual(command, ["admin", "confirm-runtime-credential", "--slot", "b"]);
+    if (failures-- > 0)
+      throw new Error(
+        "arcforges-center admin confirm-runtime-credential --slot b exited with code 1.",
+      );
+    return { slot: "b", promotedAt: "2026-10-28T00:00:00Z" };
+  };
+  return { runner, calls, directories };
+}
+
+const environment = { [directUrlSecret]: secret };
+
+test("the slot is confirmed as promoted only after the deployment succeeded", async () => {
+  const fake = fakeCenter(0);
+  const published: Record<string, string>[] = [];
+  const rotation = await withRuntimeCredential(
+    "production",
+    "image",
+    async (secrets) => {
+      published.push(secrets);
+      assert.equal(fake.calls.length, 1, "nothing is confirmed before the deployment finished");
+    },
+    { runner: fake.runner, environment, confirmDelayMs: 1 },
+  );
+  assert.deepEqual(fake.calls, [
+    ["admin", "rotate-runtime-credential"],
+    ["admin", "confirm-runtime-credential", "--slot", "b"],
+  ]);
+  assert.deepEqual(published, [
+    { ARCFORGES_CENTER_DATABASE_URL: "postgresql://synthetic-runtime" },
+  ]);
+  assert.equal(rotation.slot, "b");
+  assert.equal(rotation.promotedAt, "2026-10-28T00:00:00Z");
+  assert(!existsSync(fake.directories[0] ?? ""), "the runner-local secret directory is removed");
+});
+
+test("a failed deployment leaves its slot unconfirmed, so the retry rotates that slot again", async () => {
+  const fake = fakeCenter(0);
+  await assert.rejects(
+    withRuntimeCredential(
+      "acceptance",
+      "image",
+      async () => {
+        throw new Error("wrangler deploy failed");
+      },
+      { runner: fake.runner, environment, confirmDelayMs: 1 },
+    ),
+    /wrangler deploy failed/u,
+  );
+  assert.deepEqual(fake.calls, [["admin", "rotate-runtime-credential"]]);
+  assert(!existsSync(fake.directories[0] ?? ""));
+});
+
+test("a confirmation is retried, and one that keeps failing names the slot, the state and the recovery", async () => {
+  const flaky = fakeCenter(1);
+  const rotation = await withRuntimeCredential("production", "image", async () => {}, {
+    runner: flaky.runner,
+    environment,
+    confirmDelayMs: 1,
+  });
+  assert.equal(rotation.promotedAt, "2026-10-28T00:00:00Z");
+  assert.equal(
+    flaky.calls.filter((command) => command[1] === "confirm-runtime-credential").length,
+    2,
+  );
+  const failing = fakeCenter(10);
+  let published = 0;
+  await assert.rejects(
+    withRuntimeCredential(
+      "acceptance",
+      "image",
+      async () => {
+        published++;
+      },
+      { runner: failing.runner, environment, confirmAttempts: 3, confirmDelayMs: 1 },
+    ),
+    (error: Error) => {
+      for (const expected of [
+        /slot b/u,
+        /behind the live revision/u,
+        /confirm-runtime-credential --slot b/u,
+        /ARCFORGES_CENTER_RUNTIME_ROLE=arcforges_acceptance_runtime/u,
+        /ARCFORGES_CENTER_DATABASE_NAME=arcforges_acceptance/u,
+        /after 3 attempts/u,
+      ])
+        assert.match(error.message, expected);
+      assert(
+        !error.message.includes("synthetic-secret"),
+        "the recovery message quotes no credential",
+      );
+      return true;
+    },
+  );
+  assert.equal(published, 1);
+  assert.equal(
+    failing.calls.filter((command) => command[1] === "confirm-runtime-credential").length,
+    3,
+  );
+});
+
+test("both deployments promote inside the rotation, which confirms the slot afterwards", () => {
+  for (const file of ["tooling/cloudflare.ts", "eng/verification/proof-cloudflare.ts"]) {
+    const source = readFileSync(path.resolve(import.meta.dirname, "../..", file), "utf8");
+    const start = source.indexOf("withRuntimeCredential(");
+    assert(start > 0, `${file} rotates through withRuntimeCredential`);
+    const callback = source.slice(start, source.indexOf("\n  });\n", start));
+    assert.match(
+      callback,
+      /"deploy"|deployArguments/u,
+      `${file} runs wrangler deploy inside the rotation`,
+    );
+    assert(
+      !source.includes("confirm-runtime-credential"),
+      `${file} confirms only through withRuntimeCredential`,
+    );
+  }
 });

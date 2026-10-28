@@ -2,10 +2,11 @@
 
 // Package provision creates the center's database and rotates the runtime credential with the migration role over the direct
 // connection. The runtime credential is a password of one of two login roles (<group>_a, <group>_b) that are members of the
-// runtime group role and hold no grant of their own. Each rotation sets a new password on the slot that was rotated less
-// recently, so the revision still running keeps its working credential while the next revision deploys with the new one. The
-// password is generated here, sent only inside the statement over the verified TLS connection (Neon accepts no pre-hashed
-// password), returned only inside the pooled runtime URL and never printed or logged.
+// runtime group role and hold no grant of their own. A slot is live only once the deployment that carries its password was
+// promoted and Confirm recorded it; each rotation sets a new password on the slot other than the most recently promoted one,
+// so the revision still running keeps its working credential however often a deployment fails and is retried. The password is
+// generated here, sent only inside the statement over the verified TLS connection (Neon accepts no pre-hashed password),
+// returned only inside the pooled runtime URL and never printed or logged.
 package provision
 
 import (
@@ -88,11 +89,14 @@ type Probe struct {
 	ReadsGrantedTable   bool `json:"readsGrantedTable"`
 	CannotCreate        bool `json:"cannotCreateTables"`
 	CannotReadUngranted bool `json:"cannotReadUngrantedTables"`
+	// CannotCreateTemporary shows that PUBLIC's TEMPORARY privilege on the database is revoked.
+	CannotCreateTemporary bool `json:"cannotCreateTemporaryTables"`
 }
 
-// Rotate sets a new password on the less recently rotated login role of the runtime group, records the rotation, composes the
-// pooled runtime URL and proves through it that the credential connects as that login role, reads a granted table, and can
-// neither create a table nor read an ungranted one. conn is the migration role's direct connection to the center's database.
+// Rotate sets a new password on the login role of the runtime group that is not the most recently promoted one (slot a when
+// none was promoted), records the rotation as not yet promoted, composes the pooled runtime URL and proves through it that the
+// credential connects as that login role, reads a granted table, and can neither create a table, nor a temporary table, nor
+// read an ungranted one. conn is the migration role's direct connection to the center's database.
 func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, error) {
 	if err := migrate.ValidRoleName(options.Group); err != nil {
 		return Rotation{}, err
@@ -157,8 +161,10 @@ func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, err
 		if err = migrate.RequirePlainRole(ctx, tx, rotation.LoginRole, true); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO platform.runtime_credential (slot, login_role, rotated_at, rotated_by) VALUES ($1, $2, now(), $3)
-ON CONFLICT (slot) DO UPDATE SET login_role = excluded.login_role, rotated_at = excluded.rotated_at, rotated_by = excluded.rotated_by
+		return tx.QueryRow(ctx, `INSERT INTO platform.runtime_credential (slot, login_role, rotated_at, rotated_by, promoted_at)
+VALUES ($1, $2, now(), $3, NULL)
+ON CONFLICT (slot) DO UPDATE SET login_role = excluded.login_role, rotated_at = excluded.rotated_at, rotated_by = excluded.rotated_by,
+    promoted_at = NULL
 RETURNING to_char(rotated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`, slot, rotation.LoginRole, runner).Scan(&rotation.RotatedAt)
 	})
 	if err != nil {
@@ -175,25 +181,87 @@ RETURNING to_char(rotated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
 	return rotation, nil
 }
 
+// nextSlot is the slot other than the most recently promoted one, or a when no slot was promoted yet. A slot rotated by a
+// deployment that was never promoted is rotated again; the most recently promoted slot, which the running revision uses, never.
 func nextSlot(ctx context.Context, tx pgx.Tx) (string, error) {
-	rows, err := tx.Query(ctx, "SELECT slot FROM platform.runtime_credential ORDER BY rotated_at, slot")
-	if err != nil {
+	var live string
+	err := tx.QueryRow(ctx, "SELECT slot FROM platform.runtime_credential WHERE promoted_at IS NOT NULL ORDER BY promoted_at DESC, slot LIMIT 1").Scan(&live)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return "a", nil
+	case err != nil:
 		return "", migrate.Sanitize("read the runtime credentials", err)
+	case live == "a":
+		return "b", nil
+	default:
+		return "a", nil
 	}
-	slots, err := pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// Confirmation is the result of Confirm; every field may be printed.
+type Confirmation struct {
+	Database   string `json:"database"`
+	Group      string `json:"runtimeRole"`
+	LoginRole  string `json:"loginRole"`
+	Slot       string `json:"slot"`
+	RotatedAt  string `json:"rotatedAt"`
+	PromotedAt string `json:"promotedAt"`
+	// Already is true when the slot's current password was confirmed before; nothing changed.
+	Already bool `json:"alreadyConfirmed"`
+}
+
+// ErrUnknownSlot refuses a slot other than a or b, or one that was never rotated.
+var ErrUnknownSlot = errors.New("unknown runtime credential slot")
+
+// Confirm records, under the migration lock, that the deployment carrying the slot's current password was promoted, so the next
+// rotation leaves that slot alone. It is idempotent: a slot whose current password was confirmed already keeps its time. It
+// refuses a slot other than a or b and a slot that was never rotated.
+func Confirm(ctx context.Context, conn *pgx.Conn, group, slot string) (Confirmation, error) {
+	if err := migrate.ValidRoleName(group); err != nil {
+		return Confirmation{}, err
+	}
+	if slot != "a" && slot != "b" {
+		return Confirmation{}, fmt.Errorf("%w: the slot is a or b", ErrUnknownSlot)
+	}
+	confirmation := Confirmation{Group: group, Slot: slot}
+	err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrate.LockKey); err != nil {
+			return migrate.Sanitize("take the migration lock", err)
+		}
+		if err := tx.QueryRow(ctx, "SELECT current_database()").Scan(&confirmation.Database); err != nil {
+			return migrate.Sanitize("identify the database", err)
+		}
+		var ready bool
+		if err := tx.QueryRow(ctx, "SELECT to_regclass('platform.runtime_credential') IS NOT NULL").Scan(&ready); err != nil {
+			return migrate.Sanitize("check the migrations", err)
+		}
+		if !ready {
+			return errors.New("the database is not migrated; run arcforges-center migrate first")
+		}
+		var promoted *string
+		err := tx.QueryRow(ctx, `SELECT login_role, to_char(rotated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+    to_char(promoted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+FROM platform.runtime_credential WHERE slot = $1 FOR UPDATE`, slot).Scan(&confirmation.LoginRole, &confirmation.RotatedAt, &promoted)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: slot %s was never rotated", ErrUnknownSlot, slot)
+		}
+		if err != nil {
+			return migrate.Sanitize("read the runtime credential", err)
+		}
+		if confirmation.LoginRole != group+"_"+slot {
+			return fmt.Errorf("slot %s belongs to the login role %s, not to the runtime role %s", slot, confirmation.LoginRole, group)
+		}
+		if promoted != nil {
+			confirmation.PromotedAt, confirmation.Already = *promoted, true
+			return nil
+		}
+		return tx.QueryRow(ctx, `UPDATE platform.runtime_credential SET promoted_at = greatest(now(), rotated_at) WHERE slot = $1
+RETURNING to_char(promoted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`, slot).Scan(&confirmation.PromotedAt)
+	})
 	if err != nil {
-		return "", migrate.Sanitize("read the runtime credentials", err)
+		return Confirmation{}, err
 	}
-	for _, candidate := range []string{"a", "b"} {
-		found := false
-		for _, slot := range slots {
-			found = found || slot == candidate
-		}
-		if !found {
-			return candidate, nil
-		}
-	}
-	return slots[0], nil // the less recently rotated slot
+	return confirmation, nil
 }
 
 // membership makes the login role a member of exactly the runtime group, inheriting its grants.
@@ -314,7 +382,8 @@ func probe(ctx context.Context, rotation Rotation, options Options) (Probe, erro
 	result.ReadsGrantedTable = versions > 0
 	result.CannotCreate = refused(ctx, conn, "CREATE TABLE platform.runtime_probe (x int)")
 	result.CannotReadUngranted = refused(ctx, conn, "SELECT count(*) FROM platform.runtime_credential")
-	if !result.ConnectedAsLogin || !result.ReadsGrantedTable || !result.CannotCreate || !result.CannotReadUngranted {
+	result.CannotCreateTemporary = refused(ctx, conn, "CREATE TEMPORARY TABLE runtime_probe (x int)")
+	if !result.ConnectedAsLogin || !result.ReadsGrantedTable || !result.CannotCreate || !result.CannotReadUngranted || !result.CannotCreateTemporary {
 		return result, fmt.Errorf("the new runtime credential did not behave as the least-privilege runtime role: %+v", result)
 	}
 	return result, nil

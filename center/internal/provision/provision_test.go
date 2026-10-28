@@ -4,6 +4,7 @@ package provision
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -73,22 +74,40 @@ func connects(t *testing.T, value string) bool {
 	return true
 }
 
-func TestRotationAlternatesSlotsAndKeepsThePreviousCredential(t *testing.T) {
-	url, group := migrated(t)
-	rotate := func() Rotation {
-		t.Helper()
-		rotation, err := Rotate(context.Background(), pgtest.Connect(t, url), Options{Group: group, DirectURL: url, PooledHost: pgtest.Host(t), Runner: "test", ProbeTimeout: 10 * time.Second})
-		if err != nil {
-			t.Fatal(err)
-		}
-		probe := rotation.Probe
-		if !probe.ConnectedAsLogin || !probe.ReadsGrantedTable || !probe.CannotCreate || !probe.CannotReadUngranted {
-			t.Fatalf("probe %+v", probe)
-		}
-		return rotation
+// rotator rotates and confirms the runtime credential of a migrated database as the deployment does.
+type rotator struct {
+	t          *testing.T
+	url, group string
+}
+
+func (r rotator) rotate() Rotation {
+	r.t.Helper()
+	rotation, err := Rotate(context.Background(), pgtest.Connect(r.t, r.url), Options{Group: r.group, DirectURL: r.url, PooledHost: pgtest.Host(r.t), Runner: "test", ProbeTimeout: 10 * time.Second})
+	if err != nil {
+		r.t.Fatal(err)
 	}
-	first := rotate()
-	second := rotate()
+	probe := rotation.Probe
+	if !probe.ConnectedAsLogin || !probe.ReadsGrantedTable || !probe.CannotCreate || !probe.CannotReadUngranted || !probe.CannotCreateTemporary {
+		r.t.Fatalf("probe %+v", probe)
+	}
+	return rotation
+}
+
+func (r rotator) confirm(slot string) Confirmation {
+	r.t.Helper()
+	confirmation, err := Confirm(context.Background(), pgtest.Connect(r.t, r.url), r.group, slot)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return confirmation
+}
+
+func TestPromotedRotationsAlternateSlotsAndKeepTheRunningCredential(t *testing.T) {
+	url, group := migrated(t)
+	r := rotator{t: t, url: url, group: group}
+	first := r.rotate()
+	r.confirm(first.Slot)
+	second := r.rotate()
 	if first.Slot != "a" || second.Slot != "b" || first.LoginRole != group+"_a" || second.LoginRole != group+"_b" {
 		t.Fatalf("slots %s %s", first.Slot, second.Slot)
 	}
@@ -96,12 +115,75 @@ func TestRotationAlternatesSlotsAndKeepsThePreviousCredential(t *testing.T) {
 	if !connects(t, first.RuntimeURL) || !connects(t, second.RuntimeURL) {
 		t.Fatal("a credential of the two latest rotations does not connect")
 	}
-	third := rotate()
+	r.confirm(second.Slot)
+	third := r.rotate()
 	if third.Slot != "a" || connects(t, first.RuntimeURL) || !connects(t, second.RuntimeURL) || !connects(t, third.RuntimeURL) {
 		t.Fatalf("third rotation: slot %s", third.Slot)
 	}
-	if strings.Contains(third.RuntimeURL, "@"+pgtest.Host(t)) == false {
+	if !strings.Contains(third.RuntimeURL, "@"+pgtest.Host(t)) {
 		t.Fatal("the runtime URL does not use the pooled host")
+	}
+}
+
+// A deployment that fails after its rotation is retried: the retry rotates the unpromoted slot again and never the slot of the
+// running revision, however often it fails.
+func TestARetriedDeploymentNeverRotatesThePromotedSlot(t *testing.T) {
+	url, group := migrated(t)
+	r := rotator{t: t, url: url, group: group}
+	live := r.rotate()
+	r.confirm(live.Slot)
+	failed := r.rotate()
+	retried := r.rotate()
+	again := r.rotate()
+	if live.Slot != "a" || failed.Slot != "b" || retried.Slot != "b" || again.Slot != "b" {
+		t.Fatalf("slots %s %s %s %s", live.Slot, failed.Slot, retried.Slot, again.Slot)
+	}
+	if !connects(t, live.RuntimeURL) {
+		t.Fatal("a retried deployment broke the running revision's credential")
+	}
+	if connects(t, failed.RuntimeURL) || connects(t, retried.RuntimeURL) || !connects(t, again.RuntimeURL) {
+		t.Fatal("the unpromoted slot keeps only its latest password")
+	}
+	r.confirm(again.Slot)
+	next := r.rotate()
+	if next.Slot != "a" || connects(t, live.RuntimeURL) || !connects(t, again.RuntimeURL) || !connects(t, next.RuntimeURL) {
+		t.Fatalf("after the promotion of b: slot %s", next.Slot)
+	}
+}
+
+func TestConfirmIsIdempotentAndRefusesUnknownSlots(t *testing.T) {
+	url, group := migrated(t)
+	r := rotator{t: t, url: url, group: group}
+	conn := pgtest.Connect(t, url)
+	for _, slot := range []string{"c", "", "A"} {
+		if _, err := Confirm(context.Background(), conn, group, slot); !errors.Is(err, ErrUnknownSlot) {
+			t.Fatalf("slot %q: %v", slot, err)
+		}
+	}
+	// No slot was rotated yet, then only a.
+	if _, err := Confirm(context.Background(), conn, group, "a"); !errors.Is(err, ErrUnknownSlot) {
+		t.Fatalf("a before any rotation: %v", err)
+	}
+	rotation := r.rotate()
+	if _, err := Confirm(context.Background(), conn, group, "b"); !errors.Is(err, ErrUnknownSlot) {
+		t.Fatalf("b never rotated: %v", err)
+	}
+	first := r.confirm(rotation.Slot)
+	second := r.confirm(rotation.Slot)
+	if first.Already || !second.Already || first.PromotedAt == "" || second.PromotedAt != first.PromotedAt || first.LoginRole != group+"_a" {
+		t.Fatalf("confirmations %+v %+v", first, second)
+	}
+	// Another runtime role's confirmation does not touch this database's slots.
+	if _, err := Confirm(context.Background(), conn, group+"_other", "a"); err == nil {
+		t.Fatal("a slot was confirmed for another runtime role")
+	}
+	// A new rotation of the slot clears its promotion.
+	var promoted bool
+	r.rotate() // b
+	r.confirm("b")
+	r.rotate() // a again
+	if err := conn.QueryRow(context.Background(), "SELECT promoted_at IS NOT NULL FROM platform.runtime_credential WHERE slot = 'a'").Scan(&promoted); err != nil || promoted {
+		t.Fatalf("a rotated slot kept its promotion: %v %v", promoted, err)
 	}
 }
 

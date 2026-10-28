@@ -82,6 +82,15 @@ func TestTheMigrationAndAdministrationCommands(t *testing.T) {
 	if len(runtimePassword) != 40 || strings.Contains(fmt.Sprint(rotation), runtimePassword) {
 		t.Fatal("the rotation printed the runtime credential")
 	}
+	// The promotion of slot a is recorded once; slot b was never rotated.
+	command(1, "admin", "confirm-runtime-credential", "--slot", "b")
+	confirmed := command(0, "admin", "confirm-runtime-credential", "--slot", "a")
+	if confirmed["slot"] != "a" || confirmed["loginRole"] != name+"_runtime_a" || confirmed["alreadyConfirmed"] != false || confirmed["promotedAt"] == "" {
+		t.Fatalf("confirm: %v", confirmed)
+	}
+	if again := command(0, "admin", "confirm-runtime-credential", "--slot=a"); again["alreadyConfirmed"] != true || again["promotedAt"] != confirmed["promotedAt"] {
+		t.Fatalf("confirm again: %v", again)
+	}
 	// The file is never overwritten.
 	command(1, "admin", "rotate-runtime-credential")
 	// An edited applied migration refuses with status 3.

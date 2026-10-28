@@ -25,7 +25,7 @@ The first migration (`center/internal/schema/migrations/0001_platform_store.sql`
 | `platform.inbox`              | One row per provider message (source, message ID): received, processed, outcome, expiry                                                                                 | `SELECT, INSERT, UPDATE` |
 | `platform.outbox`             | Events committed with their business change: unique dedup key, topic, aggregate, payload, correlation, state, attempts, availability                                    | `SELECT, INSERT, UPDATE` |
 | `platform.job_lease`          | Jobs with a holder, a lease expiry and a fence that increases with every claim                                                                                          | `SELECT, INSERT, UPDATE` |
-| `platform.runtime_credential` | The two login roles of the runtime credential rotation and when each was rotated                                                                                        | none                     |
+| `platform.runtime_credential` | The two login roles of the runtime credential rotation, when each was rotated and when its deployment was promoted                                                      | none                     |
 | `audit.audit_event`           | The append-only audit chain: each event's SHA-256 covers the previous event's hash and the event's fields                                                               | `SELECT, INSERT`         |
 | `audit.chain_head`            | The chain's single head row, locked by every append                                                                                                                     | `SELECT, UPDATE`         |
 | `fleet.signing_key`           | Signing-key metadata (key ID, purpose, algorithm, public key, the name of the platform secret that holds the private key, validity); private keys are never stored here | `SELECT`                 |
@@ -56,11 +56,15 @@ locks. Integration tests against a real PostgreSQL cover each one.
   - A crash between commit and publication, or between publication and the mark, leaves the row pending. It is published again
     after the lease, with the same dedup key: at least once, never lost.
   - Failures back off. After the maximum attempts the row is dead-lettered with a truncated last error.
+  - Every mark of a failure is guarded by the attempt it claimed: a publisher whose lease expired, and whose row another
+    publisher claimed again, can neither reschedule nor dead-letter it (it counts the delivery as superseded).
   - The sink of the hosted deployment (the event queue) arrives with the first producer of events.
 - **Job lease** (`Schedule`, `Claim`, `Renew`, `Fenced`, `Complete`, `Fail`):
-  - A claim takes the oldest available job, or a job whose lease expired, and increments its fence.
-  - A business transaction calls `Fenced` to lock the job row and check the fence. A holder whose lease was taken over can
-    neither write, renew nor complete (`ErrLeaseLost`).
+  - A claim takes the oldest available job, or a job whose lease expired, increments its fence and counts an attempt.
+  - A job that is available again after the maximum attempts (its holders' leases kept expiring) is dead-lettered by the claim,
+    in the same transaction, instead of being handed out again.
+  - A business transaction calls `Fenced` to lock the job row and check the fence. A holder whose lease was taken over, or whose
+    job was completed or dead-lettered, can neither write, renew nor complete (`ErrLeaseLost`).
 - **Audit** (`AppendAudit`, `VerifyAudit`):
   - Appends are serialized by the chain head row.
   - The runtime role can only insert and read. A trigger refuses every update, even by the owner.
@@ -99,8 +103,11 @@ executable:
   - an applied version missing or renamed (removed);
   - an applied version the build does not have (the database is ahead of the build).
 - Each pending migration runs in its own transaction with `statement_timeout` (10 minutes) and `lock_timeout` (30 s). A failing
-  migration rolls back completely and reports its SQLSTATE and primary message (never the detail). A crashed run (the session
-  ends) rolls back and releases the lock.
+  migration rolls back completely and reports its SQLSTATE. Its message never quotes a value: the server's primary message is
+  kept only for class 42 (syntax error or access rule violation) and 0A (feature not supported), whose messages name objects and
+  the migration's own text; any other error reports its class and the names of the constraint, table and column (a data error
+  such as `22P02` quotes the offending value in its primary message, and the detail can quote whole rows). A crashed run (the
+  session ends) rolls back and releases the lock.
 - After the migrations the runner reconciles the runtime role's grants (below).
 - `migrate status` and `migrate plan` report without the lock and without changing anything.
 - The output is one JSON document on stdout: the database, the roles, the state (`uninitialized`, `pending`, `current` or
@@ -112,11 +119,11 @@ that cannot run in a transaction (for example `CREATE INDEX CONCURRENTLY`) is no
 
 ## Roles
 
-| Role                                                                                     | Rights                                                                                                                                                                                                                                           | Connection                                                           |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| Migration role                                                                           | Owns the schemas and tables; needs `CREATEROLE` (and `CREATEDB` for `admin ensure-database`), which Neon's owner role has through `neon_superuser`                                                                                               | The direct (unpooled) URL: `ARCFORGES_CENTER_MIGRATION_DATABASE_URL` |
-| Runtime group role (`ARCFORGES_CENTER_RUNTIME_ROLE`, default `arcforges_center_runtime`) | `NOLOGIN`, no elevated attribute, member of no role; `USAGE` on the module schemas it uses and exactly the table privileges of `center/internal/schema` (`RuntimeGrants`); no `DELETE`, `TRUNCATE`, DDL, `CREATE` on the database or on `public` | none                                                                 |
-| Login roles `<group>_a`, `<group>_b`                                                     | `LOGIN`, `INHERIT`, `CONNECTION LIMIT 16`, members of the runtime group only, no grant of their own                                                                                                                                              | The pooled URL: `ARCFORGES_CENTER_DATABASE_URL`                      |
+| Role                                                                                     | Rights                                                                                                                                                                                                                                                                                               | Connection                                                           |
+| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Migration role                                                                           | Owns the schemas and tables; needs `CREATEROLE` (and `CREATEDB` for `admin ensure-database`), which Neon's owner role has through `neon_superuser`                                                                                                                                                   | The direct (unpooled) URL: `ARCFORGES_CENTER_MIGRATION_DATABASE_URL` |
+| Runtime group role (`ARCFORGES_CENTER_RUNTIME_ROLE`, default `arcforges_center_runtime`) | `NOLOGIN`, no elevated attribute, member of no role; `USAGE` on the module schemas it uses and exactly the table privileges of `center/internal/schema` (`RuntimeGrants`); no `DELETE`, `TRUNCATE`, DDL, `CREATE` on the database or on `public`; `CONNECT` on the center's database, no `TEMPORARY` | none                                                                 |
+| Login roles `<group>_a`, `<group>_b`                                                     | `LOGIN`, `INHERIT`, `CONNECTION LIMIT 16`, members of the runtime group only, no grant of their own                                                                                                                                                                                                  | The pooled URL: `ARCFORGES_CENTER_DATABASE_URL`                      |
 
 On every run, `migrate` creates the group role if it is missing. It refuses a group role that can log in, has an elevated
 attribute or is a member of another role. It revokes everything from `PUBLIC` and from the group on the module schemas, their
@@ -127,33 +134,61 @@ integration test fails on a table with neither decision. The runtime role:
 - can neither create, alter or drop a table, schema or index;
 - can neither delete from nor truncate any table;
 - can neither update the audit chain nor write signing keys or the migration record;
-- can read no ungranted table or schema (`platform.runtime_credential`, another module's schema).
+- can read no ungranted table or schema (`platform.runtime_credential`, another module's schema);
+- can create no temporary table, and can connect to no other center database of the cluster.
 
-The test `TestTheRuntimeRoleHasExactlyItsGrants` checks each of these.
+The tests `TestTheRuntimeRoleHasExactlyItsGrants` and `TestTheRuntimeRoleConnectsOnlyToItsOwnDatabase` check each of these.
+
+**Database privileges.** PostgreSQL gives `PUBLIC` `CONNECT` and `TEMPORARY` on every new database, and production and acceptance
+share one Neon branch. On every run, `migrate` therefore revokes `CONNECT` and `TEMPORARY` on the center's database from
+`PUBLIC`, revokes `CREATE` and `TEMPORARY` from the runtime group and grants it `CONNECT` (its login roles inherit it). It then
+checks that `PUBLIC` holds neither privilege and that the runtime role can connect but not create temporary tables. The
+migration role must own the database: another role's revocation would be ignored, and the check refuses the run. The owner keeps
+its own rights.
+
+- **Who else connects.** The C# rollback path and the C# Hello connect with `NEON_DATABASE_URL`, which
+  [Neon Hello](neon-hello.md) records as the provisioned Neon owner credential (`src/ArcForges.Cloud/NeonHello.cs` reads user
+  and database from it). The owner's rights do not depend on `PUBLIC`, so that path keeps working. If `NEON_DATABASE_URL` ever
+  named a role that is not the database owner, that role would need `GRANT CONNECT` on the database before the C# rollback is
+  used.
+- **What remains.** Databases the center does not own (for example a branch's `postgres` database) keep their owners' settings:
+  a runtime role may connect there but holds no privilege on their tables.
+- **The pooler.** The rotation's pooled probe connects through the Neon pooler with the new credential before promotion. Had
+  the revocation broken pooler logins, the deployment would stop there and the running revision would stay.
 
 ### Runtime credential rotation
 
 `arcforges-center admin rotate-runtime-credential` rotates the runtime credential. It runs with the migration role, under the
 migration lock, and has five steps:
 
-1. It sets a new password on the login role of the slot rotated less recently (`a`, then `b`, then `a` …), creating that role and
-   its membership if needed.
-2. It records the rotation in `platform.runtime_credential`.
+1. It picks the slot other than the most recently promoted one (`a` when none was promoted) and sets a new password on its
+   login role, creating that role and its membership if needed. A slot rotated by a deployment that was never promoted is
+   simply rotated again; the most recently promoted slot, which the running revision uses, is never touched.
+2. It records the rotation in `platform.runtime_credential` as not yet promoted (`promoted_at` cleared).
 3. It composes the pooled runtime URL. For Neon it derives the `-pooler` endpoint from the direct host; any other host is kept,
    or `ARCFORGES_CENTER_RUNTIME_POOLED_HOST` names one.
 4. Through that URL it proves that the new credential:
    - connects as the login role to the center's database;
    - reads a granted table;
-   - can neither create a table nor read an ungranted one.
+   - can neither create a table, nor a temporary table, nor read an ungranted one.
 
    The probe retries for up to a minute while a new password propagates to the pooler.
 
 5. It writes the URL as `{"ARCFORGES_CENTER_DATABASE_URL": …}` into `ARCFORGES_CENTER_RUNTIME_SECRET_FILE`. That is a new file
    (never overwritten) with mode `0600`, in exactly the format of `wrangler deploy --secrets-file`.
 
-The revision still running keeps the other slot's credential, so a deployment never breaks the running revision's connections.
-One exception: after a deployment that failed after its rotation, the next rotation reuses the running revision's slot. The
-running revision then fails new connections until the new revision runs. A retried deployment closes that window.
+`arcforges-center admin confirm-runtime-credential --slot a|b` records, with the migration role and under the migration lock,
+that the deployment carrying the slot's current password was promoted (`promoted_at`). It is idempotent: a slot whose current
+password was confirmed keeps its time. It refuses a slot other than `a` or `b` (exit 2) and a slot that was never rotated
+(exit 1). The deployment runs it only after `wrangler deploy` succeeded.
+
+So a failed deployment, retried any number of times, rotates only its own unpromoted slot, and the running revision keeps its
+credential. One narrow window remains: if the confirmation fails after a successful promotion (three attempts with a growing
+delay), the record is behind the live revision, and the next rotation would set a new password on the live slot. The deployment
+command then exits non-zero with a message naming the slot and the recovery: before the next deployment, run
+`admin confirm-runtime-credential --slot <slot>` with the migration role's direct URL, or as the owner in the Neon SQL editor
+`UPDATE platform.runtime_credential SET promoted_at = now() WHERE slot = '<slot>' AND promoted_at IS NULL`. Without that, the
+running revision's new connections would fail from the next rotation until that deployment is promoted.
 
 The password has 40 base64url characters (240 random bits), with lowercase, uppercase, a digit and a symbol and no character
 three times in a row. Neon requires at least 60 bits of entropy and accepts no pre-hashed (SCRAM) password, so the password
@@ -181,6 +216,8 @@ The protected main-push deployment (`.github/workflows/ci.yml`, job `deploy`, Gi
      directory under the runner's temporary directory, outside every artifact directory.
    - It uploads the file with the Worker version (`--secrets-file`, together with the C# rollback path's unchanged
      `NEON_DATABASE_URL`) and removes the directory, whatever happens.
+   - Only after `wrangler deploy` succeeded, it confirms the slot with the image's `admin confirm-runtime-credential`, retried
+     up to three times; a confirmation that keeps failing fails the command with the recovery above.
    - The Container passes `ARCFORGES_CENTER_DATABASE_URL` to the Go center, which then reads the Hello greeting through the runtime
      role (`helloBackend` `postgresql-runtime`). The Hello's own Neon credential reaches only the C# host.
 

@@ -122,17 +122,21 @@ CREATE TABLE platform.job_lease (
 );
 CREATE INDEX job_lease_claim ON platform.job_lease (job_type, state, available_at);
 
--- The two login roles of the runtime credential rotation (written by `arcforges-center admin rotate-runtime-credential` with
--- the migration role; the runtime role has no access).
+-- The two login roles of the runtime credential rotation (written by `arcforges-center admin rotate-runtime-credential` and
+-- `admin confirm-runtime-credential` with the migration role; the runtime role has no access). promoted_at is set once the
+-- deployment that carries the slot's current password was promoted, and cleared by its next rotation: a rotation never touches
+-- the most recently promoted slot.
 CREATE TABLE platform.runtime_credential (
-    slot       text        NOT NULL,
-    login_role text        NOT NULL,
-    rotated_at timestamptz NOT NULL,
-    rotated_by text        NOT NULL,
+    slot        text        NOT NULL,
+    login_role  text        NOT NULL,
+    rotated_at  timestamptz NOT NULL,
+    rotated_by  text        NOT NULL,
+    promoted_at timestamptz,
     CONSTRAINT runtime_credential_pkey PRIMARY KEY (slot),
     CONSTRAINT runtime_credential_slot CHECK (slot IN ('a', 'b')),
     CONSTRAINT runtime_credential_login_role UNIQUE (login_role),
-    CONSTRAINT runtime_credential_rotated_by CHECK (length(rotated_by) BETWEEN 1 AND 128)
+    CONSTRAINT runtime_credential_rotated_by CHECK (length(rotated_by) BETWEEN 1 AND 128),
+    CONSTRAINT runtime_credential_promotion CHECK (promoted_at IS NULL OR promoted_at >= rotated_at)
 );
 
 -- Audit events: an append-only hash chain. Every event's hash covers the previous event's hash and the event's fields, and the

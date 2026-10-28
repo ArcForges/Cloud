@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Command arcforges-center is the ArcForges center: one executable that serves the public routes (serve, the default),
-// applies the PostgreSQL migrations (migrate), creates the database and rotates the runtime credential (admin) and reports its
-// identity (version, --build-info).
+// applies the PostgreSQL migrations (migrate), creates the database, rotates the runtime credential and records its promotion
+// (admin) and reports its identity (version, --build-info).
 package main
 
 import (
@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,7 +37,10 @@ commands:
   migrate [apply|status|plan]      apply the PostgreSQL migrations (apply, the default), or report them without changing
                                    anything; configured by ARCFORGES_CENTER_MIGRATION_DATABASE_URL (docs/postgres-store.md)
   admin ensure-database            create the center's database if it does not exist
-  admin rotate-runtime-credential  set a new runtime credential and write the runtime URL to ARCFORGES_CENTER_RUNTIME_SECRET_FILE
+  admin rotate-runtime-credential  set a new runtime credential on the slot that is not the last promoted one and write the
+                                   runtime URL to ARCFORGES_CENTER_RUNTIME_SECRET_FILE
+  admin confirm-runtime-credential --slot a|b
+                                   record that the deployment carrying the slot's credential was promoted
   version                          print the build identity as JSON (also --build-info)
   help                             print this help
 
@@ -64,7 +68,20 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	if len(arguments) > 1 {
 		sub = arguments[1]
 	}
+	slot := ""
 	switch {
+	case command == "admin" && sub == "confirm-runtime-credential":
+		rest := arguments[2:]
+		switch {
+		case len(rest) == 2 && rest[0] == "--slot":
+			slot = rest[1]
+		case len(rest) == 1 && strings.HasPrefix(rest[0], "--slot="):
+			slot = strings.TrimPrefix(rest[0], "--slot=")
+		}
+		if slot != "a" && slot != "b" {
+			_, _ = fmt.Fprint(stderr, usage)
+			return exitUsage
+		}
 	case len(arguments) > 2, len(arguments) == 2 && command != "migrate" && command != "admin":
 		_, _ = fmt.Fprint(stderr, usage)
 		return exitUsage
@@ -82,11 +99,11 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 		}
 		return migration(sub, lookup, stdout, stderr)
 	case "admin":
-		if sub != "ensure-database" && sub != "rotate-runtime-credential" {
+		if sub != "ensure-database" && sub != "rotate-runtime-credential" && sub != "confirm-runtime-credential" {
 			_, _ = fmt.Fprint(stderr, usage)
 			return exitUsage
 		}
-		return admin(sub, lookup, stdout, stderr)
+		return admin(sub, slot, lookup, stdout, stderr)
 	case "version", "--build-info":
 		document, err := buildinfo.Document("not-probed", buildinfo.Center{})
 		if err != nil {
@@ -187,7 +204,7 @@ func migration(sub string, lookup func(string) (string, bool), stdout, stderr io
 	return exitOK
 }
 
-func admin(sub string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
+func admin(sub, slot string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
 	logger := observe.NewLogger(stderr, slog.LevelInfo).With("command", "admin "+sub)
 	cfg, err := config.LoadMigration(lookup)
 	if err != nil {
@@ -211,6 +228,23 @@ func admin(sub string, lookup func(string) (string, bool), stdout, stderr io.Wri
 			return exitFailure
 		}
 		_ = json.NewEncoder(stdout).Encode(map[string]any{"database": cfg.Database, "created": created})
+		return exitOK
+	}
+	if sub == "confirm-runtime-credential" {
+		conn, err := connect(ctx, cfg.URL)
+		if err != nil {
+			logger.Error("the command could not connect", "error", err.Error())
+			return exitFailure
+		}
+		defer func() { _ = conn.Close(context.Background()) }()
+		confirmation, err := provision.Confirm(ctx, conn, cfg.RuntimeRole, slot)
+		if err != nil {
+			logger.Error("the runtime credential's promotion could not be recorded", "slot", slot, "error", err.Error())
+			return exitFailure
+		}
+		_ = json.NewEncoder(stdout).Encode(confirmation)
+		logger.Info("runtime credential promotion recorded", "database", confirmation.Database, "loginRole", confirmation.LoginRole,
+			"slot", confirmation.Slot, "alreadyConfirmed", confirmation.Already)
 		return exitOK
 	}
 	if cfg.SecretFile == "" {
