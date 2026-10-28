@@ -203,52 +203,216 @@ func fields(err error) string {
 		pgError.SchemaName, pgError.TableName, pgError.ColumnName, pgError.DataTypeName, pgError.ConstraintName, pgError.Routine}, "\n")
 }
 
-// A failing role statement reports its SQLSTATE and a fixed message: neither the error nor its context quotes the dynamic
+// withSecret runs the login function's preparation in a transaction that is always rolled back: the secret table with value, the
+// function source, then call. It returns the call's error.
+func withSecret(t *testing.T, conn *pgx.Conn, value, source string, before func(tx pgx.Tx), call func(tx pgx.Tx) error) error {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if before != nil {
+		before(tx)
+	}
+	if _, err = tx.Exec(ctx, secretTable); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.CopyFrom(ctx, pgx.Identifier{"pg_temp", "arcforges_login_secret"}, []string{"secret"}, pgx.CopyFromRows([][]any{{value}})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	return call(tx)
+}
+
+func unhandledSource(t *testing.T) string {
+	t.Helper()
+	unhandled := strings.Replace(setLoginSource, "EXCEPTION WHEN OTHERS OR query_canceled THEN\n    RAISE EXCEPTION USING ERRCODE = SQLSTATE, MESSAGE = 'login role update failed';\n", "", 1)
+	if unhandled == setLoginSource {
+		t.Fatal("the control did not remove the handler")
+	}
+	return unhandled
+}
+
+// A failing password statement reports its SQLSTATE and a fixed message: neither the error nor its context quotes the dynamic
 // statement, which holds the secret. Without the handler the context would (the control below).
 func TestTheLoginRoleFunctionHidesItsStatement(t *testing.T) {
-	url, group := migrated(t)
+	url, _ := migrated(t)
 	conn := pgtest.Connect(t, url)
 	ctx := context.Background()
 	const phrase = "Hidden-value_0123456789-abcdefghijklmnop"
-	call := func(source string) error {
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = tx.Rollback(ctx) }()
-		if _, err = tx.Exec(ctx, secretTable); err != nil {
-			t.Fatal(err)
-		}
-		if _, err = tx.CopyFrom(ctx, pgx.Identifier{"pg_temp", "arcforges_login_secret"}, []string{"secret"}, pgx.CopyFromRows([][]any{{phrase}})); err != nil {
-			t.Fatal(err)
-		}
-		if _, err = tx.Exec(ctx, source); err != nil {
-			t.Fatal(err)
-		}
-		// Creating the existing group role again fails (42710) inside the function.
-		_, err = tx.Exec(ctx, setLoginCall, group, 4, true)
+	absent := func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, setLoginCall, "arcforges_absent_role") // 42704 inside the function
 		return err
 	}
-	err := call(setLoginSource)
+	err := withSecret(t, conn, phrase, setLoginSource, nil, absent)
 	var pgError *pgconn.PgError
-	if !errors.As(err, &pgError) || pgError.Code != "42710" || pgError.Message != "login role update failed" {
+	if !errors.As(err, &pgError) || pgError.Code != "42704" || pgError.Message != "login role update failed" {
 		t.Fatalf("the failure: %v", err)
 	}
 	if strings.Contains(fields(err), phrase) || strings.Contains(fields(err), "PASSWORD") {
 		t.Fatalf("the error or its context quotes the role statement: %s", fields(err))
 	}
-	// The control: the same function without the handler puts the statement, secret included, into the error's context.
-	unhandled := strings.Replace(setLoginSource, "EXCEPTION WHEN OTHERS THEN\n    RAISE EXCEPTION USING ERRCODE = SQLSTATE, MESSAGE = 'login role update failed';\n", "", 1)
-	if unhandled == setLoginSource {
-		t.Fatal("the control did not remove the handler")
-	}
-	if err = call(unhandled); !strings.Contains(fields(err), phrase) {
+	if err = withSecret(t, conn, phrase, unhandledSource(t), nil, absent); !strings.Contains(fields(err), phrase) {
 		t.Fatalf("the control's context does not quote the statement, so the test proves nothing: %s", fields(err))
 	}
 }
 
+// knownPassword makes the next rotations use a password the test knows, so it can look for it in errors and logs.
+func knownPassword(t *testing.T) string {
+	t.Helper()
+	phrase, err := Password()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := newPassword
+	newPassword = func() (string, error) { return phrase, nil }
+	t.Cleanup(func() { newPassword = previous })
+	return phrase
+}
+
+// serverLog reads the test server's log, or skips the log part where it cannot be read.
+func serverLog(t *testing.T) (string, bool) {
+	t.Helper()
+	log, ok := pgtest.ServerLog(t)
+	if !ok && os.Getenv(pgtest.EnvRequired) == "1" && os.Getenv(pgtest.EnvContainer) == "" {
+		t.Log("the test server's log cannot be read here; the log checks are skipped")
+	}
+	return log, ok
+}
+
+// debug_print_parse and debug_print_rewritten are user-settable; the function switches them off for its own execution, so no
+// parse dump of the nested password statement reaches the log. The control function without the SET clauses leaks.
+func TestDebugPrintSettingsLogNoSecret(t *testing.T) {
+	url, group := migrated(t)
+	ctx := context.Background()
+	conn := pgtest.Connect(t, url)
+	var database string
+	if err := conn.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "ALTER DATABASE "+pgx.Identifier{database}.Sanitize()+" SET debug_print_parse = on"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "ALTER DATABASE "+pgx.Identifier{database}.Sanitize()+" SET debug_print_rewritten = on"); err != nil {
+		t.Fatal(err)
+	}
+	phrase := knownPassword(t)
+	rotation := rotator{t: t, url: url, group: group}.rotate()
+	if rotation.Logging.DebugPrintParse != "on" || rotation.Logging.DebugPrintRewritten != "on" {
+		t.Fatalf("logging %+v", rotation.Logging)
+	}
+	// The control: without the function's SET clauses, the parse dump carries a value from the secret table.
+	const control = "Control-value_0123456789-abcdefghijklmn"
+	fresh := pgtest.Connect(t, url)
+	_ = withSecret(t, fresh, control, strings.Replace(setLoginSource, "SET debug_print_parse = off SET debug_print_rewritten = off SET debug_print_plan = off\n", "", 1), nil,
+		func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, setLoginCall, rotation.LoginRole)
+			return err
+		})
+	log, ok := serverLog(t)
+	if !ok {
+		return
+	}
+	if strings.Contains(log, phrase) || strings.Contains(log, storedSecret(t, rotation.LoginRole)) {
+		t.Fatal("a parse dump in the server log holds the secret")
+	}
+	if !strings.Contains(log, control) || !strings.Contains(log, "{QUERY") {
+		t.Fatal("the control did not leak into the parse dump, so the test proves nothing")
+	}
+}
+
+// A session holding the login role's row makes the rotation fail cleanly on the secret-free statement, before any secret is
+// involved; the lock-wait message names only that statement.
+func TestABlockedRoleRowFailsTheRotationCleanly(t *testing.T) {
+	url, group := migrated(t)
+	ctx := context.Background()
+	r := rotator{t: t, url: url, group: group}
+	r.confirm(r.rotate().Slot) // a
+	r.confirm(r.rotate().Slot) // b: the next rotation takes a again
+	var database string
+	if err := pgtest.Connect(t, url).QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+	admin := pgtest.Connect(t, pgtest.WithDatabase(t, pgtest.ServerURL(t), database))
+	for _, setting := range []string{"log_lock_waits = on", "deadlock_timeout = '100ms'"} {
+		if _, err := admin.Exec(ctx, "ALTER DATABASE "+pgx.Identifier{database}.Sanitize()+" SET "+setting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	holder, err := pgtest.Connect(t, url).Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err = holder.Exec(ctx, "ALTER ROLE "+group+"_a CONNECTION LIMIT 5"); err != nil {
+		t.Fatal(err)
+	}
+	phrase := knownPassword(t)
+	_, err = Rotate(ctx, pgtest.Connect(t, url), Options{Group: group, DirectURL: url, PooledHost: pgtest.Host(t), Runner: "test",
+		ProbeTimeout: 10 * time.Second, RoleLockTimeout: 400 * time.Millisecond})
+	if err == nil || !strings.Contains(err.Error(), "take the login role") || !strings.Contains(err.Error(), "55P03") {
+		t.Fatalf("the blocked rotation: %v", err)
+	}
+	if strings.Contains(fields(err), phrase) {
+		t.Fatal("the error holds the secret")
+	}
+	log, ok := serverLog(t)
+	if !ok {
+		return
+	}
+	if strings.Contains(log, phrase) {
+		t.Fatal("the server log holds the secret")
+	}
+	if !strings.Contains(log, "still waiting for") {
+		t.Fatal("no lock wait was logged, so the test proves nothing")
+	}
+}
+
+// The residual path: were the password statement itself to wait (bypassing the secret-free statement) and be cancelled by
+// statement_timeout, the handler catches the cancellation too, so neither the error nor the log carries the statement.
+func TestACancelledPasswordStatementLogsNoSecret(t *testing.T) {
+	url, group := migrated(t)
+	ctx := context.Background()
+	r := rotator{t: t, url: url, group: group}
+	login := r.rotate().LoginRole
+	holder, err := pgtest.Connect(t, url).Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err = holder.Exec(ctx, "ALTER ROLE "+login+" CONNECTION LIMIT 5"); err != nil {
+		t.Fatal(err)
+	}
+	const phrase = "Cancelled-value_0123456789-abcdefghijkl"
+	err = withSecret(t, pgtest.Connect(t, url), phrase, setLoginSource,
+		func(tx pgx.Tx) {
+			if _, err := tx.Exec(ctx, "SET LOCAL statement_timeout = 300"); err != nil {
+				t.Fatal(err)
+			}
+		},
+		func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, setLoginCall, login)
+			return err
+		})
+	var pgError *pgconn.PgError
+	if !errors.As(err, &pgError) || pgError.Code != "57014" || pgError.Message != "login role update failed" {
+		t.Fatalf("the cancelled call: %v", err)
+	}
+	if strings.Contains(fields(err), phrase) || strings.Contains(fields(err), "PASSWORD") {
+		t.Fatalf("the error quotes the statement: %s", fields(err))
+	}
+	if log, ok := serverLog(t); ok && strings.Contains(log, phrase) {
+		t.Fatal("the server log holds the secret")
+	}
+}
+
 // The secret appears in no pg_stat_statements row and, where the test server's log can be read (the Linux leg: log_statement
-// 'all', log_min_duration_statement 0), in no log line; pg_stat_statements.track = 'all' refuses the rotation.
+// 'all', log_min_duration_statement 0), in no log line; pg_stat_statements.track = 'all' and log_parser_stats = on refuse the
+// rotation.
 func TestTheSecretReachesNoStatementRecordOrLog(t *testing.T) {
 	url, group := migrated(t)
 	ctx := context.Background()
@@ -290,7 +454,7 @@ func TestTheSecretReachesNoStatementRecordOrLog(t *testing.T) {
 		if strings.Contains(query, phrase) || strings.Contains(query, stored) {
 			t.Fatal("pg_stat_statements recorded the secret")
 		}
-		called = called || strings.Contains(query, "arcforges_set_login($1, $2, $3)")
+		called = called || strings.Contains(query, "arcforges_set_login($1)")
 	}
 	if !called {
 		t.Fatal("pg_stat_statements did not record the call, so the test proves nothing")
@@ -309,5 +473,15 @@ func TestTheSecretReachesNoStatementRecordOrLog(t *testing.T) {
 	_, err = Rotate(ctx, pgtest.Connect(t, url), Options{Group: group, DirectURL: url, PooledHost: pgtest.Host(t), Runner: "test", ProbeTimeout: 10 * time.Second})
 	if err == nil || !strings.Contains(err.Error(), "pg_stat_statements.track") {
 		t.Fatalf("track = 'all' was not refused: %v", err)
+	}
+	// log_parser_stats logs parser statistics with the nested statement as context, and only a superuser can switch it off.
+	for _, statement := range []string{"RESET pg_stat_statements.track", "SET log_parser_stats = on"} {
+		if _, err = admin.Exec(ctx, "ALTER DATABASE "+pgx.Identifier{database}.Sanitize()+" "+statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = Rotate(ctx, pgtest.Connect(t, url), Options{Group: group, DirectURL: url, PooledHost: pgtest.Host(t), Runner: "test", ProbeTimeout: 10 * time.Second})
+	if err == nil || !strings.Contains(err.Error(), "log_parser_stats") {
+		t.Fatalf("log_parser_stats = on was not refused: %v", err)
 	}
 }

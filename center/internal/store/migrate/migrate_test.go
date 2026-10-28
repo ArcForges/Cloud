@@ -154,7 +154,9 @@ func TestTheTestedMajorIsThePinnedImage(t *testing.T) {
 
 // The decision table of statement capture: only settings that record nested statements refuse a rotation.
 func TestTheCaptureDecisionTable(t *testing.T) {
-	quiet := Logging{PgStatStatementsTrack: "top", PgStatMonitorTrack: "not-loaded", PgAuditLog: "not-loaded", LogStatement: "none", LogMinDurationStatement: "-1"}
+	quiet := Logging{PgStatStatementsTrack: "top", PgStatMonitorTrack: "not-loaded", PgAuditLog: "not-loaded", AutoExplainLogMinDuration: "not-loaded",
+		AutoExplainLogNestedStatements: "not-loaded", LogStatement: "none", LogMinDurationStatement: "-1", LogLockWaits: "on", LogErrorVerbosity: "default",
+		LogMinMessages: "warning", LogParserStats: "off", DebugPrintParse: "off", DebugPrintRewritten: "off", DebugPrintPlan: "off"}
 	cases := []struct {
 		name   string
 		change func(*Logging)
@@ -170,6 +172,12 @@ func TestTheCaptureDecisionTable(t *testing.T) {
 		{"pgaudit ddl, all", func(l *Logging) { l.PgAuditLog = "ddl, all" }, ""},
 		{"log_statement all", func(l *Logging) { l.LogStatement = "all" }, ""},
 		{"log_min_duration_statement 0", func(l *Logging) { l.LogMinDurationStatement = "0" }, ""},
+		{"auto_explain nested, all durations", func(l *Logging) { l.AutoExplainLogNestedStatements, l.AutoExplainLogMinDuration = "on", "0" }, ""},
+		{"debug_print_parse on (switched off in the function)", func(l *Logging) { l.DebugPrintParse = "on" }, ""},
+		{"log_lock_waits on, verbose errors", func(l *Logging) { l.LogLockWaits, l.LogErrorVerbosity = "on", "verbose" }, ""},
+		{"log_parser_stats on", func(l *Logging) { l.LogParserStats = "on" }, "log_parser_stats"},
+		{"log_min_messages debug5", func(l *Logging) { l.LogMinMessages = "debug5" }, ""},
+		{"log_min_messages info", func(l *Logging) { l.LogMinMessages = "info" }, ""},
 	}
 	for _, c := range cases {
 		logging := quiet

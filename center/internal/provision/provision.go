@@ -28,6 +28,9 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
 
+// newPassword generates a rotation's password; tests replace it to look for a known value in logs and errors.
+var newPassword = Password
+
 // DefaultConnectionLimit bounds each login role's server connections (the center's pool is four per instance; the pooler and a
 // rotation overlap need a few more).
 const DefaultConnectionLimit = 16
@@ -70,6 +73,8 @@ type Options struct {
 	ConnectionLimit int
 	// ProbeTimeout bounds the pooled-connection probe, which retries while a new password propagates to the pooler.
 	ProbeTimeout time.Duration
+	// RoleLockTimeout bounds the wait for the login role's row (DefaultRoleLockTimeout when zero).
+	RoleLockTimeout time.Duration
 	// LiveSlot is the slot the live Worker version uses, as the deployment read it from Cloudflare ("" when unknown). When set,
 	// the rotation takes the other slot whatever the record says; otherwise the record decides.
 	LiveSlot string
@@ -125,11 +130,14 @@ func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, err
 	if options.ProbeTimeout <= 0 {
 		options.ProbeTimeout = time.Minute
 	}
+	if options.RoleLockTimeout <= 0 {
+		options.RoleLockTimeout = DefaultRoleLockTimeout
+	}
 	runner := options.Runner
 	if runner == "" || len(runner) > 128 {
 		runner = "unknown"
 	}
-	password, err := Password()
+	password, err := newPassword()
 	if err != nil {
 		return Rotation{}, err
 	}
@@ -182,7 +190,10 @@ func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, err
 			return err
 		}
 		rotation.PasswordForm = form
-		if err = setLogin(ctx, tx, rotation.LoginRole, secret, options.ConnectionLimit, !exists); err != nil {
+		if err = takeRole(ctx, tx, rotation.LoginRole, exists, options.ConnectionLimit, options.RoleLockTimeout); err != nil {
+			return err
+		}
+		if err = setLogin(ctx, tx, rotation.LoginRole, secret); err != nil {
 			return err
 		}
 		if err = membership(ctx, tx, rotation.LoginRole, options.Group, rotation.ServerVersionNum); err != nil {

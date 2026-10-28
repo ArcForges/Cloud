@@ -209,32 +209,64 @@ type Result struct {
 // Logging is what the server records of statements, as the migration role's session sees it. Unset modules read as
 // "not-loaded".
 type Logging struct {
-	PgStatStatementsTrack   string `json:"pgStatStatementsTrack"`
-	PgStatMonitorTrack      string `json:"pgStatMonitorTrack"`
-	PgAuditLog              string `json:"pgauditLog"`
-	LogStatement            string `json:"logStatement"`
-	LogMinDurationStatement string `json:"logMinDurationStatement"`
+	PgStatStatementsTrack          string `json:"pgStatStatementsTrack"`
+	PgStatMonitorTrack             string `json:"pgStatMonitorTrack"`
+	PgAuditLog                     string `json:"pgauditLog"`
+	AutoExplainLogMinDuration      string `json:"autoExplainLogMinDuration"`
+	AutoExplainLogNestedStatements string `json:"autoExplainLogNestedStatements"`
+	LogStatement                   string `json:"logStatement"`
+	LogMinDurationStatement        string `json:"logMinDurationStatement"`
+	LogLockWaits                   string `json:"logLockWaits"`
+	LogErrorVerbosity              string `json:"logErrorVerbosity"`
+	LogMinMessages                 string `json:"logMinMessages"`
+	LogParserStats                 string `json:"logParserStats"`
+	DebugPrintParse                string `json:"debugPrintParse"`
+	DebugPrintRewritten            string `json:"debugPrintRewritten"`
+	DebugPrintPlan                 string `json:"debugPrintPlan"`
+}
+
+// loggingSettings are the settings Logging records, in its field order.
+var loggingSettings = []string{
+	"pg_stat_statements.track", "pg_stat_monitor.pgsm_track", "pgaudit.log", "auto_explain.log_min_duration",
+	"auto_explain.log_nested_statements", "log_statement", "log_min_duration_statement", "log_lock_waits", "log_error_verbosity",
+	"log_min_messages", "log_parser_stats", "debug_print_parse", "debug_print_rewritten", "debug_print_plan",
 }
 
 // ReadLogging reads the logging settings without failing on a module that is not loaded.
 func ReadLogging(ctx context.Context, q Querier) (Logging, error) {
 	var logging Logging
-	err := q.QueryRow(ctx, `SELECT coalesce(current_setting('pg_stat_statements.track', true), 'not-loaded'),
-    coalesce(current_setting('pg_stat_monitor.pgsm_track', true), 'not-loaded'), coalesce(current_setting('pgaudit.log', true), 'not-loaded'),
-    coalesce(current_setting('log_statement', true), 'not-loaded'), coalesce(current_setting('log_min_duration_statement', true), 'not-loaded')`).
-		Scan(&logging.PgStatStatementsTrack, &logging.PgStatMonitorTrack, &logging.PgAuditLog, &logging.LogStatement, &logging.LogMinDurationStatement)
+	targets := []*string{
+		&logging.PgStatStatementsTrack, &logging.PgStatMonitorTrack, &logging.PgAuditLog, &logging.AutoExplainLogMinDuration,
+		&logging.AutoExplainLogNestedStatements, &logging.LogStatement, &logging.LogMinDurationStatement, &logging.LogLockWaits,
+		&logging.LogErrorVerbosity, &logging.LogMinMessages, &logging.LogParserStats, &logging.DebugPrintParse,
+		&logging.DebugPrintRewritten, &logging.DebugPrintPlan,
+	}
+	rows, err := q.Query(ctx, "SELECT coalesce(current_setting(name, true), 'not-loaded') FROM unnest($1::text[]) WITH ORDINALITY AS s(name, position) ORDER BY position", loggingSettings)
 	if err != nil {
 		return Logging{}, Sanitize("read the logging settings", err)
+	}
+	values, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(values) != len(targets) {
+		return Logging{}, Sanitize("read the logging settings", err)
+	}
+	for index, value := range values {
+		*targets[index] = value
 	}
 	return logging, nil
 }
 
-// CaptureRefusal says why a statement run inside a function could be recorded with its text, or "" when nothing would record
-// it. The runtime credential's role statement runs nested (inside a temporary function), so:
+// CaptureRefusal says why a statement run inside a function could be recorded or logged with its text, or "" when nothing
+// would. The runtime credential's password statement runs nested (inside a temporary function), so:
 //   - pg_stat_statements.track = 'all' and pg_stat_monitor.pgsm_track = 'all' would record it, secret included: refused;
-//   - 'top', 'none' and an unloaded module record top-level statements only (the call, never its secret);
+//     'top', 'none' and an unloaded module record top-level statements only (the call, never its secret);
+//   - log_parser_stats = on logs parser statistics while the nested statement is parsed, with the statement as their context
+//     (observed on PostgreSQL 18.4), and only a superuser can switch it off: refused. log_min_messages at a DEBUG level, the
+//     other *_stats settings and log_error_verbosity put no nested statement into the log (observed): recorded only;
 //   - pgaudit (Neon's HIPAA audit option) audits nested CREATE/ALTER ROLE statements too, but redacts every character after the
-//     password token by statement type (pgaudit 16.1, 17.1 and 18.0, log_audit_event), so pgaudit.log is recorded, not refused;
+//     password token by statement type (pgaudit 16.1, 17.1 and 18.0, log_audit_event): recorded only;
+//   - auto_explain hooks only the executor, which a role statement never reaches: recorded only;
+//   - debug_print_* are switched off for the function's own execution, and the nested statement cannot wait on a lock: the
+//     settings and log_lock_waits are recorded only;
 //   - log_statement and log_min_duration_statement log statement texts and bind parameters, which hold no secret.
 func (l Logging) CaptureRefusal() string {
 	switch {
@@ -242,6 +274,8 @@ func (l Logging) CaptureRefusal() string {
 		return "pg_stat_statements.track is 'all', which would record the nested role statement with its secret; set it to 'top' (the default) before rotating"
 	case l.PgStatMonitorTrack == "all":
 		return "pg_stat_monitor.pgsm_track is 'all', which would record the nested role statement with its secret; set it to 'top' (the default) before rotating"
+	case l.LogParserStats == "on":
+		return "log_parser_stats is on, which would log the nested role statement with its secret as context; turn it off before rotating"
 	}
 	return ""
 }

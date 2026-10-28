@@ -265,3 +265,20 @@ func TestARotationCorrectsANonInheritingMembership(t *testing.T) {
 		t.Fatalf("the membership was not corrected: %v", err)
 	}
 }
+
+// After a restore between two deployments the record can lack the live version's slot (here: live b, record a only). Confirming
+// b is refused as unknown (the deployment then knows the live version holds no credential for this database), and the rotation
+// still never takes the live slot.
+func TestARestoredRecordWithoutTheLiveSlot(t *testing.T) {
+	url, group := migrated(t)
+	r := rotator{t: t, url: url, group: group}
+	r.confirm(r.rotate().Slot) // the record holds a only
+	if _, err := Confirm(context.Background(), pgtest.Connect(t, url), group, "b"); !errors.Is(err, ErrUnknownSlot) {
+		t.Fatalf("confirm b: %v", err)
+	}
+	rotation, err := Rotate(context.Background(), pgtest.Connect(t, url), Options{Group: group, DirectURL: url, PooledHost: pgtest.Host(t), Runner: "test",
+		ProbeTimeout: 10 * time.Second, LiveSlot: "b"})
+	if err != nil || rotation.Slot != "a" || rotation.SlotSource != "live-version" {
+		t.Fatalf("rotation %+v %v", rotation, err)
+	}
+}

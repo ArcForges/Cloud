@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -82,36 +83,65 @@ func passwordSecret(password string, neon bool) (secret, form string, err error)
 	return secret, FormVerifier, nil
 }
 
-// The secret never appears in any statement text, bind parameter or log line: it is loaded with binary COPY (CopyData messages)
-// into a temporary table that the transaction's commit drops, and a temporary PL/pgSQL function reads it and runs the role
-// statement with EXECUTE. A nested statement is not recorded by pg_stat_statements with track = 'top' (the default), and the
-// function's exception handler re-raises with the SQLSTATE and a fixed message only, so the dynamic statement never reaches an
-// error's context, the client or the server log. Only LOGIN, INHERIT, the connection limit and the password are set: a
-// CREATEROLE role (the Neon owner) may not name the superuser, replication or BYPASSRLS attributes at all.
+// DefaultRoleLockTimeout bounds how long a rotation blocked on the login role's row (by another session) holds the migration
+// lock: the secret-free role statement then fails cleanly. Its value does not matter for confidentiality, because the nested
+// password statement cannot wait.
+const DefaultRoleLockTimeout = 10 * time.Second
+
+// takeRole creates or alters the login role without any secret (LOGIN, INHERIT and the connection limit only), with the lock
+// timeout set before it. The role's catalog row is then this transaction's own, so the nested password statement that follows
+// can never wait on a lock. Only these attributes are set: a CREATEROLE role (the Neon owner) may not name the superuser, replication or
+// BYPASSRLS attributes at all.
+func takeRole(ctx context.Context, tx pgx.Tx, login string, exists bool, connectionLimit int, lockTimeout time.Duration) error {
+	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL lock_timeout = %d", lockTimeout.Milliseconds())); err != nil {
+		return migrate.Sanitize("bound the role lock", err)
+	}
+	verb := "ALTER"
+	if !exists {
+		verb = "CREATE"
+	}
+	statement := fmt.Sprintf("%s ROLE %s WITH LOGIN INHERIT CONNECTION LIMIT %d", verb, pgx.Identifier{login}.Sanitize(), connectionLimit)
+	if _, err := tx.Exec(ctx, statement); err != nil {
+		return migrate.Sanitize("take the login role "+login, err)
+	}
+	return nil
+}
+
+// The secret is in no statement text and no bind parameter: it is loaded with binary COPY (CopyData messages) into a temporary
+// table that the transaction's commit drops, and a temporary PL/pgSQL function reads it and runs only `ALTER ROLE … PASSWORD`
+// with EXECUTE, on the row takeRole already took. The nested statement does hold the secret. What holds:
+//   - pg_stat_statements and pg_stat_monitor with track 'top' (the defaults) record top-level statements only; the rotation
+//     refuses 'all', and log_parser_stats = on (migrate.Logging.CaptureRefusal);
+//   - a caught error never quotes the statement: the handler (OTHERS OR query_canceled) re-raises with the SQLSTATE and a fixed
+//     message only;
+//   - a LOG message emitted while the statement runs would carry it as context; the known emitters are removed: the function
+//     sets debug_print_parse, debug_print_rewritten and debug_print_plan off for its own execution, and the statement cannot
+//     wait on a lock (no lock-wait message);
+//   - a cancellation or termination during the statement can still log it, but that aborts the rotation's transaction: the role
+//     keeps its old password, Neon's DDL forwarding (at pre-commit) never runs, no secret file is written, and the next rotation
+//     draws a new password, so the logged value was never a working credential.
 const (
 	secretTable    = `CREATE TEMPORARY TABLE pg_temp.arcforges_login_secret (secret text NOT NULL) ON COMMIT DROP`
-	setLoginSource = `CREATE OR REPLACE FUNCTION pg_temp.arcforges_set_login(role_name text, connection_limit integer, create_role boolean)
-RETURNS void LANGUAGE plpgsql AS $function$
+	setLoginSource = `CREATE OR REPLACE FUNCTION pg_temp.arcforges_set_login(role_name text)
+RETURNS void LANGUAGE plpgsql
+SET debug_print_parse = off SET debug_print_rewritten = off SET debug_print_plan = off
+AS $function$
 DECLARE
     stored text;
 BEGIN
     SELECT s.secret INTO STRICT stored FROM pg_temp.arcforges_login_secret s;
-    IF create_role THEN
-        EXECUTE format('CREATE ROLE %I WITH LOGIN INHERIT CONNECTION LIMIT %s PASSWORD %L', role_name, connection_limit, stored);
-    ELSE
-        EXECUTE format('ALTER ROLE %I WITH LOGIN INHERIT CONNECTION LIMIT %s PASSWORD %L', role_name, connection_limit, stored);
-    END IF;
-EXCEPTION WHEN OTHERS THEN
+    EXECUTE format('ALTER ROLE %I PASSWORD %L', role_name, stored);
+EXCEPTION WHEN OTHERS OR query_canceled THEN
     RAISE EXCEPTION USING ERRCODE = SQLSTATE, MESSAGE = 'login role update failed';
 END
 $function$`
-	setLoginCall = `SELECT pg_temp.arcforges_set_login($1, $2, $3)`
-	setLoginDrop = `DROP FUNCTION pg_temp.arcforges_set_login(text, integer, boolean)`
+	setLoginCall = `SELECT pg_temp.arcforges_set_login($1)`
+	setLoginDrop = `DROP FUNCTION pg_temp.arcforges_set_login(text)`
 )
 
-// setLogin sets the login role's attributes and secret in tx (the migration role's transaction, which owns the database and so
-// keeps TEMPORARY).
-func setLogin(ctx context.Context, tx pgx.Tx, login, secret string, connectionLimit int, create bool) error {
+// setLogin sets the login role's secret in tx (the migration role's transaction, which owns the database and so keeps
+// TEMPORARY), after takeRole.
+func setLogin(ctx context.Context, tx pgx.Tx, login, secret string) error {
 	if _, err := tx.Exec(ctx, secretTable); err != nil {
 		return migrate.Sanitize("create the temporary secret table", err)
 	}
@@ -121,7 +151,7 @@ func setLogin(ctx context.Context, tx pgx.Tx, login, secret string, connectionLi
 	if _, err := tx.Exec(ctx, setLoginSource); err != nil {
 		return migrate.Sanitize("create the login role function", err)
 	}
-	if _, err := tx.Exec(ctx, setLoginCall, login, connectionLimit, create); err != nil {
+	if _, err := tx.Exec(ctx, setLoginCall, login); err != nil {
 		return migrate.Sanitize("set the runtime credential of "+login, err)
 	}
 	if _, err := tx.Exec(ctx, setLoginDrop); err != nil {
