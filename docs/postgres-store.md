@@ -157,7 +157,8 @@ its own rights.
     provisioned Neon owner credential (`src/ArcForges.Cloud/NeonHello.cs` reads user and database from it). The owner's rights
     do not depend on `PUBLIC`. The deployment's migration step checks it before anything runs: it compares the role name (and,
     for production, the database name) of `NEON_DATABASE_URL` with those of the migration URL and refuses when the roles
-    differ, because the revocation would lock that role out until it is granted `CONNECT` ([Deployment](#deployment)). The live
+    differ, because the revocation would lock that role out. The remedy is to point `NEON_DATABASE_URL` at the migration
+    (owner) role, as recorded, or for the owner to decide otherwise ([Deployment](#deployment)). The live
     revision at the merge of this store still uses that credential.
   - **Neon roles that may lose access.** Neon system roles whose `neon_superuser` membership is undocumented may no longer
     connect to the center's databases: `web_access` (older documentation: the SQL Editor and passwordless login), the Data API's
@@ -245,39 +246,71 @@ The password has 40 base64url characters (240 random bits), with lowercase, uppe
 three times in a row. Neon requires at least 60 bits of entropy. The password is returned only inside the URL written to the
 secret file, and the center never prints or logs it.
 
-**How the secret reaches the server.** Neither the password nor a verifier ever appears in statement text, in a bind parameter
-or in an error:
+**How the secret reaches the server.** Neither the password nor a verifier appears in statement text or in a bind parameter:
 
-- The rotation loads the secret into a temporary table (`ON COMMIT DROP`) with binary `COPY FROM STDIN`, so the value travels
+- **Taking the role row.** In the rotation's transaction, a secret-free top-level statement takes the login role's catalog
+  row: `CREATE ROLE <login> WITH LOGIN INHERIT CONNECTION LIMIT 16`, or the same `ALTER ROLE` for an existing role.
+  - `SET LOCAL lock_timeout` (10 s) comes just before it. A session holding that row makes the rotation fail cleanly here,
+    before any secret is involved, and a lock-wait message names only this statement.
+  - The timeout bounds how long a blocked rotation holds the migration lock. Its value does not matter for confidentiality,
+    because the nested password statement cannot wait.
+- **Loading the secret.** It goes into a temporary table (`ON COMMIT DROP`) with binary `COPY FROM STDIN`, so the value travels
   in CopyData messages.
-- A temporary PL/pgSQL function reads it from that table and runs `CREATE ROLE` or `ALTER ROLE … PASSWORD` with `EXECUTE`. The
-  call is `SELECT pg_temp.arcforges_set_login($1, $2, $3)`, whose arguments are only the role name, the connection limit and
-  whether to create the role.
-- `pg_stat_statements` with `track = 'top'` (its default, which only a superuser can change) records top-level statements only:
-  the `COPY`, the function's definition and the call, never the nested role statement.
-  - The rotation reads the settings of every tool that can capture statements run inside functions. It records them in its
-    output (`logging`), and `migrate` records them in the gate record. The decision table (`migrate.Logging.CaptureRefusal`,
-    unit-tested):
-    - `pg_stat_statements.track = 'all'` would record the nested role statement, so it is refused; `top` (the default),
-      `none` and an unloaded module proceed.
-    - `pg_stat_monitor.pgsm_track = 'all'` is refused for the same reason; `top` and an unloaded module proceed.
-    - `pgaudit.log` (Neon's HIPAA audit option uses pgaudit) is recorded, not refused. pgaudit audits nested utility
-      statements too: its ProcessUtility hook handles `context <= PROCESS_UTILITY_QUERY` and keeps the nested query string.
-      But its `log_audit_event` replaces every character after the first `password` token with `<REDACTED>` for
-      `T_CreateRoleStmt` and `T_AlterRoleStmt`, by statement type and whatever the nesting. This is in `pgaudit.c` at the tags
-      Neon builds: 16.1, lines 556–602 (hook 1546–1584); 17.1, lines 612–659 (hook 1611–1649); and the current 18 tag, 18.0,
-      lines 615–663 (hook 1638–1676). Neon's compute Dockerfile at `fa50421` builds 16.1 and 17.1, and its
-      `pgaudit-parallel_workers` patches do not touch redaction. The secret follows the `PASSWORD` keyword, so it always lies after the first
-      `password` token and inside the redacted part, whatever the role name.
-    - `log_statement` and `log_min_duration_statement` are not refused: a logged statement text (`all` or `mod`, or a duration
-      line with its parameters) holds no secret.
-- The function's exception handler re-raises with the SQLSTATE and the fixed message `login role update failed`, so the dynamic
-  statement never reaches an error's context, the client or the server log.
+- **Setting the password.** A temporary PL/pgSQL function reads the secret from that table and runs only
+  `ALTER ROLE %I PASSWORD %L` with `EXECUTE`, on the row this transaction already took, so it never waits on a lock.
+  - The call is `SELECT pg_temp.arcforges_set_login($1)`, with the role name as its only argument.
+  - The function sets `debug_print_parse`, `debug_print_rewritten` and `debug_print_plan` off for its own execution. These are
+    user-settable, and without this a parse or rewrite dump of the nested statement, secret included, reaches the log
+    (observed on PostgreSQL 18.4).
+  - Its `EXCEPTION WHEN OTHERS OR query_canceled` handler re-raises with the SQLSTATE and the fixed message
+    `login role update failed`, so a caught error never quotes the nested statement, to the client or to the log.
+  - A LOG message emitted while the nested statement runs would carry it as context. The function's `SET` clauses
+    (`debug_print_*`) and the secret-free statement taken first (no lock wait inside `EXECUTE`) remove the known emitters.
+- **What records statements.** The rotation reads the settings of every tool that can capture statements run inside
+  functions. It records them in its output (`logging`), and `migrate` records them in the gate record. The decision table
+  (`migrate.Logging.CaptureRefusal`, unit-tested):
+  - `pg_stat_statements.track = 'all'` would record the nested statement, so it is refused. `top` (the default, which only a
+    superuser can change), `none` and an unloaded module record top-level statements only: the `COPY`, the function's
+    definition and the call.
+  - `pg_stat_monitor.pgsm_track = 'all'` is refused for the same reason; `top` and an unloaded module proceed.
+  - `log_parser_stats = on` is refused: it logs parser statistics with the nested statement as context (observed on
+    PostgreSQL 18.4), and only a superuser can switch it off.
+  - `pgaudit.log` (Neon's HIPAA audit option uses pgaudit) is recorded, not refused.
+    - pgaudit audits nested utility statements too: its ProcessUtility hook handles `context <= PROCESS_UTILITY_QUERY` and
+      keeps the nested query string.
+    - But its `log_audit_event` replaces every character after the first `password` token with `<REDACTED>` for
+      `T_CreateRoleStmt` and `T_AlterRoleStmt`, by statement type and whatever the nesting.
+    - This is in `pgaudit.c` at the tags Neon builds: 16.1, lines 556–602 (hook 1546–1584); 17.1, lines 612–659 (hook
+      1611–1649); and the current 18 tag, 18.0, lines 615–663 (hook 1638–1676).
+    - Neon's compute Dockerfile at `fa50421` builds 16.1 and 17.1, and its `pgaudit-parallel_workers` patches do not touch
+      redaction.
+    - The secret follows the `PASSWORD` keyword, so it always lies after the first `password` token and inside the redacted
+      part, whatever the role name.
+  - `auto_explain.log_min_duration` and `auto_explain.log_nested_statements` are recorded, not refused. auto_explain hooks
+    only the executor (`contrib/auto_explain/auto_explain.c`, `REL_18_STABLE`, lines 251–258), which a role statement never
+    reaches; nested logging shows only the function's secret-free `SELECT`. Neon's extension list does not name auto_explain.
+  - `log_lock_waits`, `log_error_verbosity`, `log_min_messages` and `debug_print_*` are recorded, not refused. The nested
+    statement waits on no lock, and `debug_print_*` are off inside the function. Neither `log_min_messages` at `debug5` nor
+    the other `*_stats` settings put the nested statement into the log (observed).
+  - `log_statement` and `log_min_duration_statement` are recorded, not refused: a logged statement text (`all` or `mod`, or a
+    duration line with its parameters) holds no secret.
+- **What remains.** A cancellation or termination during the nested statement can still log it as context. A termination
+  (`pg_terminate_backend`, `transaction_timeout`) is uncatchable, and a caught cancellation is re-raised. But either aborts the
+  rotation's transaction, so the logged value is never a working credential:
+  - the role keeps its old password;
+  - Neon's DDL forwarding, which runs at pre-commit, never fires;
+  - no secret file is written;
+  - the next rotation draws a new password.
 - **Tests.** They run on PostgreSQL 18.4 with `pg_stat_statements` preloaded, `log_statement = 'all'` and
   `log_min_duration_statement = 0`, and check that:
   - no `pg_stat_statements` row and no server log line holds the password or the verifier;
-  - a forced failure's error and context fields hold neither (without the handler they would);
-  - `track = 'all'` refuses the rotation.
+  - with `debug_print_parse` and `debug_print_rewritten` on, no parse dump holds the secret (a control function without the
+    `SET` clauses leaks);
+  - a session holding the login role's row fails the rotation with `55P03` on the secret-free statement, and neither the
+    error nor the logged lock wait holds the secret;
+  - a cancelled password statement (`statement_timeout`) and a forced failure report `login role update failed` with no
+    context holding the secret (a control without the handler leaks);
+  - `track = 'all'` and `log_parser_stats = on` refuse the rotation.
 
 What the secret is depends on one predicate, the one that derives the `-pooler` host (`provision.NeonHost`: a host
 `ep-….<region>….neon.tech`):
@@ -319,7 +352,8 @@ The protected main-push deployment (`.github/workflows/ci.yml`, job `deploy`, Gi
    - It connects with `NEON_DATABASE_URL_DIRECT`, which Docker receives by variable name, never on a command line.
    - Before anything runs it compares `NEON_DATABASE_URL` (the C# Hello's credential) with the migration URL: the same role
      (and, here, the same database) passes; another role refuses the step, because the revocation of `PUBLIC`'s `CONNECT`
-     would lock that role out until it is granted `CONNECT`; an absent variable is skipped and recorded. Acceptance, which has
+     would lock that role out (the remedy: point `NEON_DATABASE_URL` at the migration role, or the owner decides otherwise); an
+     absent variable is skipped and recorded. Acceptance, which has
      its own database, compares the role only, and only when its job carries the variable (today it does not). Neither value
      is printed.
    - It writes `artifacts/postgres-gate-production.json`: target, revision, status, database, version, the migrations applied,
