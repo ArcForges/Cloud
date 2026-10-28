@@ -21,6 +21,7 @@ import {
   proofAssetsDirName,
   proofDatabaseName,
   proofHostname,
+  proofQueueNames,
   proofWorkerName,
   sealedProofBundle,
   siteArchivePin,
@@ -219,13 +220,155 @@ async function ensureD1(api: CloudflareApi, actions: string[]): Promise<string> 
 /**
  * Idempotent provisioning of the acceptance environment: the retained proof D1 database (still bound; the gated C# migration
  * step keeps it current until AF-CTR-09 inspects and keeps it) and the center's own acceptance resources (center-provision.ts).
- * The C# proof's R2 bucket and queues are retained as they are and no longer bound; nothing else is touched.
+ * The C# proof's R2 bucket and queues are retained as they are and no longer bound; nothing else is touched here (the deployment
+ * detaches the proof script's consumers of the two retired queues, prepareProofScript).
  */
 export async function provision(api: CloudflareApi): Promise<Provisioned> {
   const actions: string[] = [];
   const d1DatabaseId = await ensureD1(api, actions);
   actions.push(...(await provisionCenter(api, "acceptance")));
   return { d1DatabaseId, actions };
+}
+
+/** What the deployment found and changed on the proof script before uploading the acceptance bundle. */
+export interface ProofScriptPreflight {
+  retiredConsumers: { queue: string; outcome: "detached" | "not attached" }[];
+  cronSchedules: number;
+  migrationTag: string | null;
+}
+
+interface QueueRecord {
+  queue_id?: unknown;
+  queue_name?: unknown;
+  consumers?: unknown;
+}
+
+interface ConsumerRecord {
+  consumer_id?: unknown;
+  type?: unknown;
+  script?: unknown;
+  service?: unknown;
+}
+
+const providerId = /^[0-9a-f]{32}$/u;
+
+async function listQueues(api: CloudflareApi): Promise<QueueRecord[]> {
+  const queues: QueueRecord[] = [];
+  for (let page = 1; page <= 20; page++) {
+    const reply = await api.request("GET", api.accountPath(`/queues?per_page=100&page=${page}`));
+    if (!reply.success || !Array.isArray(reply.result))
+      throw new Error(`Listing the queues failed (${describe(reply)}); nothing was deployed.`);
+    queues.push(...(reply.result as QueueRecord[]));
+    if (reply.result.length < 100) return queues;
+  }
+  throw new Error("The queue list did not end after 20 pages; nothing was deployed.");
+}
+
+/** The Worker consumers of a queue that name the proof script (as Wrangler's own `queues consumer remove` resolves them). */
+function proofConsumers(queue: QueueRecord): ConsumerRecord[] {
+  const consumers = Array.isArray(queue.consumers) ? (queue.consumers as ConsumerRecord[]) : [];
+  return consumers.filter(
+    (consumer) =>
+      consumer.type === "worker" &&
+      (consumer.script === proofWorkerName || consumer.service === proofWorkerName),
+  );
+}
+
+/**
+ * AF-CTR-02 follow-up. The retired C# proof bundle consumed the queues `proofQueueNames` (the wake queue and its dead-letter
+ * queue); the acceptance bundle has no queue handler, so Cloudflare refuses its upload while either queue still names the proof
+ * script as a consumer (code 11001). The wake messages are transient container wake signals, not user data: the consumers are
+ * detached, and both queues and any messages in them stay as they are, unconsumed, until AF-CTR-09.
+ *
+ * Prepares the proof script for the acceptance bundle, before anything is rotated or uploaded. It reads first and refuses what it
+ * does not know: a consumer of the proof script on any other queue, a cron schedule (the bundle has no scheduled handler), or a
+ * published Durable Object migration tag that the configuration does not list. Then it detaches only the proof script's consumers
+ * of exactly the two retired queues, reporting "detached" or "not attached" for each. It never deletes a queue or a message, and
+ * any API failure stops the deployment before Wrangler runs.
+ */
+export async function prepareProofScript(
+  api: CloudflareApi,
+  migrationTags: readonly string[],
+): Promise<ProofScriptPreflight> {
+  const retired: readonly string[] = proofQueueNames;
+  const queues = await listQueues(api);
+  for (const queue of queues) {
+    const name = String(queue.queue_name);
+    if (!retired.includes(name) && proofConsumers(queue).length > 0)
+      throw new Error(
+        `Queue ${name} has a consumer for ${proofWorkerName} that this deployment does not detach, and the acceptance bundle has no queue handler. Nothing was deployed; the owner decides about that consumer.`,
+      );
+  }
+  const schedules = await api.request(
+    "GET",
+    api.accountPath(`/workers/scripts/${proofWorkerName}/schedules`),
+  );
+  let cronSchedules = 0;
+  if (schedules.success) {
+    const list = (schedules.result as { schedules?: unknown } | null)?.schedules;
+    cronSchedules = Array.isArray(list) ? list.length : 0;
+  } else if (schedules.status !== 404)
+    throw new Error(
+      `Reading the proof script's cron schedules failed (${describe(schedules)}); nothing was deployed.`,
+    );
+  if (cronSchedules > 0)
+    throw new Error(
+      `The proof script has ${cronSchedules} cron schedule(s), and the acceptance bundle has no scheduled handler. Nothing was deployed; the owner decides about the schedules.`,
+    );
+  const service = await api.request("GET", api.accountPath(`/workers/services/${proofWorkerName}`));
+  let migrationTag: string | null = null;
+  if (service.success) {
+    const tag = (
+      service.result as { default_environment?: { script?: { migration_tag?: unknown } } } | null
+    )?.default_environment?.script?.migration_tag;
+    migrationTag = typeof tag === "string" && tag !== "" ? tag : null;
+  } else if (service.status !== 404)
+    throw new Error(
+      `Reading the proof script's metadata failed (${describe(service)}); nothing was deployed.`,
+    );
+  if (migrationTag !== null && !migrationTags.includes(migrationTag))
+    throw new Error(
+      `The proof script's Durable Object migration tag ${migrationTag} is not in the configuration's migrations (${migrationTags.join(", ")}). Nothing was deployed.`,
+    );
+  const retiredConsumers: ProofScriptPreflight["retiredConsumers"] = [];
+  const failures: string[] = [];
+  for (const name of proofQueueNames) {
+    const queue = queues.find((entry) => entry.queue_name === name);
+    const consumers = queue === undefined ? [] : proofConsumers(queue);
+    if (queue === undefined || consumers.length === 0) {
+      retiredConsumers.push({ queue: name, outcome: "not attached" });
+      continue;
+    }
+    for (const consumer of consumers) {
+      const queueId = String(queue.queue_id);
+      const consumerId = String(consumer.consumer_id);
+      if (!providerId.test(queueId) || !providerId.test(consumerId))
+        throw new Error(`Unexpected identifiers on queue ${name}; nothing was deployed.`);
+      // Only this consumer registration (with its own retry and dead-letter settings) is removed; the queue and its messages stay.
+      const removed = await api.request(
+        "DELETE",
+        api.accountPath(`/queues/${queueId}/consumers/${consumerId}`),
+      );
+      if (!removed.success) failures.push(`${name}: ${describe(removed)}`);
+    }
+    retiredConsumers.push({ queue: name, outcome: "detached" });
+  }
+  if (retiredConsumers.some((entry) => entry.outcome === "detached")) {
+    // Whatever the removals answered, the listing decides (a lost reply may hide a success, a success must really be gone).
+    const after = await listQueues(api);
+    const remaining: string[] = proofQueueNames.filter((name) => {
+      const queue = after.find((entry) => entry.queue_name === name);
+      return queue !== undefined && proofConsumers(queue).length > 0;
+    });
+    const detached = retiredConsumers
+      .filter((entry) => entry.outcome === "detached" && !remaining.includes(entry.queue))
+      .map((entry) => entry.queue);
+    if (remaining.length > 0)
+      throw new Error(
+        `The ${proofWorkerName} consumer of ${remaining.join(", ")} is still attached (${failures.join("; ") || "the removal reported success"}). Removing a consumer needs the deployment token's Queues write permission, which only the owner can add. ${detached.length > 0 ? `Detached: ${detached.join(", ")}. ` : ""}Nothing was deployed.`,
+      );
+  }
+  return { retiredConsumers, cronSchedules, migrationTag };
 }
 
 /**
@@ -791,6 +934,19 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   });
   const configFile = path.join(root, "artifacts", "proof.wrangler.json");
   await writeJson(configFile, config);
+  // AF-CTR-02 follow-up: the retired C# proof consumers are detached (and anything unknown refused) before the rotation and upload.
+  const proofMigrations = config.env.proof.migrations;
+  const preflight = await prepareProofScript(
+    api,
+    Array.isArray(proofMigrations)
+      ? proofMigrations.map((migration) => String((migration as { tag?: unknown }).tag))
+      : [],
+  );
+  for (const entry of preflight.retiredConsumers)
+    console.log(`  Queue ${entry.queue}: ${proofWorkerName} consumer ${entry.outcome}`);
+  console.log(
+    `  Proof script: ${preflight.cronSchedules} cron schedules; Durable Object migration tag ${preflight.migrationTag ?? "none"}`,
+  );
   const common = ["--config", "artifacts/proof.wrangler.json", "--env", "proof"];
   // The acceptance runtime credential is rotated now and travels in a runner-local file that Wrangler uploads with the version and
   // that is removed immediately; nothing prints it. The revision still running keeps its own credential of the other slot.
@@ -843,6 +999,10 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
       probe: rotation.probe,
     },
     retainedD1DatabaseId: provisioned.d1DatabaseId,
+    // The retired C# proof queues stay, unconsumed, until AF-CTR-09.
+    retiredQueueConsumers: preflight.retiredConsumers,
+    cronSchedules: preflight.cronSchedules,
+    migrationTag: preflight.migrationTag,
     resources: provisioned.actions,
     centerResources: centerResources.acceptance,
     receipts: receipts.map((check) => ({ name: check.name, ok: check.ok })),

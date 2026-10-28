@@ -2,6 +2,8 @@
 // Offline checks of the CI-only proof access, provisioning and receipt logic against a fake
 // Cloudflare API. The real account is exercised only by the manually dispatched workflow jobs.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,6 +12,7 @@ import {
   CloudflareApi,
   checkProofDomainFree,
   postDeployChecks,
+  prepareProofScript,
   report,
   probeAccess,
   provision,
@@ -21,6 +24,7 @@ import {
   profileBundleAssetName,
   profileBundlePin,
   proofAssetsDirName,
+  proofQueueNames,
   siteArchiveAssetName,
   siteArchivePin,
 } from "../../eng/verification/proof-deploy.ts";
@@ -28,12 +32,26 @@ import {
 const account = "0".repeat(32);
 const token = `${"a".repeat(12)}-${"b".repeat(12)}`;
 const d1Id = "11111111-1111-4111-8111-111111111111";
+const queueId = (name: string) => createHash("md5").update(name).digest("hex");
+
+interface Consumer {
+  consumer_id: string;
+  type: string;
+  script?: string;
+  service?: string;
+}
 
 interface State {
   d1: { uuid: string; name: string }[];
   buckets: string[];
   lifecycles: Map<string, unknown[]>;
   queues: string[];
+  /** Consumers by queue name. */
+  consumers: Record<string, Consumer[]>;
+  /** The proof script's cron schedules; null answers 404 (no such script). */
+  schedules: unknown[] | null;
+  /** The proof script's service metadata; null answers 404 (no such script). */
+  service: { migration_tag?: string } | null;
   denied: Set<string>;
   calls: string[];
   workersDev: boolean;
@@ -49,6 +67,9 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
     buckets: [],
     lifecycles: new Map(),
     queues: [],
+    consumers: {},
+    schedules: null,
+    service: null,
     denied: new Set(),
     calls: [],
     workersDev: false,
@@ -59,6 +80,8 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
     subdomain: null,
     ...overrides,
   };
+  // The fake removes consumers in place; a shared fixture must not see another fake's removals.
+  state.consumers = structuredClone(state.consumers);
   const reply = (result: unknown, status = 200, errors: unknown[] = []) =>
     Response.json({ success: status < 400, errors, result }, { status });
   const fetcher: typeof fetch = (input, init) => {
@@ -119,8 +142,38 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
         state.queues.push(body.queue_name ?? "");
         return Promise.resolve(reply({ queue_name: body.queue_name }));
       }
-      return Promise.resolve(reply(state.queues.map((queue_name) => ({ queue_name }))));
+      const page = Number(url.searchParams.get("page") ?? "1");
+      return Promise.resolve(
+        reply(
+          page > 1
+            ? []
+            : state.queues.map((queue_name) => ({
+                queue_id: queueId(queue_name),
+                queue_name,
+                consumers: state.consumers[queue_name] ?? [],
+              })),
+        ),
+      );
     }
+    const consumer = /\/queues\/([0-9a-f]{32})\/consumers\/([0-9a-f]{32})$/u.exec(endpoint);
+    if (consumer && method === "DELETE") {
+      const name = state.queues.find((queue) => queueId(queue) === consumer[1]) ?? "";
+      const list = state.consumers[name] ?? [];
+      if (!list.some((entry) => entry.consumer_id === consumer[2]))
+        return Promise.resolve(reply(null, 404));
+      state.consumers[name] = list.filter((entry) => entry.consumer_id !== consumer[2]);
+      return Promise.resolve(reply(null));
+    }
+    if (endpoint.endsWith("/workers/scripts/arcforges-cloud-proof/schedules"))
+      return Promise.resolve(
+        state.schedules === null ? reply(null, 404) : reply({ schedules: state.schedules }),
+      );
+    if (endpoint.endsWith("/workers/services/arcforges-cloud-proof"))
+      return Promise.resolve(
+        state.service === null
+          ? reply(null, 404)
+          : reply({ default_environment: { script: state.service } }),
+      );
     return Promise.resolve(reply(null, 404));
   };
   return { api: new CloudflareApi(account, token, fetcher), state };
@@ -359,4 +412,177 @@ test("an asset that does not match its pinned digest stops the staging before an
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+// AF-CTR-02 follow-up: the retired C# proof consumers are detached before the acceptance bundle is uploaded.
+const proofTags = ["v1", "harness-run-alarm-v1"];
+const [wake, wakeDlq] = proofQueueNames;
+const worker = (script: string, id: string): Consumer => ({
+  consumer_id: id.repeat(32),
+  type: "worker",
+  script,
+});
+const deletes = (calls: string[]) => calls.filter((call) => call.startsWith("DELETE "));
+const detachCall = (queue: string, id: string) =>
+  `DELETE /accounts/${account}/queues/${queueId(queue)}/consumers/${id.repeat(32)}`;
+const centerQueues = [
+  "arcforges-acceptance-center-events",
+  "arcforges-acceptance-center-events-dlq",
+];
+
+test("the proof script's consumers of both retired queues are detached, once", async () => {
+  const { api, state } = fakeCloudflare({
+    queues: [...centerQueues, ...proofQueueNames],
+    consumers: {
+      [wake]: [worker("arcforges-cloud-proof", "a")],
+      [wakeDlq]: [worker("arcforges-cloud-proof", "d")],
+    },
+    schedules: [],
+    service: { migration_tag: "harness-run-alarm-v1" },
+  });
+  assert.deepEqual(await prepareProofScript(api, proofTags), {
+    retiredConsumers: [
+      { queue: wake, outcome: "detached" },
+      { queue: wakeDlq, outcome: "detached" },
+    ],
+    cronSchedules: 0,
+    migrationTag: "harness-run-alarm-v1",
+  });
+  assert.deepEqual(deletes(state.calls), [detachCall(wake, "a"), detachCall(wakeDlq, "d")]);
+  // Only the consumer registrations went: every queue stays, and nothing but those two consumers is deleted or written.
+  assert.deepEqual(state.queues, [...centerQueues, ...proofQueueNames]);
+  assert.deepEqual(state.consumers, { [wake]: [], [wakeDlq]: [] });
+  assert(
+    state.calls.every(
+      (call) =>
+        call.startsWith("GET ") ||
+        /^DELETE \/accounts\/0{32}\/queues\/[0-9a-f]{32}\/consumers\/[0-9a-f]{32}$/u.test(call),
+    ),
+    state.calls.join("\n"),
+  );
+  // A rerun finds nothing attached and changes nothing.
+  state.calls.length = 0;
+  const again = await prepareProofScript(api, proofTags);
+  assert.deepEqual(again.retiredConsumers, [
+    { queue: wake, outcome: "not attached" },
+    { queue: wakeDlq, outcome: "not attached" },
+  ]);
+  assert.deepEqual(deletes(state.calls), []);
+});
+
+test("nothing attached means no call, and another script's consumers are never touched", async () => {
+  const notAttached = [
+    { queue: wake, outcome: "not attached" },
+    { queue: wakeDlq, outcome: "not attached" },
+  ];
+  // Both queues exist without a consumer, or do not exist at all.
+  for (const queues of [[...proofQueueNames], []]) {
+    const { api, state } = fakeCloudflare({ queues });
+    const result = await prepareProofScript(api, proofTags);
+    assert.deepEqual(result, {
+      retiredConsumers: notAttached,
+      cronSchedules: 0,
+      migrationTag: null,
+    });
+    assert.deepEqual(deletes(state.calls), []);
+  }
+  // Consumers of other scripts (and a pull consumer) stay on the retired queues, beside a detached proof consumer.
+  const others = {
+    [wake]: [
+      worker("arcforges-cloud", "b"),
+      worker("arcforges-cloud-proof", "a"),
+      { consumer_id: "c".repeat(32), type: "http_pull" },
+    ],
+    [wakeDlq]: [worker("arcforges-cloud-proof-x", "e")],
+  };
+  const { api, state } = fakeCloudflare({ queues: [...proofQueueNames], consumers: others });
+  assert.deepEqual((await prepareProofScript(api, proofTags)).retiredConsumers, [
+    { queue: wake, outcome: "detached" },
+    { queue: wakeDlq, outcome: "not attached" },
+  ]);
+  assert.deepEqual(deletes(state.calls), [detachCall(wake, "a")]);
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(state.consumers).map(([queue, list]) => [
+        queue,
+        list.map((entry) => entry.consumer_id[0]),
+      ]),
+    ),
+    { [wake]: ["b", "c"], [wakeDlq]: ["e"] },
+  );
+});
+
+test("anything unknown, or any API failure, stops before a consumer is detached", async () => {
+  const attached = {
+    queues: [...centerQueues, ...proofQueueNames],
+    consumers: {
+      [wake]: [worker("arcforges-cloud-proof", "a")],
+      [wakeDlq]: [worker("arcforges-cloud-proof", "d")],
+    },
+  };
+  const refused = async (overrides: Partial<State>, pattern: RegExp) => {
+    const { api, state } = fakeCloudflare({ ...attached, ...overrides });
+    await assert.rejects(prepareProofScript(api, proofTags), pattern);
+    assert.deepEqual(deletes(state.calls), [], String(pattern));
+    assert.equal(state.consumers[wake]?.length, 1);
+  };
+  // A proof consumer on any other queue is not this deployment's to remove.
+  await refused(
+    {
+      consumers: {
+        ...attached.consumers,
+        "arcforges-acceptance-center-events": [worker("arcforges-cloud-proof", "f")],
+      },
+    },
+    /Queue arcforges-acceptance-center-events has a consumer for arcforges-cloud-proof .* Nothing was deployed/u,
+  );
+  // The acceptance bundle has no scheduled handler.
+  await refused({ schedules: [{ cron: "*/5 * * * *" }] }, /1 cron schedule\(s\)/u);
+  // A Durable Object migration tag the configuration does not list.
+  await refused(
+    { service: { migration_tag: "v2" } },
+    /migration tag v2 is not in the configuration/u,
+  );
+  // Unreadable state is a refusal, not an assumption.
+  await refused(
+    { denied: new Set(["/queues"]) },
+    /Listing the queues failed .*nothing was deployed/u,
+  );
+  await refused({ denied: new Set(["/schedules"]) }, /cron schedules failed/u);
+  await refused({ denied: new Set(["/workers/services/"]) }, /metadata failed/u);
+  // Without Queues write the removal fails: the deployment stops and names the owner's action.
+  const { api, state } = fakeCloudflare({ ...attached, denied: new Set(["/consumers/"]) });
+  await assert.rejects(
+    prepareProofScript(api, proofTags),
+    /consumer of arcforges-proof-wake, arcforges-proof-wake-dlq is still attached \(arcforges-proof-wake: http 403.*Queues write permission, which only the owner can add\. Nothing was deployed\./u,
+  );
+  assert.equal(state.consumers[wake]?.length, 1);
+  assert.deepEqual(state.queues, [...centerQueues, ...proofQueueNames]);
+  // A partial removal still stops the deployment, and says which consumer did go.
+  const partial = fakeCloudflare({
+    ...attached,
+    denied: new Set([`/queues/${queueId(wakeDlq)}/consumers/`]),
+  });
+  await assert.rejects(
+    prepareProofScript(partial.api, proofTags),
+    /consumer of arcforges-proof-wake-dlq is still attached .* Detached: arcforges-proof-wake\. Nothing was deployed\./u,
+  );
+  assert.deepEqual(partial.state.consumers, {
+    [wake]: [],
+    [wakeDlq]: [worker("arcforges-cloud-proof", "d")],
+  });
+});
+
+test("the deployment prepares the proof script before the credential rotation and the upload, and records it", () => {
+  const source = readFileSync(
+    path.resolve(import.meta.dirname, "../../eng/verification/proof-cloudflare.ts"),
+    "utf8",
+  );
+  const deploy = source.slice(source.indexOf("async function deploy("));
+  const prepared = deploy.indexOf("await prepareProofScript(");
+  assert(prepared > 0);
+  assert(prepared < deploy.indexOf("withRuntimeCredential("));
+  assert(prepared < deploy.indexOf('"deploy",'));
+  for (const field of ["retiredQueueConsumers:", "cronSchedules:", "migrationTag:"])
+    assert(deploy.slice(deploy.indexOf("proof-deployment.json")).includes(field), field);
 });
