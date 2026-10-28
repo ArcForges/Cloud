@@ -96,6 +96,7 @@ public sealed class WorkerLiteralScanTests
         new("a timer with a named budget passes", "worker/a.ts", "export function f(ms: number) {\n  setTimeout(() => g(), ms);\n}\n", []),
         new("a regex without an identifier shape passes", "worker/a.ts", "const pattern = /checksum|digest/iu;\n", []),
         new("the generated module is not read", "worker/tables/cloud-tables.generated.ts", "export const maxFrameBytes = 65536;\n", []),
+        new("the Go-generated production table is not read", "worker/tables/center-tables.generated.ts", "export const maxBodyBytes = 4096;\n", []),
         new("a file outside the worker is not read", "src/a.ts", "export const maxFrameBytes = 65536;\n", []),
         new("a protocol constant named by the list passes", "worker/ingress/errors.ts", "export const grpcStatus = {\n  unavailable: 14,\n} as const;\n", []),
         new("the same constant in another file is refused", "worker/ingress/other.ts", "export const grpcStatus = {\n  unavailable: 14,\n} as const;\n",
@@ -259,6 +260,7 @@ public sealed class WorkerLiteralScanTests
         Assert.True(WorkerLiteralScan.IsScanned("worker/index.ts"));
         Assert.True(WorkerLiteralScan.IsScanned("worker/foundation/objects.ts"));
         Assert.False(WorkerLiteralScan.IsScanned("worker/tables/cloud-tables.generated.ts"));
+        Assert.False(WorkerLiteralScan.IsScanned("worker/tables/center-tables.generated.ts"));
         Assert.False(WorkerLiteralScan.IsScanned("worker/storage/plans.generated.ts"));
         Assert.False(WorkerLiteralScan.IsScanned("worker/types.d.ts"));
         Assert.False(WorkerLiteralScan.IsScanned("tests/worker/ai-internal.test.ts"));

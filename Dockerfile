@@ -24,12 +24,13 @@ RUN test -n "$SOURCE_REVISION" && dotnet publish src/ArcForges.Cloud -c Release 
     -p:CloudSourceDirty="$SOURCE_DIRTY" -p:Version="$APP_VERSION" -p:ArcForgesBuildKind="$BUILD_KIND" \
     -p:ArcForgesBuildId="$BUILD_ID" -p:ArcForgesPipelineRun="$PIPELINE_RUN" -p:ArcForgesSourceDateEpoch="$SOURCE_EPOCH" \
     -o /out && test -x /out/ArcForges.Cloud
-COPY hello-go/ ./hello-go/
-WORKDIR /source/hello-go
-RUN go mod download && go mod verify && go run ./tools/contractgen \
+# The Go center: modules verified against go.sum, built without cgo and with the same identity inputs as the C# executable.
+COPY center/ ./center/
+WORKDIR /source/center
+RUN go mod download && go mod verify && identity=github.com/ArcForges/Cloud/center/internal/buildinfo \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
-    -ldflags="-s -w -X main.appVersion=${APP_VERSION} -X main.sourceCommit=${SOURCE_COMMIT} -X main.sourceDirty=${SOURCE_DIRTY} -X main.buildKind=${BUILD_KIND} -X main.buildID=${BUILD_ID} -X main.pipelineRun=${PIPELINE_RUN} -X main.sourceEpoch=${SOURCE_EPOCH}" \
-    -o /out/arcforges-hello-go ./cmd/server
+    -ldflags="-s -w -X $identity.appVersion=${APP_VERSION} -X $identity.sourceCommit=${SOURCE_COMMIT} -X $identity.sourceDirty=${SOURCE_DIRTY} -X $identity.buildKind=${BUILD_KIND} -X $identity.buildID=${BUILD_ID} -X $identity.pipelineRun=${PIPELINE_RUN} -X $identity.sourceEpoch=${SOURCE_EPOCH}" \
+    -o /out/arcforges-center ./cmd/arcforges-center && test -x /out/arcforges-center
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0.12-noble-chiseled@sha256:18d4848091a40d13dbfdd6a8340c1657dc3e2f2d7fa2f042e9d162e68669dbc9
 ARG SOURCE_REVISION=local
@@ -38,7 +39,7 @@ LABEL org.opencontainers.image.source="https://github.com/ArcForges/Cloud" \
       org.opencontainers.image.revision="$SOURCE_REVISION"
 WORKDIR /app
 COPY --from=build /out/ArcForges.Cloud ./
-COPY --from=build /out/arcforges-hello-go ./
+COPY --from=build /out/arcforges-center ./
 COPY LICENSE ./LICENSE
 COPY artifacts/image-notices/ ./notices/
 ENV ASPNETCORE_ENVIRONMENT=Production \

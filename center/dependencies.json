@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "goVersion": "go1.27.3",
+  "inputs": {
+    "go.mod": "9e7951400458d012908d5b95b18543bc2f0f59561313169b4f0f1de77422daed",
+    "go.sum": "12ab12e467aaad6c9d2d8cd8896a7c45acf6e4ea99ae2dbb02575e1955843d9b",
+    "toolchain.json": "ad46e23c3a42ecc48b5f2383e6039aeffb11d9723bafac038fc6c648b7bd5a51",
+    "tools/go.mod": "1abc5df8e2b367cff0d4de646d089c62eb89ade03538ae799450a096a86d600b",
+    "tools/go.sum": "6394a2049a55c360f2fc72d96588570ece75a3b1350fad580da4070d53b0ae2f"
+  },
+  "runtimeModules": [
+    {
+      "path": "connectrpc.com/connect/v2",
+      "version": "v2.0.2",
+      "sum": "h1:PoPDmOlhc46elsuCdKCKTxjNBb3HJlKF+s/sP2oucPw=",
+      "goModSum": "h1:N32OLrstcPUzkykFynnefFro3+xzSdOrZlK2jHmS/xo=",
+      "repository": "https://github.com/connectrpc/connect-go",
+      "commit": "8f69fe4e4b2d861700b00983b2f55c8cf97e235b",
+      "spdx": "Apache-2.0",
+      "licenceFile": "third-party/ConnectGo.LICENSE.txt",
+      "licenceSha256": "595c92e7a9bc933c07da143f527d199e2fc3010e2afd8a8c0654c1f43bfa076c"
+    },
+    {
+      "path": "github.com/ArcForges/Contracts/go",
+      "version": "v1.0.0-ci.410.1",
+      "sum": "h1:Ei//1YQhfZ5yTsP2mwP2XCvzqR+4pdDjtOzR6IR0R3Y=",
+      "goModSum": "h1:9MwtkvawAZ6+s9I5pbTsJit1/7htfvowqEREcJlIXME=",
+      "repository": "https://github.com/ArcForges/Contracts",
+      "commit": "7205743648c6d5e81f539fe99b4d937dd4a0cbbc",
+      "spdx": "Apache-2.0",
+      "licenceFile": "third-party/ContractsGo.LICENSE.txt",
+      "licenceSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "noticeFile": "third-party/ContractsGo.NOTICE.txt",
+      "noticeSha256": "8aa487acf6a48132c861cb00e83ffe6bda718771cbbc6809b7e734a2dd6d366d"
+    },
+    {
+      "path": "github.com/jackc/pgpassfile",
+      "version": "v1.0.0",
+      "sum": "h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=",
+      "goModSum": "h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=",
+      "repository": "https://github.com/jackc/pgpassfile",
+      "commit": "99d8e8e28945ffceaf75b0299fcb2bb656b8a683",
+      "spdx": "MIT",
+      "licenceFile": "third-party/PgPassFile.LICENSE.txt",
+      "licenceSha256": "adb1663fda031df8f4344aa68f299fd87d80353e31339406742ded21dae65702"
+    },
+    {
+      "path": "github.com/jackc/pgservicefile",
+      "version": "v0.0.0-20240606120523-5a60cdf6a761",
+      "sum": "h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=",
+      "goModSum": "h1:5TJZWKEWniPve33vlWYSoGYefn3gLQRzjfDlhSJ9ZKM=",
+      "repository": "https://github.com/jackc/pgservicefile",
+      "commit": "5a60cdf6a76120dc3d5152b95f3b5fd8aa7cc9eb",
+      "spdx": "MIT",
+      "licenceFile": "third-party/PgServiceFile.LICENSE.txt",
+      "licenceSha256": "fc505773403fe869ed64cc2235cdd13988a427bb7e3a7e7004a3f4b27420f8fc"
+    },
+    {
+      "path": "github.com/jackc/pgx/v5",
+      "version": "v5.11.0",
+      "sum": "h1:IzBBtyK9AHqf98cctWFifYSci2hgQR/cd56wB4p+ogg=",
+      "goModSum": "h1:mal1tBGAFfLHvZzaYh77YS/eC6IX9OWbRV1QIIM0Jn4=",
+      "repository": "https://github.com/jackc/pgx",
+      "commit": "5e583fa7aabfa88b796292f849fc9d7d75ac159d",
+      "spdx": "MIT",
+      "licenceFile": "third-party/Pgx.LICENSE.txt",
+      "licenceSha256": "467f95e074fe23079a5623ed652619682692041b8551da27e3c2ddb9659a1507"
+    },
+    {
+      "path": "github.com/jackc/puddle/v2",
+      "version": "v2.2.2",
+      "sum": "h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo=",
+      "goModSum": "h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=",
+      "repository": "https://github.com/jackc/puddle",
+      "commit": "bd09d14bd4018b6d65a9d7770e2f3ddf8b00af1c",
+      "spdx": "MIT",
+      "licenceFile": "third-party/Puddle.LICENSE.txt",
+      "licenceSha256": "2d50e98a4900b4d6457a38d39c1432fdc156fc2f7b365f2e33ec9344acbb0057"
+    },
+    {
+      "path": "golang.org/x/net",
+      "version": "v0.62.0",
+      "sum": "h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY=",
+      "goModSum": "h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=",
+      "repository": "https://go.googlesource.com/net",
+      "commit": "3de643db506517b3e652a13cc0b56034cea6b8e6",
+      "spdx": "BSD-3-Clause",
+      "licenceFile": "third-party/GoNet.LICENSE.txt",
+      "licenceSha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+    },
+    {
+      "path": "golang.org/x/sync",
+      "version": "v0.24.0",
+      "sum": "h1:iqiDrGoDgyuvAKrhLQthUEzU/R378N78gXbBjxed7oA=",
+      "goModSum": "h1:sUUOizhqBxiL6pEWpqNLUiaJn1ShEbZ6BBqskPbjZm0=",
+      "repository": "https://go.googlesource.com/sync",
+      "commit": "36f2d70ecde9857dc4e363242a1369c7645d6770",
+      "spdx": "BSD-3-Clause",
+      "licenceFile": "third-party/GoSync.LICENSE.txt",
+      "licenceSha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+    },
+    {
+      "path": "golang.org/x/text",
+      "version": "v0.43.0",
+      "sum": "h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=",
+      "goModSum": "h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=",
+      "repository": "https://go.googlesource.com/text",
+      "commit": "ac40b0f06c159afb5bfca4d1860f8b4b60dbc160",
+      "spdx": "BSD-3-Clause",
+      "licenceFile": "third-party/GoText.LICENSE.txt",
+      "licenceSha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+    },
+    {
+      "path": "google.golang.org/protobuf",
+      "version": "v1.36.12",
+      "sum": "h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=",
+      "goModSum": "h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=",
+      "repository": "https://go.googlesource.com/protobuf",
+      "commit": "cdd4c5f7406e82462949c7a65defa9f3029c162d",
+      "spdx": "BSD-3-Clause",
+      "licenceFile": "third-party/GoProtobuf.LICENSE.txt",
+      "licenceSha256": "4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20"
+    }
+  ]
+}

@@ -12,16 +12,34 @@ namespace ArcForges.Cloud.Tests.Generation;
 /// CLOUD.84 S34 and D2: the Worker's method table, its transport budgets and its edge guards are generated from the C# registrations.
 /// These tests replace the TypeScript regex comparison with the C# host one-for-one: the committed table must be exactly what the
 /// registrations generate, the anonymous and owner-scope rule is enforced where the policy is built, and every budget is in range.
+/// AF-CTR-02 moved the production rows (the Hello method, the health route and their budgets) to the Go center's registrations,
+/// generated into center-tables.generated.ts; the C# HelloModule stays as the proof environment's host and the Hello rollback, so
+/// its production rows must still be exactly the rows the Go center generates (TheGoCenterProductionTableEqualsTheCSharpRegistrations).
 /// </summary>
 public sealed class GeneratedTablesTests
 {
     private const string TablesPath = "worker/tables/cloud-tables.generated.ts";
+    private const string CenterTablesPath = "worker/tables/center-tables.generated.ts";
 
     [Fact]
     public void CommittedWorkerTableIsExactlyWhatTheRegistrationsGenerate()
     {
         var committed = File.ReadAllText(Path.Combine(T.RepoRoot().FullName, TablesPath));
         Assert.Equal(TypeScriptTables.Render(HostReader.Read()), committed);
+    }
+
+    [Fact]
+    public void TheGoCenterProductionTableEqualsTheCSharpRegistrations()
+    {
+        // The same values from their new source: the Go center generates the production rows; the C# rollback host must agree with
+        // them byte for byte, so switching ARCFORGES_HELLO_RUNTIME changes no Worker behaviour.
+        var center = File.ReadAllText(Path.Combine(T.RepoRoot().FullName, CenterTablesPath)).ReplaceLineEndings("\n");
+        var production = TypeScriptTables.RenderProduction(HostReader.Read());
+        Assert.EndsWith(production, center, StringComparison.Ordinal);
+        Assert.Contains("export interface ApiRoute {", center, StringComparison.Ordinal);
+        var proof = File.ReadAllText(Path.Combine(T.RepoRoot().FullName, TablesPath));
+        Assert.DoesNotContain("productionRoutes", proof, StringComparison.Ordinal);
+        Assert.Contains("import type { ApiRoute } from \"./center-tables.generated.ts\";", proof, StringComparison.Ordinal);
     }
 
     [Fact]

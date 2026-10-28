@@ -23,7 +23,8 @@ import {
 import { guardResponse } from "./frames.ts";
 import { classifyStartFailureResponse, containerUnavailable } from "../readiness/container.ts";
 import { bounded, readBytes, reject, rpcError } from "./io.ts";
-import { bodyReadMilliseconds, healthRoute } from "../tables/cloud-tables.generated.ts";
+import { healthRoute } from "../tables/center-tables.generated.ts";
+import { bodyReadMilliseconds } from "../tables/cloud-tables.generated.ts";
 import {
   coldStartBudgetMs,
   findRoute,
