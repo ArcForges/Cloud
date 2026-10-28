@@ -1,5 +1,5 @@
 name: CI
-# Owner (deku2026) PRs are verified by the local pre-push hook (eng/verify.py, AD-0016), so the validation and security
+# Owner (deku2026) PRs are verified by the host verification after the push (eng/verify.py, AD-0020), so the validation and security
 # jobs skip for them; every other PR (Dependabot included) and a manual dispatch keep the full coverage. A main push runs
 # only delivery: the candidate build and its deployment. The weekly schedule runs the security analysis: CodeQL and the
 # quality job (dependency audit, secret scan and the hosted architecture gate that must follow the scan in that job).
@@ -69,9 +69,12 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.27.3"
-          cache-dependency-path: hello-go/go.sum
-      - name: Verify the Go Hello
-        run: python eng/hello-go.py check
+          cache-dependency-path: |
+            center/go.sum
+            center/tools/go.sum
+      # The same entry point as both verification legs: the race detector and fuzzing on Linux, the native build on both.
+      - name: Verify the Go center
+        run: python eng/center.py check
       - run: node tooling/project.ts licence-evaluated
       - name: Retain evaluated licence and source provenance
         if: always()
@@ -163,14 +166,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
-        if: matrix.language == 'csharp' || matrix.language == 'go'
+        if: matrix.language == 'csharp'
         with:
           global-json-file: global.json
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: matrix.language == 'go'
         with:
           go-version: "1.27.3"
-          cache-dependency-path: hello-go/go.sum
+          cache-dependency-path: center/go.sum
       - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           languages: ${{ matrix.language }}
@@ -180,17 +183,17 @@ jobs:
         run: |
           dotnet restore src/ArcForges.Cloud --locked-mode
           dotnet build src/ArcForges.Cloud -c Release --no-restore
+      # The center and its test packages; the bindings are the published Contracts Go module, so no .NET restore is needed.
       - name: Build Go for analysis
         if: matrix.language == 'go'
         env:
           GOTOOLCHAIN: local
           GOFLAGS: -mod=readonly
         run: |
-          dotnet restore src/ArcForges.Cloud --locked-mode
-          cd hello-go
+          cd center
           go mod download
-          go run ./tools/contractgen
-          go build ./cmd/server
+          go build ./...
+          go test -count=1 -run '^$' ./...
       - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           category: /language:${{ matrix.language }}
