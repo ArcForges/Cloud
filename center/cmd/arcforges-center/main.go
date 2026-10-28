@@ -46,7 +46,7 @@ commands:
   help                             print this help
 
 exit status: 0 success, 1 failure, 2 usage, 3 refused (the database's migrations differ from this build),
-             4 unknown slot (confirm-runtime-credential: the slot was never rotated in this database)
+             4 unknown slot (confirm-runtime-credential: this database's record has no row for the slot)
 `
 
 // The exit statuses.
@@ -55,7 +55,8 @@ const (
 	exitFailure = 1
 	exitUsage   = 2
 	exitRefused = 3
-	// exitUnknownSlot lets the deployment tell a slot this database never rotated (a recreated or new database) from a failure.
+	// exitUnknownSlot lets the deployment tell a slot that this database's record lacks (a recreated, restored or new database) from
+	// a failure.
 	exitUnknownSlot = 4
 )
 
@@ -257,7 +258,7 @@ func admin(sub, slot string, lookup func(string) (string, bool), stdout, stderr 
 		defer func() { _ = conn.Close(context.Background()) }()
 		confirmation, err := provision.Confirm(ctx, conn, cfg.RuntimeRole, slot)
 		if errors.Is(err, provision.ErrUnknownSlot) {
-			logger.Error("the slot was never rotated in this database", "slot", slot, "error", err.Error())
+			logger.Error("this database's record has no row for the slot", "slot", slot, "error", err.Error())
 			return exitUnknownSlot
 		}
 		if err != nil {

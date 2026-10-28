@@ -114,9 +114,12 @@ func takeRole(ctx context.Context, tx pgx.Tx, login string, exists bool, connect
 //     refuses 'all', and log_parser_stats = on (migrate.Logging.CaptureRefusal);
 //   - a caught error never quotes the statement: the handler (OTHERS OR query_canceled) re-raises with the SQLSTATE and a fixed
 //     message only;
-//   - a LOG message emitted while the statement runs would carry it as context; the known emitters are removed: the function
-//     sets debug_print_parse, debug_print_rewritten and debug_print_plan off for its own execution, and the statement cannot
-//     wait on a lock (no lock-wait message);
+//   - a LOG or WARNING message emitted while the statement runs carries it as context. The known emitters are removed: the
+//     function sets debug_print_parse, debug_print_rewritten and debug_print_plan off and password_encryption to
+//     scram-sha-256 (with md5, PostgreSQL 18 warns that MD5 is deprecated) for its own execution, and the statement cannot
+//     wait on a lock (no lock-wait message). Any other WARNING the nested ALTER ROLE raises (a password-check hook such as
+//     credcheck, a future deprecation) would still carry it; the migration role cannot change log_min_messages, which the
+//     rotation records;
 //   - a cancellation or termination during the statement can still log it, but that aborts the rotation's transaction: the role
 //     keeps its old password, Neon's DDL forwarding (at pre-commit) never runs, no secret file is written, and the next rotation
 //     draws a new password, so the logged value was never a working credential.
@@ -125,6 +128,7 @@ const (
 	setLoginSource = `CREATE OR REPLACE FUNCTION pg_temp.arcforges_set_login(role_name text)
 RETURNS void LANGUAGE plpgsql
 SET debug_print_parse = off SET debug_print_rewritten = off SET debug_print_plan = off
+SET password_encryption = 'scram-sha-256'
 AS $function$
 DECLARE
     stored text;

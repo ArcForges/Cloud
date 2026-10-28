@@ -115,7 +115,7 @@ export type CenterRunner = (
   options?: { user?: string; secretsDirectory?: string },
 ) => Promise<Record<string, unknown>>;
 
-/** A non-zero exit of the sealed executable; status 4 of confirm-runtime-credential is a slot this database never rotated. */
+/** A non-zero exit of the sealed executable; status 4 of confirm-runtime-credential is a slot this database's record lacks. */
 export class CenterExit extends Error {
   readonly status: number | null;
   constructor(message: string, status: number | null) {
@@ -124,7 +124,7 @@ export class CenterExit extends Error {
   }
 }
 
-/** The exit status of `admin confirm-runtime-credential` for a slot the database never rotated. */
+/** The exit status of `admin confirm-runtime-credential` for a slot that the database's record has no row for. */
 export const unknownSlotStatus = 4;
 
 /** The live version's slot is unknown to the target database (it was recreated, or the target is new). */
@@ -453,7 +453,7 @@ export function confirmationFailure(
 
 /**
  * Records that the deployment carrying the slot's credential was promoted, with bounded retries; it throws the recovery message
- * of confirmationFailure when every attempt failed, and SlotNeverRotated at once when the database never rotated the slot.
+ * of confirmationFailure when every attempt failed, and SlotNeverRotated at once when the database's record has no row for it.
  */
 export async function confirmRuntimeCredential(
   target: PostgresTarget,
@@ -477,7 +477,7 @@ export async function confirmRuntimeCredential(
       ]);
     } catch (error) {
       if (error instanceof CenterExit && error.status === unknownSlotStatus)
-        throw new SlotNeverRotated(`slot ${slot} was never rotated in the ${target} database`);
+        throw new SlotNeverRotated(`the ${target} database's record has no row for slot ${slot}`);
       // The executable's errors name no credential (its stderr is the job log).
       reason = error instanceof Error ? error.message : String(error);
       if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delay * attempt));
@@ -517,9 +517,10 @@ export async function withRuntimeCredential(
         );
     } catch (error) {
       if (!(error instanceof SlotNeverRotated)) throw error;
-      // The database was recreated or the target is new: the live version holds no credential for this database.
+      // The database was recreated or restored, or the target is new: its record has no row for the live slot. The live login
+      // role and its password may still exist cluster-wide (roles are not restored), but the slot cannot be confirmed here.
       log(
-        `Runtime credential (${target}): the live version's slot ${choice.slot} was never rotated in this database (it was recreated, or the target is new), so the live version holds no credential for it; nothing to record, and the other slot is rotated.`,
+        `Runtime credential (${target}): the ${target} database's record has no row for the live version's slot ${choice.slot} (the database was recreated or restored, or the target is new), so it cannot be confirmed; the other slot is rotated.`,
       );
     }
     rotate.push("--live-slot", choice.slot);

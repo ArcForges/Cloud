@@ -405,8 +405,74 @@ func TestACancelledPasswordStatementLogsNoSecret(t *testing.T) {
 	if strings.Contains(fields(err), phrase) || strings.Contains(fields(err), "PASSWORD") {
 		t.Fatalf("the error quotes the statement: %s", fields(err))
 	}
-	if log, ok := serverLog(t); ok && strings.Contains(log, phrase) {
+	// The control: without the handler the cancellation is logged with the statement, secret included, as its context.
+	const control = "Uncaught-value_0123456789-abcdefghijklm"
+	err = withSecret(t, pgtest.Connect(t, url), control, unhandledSource(t),
+		func(tx pgx.Tx) {
+			if _, err := tx.Exec(ctx, "SET LOCAL statement_timeout = 300"); err != nil {
+				t.Fatal(err)
+			}
+		},
+		func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, setLoginCall, login)
+			return err
+		})
+	if !errors.As(err, &pgError) || pgError.Code != "57014" {
+		t.Fatalf("the control's cancelled call: %v", err)
+	}
+	log, ok := serverLog(t)
+	if !ok {
+		return
+	}
+	if strings.Contains(log, phrase) {
 		t.Fatal("the server log holds the secret")
+	}
+	if !strings.Contains(log, control) {
+		t.Fatal("the control's cancellation did not log its statement, so the test proves nothing")
+	}
+}
+
+// With password_encryption = 'md5' (settable by the owner per session, role or database), PostgreSQL 18 warns that MD5 is
+// deprecated while the nested statement stores the plaintext form, and the warning carries the statement as context. The
+// function sets password_encryption to scram-sha-256 for its own execution; a control without that clause leaks.
+func TestMD5PasswordEncryptionLogsNoPlaintext(t *testing.T) {
+	url, group := migrated(t)
+	ctx := context.Background()
+	login := rotator{t: t, url: url, group: group}.rotate().LoginRole
+	conn := pgtest.Connect(t, url)
+	var database string
+	if err := conn.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "ALTER DATABASE "+pgx.Identifier{database}.Sanitize()+" SET password_encryption = 'md5'"); err != nil {
+		t.Fatal(err)
+	}
+	set := func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, setLoginCall, login)
+		return err
+	}
+	// The plaintext form, as on Neon, through the real function.
+	const phrase = "Plaintext-value_0123456789-abcdefghijkl"
+	if err := withSecret(t, pgtest.Connect(t, url), phrase, setLoginSource, nil, set); err != nil {
+		t.Fatalf("the plaintext password with md5 configured: %v", err)
+	}
+	const control = "Md5-control-value_0123456789-abcdefghij"
+	withoutClause := strings.Replace(setLoginSource, "SET password_encryption = 'scram-sha-256'\n", "", 1)
+	if withoutClause == setLoginSource {
+		t.Fatal("the control did not remove the clause")
+	}
+	if err := withSecret(t, pgtest.Connect(t, url), control, withoutClause, nil, set); err != nil {
+		t.Fatalf("the control: %v", err)
+	}
+	log, ok := serverLog(t)
+	if !ok {
+		return
+	}
+	if strings.Contains(log, phrase) {
+		t.Fatal("the server log holds the plaintext password")
+	}
+	if !strings.Contains(log, control) {
+		t.Fatal("the control's MD5 warning did not log its statement, so the test proves nothing")
 	}
 }
 

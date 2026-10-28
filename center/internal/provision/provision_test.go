@@ -267,7 +267,7 @@ func TestARotationCorrectsANonInheritingMembership(t *testing.T) {
 }
 
 // After a restore between two deployments the record can lack the live version's slot (here: live b, record a only). Confirming
-// b is refused as unknown (the deployment then knows the live version holds no credential for this database), and the rotation
+// b is refused as unknown (this database's record has no row for the live slot, so it cannot be confirmed), and the rotation
 // still never takes the live slot.
 func TestARestoredRecordWithoutTheLiveSlot(t *testing.T) {
 	url, group := migrated(t)

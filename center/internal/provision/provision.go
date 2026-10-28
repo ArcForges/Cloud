@@ -267,12 +267,12 @@ type Confirmation struct {
 	Already bool `json:"alreadyConfirmed"`
 }
 
-// ErrUnknownSlot refuses a slot other than a or b, or one that was never rotated.
+// ErrUnknownSlot refuses a slot other than a or b, or one for which this database's record has no row.
 var ErrUnknownSlot = errors.New("unknown runtime credential slot")
 
 // Confirm records, under the migration lock, that the deployment carrying the slot's current password was promoted, so the next
 // rotation leaves that slot alone. It is idempotent: a slot whose current password was confirmed already keeps its time. It
-// refuses a slot other than a or b and a slot that was never rotated.
+// refuses a slot other than a or b and a slot for which this database's record has no row.
 func Confirm(ctx context.Context, conn *pgx.Conn, group, slot string) (Confirmation, error) {
 	if err := migrate.ValidRoleName(group); err != nil {
 		return Confirmation{}, err
@@ -300,7 +300,7 @@ func Confirm(ctx context.Context, conn *pgx.Conn, group, slot string) (Confirmat
     to_char(promoted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 FROM platform.runtime_credential WHERE slot = $1 FOR UPDATE`, slot).Scan(&confirmation.LoginRole, &confirmation.RotatedAt, &promoted)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%w: slot %s was never rotated", ErrUnknownSlot, slot)
+			return fmt.Errorf("%w: this database's record has no row for slot %s", ErrUnknownSlot, slot)
 		}
 		if err != nil {
 			return migrate.Sanitize("read the runtime credential", err)

@@ -226,10 +226,11 @@ does not trust the record alone:
   `wrangler versions view <id> --json` (the annotation `workers/message`).
 - If the live version is labelled, it first confirms that slot (self-heal; idempotent), then rotates with
   `admin rotate-runtime-credential --live-slot <slot>`, which takes the other slot whatever the record says.
-- If this database never rotated the live version's slot (the acceptance database was recreated, or the target points at a
-  new database), the confirmation exits with status 4. The live version then holds no credential for this database, so there
-  is nothing to record: the job log says so and the other slot is rotated, without retries and without the post-promotion
-  recovery text.
+- If this database's record has no row for the live version's slot (the acceptance database was recreated, a restore
+  rewound the record, or the target points at a new database), the confirmation exits with status 4 and the slot cannot be
+  confirmed. The live login role and its password may still exist cluster-wide, because roles are not part of a database
+  restore. The job log says so, and the other slot is rotated, without retries and without the post-promotion recovery
+  text.
 - If the live version carries no label (the first deployment of the store; the live revision then uses no runtime
   credential) or cannot be read, the record decides, and the job log says so.
 - If several versions are live on different slots, or on a labelled and an unlabelled credential (a gradual rollout), it
@@ -264,8 +265,15 @@ secret file, and the center never prints or logs it.
     (observed on PostgreSQL 18.4).
   - Its `EXCEPTION WHEN OTHERS OR query_canceled` handler re-raises with the SQLSTATE and the fixed message
     `login role update failed`, so a caught error never quotes the nested statement, to the client or to the log.
-  - A LOG message emitted while the nested statement runs would carry it as context. The function's `SET` clauses
-    (`debug_print_*`) and the secret-free statement taken first (no lock wait inside `EXECUTE`) remove the known emitters.
+  - A LOG or WARNING message emitted while the nested statement runs carries it as context. The known emitters are
+    removed:
+    - the function's `SET` clauses switch `debug_print_*` off;
+    - `password_encryption` is set to `scram-sha-256`. With `md5`, which the owner can set per session, role or database,
+      PostgreSQL 18 logs an MD5 deprecation warning with the statement, plaintext included (observed on 18.4);
+    - the secret-free statement taken first leaves no lock wait inside `EXECUTE`.
+  - **The remaining class.** Any other WARNING that the nested `ALTER ROLE` raises carries the statement as context: a
+    password-check hook such as credcheck, or a future deprecation. The migration role cannot change `log_min_messages`; the
+    rotation records it. Operators must not install such hooks on a center database.
 - **What records statements.** The rotation reads the settings of every tool that can capture statements run inside
   functions. It records them in its output (`logging`), and `migrate` records them in the gate record. The decision table
   (`migrate.Logging.CaptureRefusal`, unit-tested):

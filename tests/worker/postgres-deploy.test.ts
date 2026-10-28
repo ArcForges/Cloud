@@ -537,7 +537,9 @@ test("a live slot this database never rotated is not self-healed: the other slot
   assert.equal(rotation.slot, "a");
   assert(
     lines.some(
-      (line) => /never rotated in this database/u.test(line) && /holds no credential/u.test(line),
+      (line) =>
+        /record has no row for the live version's slot b/u.test(line) &&
+        /cannot be confirmed/u.test(line),
     ),
     lines.join(" "),
   );
@@ -566,5 +568,5 @@ test("a restore that left the record without the live slot is handled like a new
     ).length,
     1,
   );
-  assert(lines.some((line) => /holds no credential/u.test(line)));
+  assert(lines.some((line) => /record has no row for the live version's slot b/u.test(line)));
 });
