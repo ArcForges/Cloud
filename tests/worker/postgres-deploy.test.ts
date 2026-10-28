@@ -499,7 +499,11 @@ test("the C# Hello's credential must name the migration role before PUBLIC's CON
     assert.throws(
       () => checkHelloCredential(target, { [directUrlSecret]: secret, NEON_DATABASE_URL: other }),
       (error: Error) => {
-        assert.match(error.message, /GRANT CONNECT/u);
+        assert.match(error.message, /Point NEON_DATABASE_URL at the migration \(owner\) role/u);
+        assert(
+          !/GRANT CONNECT/u.test(error.message),
+          "no remedy that the check could never accept",
+        );
         for (const value of ["synthetic-secret", "reader", "ep-a-1", "neondb"])
           assert(!error.message.includes(value), `the refusal quotes ${value}`);
         return true;
@@ -541,4 +545,26 @@ test("a live slot this database never rotated is not self-healed: the other slot
     !lines.some((line) => /behind the live version/u.test(line)),
     "no post-promotion recovery text",
   );
+});
+
+test("a restore that left the record without the live slot is handled like a new database", async () => {
+  // Live version labelled b; the restored record holds a only, so confirming b exits with status 4.
+  const fake = fakeCenter(0, ["a"], ["b"]);
+  const wrangler = fakeWrangler([{ id: versionB, percentage: 100, message: "runtime-slot=b" }]);
+  const lines: string[] = [];
+  const rotation = await withRuntimeCredential("production", "image", async () => {}, {
+    runner: fake.runner,
+    environment,
+    confirmDelayMs: 1,
+    liveSlots: () => readLiveSlots(wrangler.reader, []),
+    log: (line) => lines.push(line),
+  });
+  assert.equal(rotation.slot, "a");
+  assert.equal(
+    fake.calls.filter(
+      (command) => command.join(" ") === "admin confirm-runtime-credential --slot b",
+    ).length,
+    1,
+  );
+  assert(lines.some((line) => /holds no credential/u.test(line)));
 });

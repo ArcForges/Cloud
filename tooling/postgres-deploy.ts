@@ -222,7 +222,7 @@ export function checkHelloCredential(
   const migration = names(environment[directUrlSecret] ?? "", directUrlSecret);
   if (helloNames.user === "" || helloNames.user !== migration.user)
     throw new Error(
-      `NEON_DATABASE_URL names another role than the migration role (${directUrlSecret}). The migration revokes PUBLIC's CONNECT on the center's database, which would lock that role out of the C# Hello and its rollback. Grant it CONNECT on the database first (as the owner: GRANT CONNECT ON DATABASE <database> TO <that role>), then re-run the deployment.`,
+      `NEON_DATABASE_URL names another role than the migration role (${directUrlSecret}). The migration revokes PUBLIC's CONNECT on the center's database, which would lock that role out of the C# Hello and its rollback. Point NEON_DATABASE_URL at the migration (owner) role, which docs/neon-hello.md records it to be, or ask the owner to decide otherwise; then re-run the deployment.`,
     );
   if (target === "acceptance")
     return {
