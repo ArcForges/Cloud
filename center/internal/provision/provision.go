@@ -87,7 +87,7 @@ type Rotation struct {
 	// PasswordForm is FormVerifier or FormNeonPlaintext.
 	PasswordForm     string `json:"passwordForm"`
 	ServerVersionNum int    `json:"serverVersionNum"`
-	// Logging is what the server records of statements; the rotation refuses pg_stat_statements.track = 'all'.
+	// Logging is what the server records of statements; the rotation refuses a setting that would record nested statements.
 	Logging    migrate.Logging `json:"logging"`
 	Probe      Probe           `json:"probe"`
 	RuntimeURL string          `json:"-"`
@@ -149,9 +149,8 @@ func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, err
 			return err
 		}
 		rotation.Logging = logging
-		if logging.PgStatStatementsTrack == "all" {
-			// With track = 'all', pg_stat_statements would record the nested role statement, secret included.
-			return errors.New("pg_stat_statements.track is 'all', which would record the nested role statement with its secret; set it to 'top' (the default) before rotating")
+		if refusal := logging.CaptureRefusal(); refusal != "" {
+			return errors.New(refusal)
 		}
 		var ready bool
 		if err := tx.QueryRow(ctx, "SELECT to_regclass('platform.runtime_credential') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", options.Group).Scan(&ready); err != nil {

@@ -84,7 +84,7 @@ func TestTheMigrationAndAdministrationCommands(t *testing.T) {
 		t.Fatal("the rotation printed the runtime credential")
 	}
 	// The promotion of slot a is recorded once; slot b was never rotated.
-	command(1, "admin", "confirm-runtime-credential", "--slot", "b")
+	command(4, "admin", "confirm-runtime-credential", "--slot", "b")
 	confirmed := command(0, "admin", "confirm-runtime-credential", "--slot", "a")
 	if confirmed["slot"] != "a" || confirmed["loginRole"] != name+"_runtime_a" || confirmed["alreadyConfirmed"] != false || confirmed["promotedAt"] == "" {
 		t.Fatalf("confirm: %v", confirmed)

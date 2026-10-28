@@ -45,7 +45,8 @@ commands:
   version                          print the build identity as JSON (also --build-info)
   help                             print this help
 
-exit status: 0 success, 1 failure, 2 usage, 3 refused (the database's migrations differ from this build)
+exit status: 0 success, 1 failure, 2 usage, 3 refused (the database's migrations differ from this build),
+             4 unknown slot (confirm-runtime-credential: the slot was never rotated in this database)
 `
 
 // The exit statuses.
@@ -54,6 +55,8 @@ const (
 	exitFailure = 1
 	exitUsage   = 2
 	exitRefused = 3
+	// exitUnknownSlot lets the deployment tell a slot this database never rotated (a recreated or new database) from a failure.
+	exitUnknownSlot = 4
 )
 
 func main() {
@@ -253,6 +256,10 @@ func admin(sub, slot string, lookup func(string) (string, bool), stdout, stderr 
 		}
 		defer func() { _ = conn.Close(context.Background()) }()
 		confirmation, err := provision.Confirm(ctx, conn, cfg.RuntimeRole, slot)
+		if errors.Is(err, provision.ErrUnknownSlot) {
+			logger.Error("the slot was never rotated in this database", "slot", slot, "error", err.Error())
+			return exitUnknownSlot
+		}
 		if err != nil {
 			logger.Error("the runtime credential's promotion could not be recorded", "slot", slot, "error", err.Error())
 			return exitFailure

@@ -210,6 +210,8 @@ type Result struct {
 // "not-loaded".
 type Logging struct {
 	PgStatStatementsTrack   string `json:"pgStatStatementsTrack"`
+	PgStatMonitorTrack      string `json:"pgStatMonitorTrack"`
+	PgAuditLog              string `json:"pgauditLog"`
 	LogStatement            string `json:"logStatement"`
 	LogMinDurationStatement string `json:"logMinDurationStatement"`
 }
@@ -218,12 +220,30 @@ type Logging struct {
 func ReadLogging(ctx context.Context, q Querier) (Logging, error) {
 	var logging Logging
 	err := q.QueryRow(ctx, `SELECT coalesce(current_setting('pg_stat_statements.track', true), 'not-loaded'),
+    coalesce(current_setting('pg_stat_monitor.pgsm_track', true), 'not-loaded'), coalesce(current_setting('pgaudit.log', true), 'not-loaded'),
     coalesce(current_setting('log_statement', true), 'not-loaded'), coalesce(current_setting('log_min_duration_statement', true), 'not-loaded')`).
-		Scan(&logging.PgStatStatementsTrack, &logging.LogStatement, &logging.LogMinDurationStatement)
+		Scan(&logging.PgStatStatementsTrack, &logging.PgStatMonitorTrack, &logging.PgAuditLog, &logging.LogStatement, &logging.LogMinDurationStatement)
 	if err != nil {
 		return Logging{}, Sanitize("read the logging settings", err)
 	}
 	return logging, nil
+}
+
+// CaptureRefusal says why a statement run inside a function could be recorded with its text, or "" when nothing would record
+// it. The runtime credential's role statement runs nested (inside a temporary function), so:
+//   - pg_stat_statements.track = 'all' and pg_stat_monitor.pgsm_track = 'all' would record it, secret included: refused;
+//   - 'top', 'none' and an unloaded module record top-level statements only (the call, never its secret);
+//   - pgaudit (Neon's HIPAA audit option) audits nested CREATE/ALTER ROLE statements too, but redacts every character after the
+//     password token by statement type (pgaudit 16.1, 17.1 and 18.0, log_audit_event), so pgaudit.log is recorded, not refused;
+//   - log_statement and log_min_duration_statement log statement texts and bind parameters, which hold no secret.
+func (l Logging) CaptureRefusal() string {
+	switch {
+	case l.PgStatStatementsTrack == "all":
+		return "pg_stat_statements.track is 'all', which would record the nested role statement with its secret; set it to 'top' (the default) before rotating"
+	case l.PgStatMonitorTrack == "all":
+		return "pg_stat_monitor.pgsm_track is 'all', which would record the nested role statement with its secret; set it to 'top' (the default) before rotating"
+	}
+	return ""
 }
 
 // TestedMajor is the PostgreSQL major of the integration tests and the restore drill: the major of the pinned image

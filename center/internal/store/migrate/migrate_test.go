@@ -151,3 +151,32 @@ func TestTheTestedMajorIsThePinnedImage(t *testing.T) {
 		t.Fatalf("a PostgreSQL 17 server matched: %+v", result)
 	}
 }
+
+// The decision table of statement capture: only settings that record nested statements refuse a rotation.
+func TestTheCaptureDecisionTable(t *testing.T) {
+	quiet := Logging{PgStatStatementsTrack: "top", PgStatMonitorTrack: "not-loaded", PgAuditLog: "not-loaded", LogStatement: "none", LogMinDurationStatement: "-1"}
+	cases := []struct {
+		name   string
+		change func(*Logging)
+		refuse string
+	}{
+		{"defaults", func(*Logging) {}, ""},
+		{"no modules", func(l *Logging) { l.PgStatStatementsTrack = "not-loaded" }, ""},
+		{"pg_stat_statements none", func(l *Logging) { l.PgStatStatementsTrack = "none" }, ""},
+		{"pg_stat_statements all", func(l *Logging) { l.PgStatStatementsTrack = "all" }, "pg_stat_statements.track"},
+		{"pg_stat_monitor top", func(l *Logging) { l.PgStatMonitorTrack = "top" }, ""},
+		{"pg_stat_monitor all", func(l *Logging) { l.PgStatMonitorTrack = "all" }, "pg_stat_monitor.pgsm_track"},
+		{"pgaudit role (redacted)", func(l *Logging) { l.PgAuditLog = "role" }, ""},
+		{"pgaudit ddl, all", func(l *Logging) { l.PgAuditLog = "ddl, all" }, ""},
+		{"log_statement all", func(l *Logging) { l.LogStatement = "all" }, ""},
+		{"log_min_duration_statement 0", func(l *Logging) { l.LogMinDurationStatement = "0" }, ""},
+	}
+	for _, c := range cases {
+		logging := quiet
+		c.change(&logging)
+		refusal := logging.CaptureRefusal()
+		if (c.refuse == "") != (refusal == "") || !strings.Contains(refusal, c.refuse) {
+			t.Errorf("%s: %q", c.name, refusal)
+		}
+	}
+}

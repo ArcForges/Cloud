@@ -115,6 +115,21 @@ export type CenterRunner = (
   options?: { user?: string; secretsDirectory?: string },
 ) => Promise<Record<string, unknown>>;
 
+/** A non-zero exit of the sealed executable; status 4 of confirm-runtime-credential is a slot this database never rotated. */
+export class CenterExit extends Error {
+  readonly status: number | null;
+  constructor(message: string, status: number | null) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** The exit status of `admin confirm-runtime-credential` for a slot the database never rotated. */
+export const unknownSlotStatus = 4;
+
+/** The live version's slot is unknown to the target database (it was recreated, or the target is new). */
+export class SlotNeverRotated extends Error {}
+
 /** Runs the sealed executable with the variables in the docker CLI's environment and returns its JSON output. */
 async function center(
   image: string,
@@ -138,7 +153,10 @@ async function center(
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) resolve(text);
-      else reject(new Error(`arcforges-center ${command.join(" ")} exited with code ${code}.`));
+      else
+        reject(
+          new CenterExit(`arcforges-center ${command.join(" ")} exited with code ${code}.`, code),
+        );
     });
   });
   return JSON.parse(output.trim().split("\n").at(-1) ?? "{}") as Record<string, unknown>;
@@ -435,7 +453,7 @@ export function confirmationFailure(
 
 /**
  * Records that the deployment carrying the slot's credential was promoted, with bounded retries; it throws the recovery message
- * of confirmationFailure when every attempt failed.
+ * of confirmationFailure when every attempt failed, and SlotNeverRotated at once when the database never rotated the slot.
  */
 export async function confirmRuntimeCredential(
   target: PostgresTarget,
@@ -458,6 +476,8 @@ export async function confirmRuntimeCredential(
         slot,
       ]);
     } catch (error) {
+      if (error instanceof CenterExit && error.status === unknownSlotStatus)
+        throw new SlotNeverRotated(`slot ${slot} was never rotated in the ${target} database`);
       // The executable's errors name no credential (its stderr is the job log).
       reason = error instanceof Error ? error.message : String(error);
       if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delay * attempt));
@@ -489,11 +509,19 @@ export async function withRuntimeCredential(
   log(`Runtime credential (${target}): ${choice.note}.`);
   const rotate = ["admin", "rotate-runtime-credential"];
   if (choice.slot !== undefined) {
-    const healed = await confirmRuntimeCredential(target, image, choice.slot, options);
-    if (healed.alreadyConfirmed === false)
+    try {
+      const healed = await confirmRuntimeCredential(target, image, choice.slot, options);
+      if (healed.alreadyConfirmed === false)
+        log(
+          `Runtime credential (${target}): recorded the live slot ${choice.slot} as promoted; the record was behind the live version.`,
+        );
+    } catch (error) {
+      if (!(error instanceof SlotNeverRotated)) throw error;
+      // The database was recreated or the target is new: the live version holds no credential for this database.
       log(
-        `Runtime credential (${target}): recorded the live slot ${choice.slot} as promoted; the record was behind the live version.`,
+        `Runtime credential (${target}): the live version's slot ${choice.slot} was never rotated in this database (it was recreated, or the target is new), so the live version holds no credential for it; nothing to record, and the other slot is rotated.`,
       );
+    }
     rotate.push("--live-slot", choice.slot);
   }
   const variables = centerVariables(target, options.environment ?? process.env);
@@ -520,12 +548,14 @@ export async function withRuntimeCredential(
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-  const confirmation = await confirmRuntimeCredential(
-    target,
-    image,
-    String(rotation.slot),
-    options,
-  );
+  let confirmation: Record<string, unknown>;
+  try {
+    confirmation = await confirmRuntimeCredential(target, image, String(rotation.slot), options);
+  } catch (error) {
+    if (!(error instanceof SlotNeverRotated)) throw error;
+    // The slot was rotated moments ago: the database changed under the deployment.
+    throw new Error(confirmationFailure(target, String(rotation.slot), 1, error.message));
+  }
   return { ...rotation, promotedAt: confirmation.promotedAt };
 }
 

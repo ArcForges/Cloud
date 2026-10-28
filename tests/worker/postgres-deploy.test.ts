@@ -15,6 +15,7 @@ import {
   centerVariables,
   directUrlSecret,
   dockerArguments,
+  CenterExit,
   checkHelloCredential,
   postgresTargets,
   readLiveSlots,
@@ -22,6 +23,7 @@ import {
   requirePostgresGate,
   slotLabel,
   slotOfMessage,
+  unknownSlotStatus,
   withRuntimeCredential,
 } from "../../tooling/postgres-deploy.ts";
 import {
@@ -127,7 +129,11 @@ test("the center's resources: acceptance only, with the declared lifecycle", asy
 });
 
 /** A fake of the sealed executable: rotate writes the secret file, confirm fails as told. */
-function fakeCenter(confirmFailures: number, confirmed: string[] = []) {
+function fakeCenter(
+  confirmFailures: number,
+  confirmed: string[] = [],
+  neverRotated: string[] = [],
+) {
   const calls: string[][] = [];
   const directories: string[] = [];
   let failures = confirmFailures;
@@ -151,6 +157,11 @@ function fakeCenter(confirmFailures: number, confirmed: string[] = []) {
     }
     assert.equal(command.slice(0, 3).join(" "), "admin confirm-runtime-credential --slot");
     const slot = command[3];
+    if (neverRotated.includes(String(slot)))
+      throw new CenterExit(
+        `arcforges-center admin confirm-runtime-credential --slot ${slot} exited with code 4.`,
+        unknownSlotStatus,
+      );
     if (failures-- > 0)
       throw new Error(
         `arcforges-center admin confirm-runtime-credential --slot ${slot} exited with code 1.`,
@@ -501,4 +512,33 @@ test("the C# Hello's credential must name the migration role before PUBLIC's CON
   });
   assert.equal(acceptance.status, "same-role");
   assert.equal(acceptance.sameDatabase, undefined);
+});
+
+test("a live slot this database never rotated is not self-healed: the other slot is rotated, once, with its own reason", async () => {
+  const fake = fakeCenter(0, [], ["b"]);
+  const wrangler = fakeWrangler([{ id: versionB, percentage: 100, message: "runtime-slot=b" }]);
+  const lines: string[] = [];
+  const rotation = await withRuntimeCredential("acceptance", "image", async () => {}, {
+    runner: fake.runner,
+    environment,
+    confirmDelayMs: 1,
+    liveSlots: () => readLiveSlots(wrangler.reader, []),
+    log: (line) => lines.push(line),
+  });
+  assert.deepEqual(fake.calls, [
+    ["admin", "confirm-runtime-credential", "--slot", "b"],
+    ["admin", "rotate-runtime-credential", "--live-slot", "b"],
+    ["admin", "confirm-runtime-credential", "--slot", "a"],
+  ]);
+  assert.equal(rotation.slot, "a");
+  assert(
+    lines.some(
+      (line) => /never rotated in this database/u.test(line) && /holds no credential/u.test(line),
+    ),
+    lines.join(" "),
+  );
+  assert(
+    !lines.some((line) => /behind the live version/u.test(line)),
+    "no post-promotion recovery text",
+  );
 });
