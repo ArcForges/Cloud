@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-FROM mcr.microsoft.com/dotnet/sdk:10.0.401-noble-aot@sha256:96f3b7d45f53eb05990f05b89ce61c4e23d07a5098521c2f20b018630e34f298 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.403-noble-aot@sha256:c45158dabdcffc8409ef46c9431c16b36d9419405b51fd29261fa8a6af3f516f AS build
 WORKDIR /source
 # Official Go archive is pinned and verified; no toolchain auto-download or mutable base tag.
 RUN curl --fail --silent --show-error --location https://go.dev/dl/go1.27.3.linux-amd64.tar.gz -o /tmp/go.tar.gz \
