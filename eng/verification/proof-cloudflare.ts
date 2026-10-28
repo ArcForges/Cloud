@@ -743,8 +743,14 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   const { verifyCandidate } = await import("../../tooling/project.ts");
   const { candidateDir, readJson, root, run, wrangler, writeJson } =
     await import("../../tooling/process.ts");
-  const { loadCandidateImage, readGate, requirePostgresGate, withRuntimeCredential } =
-    await import("../../tooling/postgres-deploy.ts");
+  const {
+    loadCandidateImage,
+    readGate,
+    readLiveSlots,
+    requirePostgresGate,
+    slotLabel,
+    withRuntimeCredential,
+  } = await import("../../tooling/postgres-deploy.ts");
   const { withNeonRuntimeSecret } = await import("../../tooling/neon-runtime.ts");
   const candidate = await verifyCandidate();
   assert.equal(candidate.dirty, false, "Uncommitted local builds cannot deploy.");
@@ -788,21 +794,32 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   const common = ["--config", "artifacts/proof.wrangler.json", "--env", "proof"];
   // The acceptance runtime credential is rotated now and travels in a runner-local file that Wrangler uploads with the version and
   // that is removed immediately; nothing prints it. The revision still running keeps its own credential of the other slot.
-  const rotation = await withRuntimeCredential("acceptance", candidate.image, async (secrets) => {
-    await withNeonRuntimeSecret(secrets, async (secretArguments) => {
-      await run(process.execPath, [
-        wrangler,
-        "deploy",
-        ...common,
-        "--no-bundle",
-        "--containers-rollout",
-        "immediate",
-        "--tag",
-        `${candidate.version}-acceptance`,
-        ...secretArguments,
-      ]);
-    });
-  });
+  // The live version's message names its runtime slot, which the rotation never touches; the new version is labelled likewise.
+  const rotation = await withRuntimeCredential(
+    "acceptance",
+    candidate.image,
+    async (secrets, rotated) => {
+      await withNeonRuntimeSecret(secrets, async (secretArguments) => {
+        await run(process.execPath, [
+          wrangler,
+          "deploy",
+          ...common,
+          "--no-bundle",
+          "--containers-rollout",
+          "immediate",
+          "--tag",
+          `${candidate.version}-acceptance`,
+          "--message",
+          slotLabel(String(rotated.slot)),
+          ...secretArguments,
+        ]);
+      });
+    },
+    {
+      liveSlots: () =>
+        readLiveSlots((args) => run(process.execPath, [wrangler, ...args], true), common),
+    },
+  );
   const receipts = await postDeployChecks(api);
   await writeJson(path.join(root, "artifacts", "proof-deployment.json"), {
     revision: candidate.revision,
@@ -819,6 +836,10 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
       runtimeRole: rotation.runtimeRole,
       loginRole: rotation.loginRole,
       slot: rotation.slot,
+      passwordForm: rotation.passwordForm,
+      serverVersionNum: rotation.serverVersionNum,
+      logging: rotation.logging,
+      slotSource: rotation.slotSource,
       probe: rotation.probe,
     },
     retainedD1DatabaseId: provisioned.d1DatabaseId,

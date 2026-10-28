@@ -299,9 +299,12 @@ jobs:
       # AF-CTR-02: the sealed image's own center executable migrates the production PostgreSQL database with the migration role's
       # direct connection and reconciles the runtime role's grants, before anything is pushed or promoted. It prints the database,
       # roles, versions and checksums, never a credential; npm run deploy refuses without its passed record for this candidate.
+      # NEON_DATABASE_URL is read only to compare its role name with the migration role's before PUBLIC's CONNECT is revoked
+      # (the C# Hello and its rollback connect with it); no value of either URL is printed.
       - name: Migrate the PostgreSQL database (gated)
         run: node tooling/postgres-deploy.ts migrate --target production
         env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           NEON_DATABASE_URL_DIRECT: ${{ secrets.NEON_DATABASE_URL_DIRECT }}
       # The runtime credential is rotated inside this step and uploaded with the Worker version; it is never printed or stored.
       - run: npm run deploy

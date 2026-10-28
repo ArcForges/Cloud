@@ -10,6 +10,8 @@ import {
   loadCandidateImage,
   readGate,
   requirePostgresGate,
+  readLiveSlots,
+  slotLabel,
   withRuntimeCredential,
 } from "./postgres-deploy.ts";
 
@@ -122,11 +124,26 @@ async function deploy() {
   ];
   // The runtime credential is rotated now, in the process that uploads it with this version; the revision still running keeps its
   // own credential of the other rotation slot until this one replaces it.
-  await withRuntimeCredential("production", candidate.image, async (runtime) => {
-    await withNeonRuntimeSecret({ ...runtimeSecret, ...runtime }, async (secretArguments) => {
-      await run(process.execPath, [...deployArguments, ...secretArguments]);
-    });
-  });
+  // The live version's message names its runtime slot, which the rotation never touches; the new version is labelled likewise.
+  const configArguments = ["--config", "artifacts/deploy.wrangler.json", "--env", ""];
+  await withRuntimeCredential(
+    "production",
+    candidate.image,
+    async (runtime, rotation) => {
+      await withNeonRuntimeSecret({ ...runtimeSecret, ...runtime }, async (secretArguments) => {
+        await run(process.execPath, [
+          ...deployArguments,
+          "--message",
+          slotLabel(String(rotation.slot)),
+          ...secretArguments,
+        ]);
+      });
+    },
+    {
+      liveSlots: () =>
+        readLiveSlots((args) => run(process.execPath, [wrangler, ...args], true), configArguments),
+    },
+  );
   await writeJson(deploymentFile, {
     revision: candidate.revision,
     version: candidate.version,

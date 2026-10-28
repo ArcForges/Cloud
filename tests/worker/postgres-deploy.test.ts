@@ -15,8 +15,13 @@ import {
   centerVariables,
   directUrlSecret,
   dockerArguments,
+  checkHelloCredential,
   postgresTargets,
+  readLiveSlots,
+  recordMigration,
   requirePostgresGate,
+  slotLabel,
+  slotOfMessage,
   withRuntimeCredential,
 } from "../../tooling/postgres-deploy.ts";
 import {
@@ -122,7 +127,7 @@ test("the center's resources: acceptance only, with the declared lifecycle", asy
 });
 
 /** A fake of the sealed executable: rotate writes the secret file, confirm fails as told. */
-function fakeCenter(confirmFailures: number) {
+function fakeCenter(confirmFailures: number, confirmed: string[] = []) {
   const calls: string[][] = [];
   const directories: string[] = [];
   let failures = confirmFailures;
@@ -140,14 +145,21 @@ function fakeCenter(confirmFailures: number) {
         path.join(options.secretsDirectory, "runtime.json"),
         JSON.stringify({ ARCFORGES_CENTER_DATABASE_URL: "postgresql://synthetic-runtime" }),
       );
-      return { slot: "b", loginRole: "arcforges_center_runtime_b" };
+      // Named the live slot, the executable takes the other one; otherwise its record says b.
+      const slot = command[2] === "--live-slot" ? (command[3] === "a" ? "b" : "a") : "b";
+      return { slot, loginRole: `arcforges_center_runtime_${slot}` };
     }
-    assert.deepEqual(command, ["admin", "confirm-runtime-credential", "--slot", "b"]);
+    assert.equal(command.slice(0, 3).join(" "), "admin confirm-runtime-credential --slot");
+    const slot = command[3];
     if (failures-- > 0)
       throw new Error(
-        "arcforges-center admin confirm-runtime-credential --slot b exited with code 1.",
+        `arcforges-center admin confirm-runtime-credential --slot ${slot} exited with code 1.`,
       );
-    return { slot: "b", promotedAt: "2026-10-28T00:00:00Z" };
+    return {
+      slot,
+      promotedAt: "2026-10-28T00:00:00Z",
+      alreadyConfirmed: confirmed.includes(String(slot)),
+    };
   };
   return { runner, calls, directories };
 }
@@ -257,5 +269,236 @@ test("both deployments promote inside the rotation, which confirms the slot afte
       !source.includes("confirm-runtime-credential"),
       `${file} confirms only through withRuntimeCredential`,
     );
+    assert.match(
+      callback,
+      /"--message",\s*slotLabel\(/u,
+      `${file} labels the new version with its runtime slot`,
+    );
+    assert.match(
+      source,
+      /liveSlots: \(\) =>\s*readLiveSlots\(/u,
+      `${file} reads the live slots before rotating`,
+    );
   }
+});
+
+test("the gate record carries the migration's result and the server's version number", () => {
+  const record = {
+    target: "production" as const,
+    revision: "a".repeat(40),
+    status: "failed" as const,
+  };
+  const result = {
+    state: "current",
+    grants: "reconciled",
+    database: "neondb",
+    version: 1,
+    runtimeRole: "arcforges_center_runtime",
+    serverVersionNum: 180004,
+    testedMajor: 18,
+    serverMajorMatchesTested: true,
+    logging: { pgStatStatementsTrack: "top", logStatement: "none", logMinDurationStatement: "-1" },
+    ran: [{ name: "0001_platform_store.sql" }],
+  };
+  assert.throws(
+    () => recordMigration({ ...record }, { ...result, serverVersionNum: undefined }),
+    /server version/u,
+  );
+  assert.throws(() => recordMigration({ ...record }, { ...result, state: "pending" }));
+  const passed: Parameters<typeof recordMigration>[0] = { ...record };
+  recordMigration(passed, result);
+  assert.deepEqual(passed, {
+    ...record,
+    status: "passed",
+    database: "neondb",
+    version: 1,
+    runtimeRole: "arcforges_center_runtime",
+    serverVersionNum: 180004,
+    testedMajor: 18,
+    serverMajorMatchesTested: true,
+    logging: { pgStatStatementsTrack: "top", logStatement: "none", logMinDurationStatement: "-1" },
+    applied: ["0001_platform_store.sql"],
+  });
+  // Another major passes with a warning.
+  const other: Parameters<typeof recordMigration>[0] = { ...record };
+  recordMigration(other, { ...result, serverVersionNum: 170006, serverMajorMatchesTested: false });
+  assert.equal(other.status, "passed");
+  assert.deepEqual(other.warnings, [
+    "the server's PostgreSQL major 17 differs from the tested major 18",
+  ]);
+});
+
+/** A fake Wrangler: the live deployment's versions and each version's message, as `--json` prints them. */
+function fakeWrangler(versions: { id: string; percentage: number; message?: string }[] | Error) {
+  const calls: string[][] = [];
+  const reader = async (args: string[]) => {
+    calls.push(args);
+    if (versions instanceof Error) throw versions;
+    if (args[0] === "deployments")
+      return JSON.stringify({
+        id: "d",
+        versions: versions.map((version) => ({
+          version_id: version.id,
+          percentage: version.percentage,
+        })),
+      });
+    const version = versions.find((entry) => entry.id === args[2]);
+    assert(version);
+    return JSON.stringify({
+      id: version.id,
+      annotations: version.message === undefined ? {} : { "workers/message": version.message },
+    });
+  };
+  return { reader, calls };
+}
+
+const versionA = "0d6d1f5c-0000-4000-8000-00000000000a";
+const versionB = "0d6d1f5c-0000-4000-8000-00000000000b";
+
+test("the live versions' slots are read from Wrangler's JSON, and a failure falls back", async () => {
+  assert.equal(slotLabel("b"), "runtime-slot=b");
+  assert.equal(slotOfMessage("runtime-slot=a"), "a");
+  assert.equal(slotOfMessage("release 1 runtime-slot=b"), "b");
+  assert.equal(slotOfMessage("runtime-slot=c"), undefined);
+  const config = ["--config", "artifacts/deploy.wrangler.json", "--env", ""];
+  const labelled = fakeWrangler([{ id: versionB, percentage: 100, message: "runtime-slot=b" }]);
+  assert.deepEqual(await readLiveSlots(labelled.reader, config), {
+    labelled: ["b"],
+    unlabelled: 0,
+  });
+  assert.deepEqual(labelled.calls, [
+    ["deployments", "status", "--json", ...config],
+    ["versions", "view", versionB, "--json", ...config],
+  ]);
+  const unlabelled = fakeWrangler([{ id: versionA, percentage: 100 }]);
+  assert.deepEqual(await readLiveSlots(unlabelled.reader, config), { labelled: [], unlabelled: 1 });
+  const unreadable = await readLiveSlots(
+    fakeWrangler(new Error("wrangler exited with code 1.")).reader,
+    config,
+  );
+  assert.match(unreadable.unreadable ?? "", /exited with code 1/u);
+});
+
+test("a labelled live slot behind the record is confirmed first, then the other slot is rotated", async () => {
+  const fake = fakeCenter(0);
+  const wrangler = fakeWrangler([{ id: versionB, percentage: 100, message: "runtime-slot=b" }]);
+  const lines: string[] = [];
+  const labels: string[] = [];
+  const rotation = await withRuntimeCredential(
+    "production",
+    "image",
+    async (_secrets, rotated) => {
+      labels.push(slotLabel(String(rotated.slot)));
+    },
+    {
+      runner: fake.runner,
+      environment,
+      confirmDelayMs: 1,
+      liveSlots: () => readLiveSlots(wrangler.reader, []),
+      log: (line) => lines.push(line),
+    },
+  );
+  assert.deepEqual(fake.calls, [
+    ["admin", "confirm-runtime-credential", "--slot", "b"],
+    ["admin", "rotate-runtime-credential", "--live-slot", "b"],
+    ["admin", "confirm-runtime-credential", "--slot", "a"],
+  ]);
+  assert.equal(rotation.slot, "a");
+  assert.deepEqual(labels, ["runtime-slot=a"], "the new version is labelled with its slot");
+  assert(lines.some((line) => /uses runtime slot b/u.test(line)));
+  assert(
+    lines.some((line) => /recorded the live slot b as promoted/u.test(line)),
+    "the self-heal is logged",
+  );
+});
+
+test("an unlabelled or unreadable live version leaves the slot to the record, and says so", async () => {
+  for (const versions of [[{ id: versionA, percentage: 100 }], new Error("no deployments")]) {
+    const fake = fakeCenter(0);
+    const lines: string[] = [];
+    const wrangler = fakeWrangler(versions);
+    await withRuntimeCredential("acceptance", "image", async () => {}, {
+      runner: fake.runner,
+      environment,
+      confirmDelayMs: 1,
+      liveSlots: () => readLiveSlots(wrangler.reader, []),
+      log: (line) => lines.push(line),
+    });
+    assert.deepEqual(fake.calls, [
+      ["admin", "rotate-runtime-credential"],
+      ["admin", "confirm-runtime-credential", "--slot", "b"],
+    ]);
+    assert(
+      lines.some((line) => /follows the database record/u.test(line)),
+      lines.join(" "),
+    );
+  }
+});
+
+test("live versions on both slots, or on a slot and an unlabelled credential, refuse the rotation", async () => {
+  for (const versions of [
+    [
+      { id: versionA, percentage: 60, message: "runtime-slot=a" },
+      { id: versionB, percentage: 40, message: "runtime-slot=b" },
+    ],
+    [
+      { id: versionA, percentage: 60 },
+      { id: versionB, percentage: 40, message: "runtime-slot=b" },
+    ],
+  ]) {
+    const fake = fakeCenter(0);
+    const wrangler = fakeWrangler(versions);
+    let published = 0;
+    await assert.rejects(
+      withRuntimeCredential(
+        "production",
+        "image",
+        async () => {
+          published++;
+        },
+        {
+          runner: fake.runner,
+          environment,
+          liveSlots: () => readLiveSlots(wrangler.reader, []),
+          log: () => {},
+        },
+      ),
+      /gradual rollout/u,
+    );
+    assert.deepEqual(fake.calls, [], "no slot was confirmed or rotated");
+    assert.equal(published, 0);
+  }
+});
+
+test("the C# Hello's credential must name the migration role before PUBLIC's CONNECT is revoked", () => {
+  const hello =
+    "postgresql://owner:synthetic-secret@ep-a-1-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
+  assert.deepEqual(checkHelloCredential("production", { [directUrlSecret]: secret }), {
+    status: "skipped",
+    reason: "NEON_DATABASE_URL is not set for this step; nothing to compare",
+  });
+  const same = checkHelloCredential("production", {
+    [directUrlSecret]: secret,
+    NEON_DATABASE_URL: hello,
+  });
+  assert.equal(same.status, "same-role");
+  assert.equal(same.sameDatabase, true);
+  const other = hello.replace("owner:", "reader:");
+  for (const target of ["production", "acceptance"] as const)
+    assert.throws(
+      () => checkHelloCredential(target, { [directUrlSecret]: secret, NEON_DATABASE_URL: other }),
+      (error: Error) => {
+        assert.match(error.message, /GRANT CONNECT/u);
+        for (const value of ["synthetic-secret", "reader", "ep-a-1", "neondb"])
+          assert(!error.message.includes(value), `the refusal quotes ${value}`);
+        return true;
+      },
+    );
+  // Acceptance has its own database: only the role is compared.
+  const acceptance = checkHelloCredential("acceptance", {
+    [directUrlSecret]: secret,
+    NEON_DATABASE_URL: hello.replace("/neondb", "/elsewhere"),
+  });
+  assert.equal(acceptance.status, "same-role");
+  assert.equal(acceptance.sameDatabase, undefined);
 });
