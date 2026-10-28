@@ -1,0 +1,356 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package migrate
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"testing/fstest"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/ArcForges/Cloud/center/internal/pgtest"
+	"github.com/ArcForges/Cloud/center/internal/schema"
+)
+
+func apply(t *testing.T, url string, build []Migration, options Options) (Result, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	conn := pgtest.Connect(t, url)
+	return Apply(ctx, conn, build, options)
+}
+
+func centerBuild(t *testing.T) []Migration {
+	t.Helper()
+	build, err := Load(schema.Migrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return build
+}
+
+func TestApplyThenRepeatIsANoOp(t *testing.T) {
+	url, name := pgtest.Database(t)
+	build := centerBuild(t)
+	first, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: name + "_runtime"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.State != StateCurrent || len(first.Ran) != len(build) || first.Version != len(build) || first.Grants != "reconciled" {
+		t.Fatalf("first run: %+v", first)
+	}
+	second, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: name + "_runtime"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.State != StateCurrent || len(second.Ran) != 0 || second.Version != len(build) {
+		t.Fatalf("second run: %+v", second)
+	}
+	ctx := context.Background()
+	status, err := Inspect(ctx, pgtest.Connect(t, url), build)
+	if err != nil || status.State != StateCurrent || len(status.Pending) != 0 {
+		t.Fatalf("status: %+v %v", status, err)
+	}
+	if status.Applied[0].SHA256 != build[0].SHA256 || status.Database != name {
+		t.Fatalf("record: %+v", status)
+	}
+}
+
+func TestStatusOfAnEmptyDatabase(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	status, err := Inspect(context.Background(), pgtest.Connect(t, url), centerBuild(t))
+	if err != nil || status.State != StateUninitialized || len(status.Pending) != len(centerBuild(t)) {
+		t.Fatalf("status: %+v %v", status, err)
+	}
+}
+
+func TestConcurrentRunsSerialize(t *testing.T) {
+	url, name := pgtest.Database(t)
+	build := centerBuild(t)
+	const runs = 6
+	results := make([]Result, runs)
+	failures := make([]error, runs)
+	conns := make([]*pgx.Conn, runs)
+	for index := range conns {
+		conns[index] = pgtest.Connect(t, url)
+	}
+	var group sync.WaitGroup
+	start := make(chan struct{})
+	for index := range runs {
+		group.Go(func() {
+			<-start
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			results[index], failures[index] = Apply(ctx, conns[index], build, Options{Runner: fmt.Sprintf("run-%d", index), RuntimeRole: name + "_runtime"})
+		})
+	}
+	close(start)
+	group.Wait()
+	ran := 0
+	for index := range runs {
+		if failures[index] != nil {
+			t.Fatalf("run %d: %v", index, failures[index])
+		}
+		if results[index].State != StateCurrent {
+			t.Fatalf("run %d: %+v", index, results[index])
+		}
+		ran += len(results[index].Ran)
+	}
+	if ran != len(build) {
+		t.Fatalf("%d migrations ran across %d concurrent runs; each must run once", ran, runs)
+	}
+}
+
+func TestAnEditedAppliedMigrationIsRefused(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	original, _ := Load(files("CREATE TABLE platform.t1 (x int);", "CREATE TABLE platform.t2 (x int);"))
+	if _, err := apply(t, url, original[:1], Options{Runner: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	edited, _ := Load(files("CREATE TABLE platform.t1 (x bigint);", "CREATE TABLE platform.t2 (x int);"))
+	result, err := apply(t, url, edited, Options{Runner: "test"})
+	if !errors.Is(err, ErrRefused) || result.State != StateRefused || !strings.Contains(strings.Join(result.Problems, " "), "was edited") {
+		t.Fatalf("edited: %+v %v", result, err)
+	}
+	var exists bool
+	if err = pgtest.Connect(t, url).QueryRow(context.Background(), "SELECT to_regclass('platform.t2') IS NOT NULL").Scan(&exists); err != nil || exists {
+		t.Fatalf("a refused run applied the next migration: %v %v", exists, err)
+	}
+}
+
+func TestARemovedAppliedMigrationIsRefused(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	build, _ := Load(files("CREATE TABLE platform.t1 (x int);", "CREATE TABLE platform.t2 (x int);"))
+	if _, err := apply(t, url, build, Options{Runner: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := apply(t, url, build[:1], Options{Runner: "test"})
+	if !errors.Is(err, ErrRefused) || !strings.Contains(strings.Join(result.Problems, " "), "ahead") {
+		t.Fatalf("removed last: %+v %v", result, err)
+	}
+	renamed, _ := Load(fstestRename(files("CREATE TABLE platform.t1 (x int);", "CREATE TABLE platform.t3 (x int);"), "0002_second.sql", "0002_other.sql"))
+	result, err = apply(t, url, renamed, Options{Runner: "test"})
+	if !errors.Is(err, ErrRefused) || !strings.Contains(strings.Join(result.Problems, " "), "renamed or removed") {
+		t.Fatalf("replaced: %+v %v", result, err)
+	}
+}
+
+func TestAFailingMigrationRollsBackCompletely(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	failing, _ := Load(files("CREATE TABLE platform.t1 (x int);", "CREATE TABLE platform.t2 (x int); INSERT INTO platform.t1 VALUES (1); SELECT 1 / 0;"))
+	_, err := apply(t, url, failing, Options{Runner: "test"})
+	var failure *Failure
+	if !errors.As(err, &failure) || failure.Name != "0002_second.sql" || failure.SQLState != "22012" {
+		t.Fatalf("failure: %v", err)
+	}
+	conn := pgtest.Connect(t, url)
+	var t2 bool
+	var rows, version int
+	if err = conn.QueryRow(context.Background(), "SELECT to_regclass('platform.t2') IS NOT NULL, (SELECT count(*) FROM platform.t1), (SELECT max(version) FROM platform.schema_migration)").Scan(&t2, &rows, &version); err != nil {
+		t.Fatal(err)
+	}
+	if t2 || rows != 0 || version != 1 {
+		t.Fatalf("partial state after a failed migration: t2=%v rows=%d version=%d", t2, rows, version)
+	}
+	fixed, _ := Load(files("CREATE TABLE platform.t1 (x int);", "CREATE TABLE platform.t2 (x int); INSERT INTO platform.t1 VALUES (1);"))
+	if result, err := apply(t, url, fixed, Options{Runner: "test"}); err != nil || len(result.Ran) != 1 {
+		t.Fatalf("fixed run: %+v %v", result, err)
+	}
+}
+
+func TestACrashedRunRollsBackAndReleasesTheLock(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	slow, _ := Load(files("CREATE TABLE platform.t1 (x int);", "CREATE TABLE platform.t2 (x int); SELECT pg_sleep(60);"))
+	conn := pgtest.Connect(t, url)
+	var pid uint32
+	if err := conn.QueryRow(context.Background(), "SELECT pg_backend_pid()").Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		_, err := Apply(ctx, conn, slow, Options{Runner: "crashing"})
+		done <- err
+	}()
+	admin := pgtest.Admin(t)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var running bool
+		if err := admin.QueryRow(context.Background(), "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND query LIKE '%pg_sleep%')", pid).Scan(&running); err != nil {
+			t.Fatal(err)
+		}
+		if running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the slow migration never started")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// The process dies mid-migration: the server ends the session.
+	if _, err := admin.Exec(context.Background(), "SELECT pg_terminate_backend($1)", pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("the crashed run reported success")
+	}
+	fixed, _ := Load(files("CREATE TABLE platform.t1 (x int);", "CREATE TABLE platform.t2 (x int);"))
+	result, err := apply(t, url, fixed, Options{Runner: "after-crash", LockTimeout: 5 * time.Second})
+	if err != nil || len(result.Ran) != 1 || result.Ran[0].Name != "0002_second.sql" {
+		t.Fatalf("the run after the crash: %+v %v", result, err)
+	}
+}
+
+func TestALockHeldByAnotherRunTimesOut(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	holder := pgtest.Connect(t, url)
+	if _, err := holder.Exec(context.Background(), "SELECT pg_advisory_lock($1)", LockKey); err != nil {
+		t.Fatal(err)
+	}
+	_, err := apply(t, url, centerBuild(t), Options{Runner: "test", LockTimeout: time.Second})
+	if !errors.Is(err, ErrLocked) {
+		t.Fatalf("expected the lock timeout, got %v", err)
+	}
+}
+
+func TestTheRuntimeRoleHasExactlyItsGrants(t *testing.T) {
+	url, name := pgtest.Database(t)
+	group := name + "_runtime"
+	migration := pgtest.Connect(t, url)
+	ctx := context.Background()
+	// An unrelated schema of another module that the runtime role was never granted.
+	if _, err := migration.Exec(ctx, "CREATE SCHEMA other; CREATE TABLE other.secret (x int); INSERT INTO other.secret VALUES (1)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: group}); err != nil {
+		t.Fatal(err)
+	}
+	// An extra privilege granted by hand is revoked by the next run.
+	if _, err := migration.Exec(ctx, "GRANT DELETE ON platform.outbox TO "+group); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: group}); err != nil {
+		t.Fatal(err)
+	}
+	login, password := group+"_a", pgtest.Secret()
+	if _, err := migration.Exec(ctx, "CREATE ROLE "+login+" LOGIN PASSWORD '"+password+"' IN ROLE "+group); err != nil {
+		t.Fatal(err)
+	}
+	runtime := pgtest.Connect(t, pgtest.WithUser(t, url, login, password))
+	allowed := []string{
+		"SELECT count(*) FROM platform.schema_migration",
+		"INSERT INTO platform.inbox (source, message_id, received_at, expires_at) VALUES ('test', 'm1', now(), now() + interval '1 day')",
+		"UPDATE platform.inbox SET processed_at = now(), outcome = 1 WHERE source = 'test'",
+		"SELECT count(*) FROM fleet.signing_key",
+		"SELECT last_sequence FROM audit.chain_head",
+	}
+	for _, statement := range allowed {
+		if _, err := runtime.Exec(ctx, statement); err != nil {
+			t.Errorf("the runtime role cannot run %q: %v", statement, err)
+		}
+	}
+	refused := []string{
+		"CREATE TABLE platform.extra (x int)",
+		"CREATE TABLE public.extra (x int)",
+		"CREATE SCHEMA extra",
+		"ALTER TABLE platform.outbox ADD COLUMN extra int",
+		"DROP TABLE platform.inbox",
+		"DELETE FROM platform.outbox",
+		"DELETE FROM platform.inbox",
+		"TRUNCATE platform.command_receipt",
+		"UPDATE audit.audit_event SET reason = 'x'",
+		"DELETE FROM audit.audit_event",
+		"INSERT INTO fleet.signing_key (kid) VALUES ('kid-00001')",
+		"SELECT * FROM platform.runtime_credential",
+		"INSERT INTO platform.schema_migration (version, name, sha256, duration_ms, runner) VALUES (99, '0099_x.sql', repeat('0', 64), 0, 'x')",
+		"SELECT * FROM other.secret",
+		"CREATE INDEX extra ON platform.outbox (topic)",
+	}
+	for _, statement := range refused {
+		_, err := runtime.Exec(ctx, statement)
+		if !pgtest.IsCode(err, "42501") {
+			t.Errorf("the runtime role ran %q (or failed otherwise: %v)", statement, err)
+		}
+	}
+}
+
+func TestEveryTableHasAGrantDecision(t *testing.T) {
+	url, name := pgtest.Database(t)
+	if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: name + "_runtime"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pgtest.Connect(t, url).Query(context.Background(), "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_schema = ANY($1) ORDER BY 1", schema.Schemas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	decided := slices.Clone(schema.MigrationOnly)
+	for _, grant := range schema.RuntimeGrants {
+		decided = append(decided, grant.Schema+"."+grant.Table)
+	}
+	slices.Sort(decided)
+	if !slices.Equal(tables, decided) {
+		t.Fatalf("tables %v; decided %v (add each new table to schema.RuntimeGrants or schema.MigrationOnly)", tables, decided)
+	}
+}
+
+func TestTheRuntimeRoleMustNotBeTheMigrationRoleOrElevated(t *testing.T) {
+	url, name := pgtest.Database(t)
+	if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: name + "_owner"}); err == nil {
+		t.Fatal("the migration role was accepted as the runtime role")
+	}
+	elevated := name + "_elevated"
+	if _, err := pgtest.Admin(t).Exec(context.Background(), "CREATE ROLE "+elevated+" NOLOGIN CREATEDB"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: elevated}); err == nil || !strings.Contains(err.Error(), "elevated") {
+		t.Fatalf("an elevated runtime role was accepted: %v", err)
+	}
+}
+
+func fstestRename(directory fstest.MapFS, from, to string) fstest.MapFS {
+	directory[to] = directory[from]
+	delete(directory, from)
+	return directory
+}
+
+func TestTheRuntimeChecksSchemaCompatibility(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	conn := pgtest.Connect(t, url)
+	ctx := context.Background()
+	build, _ := Load(files("CREATE TABLE platform.t1 (x int);", "CREATE TABLE platform.t2 (x int);"))
+	if _, err := CheckCompatible(ctx, conn, build); !errors.Is(err, ErrIncompatible) {
+		t.Fatalf("an unmigrated database: %v", err)
+	}
+	if _, err := apply(t, url, build[:1], Options{Runner: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CheckCompatible(ctx, conn, build); !errors.Is(err, ErrIncompatible) {
+		t.Fatalf("a pending migration: %v", err)
+	}
+	if _, err := apply(t, url, build, Options{Runner: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if version, err := CheckCompatible(ctx, conn, build); err != nil || version != 2 {
+		t.Fatalf("current: %d %v", version, err)
+	}
+	// The previous revision stays compatible with a database one migration ahead (expand and contract).
+	if version, err := CheckCompatible(ctx, conn, build[:1]); err != nil || version != 2 {
+		t.Fatalf("ahead: %d %v", version, err)
+	}
+	edited, _ := Load(files("CREATE TABLE platform.t1 (x bigint);", "CREATE TABLE platform.t2 (x int);"))
+	if _, err := CheckCompatible(ctx, conn, edited); !errors.Is(err, ErrIncompatible) {
+		t.Fatalf("edited: %v", err)
+	}
+}

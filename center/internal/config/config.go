@@ -75,9 +75,13 @@ type Config struct {
 	LogLevel       slog.Level
 	// MetricsLogInterval is how often the metrics summary is logged; zero disables it.
 	MetricsLogInterval time.Duration
-	// NeonHello is the pooled Neon connection of the Hello greeting, or nil for the stateless greeting.
+	// HelloFromDatabase is true when ARCFORGES_NEON_HELLO is enabled: the Hello greeting is read from PostgreSQL, through the
+	// runtime database when one is configured and otherwise through NeonHello.
+	HelloFromDatabase bool
+	// NeonHello is the Hello's own pooled Neon connection (NEON_DATABASE_URL), used only while no runtime database is
+	// configured; nil otherwise.
 	NeonHello *pgxpool.Config
-	// Database is the center's pooled runtime database, or nil when none is configured.
+	// Database is the center's pooled runtime database (the least-privilege runtime role), or nil when none is configured.
 	Database *pgxpool.Config
 }
 
@@ -132,15 +136,6 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	if config.MetricsLogInterval, err = metricsInterval(get(EnvMetricsLogInterval)); err != nil {
 		return Config{}, invalid("%s: %v", EnvMetricsLogInterval, err)
 	}
-	switch get(EnvNeonHello) {
-	case "", "disabled":
-	case "enabled":
-		if config.NeonHello, err = NeonHelloPool(get(EnvNeonDatabaseURL)); err != nil {
-			return Config{}, err
-		}
-	default:
-		return Config{}, invalid("%s must be enabled or disabled", EnvNeonHello)
-	}
 	maxConns, err := bounded(get(EnvDatabaseMaxConns), DefaultDatabaseMaxConns, 1, MaxDatabaseMaxConns)
 	if err != nil {
 		return Config{}, invalid("%s: %v", EnvDatabaseMaxConns, err)
@@ -149,6 +144,20 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		if config.Database, err = RuntimeDatabasePool(value, config.Mode, int32(maxConns)); err != nil {
 			return Config{}, err
 		}
+	}
+	switch get(EnvNeonHello) {
+	case "", "disabled":
+	case "enabled":
+		config.HelloFromDatabase = true
+		// The runtime role reads the greeting once the store exists; the Hello's own Neon credential is the configuration
+		// before it (and of a center without a store), never both.
+		if config.Database == nil {
+			if config.NeonHello, err = NeonHelloPool(get(EnvNeonDatabaseURL)); err != nil {
+				return Config{}, err
+			}
+		}
+	default:
+		return Config{}, invalid("%s must be enabled or disabled", EnvNeonHello)
 	}
 	return config, nil
 }

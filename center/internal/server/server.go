@@ -10,11 +10,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -30,12 +33,18 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/routes"
+	"github.com/ArcForges/Cloud/center/internal/schema"
+	"github.com/ArcForges/Cloud/center/internal/store"
+	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
 
 // Hello backends reported by health.
 const (
 	BackendStateless = "stateless"
-	BackendNeon      = "neon-postgresql"
+	// BackendNeon is the Hello's own Neon credential (NEON_DATABASE_URL), the configuration before the store.
+	BackendNeon = "neon-postgresql"
+	// BackendRuntime is the runtime role's pooled connection of the PostgreSQL store.
+	BackendRuntime = "postgresql-runtime"
 )
 
 // Center is one composed center.
@@ -46,10 +55,21 @@ type Center struct {
 	Health  buildinfo.Health
 	// Features is the feature gate (AD-0021 section 13a); the stub answers per mode until AF-CTR-03.
 	Features feature.Gate
-	public   http.Handler
-	admin    http.Handler
-	pools    []*pgxpool.Pool
-	ready    []component
+	// Store is the runtime role's PostgreSQL store, or nil when no runtime database is configured.
+	Store  *store.DB
+	public http.Handler
+	admin  http.Handler
+	pools  []namedPool
+	ready  []component
+	// schemaVersion is the database's migration version seen by the last readiness check (-1 before one succeeded), and
+	// buildVersion the number of migrations of this build.
+	schemaVersion atomic.Int64
+	buildVersion  int
+}
+
+type namedPool struct {
+	name string
+	pool *pgxpool.Pool
 }
 
 type component struct {
@@ -67,13 +87,19 @@ type Options struct {
 // makes the center unready and its calls fail with UNAVAILABLE.
 func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, error) {
 	center := &Center{Config: cfg, Logger: logger, Metrics: observe.NewMetrics(), Features: feature.NewGate(cfg.Mode)}
+	center.schemaVersion.Store(-1)
+	build, err := migrate.Load(schema.Migrations())
+	if err != nil {
+		return nil, err
+	}
+	center.buildVersion = len(build)
 	greeting, backend := hello.Greeting(hello.Stateless), BackendStateless
 	if cfg.NeonHello != nil {
 		pool, err := pgxpool.NewWithConfig(context.Background(), cfg.NeonHello)
 		if err != nil {
 			return nil, errors.New("could not initialize the Hello database pool")
 		}
-		center.pools = append(center.pools, pool)
+		center.pools = append(center.pools, namedPool{"hello", pool})
 		center.ready = append(center.ready, component{"helloDatabase", pool.Ping})
 		greeting, backend = hello.Database(pool), BackendNeon
 	}
@@ -83,8 +109,18 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 			center.Close()
 			return nil, errors.New("could not initialize the runtime database pool")
 		}
-		center.pools = append(center.pools, pool)
-		center.ready = append(center.ready, component{"database", pool.Ping})
+		center.pools = append(center.pools, namedPool{"runtime", pool})
+		center.Store = store.New(pool)
+		center.ready = append(center.ready, component{"database", pool.Ping}, component{"databaseSchema", func(ctx context.Context) error {
+			version, err := migrate.CheckCompatible(ctx, pool, build)
+			if err == nil {
+				center.schemaVersion.Store(int64(version))
+			}
+			return err
+		}})
+		if cfg.HelloFromDatabase {
+			greeting, backend = hello.Database(pool), BackendRuntime
+		}
 	}
 	if options.Greeting != nil {
 		greeting = options.Greeting
@@ -135,8 +171,8 @@ func (c *Center) Admin() http.Handler { return c.admin }
 
 // Close releases the database pools.
 func (c *Center) Close() {
-	for _, pool := range c.pools {
-		pool.Close()
+	for _, item := range c.pools {
+		item.pool.Close()
 	}
 }
 
@@ -291,7 +327,45 @@ func (c *Center) serveMetrics(writer http.ResponseWriter, request *http.Request)
 	}
 	writer.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	writer.Header().Set("Cache-Control", "no-store")
-	_ = c.Metrics.WritePrometheus(writer)
+	if err := c.Metrics.WritePrometheus(writer); err != nil {
+		return
+	}
+	_ = c.writeDatabaseMetrics(writer)
+}
+
+// writeDatabaseMetrics writes the pools' statistics and the schema versions.
+func (c *Center) writeDatabaseMetrics(writer io.Writer) error {
+	var text strings.Builder
+	if len(c.pools) > 0 {
+		text.WriteString("# HELP arcforges_center_db_pool_connections Database pool connections, by pool and state.\n")
+		text.WriteString("# TYPE arcforges_center_db_pool_connections gauge\n")
+		for _, item := range c.pools {
+			stat := item.pool.Stat()
+			fmt.Fprintf(&text, "arcforges_center_db_pool_connections{pool=%q,state=\"acquired\"} %d\n", item.name, stat.AcquiredConns())
+			fmt.Fprintf(&text, "arcforges_center_db_pool_connections{pool=%q,state=\"idle\"} %d\n", item.name, stat.IdleConns())
+			fmt.Fprintf(&text, "arcforges_center_db_pool_connections{pool=%q,state=\"constructing\"} %d\n", item.name, stat.ConstructingConns())
+			fmt.Fprintf(&text, "arcforges_center_db_pool_connections{pool=%q,state=\"max\"} %d\n", item.name, stat.MaxConns())
+		}
+		text.WriteString("# HELP arcforges_center_db_pool_acquires_total Connections acquired from a pool, by pool and outcome.\n")
+		text.WriteString("# TYPE arcforges_center_db_pool_acquires_total counter\n")
+		for _, item := range c.pools {
+			stat := item.pool.Stat()
+			fmt.Fprintf(&text, "arcforges_center_db_pool_acquires_total{pool=%q,outcome=\"acquired\"} %d\n", item.name, stat.AcquireCount())
+			fmt.Fprintf(&text, "arcforges_center_db_pool_acquires_total{pool=%q,outcome=\"waited\"} %d\n", item.name, stat.EmptyAcquireCount())
+			fmt.Fprintf(&text, "arcforges_center_db_pool_acquires_total{pool=%q,outcome=\"cancelled\"} %d\n", item.name, stat.CanceledAcquireCount())
+		}
+		text.WriteString("# HELP arcforges_center_db_pool_acquire_seconds_total Time spent acquiring connections, by pool.\n")
+		text.WriteString("# TYPE arcforges_center_db_pool_acquire_seconds_total counter\n")
+		for _, item := range c.pools {
+			fmt.Fprintf(&text, "arcforges_center_db_pool_acquire_seconds_total{pool=%q} %g\n", item.name, item.pool.Stat().AcquireDuration().Seconds())
+		}
+	}
+	text.WriteString("# HELP arcforges_center_db_schema_version Migrations applied to the database (-1 before a readiness check succeeded) and migrations of this build.\n")
+	text.WriteString("# TYPE arcforges_center_db_schema_version gauge\n")
+	fmt.Fprintf(&text, "arcforges_center_db_schema_version{source=\"database\"} %d\n", c.schemaVersion.Load())
+	fmt.Fprintf(&text, "arcforges_center_db_schema_version{source=\"build\"} %d\n", c.buildVersion)
+	_, err := io.WriteString(writer, text.String())
+	return err
 }
 
 // Run serves the center until ctx ends or a listener fails, then shuts down within five seconds.
@@ -337,7 +411,11 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		go func() { failures <- server.Serve(netutil.LimitListener(listener, cfg.MaxConnections)) }()
 	}
 	logger.Info("center started", "mode", string(cfg.Mode), "publicBaseUrl", cfg.PublicBaseURL, "listeners", bound,
-		"helloBackend", center.Health.HelloBackend, "revision", center.Health.Revision, "version", center.Health.Artifact.Version)
+		"helloBackend", center.Health.HelloBackend, "store", center.Store != nil, "schemaBuildVersion", center.buildVersion,
+		"revision", center.Health.Revision, "version", center.Health.Artifact.Version)
+	if center.Store != nil {
+		go center.logReadiness(ctx)
+	}
 	if cfg.MetricsLogInterval > 0 {
 		go center.logMetrics(ctx, cfg.MetricsLogInterval)
 	}
@@ -356,6 +434,19 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	logger.Info("center stopped")
 	return result
+}
+
+// logReadiness logs the first readiness of the store, so a deployment whose database is unreachable or not migrated says so
+// in its log (readiness itself is on the admin listener).
+func (c *Center) logReadiness(ctx context.Context) {
+	check, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	readiness := c.Ready(check)
+	if readiness.Status == "ready" {
+		c.Logger.Info("store ready", "schemaVersion", c.schemaVersion.Load())
+		return
+	}
+	c.Logger.Warn("store not ready", "components", readiness.Components)
 }
 
 func (c *Center) logMetrics(ctx context.Context, interval time.Duration) {
