@@ -1,31 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Cloudflare account access, resource provisioning, deployment and read-only observation of the isolated
-// `proof` environment. It runs only in the manually dispatched jobs of .github/workflows/ci.yml on `main`,
-// inside the `cloudflare` GitHub environment, with the existing deployment token. Output is sanitized: it
-// names capabilities, resources and HTTP statuses, and the observation adds only allowlisted provider fields
-// (names, provider ids, states, counts, versions, locations, times); never a token, a secret, an environment
-// value or a log line. The proof secrets are generated here at deploy time and handed to Wrangler through a
-// runner-local file; they are never printed, never committed and never leave the runner except into the
-// proof Worker. No live service is called: the checks are provider metadata receipts, not runtime tests.
+// `proof` environment, which is the Go center's acceptance environment since AF-CTR-02. It runs only in the
+// manually dispatched jobs of .github/workflows/ci.yml on `main`, inside the `cloudflare` GitHub environment,
+// with the existing deployment token. Output is sanitized: it names capabilities, resources and HTTP statuses,
+// and the observation adds only allowlisted provider fields (names, provider ids, states, counts, versions,
+// locations, times); never a token, a secret, an environment value or a log line. The acceptance runtime
+// credential is rotated here at deploy time and handed to Wrangler through a runner-local file; it is never
+// printed, never committed and never leaves the runner except into the Worker. No live service is called: the
+// checks are provider metadata receipts, not runtime tests.
 import assert from "node:assert/strict";
-import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { centerResources, provisionCenter } from "./center-provision.ts";
 import {
+  acceptanceBaseUrl,
   buildProofConfig,
-  generateSecrets,
-  proofBucketName,
-  proofDatabaseName,
   composeProofAssets,
-  profileBundleAssetName,
   profileBundlePin,
   proofAssetsDirName,
+  proofDatabaseName,
   proofHostname,
-  proofQueueNames,
   proofWorkerName,
   sealedProofBundle,
-  siteArchiveAssetName,
   siteArchivePin,
   stageProofAssets,
   verifyProfileBundle,
@@ -219,35 +216,15 @@ async function ensureD1(api: CloudflareApi, actions: string[]): Promise<string> 
   return id;
 }
 
-async function ensureBucket(api: CloudflareApi, actions: string[]): Promise<void> {
-  const exists = async () =>
-    (await api.request("GET", api.accountPath(`/r2/buckets/${proofBucketName}`))).success;
-  if (await exists()) return void actions.push(`R2 ${proofBucketName}: exists`);
-  const created = await api.request("POST", api.accountPath("/r2/buckets"), {
-    name: proofBucketName,
-  });
-  assert(await exists(), `R2 create failed (${describe(created)})`);
-  actions.push(`R2 ${proofBucketName}: created`);
-}
-
-async function ensureQueue(api: CloudflareApi, name: string, actions: string[]): Promise<void> {
-  const exists = async () => {
-    const reply = await api.request("GET", api.accountPath("/queues?per_page=100"));
-    assert(reply.success, `Queues list failed (${describe(reply)})`);
-    return (reply.result as { queue_name?: string }[]).some((entry) => entry.queue_name === name);
-  };
-  if (await exists()) return void actions.push(`Queue ${name}: exists`);
-  const created = await api.request("POST", api.accountPath("/queues"), { queue_name: name });
-  assert(await exists(), `Queue create failed (${describe(created)})`);
-  actions.push(`Queue ${name}: created`);
-}
-
-/** Idempotent creation of exactly the reserved proof resources; nothing else is touched. */
+/**
+ * Idempotent provisioning of the acceptance environment: the retained proof D1 database (still bound; the gated C# migration
+ * step keeps it current until AF-CTR-09 inspects and keeps it) and the center's own acceptance resources (center-provision.ts).
+ * The C# proof's R2 bucket and queues are retained as they are and no longer bound; nothing else is touched.
+ */
 export async function provision(api: CloudflareApi): Promise<Provisioned> {
   const actions: string[] = [];
   const d1DatabaseId = await ensureD1(api, actions);
-  await ensureBucket(api, actions);
-  for (const name of proofQueueNames) await ensureQueue(api, name, actions);
+  actions.push(...(await provisionCenter(api, "acceptance")));
   return { d1DatabaseId, actions };
 }
 
@@ -766,6 +743,9 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   const { verifyCandidate } = await import("../../tooling/project.ts");
   const { candidateDir, readJson, root, run, wrangler, writeJson } =
     await import("../../tooling/process.ts");
+  const { loadCandidateImage, readGate, requirePostgresGate, withRuntimeCredential } =
+    await import("../../tooling/postgres-deploy.ts");
+  const { withNeonRuntimeSecret } = await import("../../tooling/neon-runtime.ts");
   const candidate = await verifyCandidate();
   assert.equal(candidate.dirty, false, "Uncommitted local builds cannot deploy.");
   const current = await run(
@@ -774,13 +754,9 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
     true,
   );
   assert.equal(candidate.revision, current, "A newer main commit exists; only it may deploy.");
-  await run("docker", ["load", "--input", "artifacts/candidate/docker-image.tar"]);
-  const imageId = await run(
-    "docker",
-    ["image", "inspect", candidate.image, "--format", "{{.Id}}"],
-    true,
-  );
-  assert.equal(imageId, candidate.imageId, "Loaded image is not the sealed candidate image.");
+  // AF-CTR-02: the gated PostgreSQL step migrated the acceptance database for this very candidate.
+  requirePostgresGate(await readGate("acceptance"), "acceptance", candidate.revision);
+  await loadCandidateImage(candidate);
   await run(process.execPath, [wrangler, "containers", "push", candidate.image]);
   const registryTag = `registry.cloudflare.com/${api.account}/${candidate.image}`;
   const digests = JSON.parse(
@@ -794,76 +770,39 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   const imageDigest = digests.find((value) => value.startsWith(prefix));
   assert(imageDigest, "Cloudflare registry did not return the pushed image digest.");
 
-  // WEB.40 (CLOUD.85): the two immutable release assets of one Web release, the Blazor profile bundle and the C#
-  // Site archive. Each is downloaded from its pinned release, verified against its pinned digest and composed into
-  // the one proof tree. Nothing is rebuilt and no Web source is read; a mismatch stops the job before anything is
-  // deployed.
-  const releaseDir = path.join(root, "artifacts", "web-release");
-  const profileAsset = profileBundleAssetName(profileBundlePin.digest);
-  const siteAsset = siteArchiveAssetName(siteArchivePin.digest);
-  await rm(releaseDir, { recursive: true, force: true });
-  await run("gh", releaseDownloadArguments(profileBundlePin, profileAsset, releaseDir));
-  await run("gh", releaseDownloadArguments(siteArchivePin, siteAsset, releaseDir));
-  const staged = await verifyAndStageProofAssets(
-    {
-      profile: await readFile(path.join(releaseDir, profileAsset)),
-      site: await readFile(path.join(releaseDir, siteAsset)),
-    },
-    root,
-  );
-  console.log(
-    `Web ${profileBundlePin.release}: profile bundle ${staged.profileDigest} and Site ${staged.siteDigest} verified; ${staged.files} files staged as the proof assets.`,
-  );
-
   await checkProofDomainFree(api);
-  const config = buildProofConfig(
-    await readJson<CandidateConfig>(path.join(candidateDir, "wrangler.json")),
-    {
-      account: api.account,
-      imageDigest,
-      revision: candidate.revision,
-      databaseId: provisioned.d1DatabaseId,
-      // CLOUD.84 D1: the proof environment runs its own sealed bundle, which the candidate job built from worker/proof/entry.ts and
-      // verifyCandidate checked against the manifest above; the deploy below uploads it with --no-bundle.
-      main: sealedProofBundle,
-      migrationsDir: "../worker/proof-migrations",
-    },
-  );
+  const candidateConfig = await readJson<CandidateConfig>(path.join(candidateDir, "wrangler.json"));
+  const config = buildProofConfig(candidateConfig, {
+    account: api.account,
+    imageDigest,
+    revision: candidate.revision,
+    databaseId: provisioned.d1DatabaseId,
+    // CLOUD.84 D1: the proof environment runs its own sealed bundle (the acceptance entry since AF-CTR-02), which the candidate job
+    // built and verifyCandidate checked against the manifest above; the deploy below uploads it with --no-bundle.
+    main: sealedProofBundle,
+    buildIdentity: (candidateConfig as { vars?: { BUILD_IDENTITY?: string } }).vars?.BUILD_IDENTITY,
+    migrationsDir: "../worker/proof-migrations",
+  });
   const configFile = path.join(root, "artifacts", "proof.wrangler.json");
   await writeJson(configFile, config);
   const common = ["--config", "artifacts/proof.wrangler.json", "--env", "proof"];
-  // Migrations are a separate step, never part of Container startup.
-  await run(process.execPath, [
-    wrangler,
-    "d1",
-    "migrations",
-    "apply",
-    proofDatabaseName,
-    "--remote",
-    ...common,
-  ]);
-  // Fresh secrets travel in a runner-local file that Wrangler uploads with the version and that is
-  // removed immediately; nothing prints them.
-  const secretsDir = path.join(process.env.RUNNER_TEMP ?? path.join(root, "artifacts"), "proof");
-  const secretsFile = path.join(secretsDir, `secrets-${randomBytes(8).toString("hex")}.json`);
-  await mkdir(secretsDir, { recursive: true });
-  try {
-    await writeFile(secretsFile, JSON.stringify(generateSecrets()), { mode: 0o600 });
-    await run(process.execPath, [
-      wrangler,
-      "deploy",
-      ...common,
-      "--no-bundle",
-      "--containers-rollout",
-      "immediate",
-      "--tag",
-      `${candidate.version}-proof`,
-      "--secrets-file",
-      secretsFile,
-    ]);
-  } finally {
-    await rm(secretsFile, { force: true });
-  }
+  // The acceptance runtime credential is rotated now and travels in a runner-local file that Wrangler uploads with the version and
+  // that is removed immediately; nothing prints it. The revision still running keeps its own credential of the other slot.
+  const rotation = await withRuntimeCredential("acceptance", candidate.image, async (secrets) => {
+    await withNeonRuntimeSecret(secrets, async (secretArguments) => {
+      await run(process.execPath, [
+        wrangler,
+        "deploy",
+        ...common,
+        "--no-bundle",
+        "--containers-rollout",
+        "immediate",
+        "--tag",
+        `${candidate.version}-acceptance`,
+        ...secretArguments,
+      ]);
+    });
+  });
   const receipts = await postDeployChecks(api);
   await writeJson(path.join(root, "artifacts", "proof-deployment.json"), {
     revision: candidate.revision,
@@ -872,26 +811,25 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
     imageDigest,
     worker: proofWorkerName,
     hostname: proofHostname,
-    baseUrl: `https://${proofHostname}`,
-    d1DatabaseId: provisioned.d1DatabaseId,
+    baseUrl: acceptanceBaseUrl,
+    center: {
+      mode: "official-hosted",
+      planConfiguration: "development-fixtures",
+      database: rotation.database,
+      runtimeRole: rotation.runtimeRole,
+      loginRole: rotation.loginRole,
+      slot: rotation.slot,
+      probe: rotation.probe,
+    },
+    retainedD1DatabaseId: provisioned.d1DatabaseId,
     resources: provisioned.actions,
-    profileBundle: {
-      repository: profileBundlePin.repository,
-      release: profileBundlePin.release,
-      digest: staged.profileDigest,
-    },
-    siteArchive: {
-      repository: siteArchivePin.repository,
-      release: siteArchivePin.release,
-      digest: staged.siteDigest,
-    },
-    proofAssets: { files: staged.files, headersSha256: staged.headersSha256 },
+    centerResources: centerResources.acceptance,
     receipts: receipts.map((check) => ({ name: check.name, ok: check.ok })),
     deployedAt: new Date().toISOString(),
   });
   report("Post-deployment provider receipts", receipts);
   console.log(
-    `Proof environment deployed at https://${proofHostname}. This is deployment completion, not live acceptance evidence.`,
+    `Acceptance center deployed at ${acceptanceBaseUrl}. This is deployment completion, not live acceptance evidence.`,
   );
 }
 

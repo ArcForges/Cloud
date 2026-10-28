@@ -36,10 +36,10 @@ export function neonRuntimeSecret(
 }
 
 export async function withNeonRuntimeSecret(
-  secret: { NEON_DATABASE_URL: string } | undefined,
+  secret: Readonly<Record<string, string>> | undefined,
   publish: (arguments_: string[]) => Promise<void>,
 ): Promise<void> {
-  if (!secret) return publish([]);
+  if (!secret || Object.keys(secret).length === 0) return publish([]);
   // Outside candidate/artifact directories: the secret must never be packaged or uploaded as evidence.
   const directory = await mkdtemp(path.join(os.tmpdir(), "arcforges-neon-"));
   const file = path.join(directory, "runtime.json");

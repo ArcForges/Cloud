@@ -83,3 +83,23 @@ func TestTheMigrationConfigurationRefusesWithoutEchoing(t *testing.T) {
 		}
 	}
 }
+
+func TestThePlanConfiguration(t *testing.T) {
+	values := minimal(OfficialHosted)
+	if config, err := Load(environment(values)); err != nil || config.Plan != PlanNone {
+		t.Fatalf("none: %v", err)
+	}
+	values[EnvPlanConfiguration] = "development-fixtures"
+	if config, err := Load(environment(values)); err != nil || config.Plan != PlanDevelopmentFixtures {
+		t.Fatalf("fixtures: %v", err)
+	}
+	values[EnvPlanConfiguration] = "production"
+	if _, err := Load(environment(values)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown plan configuration: %v", err)
+	}
+	selfHosted := minimal(SelfHosted)
+	selfHosted[EnvPlanConfiguration] = "development-fixtures"
+	if _, err := Load(environment(selfHosted)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("fixtures in self-hosted mode: %v", err)
+	}
+}

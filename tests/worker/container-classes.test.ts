@@ -2,6 +2,7 @@
 // Pins that the production Container class is the unchanged Hello class and that the outbound
 // interception, the environment hook and the foundation handlers belong only to the proof class.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { register } from "node:module";
 import test from "node:test";
 
@@ -39,6 +40,13 @@ const worker = (await import(workerModule)) as unknown as {
 };
 const proof = (await import(proofModule)) as unknown as {
   FoundationContainer: Constructable;
+};
+const acceptanceModule = "../../worker/acceptance/entry.ts";
+const acceptance = (await import(acceptanceModule)) as unknown as {
+  FoundationContainer: Constructable;
+  FoundationJobCoordinator: new (ctx: object, env: object) => { alarm(): Promise<void> };
+  HarnessRunAlarm: new (ctx: object, env: object) => { alarm(): Promise<void> };
+  default: unknown;
 };
 const { CloudContainer } = worker;
 const { FoundationContainer } = proof;
@@ -185,4 +193,74 @@ test("without a mode the Go center gets none and refuses to start; the C# runtim
     (csharp.envVars as Record<string, string> | undefined)?.ARCFORGES_CENTER_MODE,
     undefined,
   );
+});
+
+const centerEnvironment = {
+  ARCFORGES_HELLO_RUNTIME: "go",
+  ARCFORGES_NEON_HELLO: "enabled",
+  NEON_DATABASE_URL: "synthetic-hello-credential",
+  NEON_DATABASE_URL_DIRECT: "never-forward",
+  ARCFORGES_CENTER_DATABASE_URL: "synthetic-runtime-credential",
+  ARCFORGES_CENTER_MODE: "official-hosted",
+  ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://center.example/api",
+  ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
+};
+
+test("a Go center with a store gets the runtime role's URL and never the Hello's own Neon credential", () => {
+  const production = new CloudContainer(containerContext, centerEnvironment);
+  assert.deepEqual(production.envVars, {
+    ARCFORGES_CENTER_MODE: "official-hosted",
+    ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://center.example/api",
+    ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
+    ARCFORGES_CENTER_DATABASE_URL: "synthetic-runtime-credential",
+    ARCFORGES_NEON_HELLO: "enabled",
+  });
+  assert.equal(production.enableInternet, true);
+  // With a store the Hello needs no Neon credential of its own.
+  const { NEON_DATABASE_URL: _hello, ...withoutHello } = centerEnvironment;
+  assert.doesNotThrow(() => new CloudContainer(containerContext, withoutHello));
+  // The C# host never receives the center's runtime credential.
+  const csharp = new CloudContainer(containerContext, {
+    ...centerEnvironment,
+    ARCFORGES_HELLO_RUNTIME: "csharp",
+  });
+  assert.equal((csharp.envVars as Record<string, string>).ARCFORGES_CENTER_DATABASE_URL, undefined);
+  assert.equal(
+    (csharp.envVars as Record<string, string>).NEON_DATABASE_URL,
+    "synthetic-hello-credential",
+  );
+});
+
+test("the acceptance entry runs the Go center under the proof Container class and keeps the retired classes inert", async () => {
+  const {
+    FoundationContainer: AcceptanceContainer,
+    FoundationJobCoordinator,
+    HarnessRunAlarm,
+  } = acceptance;
+  assert.equal(Object.getPrototypeOf(AcceptanceContainer), CloudContainer);
+  // The outbound registry is keyed by class name, which the retired C# proof class shares in this test process; the acceptance
+  // entry itself registers no host and imports none of the proof foundation.
+  const source = readFileSync(new URL(acceptanceModule, import.meta.url), "utf8");
+  assert(!source.includes("outboundByHost"), "the acceptance class registers no outbound host");
+  for (const forbidden of [
+    "../proof/",
+    "../foundation/entry",
+    "../foundation/durable",
+    "../harness/",
+    "../storage/",
+  ])
+    assert(!source.includes(forbidden), `the acceptance entry imports ${forbidden}`);
+  const container = new AcceptanceContainer(containerContext, centerEnvironment);
+  assert.deepEqual(container.entrypoint, ["/app/arcforges-center"]);
+  assert.equal(
+    (container.envVars as Record<string, string>).ARCFORGES_CENTER_DATABASE_URL,
+    "synthetic-runtime-credential",
+  );
+  assert.equal((container.envVars as Record<string, string>).NEON_DATABASE_URL, undefined);
+  assert.equal(acceptance.default, ((await import(workerModule)) as { default: unknown }).default);
+  for (const Retained of [FoundationJobCoordinator, HarnessRunAlarm]) {
+    const instance = new Retained({ storage: {} }, {});
+    assert.equal((instance as { fetch?: unknown }).fetch, undefined, "no fetch handler");
+    assert.equal(await instance.alarm(), undefined);
+  }
 });

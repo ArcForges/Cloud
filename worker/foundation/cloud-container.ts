@@ -1,17 +1,72 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// ARCFORGES_HELLO_RUNTIME=go selects the Go center (/app/arcforges-center) and passes it its explicit mode and public base URL;
-// the center refuses to start without them. Only the explicitly enabled production Hello passes a Neon credential and enables
-// TCP egress. Proof subclasses keep their closed outbound policy and their own environment hook.
+// ARCFORGES_HELLO_RUNTIME=go selects the Go center (/app/arcforges-center) and passes it its explicit mode, public base URL and
+// plan configuration, and the runtime role's pooled PostgreSQL URL of its store; the center refuses to start without a valid
+// mode and base URL. The Hello's own Neon credential reaches only the C# host, or a Go center without a store. Proof subclasses
+// keep their closed outbound policy and their own environment hook.
 import { Container, type OutboundHandler } from "@cloudflare/containers";
 import { aiInternalOutbound } from "../ai/internal/outbound.ts";
 import { containerSleepAfter } from "../tables/cloud-tables.generated.ts";
 
-interface CenterEnvironment {
+export interface CenterEnvironment {
   ARCFORGES_NEON_HELLO?: string;
   NEON_DATABASE_URL?: string;
   ARCFORGES_HELLO_RUNTIME?: string;
   ARCFORGES_CENTER_MODE?: string;
   ARCFORGES_CENTER_PUBLIC_BASE_URL?: string;
+  ARCFORGES_CENTER_PLAN_CONFIGURATION?: string;
+  ARCFORGES_CENTER_DATABASE_URL?: string;
+}
+
+/** What the Container runs: the entrypoint (undefined keeps the image's C# default), its environment and TCP egress. */
+export interface CenterContainerSettings {
+  entrypoint?: string[];
+  envVars: Record<string, string>;
+  enableInternet: boolean;
+}
+
+/** The Container settings of the configured Hello runtime; it throws on an unknown runtime or a missing Hello credential. */
+export function centerContainerSettings(center: CenterEnvironment): CenterContainerSettings {
+  const runtime = center.ARCFORGES_HELLO_RUNTIME;
+  const settings: CenterContainerSettings = { envVars: {}, enableInternet: false };
+  const go = runtime === "go";
+  if (go) {
+    settings.entrypoint = ["/app/arcforges-center"];
+    // Passed through unchanged: the center validates them and refuses to start on a missing or invalid value.
+    for (const name of [
+      "ARCFORGES_CENTER_MODE",
+      "ARCFORGES_CENTER_PUBLIC_BASE_URL",
+      "ARCFORGES_CENTER_PLAN_CONFIGURATION",
+    ] as const) {
+      const value = center[name];
+      if (value !== undefined) settings.envVars[name] = value;
+    }
+    if (center.ARCFORGES_CENTER_DATABASE_URL) {
+      // Native PostgreSQL TCP is not handled by the HTTP outbound proxy; allowedHosts would NOT restrict TCP port 5432.
+      settings.enableInternet = true;
+      settings.envVars.ARCFORGES_CENTER_DATABASE_URL = center.ARCFORGES_CENTER_DATABASE_URL;
+    }
+  } else if (runtime !== undefined && runtime !== "" && runtime !== "csharp")
+    throw new Error("Unknown Hello runtime.");
+  const enabled = center.ARCFORGES_NEON_HELLO;
+  if (enabled !== undefined && enabled !== "" && enabled !== "disabled") {
+    // A Go center with a store reads the greeting through its runtime role; only the C# host and a Go center without a store
+    // receive the Hello's own Neon credential.
+    const store = go && Boolean(center.ARCFORGES_CENTER_DATABASE_URL);
+    if (enabled !== "enabled" || (!store && !center.NEON_DATABASE_URL))
+      throw new Error("Neon Hello runtime configuration is missing or invalid.");
+    settings.enableInternet = true;
+    settings.envVars.ARCFORGES_NEON_HELLO = enabled;
+    if (!store) settings.envVars.NEON_DATABASE_URL = center.NEON_DATABASE_URL as string;
+  }
+  return settings;
+}
+
+/** Applies the settings to a Container instance. */
+export function applyCenterContainer(container: Container, center: CenterEnvironment): void {
+  const settings = centerContainerSettings(center);
+  if (settings.entrypoint) container.entrypoint = settings.entrypoint;
+  container.enableInternet = settings.enableInternet;
+  if (Object.keys(settings.envVars).length > 0) container.envVars = settings.envVars;
 }
 
 export class CloudContainer extends Container {
@@ -22,29 +77,7 @@ export class CloudContainer extends Container {
   constructor(ctx: ConstructorParameters<typeof Container>[0], env: object) {
     super(ctx, env);
     if (new.target !== CloudContainer) return;
-    const center = env as CenterEnvironment;
-    const runtime = center.ARCFORGES_HELLO_RUNTIME;
-    const variables: Record<string, string> = {};
-    if (runtime === "go") {
-      this.entrypoint = ["/app/arcforges-center"];
-      // Passed through unchanged: the center validates them and refuses to start on a missing or invalid value.
-      if (center.ARCFORGES_CENTER_MODE !== undefined)
-        variables.ARCFORGES_CENTER_MODE = center.ARCFORGES_CENTER_MODE;
-      if (center.ARCFORGES_CENTER_PUBLIC_BASE_URL !== undefined)
-        variables.ARCFORGES_CENTER_PUBLIC_BASE_URL = center.ARCFORGES_CENTER_PUBLIC_BASE_URL;
-    } else if (runtime !== undefined && runtime !== "" && runtime !== "csharp")
-      throw new Error("Unknown Hello runtime.");
-    const enabled = center.ARCFORGES_NEON_HELLO;
-    if (enabled !== undefined && enabled !== "" && enabled !== "disabled") {
-      if (enabled !== "enabled" || !center.NEON_DATABASE_URL)
-        throw new Error("Neon Hello runtime configuration is missing or invalid.");
-      // Native PostgreSQL TCP is not handled by the HTTP outbound proxy. This is a deliberate
-      // production-only egress change; allowedHosts would NOT restrict TCP port 5432.
-      this.enableInternet = true;
-      variables.ARCFORGES_NEON_HELLO = enabled;
-      variables.NEON_DATABASE_URL = center.NEON_DATABASE_URL;
-    }
-    if (Object.keys(variables).length > 0) this.envVars = variables;
+    applyCenterContainer(this, env as CenterEnvironment);
   }
 }
 

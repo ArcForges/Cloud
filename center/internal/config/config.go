@@ -43,6 +43,7 @@ const (
 	EnvMetricsLogInterval = "ARCFORGES_CENTER_METRICS_LOG_INTERVAL"
 	EnvDatabaseURL        = "ARCFORGES_CENTER_DATABASE_URL"
 	EnvDatabaseMaxConns   = "ARCFORGES_CENTER_DATABASE_MAX_CONNS"
+	EnvPlanConfiguration  = "ARCFORGES_CENTER_PLAN_CONFIGURATION"
 	EnvNeonHello          = "ARCFORGES_NEON_HELLO"
 	EnvNeonDatabaseURL    = "NEON_DATABASE_URL"
 )
@@ -61,9 +62,23 @@ const (
 	disabled                  = "off"
 )
 
+// PlanConfiguration names the plan configuration of an official-hosted center (AD-0021 section 13a).
+type PlanConfiguration string
+
+// The plan configurations.
+const (
+	// PlanNone is the configuration of production until AF-PROD-01: no plan configuration, so no gated feature is enabled.
+	PlanNone PlanConfiguration = ""
+	// PlanDevelopmentFixtures is the acceptance environment's: the development fixtures of the plan catalogue (AF-CTR-03), for
+	// attributable test identities only. It is never production configuration.
+	PlanDevelopmentFixtures PlanConfiguration = "development-fixtures"
+)
+
 // Config is the validated configuration of one center process.
 type Config struct {
 	Mode Mode
+	// Plan is the plan configuration (official-hosted only).
+	Plan PlanConfiguration
 	// PublicBaseURL is the canonical absolute URL under which clients reach this center (no trailing slash).
 	PublicBaseURL string
 	// HTTPAddress serves HTTP/1.1 and h2c; GRPCAddress serves h2c only and is empty when disabled; AdminAddress serves
@@ -107,6 +122,16 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		config.Mode = SelfHosted
 	default:
 		return Config{}, invalid("%s must be %s or %s; the center does not start without an explicit mode", EnvMode, OfficialHosted, SelfHosted)
+	}
+	switch PlanConfiguration(get(EnvPlanConfiguration)) {
+	case PlanNone:
+	case PlanDevelopmentFixtures:
+		if config.Mode != OfficialHosted {
+			return Config{}, invalid("%s applies to an official-hosted center only", EnvPlanConfiguration)
+		}
+		config.Plan = PlanDevelopmentFixtures
+	default:
+		return Config{}, invalid("%s must be empty or %s", EnvPlanConfiguration, PlanDevelopmentFixtures)
 	}
 	var err error
 	if config.PublicBaseURL, err = ParsePublicBaseURL(get(EnvPublicBaseURL), config.Mode); err != nil {

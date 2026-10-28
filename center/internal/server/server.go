@@ -86,7 +86,7 @@ type Options struct {
 // New composes a center from its configuration. Pools connect lazily, so a database that is down does not stop the start; it
 // makes the center unready and its calls fail with UNAVAILABLE.
 func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, error) {
-	center := &Center{Config: cfg, Logger: logger, Metrics: observe.NewMetrics(), Features: feature.NewGate(cfg.Mode)}
+	center := &Center{Config: cfg, Logger: logger, Metrics: observe.NewMetrics(), Features: feature.NewGate(cfg.Mode, cfg.Plan)}
 	center.schemaVersion.Store(-1)
 	build, err := migrate.Load(schema.Migrations())
 	if err != nil {
@@ -410,7 +410,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		servers = append(servers, server)
 		go func() { failures <- server.Serve(netutil.LimitListener(listener, cfg.MaxConnections)) }()
 	}
-	logger.Info("center started", "mode", string(cfg.Mode), "publicBaseUrl", cfg.PublicBaseURL, "listeners", bound,
+	logger.Info("center started", "mode", string(cfg.Mode), "planConfiguration", planName(cfg.Plan), "publicBaseUrl", cfg.PublicBaseURL, "listeners", bound,
 		"helloBackend", center.Health.HelloBackend, "store", center.Store != nil, "schemaBuildVersion", center.buildVersion,
 		"revision", center.Health.Revision, "version", center.Health.Artifact.Version)
 	if center.Store != nil {
@@ -434,6 +434,13 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	logger.Info("center stopped")
 	return result
+}
+
+func planName(plan config.PlanConfiguration) string {
+	if plan == config.PlanNone {
+		return "none"
+	}
+	return string(plan)
 }
 
 // logReadiness logs the first readiness of the store, so a deployment whose database is unreachable or not migrated says so

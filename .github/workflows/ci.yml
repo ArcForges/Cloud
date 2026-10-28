@@ -11,11 +11,12 @@ on:
     inputs:
       proof:
         description: >-
-          Isolated proof environment (main only). none: nothing. access: verify the deployment token's
-          D1, R2, Queues, Workers and zone permissions. provision: access plus idempotent creation of the
-          reserved proof D1 database, R2 bucket and queues. deploy: provision plus deployment of the
-          sealed candidate to the proof Worker on proof.arcforges.com. observe: a read-only report of the
-          proof Container application, its instances and rollouts; nothing is created or changed.
+          The acceptance environment (the proof Worker on proof.arcforges.com; main only). none: nothing.
+          access: verify the deployment token's R2, Queues, Workers and zone permissions. provision: access
+          plus idempotent creation of the center's acceptance R2 bucket (with its lifecycle rules) and
+          queues. deploy: provision plus the acceptance PostgreSQL database and the deployment of the sealed
+          candidate as the Go center. observe: a read-only report of the Container application, its
+          instances and rollouts; nothing is created or changed.
         type: choice
         options: [none, access, provision, deploy, observe]
         default: none
@@ -295,11 +296,20 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # AF-CTR-02: the sealed image's own center executable migrates the production PostgreSQL database with the migration role's
+      # direct connection and reconciles the runtime role's grants, before anything is pushed or promoted. It prints the database,
+      # roles, versions and checksums, never a credential; npm run deploy refuses without its passed record for this candidate.
+      - name: Migrate the PostgreSQL database (gated)
+        run: node tooling/postgres-deploy.ts migrate --target production
+        env:
+          NEON_DATABASE_URL_DIRECT: ${{ secrets.NEON_DATABASE_URL_DIRECT }}
+      # The runtime credential is rotated inside this step and uploaded with the Worker version; it is never printed or stored.
       - run: npm run deploy
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          NEON_DATABASE_URL_DIRECT: ${{ secrets.NEON_DATABASE_URL_DIRECT }}
           GH_TOKEN: ${{ github.token }}
       - name: Publish deployed prerelease
         env:
@@ -316,6 +326,7 @@ jobs:
           path: |
             artifacts/deployment.json
             artifacts/migration-gate-production.json
+            artifacts/postgres-gate-production.json
           if-no-files-found: warn
           retention-days: 90
 
@@ -385,20 +396,27 @@ jobs:
           artifact-ids: ${{ needs.candidate.outputs.artifact-id }}
           path: artifacts/candidate
           merge-multiple: true
-      # CLOUD.70: the same gated D1 migration step against the proof database, before the proof Worker or
-      # image is promoted; a failure stops this job before `deploy:proof`.
+      # CLOUD.70: the same gated D1 migration step against the retained proof D1 database (still bound, no longer used by the
+      # acceptance center; AF-CTR-09 inspects and keeps it), before the Worker or image is promoted.
       - name: Migrate the proof D1 database (gated)
         run: node eng/migrations/deploy.ts deploy --target proof
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      # The sealed candidate is promoted unchanged. The proof secrets are generated inside this step,
-      # uploaded with the Worker version and never printed or stored; the deployment token is the
-      # existing one and the production Worker, its route and its version are not touched.
+      # AF-CTR-02: the acceptance center's own PostgreSQL database (arcforges_acceptance, created idempotently through the
+      # migration role's direct connection) is migrated with its own runtime role before the acceptance Worker is promoted.
+      - name: Migrate the acceptance PostgreSQL database (gated)
+        run: node tooling/postgres-deploy.ts migrate --target acceptance
+        env:
+          NEON_DATABASE_URL_DIRECT: ${{ secrets.NEON_DATABASE_URL_DIRECT }}
+      # The sealed candidate is promoted unchanged as the Go center in official-hosted mode. The acceptance runtime credential is
+      # rotated inside this step, uploaded with the Worker version and never printed or stored; the production Worker, its route
+      # and its version are not touched.
       - run: npm run deploy:proof
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          NEON_DATABASE_URL_DIRECT: ${{ secrets.NEON_DATABASE_URL_DIRECT }}
           GH_TOKEN: ${{ github.token }}
       - name: Preserve proof deployment evidence
         if: always()
@@ -408,5 +426,6 @@ jobs:
           path: |
             artifacts/proof-deployment.json
             artifacts/migration-gate-proof.json
+            artifacts/postgres-gate-acceptance.json
           if-no-files-found: warn
           retention-days: 90

@@ -195,29 +195,14 @@ const withShell = (replace: (html: string) => string): ProfileSpec => ({
 });
 const policyOf = (shell = profileShell) => expectedProfilePolicy(shell);
 
-test("the Worker answers every one of its own route families before any asset", () => {
-  const assets = (wrangler.env.proof as { assets?: Record<string, unknown> }).assets;
-  assert(assets);
-  assert.deepEqual(assets.run_worker_first, workerFirst);
+// AF-CTR-02: the proof environment is the Go center's acceptance environment and serves no static assets; the profile bundle helpers
+// below stay with their tests (sources and evidence stay until AF-CTR-09), and the route order they relied on is kept as data.
+test("the retired proof's Worker-first route families keep their order", () => {
   assert.deepEqual(workerFirst, ["/api/*", "/session/v1/*", "/proof/v1/*"]);
-  assert.equal(assets.not_found_handling, "404-page");
-  assert.equal(assets.html_handling, "auto-trailing-slash");
-  assert.equal(assets.binding, undefined, "no new binding: the Worker code is unchanged");
   const matches = (pathname: string) =>
     workerFirst.some((pattern) => pathname.startsWith(pattern.slice(0, -1)));
-  for (const pathname of [
-    "/session/v1/bootstrap",
-    "/session/v1/logout",
-    "/proof/v1/readiness",
-    "/proof/v1/session/issue",
-    "/api/arcforges.hello.v1.HelloService/SayHello",
-    "/api/healthz",
-  ])
-    assert(matches(pathname), pathname);
-  // Every path the proof entry itself claims is inside a Worker-first pattern.
   for (const pathname of ["/proof/v1/x", "/session/v1/bootstrap", "/session/v1/logout"])
     assert(isProofPath(pathname) && matches(pathname));
-  // No profile asset path is Worker-first, so the profiles are not shadowed by the Worker.
   for (const pathname of [
     "/account/",
     "/chat/",
@@ -227,20 +212,18 @@ test("the Worker answers every one of its own route families before any asset", 
     assert(!matches(pathname), pathname);
 });
 
-test("only the proof environment gains assets; production and the other bindings are unchanged", () => {
+test("neither the acceptance environment nor production serves static assets", () => {
   const top = wrangler as unknown as Record<string, unknown>;
   assert.equal(top.assets, undefined);
+  assert.equal(wrangler.env.proof.assets, undefined);
   assert.equal(wrangler.env.proof.workers_dev, false);
   assert.equal(wrangler.env.proof.preview_urls, false);
-  // The proof origin serves the Site 404 page for unknown paths, as production Web does; no other environment changes.
-  assert.equal(wrangler.env.proof.assets?.not_found_handling, "404-page");
-  assert.equal((wrangler as unknown as Record<string, unknown>).assets, undefined);
   assert.deepEqual(wrangler.env.proof.routes, [
     { pattern: "proof.arcforges.com", custom_domain: true },
   ]);
 });
 
-test("the generated proof config points the assets at the staged directory and keeps the route order", () => {
+test("the generated acceptance config refuses the retired proof's assets", () => {
   const options = {
     account: "0".repeat(32),
     imageDigest: `registry.example/arcforges-cloud@sha256:${"a".repeat(64)}`,
@@ -248,36 +231,14 @@ test("the generated proof config points the assets at the staged directory and k
     main: "./candidate/worker.js",
   };
   const before = JSON.stringify(wrangler);
-  const config = buildProofConfig(wrangler, options);
-  assert.equal(config.env.proof.assets?.directory, `./${proofAssetsDirName}`);
-  assert.deepEqual(config.env.proof.assets?.run_worker_first, workerFirst);
+  assert.equal(buildProofConfig(wrangler, options).env.proof.assets, undefined);
   assert.equal(JSON.stringify(wrangler), before, "the input is not mutated");
-  assert.equal(
-    buildProofConfig(wrangler, { ...options, assetsDir: "../elsewhere" }).env.proof.assets
-      ?.directory,
-    "../elsewhere",
-  );
-  // A configuration that lets assets answer a Worker route family is refused.
-  for (const order of [undefined, true, [], ["/api/*"], ["/session/v1/*", "/api/*", "/proof/v1/*"]])
-    assert.throws(
-      () =>
-        buildProofConfig(
-          {
-            ...wrangler,
-            env: {
-              proof: {
-                ...wrangler.env.proof,
-                assets: { ...wrangler.env.proof.assets, run_worker_first: order },
-              },
-            },
-          },
-          options,
-        ),
-      /route families first/u,
-    );
-  const noAssets = structuredClone(wrangler);
-  delete noAssets.env.proof.assets;
-  assert.throws(() => buildProofConfig(noAssets, options), /no static assets/u);
+  const withAssets = structuredClone(wrangler);
+  withAssets.env.proof.assets = {
+    directory: `./${proofAssetsDirName}`,
+    run_worker_first: workerFirst,
+  };
+  assert.throws(() => buildProofConfig(withAssets, options), /binds no assets/u);
 });
 
 test("the pins name the WEB.40 release assets by their own digests, one release for both", () => {
