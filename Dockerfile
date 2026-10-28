@@ -32,7 +32,7 @@ RUN go mod download && go mod verify && identity=github.com/ArcForges/Cloud/cent
     -ldflags="-s -w -X $identity.appVersion=${APP_VERSION} -X $identity.sourceCommit=${SOURCE_COMMIT} -X $identity.sourceDirty=${SOURCE_DIRTY} -X $identity.buildKind=${BUILD_KIND} -X $identity.buildID=${BUILD_ID} -X $identity.pipelineRun=${PIPELINE_RUN} -X $identity.sourceEpoch=${SOURCE_EPOCH}" \
     -o /out/arcforges-center ./cmd/arcforges-center && test -x /out/arcforges-center
 
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0.12-noble-chiseled@sha256:18d4848091a40d13dbfdd6a8340c1657dc3e2f2d7fa2f042e9d162e68669dbc9
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0.14-noble-chiseled@sha256:4309626281bfe550c0f6bb4242c435cd5cdabed1d05a5bc5843f659336f53296
 ARG SOURCE_REVISION=local
 LABEL org.opencontainers.image.source="https://github.com/ArcForges/Cloud" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
