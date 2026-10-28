@@ -225,6 +225,10 @@ does not trust the record alone:
   `wrangler versions view <id> --json` (the annotation `workers/message`).
 - If the live version is labelled, it first confirms that slot (self-heal; idempotent), then rotates with
   `admin rotate-runtime-credential --live-slot <slot>`, which takes the other slot whatever the record says.
+- If this database never rotated the live version's slot (the acceptance database was recreated, or the target points at a
+  new database), the confirmation exits with status 4. The live version then holds no credential for this database, so there
+  is nothing to record: the job log says so and the other slot is rotated, without retries and without the post-promotion
+  recovery text.
 - If the live version carries no label (the first deployment of the store; the live revision then uses no runtime
   credential) or cannot be read, the record decides, and the job log says so.
 - If several versions are live on different slots, or on a labelled and an unlabelled credential (a gradual rollout), it
@@ -251,11 +255,22 @@ or in an error:
   whether to create the role.
 - `pg_stat_statements` with `track = 'top'` (its default, which only a superuser can change) records top-level statements only:
   the `COPY`, the function's definition and the call, never the nested role statement.
-  - The rotation reads `pg_stat_statements.track` first and refuses `all`.
-  - It records that value, with `log_statement` and `log_min_duration_statement`, in its output; `migrate` records them in the
-    gate record.
-  - The log settings are not refused: a logged statement text (`log_statement` `all` or `mod`, or a duration line with its
-    parameters) holds no secret.
+  - The rotation reads the settings of every tool that can capture statements run inside functions. It records them in its
+    output (`logging`), and `migrate` records them in the gate record. The decision table (`migrate.Logging.CaptureRefusal`,
+    unit-tested):
+    - `pg_stat_statements.track = 'all'` would record the nested role statement, so it is refused; `top` (the default),
+      `none` and an unloaded module proceed.
+    - `pg_stat_monitor.pgsm_track = 'all'` is refused for the same reason; `top` and an unloaded module proceed.
+    - `pgaudit.log` (Neon's HIPAA audit option uses pgaudit) is recorded, not refused. pgaudit audits nested utility
+      statements too: its ProcessUtility hook handles `context <= PROCESS_UTILITY_QUERY` and keeps the nested query string.
+      But its `log_audit_event` replaces every character after the first `password` token with `<REDACTED>` for
+      `T_CreateRoleStmt` and `T_AlterRoleStmt`, by statement type and whatever the nesting. This is in `pgaudit.c` at the tags
+      Neon builds: 16.1, lines 556–602 (hook 1546–1584); 17.1, lines 612–659 (hook 1611–1649); and the current 18 tag, 18.0,
+      lines 615–663 (hook 1638–1676). Neon's compute Dockerfile at `fa50421` builds 16.1 and 17.1, and its
+      `pgaudit-parallel_workers` patches do not touch redaction. The secret follows the `PASSWORD` keyword, so it always lies after the first
+      `password` token and inside the redacted part, whatever the role name.
+    - `log_statement` and `log_min_duration_statement` are not refused: a logged statement text (`all` or `mod`, or a duration
+      line with its parameters) holds no secret.
 - The function's exception handler re-raises with the SQLSTATE and the fixed message `login role update failed`, so the dynamic
   statement never reaches an error's context, the client or the server log.
 - **Tests.** They run on PostgreSQL 18.4 with `pg_stat_statements` preloaded, `log_statement = 'all'` and
@@ -282,6 +297,8 @@ What the secret is depends on one predicate, the one that derives the `-pooler` 
     password.
   - The client's TLS session ends at Neon's proxy, which routes by SNI. So the proxy sees everything the rotation sends, the
     `COPY` data included, and the rotation is not protected end to end to Postgres.
+  - Neon's HIPAA audit option uses pgaudit, which logs the nested role statement with everything after `PASSWORD` redacted
+    (above).
   - Neon documents neither `log_statement` nor `log_min_duration_statement`. The rotation records both; neither can expose the
     secret, which is in no statement text or parameter.
   - A `neon_superuser` member cannot set `pg_stat_statements.track` or `log_statement` (`42501`). The rotation therefore sets
@@ -458,6 +475,11 @@ Alert conditions for AF-OPS-01:
      revision is promoted. The previous revision ignores it.
   2. **Deploy** the revision that writes the new column and reads it with a fallback.
   3. **Roll back the application only**, if needed. A rollback is a reverted application commit deployed on `main`.
+     - A Cloudflare version rollback (`wrangler rollback` or the dashboard) works only to the immediately previous version.
+       That version's slot is the other one, which the last rotation left alone. Any older version carries a slot password
+       that has since been rotated, so its connections would fail. A version rollback also reverts the version's secrets, its
+       runtime credential included. The next deployment reads the rolled-back version's slot label and rotates the other
+       slot.
      - The migration files stay: removing an applied migration is refused, and nothing ever migrates down.
      - The previous revision runs on the expanded schema: its readiness accepts a database ahead of its build.
      - The rows it writes are read by the next revision's fallback.
