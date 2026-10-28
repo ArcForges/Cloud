@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package session
+
+import (
+	"crypto/sha256"
+	"strings"
+	"testing"
+)
+
+func TestCredentialsHaveExactFormats(t *testing.T) {
+	secret := NewSecret()
+	for _, prefix := range []string{AccessPrefix, RefreshPrefix, BootstrapPrefix} {
+		token := secret.Token(prefix)
+		if len(token) != len(prefix)+EncodedLength {
+			t.Fatalf("%s length %d", prefix, len(token))
+		}
+		parsed, ok := ParseToken(prefix, token)
+		if !ok || parsed != secret {
+			t.Fatalf("%s does not parse back", prefix)
+		}
+		for _, other := range []string{AccessPrefix, RefreshPrefix, BootstrapPrefix} {
+			if other != prefix {
+				if _, ok = ParseToken(other, token); ok {
+					t.Fatalf("a %s token parsed as %s", prefix, other)
+				}
+			}
+		}
+	}
+	text := secret.Text()
+	invalid := []string{"", text[:42], text + "A", strings.Replace(text, text[:1], "+", 1), text[:42] + "=", " " + text[1:]}
+	// The last character of a 43-character base64url string carries only two bits; another value is a non-canonical spelling.
+	last := text[42]
+	for _, c := range "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" {
+		if byte(c) != last {
+			if _, ok := ParseHandle(text[:42] + string(c)); ok {
+				parsed, _ := ParseHandle(text[:42] + string(c))
+				if parsed.Text() != text[:42]+string(c) {
+					t.Fatal("a non-canonical spelling parsed")
+				}
+			}
+		}
+	}
+	for _, value := range invalid {
+		if _, ok := ParseHandle(value); ok {
+			t.Errorf("%q parsed", value)
+		}
+	}
+	if secret.Digest() != sha256.Sum256(secret[:]) {
+		t.Fatal("the digest is SHA-256 of the raw bytes")
+	}
+	if NewSecret() == secret {
+		t.Fatal("two secrets are equal")
+	}
+}
+
+func TestTheCSRFTokenIsBoundToItsHandle(t *testing.T) {
+	handle, other := NewSecret(), NewSecret()
+	token := CSRF(handle)
+	if len(token) != EncodedLength || !CheckCSRF(handle, token) || CSRF(handle) != token {
+		t.Fatal("the CSRF token of a handle")
+	}
+	if CheckCSRF(other, token) || CheckCSRF(handle, CSRF(other)) || CheckCSRF(handle, "") || CheckCSRF(handle, token+"A") || CheckCSRF(handle, token[:42]) {
+		t.Fatal("a CSRF token of another handle or of another length matched")
+	}
+	if token == handle.Text() {
+		t.Fatal("the CSRF token is the handle")
+	}
+}

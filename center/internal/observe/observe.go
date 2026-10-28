@@ -36,6 +36,8 @@ type histogram struct {
 
 type refusalKey struct{ code, category string }
 
+type eventKey struct{ event, outcome string }
+
 // Metrics is the center's request metrics. Labels are closed values: a registered method path or a fixed word, a gRPC code
 // name or an HTTP status, a registry code and an ArcError category.
 type Metrics struct {
@@ -43,11 +45,13 @@ type Metrics struct {
 	requests  map[requestKey]uint64
 	latencies map[string]*histogram
 	refusals  map[refusalKey]uint64
+	identity  map[eventKey]uint64
 }
 
 // NewMetrics is an empty metrics registry.
 func NewMetrics() *Metrics {
-	return &Metrics{requests: map[requestKey]uint64{}, latencies: map[string]*histogram{}, refusals: map[refusalKey]uint64{}}
+	return &Metrics{requests: map[requestKey]uint64{}, latencies: map[string]*histogram{}, refusals: map[refusalKey]uint64{},
+		identity: map[eventKey]uint64{}}
 }
 
 // ObserveRequest counts one finished request.
@@ -75,6 +79,15 @@ func (m *Metrics) ObserveRefusal(code, category string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refusals[refusalKey{code, category}]++
+}
+
+// ObserveIdentity counts one outcome of the identity surface (AF-CTR-03): sign-in stages by method and outcome, refreshes
+// (rotated, refused, reused), rate-limit refusals by bucket kind, bootstrap outcomes and e-mail deliveries. Both labels are closed
+// values chosen by the code, never request content.
+func (m *Metrics) ObserveIdentity(event, outcome string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.identity[eventKey{event, outcome}]++
 }
 
 // WritePrometheus writes the metrics in the Prometheus text exposition format (version 0.0.4).
@@ -122,6 +135,18 @@ func (m *Metrics) WritePrometheus(writer io.Writer) error {
 	for _, key := range refusals {
 		fmt.Fprintf(&text, "arcforges_center_refusals_total{code=%q,category=%q} %d\n", key.code, key.category, m.refusals[key])
 	}
+	text.WriteString("# HELP arcforges_center_identity_events_total Identity surface outcomes, by event and outcome.\n")
+	text.WriteString("# TYPE arcforges_center_identity_events_total counter\n")
+	events := make([]eventKey, 0, len(m.identity))
+	for key := range m.identity {
+		events = append(events, key)
+	}
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].event+"\x00"+events[i].outcome < events[j].event+"\x00"+events[j].outcome
+	})
+	for _, key := range events {
+		fmt.Fprintf(&text, "arcforges_center_identity_events_total{event=%q,outcome=%q} %d\n", key.event, key.outcome, m.identity[key])
+	}
 	_, err := io.WriteString(writer, text.String())
 	return err
 }
@@ -130,12 +155,15 @@ func (m *Metrics) WritePrometheus(writer io.Writer) error {
 func (m *Metrics) Summary() map[string]uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	summary := make(map[string]uint64, len(m.requests)+len(m.refusals))
+	summary := make(map[string]uint64, len(m.requests)+len(m.refusals)+len(m.identity))
 	for key, count := range m.requests {
 		summary[key.method+" "+key.code] = count
 	}
 	for key, count := range m.refusals {
 		summary["refused "+key.code+" "+key.category] += count
+	}
+	for key, count := range m.identity {
+		summary["identity "+key.event+" "+key.outcome] += count
 	}
 	return summary
 }
