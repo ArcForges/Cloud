@@ -2,30 +2,37 @@
 
 The center is the Go service of [AD-0021](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/decisions/AD-0021-central-access-go-center.md):
 one executable, `arcforges-center`, built from the `center/` Go module (`github.com/ArcForges/Cloud/center`). It replaces the
-bounded Go Hello proof ([go-hello](go-hello.md), now history) and is the runtime the production Worker selects. AF-CTR-02 delivers
+bounded Go Hello proof ([go-hello](go-hello.md), now history) and is the runtime the production Worker selects. AF-CTR-02 delivered
 it in two parts:
 
 - **Part A (this document):** the executable, the ingress compatibility with the Worker and the C# host, the explicit center
   mode, configuration, health, readiness, logs and metrics, the Worker's production table generated from the center's
   registrations, and the Go engineering controls ([engineering controls](engineering-controls.md)).
-- **Part B:** the PostgreSQL store (migrations, platform tables, roles), the `migrate` command and its deployment gate. Until
-  then `arcforges-center migrate` refuses and changes nothing.
+- **Part B ([PostgreSQL store](postgres-store.md)):** the store, its migrations and platform tables, the roles, the
+  `migrate` and `admin` commands, the deployment's PostgreSQL step and runtime credential rotation, the acceptance environment
+  and the recovery procedure.
 
-The C# Native AOT host stays in the same image as its default entrypoint: the isolated proof environment runs it, and setting
-`ARCFORGES_HELLO_RUNTIME=csharp` through a reviewed main push is the Hello rollback (AD-0021 §15, until AF-CTR-09).
+The C# Native AOT host stays in the same image as its default entrypoint: setting `ARCFORGES_HELLO_RUNTIME=csharp` through a
+reviewed main push is the Hello rollback (AD-0021 §15, until AF-CTR-09). The `proof` environment (proof.arcforges.com) runs the
+Go center as the acceptance environment since part B.
 
 ## Layout
 
 | Path                           | Contents                                                                                                                    |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `center/cmd/arcforges-center`  | The executable: `serve` (default), `migrate` (refuses until part B), `version` / `--build-info`, `help`                     |
+| `center/cmd/arcforges-center`  | The executable: `serve` (default), `migrate [apply                                                                          | status | plan]`, `admin ensure-database`, `admin rotate-runtime-credential`, `version`/`--build-info`, `help` |
 | `center/cmd/center-gen`        | Development generator (never in the image): `worker-tables` writes `worker/tables/center-tables.generated.ts`               |
 | `center/internal/config`       | Environment configuration, refused when missing or invalid; the public base URL and database URL parsers                    |
 | `center/internal/ingress`      | The admission pipeline: policy registry, framing, envelope reader, credential shapes, owner gate, refusals and their status |
 | `center/internal/correlation`  | Correlation identity and the strict W3C `traceparent` parser                                                                |
 | `center/internal/routes`       | The center's registrations: methods with policies, plain routes and the Worker's transport budgets                          |
 | `center/internal/workertables` | Rendering of the Worker's production table from the registrations                                                           |
-| `center/internal/hello`        | The anonymous Hello (`arcforges.hello.v1`), stateless or read from Neon                                                     |
+| `center/internal/hello`        | The anonymous Hello (`arcforges.hello.v1`), stateless or read from PostgreSQL                                               |
+| `center/internal/schema`       | The embedded migrations and the runtime role's grants ([PostgreSQL store](postgres-store.md))                               |
+| `center/internal/store`        | The runtime store: transactions, retries, sanitized errors; `store/migrate` is the migration runner                         |
+| `center/internal/platform`     | Command receipts, inbox, outbox and publisher, job leases, the audit chain and signing-key metadata                         |
+| `center/internal/provision`    | Database creation and the runtime credential rotation                                                                       |
+| `center/internal/pgtest`       | Integration test support: an isolated database on a real PostgreSQL                                                         |
 | `center/internal/feature`      | The feature gate of AD-0021 §13a (a fail-closed stub until AF-CTR-03)                                                       |
 | `center/internal/buildinfo`    | The compiled build identity and the health document                                                                         |
 | `center/internal/observe`      | JSON logging and request metrics                                                                                            |
@@ -56,22 +63,26 @@ that is published under a path prefix sits behind a proxy that removes it, exact
 Every value is an environment variable. A missing or invalid value refuses to start with one JSON log line that names the
 variable and never repeats its value.
 
-| Variable                                | Default  | Rule                                                                                                                                                                                                       |
-| --------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ARCFORGES_CENTER_MODE`                 | none     | Required: `official-hosted` or `self-hosted` exactly                                                                                                                                                       |
-| `ARCFORGES_CENTER_PUBLIC_BASE_URL`      | none     | Required: canonical absolute `https` URL (lowercase host, optional port and path, no trailing slash, query, fragment or user); `http` only for a loopback host in self-hosted mode                         |
-| `ARCFORGES_CENTER_HTTP_ADDRESS`         | `:8080`  | HTTP/1.1 and h2c listener; `host:port` with an IP literal, `localhost` or no host                                                                                                                          |
-| `ARCFORGES_CENTER_GRPC_ADDRESS`         | `:8081`  | h2c-only listener; `off` disables it                                                                                                                                                                       |
-| `ARCFORGES_CENTER_ADMIN_ADDRESS`        | disabled | Readiness (`/readyz`) and metrics (`/metrics`); must be a loopback address in official-hosted mode                                                                                                         |
-| `ARCFORGES_CENTER_MAX_CONNECTIONS`      | `64`     | Concurrent connections per listener, 1 to 4096                                                                                                                                                             |
-| `ARCFORGES_CENTER_LOG_LEVEL`            | `info`   | `debug`, `info`, `warn` or `error`                                                                                                                                                                         |
-| `ARCFORGES_CENTER_METRICS_LOG_INTERVAL` | `1m`     | The periodic metrics log line; `0` disables it, otherwise 10 s to 1 h                                                                                                                                      |
-| `ARCFORGES_NEON_HELLO`                  | disabled | `enabled` reads the Hello greeting from Neon (unchanged from the Go Hello)                                                                                                                                 |
-| `NEON_DATABASE_URL`                     | none     | With the Neon Hello: a complete pooled Neon URL with `sslmode` and `channel_binding=require`; pool of two, exec query mode; `application_name` `arcforges-center` (the Go Hello sent `arcforges-go-hello`) |
-| `ARCFORGES_CENTER_DATABASE_URL`         | none     | The pooled runtime database of the store (part B); verified TLS with channel binding, except a loopback host of a self-hosted center                                                                       |
-| `ARCFORGES_CENTER_DATABASE_MAX_CONNS`   | `4`      | Pool size of the runtime database, 1 to 32                                                                                                                                                                 |
+| Variable                                | Default  | Rule                                                                                                                                                                                                                    |
+| --------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ARCFORGES_CENTER_MODE`                 | none     | Required: `official-hosted` or `self-hosted` exactly                                                                                                                                                                    |
+| `ARCFORGES_CENTER_PUBLIC_BASE_URL`      | none     | Required: canonical absolute `https` URL (lowercase host, optional port and path, no trailing slash, query, fragment or user); `http` only for a loopback host in self-hosted mode                                      |
+| `ARCFORGES_CENTER_HTTP_ADDRESS`         | `:8080`  | HTTP/1.1 and h2c listener; `host:port` with an IP literal, `localhost` or no host                                                                                                                                       |
+| `ARCFORGES_CENTER_GRPC_ADDRESS`         | `:8081`  | h2c-only listener; `off` disables it                                                                                                                                                                                    |
+| `ARCFORGES_CENTER_ADMIN_ADDRESS`        | disabled | Readiness (`/readyz`) and metrics (`/metrics`); must be a loopback address in official-hosted mode                                                                                                                      |
+| `ARCFORGES_CENTER_MAX_CONNECTIONS`      | `64`     | Concurrent connections per listener, 1 to 4096                                                                                                                                                                          |
+| `ARCFORGES_CENTER_LOG_LEVEL`            | `info`   | `debug`, `info`, `warn` or `error`                                                                                                                                                                                      |
+| `ARCFORGES_CENTER_METRICS_LOG_INTERVAL` | `1m`     | The periodic metrics log line; `0` disables it, otherwise 10 s to 1 h                                                                                                                                                   |
+| `ARCFORGES_CENTER_PLAN_CONFIGURATION`   | none     | Official-hosted only: empty (production until AF-PROD-01: no gated feature) or `development-fixtures` (the acceptance environment); never `development-fixtures` in production (`tests/worker/proof-deploy.test.ts`)    |
+| `ARCFORGES_NEON_HELLO`                  | disabled | `enabled` reads the Hello greeting from PostgreSQL: through the runtime role when `ARCFORGES_CENTER_DATABASE_URL` is set, otherwise through `NEON_DATABASE_URL`                                                         |
+| `NEON_DATABASE_URL`                     | none     | With the Neon Hello and no store: a complete pooled Neon URL with `sslmode` and `channel_binding=require`; pool of two, exec query mode; `application_name` `arcforges-center` (the Go Hello sent `arcforges-go-hello`) |
+| `ARCFORGES_CENTER_DATABASE_URL`         | none     | The runtime role's pooled URL of the store (a login role of the runtime group; [PostgreSQL store](postgres-store.md)); verified TLS with channel binding, except a loopback host of a self-hosted center                |
+| `ARCFORGES_CENTER_DATABASE_MAX_CONNS`   | `4`      | Pool size of the runtime database, 1 to 32                                                                                                                                                                              |
 
-The direct (unpooled) migration database URL arrives with `migrate` in part B. No URL of the official deployment is compiled
+The `migrate` and `admin` commands read their own variables (`ARCFORGES_CENTER_MIGRATION_DATABASE_URL`, the migration role's
+direct URL; `ARCFORGES_CENTER_DATABASE_NAME`; `ARCFORGES_CENTER_RUNTIME_ROLE`; `ARCFORGES_CENTER_RUNTIME_SECRET_FILE`;
+`ARCFORGES_CENTER_RUNTIME_POOLED_HOST`; `ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT`); `serve` never reads them
+([PostgreSQL store](postgres-store.md)). No URL of the official deployment is compiled
 into a code path: `TestNoOfficialEndpointIsCompiledIn` fails if one appears, and health and every URL the center issues derive
 from `ARCFORGES_CENTER_PUBLIC_BASE_URL`. The production deployment states its values in `wrangler.json`
 (`ARCFORGES_CENTER_MODE=official-hosted`, `ARCFORGES_CENTER_PUBLIC_BASE_URL=https://arcforges.com/api`), which
@@ -199,7 +210,7 @@ hand-written Worker sources.
   "revision": "<commit>[-dirty]",
   "nativeAot": false,
   "runtime": "go",
-  "helloBackend": "stateless | neon-postgresql",
+  "helloBackend": "stateless | postgresql-runtime | neon-postgresql",
   "artifact": { "id": "Cloud", "version": "0.1.0-ci.<run>.<attempt>" },
   "build": {
     "sourceCommit": "…",
@@ -224,10 +235,11 @@ the same inputs as the C# executable's (`tooling/build-identity.ts`), and the re
 with the candidate. `arcforges-center version` prints the same document with `helloBackend` `not-probed` and no mode.
 
 Readiness is separate from health. `GET /readyz` on the admin listener answers `200` with `{"status":"ready","components":{…}}`
-when every configured database (the Neon Hello pool, the runtime pool) answers a ping within two seconds, and `503` with
-`unavailable` otherwise. `GET /metrics` on the same listener exposes the Prometheus text format:
-`arcforges_center_requests_total{method,code}`, `arcforges_center_request_duration_seconds{method}` (histogram) and
-`arcforges_center_refusals_total{code,category}`. Labels are closed values: a registered method path or `plain`,
+when every configured database answers a ping within two seconds (`helloDatabase`, `database`) and the store's schema carries
+every migration of this build exactly (`databaseSchema`), and `503` with `unavailable` otherwise. `GET /metrics` on the same
+listener exposes the Prometheus text format: `arcforges_center_requests_total{method,code}`,
+`arcforges_center_request_duration_seconds{method}` (histogram), `arcforges_center_refusals_total{code,category}` and the
+database pool and schema metrics of the [PostgreSQL store](postgres-store.md#observability-and-alert-conditions). Labels are closed values: a registered method path or `plain`,
 `unregistered`, `not_found`; a gRPC code name or `http_<status>`; a registry code and an `ArcError` category. The admin
 listener is not configured in the hosted Container, so production adds no route; there the metrics reach the operator as the
 periodic `metrics` log line, which the Container's logs carry.
@@ -239,22 +251,24 @@ a request or response body, a command line, output or file content. A configurat
 ## Hosted deployment
 
 `worker/foundation/cloud-container.ts` selects `/app/arcforges-center` when `ARCFORGES_HELLO_RUNTIME=go` and passes the center
-mode and base URL (and, with the Neon Hello, the Neon secret, unchanged; `tooling/neon-runtime.ts`). The Dockerfile builds the
+mode, base URL and plan configuration, and the runtime role's URL (the Worker secret `ARCFORGES_CENTER_DATABASE_URL` that the
+deployment rotates; [PostgreSQL store](postgres-store.md#deployment)). The Hello's own Neon secret reaches only the C# host or a
+Go center without a store (`tooling/neon-runtime.ts`). The Dockerfile builds the
 center with the pinned Go archive (`center/toolchain.json`, SHA-256 checked), `go mod verify`, `CGO_ENABLED=0`, `-trimpath`,
 `-buildvcs=false` and the identity `-ldflags`, beside the C# executable, which stays the image's default entrypoint. The
 candidate inspects both ELF members and their legal files without running them (`tooling/release-provenance.ts`).
 
 Structural cost bounds of the production deployment, enforced by configuration:
 
-| Bound                     | Value                                       | Where                                         |
-| ------------------------- | ------------------------------------------- | --------------------------------------------- |
-| Container instances       | `max_instances: 1`, `instance_type: lite`   | `wrangler.json` (checked by the candidate)    |
-| Idle stop                 | `sleepAfter` 60 s                           | generated `containerSleepAfter`               |
-| Worker CPU                | `cpu_ms: 50`                                | `wrangler.json`                               |
-| Public rate limit         | 60 requests per 60 s                        | `HELLO_RATE_LIMITER` in `wrangler.json`       |
-| Center connections        | 64 per listener                             | `ARCFORGES_CENTER_MAX_CONNECTIONS` default    |
-| Hello database            | pool of 2, 5 s statement timeout, 15 s call | `internal/config`, `internal/hello`           |
-| Runtime database (part B) | pool of 4 (1 to 32)                         | `ARCFORGES_CENTER_DATABASE_MAX_CONNS` default |
+| Bound               | Value                                                           | Where                                                                                                   |
+| ------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Container instances | `max_instances: 1`, `instance_type: lite`                       | `wrangler.json` (checked by the candidate)                                                              |
+| Idle stop           | `sleepAfter` 60 s                                               | generated `containerSleepAfter`                                                                         |
+| Worker CPU          | `cpu_ms: 50`                                                    | `wrangler.json`                                                                                         |
+| Public rate limit   | 60 requests per 60 s                                            | `HELLO_RATE_LIMITER` in `wrangler.json`                                                                 |
+| Center connections  | 64 per listener                                                 | `ARCFORGES_CENTER_MAX_CONNECTIONS` default                                                              |
+| Hello database      | pool of 2, 5 s statement timeout, 15 s call                     | `internal/config`, `internal/hello`                                                                     |
+| Runtime database    | pool of 4 (1 to 32); login roles limited to 16 connections each | `ARCFORGES_CENTER_DATABASE_MAX_CONNS` default; [PostgreSQL store](postgres-store.md#connection-budgets) |
 
 While a node is connected (AF-CTR-05 onward) the one instance stays running; that always-on worst case is one `lite` instance
 per deployment, which AF-PLAT-01's budgets take as the bound.
