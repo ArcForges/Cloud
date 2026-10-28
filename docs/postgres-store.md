@@ -33,6 +33,52 @@ The first migration (`center/internal/schema/migrations/0001_platform_store.sql`
 Retention sweeps (receipts after 90 days, the inbox, dispatched outbox rows, audit partitions) are AF-PLAT-01's. They run with the
 migration role, because the runtime role can never delete.
 
+### Identity and device (AF-CTR-03)
+
+The second migration (`center/internal/schema/migrations/0002_identity_device.sql`) creates the `identity` and `device` schemas
+and the rate-limit table. The tables derive from the D1 manifests
+`src/ArcForges.Cloud.Storage.D1/Physical/manifest/{identity,device}.json` by the rules above. AF-CTR-03 lands it whole in its
+first part (A1a), including the tables its second part (A1b) writes first (`identity.step_up_challenge`); a later change is a new
+migration.
+
+| Table                        | Purpose                                                                                                                                                                      | Runtime role             |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `identity.user`              | Accounts: display name, state (active, restricted, suspended, pending deletion, deleted), locale, timezone, the random 32-byte WebAuthn user handle, revision                | `SELECT, INSERT, UPDATE` |
+| `identity.auth_identity`     | Credentials: passkeys (COSE key, user handle, counter, BE/BS flags, transports, AAGUID, attestation `none`) and e-mail identities, unique by provider and subject            | `SELECT, INSERT, UPDATE` |
+| `identity.session`           | Native bearer sessions (access and refresh token digests, family, generation) and browser cookie sessions (cookie handle digest, origin, idle expiry); scope; device binding | `SELECT, INSERT, UPDATE` |
+| `identity.spent_refresh`     | The digest of every rotated refresh token, so a second presentation revokes the family                                                                                       | `SELECT, INSERT`         |
+| `identity.auth_flow`         | One row per passkey or e-mail ceremony: channel, kind, purpose, challenge or code verifier, installation claim, attempts, expiry, outcome; final once consumed (trigger)     | `SELECT, INSERT, UPDATE` |
+| `identity.step_up_challenge` | Step-up evidence: one operation ID and target digest of one session, proved and consumed at most once                                                                        | `SELECT, INSERT, UPDATE` |
+| `identity.bootstrap`         | The single owner bootstrap of the database (singleton key): the configured token's digest, the account it created, when                                                      | `SELECT, INSERT`         |
+| `device.device`              | One record per node, phone and browser installation: name, platform, trust (untrusted, trusted, revoked), remote control, seen, revocation                                   | `SELECT, INSERT, UPDATE` |
+| `device.installation`        | One per device and product (`arcscope`, `companion`, `arcforges-node`, `arcforges-mobile`, `arcforges-web`): version, platform, a browser's claimed ID, an optional key      | `SELECT, INSERT, UPDATE` |
+| `platform.rate_limit`        | Fixed-window counters keyed by the SHA-256 of a bucket kind and key, reset in place                                                                                          | `SELECT, INSERT, UPDATE` |
+
+Differences from the D1 model, for the data/cloud-store.md §6 companion list:
+
+- no `realm_id`: one center database is one realm (the acceptance environment has its own database);
+- `identity.user` gains `locale` and `timezone` (`NOT NULL`, defaults `en-US` and `UTC`) and `passkey_user_handle`;
+  `device_installation.contract_set_version` is dropped;
+- `identity.session` gains `scope` (account, mobile.limited, node, push, automation; there is no agent scope, AF-CTR-07 keeps
+  agent grants in its own table), `auth_method`, `authenticated_at`, `refresh_expires_at` and `revoke_reason`, and keeps no
+  `csrf_hash`: a browser session's CSRF token is derived from its cookie handle. Every session names a device and an
+  installation (`NOT NULL`, bound to the account by composite foreign keys);
+- `identity.auth_flow` replaces `identity_browser_auth_flow` and `identity_security_flow` for the passkey and e-mail ceremonies; an
+  e-mail flow stores the SHA-256 of the normalised address, never the address;
+- `device.installation.public_key` and `key_version` are nullable (node keys arrive with AF-CTR-04, phone keys with AF-CLD-02),
+  and `client_installation_id` carries a browser's claimed installation ID, unique per account over live rows;
+- the device trust level gains 3 = revoked, set only by the revocation cascade together with `revoked_at`.
+
+Indexes: the three token digests are partial unique indexes; sessions are indexed by account (listing and mass revocation), device
+and installation (the revocation cascade), family and expiry; flows, step-up challenges, spent refresh tokens
+(`family_expires_at`) and rate-limit windows (`window_start`) are indexed by the instant their retention sweep reads.
+
+Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables identity in production only after them): consumed or
+expired flows and step-up challenges after 7 days, spent refresh tokens after their family's absolute expiry, revoked or expired
+sessions after 90 days, rate-limit windows after one window has passed, revoked devices and installations with the account. Until
+the sweeps exist these tables only grow. A rate-limit bucket key is the SHA-256 of a client IP prefix, an account or an e-mail
+address; such a digest can be reversed by trying every value, so the rows are personal data under the same retention.
+
 ## Guarantees
 
 `center/internal/platform` re-implements the guarantees of the D1 storage plans with native transactions, constraints and row
