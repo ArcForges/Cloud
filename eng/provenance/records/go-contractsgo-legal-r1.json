@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "go-contractsgo-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/ArcForges/Contracts",
+  "sourceCommit": "7205743648c6d5e81f539fe99b4d937dd4a0cbbc",
+  "sourcePaths": [
+    "go/LICENSE",
+    "go/NOTICE"
+  ],
+  "licence": {
+    "spdx": "Apache-2.0",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "go/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "finding": "Complete licence of the exact published Go module (tag go/v1.0.0-ci.410.1); the module zip is pinned by go.sum."
+      },
+      {
+        "path": "go/NOTICE",
+        "sha256": "8aa487acf6a48132c861cb00e83ffe6bda718771cbbc6809b7e734a2dd6d366d",
+        "finding": "Complete NOTICE of the exact published Go module; Apache-2.0 section 4(d) requires its reproduction."
+      }
+    ],
+    "scope": "github.com/ArcForges/Contracts/go v1.0.0-ci.410.1: Apache-2.0, copyright 2026 ArcForges contributors. The complete licence and the module's NOTICE (generator attributions of protoc-gen-go and protoc-gen-connect-go) are retained verbatim.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "github.com/ArcForges/Contracts/go v1.0.0-ci.410.1: Apache-2.0, copyright 2026 ArcForges contributors. The complete licence and the module's NOTICE (generator attributions of protoc-gen-go and protoc-gen-connect-go) are retained verbatim."
+  ],
+  "targets": [
+    {
+      "path": "third-party/ContractsGo.LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "normalization": "lf"
+    },
+    {
+      "path": "third-party/ContractsGo.NOTICE.txt",
+      "sha256": "8aa487acf6a48132c861cb00e83ffe6bda718771cbbc6809b7e734a2dd6d366d",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "github.com/ArcForges/Contracts/go v1.0.0-ci.410.1: Apache-2.0, copyright 2026 ArcForges contributors. The complete licence and the module's NOTICE (generator attributions of protoc-gen-go and protoc-gen-connect-go) are retained verbatim.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/ContractsGo.LICENSE.txt",
+      "third-party/ContractsGo.NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "github.com/ArcForges/Contracts/go v1.0.0-ci.410.1: Apache-2.0, copyright 2026 ArcForges contributors. The complete licence and the module's NOTICE (generator attributions of protoc-gen-go and protoc-gen-connect-go) are retained verbatim."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-02 delegated author); PR review is recorded separately",
+    "reviewedOn": "2026-10-28",
+    "decision": "approved",
+    "rationale": "github.com/ArcForges/Contracts/go v1.0.0-ci.410.1: Apache-2.0, copyright 2026 ArcForges contributors. The complete licence and the module's NOTICE (generator attributions of protoc-gen-go and protoc-gen-connect-go) are retained verbatim.",
+    "baselineCommit": "ba323d0ee2bb158f946a1d33de2ec752882bd3d7",
+    "reconciliation": false
+  },
+  "supersedes": null
+}
