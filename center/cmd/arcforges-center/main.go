@@ -37,8 +37,9 @@ commands:
   migrate [apply|status|plan]      apply the PostgreSQL migrations (apply, the default), or report them without changing
                                    anything; configured by ARCFORGES_CENTER_MIGRATION_DATABASE_URL (docs/postgres-store.md)
   admin ensure-database            create the center's database if it does not exist
-  admin rotate-runtime-credential  set a new runtime credential on the slot that is not the last promoted one and write the
-                                   runtime URL to ARCFORGES_CENTER_RUNTIME_SECRET_FILE
+  admin rotate-runtime-credential [--live-slot a|b]
+                                   set a new runtime credential on the slot that is not the live one (named, or else the last
+                                   promoted one) and write the runtime URL to ARCFORGES_CENTER_RUNTIME_SECRET_FILE
   admin confirm-runtime-credential --slot a|b
                                    record that the deployment carrying the slot's credential was promoted
   version                          print the build identity as JSON (also --build-info)
@@ -71,14 +72,12 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	slot := ""
 	switch {
 	case command == "admin" && sub == "confirm-runtime-credential":
-		rest := arguments[2:]
-		switch {
-		case len(rest) == 2 && rest[0] == "--slot":
-			slot = rest[1]
-		case len(rest) == 1 && strings.HasPrefix(rest[0], "--slot="):
-			slot = strings.TrimPrefix(rest[0], "--slot=")
+		if slot = slotFlag(arguments[2:], "--slot"); slot != "a" && slot != "b" {
+			_, _ = fmt.Fprint(stderr, usage)
+			return exitUsage
 		}
-		if slot != "a" && slot != "b" {
+	case command == "admin" && sub == "rotate-runtime-credential" && len(arguments) > 2:
+		if slot = slotFlag(arguments[2:], "--live-slot"); slot != "a" && slot != "b" {
 			_, _ = fmt.Fprint(stderr, usage)
 			return exitUsage
 		}
@@ -121,6 +120,17 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 		_, _ = fmt.Fprint(stderr, usage)
 		return exitUsage
 	}
+}
+
+// slotFlag reads `<flag> a|b` or `<flag>=a|b` as the only arguments; anything else is "".
+func slotFlag(rest []string, flag string) string {
+	switch {
+	case len(rest) == 2 && rest[0] == flag:
+		return rest[1]
+	case len(rest) == 1 && strings.HasPrefix(rest[0], flag+"="):
+		return strings.TrimPrefix(rest[0], flag+"=")
+	}
+	return ""
 }
 
 func serve(lookup func(string) (string, bool), stderr io.Writer) int {
@@ -192,6 +202,10 @@ func migration(sub string, lookup func(string) (string, bool), stdout, stderr io
 		result, err = migrate.Inspect(ctx, conn, build)
 	}
 	_ = json.NewEncoder(stdout).Encode(result)
+	if sub != "apply" && result.ServerVersionNum != 0 && !result.ServerMajorMatchesTested {
+		logger.Warn("the server's PostgreSQL major differs from the tested major", "serverVersionNum", result.ServerVersionNum,
+			"testedMajor", migrate.TestedMajor)
+	}
 	switch {
 	case errors.Is(err, migrate.ErrRefused), err == nil && result.State == migrate.StateRefused:
 		logger.Error("the database's migrations differ from this build; nothing was applied", "problems", result.Problems)
@@ -200,7 +214,8 @@ func migration(sub string, lookup func(string) (string, bool), stdout, stderr io
 		logger.Error("the migration failed", "error", err.Error())
 		return exitFailure
 	}
-	logger.Info("migration "+sub+" finished", "database", result.Database, "state", result.State, "version", result.Version, "applied", len(result.Ran))
+	logger.Info("migration "+sub+" finished", "database", result.Database, "state", result.State, "version", result.Version, "applied", len(result.Ran),
+		"serverVersionNum", result.ServerVersionNum)
 	return exitOK
 }
 
@@ -265,7 +280,8 @@ func admin(sub, slot string, lookup func(string) (string, bool), stdout, stderr 
 		return exitFailure
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
-	rotation, err := provision.Rotate(ctx, conn, provision.Options{Group: cfg.RuntimeRole, DirectURL: cfg.URL, PooledHost: cfg.PooledHost, Runner: revision()})
+	rotation, err := provision.Rotate(ctx, conn, provision.Options{Group: cfg.RuntimeRole, DirectURL: cfg.URL, PooledHost: cfg.PooledHost, Runner: revision(),
+		LiveSlot: slot})
 	if err != nil {
 		logger.Error("the runtime credential could not be rotated", "error", err.Error())
 		return exitFailure
@@ -275,7 +291,8 @@ func admin(sub, slot string, lookup func(string) (string, bool), stdout, stderr 
 		return exitFailure
 	}
 	_ = json.NewEncoder(stdout).Encode(rotation)
-	logger.Info("runtime credential rotated", "database", rotation.Database, "loginRole", rotation.LoginRole, "slot", rotation.Slot)
+	logger.Info("runtime credential rotated", "database", rotation.Database, "loginRole", rotation.LoginRole, "slot", rotation.Slot,
+		"slotSource", rotation.SlotSource, "passwordForm", rotation.PasswordForm)
 	return exitOK
 }
 

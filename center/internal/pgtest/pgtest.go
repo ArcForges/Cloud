@@ -14,6 +14,7 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,24 @@ import (
 const (
 	EnvServer   = "ARCFORGES_TEST_POSTGRES_URL"
 	EnvRequired = "ARCFORGES_TEST_POSTGRES_REQUIRED"
+	// EnvContainer names the server's Docker container (eng/center.py sets it on the Linux leg) so a test can read the server's
+	// log; that server runs with pg_stat_statements preloaded, log_statement = 'all' and log_min_duration_statement = 0.
+	EnvContainer = "ARCFORGES_TEST_POSTGRES_CONTAINER"
 )
+
+// ServerLog returns the server's log (the container's output), or false when no container is named.
+func ServerLog(t testing.TB) (string, bool) {
+	t.Helper()
+	name := os.Getenv(EnvContainer)
+	if name == "" {
+		return "", false
+	}
+	output, err := exec.Command("docker", "logs", name).CombinedOutput()
+	if err != nil {
+		t.Fatalf("read the server log of the test container: %v", err)
+	}
+	return string(output), true
+}
 
 // ServerURL is the administrative URL of the integration server, or skips (fails when required).
 func ServerURL(t testing.TB) string {

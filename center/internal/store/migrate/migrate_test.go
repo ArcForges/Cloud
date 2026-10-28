@@ -4,11 +4,16 @@ package migrate
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/ArcForges/Cloud/center/internal/schema"
+	"github.com/ArcForges/Cloud/center/internal/workertables"
 )
 
 func files(contents ...string) fstest.MapFS {
@@ -123,5 +128,26 @@ func TestFailureNeverCarriesTheDetail(t *testing.T) {
 	}
 	if err := Sanitize("op", errors.New("password=secret")); strings.Contains(err.Error(), "secret") {
 		t.Fatal("a non-database error leaked its text")
+	}
+}
+
+// The tested major is the major of the PostgreSQL image the integration tests and the restore drill run (eng/center.py).
+func TestTheTestedMajorIsThePinnedImage(t *testing.T) {
+	root, err := workertables.RepositoryRoot(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(root, "eng", "center.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := regexp.MustCompile(`POSTGRES_IMAGE = "postgres:([0-9]+)-alpine@sha256:[0-9a-f]{64}"`).FindSubmatch(source)
+	if match == nil || string(match[1]) != strconv.Itoa(TestedMajor) {
+		t.Fatalf("eng/center.py pins %q; TestedMajor is %d", match, TestedMajor)
+	}
+	result := Result{ServerVersionNum: 170006}
+	result.recordServer()
+	if result.ServerMajorMatchesTested || result.TestedMajor != TestedMajor {
+		t.Fatalf("a PostgreSQL 17 server matched: %+v", result)
 	}
 }

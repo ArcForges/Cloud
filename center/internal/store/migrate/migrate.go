@@ -186,25 +186,69 @@ type Step struct {
 
 // Result is the record of a status, a plan or a run. It names no credential.
 type Result struct {
-	Database      string    `json:"database"`
-	MigrationRole string    `json:"migrationRole"`
-	RuntimeRole   string    `json:"runtimeRole,omitempty"`
-	State         string    `json:"state"`
-	Version       int       `json:"version"`
-	BuildVersion  int       `json:"buildVersion"`
-	Applied       []Applied `json:"applied"`
-	Pending       []string  `json:"pending"`
-	Ran           []Step    `json:"ran,omitempty"`
-	Problems      []string  `json:"problems,omitempty"`
-	Grants        string    `json:"grants,omitempty"`
+	Database      string `json:"database"`
+	MigrationRole string `json:"migrationRole"`
+	// ServerVersionNum is the server's server_version_num (180004 for PostgreSQL 18.4), recorded with every run.
+	ServerVersionNum int `json:"serverVersionNum"`
+	// TestedMajor is the PostgreSQL major the tests run; a server of another major is a warning, not a failure.
+	TestedMajor              int  `json:"testedMajor"`
+	ServerMajorMatchesTested bool `json:"serverMajorMatchesTested"`
+	// Logging is recorded with every run (the deployment's evidence).
+	Logging      Logging   `json:"logging"`
+	RuntimeRole  string    `json:"runtimeRole,omitempty"`
+	State        string    `json:"state"`
+	Version      int       `json:"version"`
+	BuildVersion int       `json:"buildVersion"`
+	Applied      []Applied `json:"applied"`
+	Pending      []string  `json:"pending"`
+	Ran          []Step    `json:"ran,omitempty"`
+	Problems     []string  `json:"problems,omitempty"`
+	Grants       string    `json:"grants,omitempty"`
+}
+
+// Logging is what the server records of statements, as the migration role's session sees it. Unset modules read as
+// "not-loaded".
+type Logging struct {
+	PgStatStatementsTrack   string `json:"pgStatStatementsTrack"`
+	LogStatement            string `json:"logStatement"`
+	LogMinDurationStatement string `json:"logMinDurationStatement"`
+}
+
+// ReadLogging reads the logging settings without failing on a module that is not loaded.
+func ReadLogging(ctx context.Context, q Querier) (Logging, error) {
+	var logging Logging
+	err := q.QueryRow(ctx, `SELECT coalesce(current_setting('pg_stat_statements.track', true), 'not-loaded'),
+    coalesce(current_setting('log_statement', true), 'not-loaded'), coalesce(current_setting('log_min_duration_statement', true), 'not-loaded')`).
+		Scan(&logging.PgStatStatementsTrack, &logging.LogStatement, &logging.LogMinDurationStatement)
+	if err != nil {
+		return Logging{}, Sanitize("read the logging settings", err)
+	}
+	return logging, nil
+}
+
+// TestedMajor is the PostgreSQL major of the integration tests and the restore drill: the major of the pinned image
+// postgres:<major>-alpine in eng/center.py (a test keeps them equal).
+const TestedMajor = 18
+
+// recordServer completes the server fields of a result.
+func (r *Result) recordServer() {
+	r.TestedMajor = TestedMajor
+	r.ServerMajorMatchesTested = r.ServerVersionNum/10000 == TestedMajor
 }
 
 // Inspect reports the database against the build without changing anything and without the lock.
 func Inspect(ctx context.Context, conn *pgx.Conn, build []Migration) (Result, error) {
 	result := Result{BuildVersion: len(build), Applied: []Applied{}, Pending: []string{}}
-	if err := conn.QueryRow(ctx, "SELECT current_database(), current_user").Scan(&result.Database, &result.MigrationRole); err != nil {
+	if err := conn.QueryRow(ctx, "SELECT current_database(), current_user, current_setting('server_version_num')::int").
+		Scan(&result.Database, &result.MigrationRole, &result.ServerVersionNum); err != nil {
 		return result, Sanitize("identify the database", err)
 	}
+	result.recordServer()
+	logging, loggingErr := ReadLogging(ctx, conn)
+	if loggingErr != nil {
+		return result, loggingErr
+	}
+	result.Logging = logging
 	applied, exists, err := ReadApplied(ctx, conn)
 	if err != nil {
 		return result, Sanitize("read platform.schema_migration", err)
@@ -294,9 +338,22 @@ func (f *Failure) Error() string {
 func Apply(ctx context.Context, conn *pgx.Conn, build []Migration, options Options) (Result, error) {
 	options.defaults()
 	result := Result{BuildVersion: len(build), RuntimeRole: options.RuntimeRole, Applied: []Applied{}, Pending: []string{}}
-	if err := conn.QueryRow(ctx, "SELECT current_database(), current_user").Scan(&result.Database, &result.MigrationRole); err != nil {
+	defer func() {
+		if result.ServerVersionNum != 0 && !result.ServerMajorMatchesTested {
+			options.Logger.Warn("the server's PostgreSQL major differs from the tested major", "serverVersionNum", result.ServerVersionNum,
+				"testedMajor", TestedMajor)
+		}
+	}()
+	if err := conn.QueryRow(ctx, "SELECT current_database(), current_user, current_setting('server_version_num')::int").
+		Scan(&result.Database, &result.MigrationRole, &result.ServerVersionNum); err != nil {
 		return result, Sanitize("identify the database", err)
 	}
+	result.recordServer()
+	logging, loggingErr := ReadLogging(ctx, conn)
+	if loggingErr != nil {
+		return result, loggingErr
+	}
+	result.Logging = logging
 	if options.RuntimeRole != "" {
 		if err := ValidRoleName(options.RuntimeRole); err != nil {
 			return result, err

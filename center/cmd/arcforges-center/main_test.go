@@ -56,7 +56,7 @@ func TestVersionMigrationRefusalsAndUsage(t *testing.T) {
 	stderr.Reset()
 	secret := map[string]string{"ARCFORGES_CENTER_MODE": "official-hosted",
 		"ARCFORGES_CENTER_MIGRATION_DATABASE_URL": "postgresql://owner:leaked-secret@db.example/center?sslmode=disable"}
-	for _, arguments := range [][]string{{"migrate"}, {"migrate", "status"}, {"admin", "rotate-runtime-credential"}, {"admin", "confirm-runtime-credential", "--slot", "a"}} {
+	for _, arguments := range [][]string{{"migrate"}, {"migrate", "status"}, {"admin", "rotate-runtime-credential"}, {"admin", "confirm-runtime-credential", "--slot", "a"}, {"admin", "rotate-runtime-credential", "--live-slot=a"}} {
 		stdout.Reset()
 		stderr.Reset()
 		if code := run(arguments, environment(secret), &stdout, &stderr); code != 1 || strings.Contains(stderr.String(), "leaked-secret") ||
@@ -66,7 +66,8 @@ func TestVersionMigrationRefusalsAndUsage(t *testing.T) {
 	}
 	for _, arguments := range [][]string{{"unknown"}, {"serve", "extra"}, {"migrate", "drop"}, {"migrate", "apply", "x"}, {"admin"}, {"admin", "drop"}, {"version", "x"},
 		{"admin", "confirm-runtime-credential"}, {"admin", "confirm-runtime-credential", "--slot"}, {"admin", "confirm-runtime-credential", "--slot", "c"},
-		{"admin", "confirm-runtime-credential", "--slot=", "a"}, {"admin", "rotate-runtime-credential", "--slot", "a"}} {
+		{"admin", "confirm-runtime-credential", "--slot=", "a"}, {"admin", "rotate-runtime-credential", "--slot", "a"},
+		{"admin", "rotate-runtime-credential", "--live-slot", "c"}, {"admin", "rotate-runtime-credential", "--live-slot"}} {
 		if code := run(arguments, environment(nil), &stdout, &stderr); code != 2 {
 			t.Fatalf("%v: %d", arguments, code)
 		}

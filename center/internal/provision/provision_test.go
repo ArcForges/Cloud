@@ -213,3 +213,55 @@ func TestEnsureDatabase(t *testing.T) {
 		}
 	}
 }
+
+// The deployment names the live version's slot (read from Cloudflare): the rotation takes the other slot even when the record
+// is behind the live revision (its promotion was never confirmed).
+func TestARotationNeverTouchesTheLiveSlotItIsGiven(t *testing.T) {
+	url, group := migrated(t)
+	r := rotator{t: t, url: url, group: group}
+	first := r.rotate()
+	r.confirm(first.Slot)
+	live := r.rotate() // b went live, but its confirmation was lost
+	rotation, err := Rotate(context.Background(), pgtest.Connect(t, url), Options{Group: group, DirectURL: url, PooledHost: pgtest.Host(t), Runner: "test",
+		ProbeTimeout: 10 * time.Second, LiveSlot: live.Slot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.Slot != "b" || rotation.Slot != "a" || rotation.SlotSource != "live-version" || !connects(t, live.RuntimeURL) {
+		t.Fatalf("live %s rotated %s (%s)", live.Slot, rotation.Slot, rotation.SlotSource)
+	}
+	if _, err = Rotate(context.Background(), pgtest.Connect(t, url), Options{Group: group, DirectURL: url, LiveSlot: "c"}); !errors.Is(err, ErrUnknownSlot) {
+		t.Fatalf("live slot c: %v", err)
+	}
+}
+
+// A login role whose membership does not inherit (PostgreSQL 16 and later) is corrected by the rotation.
+func TestARotationCorrectsANonInheritingMembership(t *testing.T) {
+	url, group := migrated(t)
+	conn := pgtest.Connect(t, url)
+	ctx := context.Background()
+	var version int
+	if err := conn.QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&version); err != nil || version < 160000 {
+		t.Skipf("membership inherit options need PostgreSQL 16 (%d %v)", version, err)
+	}
+	login := group + "_a"
+	for _, statement := range []string{
+		"CREATE ROLE " + login + " LOGIN",
+		"GRANT " + group + " TO " + login + " WITH INHERIT FALSE",
+	} {
+		if _, err := conn.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var inherits bool
+	if err := conn.QueryRow(ctx, "SELECT pg_has_role($1, $2, 'USAGE')", login, group).Scan(&inherits); err != nil || inherits {
+		t.Fatalf("the fixture membership inherits: %v", err)
+	}
+	r := rotator{t: t, url: url, group: group}
+	if rotation := r.rotate(); rotation.Slot != "a" {
+		t.Fatalf("slot %s", rotation.Slot)
+	}
+	if err := conn.QueryRow(ctx, "SELECT pg_has_role($1, $2, 'USAGE')", login, group).Scan(&inherits); err != nil || !inherits {
+		t.Fatalf("the membership was not corrected: %v", err)
+	}
+}

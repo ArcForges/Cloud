@@ -151,10 +151,11 @@ class Postgres:
     """A disposable PostgreSQL server in Docker: its own container, an ephemeral loopback port, data on tmpfs and a random
     superuser password that lives only in this process. Leaving the context removes the container."""
 
-    def __init__(self, purpose: str) -> None:
+    def __init__(self, purpose: str, settings: tuple[str, ...] = ()) -> None:
         self.name = f"arcforges-center-{purpose}-{secrets.token_hex(4)}"
         self.password = secrets.token_hex(24)
         self.address = ""
+        self.settings = settings
 
     def __enter__(self) -> "Postgres":
         if shutil.which("docker") is None:
@@ -162,7 +163,8 @@ class Postgres:
         started = subprocess.run(
             ["docker", "run", "--detach", "--rm", "--name", self.name, "--env", "POSTGRES_PASSWORD", "--publish", "127.0.0.1::5432",
              "--tmpfs", "/var/lib/postgresql:rw,size=1g", POSTGRES_IMAGE, "-c", "max_connections=300", "-c", "fsync=off",
-             "-c", "synchronous_commit=off", "-c", "full_page_writes=off"],
+             "-c", "synchronous_commit=off", "-c", "full_page_writes=off",
+             *[item for setting in self.settings for item in ("-c", setting)]],
             env={**os.environ, "POSTGRES_PASSWORD": self.password}, capture_output=True, text=True)
         if started.returncode != 0:
             raise SystemExit(f"[center] could not start PostgreSQL ({POSTGRES_IMAGE}): {started.stderr.strip()[-300:]}")
@@ -200,10 +202,14 @@ def check_tests(linux: bool) -> None:
         go(*arguments, "./...")
     else:
         # The race detector needs cgo, which the Linux host has and the Windows host does not (docs/engineering-controls.md).
-        # The integration tests must run here: ARCFORGES_TEST_POSTGRES_REQUIRED turns their skip into a failure.
+        # The integration tests must run here: ARCFORGES_TEST_POSTGRES_REQUIRED turns their skip into a failure. The server preloads
+        # pg_stat_statements and logs every statement with its duration, so the rotation tests can check that no secret reaches a
+        # statement record or a log line (they read the container's log by its name).
         arguments.insert(2, "-race")
-        with Postgres("tests") as server:
-            go(*arguments, "./...", env={**ENV, "ARCFORGES_TEST_POSTGRES_URL": server.url(), "ARCFORGES_TEST_POSTGRES_REQUIRED": "1"})
+        with Postgres("tests", ("shared_preload_libraries=pg_stat_statements", "log_statement=all",
+                                "log_min_duration_statement=0")) as server:
+            go(*arguments, "./...", env={**ENV, "ARCFORGES_TEST_POSTGRES_URL": server.url(), "ARCFORGES_TEST_POSTGRES_REQUIRED": "1",
+                                          "ARCFORGES_TEST_POSTGRES_CONTAINER": server.name})
     go("go", "run", "./cmd/center-gen", "worker-tables", "-check")
 
 
@@ -286,7 +292,8 @@ def drill(executable: Path) -> dict[str, object]:
         if (seed_slot, verify_slot) != ("a", "b"):
             raise SystemExit(f"[center] the restore drill rotated slots {seed_slot} and {verify_slot}, expected a and b")
         drill_phase("verify", verify_url)
-    return {"dumpBytes": dump.stat().st_size, "schemaVersion": status["version"], "slots": [seed_slot, verify_slot],
+    return {"dumpBytes": dump.stat().st_size, "schemaVersion": status["version"], "serverVersionNum": status["serverVersionNum"],
+            "slots": [seed_slot, verify_slot],
             "phases": ["seed", "dump", "restore", "migrate", "verify"]}
 
 

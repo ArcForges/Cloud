@@ -5,8 +5,9 @@
 // runtime group role and hold no grant of their own. A slot is live only once the deployment that carries its password was
 // promoted and Confirm recorded it; each rotation sets a new password on the slot other than the most recently promoted one,
 // so the revision still running keeps its working credential however often a deployment fails and is retried. The password is
-// generated here, sent only inside the statement over the verified TLS connection (Neon accepts no pre-hashed password),
-// returned only inside the pooled runtime URL and never printed or logged.
+// generated here and returned only inside the pooled runtime URL; it is never printed or logged. On a self-hosted PostgreSQL only
+// a SCRAM-SHA-256 verifier of it reaches the server; on Neon, which refuses verifiers, the password itself travels inside the
+// statement over the verified TLS connection (docs/postgres-store.md says who can read it there).
 package provision
 
 import (
@@ -69,22 +70,35 @@ type Options struct {
 	ConnectionLimit int
 	// ProbeTimeout bounds the pooled-connection probe, which retries while a new password propagates to the pooler.
 	ProbeTimeout time.Duration
+	// LiveSlot is the slot the live Worker version uses, as the deployment read it from Cloudflare ("" when unknown). When set,
+	// the rotation takes the other slot whatever the record says; otherwise the record decides.
+	LiveSlot string
 }
 
 // Rotation is the result of a rotation. RuntimeURL is the credential; every other field may be printed.
 type Rotation struct {
-	Database   string `json:"database"`
-	Group      string `json:"runtimeRole"`
-	LoginRole  string `json:"loginRole"`
-	Slot       string `json:"slot"`
-	RotatedAt  string `json:"rotatedAt"`
-	Probe      Probe  `json:"probe"`
-	RuntimeURL string `json:"-"`
+	Database  string `json:"database"`
+	Group     string `json:"runtimeRole"`
+	LoginRole string `json:"loginRole"`
+	Slot      string `json:"slot"`
+	RotatedAt string `json:"rotatedAt"`
+	// SlotSource says what chose the slot: "live-version" (the deployment named the live slot) or "record".
+	SlotSource string `json:"slotSource"`
+	// PasswordForm is FormVerifier or FormNeonPlaintext.
+	PasswordForm     string `json:"passwordForm"`
+	ServerVersionNum int    `json:"serverVersionNum"`
+	// Logging is what the server records of statements; the rotation refuses pg_stat_statements.track = 'all'.
+	Logging    migrate.Logging `json:"logging"`
+	Probe      Probe           `json:"probe"`
+	RuntimeURL string          `json:"-"`
 }
 
-// Probe is what the new credential proved through the pooled endpoint.
+// Probe is what the new credential proved through the pooled endpoint and, for CONNECT, through one unpooled connection.
 type Probe struct {
-	Pooled              bool `json:"pooledEndpoint"`
+	Pooled bool `json:"pooledEndpoint"`
+	// ConnectsUnpooled shows CONNECT conclusively: a direct connection always starts a new server backend, which checks the
+	// privilege, whereas the pooler may answer with a backend that started before a revocation.
+	ConnectsUnpooled    bool `json:"connectsUnpooled"`
 	ConnectedAsLogin    bool `json:"connectedAsLoginRole"`
 	ReadsGrantedTable   bool `json:"readsGrantedTable"`
 	CannotCreate        bool `json:"cannotCreateTables"`
@@ -94,12 +108,16 @@ type Probe struct {
 }
 
 // Rotate sets a new password on the login role of the runtime group that is not the most recently promoted one (slot a when
-// none was promoted), records the rotation as not yet promoted, composes the pooled runtime URL and proves through it that the
-// credential connects as that login role, reads a granted table, and can neither create a table, nor a temporary table, nor
-// read an ungranted one. conn is the migration role's direct connection to the center's database.
+// none was promoted), records the rotation as not yet promoted, checks that the login role inherits the runtime group and may
+// connect, composes the pooled runtime URL and proves through it that the credential connects as that login role, reads a
+// granted table, and can neither create a table, nor a temporary table, nor read an ungranted one; one unpooled connection
+// proves CONNECT. conn is the migration role's direct connection to the center's database.
 func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, error) {
 	if err := migrate.ValidRoleName(options.Group); err != nil {
 		return Rotation{}, err
+	}
+	if options.LiveSlot != "" && options.LiveSlot != "a" && options.LiveSlot != "b" {
+		return Rotation{}, fmt.Errorf("%w: the live slot is a or b", ErrUnknownSlot)
 	}
 	if options.ConnectionLimit <= 0 {
 		options.ConnectionLimit = DefaultConnectionLimit
@@ -115,14 +133,25 @@ func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, err
 	if err != nil {
 		return Rotation{}, err
 	}
+	// One predicate decides Neon: the one that derives the pooled host.
+	neon := NeonHost(hostOf(options.DirectURL))
 	rotation := Rotation{Group: options.Group}
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
 		// The migration lock serializes a rotation with migrations and with another rotation.
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrate.LockKey); err != nil {
 			return migrate.Sanitize("take the migration lock", err)
 		}
-		if err := tx.QueryRow(ctx, "SELECT current_database()").Scan(&rotation.Database); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT current_database(), current_setting('server_version_num')::int").Scan(&rotation.Database, &rotation.ServerVersionNum); err != nil {
 			return migrate.Sanitize("identify the database", err)
+		}
+		logging, err := migrate.ReadLogging(ctx, tx)
+		if err != nil {
+			return err
+		}
+		rotation.Logging = logging
+		if logging.PgStatStatementsTrack == "all" {
+			// With track = 'all', pg_stat_statements would record the nested role statement, secret included.
+			return errors.New("pg_stat_statements.track is 'all', which would record the nested role statement with its secret; set it to 'top' (the default) before rotating")
 		}
 		var ready bool
 		if err := tx.QueryRow(ctx, "SELECT to_regclass('platform.runtime_credential') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", options.Group).Scan(&ready); err != nil {
@@ -138,28 +167,39 @@ func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, err
 		if err != nil {
 			return err
 		}
+		rotation.SlotSource = "record"
+		if options.LiveSlot != "" {
+			// The live version's slot is never rotated, even when the record is behind it.
+			slot, rotation.SlotSource = other(options.LiveSlot), "live-version"
+		}
 		rotation.Slot, rotation.LoginRole = slot, options.Group+"_"+slot
-		login := pgx.Identifier{rotation.LoginRole}.Sanitize()
 		var exists bool
 		if err = tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", rotation.LoginRole).Scan(&exists); err != nil {
 			return migrate.Sanitize("look up the login role", err)
 		}
-		// Only LOGIN, INHERIT, the connection limit and the password are set: a CREATEROLE role (the Neon owner) may not name the
-		// superuser, replication or BYPASSRLS attributes at all, and RequirePlainRole below refuses a role that has one.
-		attributes := fmt.Sprintf("LOGIN INHERIT CONNECTION LIMIT %d PASSWORD %s", options.ConnectionLimit, literal(password))
-		statement := "ALTER ROLE " + login + " WITH " + attributes
-		if !exists {
-			statement = "CREATE ROLE " + login + " WITH " + attributes
+		// RequirePlainRole below refuses a login role with an elevated attribute.
+		secret, form, err := passwordSecret(password, neon)
+		if err != nil {
+			return err
 		}
-		if _, err = tx.Exec(ctx, statement); err != nil {
-			// The statement holds the password: only the SQLSTATE is reported.
-			return migrate.Sanitize("set the runtime credential of "+rotation.LoginRole, err)
+		rotation.PasswordForm = form
+		if err = setLogin(ctx, tx, rotation.LoginRole, secret, options.ConnectionLimit, !exists); err != nil {
+			return err
 		}
-		if err = membership(ctx, tx, rotation.LoginRole, options.Group); err != nil {
+		if err = membership(ctx, tx, rotation.LoginRole, options.Group, rotation.ServerVersionNum); err != nil {
 			return err
 		}
 		if err = migrate.RequirePlainRole(ctx, tx, rotation.LoginRole, true); err != nil {
 			return err
+		}
+		var inherits, connects bool
+		if err = tx.QueryRow(ctx, "SELECT pg_has_role($1, $2, 'USAGE'), has_database_privilege($1, current_database(), 'CONNECT')",
+			rotation.LoginRole, options.Group).Scan(&inherits, &connects); err != nil {
+			return migrate.Sanitize("check the login role's privileges", err)
+		}
+		if !inherits || !connects {
+			return fmt.Errorf("the login role %s does not inherit the runtime role's privileges or may not connect to the database (inherits %v, connect %v)",
+				rotation.LoginRole, inherits, connects)
 		}
 		return tx.QueryRow(ctx, `INSERT INTO platform.runtime_credential (slot, login_role, rotated_at, rotated_by, promoted_at)
 VALUES ($1, $2, now(), $3, NULL)
@@ -196,6 +236,13 @@ func nextSlot(ctx context.Context, tx pgx.Tx) (string, error) {
 	default:
 		return "a", nil
 	}
+}
+
+func other(slot string) string {
+	if slot == "a" {
+		return "b"
+	}
+	return "a"
 }
 
 // Confirmation is the result of Confirm; every field may be printed.
@@ -264,8 +311,10 @@ RETURNING to_char(promoted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`
 	return confirmation, nil
 }
 
-// membership makes the login role a member of exactly the runtime group, inheriting its grants.
-func membership(ctx context.Context, tx pgx.Tx, login, group string) error {
+// membership makes the login role a member of exactly the runtime group, inheriting its grants. From PostgreSQL 16 the inherit
+// option belongs to the membership: it is granted WITH INHERIT TRUE, which also corrects an existing membership that does not
+// inherit.
+func membership(ctx context.Context, tx pgx.Tx, login, group string, serverVersionNum int) error {
 	rows, err := tx.Query(ctx, `SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles r ON r.oid = m.member
 WHERE r.rolname = $1`, login)
 	if err != nil {
@@ -282,10 +331,14 @@ WHERE r.rolname = $1`, login)
 		}
 		member = true
 	}
-	if !member {
-		if _, err = tx.Exec(ctx, "GRANT "+pgx.Identifier{group}.Sanitize()+" TO "+pgx.Identifier{login}.Sanitize()); err != nil {
-			return migrate.Sanitize("add the login role to the runtime role", err)
-		}
+	grant := "GRANT " + pgx.Identifier{group}.Sanitize() + " TO " + pgx.Identifier{login}.Sanitize()
+	if serverVersionNum >= 160000 {
+		grant += " WITH INHERIT TRUE"
+	} else if member {
+		return nil
+	}
+	if _, err = tx.Exec(ctx, grant); err != nil {
+		return migrate.Sanitize("add the login role to the runtime role", err)
 	}
 	return nil
 }
@@ -316,19 +369,24 @@ func tripled(value string) bool {
 	return false
 }
 
-// literal quotes a generated password (base64url: no quote or backslash can occur).
-func literal(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+// NeonHost reports whether host is a Neon compute endpoint (ep-<name>.<region>.….neon.tech). It is the one predicate that
+// decides Neon: the derived pooled host (PooledHost) and the password form of a rotation (Neon refuses SCRAM verifiers).
+func NeonHost(host string) bool {
+	name, rest, found := strings.Cut(strings.ToLower(host), ".")
+	return found && strings.HasPrefix(name, "ep-") && (rest == "neon.tech" || strings.HasSuffix(rest, ".neon.tech"))
 }
 
 // PooledHost derives the pooled endpoint of a Neon direct host (ep-name.region.aws.neon.tech → ep-name-pooler.region…); any
 // other host is kept.
 func PooledHost(host string) string {
-	name, rest, found := strings.Cut(host, ".")
-	if found && strings.HasPrefix(name, "ep-") && !strings.HasSuffix(name, "-pooler") && strings.HasSuffix(rest, "neon.tech") {
-		return name + "-pooler." + rest
+	if !NeonHost(host) {
+		return host
 	}
-	return host
+	name, rest, _ := strings.Cut(host, ".")
+	if strings.HasSuffix(name, "-pooler") {
+		return host
+	}
+	return name + "-pooler." + rest
 }
 
 // RuntimeURL composes the runtime credential: the direct URL with the login role, its password and the pooled host.
@@ -349,28 +407,25 @@ func RuntimeURL(direct, login, password, pooledHost string) (string, error) {
 }
 
 func probe(ctx context.Context, rotation Rotation, options Options) (Probe, error) {
-	config, err := pgx.ParseConfig(rotation.RuntimeURL)
-	if err != nil {
-		return Probe{}, errors.New("the runtime URL does not parse")
-	}
-	config.DefaultQueryExecMode = pgx.QueryExecModeExec
-	config.ConnectTimeout = 10 * time.Second
-	result := Probe{Pooled: config.Host != hostOf(options.DirectURL)}
 	deadline := time.Now().Add(options.ProbeTimeout)
-	var conn *pgx.Conn
-	for {
-		conn, err = pgx.ConnectConfig(ctx, config)
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) || ctx.Err() != nil {
-			return Probe{}, migrate.Sanitize("connect with the new runtime credential through the pooled endpoint", err)
-		}
-		select {
-		case <-ctx.Done():
-			return Probe{}, ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
+	result := Probe{Pooled: hostOf(rotation.RuntimeURL) != hostOf(options.DirectURL)}
+	// One unpooled connection as the login role starts a new backend, which checks CONNECT on the database.
+	direct, err := RuntimeURL(options.DirectURL, rotation.LoginRole, passwordOf(rotation.RuntimeURL), hostPortOf(options.DirectURL))
+	if err != nil {
+		return Probe{}, err
+	}
+	conn, err := connectRetrying(ctx, direct, deadline, "connect with the new runtime credential directly")
+	if err != nil {
+		return Probe{}, err
+	}
+	err = conn.QueryRow(ctx, "SELECT current_user = $1 AND has_database_privilege(current_user, current_database(), 'CONNECT')", rotation.LoginRole).
+		Scan(&result.ConnectsUnpooled)
+	_ = conn.Close(context.Background())
+	if err != nil {
+		return Probe{}, migrate.Sanitize("check CONNECT on a direct connection", err)
+	}
+	if conn, err = connectRetrying(ctx, rotation.RuntimeURL, deadline, "connect with the new runtime credential through the pooled endpoint"); err != nil {
+		return Probe{}, err
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
 	var user, database string
@@ -383,10 +438,53 @@ func probe(ctx context.Context, rotation Rotation, options Options) (Probe, erro
 	result.CannotCreate = refused(ctx, conn, "CREATE TABLE platform.runtime_probe (x int)")
 	result.CannotReadUngranted = refused(ctx, conn, "SELECT count(*) FROM platform.runtime_credential")
 	result.CannotCreateTemporary = refused(ctx, conn, "CREATE TEMPORARY TABLE runtime_probe (x int)")
-	if !result.ConnectedAsLogin || !result.ReadsGrantedTable || !result.CannotCreate || !result.CannotReadUngranted || !result.CannotCreateTemporary {
+	if !result.ConnectsUnpooled || !result.ConnectedAsLogin || !result.ReadsGrantedTable || !result.CannotCreate || !result.CannotReadUngranted ||
+		!result.CannotCreateTemporary {
 		return result, fmt.Errorf("the new runtime credential did not behave as the least-privilege runtime role: %+v", result)
 	}
 	return result, nil
+}
+
+// connectRetrying connects in exec mode, retrying until the deadline while a new password propagates (to the pooler); an error
+// never repeats the URL.
+func connectRetrying(ctx context.Context, value string, deadline time.Time, operation string) (*pgx.Conn, error) {
+	config, err := pgx.ParseConfig(value)
+	if err != nil {
+		return nil, errors.New("the runtime URL does not parse")
+	}
+	config.DefaultQueryExecMode = pgx.QueryExecModeExec
+	config.ConnectTimeout = 10 * time.Second
+	for {
+		conn, err := pgx.ConnectConfig(ctx, config)
+		if err == nil {
+			return conn, nil
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return nil, migrate.Sanitize(operation, err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func passwordOf(value string) string {
+	uri, err := url.Parse(value)
+	if err != nil || uri.User == nil {
+		return ""
+	}
+	password, _ := uri.User.Password()
+	return password
+}
+
+func hostPortOf(value string) string {
+	uri, err := url.Parse(value)
+	if err != nil {
+		return ""
+	}
+	return uri.Host
 }
 
 // refused runs a statement in a transaction that is always rolled back and reports whether it failed for lack of privilege.

@@ -58,14 +58,15 @@ func TestTheMigrationAndAdministrationCommands(t *testing.T) {
 	if document := command(0, "migrate", "plan"); len(document["pending"].([]any)) == 0 {
 		t.Fatalf("plan: %v", document)
 	}
-	if document := command(0, "migrate"); document["state"] != "current" || document["grants"] != "reconciled" || len(document["ran"].([]any)) == 0 {
+	if document := command(0, "migrate"); document["state"] != "current" || document["grants"] != "reconciled" || len(document["ran"].([]any)) == 0 ||
+		number(document["serverVersionNum"]) < 160000 {
 		t.Fatalf("apply: %v", document)
 	}
 	if document := command(0, "migrate", "apply"); document["state"] != "current" || document["ran"] != nil {
 		t.Fatalf("apply again: %v", document)
 	}
 	rotation := command(0, "admin", "rotate-runtime-credential")
-	if rotation["slot"] != "a" || rotation["loginRole"] != name+"_runtime_a" {
+	if rotation["slot"] != "a" || rotation["loginRole"] != name+"_runtime_a" || rotation["passwordForm"] != "scram-sha-256-verifier" {
 		t.Fatalf("rotation: %v", rotation)
 	}
 	info, err := os.Stat(secretFile)
@@ -101,4 +102,12 @@ func TestTheMigrationAndAdministrationCommands(t *testing.T) {
 		t.Fatalf("refused: %v", document)
 	}
 	command(3, "migrate", "status")
+}
+
+// number reads a JSON number, or -1 when the value is not one.
+func number(value any) float64 {
+	if number, ok := value.(float64); ok {
+		return number
+	}
+	return -1
 }

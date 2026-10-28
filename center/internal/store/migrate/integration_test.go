@@ -64,6 +64,21 @@ func TestApplyThenRepeatIsANoOp(t *testing.T) {
 	if status.Applied[0].SHA256 != build[0].SHA256 || status.Database != name {
 		t.Fatalf("record: %+v", status)
 	}
+	// Every run records the server's major and minor (the tests pin PostgreSQL 18).
+	var version int
+	if err = pgtest.Connect(t, url).QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if first.ServerVersionNum != version || second.ServerVersionNum != version || status.ServerVersionNum != version || version < 180000 {
+		t.Fatalf("server version %d: %d %d %d", version, first.ServerVersionNum, second.ServerVersionNum, status.ServerVersionNum)
+	}
+	if first.TestedMajor != TestedMajor || !first.ServerMajorMatchesTested || !status.ServerMajorMatchesTested {
+		t.Fatalf("tested major: %+v", first)
+	}
+	if first.Logging.LogStatement == "" || first.Logging.LogMinDurationStatement == "" || first.Logging.PgStatStatementsTrack == "" ||
+		status.Logging != first.Logging {
+		t.Fatalf("logging: %+v %+v", first.Logging, status.Logging)
+	}
 }
 
 func TestStatusOfAnEmptyDatabase(t *testing.T) {
