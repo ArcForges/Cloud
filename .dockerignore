@@ -126,6 +126,10 @@
 !center/internal/*/*.go
 !center/internal/store/migrate/
 !center/internal/store/migrate/*.go
+!center/internal/identity/passkey/
+!center/internal/identity/passkey/*.go
+!center/internal/identity/passkey/virtual/
+!center/internal/identity/passkey/virtual/*.go
 !center/internal/schema/migrations/
 !center/internal/schema/migrations/*.sql
 center/tools/

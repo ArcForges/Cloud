@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-golangjwt-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/golang-jwt/jwt",
+  "sourceCommit": "7ceae619e739dc8a7bf577214aa8ebf26668e9db",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "MIT",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "fe26ca41577b9b2b4448050a24b25e5753af66b5d5945d5d36094e7790bfcb2f",
+        "finding": "Complete licence from the exact Go module source; module integrity is pinned by go.sum."
+      }
+    ],
+    "scope": "github.com/golang-jwt/jwt/v5 v5.3.1: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "github.com/golang-jwt/jwt/v5 v5.3.1: MIT. Complete upstream copyright, permission and disclaimer terms are retained."
+  ],
+  "targets": [
+    {
+      "path": "third-party/GolangJwt.LICENSE.txt",
+      "sha256": "fe26ca41577b9b2b4448050a24b25e5753af66b5d5945d5d36094e7790bfcb2f",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "github.com/golang-jwt/jwt/v5 v5.3.1: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/GolangJwt.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "github.com/golang-jwt/jwt/v5 v5.3.1: MIT. Complete upstream copyright, permission and disclaimer terms are retained."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-03 delegated author); PR review is recorded separately",
+    "reviewedOn": "2026-10-28",
+    "decision": "approved",
+    "rationale": "github.com/golang-jwt/jwt/v5 v5.3.1: MIT. Complete upstream copyright, permission and disclaimer terms are retained. Linked into arcforges-center through github.com/go-webauthn/webauthn (AF-CTR-03 passkeys).",
+    "baselineCommit": "aecf53fd34e7e7d15cc5d40d36db1ffae383a305",
+    "reconciliation": false
+  },
+  "supersedes": null
+}
