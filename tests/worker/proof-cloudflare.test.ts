@@ -52,6 +52,8 @@ interface State {
   schedules: unknown[] | null;
   /** The proof script's service metadata; null answers 404 (no such script). */
   service: { migration_tag?: string } | null;
+  /** Pages the queue list by this size with the given `result_info`; null answers one page without it. */
+  queuePaging: { size: number; info: "total_pages" | "total_count" } | null;
   denied: Set<string>;
   calls: string[];
   workersDev: boolean;
@@ -70,6 +72,7 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
     consumers: {},
     schedules: null,
     service: null,
+    queuePaging: null,
     denied: new Set(),
     calls: [],
     workersDev: false,
@@ -82,8 +85,16 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
   };
   // The fake removes consumers in place; a shared fixture must not see another fake's removals.
   state.consumers = structuredClone(state.consumers);
-  const reply = (result: unknown, status = 200, errors: unknown[] = []) =>
-    Response.json({ success: status < 400, errors, result }, { status });
+  const reply = (
+    result: unknown,
+    status = 200,
+    errors: unknown[] = [],
+    resultInfo?: Record<string, number>,
+  ) =>
+    Response.json(
+      { success: status < 400, errors, result, ...(resultInfo ? { result_info: resultInfo } : {}) },
+      { status },
+    );
   const fetcher: typeof fetch = (input, init) => {
     const url = new URL(String(input));
     const endpoint = url.pathname.replace("/client/v4", "");
@@ -143,16 +154,23 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
         return Promise.resolve(reply({ queue_name: body.queue_name }));
       }
       const page = Number(url.searchParams.get("page") ?? "1");
+      const records = state.queues.map((queue_name) => ({
+        queue_id: queueId(queue_name),
+        queue_name,
+        consumers: state.consumers[queue_name] ?? [],
+      }));
+      const paging = state.queuePaging;
+      if (paging === null) return Promise.resolve(reply(page > 1 ? [] : records));
+      // A provider that pages by its own size, whatever per_page asked for.
+      const slice = records.slice((page - 1) * paging.size, page * paging.size);
+      const info = { page, per_page: paging.size, count: slice.length };
       return Promise.resolve(
-        reply(
-          page > 1
-            ? []
-            : state.queues.map((queue_name) => ({
-                queue_id: queueId(queue_name),
-                queue_name,
-                consumers: state.consumers[queue_name] ?? [],
-              })),
-        ),
+        reply(slice, 200, [], {
+          ...info,
+          ...(paging.info === "total_pages"
+            ? { total_pages: Math.ceil(records.length / paging.size) }
+            : { total_count: records.length }),
+        }),
       );
     }
     const consumer = /\/queues\/([0-9a-f]{32})\/consumers\/([0-9a-f]{32})$/u.exec(endpoint);
@@ -415,7 +433,13 @@ test("an asset that does not match its pinned digest stops the staging before an
 });
 
 // AF-CTR-02 follow-up: the retired C# proof consumers are detached before the acceptance bundle is uploaded.
-const proofTags = ["v1", "harness-run-alarm-v1"];
+// The checked-in proof environment, from which the deployment generates its configuration: migrations v1 and
+// harness-run-alarm-v1, `triggers: {}` and no queue consumer.
+const proof = (
+  JSON.parse(readFileSync(path.resolve(import.meta.dirname, "../../wrangler.json"), "utf8")) as {
+    env: { proof: Record<string, unknown> };
+  }
+).env.proof;
 const [wake, wakeDlq] = proofQueueNames;
 const worker = (script: string, id: string): Consumer => ({
   consumer_id: id.repeat(32),
@@ -440,7 +464,7 @@ test("the proof script's consumers of both retired queues are detached, once", a
     schedules: [],
     service: { migration_tag: "harness-run-alarm-v1" },
   });
-  assert.deepEqual(await prepareProofScript(api, proofTags), {
+  assert.deepEqual(await prepareProofScript(api, proof), {
     retiredConsumers: [
       { queue: wake, outcome: "detached" },
       { queue: wakeDlq, outcome: "detached" },
@@ -462,7 +486,7 @@ test("the proof script's consumers of both retired queues are detached, once", a
   );
   // A rerun finds nothing attached and changes nothing.
   state.calls.length = 0;
-  const again = await prepareProofScript(api, proofTags);
+  const again = await prepareProofScript(api, proof);
   assert.deepEqual(again.retiredConsumers, [
     { queue: wake, outcome: "not attached" },
     { queue: wakeDlq, outcome: "not attached" },
@@ -478,7 +502,7 @@ test("nothing attached means no call, and another script's consumers are never t
   // Both queues exist without a consumer, or do not exist at all.
   for (const queues of [[...proofQueueNames], []]) {
     const { api, state } = fakeCloudflare({ queues });
-    const result = await prepareProofScript(api, proofTags);
+    const result = await prepareProofScript(api, proof);
     assert.deepEqual(result, {
       retiredConsumers: notAttached,
       cronSchedules: 0,
@@ -496,7 +520,7 @@ test("nothing attached means no call, and another script's consumers are never t
     [wakeDlq]: [worker("arcforges-cloud-proof-x", "e")],
   };
   const { api, state } = fakeCloudflare({ queues: [...proofQueueNames], consumers: others });
-  assert.deepEqual((await prepareProofScript(api, proofTags)).retiredConsumers, [
+  assert.deepEqual((await prepareProofScript(api, proof)).retiredConsumers, [
     { queue: wake, outcome: "detached" },
     { queue: wakeDlq, outcome: "not attached" },
   ]);
@@ -522,7 +546,7 @@ test("anything unknown, or any API failure, stops before a consumer is detached"
   };
   const refused = async (overrides: Partial<State>, pattern: RegExp) => {
     const { api, state } = fakeCloudflare({ ...attached, ...overrides });
-    await assert.rejects(prepareProofScript(api, proofTags), pattern);
+    await assert.rejects(prepareProofScript(api, proof), pattern);
     assert.deepEqual(deletes(state.calls), [], String(pattern));
     assert.equal(state.consumers[wake]?.length, 1);
   };
@@ -536,8 +560,11 @@ test("anything unknown, or any API failure, stops before a consumer is detached"
     },
     /Queue arcforges-acceptance-center-events has a consumer for arcforges-cloud-proof .* Nothing was deployed/u,
   );
-  // The acceptance bundle has no scheduled handler.
-  await refused({ schedules: [{ cron: "*/5 * * * *" }] }, /1 cron schedule\(s\)/u);
+  // The configuration declares no triggers.crons, so a live schedule would stay beside a bundle that declares none.
+  await refused(
+    { schedules: [{ cron: "*/5 * * * *" }] },
+    /1 cron schedule\(s\) that the proof configuration does not declare/u,
+  );
   // A Durable Object migration tag the configuration does not list.
   await refused(
     { service: { migration_tag: "v2" } },
@@ -553,7 +580,7 @@ test("anything unknown, or any API failure, stops before a consumer is detached"
   // Without Queues write the removal fails: the deployment stops and names the owner's action.
   const { api, state } = fakeCloudflare({ ...attached, denied: new Set(["/consumers/"]) });
   await assert.rejects(
-    prepareProofScript(api, proofTags),
+    prepareProofScript(api, proof),
     /consumer of arcforges-proof-wake, arcforges-proof-wake-dlq is still attached \(arcforges-proof-wake: http 403.*Queues write permission, which only the owner can add\. Nothing was deployed\./u,
   );
   assert.equal(state.consumers[wake]?.length, 1);
@@ -564,7 +591,7 @@ test("anything unknown, or any API failure, stops before a consumer is detached"
     denied: new Set([`/queues/${queueId(wakeDlq)}/consumers/`]),
   });
   await assert.rejects(
-    prepareProofScript(partial.api, proofTags),
+    prepareProofScript(partial.api, proof),
     /consumer of arcforges-proof-wake-dlq is still attached .* Detached: arcforges-proof-wake\. Nothing was deployed\./u,
   );
   assert.deepEqual(partial.state.consumers, {
@@ -585,4 +612,89 @@ test("the deployment prepares the proof script before the credential rotation an
   assert(prepared < deploy.indexOf('"deploy",'));
   for (const field of ["retiredQueueConsumers:", "cronSchedules:", "migrationTag:"])
     assert(deploy.slice(deploy.indexOf("proof-deployment.json")).includes(field), field);
+});
+
+test("consumers and schedules that the proof configuration declares are accepted, others refused", async () => {
+  const events = "arcforges-acceptance-center-events";
+  const attached = {
+    queues: [...centerQueues, ...proofQueueNames],
+    consumers: {
+      [wake]: [worker("arcforges-cloud-proof", "a")],
+      [wakeDlq]: [worker("arcforges-cloud-proof", "d")],
+      [events]: [worker("arcforges-cloud-proof", "f")],
+    },
+    schedules: [{ cron: "0 * * * *" }],
+  };
+  // A later acceptance configuration with an outbox sink and a cron: Wrangler updates that consumer and replaces the schedules.
+  const declared = {
+    ...proof,
+    queues: { consumers: [{ queue: events }] },
+    triggers: { crons: ["0 * * * *"] },
+  };
+  const { api, state } = fakeCloudflare(attached);
+  const result = await prepareProofScript(api, declared);
+  assert.deepEqual(result.retiredConsumers, [
+    { queue: wake, outcome: "detached" },
+    { queue: wakeDlq, outcome: "detached" },
+  ]);
+  assert.equal(result.cronSchedules, 1);
+  assert.deepEqual(deletes(state.calls), [detachCall(wake, "a"), detachCall(wakeDlq, "d")]);
+  assert.equal(state.consumers[events]?.length, 1);
+  // Declared crons replace every live schedule, so a changed expression is not a refusal (crons: [] clears them all).
+  for (const crons of [["*/10 * * * *"], []]) {
+    const changed = fakeCloudflare(attached);
+    await prepareProofScript(changed.api, { ...declared, triggers: { crons } });
+    assert.equal(deletes(changed.state.calls).length, 2);
+  }
+  // A proof consumer on a queue that the configuration does not consume is still refused.
+  const other = fakeCloudflare({
+    ...attached,
+    queues: [...attached.queues, "arcforges-other"],
+    consumers: { ...attached.consumers, "arcforges-other": [worker("arcforges-cloud-proof", "e")] },
+  });
+  await assert.rejects(
+    prepareProofScript(other.api, declared),
+    /Queue arcforges-other has a consumer for arcforges-cloud-proof that the proof configuration does not declare/u,
+  );
+  assert.deepEqual(deletes(other.state.calls), []);
+  // A configuration that consumes a retired queue again is refused before anything is read.
+  const reused = fakeCloudflare(attached);
+  await assert.rejects(
+    prepareProofScript(reused.api, { ...proof, queues: { consumers: [{ queue: wakeDlq }] } }),
+    /consumes arcforges-proof-wake-dlq, the retired C# proof queue/u,
+  );
+  assert.deepEqual(reused.state.calls, []);
+});
+
+test("the queue list follows the provider's paging details, within 20 pages", async () => {
+  // 45 queues, 20 per page whatever per_page asked for: the retired ones are on the third page.
+  const many = [...Array.from({ length: 43 }, (_, index) => `queue-${index}`), ...proofQueueNames];
+  const consumers = {
+    [wake]: [worker("arcforges-cloud-proof", "a")],
+    [wakeDlq]: [worker("arcforges-cloud-proof", "d")],
+  };
+  for (const info of ["total_pages", "total_count"] as const) {
+    const { api, state } = fakeCloudflare({
+      queues: many,
+      consumers,
+      queuePaging: { size: 20, info },
+    });
+    const result = await prepareProofScript(api, proof);
+    assert.deepEqual(
+      result.retiredConsumers.map((entry) => entry.outcome),
+      ["detached", "detached"],
+      info,
+    );
+    const pages = state.calls.filter((call) => call === `GET /accounts/${account}/queues`);
+    // Three pages for the preflight and three for the re-read after the removals; never a fourth.
+    assert.equal(pages.length, 6, info);
+    assert.deepEqual(state.consumers, { [wake]: [], [wakeDlq]: [] });
+  }
+  // A list that claims more than 20 pages stops the deployment.
+  const endless = fakeCloudflare({
+    queues: Array.from({ length: 21 }, (_, index) => `queue-${index}`),
+    queuePaging: { size: 1, info: "total_pages" },
+  });
+  await assert.rejects(prepareProofScript(endless.api, proof), /did not end after 20 pages/u);
+  assert.deepEqual(deletes(endless.state.calls), []);
 });

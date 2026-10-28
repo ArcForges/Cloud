@@ -41,6 +41,8 @@ export interface ApiReply {
   /** Provider error codes and messages only; any token text is removed. */
   errors: string;
   result: unknown;
+  /** The provider's paging details (`result_info`), when the reply has them. */
+  resultInfo?: Record<string, unknown> | null;
 }
 
 export class CloudflareApi {
@@ -74,7 +76,12 @@ export class CloudflareApi {
           body: body === undefined ? undefined : JSON.stringify(body),
           signal: AbortSignal.timeout(30_000),
         });
-        let parsed: { success?: boolean; errors?: unknown; result?: unknown } = {};
+        let parsed: {
+          success?: boolean;
+          errors?: unknown;
+          result?: unknown;
+          result_info?: unknown;
+        } = {};
         try {
           parsed = (await response.json()) as typeof parsed;
         } catch {
@@ -90,6 +97,10 @@ export class CloudflareApi {
           success: response.ok && parsed.success !== false,
           errors: this.scrub(errors),
           result: parsed.result ?? null,
+          resultInfo:
+            typeof parsed.result_info === "object" && parsed.result_info !== null
+              ? (parsed.result_info as Record<string, unknown>)
+              : null,
         };
         if (last.status < 500 && last.status !== 429) return last;
       } catch (error) {
@@ -252,6 +263,11 @@ interface ConsumerRecord {
 
 const providerId = /^[0-9a-f]{32}$/u;
 
+/**
+ * Every queue of the account. The provider's paging details decide where the list ends (`result_info.total_pages`, else
+ * `total_count`), so a page size other than the requested one cannot end it early; without them a short or empty page ends it.
+ * At most 20 pages are read.
+ */
 async function listQueues(api: CloudflareApi): Promise<QueueRecord[]> {
   const queues: QueueRecord[] = [];
   for (let page = 1; page <= 20; page++) {
@@ -259,7 +275,15 @@ async function listQueues(api: CloudflareApi): Promise<QueueRecord[]> {
     if (!reply.success || !Array.isArray(reply.result))
       throw new Error(`Listing the queues failed (${describe(reply)}); nothing was deployed.`);
     queues.push(...(reply.result as QueueRecord[]));
-    if (reply.result.length < 100) return queues;
+    const totalPages = reply.resultInfo?.total_pages;
+    const totalCount = reply.resultInfo?.total_count;
+    const last =
+      typeof totalPages === "number"
+        ? page >= totalPages
+        : typeof totalCount === "number"
+          ? queues.length >= totalCount
+          : reply.result.length < 100;
+    if (last || reply.result.length === 0) return queues;
   }
   throw new Error("The queue list did not end after 20 pages; nothing was deployed.");
 }
@@ -274,29 +298,66 @@ function proofConsumers(queue: QueueRecord): ConsumerRecord[] {
   );
 }
 
+/** What the generated proof configuration (`env.proof`) declares that the preflight compares with the live proof script. */
+interface ProofScriptConfiguration {
+  migrationTags: string[];
+  /** The queues the configuration consumes; Wrangler creates or updates exactly these consumers and leaves any other. */
+  consumerQueues: string[];
+  /** `triggers.crons`, which Wrangler applies by replacing every live schedule; undefined leaves the live schedules as they are. */
+  crons: string[] | undefined;
+}
+
+function proofScriptConfiguration(proof: Record<string, unknown>): ProofScriptConfiguration {
+  const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+  const field = (value: unknown, key: string): unknown =>
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)[key]
+      : undefined;
+  const crons = field(proof.triggers, "crons");
+  return {
+    migrationTags: list(proof.migrations).map((migration) => String(field(migration, "tag"))),
+    consumerQueues: list(field(proof.queues, "consumers")).map((consumer) =>
+      String(field(consumer, "queue")),
+    ),
+    crons: Array.isArray(crons) ? crons.map(String) : undefined,
+  };
+}
+
 /**
  * AF-CTR-02 follow-up. The retired C# proof bundle consumed the queues `proofQueueNames` (the wake queue and its dead-letter
  * queue); the acceptance bundle has no queue handler, so Cloudflare refuses its upload while either queue still names the proof
  * script as a consumer (code 11001). The wake messages are transient container wake signals, not user data: the consumers are
  * detached, and both queues and any messages in them stay as they are, unconsumed, until AF-CTR-09.
  *
- * Prepares the proof script for the acceptance bundle, before anything is rotated or uploaded. It reads first and refuses what it
- * does not know: a consumer of the proof script on any other queue, a cron schedule (the bundle has no scheduled handler), or a
- * published Durable Object migration tag that the configuration does not list. Then it detaches only the proof script's consumers
- * of exactly the two retired queues, reporting "detached" or "not attached" for each. It never deletes a queue or a message, and
- * any API failure stops the deployment before Wrangler runs.
+ * Prepares the proof script for the generated proof configuration `proof` (`env.proof`), before anything is rotated or uploaded.
+ * It reads first and refuses only what the deployment would leave in place without the configuration declaring it: a consumer of
+ * the proof script on a queue that the configuration does not consume, a live cron schedule while the configuration declares no
+ * `triggers.crons` (with declared crons, Wrangler replaces the schedules), or a published Durable Object migration tag that the
+ * configuration does not list. Then it detaches only the proof script's consumers of exactly the two retired queues, reporting
+ * "detached" or "not attached" for each. It never deletes a queue or a message, and any API failure stops the deployment before
+ * Wrangler runs.
  */
 export async function prepareProofScript(
   api: CloudflareApi,
-  migrationTags: readonly string[],
+  proof: Record<string, unknown>,
 ): Promise<ProofScriptPreflight> {
+  const { migrationTags, consumerQueues, crons } = proofScriptConfiguration(proof);
   const retired: readonly string[] = proofQueueNames;
+  const reused = consumerQueues.filter((name) => retired.includes(name));
+  if (reused.length > 0)
+    throw new Error(
+      `The proof configuration consumes ${reused.join(", ")}, the retired C# proof queue(s) whose consumers this deployment detaches; AF-CTR-09 decides about those queues. Nothing was deployed.`,
+    );
   const queues = await listQueues(api);
   for (const queue of queues) {
     const name = String(queue.queue_name);
-    if (!retired.includes(name) && proofConsumers(queue).length > 0)
+    if (
+      !retired.includes(name) &&
+      !consumerQueues.includes(name) &&
+      proofConsumers(queue).length > 0
+    )
       throw new Error(
-        `Queue ${name} has a consumer for ${proofWorkerName} that this deployment does not detach, and the acceptance bundle has no queue handler. Nothing was deployed; the owner decides about that consumer.`,
+        `Queue ${name} has a consumer for ${proofWorkerName} that the proof configuration does not declare and this deployment does not detach. Nothing was deployed; the owner decides about that consumer.`,
       );
   }
   const schedules = await api.request(
@@ -311,9 +372,10 @@ export async function prepareProofScript(
     throw new Error(
       `Reading the proof script's cron schedules failed (${describe(schedules)}); nothing was deployed.`,
     );
-  if (cronSchedules > 0)
+  // Declared crons replace every live schedule; without them, each live schedule stays beside a bundle that declares none.
+  if (crons === undefined && cronSchedules > 0)
     throw new Error(
-      `The proof script has ${cronSchedules} cron schedule(s), and the acceptance bundle has no scheduled handler. Nothing was deployed; the owner decides about the schedules.`,
+      `The proof script has ${cronSchedules} cron schedule(s) that the proof configuration does not declare (it declares no triggers.crons, so the deployment would leave them in place). Nothing was deployed; the owner decides about the schedules.`,
     );
   const service = await api.request("GET", api.accountPath(`/workers/services/${proofWorkerName}`));
   let migrationTag: string | null = null;
@@ -934,14 +996,9 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   });
   const configFile = path.join(root, "artifacts", "proof.wrangler.json");
   await writeJson(configFile, config);
-  // AF-CTR-02 follow-up: the retired C# proof consumers are detached (and anything unknown refused) before the rotation and upload.
-  const proofMigrations = config.env.proof.migrations;
-  const preflight = await prepareProofScript(
-    api,
-    Array.isArray(proofMigrations)
-      ? proofMigrations.map((migration) => String((migration as { tag?: unknown }).tag))
-      : [],
-  );
+  // AF-CTR-02 follow-up: the retired C# proof consumers are detached (and anything the configuration does not declare refused)
+  // before the rotation and upload.
+  const preflight = await prepareProofScript(api, config.env.proof);
   for (const entry of preflight.retiredConsumers)
     console.log(`  Queue ${entry.queue}: ${proofWorkerName} consumer ${entry.outcome}`);
   console.log(
