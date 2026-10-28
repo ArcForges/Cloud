@@ -4,6 +4,7 @@ package config
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -47,11 +48,14 @@ func TestTheMigrationConfiguration(t *testing.T) {
 	values := migrationValues()
 	values[EnvDatabaseName] = "arcforges_acceptance"
 	values[EnvRuntimeRole] = "arcforges_acceptance_runtime"
-	values[EnvRuntimeSecretFile] = "/tmp/runtime/secret.json"
+	// An absolute path of the host platform (C:\... on Windows); a relative one is refused below.
+	secretFile := filepath.Join(t.TempDir(), "runtime", "secret.json")
+	values[EnvRuntimeSecretFile] = secretFile
 	values[EnvMigrationLockTimeout] = "30s"
 	config, err = LoadMigration(environment(values))
 	if err != nil || config.Database != "arcforges_acceptance" || !strings.Contains(config.URL, "/arcforges_acceptance?") ||
-		!strings.Contains(config.Maintenance, "/neondb?") || config.RuntimeRole != "arcforges_acceptance_runtime" || config.LockTimeout != 30*time.Second {
+		!strings.Contains(config.Maintenance, "/neondb?") || config.RuntimeRole != "arcforges_acceptance_runtime" || config.LockTimeout != 30*time.Second ||
+		config.SecretFile != secretFile {
 		t.Fatalf("acceptance: %+v %v", config, err)
 	}
 	local := map[string]string{EnvMode: string(SelfHosted), EnvMigrationDatabaseURL: "postgres://owner:secret@127.0.0.1:5432/center?sslmode=disable"}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -68,7 +69,8 @@ func TestTheMigrationAndAdministrationCommands(t *testing.T) {
 		t.Fatalf("rotation: %v", rotation)
 	}
 	info, err := os.Stat(secretFile)
-	if err != nil || info.Mode().Perm() != 0o600 {
+	// Windows has no POSIX permission bits (Go reports 0666 for a writable file); the mode is checked where it exists.
+	if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
 		t.Fatalf("secret file: %v %v", info, err)
 	}
 	content, _ := os.ReadFile(secretFile)
