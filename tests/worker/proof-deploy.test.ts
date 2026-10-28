@@ -54,6 +54,9 @@ test("the checked-in proof environment is the isolated acceptance center", () =>
       ARCFORGES_CENTER_MODE: "official-hosted",
       ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
       ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
+      // AF-CTR-03: the acceptance environment serves the identity surface; browser cookies are bound to its own origin.
+      FLAGSHIP_SURFACES: "identity",
+      ALLOWED_ORIGIN: "https://proof.arcforges.com",
     },
   );
   // Production keeps the Hello-only bindings and never the development fixtures.

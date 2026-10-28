@@ -163,6 +163,8 @@ test("the Go center is selected only for the production class and proof remains 
   assert.deepEqual(production.envVars, {
     ARCFORGES_CENTER_MODE: "official-hosted",
     ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://center.example/api",
+    ARCFORGES_CENTER_SURFACES: "none",
+    ARCFORGES_CENTER_CLIENT_IP_HEADER: "x-arcforges-client-ip",
     ARCFORGES_NEON_HELLO: "enabled",
     NEON_DATABASE_URL: "synthetic",
   });
@@ -212,6 +214,8 @@ test("a Go center with a store gets the runtime role's URL and never the Hello's
     ARCFORGES_CENTER_MODE: "official-hosted",
     ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://center.example/api",
     ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
+    ARCFORGES_CENTER_SURFACES: "none",
+    ARCFORGES_CENTER_CLIENT_IP_HEADER: "x-arcforges-client-ip",
     ARCFORGES_CENTER_DATABASE_URL: "synthetic-runtime-credential",
     ARCFORGES_NEON_HELLO: "enabled",
   });
@@ -229,6 +233,23 @@ test("a Go center with a store gets the runtime role's URL and never the Hello's
     (csharp.envVars as Record<string, string>).NEON_DATABASE_URL,
     "synthetic-hello-credential",
   );
+});
+
+test("the Go center gets the surfaces the Worker forwards and always the client-address header", () => {
+  const settings = (flag: string | undefined) =>
+    new CloudContainer(containerContext, { ...centerEnvironment, FLAGSHIP_SURFACES: flag })
+      .envVars as Record<string, string>;
+  assert.equal(settings("identity").ARCFORGES_CENTER_SURFACES, "identity");
+  // The center refuses to start on an unknown surface name; the Worker forwards none of it, so it passes "none" instead.
+  for (const flag of [undefined, "", "Identity", "identity,identity", "identity, operations"])
+    assert.equal(settings(flag).ARCFORGES_CENTER_SURFACES, "none", String(flag));
+  assert.equal(settings("identity").ARCFORGES_CENTER_CLIENT_IP_HEADER, "x-arcforges-client-ip");
+  const csharp = new CloudContainer(containerContext, {
+    ARCFORGES_HELLO_RUNTIME: "csharp",
+    FLAGSHIP_SURFACES: "identity",
+  }).envVars as Record<string, string> | undefined;
+  assert.equal(csharp?.ARCFORGES_CENTER_SURFACES, undefined);
+  assert.equal(csharp?.ARCFORGES_CENTER_CLIENT_IP_HEADER, undefined);
 });
 
 test("the acceptance entry runs the Go center under the proof Container class and keeps the retired classes inert", async () => {

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // ARCFORGES_HELLO_RUNTIME=go selects the Go center (/app/arcforges-center) and passes it its explicit mode, public base URL and
 // plan configuration, and the runtime role's pooled PostgreSQL URL of its store; the center refuses to start without a valid
-// mode and base URL. The Hello's own Neon credential reaches only the C# host, or a Go center without a store. Proof subclasses
+// mode and base URL. It also passes the enabled surfaces the Worker forwards (FLAGSHIP_SURFACES as parsed here, "none" when none)
+// and always names the header the Worker sets to the client's address, so the center and the Worker agree on both. The Hello's own Neon credential reaches only the C# host, or a Go center without a store. Proof subclasses
 // keep their closed outbound policy and their own environment hook.
 import { Container, type OutboundHandler } from "@cloudflare/containers";
 import { aiInternalOutbound } from "../ai/internal/outbound.ts";
 import { containerSleepAfter } from "../tables/cloud-tables.generated.ts";
+import { clientIpHeader, enabledSurfaces } from "../ingress/routes.ts";
 
 export interface CenterEnvironment {
   ARCFORGES_NEON_HELLO?: string;
@@ -15,6 +17,7 @@ export interface CenterEnvironment {
   ARCFORGES_CENTER_PUBLIC_BASE_URL?: string;
   ARCFORGES_CENTER_PLAN_CONFIGURATION?: string;
   ARCFORGES_CENTER_DATABASE_URL?: string;
+  FLAGSHIP_SURFACES?: string;
 }
 
 /** What the Container runs: the entrypoint (undefined keeps the image's C# default), its environment and TCP egress. */
@@ -40,6 +43,9 @@ export function centerContainerSettings(center: CenterEnvironment): CenterContai
       const value = center[name];
       if (value !== undefined) settings.envVars[name] = value;
     }
+    const surfaces = [...enabledSurfaces(center.FLAGSHIP_SURFACES)];
+    settings.envVars.ARCFORGES_CENTER_SURFACES = surfaces.length > 0 ? surfaces.join(",") : "none";
+    settings.envVars.ARCFORGES_CENTER_CLIENT_IP_HEADER = clientIpHeader;
     if (center.ARCFORGES_CENTER_DATABASE_URL) {
       // Native PostgreSQL TCP is not handled by the HTTP outbound proxy; allowedHosts would NOT restrict TCP port 5432.
       settings.enableInternet = true;

@@ -29,3 +29,25 @@ test("the host build network is a local-only option that hosted CI refuses", () 
     /only host/,
   );
 });
+
+test("every Worker test file runs in npm test or in its own named script", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const path = await import("node:path");
+  const root = path.resolve(import.meta.dirname, "../..");
+  const scripts = (
+    JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    }
+  ).scripts;
+  const listed = new Set(scripts.test?.split(" ").filter((item) => item.endsWith(".test.ts")));
+  for (const file of readdirSync(path.join(root, "tests/worker")).filter((name) =>
+    name.endsWith(".test.ts"),
+  )) {
+    const relative = `tests/worker/${file}`;
+    // The release provenance test needs a prepared candidate and runs in test:artifact.
+    const own = Object.entries(scripts).some(
+      ([name, script]) => name !== "test" && script.includes(relative),
+    );
+    assert(listed.has(relative) || own, `${relative} is not run by npm test`);
+  }
+});

@@ -16,10 +16,14 @@ export interface CloudBindings {
   FOUNDATION_PROOF?: string;
   /** The one exact Origin that may use a browser session cookie. Absent means no cookie credential is admitted. */
   ALLOWED_ORIGIN?: string;
+  /** The enabled switchable surfaces (AF-CTR-03); absent or empty enables none. */
+  FLAGSHIP_SURFACES?: string;
   CLOUD_CONTAINER: {
     getByName(name: string): { fetch(request: Request): Promise<Response> };
   };
   HELLO_RATE_LIMITER: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** The edge rate limit of the surface methods. */
+  IDENTITY_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
 export async function routeRequest(
