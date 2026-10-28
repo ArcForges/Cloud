@@ -110,8 +110,8 @@ the remaining C# code.
   §13a); Hello and health are not gated features. No official endpoint is compiled into a code path: health and every URL the
   center issues derive from `ARCFORGES_CENTER_PUBLIC_BASE_URL`.
 - Every public method registers its policy and Worker budget in `center/internal/routes`; the ingress registry and the
-  Worker's production table (`worker/tables/center-tables.generated.ts`) are generated from it. Run `python eng/center.py
-generate` after a registration change; never edit the generated table by hand.
+  Worker's production table (`worker/tables/center-tables.generated.ts`) are generated from it. After a registration change,
+  run `python eng/center.py generate`; never edit the generated table by hand.
 - The center keeps the C# ingress behaviour for the methods it serves (deny by default, framing, credentials, body bounds,
   correlation, refusal statuses; [center](docs/center.md#ingress-compatibility)). Signatures and request digests cover the
   transmitted bytes, never a re-encoding (AD-0021 §10).

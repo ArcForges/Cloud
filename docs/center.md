@@ -56,20 +56,20 @@ that is published under a path prefix sits behind a proxy that removes it, exact
 Every value is an environment variable. A missing or invalid value refuses to start with one JSON log line that names the
 variable and never repeats its value.
 
-| Variable                                | Default  | Rule                                                                                                                                                                               |
-| --------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ARCFORGES_CENTER_MODE`                 | none     | Required: `official-hosted` or `self-hosted` exactly                                                                                                                               |
-| `ARCFORGES_CENTER_PUBLIC_BASE_URL`      | none     | Required: canonical absolute `https` URL (lowercase host, optional port and path, no trailing slash, query, fragment or user); `http` only for a loopback host in self-hosted mode |
-| `ARCFORGES_CENTER_HTTP_ADDRESS`         | `:8080`  | HTTP/1.1 and h2c listener; `host:port` with an IP literal, `localhost` or no host                                                                                                  |
-| `ARCFORGES_CENTER_GRPC_ADDRESS`         | `:8081`  | h2c-only listener; `off` disables it                                                                                                                                               |
-| `ARCFORGES_CENTER_ADMIN_ADDRESS`        | disabled | Readiness (`/readyz`) and metrics (`/metrics`); must be a loopback address in official-hosted mode                                                                                 |
-| `ARCFORGES_CENTER_MAX_CONNECTIONS`      | `64`     | Concurrent connections per listener, 1 to 4096                                                                                                                                     |
-| `ARCFORGES_CENTER_LOG_LEVEL`            | `info`   | `debug`, `info`, `warn` or `error`                                                                                                                                                 |
-| `ARCFORGES_CENTER_METRICS_LOG_INTERVAL` | `1m`     | The periodic metrics log line; `0` disables it, otherwise 10 s to 1 h                                                                                                              |
-| `ARCFORGES_NEON_HELLO`                  | disabled | `enabled` reads the Hello greeting from Neon (unchanged from the Go Hello)                                                                                                         |
-| `NEON_DATABASE_URL`                     | none     | With the Neon Hello: a complete pooled Neon URL with `sslmode` and `channel_binding=require`; pool of two, exec query mode                                                         |
-| `ARCFORGES_CENTER_DATABASE_URL`         | none     | The pooled runtime database of the store (part B); verified TLS with channel binding, except a loopback host of a self-hosted center                                               |
-| `ARCFORGES_CENTER_DATABASE_MAX_CONNS`   | `4`      | Pool size of the runtime database, 1 to 32                                                                                                                                         |
+| Variable                                | Default  | Rule                                                                                                                                                                                                       |
+| --------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ARCFORGES_CENTER_MODE`                 | none     | Required: `official-hosted` or `self-hosted` exactly                                                                                                                                                       |
+| `ARCFORGES_CENTER_PUBLIC_BASE_URL`      | none     | Required: canonical absolute `https` URL (lowercase host, optional port and path, no trailing slash, query, fragment or user); `http` only for a loopback host in self-hosted mode                         |
+| `ARCFORGES_CENTER_HTTP_ADDRESS`         | `:8080`  | HTTP/1.1 and h2c listener; `host:port` with an IP literal, `localhost` or no host                                                                                                                          |
+| `ARCFORGES_CENTER_GRPC_ADDRESS`         | `:8081`  | h2c-only listener; `off` disables it                                                                                                                                                                       |
+| `ARCFORGES_CENTER_ADMIN_ADDRESS`        | disabled | Readiness (`/readyz`) and metrics (`/metrics`); must be a loopback address in official-hosted mode                                                                                                         |
+| `ARCFORGES_CENTER_MAX_CONNECTIONS`      | `64`     | Concurrent connections per listener, 1 to 4096                                                                                                                                                             |
+| `ARCFORGES_CENTER_LOG_LEVEL`            | `info`   | `debug`, `info`, `warn` or `error`                                                                                                                                                                         |
+| `ARCFORGES_CENTER_METRICS_LOG_INTERVAL` | `1m`     | The periodic metrics log line; `0` disables it, otherwise 10 s to 1 h                                                                                                                                      |
+| `ARCFORGES_NEON_HELLO`                  | disabled | `enabled` reads the Hello greeting from Neon (unchanged from the Go Hello)                                                                                                                                 |
+| `NEON_DATABASE_URL`                     | none     | With the Neon Hello: a complete pooled Neon URL with `sslmode` and `channel_binding=require`; pool of two, exec query mode; `application_name` `arcforges-center` (the Go Hello sent `arcforges-go-hello`) |
+| `ARCFORGES_CENTER_DATABASE_URL`         | none     | The pooled runtime database of the store (part B); verified TLS with channel binding, except a loopback host of a self-hosted center                                                                       |
+| `ARCFORGES_CENTER_DATABASE_MAX_CONNS`   | `4`      | Pool size of the runtime database, 1 to 32                                                                                                                                                                 |
 
 The direct (unpooled) migration database URL arrives with `migrate` in part B. No URL of the official deployment is compiled
 into a code path: `TestNoOfficialEndpointIsCompiledIn` fails if one appears, and health and every URL the center issues derive
@@ -265,5 +265,8 @@ per deployment, which AF-PLAT-01's budgets take as the bound.
 `eng/verify_steps.py`) and of hosted CI for external PRs; [engineering controls](engineering-controls.md) lists every control,
 its stage and its evidence. The published C# client's exchange is covered offline by the protocol tests of
 `center/internal/server` (greeting, Unicode, NUL, empty and oversized names, statuses and trailers over gRPC and binary
-gRPC-Web, and the probe's raw HTTP/1.1 exchange), and the local Worker runtime (`npm run test:worker`) runs the real image's Go
-executable behind the real Worker bundle.
+gRPC-Web, and the probe's raw HTTP/1.1 exchange). Two local opt-in diagnostics (never CI, not gates) start the sealed candidate
+image: `npm run test:container` runs `/app/arcforges-center` as the Container does (the mode and public base URL of
+`wrangler.json`, a read-only filesystem, no capabilities, `no-new-privileges`, 256 MiB) and checks its build identity, the health
+identity and `center` block, the published C# gRPC-Web probe, the published native gRPC Consumer and a clean stop on `SIGTERM`;
+`npm run test:worker` runs the same executable behind the real Worker bundle.

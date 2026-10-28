@@ -52,9 +52,9 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   drift-checked by the center's Go tests ([center](center.md#worker-table-authority)); `tools/ArcForges.Cloud.Generation`
   reads the C# host's registrations (`PipelineProbe`, and `HelloModule` for the cross-check) and the transport budgets in
   `src/ArcForges.Cloud/Generation/TransportBudgets.cs`, and writes the proof rows to `worker/tables/cloud-tables.generated.ts`.
-  Both generators refuse a registered method without a budget and a budget without a registered method. `npm run
-check:generated`, the center's `TestCommittedWorkerTablesAreCurrent` and the C# test `GeneratedTablesTests` fail on any
-  drift, and `GeneratedTablesTests` pins the Go production table to the C# Hello registration, byte for byte.
+  Both generators refuse a registered method without a budget and a budget without a registered method.
+  `npm run check:generated`, the center's `TestCommittedWorkerTablesAreCurrent` and the C# test `GeneratedTablesTests` fail
+  on any drift, and `GeneratedTablesTests` pins the Go production table to the C# Hello registration, byte for byte.
   The Worker's transport budgets and edge-guard names (the session cookie and the CSRF header) come from the same module.
   Every other limit and identifier shape the Worker applies is declared in C# as well: the production values in
   `src/ArcForges.Cloud/Generation/WorkerWireLimits.cs` (the body and router read timers, the container sleep, the gRPC frame

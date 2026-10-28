@@ -93,8 +93,9 @@ func isLoopbackHost(host string) bool {
 }
 
 // NeonHelloPool is the pooled Neon connection of the Hello greeting: a complete pooled NEON_DATABASE_URL with verified TLS and
-// required channel binding, a pool capped at two and the exec query mode, which keeps no session state for the pooler. It is
-// the Go Hello's configuration, unchanged.
+// required channel binding, a pool capped at two and the exec query mode, which keeps no session state for the pooler. It
+// keeps the Go Hello's URL, TLS, pool and query-mode rules; only the session's application_name changed, from
+// arcforges-go-hello to arcforges-center.
 func NeonHelloPool(value string) (*pgxpool.Config, error) {
 	refused := invalid("the Neon Hello requires a complete pooled %s with TLS and channel binding", EnvNeonDatabaseURL)
 	if len(value) == 0 || len(value) > 8192 {
@@ -124,6 +125,7 @@ func NeonHelloPool(value string) (*pgxpool.Config, error) {
 	config.MaxConnLifetime = time.Hour
 	config.ConnConfig.ConnectTimeout = 10 * time.Second
 	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	// The Go Hello sent arcforges-go-hello; the center names itself in pg_stat_activity.
 	config.ConnConfig.RuntimeParams["application_name"] = "arcforges-center"
 	return config, nil
 }
