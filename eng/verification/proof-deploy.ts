@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Pure helpers of the proof-environment deployment: the isolated Wrangler configuration and the
-// deployment secrets. The deployment itself runs only in the manually dispatched CI job
-// (eng/verification/proof-cloudflare.ts); secrets are generated there at deploy time, handed to
-// Wrangler through a runner-local file and never printed, committed or sent anywhere else.
+// Pure helpers of the proof-environment deployment: the isolated Wrangler configuration of the acceptance environment and, kept
+// with their tests until AF-CTR-09, the helpers of the retired C# proof (its deployment secrets and the Web profile bundle). Since
+// AF-CTR-02 the `proof` Worker on proof.arcforges.com is the acceptance environment of the Go center (worker/acceptance/entry.ts);
+// the deployment runs only in the manually dispatched CI job (eng/verification/proof-cloudflare.ts), and its only secret, the
+// acceptance runtime credential, is rotated there and handed to Wrangler through a runner-local file.
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
@@ -17,10 +18,15 @@ export const proofHostname = "proof.arcforges.com";
 /** The route families that the Worker answers before any static asset. */
 export const workerFirst = ["/api/*", "/session/v1/*", "/proof/v1/*"];
 /**
- * The proof environment's own source entry (CLOUD.84 D1), as env.proof.main declares it. Only the candidate job reads it: it
- * bundles it once, with a Wrangler dry run, into the sealed candidate member `proof-worker.js`. A deployment never reads it.
+ * The proof environment's own source entry (CLOUD.84 D1; the acceptance entry since AF-CTR-02), as env.proof.main declares it.
+ * Only the candidate job reads it: it bundles it once, with a Wrangler dry run, into the sealed candidate member `proof-worker.js`.
+ * A deployment never reads it.
  */
-export const proofSourceEntry = "worker/proof/entry.ts";
+export const proofSourceEntry = "worker/acceptance/entry.ts";
+/** The acceptance center's public base URL: the proof host's /api prefix, as the production center's is arcforges.com/api. */
+export const acceptanceBaseUrl = "https://proof.arcforges.com/api";
+/** The Container class name the proof environment keeps (its Durable Object namespace and Container application stay). */
+export const acceptanceContainerClass = "FoundationContainer";
 /** The sealed proof bundle of the downloaded candidate, relative to the generated configuration file (artifacts/). */
 export const sealedProofBundle = "./candidate/proof-worker.js";
 /** Where the verified bundle is staged, beside the generated configuration (artifacts/). */
@@ -73,8 +79,8 @@ export function buildProofConfig(
     revision: string;
     databaseId?: string;
     main: string;
-    /** Relative to the directory of the generated configuration file; defaults to the staged profile assets. */
-    assetsDir?: string;
+    /** The candidate's compiled build identity (its top-level BUILD_IDENTITY), for the Worker's build header. */
+    buildIdentity?: string;
     /** Relative to the directory of the generated configuration file. */
     migrationsDir?: string;
   },
@@ -122,17 +128,29 @@ export function buildProofConfig(
   // instead of a Dockerfile path.
   const top = (config as Record<string, unknown>).containers as { image: string }[] | undefined;
   if (top?.[0]) top[0].image = options.imageDigest;
-  proof.vars = { ...proof.vars, SOURCE_REVISION: options.revision };
-  // The static profile assets: the directory staged from the verified bundle, with the Worker answering its own
-  // route families first. Nothing else about the assets configuration is taken from the options.
-  const assets = proof.assets;
-  assert(assets, "The proof environment declares no static assets.");
-  assert.deepEqual(
-    assets.run_worker_first,
-    workerFirst,
-    "The Worker must answer its route families first.",
+  // AF-CTR-02: the acceptance environment is the Go center in official-hosted mode with the development fixtures of the plan
+  // configuration; the C# proof routes, its static profile assets, its R2 bucket and its queues are no longer bound.
+  assert.equal(
+    proof.vars.ARCFORGES_HELLO_RUNTIME,
+    "go",
+    "The acceptance environment runs the Go center.",
   );
-  assets.directory = options.assetsDir ?? `./${proofAssetsDirName}`;
+  assert.equal(proof.vars.ARCFORGES_CENTER_MODE, "official-hosted");
+  assert.equal(proof.vars.ARCFORGES_CENTER_PUBLIC_BASE_URL, acceptanceBaseUrl);
+  assert.equal(proof.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, "development-fixtures");
+  assert.equal(proof.vars.FOUNDATION_PROOF, undefined, "The C# proof foundation is not deployed.");
+  for (const retired of ["assets", "r2_buckets", "queues"])
+    assert.equal(
+      proof[retired],
+      undefined,
+      `The acceptance environment binds no ${retired} of the C# proof.`,
+    );
+  assert.equal(
+    (proof.containers[0] as { class_name?: string }).class_name,
+    acceptanceContainerClass,
+  );
+  proof.vars = { ...proof.vars, SOURCE_REVISION: options.revision };
+  if (options.buildIdentity !== undefined) proof.vars.BUILD_IDENTITY = options.buildIdentity;
   if (options.databaseId !== undefined) {
     assert.match(
       options.databaseId,

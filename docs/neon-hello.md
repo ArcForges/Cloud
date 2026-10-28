@@ -1,5 +1,10 @@
 # Deployed Neon Hello
 
+> **Update (AF-CTR-02 part B).** This record describes the C# Hello's Neon check, which stays as the rollback host. The
+> Go center now reads the Hello greeting through its least-privilege runtime role, whose pooled URL the deploy job rotates
+> and uploads; `NEON_DATABASE_URL` reaches only the C# host or a center without a store, and `NEON_DATABASE_URL_DIRECT` is
+> used by the deploy job's migration step. See [PostgreSQL store](postgres-store.md).
+
 The user authorized two sequential deployment checks on 2026-10-27: first the existing C# Hello with
 Neon, then a Go Hello with the same public contract. This increment implements only the C# check.
 It is not the full Go migration, a D1 migration, or activation of flagship business surfaces.

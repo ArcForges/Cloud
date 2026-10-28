@@ -45,6 +45,9 @@ const (
 	ReasonUnknownFeature Reason = "unknown_feature"
 	// ReasonModeInvalid is a gate without a valid mode; nothing is available.
 	ReasonModeInvalid Reason = "mode_invalid"
+	// ReasonPlanCataloguePending is every gated feature of an official-hosted center configured with the development fixtures
+	// (the acceptance environment) until AF-CTR-03 delivers the catalogue and the resolver; still nothing is enabled.
+	ReasonPlanCataloguePending Reason = "plan_catalogue_pending"
 )
 
 // Decision is the availability of one feature for one caller.
@@ -59,10 +62,15 @@ type Gate interface {
 	Availability(ctx context.Context, key Key) Decision
 }
 
-// NewGate is the stub gate of a center mode.
-func NewGate(mode config.Mode) Gate { return stub{mode: mode} }
+// NewGate is the stub gate of a center mode and plan configuration.
+func NewGate(mode config.Mode, plan config.PlanConfiguration) Gate {
+	return stub{mode: mode, plan: plan}
+}
 
-type stub struct{ mode config.Mode }
+type stub struct {
+	mode config.Mode
+	plan config.PlanConfiguration
+}
 
 func (s stub) Availability(_ context.Context, key Key) Decision {
 	known := false
@@ -74,6 +82,8 @@ func (s stub) Availability(_ context.Context, key Key) Decision {
 		return Decision{Reason: ReasonUnknownFeature}
 	case s.mode == config.SelfHosted:
 		return Decision{Available: true, Reason: ReasonSelfHostedDefault}
+	case s.mode == config.OfficialHosted && s.plan == config.PlanDevelopmentFixtures:
+		return Decision{Reason: ReasonPlanCataloguePending}
 	case s.mode == config.OfficialHosted:
 		return Decision{Reason: ReasonPlanConfigurationMissing}
 	default:

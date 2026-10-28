@@ -33,37 +33,40 @@ const wrangler = JSON.parse(
 const digest = `registry.example/arcforges-cloud@sha256:${"a".repeat(64)}`;
 const account = "0".repeat(32);
 
-test("the checked-in proof environment is isolated from the production Worker", () => {
+test("the checked-in proof environment is the isolated acceptance center", () => {
   const proof = wrangler.env.proof;
   assert.equal(wrangler.name, "arcforges-cloud");
   assert.equal(proof.name, proofWorkerName);
-  // The only ingress is the dedicated custom domain; workers.dev and preview URLs stay disabled and
-  // the production route arcforges.com/api/* is not referenced.
+  // The only ingress is the dedicated custom domain; workers.dev and preview URLs stay disabled and the production route
+  // arcforges.com/api/* is not claimed.
   assert.deepEqual(proof.routes, [{ pattern: proofHostname, custom_domain: true }]);
   assert.equal(proofHostname, "proof.arcforges.com");
   assert.equal(proof.workers_dev, false);
   assert.equal(proof.preview_urls, false);
-  assert(!JSON.stringify(proof).includes("arcforges.com/api"));
-  assert.equal(proof.vars.ALLOWED_ORIGIN, `https://${proofHostname}`);
-  assert.match(String(proof.vars.PROOF_OPERATOR_VERIFIER), /^[A-Za-z0-9_-]{43}$/u);
-  assert.equal(proof.vars.FOUNDATION_PROOF, "enabled");
-  // Production keeps the Hello-only bindings.
+  // AF-CTR-02: the Go center in official-hosted mode with the development fixtures of the plan configuration, under the proof
+  // host's own public base URL; none of the retired C# proof's variables.
+  assert.equal(proof.main, proofSourceEntry);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(proof.vars).filter(([key]) => key !== "SOURCE_REVISION")),
+    {
+      ARCFORGES_NEON_HELLO: "enabled",
+      ARCFORGES_HELLO_RUNTIME: "go",
+      ARCFORGES_CENTER_MODE: "official-hosted",
+      ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
+      ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
+    },
+  );
+  // Production keeps the Hello-only bindings and never the development fixtures.
   const top = wrangler as unknown as Record<string, unknown>;
-  for (const key of ["d1_databases", "r2_buckets", "queues"])
+  for (const key of ["d1_databases", "r2_buckets", "queues", "assets"])
     assert.equal(top[key], undefined, key);
   assert.equal((top.vars as Record<string, string>).FOUNDATION_PROOF, undefined);
-  // Production binds the unchanged Hello Container class; only the proof environment binds the
-  // subclass that registers outbound interception.
+  assert.equal((top.vars as Record<string, string>).ARCFORGES_CENTER_PLAN_CONFIGURATION, undefined);
   const classes = (value: unknown) => JSON.stringify(value).match(/"class_name":"[^"]+"/gu);
   assert.deepEqual(classes(top.containers), ['"class_name":"CloudContainer"']);
-  // The production script binds no Durable Object of the harness: the run alarm (HAR.40) exists only in the proof environment.
   assert.deepEqual(classes(top.durable_objects), ['"class_name":"CloudContainer"']);
   const { env: _proofEnvironment, ...production } = top;
   assert(!JSON.stringify(production).includes("HarnessRunAlarm"), "production binds no run alarm");
-  assert(
-    !JSON.stringify(production).includes("HARNESS_RUN_ALARM"),
-    "production binds no run alarm",
-  );
   // The live script recorded the discarded build's capacity-pacer-v1 tag; that history is kept
   // and the class it added is retired. Only the deletion is applied after the live tag.
   assert.deepEqual(top.migrations, [
@@ -71,28 +74,32 @@ test("the checked-in proof environment is isolated from the production Worker", 
     { tag: "capacity-pacer-v1", new_sqlite_classes: ["CapacityJobPacer"] },
     { tag: "retire-capacity-pacer-v1", deleted_classes: ["CapacityJobPacer"] },
   ]);
-  // The proof environment binds the run alarm (HAR.40) with its own migration; it is a wake-only adapter that holds a wake handle and no run state.
-  assert.deepEqual(classes(proof.durable_objects), [
-    '"class_name":"FoundationContainer"',
-    '"class_name":"FoundationJobCoordinator"',
-    '"class_name":"HarnessRunAlarm"',
-  ]);
+  // The proof environment keeps its Container class name (so its Durable Object namespace and Container application stay) and its
+  // migrations unchanged: no class is deleted, so the retained classes' stored state stays until AF-CTR-09.
+  assert.deepEqual(classes(proof.containers), ['"class_name":"FoundationContainer"']);
+  assert.deepEqual(classes(proof.durable_objects), ['"class_name":"FoundationContainer"']);
   assert.deepEqual(proof.migrations, [
     { tag: "v1", new_sqlite_classes: ["FoundationContainer", "FoundationJobCoordinator"] },
     { tag: "harness-run-alarm-v1", new_sqlite_classes: ["HarnessRunAlarm"] },
   ]);
-  assert.deepEqual(classes(proof.containers), ['"class_name":"FoundationContainer"']);
+  assert.equal(JSON.stringify(proof.migrations).includes('"CloudContainer"'), false);
+  // The acceptance entry exports every class of the proof migrations.
+  const entry = readFileSync(path.resolve(import.meta.dirname, "../../", proofSourceEntry), "utf8");
+  for (const name of ["FoundationContainer", "FoundationJobCoordinator", "HarnessRunAlarm"])
+    assert.match(entry, new RegExp(`export class ${name} extends`, "u"), name);
+  // The C# proof's resources stay as they are, unbound; only the retained D1 database stays bound (the gated C# migration step
+  // keeps it current until AF-CTR-09).
+  const record = proof as unknown as Record<string, unknown>;
+  for (const key of ["assets", "r2_buckets", "queues"]) assert.equal(record[key], undefined, key);
   assert.deepEqual(
-    JSON.stringify(proof.migrations).includes('"CloudContainer"'),
-    false,
-    "the proof environment never references the production class",
+    proof.d1_databases.map((entry) => (entry as { database_name?: string }).database_name),
+    ["arcforges-proof-business"],
   );
   // No resource name is shared with another environment.
-  const names = JSON.stringify(proof);
-  assert(!names.includes('"arcforges-cloud"'));
-  // Variables carry key identifiers, never secret values.
+  assert(!JSON.stringify(proof).includes('"arcforges-cloud"'));
+  // Variables carry configuration, never secret values.
   assert.deepEqual(
-    Object.keys(proof.vars).filter((key) => /SECRET|TOKEN/u.test(key)),
+    Object.keys(proof.vars).filter((key) => /SECRET|TOKEN|DATABASE_URL/u.test(key)),
     [],
   );
 });
@@ -171,6 +178,34 @@ test("the proof config pins the registry digest, revision and account and nothin
       },
     ),
   );
+});
+
+test("the acceptance config carries the build identity and refuses the retired proof's configuration", () => {
+  const options = {
+    account,
+    imageDigest: digest,
+    revision: "b".repeat(40),
+    main: sealedProofBundle,
+  };
+  const identity = JSON.stringify({ sourceCommit: "b".repeat(40) });
+  assert.equal(
+    buildProofConfig(wrangler, { ...options, buildIdentity: identity }).env.proof.vars
+      .BUILD_IDENTITY,
+    identity,
+  );
+  const variant = (vars: Record<string, string | undefined>) =>
+    ({
+      ...wrangler,
+      env: { proof: { ...wrangler.env.proof, vars: { ...wrangler.env.proof.vars, ...vars } } },
+    }) as typeof wrangler;
+  for (const vars of [
+    { FOUNDATION_PROOF: "enabled" },
+    { ARCFORGES_HELLO_RUNTIME: "csharp" },
+    { ARCFORGES_CENTER_MODE: "self-hosted" },
+    { ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://arcforges.com/api" },
+    { ARCFORGES_CENTER_PLAN_CONFIGURATION: undefined },
+  ])
+    assert.throws(() => buildProofConfig(variant(vars), options), JSON.stringify(vars));
 });
 
 test("the proof deploy uploads the sealed proof bundle and never resolves the source entry", () => {
@@ -540,16 +575,19 @@ test("the Hello ingress scenario retries thrown errors within its deadline", asy
   }
 });
 
-test("only the proof environment may run more than one Container instance", () => {
-  const top = wrangler as unknown as { containers: { max_instances: number }[] };
+test("production and the acceptance center each run one Container instance", () => {
+  const top = wrangler as unknown as {
+    containers: { max_instances: number; instance_type: string }[];
+  };
   assert.equal(top.containers[0]?.max_instances, 1, "production keeps one instance");
-  // CLOUD.71: with a ceiling of 2 the provider ran only one of the two named instances (hello, foundation) at a
-  // time; the ceiling leaves headroom so both can run at once. It is a ceiling, not a minimum: two names exist.
-  assert.equal(
-    (wrangler.env.proof.containers[0] as { max_instances?: number }).max_instances,
-    4,
-    "the proof Hello instance and the foundation instance must be able to run at the same time",
-  );
+  // AF-CTR-02: the acceptance environment has the production structure (one lite instance of the center); the C# proof's second
+  // named instance (its foundation) is retired with it.
+  const proof = wrangler.env.proof.containers[0] as {
+    max_instances?: number;
+    instance_type?: string;
+  };
+  assert.equal(proof.max_instances, 1);
+  assert.equal(proof.instance_type, top.containers[0]?.instance_type);
 });
 
 test("the queue scenario passes only after one delivery plus six retries and a later dead letter", async () => {

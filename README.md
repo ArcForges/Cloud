@@ -1,6 +1,6 @@
 # ArcForges Cloud
 
-The production Container runs the ArcForges center, `arcforges-center`, written in Go ([center](docs/center.md), [AD-0021](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/decisions/AD-0021-central-access-go-center.md)); today it serves the anonymous Hello, which queries Neon, and its health. A small TypeScript Worker preserves the public binary gRPC-Web endpoint and its deny-by-default route table, generated from the center's registrations. The image retains the C# 14 / .NET 10 Native AOT executable for the isolated proof environment and the Hello rollback until AF-CTR-09. The center consumes the published Contracts Go module and the C# host the NuGet packages of the same cohort. The same `arcforges-center` binary runs as a self-hosted center without the Worker.
+The production Container runs the ArcForges center, `arcforges-center`, written in Go ([center](docs/center.md), [AD-0021](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/decisions/AD-0021-central-access-go-center.md)); today it serves the anonymous Hello, which reads PostgreSQL (Neon) through the center's least-privilege runtime role, and its health. Its [PostgreSQL store](docs/postgres-store.md) holds the platform tables (command receipts, inbox, outbox, job leases, audit, signing keys) and is migrated by the deploy job before promotion. A small TypeScript Worker preserves the public binary gRPC-Web endpoint and its deny-by-default route table, generated from the center's registrations. The image retains the C# 14 / .NET 10 Native AOT executable for the isolated proof environment and the Hello rollback until AF-CTR-09. The center consumes the published Contracts Go module and the C# host the NuGet packages of the same cohort. The same `arcforges-center` binary runs as a self-hosted center without the Worker.
 
 ```text
 Web or published gRPC-Web client
@@ -10,7 +10,7 @@ Web or published gRPC-Web client
         → ingress pipeline → generated Connect service → Hello, ArcForges!
 ```
 
-The separate `arcforges-web` Worker continues serving the website. This repository implements a bounded, anonymous Hello diagnostic. Accounts, D1 business transactions, AI integration and commercial APIs are future work; the previous monorepo is not a runtime/build dependency.
+The separate `arcforges-web` Worker continues serving the website. This repository implements a bounded, anonymous Hello diagnostic. Accounts, business transactions, AI integration and commercial APIs are future work; the previous monorepo is not a runtime/build dependency.
 
 - [Development and local validation](docs/development.md)
 - [Cloudflare setup, deployment and recovery](docs/deployment.md)

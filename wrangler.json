@@ -77,7 +77,7 @@
   "env": {
     "proof": {
       "name": "arcforges-cloud-proof",
-      "main": "worker/proof/entry.ts",
+      "main": "worker/acceptance/entry.ts",
       "workers_dev": false,
       "preview_urls": false,
       "triggers": {},
@@ -90,17 +90,11 @@
           "custom_domain": true
         }
       ],
-      "assets": {
-        "directory": "./artifacts/proof-assets",
-        "run_worker_first": ["/api/*", "/session/v1/*", "/proof/v1/*"],
-        "html_handling": "auto-trailing-slash",
-        "not_found_handling": "404-page"
-      },
       "containers": [
         {
           "class_name": "FoundationContainer",
           "image": "./Dockerfile",
-          "max_instances": 4,
+          "max_instances": 1,
           "instance_type": "lite"
         }
       ],
@@ -109,14 +103,6 @@
           {
             "name": "CLOUD_CONTAINER",
             "class_name": "FoundationContainer"
-          },
-          {
-            "name": "JOB_COORDINATOR",
-            "class_name": "FoundationJobCoordinator"
-          },
-          {
-            "name": "HARNESS_RUN_ALARM",
-            "class_name": "HarnessRunAlarm"
           }
         ]
       },
@@ -137,35 +123,6 @@
           "migrations_dir": "worker/proof-migrations"
         }
       ],
-      "r2_buckets": [
-        {
-          "binding": "OBJECTS",
-          "bucket_name": "arcforges-proof-objects"
-        }
-      ],
-      "queues": {
-        "producers": [
-          {
-            "binding": "WAKE_QUEUE",
-            "queue": "arcforges-proof-wake"
-          }
-        ],
-        "consumers": [
-          {
-            "queue": "arcforges-proof-wake",
-            "max_batch_size": 1,
-            "max_batch_timeout": 1,
-            "max_retries": 6,
-            "dead_letter_queue": "arcforges-proof-wake-dlq"
-          },
-          {
-            "queue": "arcforges-proof-wake-dlq",
-            "max_batch_size": 1,
-            "max_batch_timeout": 1,
-            "max_retries": 3
-          }
-        ]
-      },
       "ratelimits": [
         {
           "name": "HELLO_RATE_LIMITER",
@@ -178,13 +135,11 @@
       ],
       "vars": {
         "SOURCE_REVISION": "local",
-        "FOUNDATION_PROOF": "enabled",
-        "REALM_ID": "proof",
-        "RECOVERY_GENERATION": "0",
-        "ALLOWED_ORIGIN": "https://proof.arcforges.com",
-        "PROOF_OPERATOR_VERIFIER": "jOWMycpHCCr-UWZoF6r7wNTteGrTbS5KxPOveANQUgc",
-        "HMAC_C2W_KEY_ID": "c2w-1",
-        "HMAC_W2C_KEY_ID": "w2c-1"
+        "ARCFORGES_NEON_HELLO": "enabled",
+        "ARCFORGES_HELLO_RUNTIME": "go",
+        "ARCFORGES_CENTER_MODE": "official-hosted",
+        "ARCFORGES_CENTER_PUBLIC_BASE_URL": "https://proof.arcforges.com/api",
+        "ARCFORGES_CENTER_PLAN_CONFIGURATION": "development-fixtures"
       }
     }
   }

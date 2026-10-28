@@ -124,6 +124,10 @@
 !center/internal/
 !center/internal/*/
 !center/internal/*/*.go
+!center/internal/store/migrate/
+!center/internal/store/migrate/*.go
+!center/internal/schema/migrations/
+!center/internal/schema/migrations/*.sql
 center/tools/
 center/cmd/center-gen/
 center/**/testdata/

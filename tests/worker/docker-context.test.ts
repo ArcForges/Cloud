@@ -55,6 +55,47 @@ test("every source project of the image is admitted to the Docker context by exp
   }
 });
 
+/** Every folder of the Go center that holds a non-test Go source or an embedded migration. */
+function centerFolders(directory: string): { folder: string; files: string[] }[] {
+  const entries = readdirSync(path.join(root, directory), { withFileTypes: true });
+  const files = entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        ((entry.name.endsWith(".go") && !entry.name.endsWith("_test.go")) ||
+          entry.name.endsWith(".sql")),
+    )
+    .map((entry) => entry.name);
+  const folders = files.length > 0 ? [{ folder: directory, files }] : [];
+  for (const entry of entries)
+    if (entry.isDirectory() && entry.name !== "testdata")
+      folders.push(...centerFolders(path.posix.join(directory, entry.name)));
+  return folders;
+}
+
+test("every package of the Go center and its embedded migrations are admitted to the Docker context", () => {
+  const folders = [
+    ...centerFolders("center/internal"),
+    ...centerFolders("center/cmd/arcforges-center"),
+  ];
+  const names = folders.map((entry) => entry.folder);
+  for (const expected of [
+    "center/internal/store/migrate",
+    "center/internal/schema/migrations",
+    "center/cmd/arcforges-center",
+  ])
+    assert(names.includes(expected), expected);
+  for (const { folder, files } of folders) {
+    assert(admitted(`${folder}/`), `Missing directory rule for ${folder}`);
+    for (const file of files)
+      assert(admitted(`${folder}/${file}`), `Missing file rule for ${folder}/${file}`);
+  }
+  assert(!admitted("center/internal/schema/migrations/notes.md"));
+  assert(
+    rules.indexOf("center/**/*_test.go") > rules.indexOf("!center/internal/store/migrate/*.go"),
+  );
+});
+
 test("a rule never admits tests, the Worker, the plan files, build output or a stray file", () => {
   for (const forbidden of [
     "!tests/",

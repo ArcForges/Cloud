@@ -32,6 +32,7 @@ const d1Id = "11111111-1111-4111-8111-111111111111";
 interface State {
   d1: { uuid: string; name: string }[];
   buckets: string[];
+  lifecycles: Map<string, unknown[]>;
   queues: string[];
   denied: Set<string>;
   calls: string[];
@@ -46,6 +47,7 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
   const state: State = {
     d1: [],
     buckets: [],
+    lifecycles: new Map(),
     queues: [],
     denied: new Set(),
     calls: [],
@@ -95,6 +97,16 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
       }
       return Promise.resolve(reply({ buckets: state.buckets.map((name) => ({ name })) }));
     }
+    const lifecycle = /\/r2\/buckets\/([^/]+)\/lifecycle$/u.exec(endpoint);
+    if (lifecycle) {
+      const name = lifecycle[1] ?? "";
+      if (!state.buckets.includes(name)) return Promise.resolve(reply(null, 404));
+      if (method === "PUT") {
+        state.lifecycles.set(name, (JSON.parse(String(init?.body)) as { rules: unknown[] }).rules);
+        return Promise.resolve(reply(null));
+      }
+      return Promise.resolve(reply({ rules: state.lifecycles.get(name) ?? [] }));
+    }
     const bucket = /\/r2\/buckets\/(.+)$/u.exec(endpoint);
     if (bucket)
       return Promise.resolve(
@@ -142,18 +154,27 @@ test("provisioning creates exactly the reserved resources once and is idempotent
   const { api, state } = fakeCloudflare();
   const first = await provision(api);
   assert.equal(first.d1DatabaseId, d1Id);
+  // AF-CTR-02: the retained proof D1 database and the center's acceptance bucket (with its lifecycle rules) and queues.
+  const lifecycle = "lifecycle support-bundles-30-days, abort-incomplete-uploads";
   assert.deepEqual(first.actions, [
     "D1 arcforges-proof-business: created",
-    "R2 arcforges-proof-objects: created",
-    "Queue arcforges-proof-wake: created",
-    "Queue arcforges-proof-wake-dlq: created",
+    "R2 arcforges-acceptance-center: created",
+    `R2 arcforges-acceptance-center: ${lifecycle}`,
+    "Queue arcforges-acceptance-center-events: created",
+    "Queue arcforges-acceptance-center-events-dlq: created",
   ]);
   assert.equal(state.calls.filter((call) => call.startsWith("POST")).length, 4);
+  assert.deepEqual(
+    (state.lifecycles.get("arcforges-acceptance-center") as { id: string }[]).map(
+      (rule) => rule.id,
+    ),
+    ["support-bundles-30-days", "abort-incomplete-uploads"],
+  );
   state.calls.length = 0;
   const second = await provision(api);
   assert.deepEqual(
     second.actions.map((entry) => entry.split(": ")[1]),
-    ["exists", "exists", "exists", "exists"],
+    ["exists", "exists", lifecycle, "exists", "exists"],
   );
   assert.equal(state.calls.filter((call) => call.startsWith("POST")).length, 0);
   // Resources of other names are never mistaken for the reserved ones.

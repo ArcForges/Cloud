@@ -6,6 +6,14 @@ import { candidateDir, readJson, root, run, wrangler, writeJson } from "./proces
 import { verifyCandidate, type WorkerConfig } from "./project.ts";
 import { runProbe, waitForHealth } from "./protocol.ts";
 import { neonRuntimeSecret, withNeonRuntimeSecret } from "./neon-runtime.ts";
+import {
+  loadCandidateImage,
+  readGate,
+  requirePostgresGate,
+  readLiveSlots,
+  slotLabel,
+  withRuntimeCredential,
+} from "./postgres-deploy.ts";
 
 import { expectedIdentity, verifyHealthIdentity } from "./build-identity.ts";
 
@@ -76,13 +84,10 @@ async function deploy() {
   // CLOUD.70: nothing is pushed or promoted unless the gated D1 migration step passed for this very candidate
   // (a failing or missing step stops promotion; the workflow step before this one writes the record).
   requireGatePassed("production", candidate.revision);
-  await run("docker", ["load", "--input", "artifacts/candidate/docker-image.tar"]);
-  const imageId = await run(
-    "docker",
-    ["image", "inspect", candidate.image, "--format", "{{.Id}}"],
-    true,
-  );
-  assert.equal(imageId, candidate.imageId, "Loaded image is not the sealed candidate image.");
+  // AF-CTR-02: and the PostgreSQL step migrated the production database for this very candidate.
+  requirePostgresGate(await readGate("production"), "production", candidate.revision);
+  await loadCandidateImage(candidate);
+  const imageId = candidate.imageId;
   await run(process.execPath, [wrangler, "containers", "push", candidate.image]);
   const registryTag = `registry.cloudflare.com/${account}/${candidate.image}`;
   const digests = JSON.parse(
@@ -117,9 +122,28 @@ async function deploy() {
     "--tag",
     candidate.version,
   ];
-  await withNeonRuntimeSecret(runtimeSecret, async (secretArguments) => {
-    await run(process.execPath, [...deployArguments, ...secretArguments]);
-  });
+  // The runtime credential is rotated now, in the process that uploads it with this version; the revision still running keeps its
+  // own credential of the other rotation slot until this one replaces it.
+  // The live version's message names its runtime slot, which the rotation never touches; the new version is labelled likewise.
+  const configArguments = ["--config", "artifacts/deploy.wrangler.json", "--env", ""];
+  await withRuntimeCredential(
+    "production",
+    candidate.image,
+    async (runtime, rotation) => {
+      await withNeonRuntimeSecret({ ...runtimeSecret, ...runtime }, async (secretArguments) => {
+        await run(process.execPath, [
+          ...deployArguments,
+          "--message",
+          slotLabel(String(rotation.slot)),
+          ...secretArguments,
+        ]);
+      });
+    },
+    {
+      liveSlots: () =>
+        readLiveSlots((args) => run(process.execPath, [wrangler, ...args], true), configArguments),
+    },
+  );
   await writeJson(deploymentFile, {
     revision: candidate.revision,
     version: candidate.version,

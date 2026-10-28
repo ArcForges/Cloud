@@ -17,7 +17,12 @@ The Go center (`center/`) uses the Go release pinned in `center/toolchain.json` 
 `python eng/center.py check` runs every Go control of the host's leg: module integrity and tidiness, dependency admission
 (`center/dependencies.json`), `gofmt -s`, `go vet`, staticcheck, the tests (with the race detector on Linux), the generated
 Worker table's drift, the fuzz targets (Linux), govulncheck and a native build that is started as a self-hosted center
-([engineering controls](docs/engineering-controls.md)). After a change to the center's registrations run
+([engineering controls](docs/engineering-controls.md)). On Linux it also starts a PostgreSQL container (`postgres:18-alpine`
+pinned by digest in `eng/center.py`; Docker Engine required) for the store's integration tests and the logical-backup
+restore drill ([PostgreSQL store](docs/postgres-store.md)). To run the store tests yourself, point
+`ARCFORGES_TEST_POSTGRES_URL` at a disposable server's superuser URL (each test creates and drops its own database and
+roles); without it they skip. A schema change is a new file in `center/internal/schema/migrations` with its runtime grants
+in `center/internal/schema`; applied migrations are never edited. After a change to the center's registrations run
 `python eng/center.py generate`; after a Go dependency change update `center/dependencies.json` and its review receipt.
 
 Every pull request is verified after the push on the owner's two verification hosts, a Windows leg on native Windows and a Linux leg on native Linux, which run these checks and the candidate build and report the commit statuses `arcforges/windows` and `arcforges/linux` that `main` requires (see [AGENTS.md](AGENTS.md), Verification after the push); external pull requests also run the full hosted CI and need no local hook. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). The pre-commit hook checks only the staged whitespace and the `gofmt -s` formatting of staged Go files; install it with `python eng/verify.py install`. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
