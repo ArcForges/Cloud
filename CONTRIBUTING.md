@@ -9,10 +9,18 @@ npm ci --ignore-scripts
 dotnet restore Cloud.slnx --locked-mode
 npm run check
 npm run check:dotnet
+python eng/center.py check
 npm run candidate
 ```
 
-Every pull request is verified after the push on the owner's two verification hosts, a Windows leg on native Windows and a Linux leg on native Linux, which run these checks and the candidate build and report the commit statuses `arcforges/windows` and `arcforges/linux` that `main` requires (see [AGENTS.md](AGENTS.md), Verification after the push); external pull requests also run the full hosted CI and need no local hook. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). The pre-commit hook checks only the staged whitespace. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
+The Go center (`center/`) uses the Go release pinned in `center/toolchain.json` with `GOTOOLCHAIN=local` and read-only modules.
+`python eng/center.py check` runs every Go control of the host's leg: module integrity and tidiness, dependency admission
+(`center/dependencies.json`), `gofmt -s`, `go vet`, staticcheck, the tests (with the race detector on Linux), the generated
+Worker table's drift, the fuzz targets (Linux), govulncheck and a native build that is started as a self-hosted center
+([engineering controls](docs/engineering-controls.md)). After a change to the center's registrations run
+`python eng/center.py generate`; after a Go dependency change update `center/dependencies.json` and its review receipt.
+
+Every pull request is verified after the push on the owner's two verification hosts, a Windows leg on native Windows and a Linux leg on native Linux, which run these checks and the candidate build and report the commit statuses `arcforges/windows` and `arcforges/linux` that `main` requires (see [AGENTS.md](AGENTS.md), Verification after the push); external pull requests also run the full hosted CI and need no local hook. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). The pre-commit hook checks only the staged whitespace and the `gofmt -s` formatting of staged Go files; install it with `python eng/verify.py install`. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
 
 Update central NuGet versions and regenerate the per-project locks with `dotnet restore Cloud.slnx --force-evaluate`; use `npm install --ignore-scripts` for npm lock changes. Do not hand-edit lock dependency graphs or disable locked mode. The Cloud host explicitly lists Windows/Linux x64 restore targets so its lock is portable between development and production builds.
 
