@@ -4,12 +4,13 @@ package routes
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 )
 
-func TestTheCenterServesExactlyTheAnonymousHelloAndTheHealthRoute(t *testing.T) {
+func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 	modules, err := Center()
 	if err != nil {
 		t.Fatal(err)
@@ -33,12 +34,44 @@ func TestTheCenterServesExactlyTheAnonymousHelloAndTheHealthRoute(t *testing.T) 
 		table.MaxBodyBytes != 4096 || table.ColdStartMilliseconds != 15_000 || table.StreamLifetimeMilliseconds != 310_000 {
 		t.Fatalf("table: %+v", table)
 	}
+	// The identity surface is exactly the methods A1a serves (F13 pins the same set against the service descriptors), each
+	// reading a RequestMeta, served by the one center instance and switched by the surface.
+	served := []string{
+		"/arcforges.publicapi.v1.IdentityService/BeginAuthentication anonymous 4096",
+		"/arcforges.publicapi.v1.IdentityService/CompleteAuthentication anonymous 16384",
+		"/arcforges.publicapi.v1.IdentityService/RequestEmailCode anonymous 4096",
+		"/arcforges.publicapi.v1.IdentityService/RedeemEmailCode anonymous 4096",
+		"/arcforges.publicapi.v1.IdentityService/CompleteEnrollment anonymous 16384",
+		"/arcforges.publicapi.v1.IdentityService/ListAuthProviders anonymous 4096",
+		"/arcforges.publicapi.v1.IdentityService/RefreshSession anonymous 4096",
+		"/arcforges.publicapi.v1.IdentityService/GetProfile session 4096",
+		"/arcforges.publicapi.v1.IdentityService/ListAuthIdentities session 4096",
+		"/arcforges.publicapi.v1.IdentityService/ListSessions session 4096",
+		"/arcforges.publicapi.v1.DeviceService/List session 4096",
+	}
+	if len(table.Surfaces) != 1 || table.Surfaces[0] != SurfaceIdentity || len(table.SurfaceRows) != len(served) {
+		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))
+	}
+	for index, row := range table.SurfaceRows {
+		if got := fmt.Sprintf("%s %s %d", row.Path, row.Auth, row.MaxRequestBytes); got != served[index] || row.Surface != SurfaceIdentity ||
+			!row.RequestMeta || row.Instance != HealthInstance || row.Kind != "unary" || row.MaxFrameBytes != 65_536 ||
+			row.MaxUnaryResponseBytes != 65_536 || row.MaxDurationMilliseconds != 15_000 {
+			t.Fatalf("surface row %d: %+v", index, row)
+		}
+	}
 	routes, err := Ingress(modules)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy, ok := routes.Registry.Lookup(HelloMethod); !ok || policy.Authentication != ingress.Anonymous || policy.ReadsRequestMeta() {
+	if policy, ok := routes.Registry.Lookup(HelloMethod); !ok || policy.Authentication != ingress.Anonymous || policy.ReadsRequestMeta() ||
+		policy.Surface != "" {
 		t.Fatal("the ingress registry differs from the table")
+	}
+	for _, row := range table.SurfaceRows {
+		policy, ok := routes.Registry.Lookup(row.Path)
+		if !ok || policy.Surface != SurfaceIdentity || !policy.ReadsRequestMeta() || policy.MaxRequestBytes != row.MaxRequestBytes {
+			t.Fatalf("the ingress registry differs from the surface row %s", row.Path)
+		}
 	}
 	if !routes.IsPlain(HealthPath) || routes.IsPlain("/readyz") {
 		t.Fatal("plain routes")
@@ -78,6 +111,36 @@ func TestInconsistentRegistrationsStopTheGenerator(t *testing.T) {
 		},
 		"a budget out of range": func(modules []Module) []Module {
 			modules[0].Budgets[HelloMethod] = Budget{MaxFrameBytes: 0, MaxUnaryResponseBytes: 1, MaxDurationMilliseconds: 1, Instance: "hello"}
+			return modules
+		},
+		"a surface policy outside its module's surface": func(modules []Module) []Module {
+			modules[1].Policies[0].Surface = ""
+			return modules
+		},
+		"a surface method on another instance": func(modules []Module) []Module {
+			budget := modules[1].Budgets[modules[1].Policies[0].FullName]
+			budget.Instance = "other"
+			modules[1].Budgets[modules[1].Policies[0].FullName] = budget
+			return modules
+		},
+		"a surface method without a RequestMeta": func(modules []Module) []Module {
+			path := modules[1].Policies[0].FullName
+			policy, err := ingress.NewUnary(path, ingress.Anonymous, ingress.NoScope, 4096, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			modules[1].Policies[0] = policy.InSurface(SurfaceIdentity)
+			return modules
+		},
+		"a surface name out of pattern": func(modules []Module) []Module {
+			modules[1].Surface = "Identity"
+			for index := range modules[1].Policies {
+				modules[1].Policies[index] = modules[1].Policies[index].InSurface("Identity")
+			}
+			return modules
+		},
+		"a surface module with a plain path": func(modules []Module) []Module {
+			modules[1].PlainPaths = []string{"/readyz"}
 			return modules
 		},
 		"a duplicate module": func(modules []Module) []Module { return append(modules, modules[0]) },

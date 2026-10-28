@@ -445,12 +445,13 @@ func TestTheRefusalTableIsTheHostTable(t *testing.T) {
 	for key, status := range map[string]Status{
 		"unimplemented/12": 12, "auth.unauthenticated/16": 16, "perm.resource_denied/7": 7, "validation.invalid_request/3": 3,
 		"validation.invalid_request/8": 8, "state.stale_generation/9": 9, "dependency.unavailable/14": 14,
+		"auth.token_expired/16": 16, "auth.credential_revoked/16": 16,
 	} {
 		if want[key] != status {
 			t.Fatalf("missing %s", key)
 		}
 	}
-	if len(want) != 7 || connect.Code(StatusUnauthenticated) != connect.CodeUnauthenticated || connect.Code(StatusResourceExhausted) != connect.CodeResourceExhausted {
+	if len(want) != 9 || connect.Code(StatusUnauthenticated) != connect.CodeUnauthenticated || connect.Code(StatusResourceExhausted) != connect.CodeResourceExhausted {
 		t.Fatal("status numbering")
 	}
 	if got := TrailerFrame(StatusOK, "", false, [2]string{"x-af-probe", "done"}); string(got[5:]) != "grpc-status: 0\r\nx-af-probe: done\r\n" || got[0] != TrailerFlag {

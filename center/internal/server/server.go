@@ -148,12 +148,16 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 
 	dispatcher := connect.NewServer(center.recordOutcome)
 	hellov1connect.RegisterHelloServiceHandler(dispatcher, &hello.Server{Greeting: greeting})
+	pipelineOptions := ingress.Options{Routes: publicRoutes, Observe: center.observeAdmission,
+		SurfaceEnabled: func(surface string) bool { return cfg.Identity.Enabled(config.Surface(surface)) },
+		ClientIP:       ClientAddress(cfg.Mode, cfg.Identity), RequireClientIP: cfg.Mode == config.OfficialHosted}
 	mux := http.NewServeMux()
-	// The message bound is the Hello policy's request bound without the five-byte frame header, as before.
-	limit := routes.MaxBodyBytes - ingress.HeaderLength
+	// The message bound is the largest request bound of the registered methods without the five-byte frame header; the
+	// pipeline applies each method's own bound before any handler reads.
+	limit := routes.MaxRequestBytes(modules) - ingress.HeaderLength
 	connecthttp.Mount(mux, dispatcher, connecthttp.WithReadMaxBytes(limit), connecthttp.WithSendMaxBytes(limit))
 	mux.HandleFunc(routes.HealthPath, center.serveHealth)
-	pipeline := ingress.NewPipeline(ingress.Options{Routes: publicRoutes, Observe: center.observeAdmission}, mux)
+	pipeline := ingress.NewPipeline(pipelineOptions, mux)
 	center.public = center.track(pipeline)
 
 	admin := http.NewServeMux()
@@ -410,9 +414,17 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		servers = append(servers, server)
 		go func() { failures <- server.Serve(netutil.LimitListener(listener, cfg.MaxConnections)) }()
 	}
+	surfaces := make([]string, 0, len(cfg.Identity.Surfaces))
+	for _, surface := range cfg.Identity.Surfaces {
+		surfaces = append(surfaces, string(surface))
+	}
 	logger.Info("center started", "mode", string(cfg.Mode), "planConfiguration", planName(cfg.Plan), "publicBaseUrl", cfg.PublicBaseURL, "listeners", bound,
 		"helloBackend", center.Health.HelloBackend, "store", center.Store != nil, "schemaBuildVersion", center.buildVersion,
-		"revision", center.Health.Revision, "version", center.Health.Artifact.Version)
+		"revision", center.Health.Revision, "version", center.Health.Artifact.Version, "surfaces", surfaces,
+		"bootstrapConfigured", cfg.Identity.Bootstrap != nil)
+	if cfg.Identity.Disabled != "" {
+		logger.Error("the identity surface is off", "reason", cfg.Identity.Disabled)
+	}
 	if center.Store != nil {
 		go center.logReadiness(ctx)
 	}

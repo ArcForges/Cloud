@@ -98,6 +98,8 @@ type Config struct {
 	NeonHello *pgxpool.Config
 	// Database is the center's pooled runtime database (the least-privilege runtime role), or nil when none is configured.
 	Database *pgxpool.Config
+	// Identity is the identity surface's configuration (AF-CTR-03).
+	Identity Identity
 }
 
 // ErrInvalid is the error of every refused configuration.
@@ -183,6 +185,17 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		}
 	default:
 		return Config{}, invalid("%s must be enabled or disabled", EnvNeonHello)
+	}
+	if config.Identity, err = loadIdentity(get, config.Mode, config.PublicBaseURL, time.Now()); err != nil {
+		return Config{}, err
+	}
+	if config.Identity.Enabled(SurfaceIdentity) && config.Database == nil {
+		if get(EnvSurfaces) != "" {
+			return Config{}, invalid("the identity surface needs the runtime database (%s)", EnvDatabaseURL)
+		}
+		// A self-hosted center without a store keeps serving Hello; identity stays off and the start-up log says why.
+		config.Identity.Surfaces = nil
+		config.Identity.Disabled = "no runtime database is configured (" + EnvDatabaseURL + ")"
 	}
 	return config, nil
 }

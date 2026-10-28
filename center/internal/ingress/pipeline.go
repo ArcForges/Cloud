@@ -5,11 +5,14 @@ package ingress
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 
+	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 )
 
@@ -25,6 +28,8 @@ type Outcome struct {
 	HTTPStatus int
 	// Call is the admitted call, or nil.
 	Call *Call
+	// Domain is the code of a domain refusal the pipeline answered itself (STATE/not_activated of a disabled surface), or empty.
+	Domain string
 }
 
 // Options configure the pipeline.
@@ -36,6 +41,13 @@ type Options struct {
 	Browser BrowserSessionVerifier
 	// Observe receives the pipeline's decision about every request; it may be nil.
 	Observe func(*http.Request, Outcome)
+	// SurfaceEnabled reports whether a surface is enabled; nil enables none.
+	SurfaceEnabled func(surface string) bool
+	// ClientIP extracts the client's address of a surface method's request; nil knows none.
+	ClientIP func(*http.Request) (netip.Addr, bool)
+	// RequireClientIP refuses a surface method whose client address is unknown (hosted mode: the Worker always sets it, so its
+	// absence is never counted in a shared bucket).
+	RequireClientIP bool
 }
 
 // NewPipeline is the public admission pipeline in front of next (the Connect handlers and the plain routes): a path that is not
@@ -128,6 +140,32 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 		plain(writer, http.StatusUnsupportedMediaType)
 		return
 	}
+	var clientIP netip.Addr
+	if policy.Surface != "" {
+		// A disabled surface is answered before any credential, body or store is read, with the same domain refusal the Worker
+		// sends (this one carries the call's correlation id).
+		if p.options.SurfaceEnabled == nil || !p.options.SurfaceEnabled(policy.Surface) {
+			call := correlation.ForRequest(request.Header.Values(TraceparentHeader), "")
+			reply, err := arc.ReplyMessage(arc.NotActivated(policy.Surface).ArcError(call))
+			if err != nil {
+				p.refuse(writer, request, outcome, ReasonInvalidRequest)
+				return
+			}
+			outcome.Domain = "not_activated"
+			p.observe(request, outcome)
+			WriteDomainReply(writer, request, reply)
+			return
+		}
+		address, known := netip.Addr{}, false
+		if p.options.ClientIP != nil {
+			address, known = p.options.ClientIP(request)
+		}
+		if !known && p.options.RequireClientIP {
+			p.refuse(writer, request, outcome, ReasonInvalidRequest)
+			return
+		}
+		clientIP = address
+	}
 
 	caller := Caller{}
 	if policy.Authentication != Anonymous {
@@ -168,6 +206,7 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 	call := &Call{
 		Policy: policy, Caller: caller, Owner: owner,
 		Correlation: correlation.ForRequest(request.Header.Values(TraceparentHeader), stated),
+		ClientIP:    clientIP,
 	}
 	outcome.Call = call
 	p.observe(request, outcome)
@@ -192,7 +231,12 @@ func (p *pipeline) authenticate(request *http.Request) (*Caller, *Reason) {
 			return nil, &ReasonUnauthenticated
 		}
 		caller, err := p.options.Bearer.Verify(request.Context(), token)
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrTokenExpired):
+			return nil, &ReasonTokenExpired
+		case errors.Is(err, ErrCredentialRevoked):
+			return nil, &ReasonCredentialRevoked
+		case err != nil:
 			return nil, &ReasonDependencyUnavailable
 		}
 		if caller == nil || caller.Credential != CredentialNativeBearer {
@@ -278,6 +322,29 @@ func (p *pipeline) refuse(writer http.ResponseWriter, request *http.Request, out
 	outcome.Refusal = &reason
 	p.observe(request, outcome)
 	WriteRefusal(writer, request, reason)
+}
+
+// WriteDomainReply answers with a domain reply: gRPC OK and one reply message (an ArcError outcome). To a gRPC-Web (or
+// unidentified) request it is one data frame and the status trailer frame in the body; to a native gRPC request it is the data
+// frame and the status in HTTP/2 trailers.
+func WriteDomainReply(writer http.ResponseWriter, request *http.Request, message []byte) {
+	header := writer.Header()
+	header.Set("Cache-Control", "no-store")
+	header.Set("X-Content-Type-Options", "nosniff")
+	frame := Frame(message)
+	if isNativeGRPC(request.Header) {
+		header.Set("Content-Type", "application/grpc")
+		header.Set("Trailer", "Grpc-Status")
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write(frame)
+		header.Set("Grpc-Status", "0")
+		return
+	}
+	body := append(frame, TrailerFrame(StatusOK, "", false)...)
+	header.Set("Content-Type", "application/grpc-web+proto")
+	header.Set("Content-Length", strconv.Itoa(len(body)))
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write(body)
 }
 
 // WriteRefusal answers with a trailers-only refusal: HTTP 200 and the status. To a gRPC-Web (or unidentified) request it is one

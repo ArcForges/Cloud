@@ -3,12 +3,18 @@
 package workertables
 
 import (
+	"bytes"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ArcForges/Cloud/center/internal/arc"
+	"github.com/ArcForges/Cloud/center/internal/correlation"
+	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 )
 
@@ -33,7 +39,8 @@ func TestCommittedWorkerTablesAreCurrent(t *testing.T) {
 }
 
 // TestTheProductionRowsAreTheRowsTheWorkerServedBefore pins the rows the C# generator wrote for Hello before the split; the C#
-// GeneratedTablesTests check the same fragment against the C# registrations of the rollback host.
+// GeneratedTablesTests check the same fragment against the C# registrations of the rollback host. The surfaces (AF-CTR-03) come
+// before it, so the generated module still ends with exactly these bytes.
 func TestTheProductionRowsAreTheRowsTheWorkerServedBefore(t *testing.T) {
 	generated, err := Generate()
 	if err != nil {
@@ -78,6 +85,46 @@ export const productionRoutes: readonly ApiRoute[] = [
 `
 	if !strings.HasSuffix(generated, before) {
 		t.Fatal("the production rows changed")
+	}
+}
+
+// TestTheSurfaceRepliesAreTheCentersRefusals decodes the generated replies: each is one gRPC-Web reply frame whose message is the
+// center's own refusal (without a correlation id) and an OK status trailer.
+func TestTheSurfaceRepliesAreTheCentersRefusals(t *testing.T) {
+	generated, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]*arc.Refusal{
+		"identity":         arc.NotActivated("identity"),
+		"rateLimitedReply": arc.RateLimited("edge", 0, time.Time{}),
+	} {
+		start := strings.Index(generated, name+":")
+		if name == "rateLimitedReply" {
+			start = strings.Index(generated, "export const rateLimitedReply")
+		}
+		if start < 0 {
+			t.Fatalf("%s is not generated", name)
+		}
+		rest := generated[start:]
+		open := strings.Index(rest, `"`)
+		closing := strings.Index(rest[open+1:], `"`)
+		body, err := base64.StdEncoding.DecodeString(rest[open+1 : open+1+closing])
+		if err != nil {
+			t.Fatal(err)
+		}
+		message, err := arc.ReplyMessage(want.ArcError(correlation.Context{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(body, append(ingress.Frame(message), ingress.TrailerFrame(ingress.StatusOK, "", false)...)) {
+			t.Fatalf("%s is not the center's refusal", name)
+		}
+	}
+	if !strings.Contains(generated, `export const surfaceNames: readonly Surface[] = ["identity"];`) ||
+		!strings.Contains(generated, `export const clientIpHeader = "x-arcforges-client-ip";`) ||
+		!strings.Contains(generated, `export type Surface = "identity";`) {
+		t.Fatal("the surface constants changed")
 	}
 }
 

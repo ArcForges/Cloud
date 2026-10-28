@@ -5,8 +5,10 @@ package ingress
 import (
 	"context"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 )
@@ -40,6 +42,18 @@ type Caller struct {
 	DeviceID           string
 	WorkspaceIDs       []string
 	RecoveryGeneration uint64
+	// InstallationID, Scope, Product and AuthMethod are the session's (AF-CTR-03): its installation, its scope (account,
+	// mobile.limited, node, push or automation; AD-0011 section 5), its installation's product and how it authenticated.
+	InstallationID string
+	Scope          string
+	Product        string
+	AuthMethod     string
+	// AuthenticatedAt is when the session's account authenticated; it is never step-up evidence.
+	AuthenticatedAt time.Time
+	// AuthEpoch is the account's authentication epoch the session was issued in.
+	AuthEpoch int64
+	// AccountState is the account's state (identity.user_state) when the credential was verified.
+	AccountState int16
 }
 
 // IsAuthenticated reports a caller with a credential.
@@ -61,6 +75,9 @@ type Call struct {
 	Caller      Caller
 	Owner       *Owner
 	Correlation correlation.Context
+	// ClientIP is the client's address for a surface method (the Worker's header in hosted mode, else the TCP peer or a trusted
+	// proxy's header); it is zero when unknown. It keys rate limits and is never logged.
+	ClientIP netip.Addr
 }
 
 type callKey struct{}
