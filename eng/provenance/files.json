@@ -90,6 +90,8 @@
     "center/internal/platform/setup_test.go",
     "center/internal/provision/provision.go",
     "center/internal/provision/provision_test.go",
+    "center/internal/provision/scram.go",
+    "center/internal/provision/scram_test.go",
     "center/internal/routes/routes.go",
     "center/internal/routes/routes_test.go",
     "center/internal/schema/migrations/0001_platform_store.sql",
@@ -179,6 +181,7 @@
     "eng/policy/dependency-reviews/af-ctr-02-r1.json",
     "eng/policy/dependency-reviews/af-ctr-02-r2.json",
     "eng/policy/dependency-reviews/af-ctr-02-r3.json",
+    "eng/policy/dependency-reviews/af-ctr-02-r4.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r1.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r2.json",
     "eng/policy/dependency-reviews/cloud-01-r1.json",
@@ -299,6 +302,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r55.json",
     "eng/provenance/artifact-profiles/cloud-release-r56.json",
     "eng/provenance/artifact-profiles/cloud-release-r57.json",
+    "eng/provenance/artifact-profiles/cloud-release-r58.json",
     "eng/provenance/artifact-profiles/cloud-release-r6.json",
     "eng/provenance/artifact-profiles/cloud-release-r7.json",
     "eng/provenance/artifact-profiles/cloud-release-r8.json",
@@ -310,9 +314,11 @@
     "eng/provenance/records/center-runtime-r1.json",
     "eng/provenance/records/center-runtime-r2.json",
     "eng/provenance/records/center-runtime-r3.json",
+    "eng/provenance/records/center-runtime-r4.json",
     "eng/provenance/records/center-worker-r1.json",
     "eng/provenance/records/center-worker-r2.json",
     "eng/provenance/records/center-worker-r3.json",
+    "eng/provenance/records/center-worker-r4.json",
     "eng/provenance/records/cloud-02-cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-02-cloud-worker-bundle-r1.json",
     "eng/provenance/records/cloud-03-cloud-runtime-notices-r1.json",
@@ -1109,5 +1115,5 @@
     "third-party/ContractsGo.LICENSE.txt": "go-contractsgo-legal-r1",
     "third-party/ContractsGo.NOTICE.txt": "go-contractsgo-legal-r1"
   },
-  "artifacts": ["center-runtime-r3", "center-worker-r3"]
+  "artifacts": ["center-runtime-r4", "center-worker-r4"]
 }
