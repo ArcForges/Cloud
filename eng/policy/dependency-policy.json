@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "bc35597d162711e0aec75a347d13aa1da920af85",
+  "sourceCommit": "75e62969f77adb08f3edb076eaddfb058b2dc972",
   "manifests": ["package.json"],
   "inputs": {
     ".github/workflows/ci.yml": "88cc86554af64d5948b4d0981e7ac5bb7dd022b8ccae9fceec4fb68ed3271324",
@@ -27,14 +27,17 @@
     "eng/provenance/artifact-profiles/cloud-release-r56.json": "02aeed0f72056131ed7fd31a56d4f21ab75fb91e06afbf0998535dcc2abd0590",
     "eng/provenance/artifact-profiles/cloud-release-r57.json": "e96b7787269f956fc4b602d0b2041242f787af43df0f128990f9c83af2954988",
     "eng/provenance/artifact-profiles/cloud-release-r58.json": "4b5db10852ccb63f179425a22927563f7296e5ddc833fe9424ebf6baeba80b3f",
+    "eng/provenance/artifact-profiles/cloud-release-r59.json": "10c905c0abccc06ede5f090ef02651c6824d58207952c89dc7522ccda422c585",
     "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
     "eng/provenance/records/center-runtime-r2.json": "7a77f19fbd13e0380cec6294d8e99be4fa9d5ad910e2aae916df731e4ea114c1",
     "eng/provenance/records/center-runtime-r3.json": "d5a7a237da63a5b40cc126e17bb4799b1104671437640f61c83ec12115d1d9de",
     "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
+    "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
     "eng/provenance/records/center-worker-r1.json": "fcf19e96c9247818af2edbbaa811fd6f897acea134b2a526b287f5533104adfa",
     "eng/provenance/records/center-worker-r2.json": "85081952fdf6b3f25915bcd4547b43cae5db26dd3044c5089f67eb592916a540",
     "eng/provenance/records/center-worker-r3.json": "628fc3b8b715491124752c544cc10bc135a7c9965aa0013f5aecc6d73080f97e",
     "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
+    "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
     "eng/provenance/records/go-connectgo-legal-r1.json": "b015702a97d2e9f8c7c83d4760c24392b52f13a0f23b9b66b13d2532f5478cb8",
     "eng/provenance/records/go-contractsgo-legal-r1.json": "089b60868e2591af4054cb1649f73271ce660b1c11bafbf4bffe187ceab8ad6f",
     "eng/provenance/records/go-go-legal-r1.json": "eafe32e2dee39a5e4f946a2757f08c7638621d195451acee9c96851ddb08c46b",
@@ -120,7 +123,7 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-02 delegated author); PR review is recorded separately",
     "date": "2026-10-28",
-    "rationale": "AF-CTR-02 part B, second review round after af-ctr-02-r3: no Go module, npm package, NuGet package, base image or toolchain changes; the verifier uses the standard library's crypto/pbkdf2, crypto/hmac and crypto/sha256. The re-bound inputs are .github/workflows/ci.yml (the production PostgreSQL step also reads NEON_DATABASE_URL, only to compare its role and database names with the migration URL; no value is printed), eng/center.py (the restore drill records the server version; the test server preloads pg_stat_statements and logs every statement with its duration, which the tests read) and the release profile cloud-release-r58 with its successor records center-runtime-r4 and center-worker-r4, which bind the changed center sources: a client-side SCRAM-SHA-256 verifier for self-hosted servers, the secret loaded by binary COPY and applied by a temporary function whose errors carry a fixed message (pg_stat_statements.track 'all' refused), the inheriting membership and CONNECT checks with an unpooled proof, the live-slot rotation option, and the recorded server version and tested major. The deployment tooling reads the live Worker version's runtime slot with the pinned Wrangler. No business, D1 or account migration.",
+    "rationale": "AF-CTR-02 part B, round-2 follow-up after af-ctr-02-r4: no Go module, npm package, NuGet package, base image or toolchain changes, and no other dependency input changed. The release profile cloud-release-r59 with its successor records center-runtime-r5 and center-worker-r5 binds the changed center sources: the statement-capture check also refuses pg_stat_monitor.pgsm_track 'all' and records pgaudit.log (pgaudit redacts nested CREATE/ALTER ROLE passwords by statement type), and admin confirm-runtime-credential exits with status 4 for a slot the database never rotated, which the deployment tooling treats as a live version without a credential for that database. No business, D1 or account migration.",
     "inputs": {
       ".github/workflows/ci.yml": "88cc86554af64d5948b4d0981e7ac5bb7dd022b8ccae9fceec4fb68ed3271324",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -145,14 +148,17 @@
       "eng/provenance/artifact-profiles/cloud-release-r56.json": "02aeed0f72056131ed7fd31a56d4f21ab75fb91e06afbf0998535dcc2abd0590",
       "eng/provenance/artifact-profiles/cloud-release-r57.json": "e96b7787269f956fc4b602d0b2041242f787af43df0f128990f9c83af2954988",
       "eng/provenance/artifact-profiles/cloud-release-r58.json": "4b5db10852ccb63f179425a22927563f7296e5ddc833fe9424ebf6baeba80b3f",
+      "eng/provenance/artifact-profiles/cloud-release-r59.json": "10c905c0abccc06ede5f090ef02651c6824d58207952c89dc7522ccda422c585",
       "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
       "eng/provenance/records/center-runtime-r2.json": "7a77f19fbd13e0380cec6294d8e99be4fa9d5ad910e2aae916df731e4ea114c1",
       "eng/provenance/records/center-runtime-r3.json": "d5a7a237da63a5b40cc126e17bb4799b1104671437640f61c83ec12115d1d9de",
       "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
+      "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
       "eng/provenance/records/center-worker-r1.json": "fcf19e96c9247818af2edbbaa811fd6f897acea134b2a526b287f5533104adfa",
       "eng/provenance/records/center-worker-r2.json": "85081952fdf6b3f25915bcd4547b43cae5db26dd3044c5089f67eb592916a540",
       "eng/provenance/records/center-worker-r3.json": "628fc3b8b715491124752c544cc10bc135a7c9965aa0013f5aecc6d73080f97e",
       "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
+      "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
       "eng/provenance/records/go-connectgo-legal-r1.json": "b015702a97d2e9f8c7c83d4760c24392b52f13a0f23b9b66b13d2532f5478cb8",
       "eng/provenance/records/go-contractsgo-legal-r1.json": "089b60868e2591af4054cb1649f73271ce660b1c11bafbf4bffe187ceab8ad6f",
       "eng/provenance/records/go-go-legal-r1.json": "eafe32e2dee39a5e4f946a2757f08c7638621d195451acee9c96851ddb08c46b",
@@ -243,9 +249,9 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "AF-CTR-02 part B, second review round after af-ctr-02-r3: no Go module, npm package, NuGet package, base image or toolchain changes; the verifier uses the standard library's crypto/pbkdf2, crypto/hmac and crypto/sha256. The re-bound inputs are .github/workflows/ci.yml (the production PostgreSQL step also reads NEON_DATABASE_URL, only to compare its role and database names with the migration URL; no value is printed), eng/center.py (the restore drill records the server version; the test server preloads pg_stat_statements and logs every statement with its duration, which the tests read) and the release profile cloud-release-r58 with its successor records center-runtime-r4 and center-worker-r4, which bind the changed center sources: a client-side SCRAM-SHA-256 verifier for self-hosted servers, the secret loaded by binary COPY and applied by a temporary function whose errors carry a fixed message (pg_stat_statements.track 'all' refused), the inheriting membership and CONNECT checks with an unpooled proof, the live-slot rotation option, and the recorded server version and tested major. The deployment tooling reads the live Worker version's runtime slot with the pinned Wrangler. No business, D1 or account migration.",
+    "runtimeAssessment": "AF-CTR-02 part B, round-2 follow-up after af-ctr-02-r4: no Go module, npm package, NuGet package, base image or toolchain changes, and no other dependency input changed. The release profile cloud-release-r59 with its successor records center-runtime-r5 and center-worker-r5 binds the changed center sources: the statement-capture check also refuses pg_stat_monitor.pgsm_track 'all' and records pgaudit.log (pgaudit redacts nested CREATE/ALTER ROLE passwords by statement type), and admin confirm-runtime-credential exits with status 4 for a slot the database never rotated, which the deployment tooling treats as a live version without a credential for that database. No business, D1 or account migration.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-02-r3.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-02-r4.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-10-28",
     "decision": "approved"
@@ -1025,7 +1031,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["center-runtime-r4", "center-worker-r4"],
+  "artifactRecords": ["center-runtime-r5", "center-worker-r5"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1039,7 +1045,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-02-r4.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-02-r5.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

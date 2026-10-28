@@ -182,6 +182,7 @@
     "eng/policy/dependency-reviews/af-ctr-02-r2.json",
     "eng/policy/dependency-reviews/af-ctr-02-r3.json",
     "eng/policy/dependency-reviews/af-ctr-02-r4.json",
+    "eng/policy/dependency-reviews/af-ctr-02-r5.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r1.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r2.json",
     "eng/policy/dependency-reviews/cloud-01-r1.json",
@@ -303,6 +304,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r56.json",
     "eng/provenance/artifact-profiles/cloud-release-r57.json",
     "eng/provenance/artifact-profiles/cloud-release-r58.json",
+    "eng/provenance/artifact-profiles/cloud-release-r59.json",
     "eng/provenance/artifact-profiles/cloud-release-r6.json",
     "eng/provenance/artifact-profiles/cloud-release-r7.json",
     "eng/provenance/artifact-profiles/cloud-release-r8.json",
@@ -315,10 +317,12 @@
     "eng/provenance/records/center-runtime-r2.json",
     "eng/provenance/records/center-runtime-r3.json",
     "eng/provenance/records/center-runtime-r4.json",
+    "eng/provenance/records/center-runtime-r5.json",
     "eng/provenance/records/center-worker-r1.json",
     "eng/provenance/records/center-worker-r2.json",
     "eng/provenance/records/center-worker-r3.json",
     "eng/provenance/records/center-worker-r4.json",
+    "eng/provenance/records/center-worker-r5.json",
     "eng/provenance/records/cloud-02-cloud-runtime-notices-r1.json",
     "eng/provenance/records/cloud-02-cloud-worker-bundle-r1.json",
     "eng/provenance/records/cloud-03-cloud-runtime-notices-r1.json",
@@ -1115,5 +1119,5 @@
     "third-party/ContractsGo.LICENSE.txt": "go-contractsgo-legal-r1",
     "third-party/ContractsGo.NOTICE.txt": "go-contractsgo-legal-r1"
   },
-  "artifacts": ["center-runtime-r4", "center-worker-r4"]
+  "artifacts": ["center-runtime-r5", "center-worker-r5"]
 }
