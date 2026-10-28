@@ -1,5 +1,11 @@
 # Go Hello deployment proof
 
+> **History.** This record describes the bounded Go Hello proof of 2026-10-27 (Cloud #110). AF-CTR-02 replaced it with the
+> Go center: `hello-go/`, `eng/hello-go.py` and `/app/arcforges-hello-go` no longer exist, the Hello moved unchanged in
+> behaviour into `center/internal/hello`, the bindings come from the published Contracts Go module instead of the NuGet
+> descriptor, and `python eng/center.py check` replaces the check below. The successor is [center](center.md); the controls
+> are in [engineering controls](engineering-controls.md).
+
 This increment follows the verified C# / Neon deployment (PR #109, 0.1.0-ci.417.1).
 It switches only the production Hello process to Go. It does not migrate the other Cloud modules,
 D1, accounts, fleet, commerce, or the product architecture.

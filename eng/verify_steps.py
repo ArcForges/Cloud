@@ -5,10 +5,13 @@ The full profile is every validation job of .github/workflows/ci.yml plus `candi
 build that `deploy` ships; main pushes no longer re-validate it), each on the host the hosted job used, in two legs on
 two native machines (eng/verify.py; AGENTS.md):
 - lane `win` (Windows, in <main checkout>/.worktree/_verify): `source (windows-latest)`: npm ci, the locked restore and
-  Release build of Cloud.slnx, and the evaluated licence report.
+  Release build of Cloud.slnx, the Go center's controls (`win-center`: python eng/center.py check, without the race detector
+  and fuzzing because the Windows host has no cgo; docs/engineering-controls.md), and the evaluated licence report.
 - lane `linux` (Linux, in ~/.cache/arcforges-verify/Cloud): `clone-identity`, `fresh-intermediates` (see
   FRESH_INTERMEDIATES), then `source (ubuntu-latest)`: npm ci,
-  `npm run check`, `npm run check:dotnet` and the evaluated licence report; the dependency audit of `quality`; then
+  `npm run check`, `npm run check:dotnet`, the Go center's controls (`linux-center`: python eng/center.py check with the race
+  detector, the fuzz targets, govulncheck and the image target) and the evaluated licence report; the dependency audit of
+  `quality`; then
   `candidate` (`npm run candidate`: the Linux Native AOT image in the Linux host's Docker, both Worker bundles, the sealed tool and the
   manifest, verified). Everything that runs dotnet or npm in the clone is in this lane: concurrent restores or builds of
   shared projects in one checkout would race.
@@ -161,7 +164,8 @@ STEPS = [
     win("win-npm-ci", pwsh(f"node (node -p \"{_BUNDLED_NPM}\") ci --ignore-scripts"), 300),
     win("win-restore", ["dotnet", "restore", "Cloud.slnx", "--locked-mode"], 600),
     win("win-build", ["dotnet", "build", "Cloud.slnx", "-c", "Release", "--no-restore"], 900),
-    win("win-go-hello", ["python", "eng/hello-go.py", "check"], 600),
+    # The Go center (AF-CTR-02): build, gofmt, vet, staticcheck, unit and protocol tests, drift, govulncheck and the native build.
+    win("win-center", ["python", "eng/center.py", "check"], 900),
     win("win-licence-evaluated", ["node", "tooling/project.ts", "licence-evaluated"], 600),
     # ci.yml source (ubuntu-latest), the dependency audit of quality, then candidate
     linux("clone-identity", "set -e; git config remote.origin.url https://github.com/ArcForges/Cloud.git; "
@@ -171,7 +175,8 @@ STEPS = [
     linux("npm-audit", "npm audit --audit-level=high", 300),
     linux("check", "npm run check", 1200),
     linux("check-dotnet", "npm run check:dotnet", 1200),
-    linux("go-hello", "python eng/hello-go.py check", 600),
+    # The Go center (AF-CTR-02): the Windows controls plus the race detector, the fuzz targets and the image target.
+    linux("linux-center", "python eng/center.py check", 900),
     linux("licence-evaluated", "node tooling/project.ts licence-evaluated", 300),
     linux("candidate", CANDIDATE, 900),
     # the whitespace check and quality's secret scan over the commits since the merge base; actionlint when a workflow changed

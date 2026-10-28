@@ -147,6 +147,21 @@ export async function verifyCandidate(): Promise<Candidate> {
   return candidate;
 }
 
+/** The hardening every local container run of the candidate image uses: the production Container's bounds and no privileges. */
+const containerHardening = [
+  "--read-only",
+  "--cap-drop",
+  "ALL",
+  "--security-opt",
+  "no-new-privileges",
+  "--memory",
+  "256m",
+  "--cpus",
+  "1",
+] as const;
+
+// Local opt-in diagnostic of the sealed candidate image (never CI). It starts the image's C# default entrypoint, then the Go
+// center (/app/arcforges-center) from the same image the way the production Container runs it.
 export async function testContainer(image: string, revision: string, identity: Identity) {
   assert.notEqual(process.env.CI, "true", "Container runtime tests are local opt-in only.");
   const compiled = JSON.parse(
@@ -184,15 +199,7 @@ export async function testContainer(image: string, revision: string, identity: I
     [
       "run",
       "--detach",
-      "--read-only",
-      "--cap-drop",
-      "ALL",
-      "--security-opt",
-      "no-new-privileges",
-      "--memory",
-      "256m",
-      "--cpus",
-      "1",
+      ...containerHardening,
       "--publish",
       "127.0.0.1::8080",
       "--publish",
@@ -201,19 +208,123 @@ export async function testContainer(image: string, revision: string, identity: I
     ],
     true,
   );
+  const binding = async (container: string, port: string) => {
+    const output = await run("docker", ["port", container, port], true);
+    const match = /^127\.0\.0\.1:(\d+)$/.exec(output);
+    assert.ok(match, `Unexpected Docker port: ${output}`);
+    return `http://127.0.0.1:${match[1]}`;
+  };
+  let csharp: { health: unknown; grpcWeb: unknown };
   try {
     const provenance = await verifyImageProvenance(id, revision, imageInfo.Id);
     await writeJson(path.join(candidateDir, "image-provenance.json"), provenance);
-    const binding = async (port: string) => {
-      const output = await run("docker", ["port", id, port], true);
-      const match = /^127\.0\.0\.1:(\d+)$/.exec(output);
-      assert.ok(match, `Unexpected Docker port: ${output}`);
-      return `http://127.0.0.1:${match[1]}`;
-    };
-    const web = await binding("8080/tcp");
-    const native = await binding("8081/tcp");
+    const web = await binding(id, "8080/tcp");
     const health = await waitForHealth(web, revision, false, 60000);
     verifyHealthIdentity(health, identity);
+    const grpcWeb = await runProbe(web, false);
+    // No native gRPC call to the C# host: its ingress admits binary gRPC-Web only and answers application/grpc with 415
+    // (docs/cloud-ingress.md, host admission rule 2). The published native Consumer runs against the Go center below,
+    // which admits native gRPC.
+    await run("docker", ["restart", id]);
+    const restartedWeb = await binding(id, "8080/tcp");
+    verifyHealthIdentity(await waitForHealth(restartedWeb, revision, false, 60000), identity);
+    await runProbe(restartedWeb, false);
+    csharp = { health, grpcWeb };
+  } finally {
+    await run("docker", ["logs", "--tail", "50", id]);
+    await run("docker", ["rm", "--force", id]);
+  }
+
+  const center = await testCenterContainer(image, revision, identity, binding);
+  await writeJson(path.join(root, "artifacts", "container-evidence.json"), {
+    imageId: imageInfo.Id,
+    health: csharp.health,
+    grpcWeb: csharp.grpcWeb,
+    restart: true,
+    nonRoot: true,
+    center,
+  });
+  return imageInfo.Id;
+}
+
+/**
+ * Starts the Go center from the candidate image as the production Container does (worker/foundation/cloud-container.ts):
+ * the entrypoint /app/arcforges-center with the mode and public base URL of wrangler.json, under the same hardening. The Neon
+ * Hello stays disabled because this local run has no database secret.
+ */
+async function testCenterContainer(
+  image: string,
+  revision: string,
+  identity: Identity,
+  binding: (container: string, port: string) => Promise<string>,
+) {
+  const entrypoint = "/app/arcforges-center";
+  const production = await readJson<{ vars: Record<string, string | undefined> }>(
+    path.join(root, "wrangler.json"),
+  );
+  const mode = production.vars.ARCFORGES_CENTER_MODE;
+  const publicBaseUrl = production.vars.ARCFORGES_CENTER_PUBLIC_BASE_URL;
+  assert.equal(mode, "official-hosted", "Production must run the center in official-hosted mode.");
+  assert.ok(
+    publicBaseUrl?.startsWith("https://"),
+    "Production must state an https public base URL.",
+  );
+
+  const compiled = JSON.parse(
+    await run(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--entrypoint",
+        entrypoint,
+        image,
+        "--build-info",
+      ],
+      true,
+    ),
+  ) as { runtime?: unknown; nativeAot?: unknown };
+  verifyHealthIdentity(compiled, identity);
+  assert.equal(compiled.runtime, "go", "The center's build identity must report the Go runtime.");
+  assert.equal(compiled.nativeAot, false);
+
+  const id = await run(
+    "docker",
+    [
+      "run",
+      "--detach",
+      ...containerHardening,
+      "--publish",
+      "127.0.0.1::8080",
+      "--publish",
+      "127.0.0.1::8081",
+      "--env",
+      `ARCFORGES_CENTER_MODE=${mode}`,
+      "--env",
+      `ARCFORGES_CENTER_PUBLIC_BASE_URL=${publicBaseUrl}`,
+      "--env",
+      "ARCFORGES_NEON_HELLO=disabled",
+      "--entrypoint",
+      entrypoint,
+      image,
+    ],
+    true,
+  );
+  try {
+    const web = await binding(id, "8080/tcp");
+    const native = await binding(id, "8081/tcp");
+    const health = (await waitForHealth(web, revision, false, 60000, undefined, "go")) as {
+      helloBackend?: unknown;
+      center?: unknown;
+    };
+    verifyHealthIdentity(health, identity);
+    assert.equal(health.helloBackend, "stateless");
+    assert.deepEqual(health.center, { binary: "arcforges-center", mode, publicBaseUrl });
     const grpcWeb = await runProbe(web, false);
     await run("dotnet", [
       "run",
@@ -225,23 +336,23 @@ export async function testContainer(image: string, revision: string, identity: I
       "--",
       native,
     ]);
-    await run("docker", ["restart", id]);
-    const restartedWeb = await binding("8080/tcp");
-    verifyHealthIdentity(await waitForHealth(restartedWeb, revision, false, 60000), identity);
-    await runProbe(restartedWeb, false);
-    await writeJson(path.join(root, "artifacts", "container-evidence.json"), {
-      imageId: imageInfo.Id,
+    // SIGTERM, as the Container runtime stops an instance: the center drains and exits 0.
+    await run("docker", ["stop", "--time", "20", id]);
+    const exitCode = await run("docker", ["inspect", "--format", "{{.State.ExitCode}}", id], true);
+    assert.equal(exitCode, "0", "The center must stop cleanly on SIGTERM.");
+    return {
+      entrypoint,
+      mode,
+      publicBaseUrl,
       health,
       grpcWeb,
       nativeGrpc: true,
-      restart: true,
-      nonRoot: true,
-    });
+      gracefulStop: true,
+    };
   } finally {
     await run("docker", ["logs", "--tail", "50", id]);
     await run("docker", ["rm", "--force", id]);
   }
-  return imageInfo.Id;
 }
 
 async function testWorker(candidate: Candidate) {

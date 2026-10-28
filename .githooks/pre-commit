@@ -1,5 +1,35 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 # Whitespace errors in the staged changes. Builds and tests run after the push, in the host verification
 # (eng/verify.py run-and-report; AGENTS.md, Verification after the push), not on commit.
 git diff --cached --check
+
+# gofmt -s of the staged Go files, read from the index (the bytes being committed, not the working tree). Only the
+# formatter runs here; vet, staticcheck, the tests and every other Go control run in python eng/center.py check.
+# The paths are read NUL-separated, so a path with spaces or other special characters stays one path.
+staged_go=()
+while IFS= read -r -d '' file; do
+	staged_go+=("$file")
+done < <(git diff --cached --name-only -z --diff-filter=ACMR -- '*.go')
+if [ "${#staged_go[@]}" -gt 0 ]; then
+	gofmt_command=gofmt
+	if ! command -v gofmt >/dev/null 2>&1; then
+		if command -v go >/dev/null 2>&1 && [ -x "$(go env GOROOT)/bin/gofmt" ]; then
+			gofmt_command="$(go env GOROOT)/bin/gofmt"
+		else
+			echo "pre-commit: gofmt is not on PATH; install the Go release pinned in center/toolchain.json" >&2
+			exit 1
+		fi
+	fi
+	unformatted=()
+	for file in "${staged_go[@]}"; do
+		if [ -n "$(git show ":$file" | "$gofmt_command" -s -l 2>&1)" ]; then
+			unformatted+=("$file")
+		fi
+	done
+	if [ "${#unformatted[@]}" -gt 0 ]; then
+		echo "pre-commit: gofmt -s would reformat these staged files; run gofmt -s -w on them and stage the result:" >&2
+		printf '  %s\n' "${unformatted[@]}" >&2
+		exit 1
+	fi
+fi

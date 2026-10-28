@@ -97,7 +97,7 @@ export function releaseProfile(owner: string) {
       (image.executables === undefined ? "" : " executables"),
   );
   if (image.executables !== undefined)
-    assert.deepEqual(list(image.executables).sort(), ["ArcForges.Cloud", "arcforges-hello-go"]);
+    assert.deepEqual(list(image.executables).sort(), ["ArcForges.Cloud", "arcforges-center"]);
   for (const inputs of [object(worker.inputs), object(image.inputs)]) {
     assert(Object.keys(inputs).length > 0, "Empty source closure");
     for (const [name, expected] of Object.entries(inputs))

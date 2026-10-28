@@ -15,8 +15,9 @@ namespace ArcForges.Cloud.ArchitectureTests.WorkerAdapter;
 /// 0 to 3 compared with a length. A comparison reads each whole operand, so a shift or arithmetic operand is a budget too.
 /// Every other finding must be covered by a closed list: a number row (<see cref="NumberRows"/>) for values fixed by an external standard,
 /// keyed by file, symbol and value; a shape row (<see cref="ShapeRows"/>) for a shape that a standard fixes; or an owned, expiring row of the
-/// shared register (the HAR40-EX carve-out and the CLOUD84-EX D16 rows). The generated module and the generated plan tables are not read; their
-/// values come from C# declarations and are checked by generate --check.
+/// shared register (the HAR40-EX carve-out and the CLOUD84-EX D16 rows). The generated modules and the generated plan tables are not read; their
+/// values come from C# declarations checked by generate --check and, for the production method table, from the Go center's registrations
+/// checked by its Go drift test (python eng/center.py check).
 /// </summary>
 internal static partial class WorkerLiteralScan
 {
@@ -63,10 +64,14 @@ internal static partial class WorkerLiteralScan
     /// <summary>The generated module that holds the readiness terms; the one file that names them as literals.</summary>
     public const string GeneratedTablesPath = "worker/tables/cloud-tables.generated.ts";
 
-    /// <summary>The generated Worker outputs: the only worker files the check does not read.</summary>
+    /// <summary>
+    /// The generated Worker outputs: the only worker files the check does not read. The production method table and its budgets are
+    /// generated from the Go center's registrations (AF-CTR-02, checked by the center's Go drift test); the other tables from C#.
+    /// </summary>
     public static readonly IReadOnlySet<string> GeneratedFiles = new HashSet<string>(StringComparer.Ordinal)
     {
         "worker/tables/cloud-tables.generated.ts",
+        "worker/tables/center-tables.generated.ts",
         "worker/storage/plans.generated.ts",
     };
 

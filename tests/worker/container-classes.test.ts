@@ -141,19 +141,48 @@ test("the 60 second sleep timer never stops a Container that has a request or a 
   assert.ok(container.sleepAfterMs > Date.now(), "and the sleep window is renewed");
 });
 
-test("Go is selected only for the production class and proof remains C#", () => {
+test("the Go center is selected only for the production class and proof remains C#", () => {
   const environment = {
     ARCFORGES_HELLO_RUNTIME: "go",
     ARCFORGES_NEON_HELLO: "enabled",
     NEON_DATABASE_URL: "synthetic",
+    ARCFORGES_CENTER_MODE: "official-hosted",
+    ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://center.example/api",
   };
   const production = new CloudContainer(containerContext, environment);
-  assert.deepEqual(production.entrypoint, ["/app/arcforges-hello-go"]);
+  assert.deepEqual(production.entrypoint, ["/app/arcforges-center"]);
+  // The center's mode and base URL pass through unchanged; the center itself refuses a missing or invalid value.
+  assert.deepEqual(production.envVars, {
+    ARCFORGES_CENTER_MODE: "official-hosted",
+    ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://center.example/api",
+    ARCFORGES_NEON_HELLO: "enabled",
+    NEON_DATABASE_URL: "synthetic",
+  });
+  assert.equal(production.enableInternet, true);
   const proof = new FoundationContainer(containerContext, environment);
   assert.equal(proof.entrypoint, undefined);
   assert.equal(proof.enableInternet, false);
   assert.throws(
     () => new CloudContainer(containerContext, { ARCFORGES_HELLO_RUNTIME: "unknown" }),
     /Unknown Hello runtime/u,
+  );
+});
+
+test("without a mode the Go center gets none and refuses to start; the C# runtime gets no center variable", () => {
+  const unconfigured = new CloudContainer(containerContext, { ARCFORGES_HELLO_RUNTIME: "go" });
+  assert.deepEqual(unconfigured.entrypoint, ["/app/arcforges-center"]);
+  assert.equal(unconfigured.enableInternet, false);
+  assert.equal(
+    (unconfigured.envVars as Record<string, string> | undefined)?.ARCFORGES_CENTER_MODE,
+    undefined,
+  );
+  const csharp = new CloudContainer(containerContext, {
+    ARCFORGES_HELLO_RUNTIME: "csharp",
+    ARCFORGES_CENTER_MODE: "official-hosted",
+  });
+  assert.equal(csharp.entrypoint, undefined);
+  assert.equal(
+    (csharp.envVars as Record<string, string> | undefined)?.ARCFORGES_CENTER_MODE,
+    undefined,
   );
 });

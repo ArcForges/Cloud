@@ -42,6 +42,23 @@ updates:
     schedule:
       interval: weekly
       day: monday
+  # The Go center and its pinned tools module (AF-CTR-02). Every requirement of /center/tools is // indirect behind its tool
+  # lines, so all dependency types are allowed. An update fails python eng/center.py check until center/dependencies.json is
+  # re-admitted by review, like any dependency change.
+  - package-ecosystem: gomod
+    directories: ["/center", "/center/tools"]
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: all
+    groups:
+      contracts:
+        patterns: ["github.com/ArcForges/*"]
+      go-modules:
+        patterns: ["*"]
+        exclude-patterns: ["github.com/ArcForges/*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

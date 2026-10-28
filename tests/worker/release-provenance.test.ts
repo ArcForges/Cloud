@@ -67,7 +67,7 @@ function imageFixture() {
   cpSync(path.join(root, "LICENSE"), path.join(directory, "LICENSE"));
   // An explicitly synthetic ELF prefix tests legal packaging only; Docker tests execute the real binary.
   writeFileSync(path.join(directory, "ArcForges.Cloud"), Buffer.from([127, 69, 76, 70, 1]));
-  writeFileSync(path.join(directory, "arcforges-hello-go"), Buffer.from([127, 69, 76, 70, 2]));
+  writeFileSync(path.join(directory, "arcforges-center"), Buffer.from([127, 69, 76, 70, 2]));
   const cleanup = () => {
     assert.equal(path.dirname(directory), os.tmpdir());
     assert(path.basename(directory).startsWith("cloud-image-provenance-"));
@@ -155,9 +155,9 @@ test("distribution cannot omit legal text or substitute a source receipt", () =>
 test("reject a missing or non-native Go executable in the dual-runtime image", () => {
   const fixture = imageFixture();
   try {
-    writeFileSync(path.join(fixture.directory, "arcforges-hello-go"), "not an ELF executable");
+    writeFileSync(path.join(fixture.directory, "arcforges-center"), "not an ELF executable");
     assert.throws(() => verifyImageFiles(root, revision, fixture.directory), /Missing native ELF/u);
-    rmSync(path.join(fixture.directory, "arcforges-hello-go"));
+    rmSync(path.join(fixture.directory, "arcforges-center"));
     assert.throws(
       () => verifyImageFiles(root, revision, fixture.directory),
       /Unclassified or missing image member/u,
