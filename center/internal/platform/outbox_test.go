@@ -184,6 +184,33 @@ func TestConcurrentPublishersDeliverEveryMessage(t *testing.T) {
 	}
 }
 
+// A publisher whose lease expired while its sink failed must not dead-letter (or reschedule) a row another publisher claimed again.
+func TestAStaleClaimantCannotDeadLetterAReclaimedMessage(t *testing.T) {
+	f := setup(t)
+	commitWithMessage(t, f, "contested")
+	ctx := context.Background()
+	reclaimed := false
+	var second Report
+	// The second publisher claims the row again once the first one's lease expired; its own delivery fails and is rescheduled.
+	other := &Publisher{DB: f.db, MaxAttempts: 10, Sink: &recorder{before: func(Delivery) error { return errors.New("the queue is slow") }}}
+	first := &Publisher{DB: f.db, MaxAttempts: 1, Sink: &recorder{before: func(Delivery) error {
+		if _, err := f.migration.Exec(ctx, "UPDATE platform.outbox SET available_at = now() WHERE dedup_key = 'contested'"); err != nil {
+			return err
+		}
+		var err error
+		second, err = other.PublishOnce(ctx)
+		reclaimed = err == nil && second.Claimed == 1 && second.Failed == 1
+		return errors.New("the queue refused the message")
+	}}}
+	report, err := first.PublishOnce(ctx)
+	if err != nil || !reclaimed || report.DeadLettered != 0 || report.Superseded != 1 {
+		t.Fatalf("first publisher: %+v %v; second %+v", report, err, second)
+	}
+	if state, attempts := f.outboxState(t, "contested"); state != outboxPending || attempts != 2 {
+		t.Fatalf("the re-claimed row: state %d attempts %d", state, attempts)
+	}
+}
+
 func TestAFailingSinkRetriesThenDeadLetters(t *testing.T) {
 	f := setup(t)
 	commitWithMessage(t, f, "poison")

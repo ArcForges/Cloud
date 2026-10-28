@@ -102,6 +102,9 @@ type Report struct {
 	Dispatched   int
 	Failed       int
 	DeadLettered int
+	// Superseded counts failed deliveries whose row another publisher claimed again after this one's lease expired; that
+	// publisher decides about the row, so this one neither retries nor dead-letters it.
+	Superseded int
 }
 
 func (p *Publisher) defaults() (batch int, lease time.Duration, attempts int, logger *slog.Logger) {
@@ -153,31 +156,44 @@ RETURNING o.outbox_id, o.sequence, o.dedup_key, o.topic, o.aggregate_kind, o.agg
 			return report, ctx.Err()
 		}
 		publishErr := p.Sink.Publish(ctx, delivery)
+		// Every mark is guarded by the state, and a failure's mark also by the attempt: a publisher whose lease expired and whose
+		// row another publisher claimed again (a higher attempt) must neither retry nor dead-letter it.
 		var statement string
 		var arguments []any
 		switch {
 		case publishErr == nil:
 			statement = "UPDATE platform.outbox SET state = $2, dispatched_at = now(), last_error = NULL WHERE outbox_id = $1 AND state = $3"
 			arguments = []any{delivery.OutboxID, outboxDispatched, outboxPending}
-			report.Dispatched++
 		case delivery.Attempt >= maxAttempts:
-			statement = "UPDATE platform.outbox SET state = $2, last_error = $4 WHERE outbox_id = $1 AND state = $3"
-			arguments = []any{delivery.OutboxID, outboxDeadLettered, outboxPending, lastError(publishErr)}
-			report.DeadLettered++
-			logger.Error("outbox message dead-lettered", "dedupKey", delivery.DedupKey, "topic", delivery.Topic, "attempts", delivery.Attempt)
+			statement = "UPDATE platform.outbox SET state = $2, last_error = $5 WHERE outbox_id = $1 AND state = $3 AND attempts = $4"
+			arguments = []any{delivery.OutboxID, outboxDeadLettered, outboxPending, delivery.Attempt, lastError(publishErr)}
 		default:
 			statement = "UPDATE platform.outbox SET available_at = now() + $4::interval, last_error = $5 WHERE outbox_id = $1 AND state = $2 AND attempts = $3"
 			arguments = []any{delivery.OutboxID, outboxPending, delivery.Attempt, backoff(delivery.Attempt), lastError(publishErr)}
-			report.Failed++
-			logger.Warn("outbox publication failed; it will be retried", "dedupKey", delivery.DedupKey, "topic", delivery.Topic, "attempt", delivery.Attempt)
 		}
+		var marked int64
 		err := p.DB.InTx(ctx, "mark an outbox message", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, statement, arguments...)
+			tag, err := tx.Exec(ctx, statement, arguments...)
+			marked = tag.RowsAffected()
 			return err
 		})
 		if err != nil {
 			// The row stays pending and is claimed again after its lease: published again, never lost.
 			return report, err
+		}
+		switch {
+		case publishErr == nil:
+			report.Dispatched++
+		case marked == 0:
+			report.Superseded++
+			logger.Warn("outbox publication failed after another publisher claimed the message again; it decides about it",
+				"dedupKey", delivery.DedupKey, "topic", delivery.Topic, "attempt", delivery.Attempt)
+		case delivery.Attempt >= maxAttempts:
+			report.DeadLettered++
+			logger.Error("outbox message dead-lettered", "dedupKey", delivery.DedupKey, "topic", delivery.Topic, "attempts", delivery.Attempt)
+		default:
+			report.Failed++
+			logger.Warn("outbox publication failed; it will be retried", "dedupKey", delivery.DedupKey, "topic", delivery.Topic, "attempt", delivery.Attempt)
 		}
 	}
 	return report, nil

@@ -274,8 +274,10 @@ func (o *Options) defaults() {
 	}
 }
 
-// Failure is a migration that failed and was rolled back. It carries the SQLSTATE and the server's primary message (never the
-// detail, which can quote row values).
+// Failure is a migration that failed and was rolled back. It carries the SQLSTATE and a message that never quotes a value: the
+// server's primary message only for the classes whose messages name objects and the statement (42, syntax error or access rule
+// violation; 0A, feature not supported), otherwise the error class with the constraint, table and column names. A data error
+// such as 22P02 quotes the offending value in its primary message, and the detail can quote whole rows.
 type Failure struct {
 	Version  int
 	Name     string
@@ -423,13 +425,72 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 		failure := &Failure{Version: migration.Version, Name: migration.Name, SQLState: "unknown", Message: "the migration did not complete"}
 		var pgError *pgconn.PgError
 		if errors.As(err, &pgError) {
-			failure.SQLState, failure.Message = pgError.Code, pgError.Message
+			failure.SQLState, failure.Message = pgError.Code, failureMessage(pgError)
 		} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			failure.SQLState, failure.Message = "57014", "the run was cancelled or timed out"
 		}
 		return Step{}, failure
 	}
 	return Step{Version: migration.Version, Name: migration.Name, SHA256: migration.SHA256, DurationMS: time.Since(started).Milliseconds()}, nil
+}
+
+// sqlStateClasses names the classes of the errors a migration can raise (PostgreSQL documentation, appendix A).
+var sqlStateClasses = map[string]string{
+	"08": "connection exception",
+	"21": "cardinality violation",
+	"22": "data exception",
+	"23": "integrity constraint violation",
+	"25": "invalid transaction state",
+	"28": "invalid authorization specification",
+	"2B": "dependent privilege descriptors still exist",
+	"2F": "SQL routine exception",
+	"38": "external routine exception",
+	"39": "external routine invocation exception",
+	"3B": "savepoint exception",
+	"3D": "invalid catalog name",
+	"3F": "invalid schema name",
+	"40": "transaction rollback",
+	"53": "insufficient resources",
+	"54": "program limit exceeded",
+	"55": "object not in prerequisite state",
+	"57": "operator intervention",
+	"58": "system error",
+	"P0": "PL/pgSQL error",
+	"XX": "internal error",
+}
+
+// failureMessage keeps the primary message of class 42 and 0A errors, whose messages name objects and statement text of the
+// migration itself, and reduces every other error to its class and the names of the constraint, table and column involved.
+func failureMessage(pgError *pgconn.PgError) string {
+	class := ""
+	if len(pgError.Code) == 5 {
+		class = pgError.Code[:2]
+	}
+	if class == "42" || class == "0A" {
+		return pgError.Message
+	}
+	name, known := sqlStateClasses[class]
+	if !known {
+		name = "database error"
+	}
+	var names []string
+	if pgError.ConstraintName != "" {
+		names = append(names, "constraint "+pgError.ConstraintName)
+	}
+	if pgError.TableName != "" {
+		table := pgError.TableName
+		if pgError.SchemaName != "" {
+			table = pgError.SchemaName + "." + table
+		}
+		names = append(names, "table "+table)
+	}
+	if pgError.ColumnName != "" {
+		names = append(names, "column "+pgError.ColumnName)
+	}
+	if len(names) == 0 {
+		return name
+	}
+	return name + " (" + strings.Join(names, ", ") + ")"
 }
 
 func runnerName(runner string) string {

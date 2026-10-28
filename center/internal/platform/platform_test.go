@@ -94,15 +94,15 @@ func TestAnExpiredLeaseIsFencedOut(t *testing.T) {
 	f := setup(t)
 	scheduleJobs(t, f, 1)
 	ctx := context.Background()
-	stale, err := Claim(ctx, f.db, "test.job", "worker-a", time.Second)
+	stale, err := Claim(ctx, f.db, "test.job", "worker-a", time.Second, 0)
 	if err != nil || stale == nil || stale.Fence != 1 {
 		t.Fatalf("claim: %+v %v", stale, err)
 	}
-	if again, err := Claim(ctx, f.db, "test.job", "worker-b", time.Second); err != nil || again != nil {
+	if again, err := Claim(ctx, f.db, "test.job", "worker-b", time.Second, 0); err != nil || again != nil {
 		t.Fatalf("a leased job was claimed twice: %+v %v", again, err)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	current, err := Claim(ctx, f.db, "test.job", "worker-b", time.Minute)
+	current, err := Claim(ctx, f.db, "test.job", "worker-b", time.Minute, 0)
 	if err != nil || current == nil || current.Fence != 2 || current.Attempts != 2 {
 		t.Fatalf("reclaim: %+v %v", current, err)
 	}
@@ -135,8 +135,13 @@ func TestAnExpiredLeaseIsFencedOut(t *testing.T) {
 	if err != nil || f.counter(t, "fenced") != 1 {
 		t.Fatalf("completion: %v counter %d", err, f.counter(t, "fenced"))
 	}
-	if next, err := Claim(ctx, f.db, "test.job", "worker-c", time.Minute); err != nil || next != nil {
+	if next, err := Claim(ctx, f.db, "test.job", "worker-c", time.Minute, 0); err != nil || next != nil {
 		t.Fatalf("a completed job was claimed: %+v %v", next, err)
+	}
+	// A completed job has no lease: completing it again is refused, not an error of the store.
+	err = f.db.InTx(ctx, "second completion", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error { return current.Complete(ctx, tx) })
+	if !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("second completion: %v", err)
 	}
 }
 
@@ -149,7 +154,7 @@ func TestConcurrentClaimersTakeEachJobOnce(t *testing.T) {
 	for worker := range 5 {
 		group.Go(func() {
 			for {
-				lease, err := Claim(context.Background(), f.db, "test.job", fmt.Sprintf("worker-%d", worker), time.Minute)
+				lease, err := Claim(context.Background(), f.db, "test.job", fmt.Sprintf("worker-%d", worker), time.Minute, 0)
 				if err != nil {
 					t.Error(err)
 					return
@@ -180,7 +185,7 @@ func TestAFailedJobRetriesThenDeadLetters(t *testing.T) {
 	scheduleJobs(t, f, 1)
 	ctx := context.Background()
 	for attempt := 1; attempt <= 2; attempt++ {
-		lease, err := Claim(ctx, f.db, "test.job", "worker", time.Minute)
+		lease, err := Claim(ctx, f.db, "test.job", "worker", time.Minute, 0)
 		if err != nil || lease == nil {
 			t.Fatalf("attempt %d: %+v %v", attempt, lease, err)
 		}
@@ -191,6 +196,48 @@ func TestAFailedJobRetriesThenDeadLetters(t *testing.T) {
 	var state int16
 	if err := f.migration.QueryRow(ctx, "SELECT state FROM platform.job_lease").Scan(&state); err != nil || state != jobDeadLettered {
 		t.Fatalf("state %d %v", state, err)
+	}
+}
+
+// A job whose holders' leases keep expiring is not handed out forever: the claim after the last attempt dead-letters it.
+func TestAJobWhoseLeasesKeepExpiringIsDeadLetteredByTheClaim(t *testing.T) {
+	f := setup(t)
+	ids := scheduleJobs(t, f, 1)
+	ctx := context.Background()
+	expire := func() {
+		t.Helper()
+		if _, err := f.migration.Exec(ctx, "UPDATE platform.job_lease SET leased_until = now() - interval '1 second' WHERE state = $1", jobLeased); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var last *Lease
+	for attempt := 1; attempt <= 2; attempt++ {
+		lease, err := Claim(ctx, f.db, "test.job", fmt.Sprintf("worker-%d", attempt), time.Minute, 2)
+		if err != nil || lease == nil || lease.Attempts != attempt {
+			t.Fatalf("attempt %d: %+v %v", attempt, lease, err)
+		}
+		last = lease
+		expire()
+	}
+	if lease, err := Claim(ctx, f.db, "test.job", "worker-3", time.Minute, 2); err != nil || lease != nil {
+		t.Fatalf("an exhausted job was handed out: %+v %v", lease, err)
+	}
+	var state int16
+	var attempts int
+	var lastError string
+	if err := f.migration.QueryRow(ctx, "SELECT state, attempts, last_error FROM platform.job_lease WHERE job_id = $1", ids[0]).Scan(&state, &attempts, &lastError); err != nil ||
+		state != jobDeadLettered || attempts != 2 || lastError != exhaustedReason {
+		t.Fatalf("state %d attempts %d last error %q %v", state, attempts, lastError, err)
+	}
+	// The last holder, whose lease expired, can no longer complete it.
+	err := f.db.InTx(ctx, "stale completion", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error { return last.Complete(ctx, tx) })
+	if !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("stale completion of a dead-lettered job: %v", err)
+	}
+	// A job with attempts left is claimed, and the default maximum applies to a claim without one.
+	scheduleJobs(t, f, 1)
+	if lease, err := Claim(ctx, f.db, "test.job", "worker-4", time.Minute, 0); err != nil || lease == nil || lease.Attempts != 1 {
+		t.Fatalf("a fresh job: %+v %v", lease, err)
 	}
 }
 

@@ -23,6 +23,12 @@ const (
 // MaxJobPayloadBytes bounds a job's payload.
 const MaxJobPayloadBytes = 65536
 
+// DefaultJobAttempts bounds the claims of one job when the caller names no maximum.
+const DefaultJobAttempts = 10
+
+// exhaustedReason is the last error of a job that Claim dead-lettered.
+const exhaustedReason = "dead-lettered by a claim: the job reached its maximum attempts"
+
 // ErrLeaseLost refuses a renewal, a fenced write or a completion by a holder whose lease ended: another holder claimed the job
 // with a higher fence, or the job is no longer leased.
 var ErrLeaseLost = errors.New("the job lease was lost")
@@ -52,22 +58,35 @@ VALUES ($1, $2, 0, 0, $3, $4, $5, now(), now()) ON CONFLICT (job_id) DO NOTHING`
 }
 
 // Claim leases the oldest available job of a type: a ready job whose time has come or a leased job whose lease expired. Every
-// claim increments the fence. It returns nil when no job is available. Concurrent claimers skip each other's rows.
-func Claim(ctx context.Context, db *store.DB, jobType, holder string, duration time.Duration) (*Lease, error) {
+// claim increments the fence and counts an attempt. A job that is available again after maxAttempts claims (its holders' leases
+// kept expiring) is dead-lettered in the same transaction instead of being handed out; maxAttempts <= 0 means
+// DefaultJobAttempts. It returns nil when no job is available. Concurrent claimers skip each other's rows.
+func Claim(ctx context.Context, db *store.DB, jobType, holder string, duration time.Duration, maxAttempts int) (*Lease, error) {
 	if !lowerName.MatchString(jobType) || holder == "" || len(holder) > 128 || duration <= 0 {
 		return nil, errors.New("a claim needs a job type, a holder and a positive lease")
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultJobAttempts
 	}
 	var lease *Lease
 	err := db.InTx(ctx, "claim a job", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		lease = nil
+		if _, err := tx.Exec(ctx, `WITH exhausted AS (
+    SELECT job_id FROM platform.job_lease
+    WHERE job_type = $1 AND attempts >= $4 AND ((state = $2 AND available_at <= now()) OR (state = $3 AND leased_until <= now()))
+    FOR UPDATE SKIP LOCKED)
+UPDATE platform.job_lease j SET state = $5, holder = NULL, leased_until = NULL, last_error = $6, updated_at = now()
+FROM exhausted WHERE j.job_id = exhausted.job_id`, jobType, jobReady, jobLeased, maxAttempts, jobDeadLettered, exhaustedReason); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `WITH candidate AS (
     SELECT job_id FROM platform.job_lease
-    WHERE job_type = $1 AND ((state = $2 AND available_at <= now()) OR (state = $3 AND leased_until <= now()))
+    WHERE job_type = $1 AND attempts < $6 AND ((state = $2 AND available_at <= now()) OR (state = $3 AND leased_until <= now()))
     ORDER BY available_at, job_id LIMIT 1 FOR UPDATE SKIP LOCKED)
 UPDATE platform.job_lease j SET state = $3, holder = $4, leased_until = now() + $5::interval, attempts = j.attempts + 1,
     fence = j.fence + 1, updated_at = now()
 FROM candidate WHERE j.job_id = candidate.job_id
-RETURNING j.job_id, j.job_type, j.holder, j.fence, j.attempts, j.payload, j.leased_until`, jobType, jobReady, jobLeased, holder, duration)
+RETURNING j.job_id, j.job_type, j.holder, j.fence, j.attempts, j.payload, j.leased_until`, jobType, jobReady, jobLeased, holder, duration, maxAttempts)
 		if err != nil {
 			return err
 		}
@@ -101,12 +120,13 @@ WHERE job_id = $1 AND fence = $2 AND state = $3 AND leased_until > now() RETURNI
 }
 
 // Fenced locks the job row in the caller's business transaction and checks that this lease still holds it, so the business
-// write commits only under the current fence: a stale holder's transaction fails with ErrLeaseLost.
+// write commits only under the current fence: a stale holder's transaction fails with ErrLeaseLost, also once the job was
+// completed or dead-lettered (no lease).
 func (l *Lease) Fenced(ctx context.Context, tx pgx.Tx) error {
 	var fence int64
 	var state int16
 	var live bool
-	err := tx.QueryRow(ctx, "SELECT fence, state, leased_until > now() FROM platform.job_lease WHERE job_id = $1 FOR UPDATE", l.JobID).Scan(&fence, &state, &live)
+	err := tx.QueryRow(ctx, "SELECT fence, state, coalesce(leased_until > now(), false) FROM platform.job_lease WHERE job_id = $1 FOR UPDATE", l.JobID).Scan(&fence, &state, &live)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (fence != l.Fence || state != jobLeased || !live)) {
 		return ErrLeaseLost
 	}

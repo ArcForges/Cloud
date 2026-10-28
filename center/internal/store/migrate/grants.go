@@ -17,8 +17,11 @@ import (
 // reconcile makes the runtime group role's privileges exactly the declared grants, in one transaction, so there is no moment
 // with a missing or an extra privilege: the role exists without login and without any elevated attribute and is a member of
 // no other role; PUBLIC and the role lose every privilege on the module schemas, their tables, sequences and functions; the role
-// gets USAGE on the schemas it uses and the declared table privileges; and it cannot create a schema in the database or an
-// object in the public schema.
+// gets USAGE on the schemas it uses and the declared table privileges; it cannot create a schema in the database or an object in
+// the public schema; and PUBLIC loses CONNECT and TEMPORARY on the center's database, which only the runtime role (for its login
+// roles) and the owner may connect to, so a runtime role of another database in the same cluster cannot connect here and this
+// one can create no temporary table. The migration role must own the database: a revocation by another role would be ignored,
+// and the check below then refuses.
 func reconcile(ctx context.Context, conn *pgx.Conn, options Options) error {
 	role := options.RuntimeRole
 	err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
@@ -85,12 +88,26 @@ func reconcile(ctx context.Context, conn *pgx.Conn, options Options) error {
 		if err := tx.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil {
 			return Sanitize("identify the database", err)
 		}
-		if _, err := tx.Exec(ctx, "REVOKE CREATE ON DATABASE "+pgx.Identifier{database}.Sanitize()+" FROM "+quoted); err != nil {
-			return Sanitize("revoke CREATE on the database", err)
+		db := pgx.Identifier{database}.Sanitize()
+		for _, statement := range []string{
+			"REVOKE CONNECT, TEMPORARY ON DATABASE " + db + " FROM PUBLIC",
+			"REVOKE CREATE, TEMPORARY ON DATABASE " + db + " FROM " + quoted,
+			"GRANT CONNECT ON DATABASE " + db + " TO " + quoted,
+		} {
+			if _, err := tx.Exec(ctx, statement); err != nil {
+				return Sanitize("reconcile the privileges on the database", err)
+			}
 		}
-		var createDatabase, createPublic bool
-		if err := tx.QueryRow(ctx, "SELECT has_database_privilege($1, current_database(), 'CREATE'), has_schema_privilege($1, 'public', 'CREATE')", role).Scan(&createDatabase, &createPublic); err != nil {
+		var createDatabase, createPublic, temporary, connect, publicAccess bool
+		if err := tx.QueryRow(ctx, `SELECT has_database_privilege($1, current_database(), 'CREATE'), has_schema_privilege($1, 'public', 'CREATE'),
+    has_database_privilege($1, current_database(), 'TEMPORARY'), has_database_privilege($1, current_database(), 'CONNECT'),
+    EXISTS (SELECT 1 FROM pg_database d, aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
+            WHERE d.datname = current_database() AND a.grantee = 0 AND a.privilege_type IN ('CONNECT', 'TEMPORARY'))`, role).
+			Scan(&createDatabase, &createPublic, &temporary, &connect, &publicAccess); err != nil {
 			return Sanitize("check the runtime role's database privileges", err)
+		}
+		if temporary || publicAccess || !connect {
+			return errors.New("PUBLIC keeps CONNECT or TEMPORARY on the center's database, or the runtime role cannot connect; the migration role must own the database")
 		}
 		if createPublic {
 			if _, err := tx.Exec(ctx, "REVOKE CREATE ON SCHEMA public FROM PUBLIC, "+quoted); err != nil {

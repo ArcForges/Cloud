@@ -3,9 +3,12 @@
 package migrate
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -165,6 +168,52 @@ func TestAFailingMigrationRollsBackCompletely(t *testing.T) {
 	}
 }
 
+// A data error quotes the offending value in the server's primary message (22P02 here); the run's output, its log lines and the
+// error the command logs name the SQLSTATE, the class and the objects only.
+func TestAFailingMigrationNeverQuotesAValue(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	const value = "fixture-value-7319"
+	failing, _ := Load(files("CREATE TABLE platform.t1 (x text);",
+		"INSERT INTO platform.t1 VALUES ('"+value+"'); ALTER TABLE platform.t1 ALTER COLUMN x TYPE integer USING x::integer;"))
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	result, err := apply(t, url, failing, Options{Runner: "test", Logger: logger})
+	var failure *Failure
+	if !errors.As(err, &failure) || failure.SQLState != "22P02" || failure.Message != "data exception" {
+		t.Fatalf("failure: %#v %v", failure, err)
+	}
+	document, marshalErr := json.Marshal(result)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	// The command prints the result and logs the error with the same logger (cmd/arcforges-center).
+	logger.Error("the migration failed", "error", err.Error())
+	for name, text := range map[string]string{"output": string(document), "log": logs.String(), "error": err.Error()} {
+		if strings.Contains(text, value) {
+			t.Fatalf("the %s quotes the row value: %s", name, text)
+		}
+	}
+	if !strings.Contains(err.Error(), "22P02") || !strings.Contains(logs.String(), "0002_second.sql") {
+		t.Fatalf("the failure does not name its SQLSTATE and migration: %v %s", err, logs.String())
+	}
+	// A constraint violation names its constraint and table, never the duplicated value.
+	unique, _ := Load(files("CREATE TABLE platform.t2 (x text CONSTRAINT t2_x UNIQUE);",
+		"INSERT INTO platform.t2 VALUES ('"+value+"'), ('"+value+"');"))
+	other, _ := pgtest.Database(t)
+	_, err = apply(t, other, unique, Options{Runner: "test"})
+	if !errors.As(err, &failure) || failure.SQLState != "23505" || strings.Contains(err.Error(), value) ||
+		failure.Message != "integrity constraint violation (constraint t2_x, table platform.t2)" {
+		t.Fatalf("unique failure: %#v %v", failure, err)
+	}
+	// Errors of class 42 keep the server's message, which names objects of the migration's own text.
+	missing, _ := Load(files("CREATE TABLE platform.t3 (x int);", "SELECT * FROM platform.absent;"))
+	third, _ := pgtest.Database(t)
+	_, err = apply(t, third, missing, Options{Runner: "test"})
+	if !errors.As(err, &failure) || failure.SQLState != "42P01" || !strings.Contains(failure.Message, "platform.absent") {
+		t.Fatalf("42P01 failure: %#v %v", failure, err)
+	}
+}
+
 func TestACrashedRunRollsBackAndReleasesTheLock(t *testing.T) {
 	url, _ := pgtest.Database(t)
 	slow, _ := Load(files("CREATE TABLE platform.t1 (x int);", "CREATE TABLE platform.t2 (x int); SELECT pg_sleep(60);"))
@@ -273,11 +322,55 @@ func TestTheRuntimeRoleHasExactlyItsGrants(t *testing.T) {
 		"INSERT INTO platform.schema_migration (version, name, sha256, duration_ms, runner) VALUES (99, '0099_x.sql', repeat('0', 64), 0, 'x')",
 		"SELECT * FROM other.secret",
 		"CREATE INDEX extra ON platform.outbox (topic)",
+		"CREATE TEMP TABLE extra_temporary (x int)",
 	}
 	for _, statement := range refused {
 		_, err := runtime.Exec(ctx, statement)
 		if !pgtest.IsCode(err, "42501") {
 			t.Errorf("the runtime role ran %q (or failed otherwise: %v)", statement, err)
+		}
+	}
+}
+
+// Production and acceptance share one cluster: a runtime role connects to its own database only.
+func TestTheRuntimeRoleConnectsOnlyToItsOwnDatabase(t *testing.T) {
+	ctx := context.Background()
+	type center struct{ url, login, password string }
+	centers := make([]center, 2)
+	for index := range centers {
+		url, name := pgtest.Database(t)
+		group := name + "_runtime"
+		for range 2 { // a repeated run keeps the database privileges
+			if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: group}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		login, password := group+"_a", pgtest.Secret()
+		if _, err := pgtest.Connect(t, url).Exec(ctx, "CREATE ROLE "+login+" LOGIN PASSWORD '"+password+"' IN ROLE "+group); err != nil {
+			t.Fatal(err)
+		}
+		centers[index] = center{url: url, login: login, password: password}
+	}
+	for index, own := range centers {
+		other := centers[1-index]
+		if conn, err := pgx.Connect(ctx, pgtest.WithUser(t, own.url, own.login, own.password)); err != nil {
+			t.Fatalf("center %d: its runtime role cannot connect to its own database: %v", index, err)
+		} else {
+			_ = conn.Close(ctx)
+		}
+		conn, err := pgx.Connect(ctx, pgtest.WithUser(t, other.url, own.login, own.password))
+		if err == nil {
+			_ = conn.Close(ctx)
+			t.Fatalf("center %d: its runtime role connected to another center's database", index)
+		}
+		if !pgtest.IsCode(err, "42501") {
+			t.Fatalf("center %d: unexpected refusal: %v", index, err)
+		}
+		// The owner keeps its rights.
+		if conn, err := pgx.Connect(ctx, own.url); err != nil {
+			t.Fatalf("center %d: the migration role cannot connect: %v", index, err)
+		} else {
+			_ = conn.Close(ctx)
 		}
 	}
 }

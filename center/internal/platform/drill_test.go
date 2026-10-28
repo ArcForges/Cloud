@@ -73,7 +73,7 @@ func TestRestoreDrill(t *testing.T) {
 			t.Fatalf("outbox: %+v %v", report, err)
 		}
 		// The restored job is claimed and completed under its fence.
-		lease, err := Claim(ctx, db, "test.drill", "drill", time.Minute)
+		lease, err := Claim(ctx, db, "test.drill", "drill", time.Minute, 0)
 		if err != nil || lease == nil || lease.JobID != drillJob {
 			t.Fatalf("job: %+v %v", lease, err)
 		}
