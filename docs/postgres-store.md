@@ -401,8 +401,8 @@ environment of the Go center since AF-CTR-02.
   `admin ensure-database` through the migration role's direct connection, with its own runtime role
   `arcforges_acceptance_runtime`. Neither environment's credential reaches the other's database.
 - **The deployment job:** after the retained D1 gate, `node tooling/postgres-deploy.ts migrate --target acceptance` ensures the
-  database and migrates it. `npm run deploy:proof` then rotates the acceptance credential and deploys the sealed acceptance
-  bundle.
+  database and migrates it. `npm run deploy:proof` then detaches the retired C# queue consumers (below), rotates the acceptance
+  credential and deploys the sealed acceptance bundle.
 - **Its resources:** the dispatch's `provision` action also provisions the center's acceptance resources
   (`eng/verification/center-provision.ts`): the R2 bucket `arcforges-acceptance-center` and the queues
   `arcforges-acceptance-center-events` and `-dlq`. The bucket's lifecycle rules expire `support-bundles/` objects after 30 days
@@ -414,8 +414,33 @@ environment of the Go center since AF-CTR-02.
   - The retired Durable Object classes (`FoundationJobCoordinator`, `HarnessRunAlarm`) stay exported and inert, so no stored
     state is deleted.
   - The retained D1 database stays bound for its gated C# step, until AF-CTR-09 inspects and keeps it.
-  - The C# proof routes, its static profile assets, its R2 bucket and its queues are no longer bound and stay as they are. Their
-    sources and historical evidence stay until AF-CTR-09.
+  - The C# proof routes, its static profile assets and its R2 bucket are no longer bound and stay as they are. Their sources and
+    historical evidence stay until AF-CTR-09.
+  - The queue `arcforges-proof-wake` and its dead-letter queue `arcforges-proof-wake-dlq` stay, unconsumed, until AF-CTR-09,
+    with whatever messages they hold (transient container wake signals, not user data). The retired C# bundle consumed both,
+    and Cloudflare refuses to upload a script that a queue still names as its consumer when the script has no `queue` handler
+    (code 11001). Before the credential rotation and the upload, `npm run deploy:proof` therefore detaches the proof script's
+    consumers of exactly these two queues, leaving every other consumer alone, and prints and records `detached` or
+    `not attached` for each (`retiredQueueConsumers` in `artifacts/proof-deployment.json`). The consumer's own settings (six
+    retries, dead-lettering into `arcforges-proof-wake-dlq`) go with it. It never deletes a queue or a message: messages left in
+    the queues are no longer delivered and expire under each queue's own retention setting. A rerun finds `not attached` and
+    changes nothing.
+  - Once the consumers are detached, a later failure in the credential rotation or in `wrangler deploy` leaves the still-live C#
+    proof Worker without its wake consumers. That is acceptable for the retired proof, and the next successful dispatch
+    replaces that Worker.
+  - Before it changes anything, the same step compares the live proof script with the generated proof configuration and refuses
+    only what the deployment would leave in place undeclared:
+    - a proof-script consumer of a queue that the configuration does not consume (consumers it declares, such as a later outbox
+      sink, are Wrangler's to update);
+    - a live cron schedule while the configuration declares no `triggers.crons` (declared crons replace every live schedule; the
+      acceptance configuration declares none, and the proof never had a schedule);
+    - a published Durable Object migration tag that the configuration does not list (it keeps `v1` and
+      `harness-run-alarm-v1`).
+
+    A configuration that consumes one of the two retired queues again is refused too. The step records the schedule count and
+    the tag beside the consumers. It reads the queue list by the provider's paging details (`total_pages`, else `total_count`),
+    at most 20 pages. An unreadable answer or a failed removal stops the deployment before Wrangler runs. Removing a consumer
+    needs the deployment token's Queues write permission; adding it is the owner's action.
 
 ## Self-hosted center
 
