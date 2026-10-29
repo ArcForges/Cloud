@@ -863,9 +863,13 @@ internal static partial class HarnessArchitecture
 
             var hex = new HashSet<string>(tokens.Where(t => t.Kind == TokenKind.Number).Select(t => t.Value.ToLowerInvariant().Replace("_", string.Empty, StringComparison.Ordinal)), StringComparer.Ordinal);
             var names = new HashSet<string>(tokens.Where(t => t.Kind == TokenKind.Word).Select(t => t.Value), StringComparer.Ordinal);
-            // Build tooling may read the protobuf runtime's licence header; the codec rule concerns authored product and test code.
+            // Build tooling may read the protobuf runtime's licence header; the codec rule concerns authored product and test code. A
+            // word that contains "varint" in any case (AF-CTR-03 D7: varintRadix, readVarint, writeVarint) marks varint logic as the
+            // exact word does, whatever the arithmetic is spelled with.
             if (!file.Path.StartsWith("eng/", StringComparison.Ordinal)
-                && (new[] { "BinaryWriter", "BinaryReader", "varint" }.Any(names.Contains) || (hex.Contains("0x7f") && hex.Contains("0x80"))))
+                && (new[] { "BinaryWriter", "BinaryReader" }.Any(names.Contains)
+                    || names.Any(name => name.Contains("varint", StringComparison.OrdinalIgnoreCase))
+                    || (hex.Contains("0x7f") && hex.Contains("0x80"))))
             {
                 c.Report("wire-codec", file.Path, "Manual varint or binary reader/writer logic");
             }
