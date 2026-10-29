@@ -429,3 +429,42 @@ func TestARetryWithItsOwnCorrelationReplaysTheReceipt(t *testing.T) {
 		t.Fatal("a reused command ID revoked another session")
 	}
 }
+
+// TestADuplicateOfARunningRegistrationIsBusy (B4): the same CompletePasskeyRegistration command sent again while its first
+// execution still runs finds the flow's only attempt taken; it answers RESOURCE/overloaded (AFTER_TIME), never a final refusal,
+// and once the first committed the same command replays its success. The first execution is parked in its receipt transaction by
+// a held lock on the account's row.
+func TestADuplicateOfARunningRegistrationIsBusy(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	who := h.seedAccount(1, "")
+	from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
+	h.stepUp(who, from, identity.ClassBeginRegistration, who.id)
+	challenge := rpc(h, beginRegisterPath, &publicapiv1.IdentityServiceBeginPasskeyRegistrationRequest{Meta: meta(), DisplayName: proto.String("Key")}, from,
+		&publicapiv1.IdentityServiceBeginPasskeyRegistrationResponse{}).GetValue().GetChallenge()
+	creation, _ := virtual.New(rpID, origin).Create(challenge.GetChallenge(), who.handle)
+	request := &publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest{Meta: command(), FlowId: challenge.GetFlowId(), Credential: creationOf(creation)}
+	complete := func() *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse {
+		return rpc(h, completeRegisterPath, request, from, &publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse{})
+	}
+	lock := h.holding("SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", who.id)
+	first := make(chan *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse, 1)
+	go func() { first <- complete() }()
+	if !lock.waitFor(1) {
+		t.Fatal("the first completion never reached the account's row")
+	}
+	duplicate := complete().GetError()
+	if failure(duplicate) != "RESOURCE/overloaded" || duplicate.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_AFTER_TIME {
+		t.Fatalf("the duplicate while the first runs: %v", duplicate)
+	}
+	lock.release(false)
+	answer := <-first
+	if answer.GetError() != nil {
+		t.Fatalf("the first completion: %s", failure(answer.GetError()))
+	}
+	replay := complete()
+	if replay.GetError() != nil || !proto.Equal(replay.GetValue(), answer.GetValue()) || h.receipts() != 1 ||
+		h.count("SELECT count(*) FROM identity.auth_identity WHERE subject = $1", base64.RawURLEncoding.EncodeToString(creation.CredentialID)) != 1 {
+		t.Fatalf("the replay after the first committed: %v", replay)
+	}
+	h.verifyAudit()
+}

@@ -305,6 +305,11 @@ func (s *Server) completePasskeyRegistration(ctx context.Context, call *ingress.
 		}
 		registration, err := s.identity.PrepareRegistration(ctx, caller, flowID, creation(request.GetCredential()))
 		if err != nil {
+			// B4: a duplicate refused because its first execution held the flow's attempt answers that execution's receipt when it
+			// committed meanwhile.
+			if outcome, found, lookupErr := platform.Lookup(ctx, s.db, receiptCommand); lookupErr == nil && found {
+				return decode(outcome, nil, &publicapiv1.IdentityServiceCompletePasskeyRegistrationValue{})
+			}
 			return nil, err
 		}
 		value, err := execute(ctx, s, receiptCommand, &publicapiv1.IdentityServiceCompletePasskeyRegistrationValue{},
