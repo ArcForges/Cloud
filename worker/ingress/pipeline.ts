@@ -20,6 +20,7 @@ import {
   deadlineError,
   grpcStatus,
 } from "./errors.ts";
+import { edgeClientKey, rateLimitedReplyAt } from "./edge-limit.ts";
 import { guardResponse } from "./frames.ts";
 import { classifyStartFailureResponse, containerUnavailable } from "../readiness/container.ts";
 import { bounded, readBytes, reject, rpcError } from "./io.ts";
@@ -33,7 +34,6 @@ import {
   healthPath,
   notActivatedReplies,
   productionTable,
-  rateLimitedReply,
   streamLifetimeMs,
   surfaceTable,
   type RouteTable,
@@ -59,7 +59,10 @@ export interface IngressEnv {
  * so a client reads the refusal exactly as it reads the center's.
  */
 function domainReply(base64: string): Response {
-  const body = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+  return domainReplyBody(Uint8Array.from(atob(base64), (character) => character.charCodeAt(0)));
+}
+
+function domainReplyBody(body: Uint8Array<ArrayBuffer>): Response {
   return new Response(body, {
     headers: {
       "content-type": "application/grpc-web+proto",
@@ -148,21 +151,18 @@ export async function handleApiRequest(
   };
   try {
     signal.throwIfAborted();
-    // Cloudflare supplies this header. The limit is not authentication or a billing quota.
+    // Cloudflare supplies this header. The limit is not authentication or a billing quota. Both limits key a client by its
+    // address, an IPv6 client by its generated network (F7).
     const client = request.headers.get("cf-connecting-ip");
+    const key = edgeClientKey(client);
     if (surfaceRoute) {
       // The surface methods have their own edge limit; over it (or without the binding) the call is refused with the generated
-      // domain refusal RESOURCE/rate_limited (PLT-11), and the Container never sees it.
+      // domain refusal RESOURCE/rate_limited (PLT-11) with its retry instant (F17), and the Container never sees it.
       const limiter = env.IDENTITY_RATE_LIMITER;
-      const underLimit = limiter
-        ? (await bounded(limiter.limit({ key: client ?? "local" }), signal)).success
-        : false;
-      if (!underLimit) return domainReply(rateLimitedReply);
+      const underLimit = limiter ? (await bounded(limiter.limit({ key }), signal)).success : false;
+      if (!underLimit) return domainReplyBody(rateLimitedReplyAt(Date.now()));
     } else {
-      const { success } = await bounded(
-        env.HELLO_RATE_LIMITER.limit({ key: client ?? "local" }),
-        signal,
-      );
+      const { success } = await bounded(env.HELLO_RATE_LIMITER.limit({ key }), signal);
       if (!success) return reject(429, "Hello rate limit exceeded.");
     }
 

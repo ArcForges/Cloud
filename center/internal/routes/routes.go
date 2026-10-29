@@ -39,6 +39,15 @@ const (
 	HealthMaxDurationMilliseconds = 15_000
 	// HealthInstance is the Container instance that answers the health route.
 	HealthInstance = "hello"
+	// EdgeIPv6PrefixBits is the network that keys an IPv6 client at the Worker's rate limits (F7): its /64, the smallest standard
+	// per-subscriber allocation, so one host cannot slip past the edge limit by changing its address within its own network. An
+	// IPv4 client (an IPv4-mapped IPv6 address included) is keyed by its whole address, so the users behind a carrier-grade NAT do not
+	// share one key. The center's own buckets group clients more coarsely (ratelimit.Prefix).
+	EdgeIPv6PrefixBits = 64
+	// EdgeRateLimitPeriodSeconds is the period of the Worker's surface rate limit (wrangler.json IDENTITY_RATE_LIMITER simple.period
+	// in both environments, pinned by tests/worker/center-config.test.ts). The Worker's rate_limited reply advises a retry this
+	// long after the refused call, which no window of the limiter outlasts (F17).
+	EdgeRateLimitPeriodSeconds = 60
 )
 
 // Budget is one method's transport budget as the Worker applies it. These are declarations for the Worker; the center keeps

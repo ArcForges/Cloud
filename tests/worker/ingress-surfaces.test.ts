@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The surface switch of the Worker (AF-CTR-03, DC-04, PLT-11, PLT-12): a method of a disabled surface is answered with the
 // generated domain refusal STATE/not_activated without waking the Container; an enabled one passes its own edge rate limit (over it,
-// the generated RESOURCE/rate_limited reply), carries the client's address from Cloudflare's header only, and is forwarded like a
-// production method. FLAGSHIP_SURFACES is exact: anything but known names, comma-separated, enables nothing.
+// the generated RESOURCE/rate_limited reply with its retry instant, F17), carries the client's address from Cloudflare's header only,
+// and is forwarded like a production method. Both edge limits key an IPv6 client by its generated network (F7). FLAGSHIP_SURFACES is
+// exact: anything but known names, comma-separated, enables nothing.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { edgeClientKey, rateLimitedReplyAt } from "../../worker/ingress/edge-limit.ts";
 import { trailerFrame } from "../../worker/ingress/io.ts";
 import {
   clientIpHeader,
@@ -14,7 +16,14 @@ import {
   surfaceTable,
 } from "../../worker/ingress/routes.ts";
 import { routeRequest, type CloudBindings } from "../../worker/router.ts";
-import { surfaceNames, surfaceRoutes } from "../../worker/tables/center-tables.generated.ts";
+import {
+  edgeIpv6PrefixBits,
+  edgeRateLimitPeriodSeconds,
+  productionRoutes,
+  rateLimitedReplyInstantOffsets,
+  surfaceNames,
+  surfaceRoutes,
+} from "../../worker/tables/center-tables.generated.ts";
 
 const grpcWeb = "application/grpc-web+proto";
 const anonymous = surfaceRoutes.find((route) => route.auth === "anonymous");
@@ -76,6 +85,16 @@ function call(path: string, headers: Record<string, string> = {}): Request {
 
 function decode(base64: string): Uint8Array {
   return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+}
+
+/**
+ * The template with the five given bytes at each instant offset. The center's own test (TestTheRateLimitedTemplateTakesTheWorkersInstant)
+ * decodes such a body as its rate_limited refusal at that instant; here the expected bytes are fixed vectors.
+ */
+function withInstant(bytes: readonly number[]): Uint8Array {
+  const body = decode(rateLimitedReply);
+  for (const offset of rateLimitedReplyInstantOffsets) body.set(bytes, offset);
+  return body;
 }
 
 test("FLAGSHIP_SURFACES enables exact generated names only", () => {
@@ -160,14 +179,73 @@ test("an enabled surface forwards with its own rate limit and the client address
 test("over the edge limit, or without the limiter, a surface call gets the generated rate_limited reply", async () => {
   for (const limiter of [{ limit: async () => ({ success: false }) }, undefined]) {
     const { env, seen } = bindings({ IDENTITY_RATE_LIMITER: limiter });
+    const before = Date.now();
     const response = await routeRequest(
       call(anonymous.path, { "cf-connecting-ip": "203.0.113.7" }),
       env,
     );
+    const after = Date.now();
     assert.equal(response.status, 200);
-    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), decode(rateLimitedReply));
+    const body = new Uint8Array(await response.arrayBuffer());
     assert.equal(seen.length, 0);
+    // The reply is the template with the retry instant of the refusal's time.
+    assert(
+      [before, after].some((at) => Buffer.from(rateLimitedReplyAt(at)).equals(Buffer.from(body))),
+      "the reply is the template at the refusal's time",
+    );
   }
+});
+
+test("the rate_limited reply's instants are the time rounded up to the second plus the edge period", () => {
+  assert.equal(edgeRateLimitPeriodSeconds, 60);
+  // The zigzag (sint64) seconds as five varint bytes: 2026-10-29T12:00:00.001Z rounds up to 1793275201, plus 60; and both ends of
+  // the five-byte range (2^27 and 2^34 - 1 seconds).
+  for (const [at, bytes] of [
+    [Date.UTC(2026, 9, 29, 12, 0, 0, 1), [250, 213, 153, 174, 13]],
+    [2 ** 27 * 1000 - 60000, [128, 128, 128, 128, 1]],
+    [(2 ** 34 - 61) * 1000, [254, 255, 255, 255, 127]],
+  ] as const)
+    assert.deepEqual(rateLimitedReplyAt(at), withInstant(bytes), String(at));
+});
+
+test("an edge client key is the address, an IPv6 client's generated network", () => {
+  assert.equal(edgeIpv6PrefixBits, 64);
+  const network = "2001:db8:1:2::/64";
+  for (const [address, key] of [
+    ["203.0.113.7", "203.0.113.7"],
+    ["::ffff:203.0.113.7", "203.0.113.7"],
+    ["::ffff:cb00:7107", "203.0.113.7"],
+    ["2001:db8:1:2:3:4:5:6", network],
+    ["2001:db8:1:2:ffff:ffff:ffff:ffff", network],
+    ["2001:DB8:1:2::1", network],
+    ["2001:0db8:0001:0002::", network],
+    ["2001:db8:1:3::1", "2001:db8:1:3::/64"],
+    ["::1", "::/64"],
+    ["not an address", "not an address"],
+    ["fe80::1%eth0", "fe80::1%eth0"],
+    ["1::2::3", "1::2::3"],
+  ] as const)
+    assert.equal(edgeClientKey(address), key, address);
+  assert.equal(edgeClientKey(null), "local");
+});
+
+test("both edge limits key two addresses of one IPv6 network alike", async () => {
+  const hello = productionRoutes[0]?.path ?? "";
+  const helloKeys: string[] = [];
+  const { env, keys } = bindings({
+    HELLO_RATE_LIMITER: {
+      limit: async ({ key }) => {
+        helloKeys.push(key);
+        return { success: true };
+      },
+    },
+  });
+  for (const address of ["2001:db8:a:b::1", "2001:db8:a:b:9::2", "2001:db8:a:c::1"]) {
+    await routeRequest(call(anonymous.path, { "cf-connecting-ip": address }), env);
+    await routeRequest(call(hello, { "cf-connecting-ip": address }), env);
+  }
+  assert.deepEqual(keys, ["2001:db8:a:b::/64", "2001:db8:a:b::/64", "2001:db8:a:c::/64"]);
+  assert.deepEqual(helloKeys, keys);
 });
 
 test("a surface method keeps the transport rules of every method", async () => {

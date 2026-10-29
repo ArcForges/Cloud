@@ -89,7 +89,7 @@ export const productionRoutes: readonly ApiRoute[] = [
 }
 
 // TestTheSurfaceRepliesAreTheCentersRefusals decodes the generated replies: each is one gRPC-Web reply frame whose message is the
-// center's own refusal (without a correlation id) and an OK status trailer.
+// center's own refusal (without a correlation id) and an OK status trailer; the rate_limited template carries its template instant.
 func TestTheSurfaceRepliesAreTheCentersRefusals(t *testing.T) {
 	generated, err := Generate()
 	if err != nil {
@@ -97,7 +97,7 @@ func TestTheSurfaceRepliesAreTheCentersRefusals(t *testing.T) {
 	}
 	for name, want := range map[string]*arc.Refusal{
 		"identity":         arc.NotActivated("identity"),
-		"rateLimitedReply": arc.RateLimited("edge", 0, time.Time{}),
+		"rateLimitedReply": arc.RateLimited("edge", 0, time.Unix(1<<33, 0)),
 	} {
 		start := strings.Index(generated, name+":")
 		if name == "rateLimitedReply" {
@@ -125,6 +125,50 @@ func TestTheSurfaceRepliesAreTheCentersRefusals(t *testing.T) {
 		!strings.Contains(generated, `export const clientIpHeader = "x-arcforges-client-ip";`) ||
 		!strings.Contains(generated, `export type Surface = "identity";`) {
 		t.Fatal("the surface constants changed")
+	}
+}
+
+// TestTheRateLimitedTemplateTakesTheWorkersInstant (F17) writes an instant into the generated template as the Worker does (its
+// zigzag seconds as five varint bytes at each offset) and finds exactly the center's rate_limited refusal at that instant, with
+// retry_at and recovery_at set; the period is the edge limiter's.
+func TestTheRateLimitedTemplateTakesTheWorkersInstant(t *testing.T) {
+	generated, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, offsets, err := rateLimitedReply()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(generated, "export const rateLimitedReplyInstantOffsets: readonly number[] = ["+joinInts(offsets)+"];") ||
+		!strings.Contains(generated, "export const rateLimitedReplyInstantBytes = 5;") ||
+		!strings.Contains(generated, "export const edgeRateLimitPeriodSeconds = 60;") ||
+		!strings.Contains(generated, "export const edgeIpv6PrefixBits = 64;") {
+		t.Fatal("the edge constants are not generated")
+	}
+	template, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range []time.Time{time.Date(2026, 10, 29, 12, 0, 1, 0, time.UTC), time.Unix(1<<27, 0), time.Unix(1<<34-1, 0)} {
+		patched := bytes.Clone(template)
+		for _, offset := range offsets {
+			value := uint64(at.Unix()) * 2 // the zigzag of a positive sint64
+			for index := range 5 {
+				patched[offset+index] = byte(value % 128)
+				if index < 4 {
+					patched[offset+index] |= 128
+				}
+				value /= 128
+			}
+		}
+		message, err := arc.ReplyMessage(arc.RateLimited("edge", 0, at).ArcError(correlation.Context{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(patched, append(ingress.Frame(message), ingress.TrailerFrame(ingress.StatusOK, "", false)...)) {
+			t.Fatalf("the template at %s is not the center's refusal", at)
+		}
 	}
 }
 

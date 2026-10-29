@@ -8,6 +8,7 @@
 package workertables
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/config"
@@ -117,12 +120,24 @@ func Render(table routes.WorkerTable) (string, error) {
 		text.WriteString(property(surface, quote(replies[surface])))
 	}
 	text.WriteString("};\n")
-	limited, err := rateLimitedReply()
+	limited, offsets, err := rateLimitedReply()
 	if err != nil {
 		return "", err
 	}
-	text.WriteString("/** The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited, retry after time. Base64. */\n")
+	text.WriteString("/**\n")
+	text.WriteString(" * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit \"edge\"), retry after time.\n")
+	text.WriteString(" * A template: the Worker writes the retry instant (the refusal's time rounded up to the second, plus the edge period) into\n")
+	text.WriteString(" * the instant seconds at each offset (retry.retry_at and limit.recovery_at). Base64.\n")
+	text.WriteString(" */\n")
 	text.WriteString(constant("rateLimitedReply", quote(limited)))
+	text.WriteString("/** The byte offsets of the template's instant seconds (zigzag varints of a fixed width). */\n")
+	text.WriteString("export const rateLimitedReplyInstantOffsets: readonly number[] = [" + joinInts(offsets) + "];\n")
+	text.WriteString("/** The width of each instant's seconds: five varint bytes hold every instant from 1974 to 2514. */\n")
+	text.WriteString("export const rateLimitedReplyInstantBytes = " + strconv.Itoa(instantSlotBytes) + ";\n")
+	text.WriteString("/** The period of the surface rate limit in seconds (wrangler.json IDENTITY_RATE_LIMITER simple.period). */\n")
+	text.WriteString("export const edgeRateLimitPeriodSeconds = " + strconv.Itoa(routes.EdgeRateLimitPeriodSeconds) + ";\n")
+	text.WriteString("/** The network that keys an IPv6 client at the edge rate limits; an IPv4 client is keyed by its whole address. */\n")
+	text.WriteString("export const edgeIpv6PrefixBits = " + strconv.Itoa(routes.EdgeIPv6PrefixBits) + ";\n")
 	text.WriteString("\n")
 	text.WriteString("/** The methods of the switchable surfaces; each is forwarded only while its surface is enabled. */\n")
 	text.WriteString("export const surfaceRoutes: readonly SurfaceRoute[] = [\n")
@@ -191,6 +206,14 @@ func property(name, value string) string {
 	return "  " + name + ":\n    " + value + ",\n"
 }
 
+func joinInts(values []int) string {
+	texts := make([]string, len(values))
+	for index, value := range values {
+		texts[index] = strconv.Itoa(value)
+	}
+	return strings.Join(texts, ", ")
+}
+
 func joinQuoted(values []string) string {
 	quoted := make([]string, len(values))
 	for index, value := range values {
@@ -218,14 +241,44 @@ func surfaceReplies(surfaces []string) (map[string]string, error) {
 	return replies, nil
 }
 
-// rateLimitedReply is the generated reply of the Worker's surface rate limit (PLT-11): retry after time, with no instant (the edge
-// limiter's window is the platform's).
-func rateLimitedReply() (string, error) {
-	message, err := arc.ReplyMessage(arc.RateLimited("edge", 0, time.Time{}).ArcError(correlation.Context{}))
+// The instant of the rate_limited template: 2^33 seconds (in 2242), whose zigzag (sint64) seconds take five varint bytes, as every
+// instant from 1974 (2^27 seconds) to 2514 (2^34 seconds) does, so the Worker writes its instant into the same five bytes.
+const (
+	instantSlotBytes = 5
+	templateSeconds  = int64(1) << 33
+)
+
+// rateLimitedReply is the generated reply of the Worker's surface rate limit (PLT-11, F17): RESOURCE/rate_limited, limit "edge",
+// retry after time, as a template whose two instants (retry.retry_at and limit.recovery_at, equal as arc.RateLimited makes them) the
+// Worker sets at refusal time. It returns the body and the byte offsets of the instants' seconds within it.
+func rateLimitedReply() (string, []int, error) {
+	message, err := arc.ReplyMessage(arc.RateLimited("edge", 0, time.Unix(templateSeconds, 0)).ArcError(correlation.Context{}))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return grpcWebBody(message), nil
+	body, err := base64.StdEncoding.DecodeString(grpcWebBody(message))
+	if err != nil {
+		return "", nil, err
+	}
+	// An instant is field 1 (sint64, varint) and field 2 (nanos 0): the tag 0x08, the five seconds bytes, then 0x10 0x00.
+	slot := protowire.AppendVarint([]byte{0x08}, protowire.EncodeZigZag(templateSeconds))
+	if len(slot) != 1+instantSlotBytes {
+		return "", nil, errors.New("the template's instant does not take five varint bytes")
+	}
+	slot = append(slot, 0x10, 0x00)
+	var offsets []int
+	for start := 0; ; {
+		index := bytes.Index(body[start:], slot)
+		if index < 0 {
+			break
+		}
+		offsets = append(offsets, start+index+1)
+		start += index + len(slot)
+	}
+	if len(offsets) != 2 {
+		return "", nil, errors.New("the rate_limited template does not hold exactly its two instants")
+	}
+	return base64.StdEncoding.EncodeToString(body), offsets, nil
 }
 
 // Generate renders the table of the center's registrations.

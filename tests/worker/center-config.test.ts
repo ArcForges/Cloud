@@ -5,6 +5,7 @@
 // rather than the deployment. Wrangler does not inherit `vars` into a named environment, so each environment is checked on
 // its own.
 import assert from "node:assert/strict";
+import { edgeRateLimitPeriodSeconds } from "../../worker/tables/center-tables.generated.ts";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -177,4 +178,21 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   ])
     assert.equal(surfaceProblems({ ...valid, ALLOWED_ORIGIN: origin }).length, 1, String(origin));
   assert.equal(surfaceProblems({ ...valid, ARCFORGES_HELLO_RUNTIME: "csharp" }).length, 1);
+});
+
+// AF-CTR-03 (F17): the Worker's rate_limited reply advises a retry after the generated edge period, which must be the surface
+// limiter's own period in every environment, so the advised instant is never inside the limiter's window.
+test("the surface limiter's period is the generated edge period in every environment", () => {
+  for (const [name, environment] of environments) {
+    const limiters =
+      (environment as { ratelimits?: { name?: string; simple?: { period?: unknown } }[] })
+        .ratelimits ?? [];
+    const identity = limiters.filter((limiter) => limiter.name === "IDENTITY_RATE_LIMITER");
+    assert.equal(identity.length, 1, `wrangler.json environment ${name}`);
+    assert.equal(
+      identity[0]?.simple?.period,
+      edgeRateLimitPeriodSeconds,
+      `wrangler.json environment ${name}`,
+    );
+  }
 });
