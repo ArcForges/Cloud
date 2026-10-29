@@ -103,8 +103,8 @@ func (s *Service) Bootstrap(ctx context.Context, request Request, in Enrollment)
 		return SignedIn{}, arc.Unauthenticated()
 	}
 	now := s.now()
-	secret, ok := session.ParseToken(session.BootstrapPrefix, in.LocalCode)
-	digest := secret.Digest()
+	_, ok := session.ParseToken(session.BootstrapPrefix, in.LocalCode)
+	digest := session.BootstrapDigest(in.LocalCode)
 	switch {
 	case s.bootstrap == nil:
 		return refuse(bootstrapDisabled)
@@ -199,10 +199,11 @@ VALUES ($1, $2, 1, 'passkey', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)`, id
 		}
 		return refuse(bootstrapAccountExists)
 	case err != nil:
-		if refusalOf(err) != nil {
-			if exhaustErr := s.exhaust(ctx, row.ID); exhaustErr != nil {
-				return SignedIn{}, exhaustErr
-			}
+		if refusalOf(err) == nil {
+			// The token and the creation verified and the store failed: the attempt is given back for the advised retry.
+			s.release(ctx, row.ID)
+		} else if exhaustErr := s.exhaust(ctx, row.ID); exhaustErr != nil {
+			return SignedIn{}, exhaustErr
 		}
 		return SignedIn{}, err
 	}

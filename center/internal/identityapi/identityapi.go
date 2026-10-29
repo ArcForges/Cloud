@@ -96,8 +96,9 @@ func (s *Server) Methods() []connect.Method {
 	}
 }
 
-// failure is the ArcError of an error: a refusal as it is, a store that is down or contended as RESOURCE/overloaded, anything
-// else as INTERNAL/internal (logged with the correlation id; store errors never carry row values).
+// failure is the ArcError of an error: a refusal as it is, a write whose commit outcome is unknown as INTERNAL/internal with effect
+// UNKNOWN and retry NEVER (F6), a store that is down or contended as RESOURCE/overloaded, anything else as INTERNAL/internal
+// (logged with the correlation id; store errors never carry row values).
 func (s *Server) failure(ctx context.Context, call *ingress.Call, err error) *foundationv1.ArcError {
 	if err == nil {
 		return nil
@@ -105,6 +106,9 @@ func (s *Server) failure(ctx context.Context, call *ingress.Call, err error) *fo
 	var refusal *arc.Refusal
 	switch {
 	case errors.As(err, &refusal):
+	case errors.Is(err, store.ErrCommitUnknown):
+		s.logger.ErrorContext(ctx, "identity call failed", "method", call.Policy.FullName, "correlationId", call.Correlation.CorrelationID, "error", err.Error())
+		refusal = arc.CommitUnknown()
 	case errors.Is(err, store.ErrUnavailable), errors.Is(err, store.ErrTimeout), errors.Is(err, store.ErrContention), errors.Is(err, store.ErrCanceled),
 		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		refusal = arc.Unavailable()

@@ -5,6 +5,7 @@ package identityapi_test
 import (
 	"bytes"
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
+	centerpage "github.com/ArcForges/Cloud/center/internal/page"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
@@ -293,6 +295,26 @@ func TestAPasskeySignsInAndReadsItsAccount(t *testing.T) {
 	if failure(devicePage.GetError()) != "VALIDATION/invalid_cursor" {
 		t.Fatalf("a bogus cursor: %s", failure(devicePage.GetError()))
 	}
+	// A well-formed cursor whose instant PostgreSQL cannot hold is invalid_cursor too, and no call fails (F11).
+	for _, instant := range []int64{-1 << 62, 1 << 62} {
+		position := centerpage.Cursor{At: time.UnixMicro(instant)}
+		results := []string{
+			failure(rpc(h, sessionsPath, &publicapiv1.IdentityServiceListSessionsRequest{Meta: meta(), Page: &foundationv1.PageRequest{
+				Cursor: proto.String(centerpage.Encode(centerpage.Sessions, position))}}, bearer, &publicapiv1.IdentityServiceListSessionsResponse{}).GetError()),
+			failure(rpc(h, identities, &publicapiv1.IdentityServiceListAuthIdentitiesRequest{Meta: meta(), Page: &foundationv1.PageRequest{
+				Cursor: proto.String(centerpage.Encode(centerpage.Credentials, position))}}, bearer, &publicapiv1.IdentityServiceListAuthIdentitiesResponse{}).GetError()),
+			failure(rpc(h, devicesPath, &publicapiv1.DeviceServiceListRequest{Meta: meta(), Page: &foundationv1.PageRequest{
+				Cursor: proto.String(centerpage.Encode(centerpage.Devices, position))}}, bearer, &publicapiv1.DeviceServiceListResponse{}).GetError()),
+		}
+		for _, result := range results {
+			if result != "VALIDATION/invalid_cursor" {
+				t.Fatalf("a cursor at %d µs: %v", instant, results)
+			}
+		}
+	}
+	if strings.Contains(h.logs.String(), "identity call failed") {
+		t.Fatal("an out-of-range cursor failed a call")
+	}
 	if h.audits("identity.sign_in.succeeded") != 2 {
 		t.Fatal("sign-ins are audited")
 	}
@@ -461,6 +483,15 @@ func TestRefreshRotatesAndAReusedTokenRevokesTheFamily(t *testing.T) {
 	if result := failure(refresh(next.GetRefreshToken(), claim.GetInstallationId()).GetError()); result != "AUTHENTICATION/credential_revoked" {
 		t.Fatalf("the family's newest refresh token: %s", result)
 	}
+	// Replaying the spent token again revokes nothing more: it is refused alike and only counted, never audited again (E5).
+	for range 3 {
+		if result := failure(refresh(native.GetRefreshToken(), claim.GetInstallationId()).GetError()); result != "AUTHENTICATION/credential_revoked" {
+			t.Fatalf("a spent token replayed: %s", result)
+		}
+	}
+	if h.audits("identity.session.refresh_reused") != 1 {
+		t.Fatalf("replays of a revoked family were audited: %d", h.audits("identity.session.refresh_reused"))
+	}
 
 	// Two concurrent refreshes with one token: one rotates, the other is a reuse and revokes the family.
 	fresh := h.signIn(who, newClaim(t), caller{})
@@ -505,6 +536,36 @@ func TestRefreshRotatesAndAReusedTokenRevokesTheFamily(t *testing.T) {
 		t.Fatalf("a malformed token: %s", result)
 	}
 	h.verifyAudit()
+}
+
+// TestListSessionsLeavesOutLapsedNativeSessions (E4): a native session whose sliding refresh lifetime has passed is no longer
+// listed, although its absolute expiry has not passed.
+func TestListSessionsLeavesOutLapsedNativeSessions(t *testing.T) {
+	h := newHarness(t, settings{})
+	who := h.seedAccount(1, "")
+	h.signIn(who, newClaim(t), caller{})
+	claim := newClaim(t)
+	current := h.signIn(who, claim, caller{})
+	refresh := func() {
+		t.Helper()
+		response := rpc(h, refreshPath, &publicapiv1.IdentityServiceRefreshSessionRequest{Meta: meta(), RefreshToken: proto.String(current.GetRefreshToken()),
+			InstallationId: claim.GetInstallationId()}, caller{}, &publicapiv1.IdentityServiceRefreshSessionResponse{})
+		if response.GetError() != nil {
+			t.Fatalf("refresh: %s", failure(response.GetError()))
+		}
+		current = response.GetValue().GetSession()
+		h.remember(current.GetAccessToken(), current.GetRefreshToken())
+	}
+	// Only the second session is refreshed; the first lapses after its 30-day refresh lifetime, well before its 90-day expiry.
+	h.clock.Advance(29 * 24 * time.Hour)
+	refresh()
+	h.clock.Advance(2 * 24 * time.Hour)
+	refresh()
+	listed := rpc(h, sessionsPath, &publicapiv1.IdentityServiceListSessionsRequest{Meta: meta(), Page: page(10)}, caller{bearer: current.GetAccessToken()},
+		&publicapiv1.IdentityServiceListSessionsResponse{}).GetValue().GetSessions()
+	if len(listed) != 1 || !listed[0].GetCurrent() {
+		t.Fatalf("sessions %v", listed)
+	}
 }
 
 // claim2 is a fresh claim (a helper so a test can sign in again without naming the installation).

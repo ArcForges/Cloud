@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -144,7 +143,7 @@ func newHarness(t *testing.T, options settings) *harness {
 		secret := session.NewSecret()
 		h.bootstrap = secret.Token(session.BootstrapPrefix)
 		h.remember(h.bootstrap)
-		digest := sha256.Sum256(secret[:])
+		digest := session.BootstrapDigest(h.bootstrap)
 		values[config.EnvBootstrapSHA256] = hex.EncodeToString(digest[:])
 		values[config.EnvBootstrapExpiresAt] = time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339)
 	}

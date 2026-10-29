@@ -145,14 +145,27 @@ func (s *Service) limited(ctx context.Context, request Request, bucket ratelimit
 	return decision.Refusal(bucket)
 }
 
-// fail counts a failed proof in a failure bucket; the first failure of a window is audited (anonymous failures are otherwise
-// only counted).
+// fail counts a failed proof in a failure bucket and audits it as audited decides.
 func (s *Service) fail(ctx context.Context, request Request, bucket ratelimit.Bucket, actor, eventType, reason string, payload map[string]any) error {
 	decision, err := s.limits.Fail(ctx, bucket, s.now())
 	if err != nil {
 		return err
 	}
-	if decision.First {
+	return s.audited(ctx, request, bucket, decision, actor, eventType, reason, payload)
+}
+
+// audited audits a counted failure once per window (E10). A failure that names an account is audited as the first failure of its
+// bucket's window. An anonymous failure's bucket key is chosen by the client (an unknown credential, an address), so its audit
+// follows the client's prefix instead: a marker of the bucket's kind keyed by the prefix is counted, and only its first failure of
+// a window is audited; the rest are only counted. The marker is counted for every failure, whoever it names, so known and unknown
+// credentials run the same statements.
+func (s *Service) audited(ctx context.Context, request Request, bucket ratelimit.Bucket, decision ratelimit.Decision, actor, eventType, reason string,
+	payload map[string]any) error {
+	marker, err := s.limits.Fail(ctx, s.bucket(bucket.Kind, "prefix:"+ratelimit.Prefix(request.ClientIP)), s.now())
+	if err != nil {
+		return err
+	}
+	if actor == Anonymous && marker.First || actor != Anonymous && decision.First {
 		return s.auditAlone(ctx, request, actor, eventType, reason, "", "", payload)
 	}
 	return nil

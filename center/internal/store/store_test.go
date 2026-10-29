@@ -3,8 +3,11 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -98,5 +101,174 @@ func TestADeadlineEndsTheTransaction(t *testing.T) {
 	})
 	if !errors.Is(err, ErrTimeout) || time.Since(started) > 5*time.Second {
 		t.Fatalf("%v after %s", err, time.Since(started))
+	}
+}
+
+// TestACommitErrorIsARollbackOnlyWhenTheServerSaysSo pins the classification of a COMMIT error (F6).
+func TestACommitErrorIsARollbackOnlyWhenTheServerSaysSo(t *testing.T) {
+	cases := map[string]struct {
+		err        error
+		rolledBack bool
+	}{
+		"a serialization failure":         {&pgconn.PgError{Code: "40001"}, true},
+		"a deadlock":                      {&pgconn.PgError{Code: "40P01"}, true},
+		"a transaction integrity error":   {&pgconn.PgError{Code: "40002"}, true},
+		"a deferred unique violation":     {&pgconn.PgError{Code: "23505"}, true},
+		"a deferred check violation":      {&pgconn.PgError{Code: "23514"}, true},
+		"a transaction that had failed":   {pgx.ErrTxCommitRollback, true},
+		"statement completion unknown":    {&pgconn.PgError{Code: "40003"}, false},
+		"the pooler's protocol violation": {&pgconn.PgError{Code: "08P01"}, false},
+		"an administrator shutdown":       {&pgconn.PgError{Code: "57P01"}, false},
+		"a lost connection":               {io.ErrUnexpectedEOF, false},
+		"a closed connection":             {net.ErrClosed, false},
+		"a deadline":                      {context.DeadlineExceeded, false},
+		"a cancellation":                  {context.Canceled, false},
+		"an unknown error":                {errors.New("conn busy"), false},
+	}
+	for name, item := range cases {
+		if commitRolledBack(item.err) != item.rolledBack {
+			t.Errorf("%s: rolled back %v", name, !item.rolledBack)
+		}
+	}
+}
+
+// commitProxy relays connections to the test server and acts on the first COMMIT it sees while armed. "drop" forwards the COMMIT
+// and closes the connection before the server's reply reaches the client: the server commits, the client sees the connection fail.
+// "lose" closes the connection without forwarding the COMMIT: nothing commits, and the client sees the same failure.
+type commitProxy struct {
+	listener net.Listener
+	target   string
+	mode     atomic.Value
+	commits  atomic.Int32
+}
+
+// commitMessage is the simple-query message pgx sends to commit: 'Q', its length (11) and "commit" with its terminator.
+var commitMessage = append([]byte{'Q', 0, 0, 0, 11}, "commit\x00"...)
+
+func newCommitProxy(t *testing.T, target string) *commitProxy {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := &commitProxy{listener: listener, target: target}
+	proxy.mode.Store("")
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			client, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go proxy.relay(client)
+		}
+	}()
+	return proxy
+}
+
+func (p *commitProxy) relay(client net.Conn) {
+	server, err := net.Dial("tcp", p.target)
+	if err != nil {
+		_ = client.Close()
+		return
+	}
+	var cut atomic.Bool
+	closeBoth := sync.OnceFunc(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+	defer closeBoth()
+	go func() {
+		defer closeBoth()
+		buffer := make([]byte, 32*1024)
+		for {
+			n, err := server.Read(buffer)
+			if n > 0 {
+				if cut.Load() {
+					return // the COMMIT's reply never reaches the client
+				}
+				if _, err := client.Write(buffer[:n]); err != nil {
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	buffer := make([]byte, 32*1024)
+	var tail []byte
+	for {
+		n, err := client.Read(buffer)
+		if n > 0 {
+			window := append(tail, buffer[:n]...)
+			if mode, _ := p.mode.Load().(string); mode != "" && bytes.Contains(window, commitMessage) {
+				p.mode.Store("")
+				p.commits.Add(1)
+				if mode == "lose" {
+					return
+				}
+				cut.Store(true)
+			}
+			if _, err := server.Write(buffer[:n]); err != nil {
+				return
+			}
+			tail = append([]byte(nil), window[max(0, len(window)-len(commitMessage)+1):]...)
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// TestACommitWithoutAnAnswerIsUnknownAndNeverRetried loses the connection of a COMMIT after the server committed, and before the
+// COMMIT reached the server: both are ErrCommitUnknown, fn runs once, and only the first committed (F6).
+func TestACommitWithoutAnAnswerIsUnknownAndNeverRetried(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	setup := pgtest.Connect(t, url)
+	if _, err := setup.Exec(context.Background(), "CREATE TABLE ledger (id int PRIMARY KEY)"); err != nil {
+		t.Fatal(err)
+	}
+	proxy := newCommitProxy(t, pgtest.Host(t))
+	proxied := strings.Replace(url, "@"+pgtest.Host(t)+"/", "@"+proxy.listener.Addr().String()+"/", 1)
+	if proxied == url {
+		t.Fatal("the test URL does not name the server's host")
+	}
+	db := New(pgtest.Pool(t, proxied, 2))
+	for index, mode := range []string{"drop", "lose"} {
+		id := index + 1
+		var runs atomic.Int32
+		proxy.mode.Store(mode)
+		err := db.InTx(context.Background(), "insert", TxOptions{Timeout: 2 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+			runs.Add(1)
+			_, err := tx.Exec(ctx, "INSERT INTO ledger VALUES ($1)", id)
+			return err
+		})
+		var stored int
+		if scanErr := setup.QueryRow(context.Background(), "SELECT count(*) FROM ledger WHERE id = $1", id).Scan(&stored); scanErr != nil {
+			t.Fatal(scanErr)
+		}
+		if !errors.Is(err, ErrCommitUnknown) || errors.Is(err, ErrUnavailable) || runs.Load() != 1 || proxy.commits.Load() != int32(id) {
+			t.Fatalf("%s: %v after %d runs (%d commits seen)", mode, err, runs.Load(), proxy.commits.Load())
+		}
+		if (mode == "drop") != (stored == 1) {
+			t.Fatalf("%s: %d rows", mode, stored)
+		}
+	}
+	// The proxy is disarmed: the next transaction commits normally.
+	if err := db.InTx(context.Background(), "insert", TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO ledger VALUES (3)")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A read-only transaction has no effect: a lost COMMIT reply is an ordinary connection failure, not an unknown commit.
+	proxy.mode.Store("drop")
+	err := db.InTx(context.Background(), "read", TxOptions{ReadOnly: true, Attempts: 1}, func(ctx context.Context, tx pgx.Tx) error {
+		var count int
+		return tx.QueryRow(ctx, "SELECT count(*) FROM ledger").Scan(&count)
+	})
+	if errors.Is(err, ErrCommitUnknown) || !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("a read-only commit: %v", err)
 	}
 }

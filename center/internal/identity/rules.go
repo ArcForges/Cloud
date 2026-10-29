@@ -107,14 +107,15 @@ func ValidLabel(text *string) bool {
 
 var (
 	localePattern   = regexp.MustCompile(`^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8}){0,4}$`)
-	timezonePattern = regexp.MustCompile(`^[A-Za-z0-9_+/-]{1,64}$`)
+	timezonePattern = regexp.MustCompile(`^[A-Za-z0-9_/-]{1,64}$`)
 	labelPattern    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
 // ValidLocale is a BCP 47 shaped language tag of at most 35 characters.
 func ValidLocale(text string) bool { return len(text) <= 35 && localePattern.MatchString(text) }
 
-// ValidTimezone is an IANA time zone name shape (Area/Location, UTC, Etc/GMT+1) of at most 64 characters.
+// ValidTimezone is an IANA time zone name shape (Area/Location, UTC, Etc/GMT-1) of at most 64 characters within the contract's
+// timezone pattern (con-07 ProfileUpdate and AccountProfile), which has no '+': the Etc/GMT+N zones cannot be named.
 func ValidTimezone(text string) bool {
 	return timezonePattern.MatchString(text) && !strings.Contains(text, "//") && !strings.HasPrefix(text, "/") && !strings.HasSuffix(text, "/")
 }

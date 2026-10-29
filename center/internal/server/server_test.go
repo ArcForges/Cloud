@@ -450,3 +450,50 @@ func TestServeStartsAndStopsOnEphemeralPorts(t *testing.T) {
 		t.Fatalf("logs: %s", logs.String())
 	}
 }
+
+// TestAnExpiredBootstrapStillServesHello (E2): a configuration whose owner bootstrap expired (its variables left set after the
+// bootstrap) loads, the center starts and serves Hello and health, and the start-up log says the variables can be removed.
+func TestAnExpiredBootstrapStillServesHello(t *testing.T) {
+	values := map[string]string{
+		config.EnvMode: string(config.SelfHosted), config.EnvPublicBaseURL: "https://center.example/api", config.EnvSurfaces: "none",
+		config.EnvHTTPAddress: "127.0.0.1:0", config.EnvGRPCAddress: "127.0.0.1:0",
+		config.EnvBootstrapSHA256:    strings.Repeat("ab", 32),
+		config.EnvBootstrapExpiresAt: time.Now().Add(-72 * time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339),
+	}
+	cfg, err := config.Load(func(name string) (string, bool) { value, ok := values[name]; return value, ok })
+	if err != nil || cfg.Identity.Bootstrap == nil {
+		t.Fatalf("an expired bootstrap does not load: %v", err)
+	}
+	logs := &lockedBuffer{}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, cfg, observe.NewLogger(logs, slog.LevelInfo)) }()
+	var address string
+	for address == "" {
+		select {
+		case err := <-done:
+			t.Fatalf("serve stopped: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+		for line := range strings.SplitSeq(logs.String(), "\n") {
+			var entry struct {
+				Msg       string            `json:"msg"`
+				Listeners map[string]string `json:"listeners"`
+			}
+			if json.Unmarshal([]byte(line), &entry) == nil && entry.Msg == "center started" {
+				address = entry.Listeners["http"]
+			}
+		}
+	}
+	reply := grpcWeb(t, "http://"+address, "/arcforges.hello.v1.HelloService/SayHello", helloRequest(t, "owner"), nil)
+	if reply.trailers["grpc-status"] != "0" || len(reply.messages) != 1 {
+		t.Fatalf("Hello with an expired bootstrap: %+v", reply)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), `"msg":"the owner bootstrap has expired; remove its variables"`) {
+		t.Fatalf("no start-up warning: %s", logs.String())
+	}
+}

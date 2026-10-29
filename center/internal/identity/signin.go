@@ -265,8 +265,10 @@ func (s *Service) CompletePasskey(ctx context.Context, request Request, flowID p
 			}
 			return err
 		}
-		if verified.SignCount != 0 && int64(verified.SignCount) <= current {
-			return arc.Unauthenticated() // a concurrent sign-in advanced the counter past this one: a possible clone
+		// The library's clone rule against the locked counter: a counter that does not exceed the stored one is refused unless both
+		// are zero (an authenticator without a counter). A concurrent sign-in may have advanced it since the library checked.
+		if int64(verified.SignCount) <= current && (verified.SignCount != 0 || current != 0) {
+			return arc.Unauthenticated() // a possible clone
 		}
 		_, err := tx.Exec(ctx, `UPDATE identity.auth_identity SET sign_count = $2, backup_state = $3, last_used_at = $4, rev = rev + 1
 WHERE auth_identity_id = $1`, found.identityID, int64(verified.SignCount), verified.BackupState, now)
@@ -326,10 +328,11 @@ func (s *Service) signIn(ctx context.Context, request Request, row flow, userID 
 			map[string]any{"method": methodName(method), "channel": "native", "scope": "account"})
 	})
 	if err != nil {
-		if refusalOf(err) != nil {
-			if exhaustErr := s.exhaust(ctx, row.ID); exhaustErr != nil {
-				return SignedIn{}, exhaustErr
-			}
+		if refusalOf(err) == nil {
+			// The proof verified and the store failed: the attempt is given back for the advised retry.
+			s.release(ctx, row.ID)
+		} else if exhaustErr := s.exhaust(ctx, row.ID); exhaustErr != nil {
+			return SignedIn{}, exhaustErr
 		}
 		return SignedIn{}, err
 	}

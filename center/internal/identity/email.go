@@ -174,9 +174,12 @@ func codeText(code string, lifetime time.Duration) string {
 }
 
 // RedeemEmailCode completes a native e-mail flow with its code (RedeemEmailCode, or CompleteAuthentication with an e-mail code
-// proof): the sign-in bucket of the prefix, the failure bucket of the flow's address (across flows), the flow's attempt, the
-// PBKDF2 check outside any transaction (at most the policy's attempts per flow ever reach it), and the success transaction. A
-// wrong code, a code of an address without an account and an account that may not sign in all give AUTHENTICATION/unauthenticated.
+// proof): the sign-in bucket of the prefix, the failure bucket of the flow's address (across flows), the flow's attempt, a
+// reservation of one failure of the address (E6: atomic and only under its limit, so concurrent codes across flows cannot get past
+// it; a refused reservation gives the attempt back), the PBKDF2 check outside any transaction (at most the policy's attempts per
+// flow ever reach it), and the success transaction, which gives the reservation back. A wrong code keeps its reservation as the
+// counted failure. A wrong code, a code of an address without an account and an account that may not sign in all give
+// AUTHENTICATION/unauthenticated.
 func (s *Service) RedeemEmailCode(ctx context.Context, request Request, flowID platform.ID, code string) (SignedIn, error) {
 	if code == "" || len(code) > 128 {
 		return SignedIn{}, arc.InvalidArgument("code", "length")
@@ -211,6 +214,15 @@ func (s *Service) RedeemEmailCode(ctx context.Context, request Request, flowID p
 		return SignedIn{}, err
 	}
 	failures = s.bucket(ratelimit.RedeemFailuresAddress, hex.EncodeToString(row.EmailHash))
+	reservation, err := s.limits.Reserve(ctx, failures, s.now())
+	if err != nil {
+		return SignedIn{}, err
+	}
+	if !reservation.Allowed {
+		// No code was checked: the attempt is given back, and the refusal is a limited request (not audited: only failures are).
+		s.release(ctx, row.ID)
+		return SignedIn{}, s.limited(ctx, request, failures, reservation, Anonymous)
+	}
 	normalized, valid := NormalizeCode(code)
 	if !valid {
 		normalized = strings.Repeat("?", CodeLength) // still costs one PBKDF2 run, like any wrong code
@@ -226,13 +238,17 @@ func (s *Service) RedeemEmailCode(ctx context.Context, request Request, flowID p
 				return SignedIn{}, err
 			}
 		}
-		if err = s.fail(ctx, request, failures, Anonymous, "identity.sign_in.failed", "code_invalid", map[string]any{"method": "email_code", "channel": "native"}); err != nil {
+		if err = s.audited(ctx, request, failures, reservation, Anonymous, "identity.sign_in.failed", "code_invalid",
+			map[string]any{"method": "email_code", "channel": "native"}); err != nil {
 			return SignedIn{}, err
 		}
 		return SignedIn{}, arc.Unauthenticated()
 	}
 	userID := *row.UserID
 	return s.signIn(ctx, request, row, userID, int16(MethodEmailCode), func(ctx context.Context, tx pgx.Tx, now time.Time) error {
+		if err := ratelimit.Release(ctx, tx, failures, reservation); err != nil {
+			return err
+		}
 		var identityID platform.ID
 		err := tx.QueryRow(ctx, `SELECT auth_identity_id FROM identity.auth_identity
 WHERE user_id = $1 AND provider_id = 'email' AND revoked_at IS NULL AND sha256(convert_to(subject, 'UTF8')) = $2 FOR UPDATE`, userID, row.EmailHash).

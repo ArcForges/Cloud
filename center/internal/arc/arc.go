@@ -199,6 +199,14 @@ func Internal() *Refusal {
 		Retry: foundationv1.RetryMode_RETRY_MODE_AFTER_TIME, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN}
 }
 
+// CommitUnknown is INTERNAL/internal for a write whose COMMIT was sent without an answer: it may have happened (effect UNKNOWN), and
+// the same call is never retried as it was (retry NEVER), because a refresh token or a flow it presented may already be spent; the
+// client signs in again or reads the state it needs.
+func CommitUnknown() *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_INTERNAL, Code: "internal",
+		Retry: foundationv1.RetryMode_RETRY_MODE_NEVER, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN}
+}
+
 // Instant is a contract instant (UTC seconds and nanoseconds, truncated to microseconds as the store keeps them).
 func Instant(at time.Time) *foundationv1.Instant {
 	at = at.UTC().Truncate(time.Microsecond)

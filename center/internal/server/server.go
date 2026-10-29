@@ -498,6 +498,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if cfg.Identity.Disabled != "" {
 		logger.Error("the identity surface is off", "reason", cfg.Identity.Disabled)
 	}
+	if bootstrap := cfg.Identity.Bootstrap; bootstrap != nil && !time.Now().Before(bootstrap.ExpiresAt) {
+		logger.Warn("the owner bootstrap has expired; remove its variables", "expiresAt", bootstrap.ExpiresAt.Format(time.RFC3339))
+	}
 	if center.Store != nil {
 		go center.logReadiness(ctx)
 	}

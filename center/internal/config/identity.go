@@ -347,7 +347,8 @@ func parseSurfaces(value string, mode Mode) ([]Surface, error) {
 }
 
 // parseBootstrap reads the owner bootstrap: both variables or neither; 64 lowercase hexadecimal characters and an RFC 3339 UTC
-// instant in the future and at most seven days ahead.
+// instant at most seven days ahead. A past instant loads (E2): the bootstrap is then refused at use with the reason expired, and a
+// restart with the variables left set still starts the center (the start-up log warns that they can be removed).
 func parseBootstrap(digest, expires string, now time.Time) (*Bootstrap, error) {
 	if digest == "" && expires == "" {
 		return nil, nil
@@ -377,8 +378,8 @@ func parseBootstrap(digest, expires string, now time.Time) (*Bootstrap, error) {
 	if err != nil || !strings.HasSuffix(expires, "Z") || at.Format(time.RFC3339) != expires && at.Format(time.RFC3339Nano) != expires {
 		return nil, invalid("%s must be an RFC 3339 UTC instant (…Z)", EnvBootstrapExpiresAt)
 	}
-	if !at.After(now) || at.Sub(now) > MaxBootstrapLead {
-		return nil, invalid("%s must be in the future and at most seven days ahead", EnvBootstrapExpiresAt)
+	if at.Sub(now) > MaxBootstrapLead {
+		return nil, invalid("%s must be at most seven days ahead", EnvBootstrapExpiresAt)
 	}
 	bootstrap.ExpiresAt = at.UTC()
 	return &bootstrap, nil

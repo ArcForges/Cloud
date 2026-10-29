@@ -32,6 +32,14 @@ const (
 
 const cursorVersion = 1
 
+// The instants a cursor may carry: the contract Timestamp range, 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999Z, in
+// microseconds since the Unix epoch. PostgreSQL holds all of it, and every cursor the center issues carries an instant of a row it
+// wrote.
+const (
+	minInstant int64 = -62135596800000000
+	maxInstant int64 = 253402300799999999
+)
+
 // cursorBytes is the version, the listing, the instant in microseconds and a 16-byte identifier.
 const cursorBytes = 1 + 1 + 8 + 16
 
@@ -49,7 +57,7 @@ type Request struct {
 }
 
 // Parse validates a page request: a limit below 1 is VALIDATION/invalid_argument, a limit above the maximum is clamped, and a
-// malformed cursor or one of another listing is VALIDATION/invalid_cursor.
+// malformed cursor, one of another listing or one whose instant is outside the contract's range is VALIDATION/invalid_cursor.
 func Parse(listing Listing, cursor string, limit int32, hasLimit bool) (Request, *arc.Refusal) {
 	request := Request{Limit: DefaultLimit}
 	if hasLimit {
@@ -66,7 +74,11 @@ func Parse(listing Listing, cursor string, limit int32, hasLimit bool) (Request,
 		base64.RawURLEncoding.EncodeToString(data) != cursor {
 		return Request{}, arc.InvalidCursor()
 	}
-	position := &Cursor{At: time.UnixMicro(int64(binary.BigEndian.Uint64(data[2:10]))).UTC()}
+	instant := int64(binary.BigEndian.Uint64(data[2:10]))
+	if instant < minInstant || instant > maxInstant {
+		return Request{}, arc.InvalidCursor()
+	}
+	position := &Cursor{At: time.UnixMicro(instant).UTC()}
 	copy(position.ID[:], data[10:])
 	request.After = position
 	return request, nil

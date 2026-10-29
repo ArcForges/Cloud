@@ -4,9 +4,21 @@ package session
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
+
+// TestTheBootstrapDigestIsTheSHA256OfTheTokenText pins the configured form of the owner bootstrap token (E3): the SHA-256 of the
+// exact token text, prefix included, as `printf %s "$TOKEN" | sha256sum` prints it; not the digest of its decoded bytes.
+func TestTheBootstrapDigestIsTheSHA256OfTheTokenText(t *testing.T) {
+	token := BootstrapPrefix + strings.Repeat("A", EncodedLength)
+	secret, ok := ParseToken(BootstrapPrefix, token)
+	digest := BootstrapDigest(token)
+	if !ok || hex.EncodeToString(digest[:]) != "09e0b22a38f1d38f287867c42c2969cf2063ee0194d43f87cb6f1ec7654df8b8" || digest == secret.Digest() {
+		t.Fatalf("the bootstrap digest of %s is %x", token, digest)
+	}
+}
 
 func TestCredentialsHaveExactFormats(t *testing.T) {
 	secret := NewSecret()

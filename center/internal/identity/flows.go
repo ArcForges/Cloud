@@ -173,6 +173,17 @@ WHERE flow_id = $1 AND consumed_at IS NULL AND attempts >= max_attempts`, id, s.
 	})
 }
 
+// release gives back the attempt a completion took when its proof verified but its success transaction failed in the store (or
+// when no proof was checked at all), so the advised retry of the same request can succeed (F9). It is best effort, in its own short
+// transaction: a store that is still down leaves the attempt spent. A flow consumed meanwhile (a success whose reply was lost) is
+// never changed, and a wrong proof never reaches it, so it grants no guess.
+func (s *Service) release(ctx context.Context, id platform.ID) {
+	_ = s.db.InTx(context.WithoutCancel(ctx), "release a flow attempt", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE identity.auth_flow SET attempts = attempts - 1 WHERE flow_id = $1 AND consumed_at IS NULL AND attempts > 0", id)
+		return err
+	})
+}
+
 // consume marks a flow succeeded in the success transaction; a flow consumed meanwhile is a proof presented twice.
 func consume(ctx context.Context, tx pgx.Tx, id platform.ID, now time.Time) error {
 	tag, err := tx.Exec(ctx, "UPDATE identity.auth_flow SET consumed_at = $2, outcome = $3 WHERE flow_id = $1 AND consumed_at IS NULL", id, now, outcomeSucceeded)

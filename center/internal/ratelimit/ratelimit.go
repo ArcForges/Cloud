@@ -4,8 +4,10 @@
 // platform.rate_limit, one row per bucket, keyed by the SHA-256 of the bucket's kind and key and reset in place when its window
 // has passed. A count is taken in its own short transaction before the work it guards, so it commits whether the work is
 // admitted or refused. Request buckets (Take) count every request and refuse the ones over the limit; failure buckets (Check
-// before the work, Fail after a failed proof) count only failures. Keys are client address prefixes (IPv4 /24, IPv6 /56, an
-// IPv4-mapped address as IPv4), accounts and normalised e-mail addresses; the store holds only their digests.
+// before the work, Fail after a failed proof) count only failures, and Reserve counts a failure before a proof is checked,
+// atomically and only under the limit, so concurrent proofs cannot get past it (Release gives a correct proof's reservation back).
+// Keys are client address prefixes (IPv4 /24, IPv6 /56, an IPv4-mapped address as IPv4), accounts and normalised e-mail
+// addresses; the store holds only their unsalted digests, which can be reversed by trying values.
 package ratelimit
 
 import (
@@ -108,6 +110,8 @@ type Decision struct {
 	Allowed bool
 	// Count is the bucket's count in the current window.
 	Count int
+	// WindowStart is when the current window began (zero for a bucket without a row).
+	WindowStart time.Time
 	// RetryAt is when the current window ends.
 	RetryAt time.Time
 	// First reports the one event of the window the center audits: the first refusal of a request bucket (Take), or the first
@@ -160,7 +164,7 @@ func (l *Limiter) Take(ctx context.Context, bucket Bucket, now time.Time) (Decis
 	if err != nil {
 		return Decision{}, err
 	}
-	return Decision{Allowed: count <= bucket.Window.Limit, Count: count, RetryAt: start.Add(bucket.Window.Window),
+	return Decision{Allowed: count <= bucket.Window.Limit, Count: count, WindowStart: start, RetryAt: start.Add(bucket.Window.Window),
 		First: count == bucket.Window.Limit+1}, nil
 }
 
@@ -170,7 +174,51 @@ func (l *Limiter) Fail(ctx context.Context, bucket Bucket, now time.Time) (Decis
 	if err != nil {
 		return Decision{}, err
 	}
-	return Decision{Allowed: count < bucket.Window.Limit, Count: count, RetryAt: start.Add(bucket.Window.Window), First: count == 1}, nil
+	return Decision{Allowed: count < bucket.Window.Limit, Count: count, WindowStart: start, RetryAt: start.Add(bucket.Window.Window),
+		First: count == 1}, nil
+}
+
+// Reserve counts one failure of a failure bucket before the proof is checked (E6): one statement, in its own transaction, that
+// starts a new window or adds one to the current window's count only while the count is under the limit. The conflicting row is
+// locked and the condition re-read on its latest version, so concurrent reservations never take more than the limit. A refused
+// reservation counts nothing. First reports the window's first failure.
+func (l *Limiter) Reserve(ctx context.Context, bucket Bucket, now time.Time) (Decision, error) {
+	if bucket.Key == "" || bucket.Window.Limit < 1 || bucket.Window.Window <= 0 {
+		return Decision{}, ErrBucket
+	}
+	hash := bucket.Hash()
+	var start time.Time
+	var count int
+	reserved := true
+	err := l.db.InTx(ctx, "reserve a rate-limit failure", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+		reserved = true
+		err := tx.QueryRow(ctx, `INSERT INTO platform.rate_limit AS r (bucket_hash, window_start, count) VALUES ($1, $2, 1)
+ON CONFLICT (bucket_hash) DO UPDATE SET
+    window_start = CASE WHEN r.window_start + $3::interval <= $2 THEN $2 ELSE r.window_start END,
+    count = CASE WHEN r.window_start + $3::interval <= $2 THEN 1 ELSE r.count + 1 END
+WHERE r.window_start + $3::interval <= $2 OR r.count < $4
+RETURNING window_start, count`, hash[:], now.UTC(), bucket.Window.Window, bucket.Window.Limit).Scan(&start, &count)
+		if errors.Is(err, pgx.ErrNoRows) {
+			reserved = false
+			return tx.QueryRow(ctx, "SELECT window_start, count FROM platform.rate_limit WHERE bucket_hash = $1", hash[:]).Scan(&start, &count)
+		}
+		return err
+	})
+	if err != nil {
+		return Decision{}, err
+	}
+	decision := Decision{Allowed: reserved, Count: count, WindowStart: start, RetryAt: start.Add(bucket.Window.Window)}
+	decision.First = reserved && count == 1
+	return decision, nil
+}
+
+// Release gives a reservation back in the caller's transaction (a correct proof is no failure): the count of the reservation's
+// window, if that window is still current, loses one.
+func Release(ctx context.Context, tx pgx.Tx, bucket Bucket, reservation Decision) error {
+	hash := bucket.Hash()
+	_, err := tx.Exec(ctx, "UPDATE platform.rate_limit SET count = count - 1 WHERE bucket_hash = $1 AND window_start = $2 AND count > 0",
+		hash[:], reservation.WindowStart)
+	return err
 }
 
 // Check decides a failure bucket without counting: refused once the window holds the limit's number of failures.
@@ -196,5 +244,5 @@ func (l *Limiter) Check(ctx context.Context, bucket Bucket, now time.Time) (Deci
 	if !found || !start.Add(bucket.Window.Window).After(now) {
 		return Decision{Allowed: true}, nil
 	}
-	return Decision{Allowed: count < bucket.Window.Limit, Count: count, RetryAt: start.Add(bucket.Window.Window)}, nil
+	return Decision{Allowed: count < bucket.Window.Limit, Count: count, WindowStart: start, RetryAt: start.Add(bucket.Window.Window)}, nil
 }

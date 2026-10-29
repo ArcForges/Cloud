@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package store is the center's access to its PostgreSQL store with the runtime role (ArcForges-Design data/cloud-store.md
-// section 6): transactions with a deadline, cancellation and a bounded retry of serialization failures and deadlocks, and
-// errors that keep the operation, the SQLSTATE and the constraint name but never the server's message or detail, which can
-// quote row values. The pool keeps no session state (exec query mode), so it works behind the Neon transaction pooler.
+// section 6): transactions with a deadline, cancellation and a bounded retry of serialization failures and deadlocks, a COMMIT
+// whose outcome is unknown reported as such and never retried, and errors that keep the operation, the SQLSTATE and the constraint
+// name but never the server's message or detail, which can quote row values. The pool keeps no session state (exec query mode), so it works behind the Neon transaction pooler.
 package store
 
 import (
@@ -13,6 +13,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -45,6 +46,10 @@ var (
 	ErrPermission = errors.New("the runtime role lacks a privilege")
 	// ErrInternal: any other database error.
 	ErrInternal = errors.New("the database refused the operation")
+	// ErrCommitUnknown: a read-write transaction sent its COMMIT and did not learn the outcome (the connection failed, the
+	// deadline passed or the call was cancelled while the COMMIT was in flight, or the server answered with an error that does not
+	// say it rolled back): the transaction may have committed. It is never retried; callers answer that the effect is unknown.
+	ErrCommitUnknown = errors.New("the outcome of the commit is unknown")
 )
 
 // Error is a sanitized database error.
@@ -152,7 +157,8 @@ type TxOptions struct {
 
 // InTx runs fn in a transaction and commits it. A serialization failure or a deadlock (of fn or of the commit) rolls back and
 // runs fn again, up to the attempts and within the deadline, so fn must be safe to repeat: it may touch only the database
-// through tx. An error fn returns that is not a database error is returned unchanged after the rollback.
+// through tx. An error fn returns that is not a database error is returned unchanged after the rollback. A read-write
+// transaction whose COMMIT was sent without a definite answer is ErrCommitUnknown and never runs again (see commitRolledBack).
 func (db *DB) InTx(ctx context.Context, operation string, options TxOptions, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	timeout := options.Timeout
 	if timeout <= 0 {
@@ -169,11 +175,18 @@ func (db *DB) InTx(ctx context.Context, operation string, options TxOptions, fn 
 		access = pgx.ReadOnly
 	}
 	for attempt := 1; ; attempt++ {
-		err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: options.Isolation, AccessMode: access}, func(tx pgx.Tx) error {
-			return fn(ctx, tx)
-		})
+		err := db.run(ctx, pgx.TxOptions{IsoLevel: options.Isolation, AccessMode: access}, fn)
 		if err == nil {
 			return nil
+		}
+		var unknown *commitUnknown
+		if errors.As(err, &unknown) {
+			sanitized := &Error{Operation: operation, Kind: ErrCommitUnknown}
+			var pgError *pgconn.PgError
+			if errors.As(unknown.err, &pgError) {
+				sanitized.SQLState, sanitized.Constraint = pgError.Code, pgError.ConstraintName
+			}
+			return sanitized
 		}
 		if attempt >= attempts || !retryable(err) || ctx.Err() != nil {
 			return Sanitize(operation, err)
@@ -186,4 +199,48 @@ func (db *DB) InTx(ctx context.Context, operation string, options TxOptions, fn 
 		case <-time.After(backoff):
 		}
 	}
+}
+
+// commitUnknown carries the error of a COMMIT whose outcome is unknown.
+type commitUnknown struct{ err error }
+
+func (c *commitUnknown) Error() string { return "commit: " + c.err.Error() }
+
+// run is one attempt: begin, fn and commit. An error of the begin or of fn rolls back (the server never commits a transaction
+// whose COMMIT it did not receive), so it is retried under the usual rules. An error of a read-write COMMIT is a definite rollback
+// only when the server says so; anything else may have committed and is reported as commitUnknown. A read-only transaction has no
+// effect, so its COMMIT error is an ordinary error.
+func (db *DB) run(ctx context.Context, options pgx.TxOptions, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	tx, err := db.pool.BeginTx(ctx, options)
+	if err != nil {
+		return err
+	}
+	if err = fn(ctx, tx); err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		if options.AccessMode == pgx.ReadOnly || commitRolledBack(err) {
+			return err
+		}
+		return &commitUnknown{err: err}
+	}
+	return nil
+}
+
+// commitRolledBack reports a COMMIT error that proves the transaction rolled back: the server's own refusal of the commit, a
+// transaction rollback (class 40: a serialization failure or a deadlock, which are retried; not 40003, statement completion
+// unknown) or an integrity violation of a deferred constraint (class 23), or a transaction that had already failed
+// (pgx.ErrTxCommitRollback). Every other error after the COMMIT was sent (a lost connection, a timeout, a cancellation, pgx's
+// connection lock error, the pooler's 08P01) leaves the outcome unknown; pgconn.SafeToRetry is not consulted then, because the
+// COMMIT may have reached the server.
+func commitRolledBack(err error) bool {
+	if errors.Is(err, pgx.ErrTxCommitRollback) {
+		return true
+	}
+	var pgError *pgconn.PgError
+	if errors.As(err, &pgError) {
+		return strings.HasPrefix(pgError.Code, "40") && pgError.Code != "40003" || strings.HasPrefix(pgError.Code, "23")
+	}
+	return false
 }
