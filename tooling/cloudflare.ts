@@ -44,11 +44,12 @@ interface Deployment {
   imageDigest: string;
   baseUrl: string;
   /**
-   * The surfaces the deployed Worker version forwards and starts the Go center with (ARCFORGES_CENTER_SURFACES). The Container
-   * restarts a center left running under another version's start environment before it serves a request (AF-CTR-03), so the
-   * center's health states the same value; the local live check compares them.
+   * The configured surfaces: those the deployed Worker version forwards and starts the Go center with (ARCFORGES_CENTER_SURFACES),
+   * computed from its configuration, not observed. The Container restarts a center left running under another version's start
+   * environment before it serves a request (AF-CTR-03), so the center's health (`center.surfaces`) should state the same value;
+   * only the local live check and the post-deploy acceptance read the health and compare them.
    */
-  center?: { surfaces: string };
+  center?: { configuredSurfaces: string };
   deployedAt: string;
   verified?: unknown;
 }
@@ -158,7 +159,7 @@ async function deploy() {
     imageDigest,
     baseUrl: productionBase,
     ...(config.vars.ARCFORGES_HELLO_RUNTIME === "go"
-      ? { center: { surfaces: centerSurfaces(config.vars.FLAGSHIP_SURFACES) } }
+      ? { center: { configuredSurfaces: centerSurfaces(config.vars.FLAGSHIP_SURFACES) } }
       : {}),
     deployedAt: new Date().toISOString(),
   } satisfies Deployment);
@@ -191,7 +192,7 @@ async function smoke() {
   if (deployment.center)
     assert.equal(
       (health as { center?: { surfaces?: unknown } }).center?.surfaces,
-      deployment.center.surfaces,
+      deployment.center.configuredSurfaces,
       "The running center must serve exactly the surfaces the deployed Worker forwards.",
     );
   const protocol = await runProbe(productionBase, true);

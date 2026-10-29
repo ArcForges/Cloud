@@ -614,20 +614,26 @@ test("the deployment prepares the proof script before the credential rotation an
     assert(deploy.slice(deploy.indexOf("proof-deployment.json")).includes(field), field);
 });
 
-test("both deployments record the surfaces the deployed version starts the center with, and the live checks compare them", () => {
+test("both deployments record the configured surfaces the deployed version starts the center with, and the local checks compare them", () => {
   // AF-CTR-03: the Container restarts a center left running under another version's start environment before it serves a
-  // request, so the center's health states the surfaces the deployment evidence records.
+  // request, so the center's health should state the configured surfaces the deployment evidence records. The evidence is computed
+  // from the configuration, not observed: the production live check and the local Worker check compare it with the health, and for
+  // proof the post-deploy acceptance does (CI makes no live call).
   const read = (file: string) =>
     readFileSync(path.resolve(import.meta.dirname, "../..", file), "utf8");
   const proofSource = read("eng/verification/proof-cloudflare.ts");
   const record = proofSource.slice(proofSource.indexOf("proof-deployment.json"));
-  assert(record.includes("surfaces: centerSurfaces(config.env.proof.vars.FLAGSHIP_SURFACES)"));
+  assert(
+    record.includes("configuredSurfaces: centerSurfaces(config.env.proof.vars.FLAGSHIP_SURFACES)"),
+  );
   const production = read("tooling/cloudflare.ts");
   const deployment = production.slice(production.indexOf("await writeJson(deploymentFile, {"));
   assert(
-    deployment.includes("center: { surfaces: centerSurfaces(config.vars.FLAGSHIP_SURFACES) }"),
+    deployment.includes(
+      "center: { configuredSurfaces: centerSurfaces(config.vars.FLAGSHIP_SURFACES) }",
+    ),
   );
-  assert.match(production, /center\?\.surfaces,\s*deployment\.center\.surfaces,/u);
+  assert.match(production, /center\?\.surfaces,\s*deployment\.center\.configuredSurfaces,/u);
   assert.match(
     read("tooling/project.ts"),
     /center\?\.surfaces,\s*centerSurfaces\(config\.vars\.FLAGSHIP_SURFACES\),/u,
