@@ -71,7 +71,9 @@ class (`worker/foundation/cloud-container.ts`) records, in its Durable Object's 
 start settings: the Worker's `SOURCE_REVISION`, the entrypoint, the egress switch and every variable. Every request first compares
 it with the digest of this version's settings. A center started under another digest (or before the digest existed) gets SIGTERM
 (the center stops within 5 s; the class waits up to 6 s), then SIGKILL (bounded at 4 s), and is started again with this version's
-settings before the request is forwarded. Requests that arrive meanwhile wait for the same restart, so with `max_instances: 1` the
+settings before the request is forwarded. The bounds are generated from the center (`staleCenterStopMs`, `staleCenterKillMs` and
+`centerStopPollMs` in `worker/tables/center-tables.generated.ts`, from `routes.ShutdownMilliseconds`, the center's own shutdown
+bound). Requests that arrive meanwhile wait for the same restart, so with `max_instances: 1` the
 previous environment never serves a request of the new version. Health and the Hello go through the same rule: the first request
 after a deployment pays one restart and is never refused by it, unless the previous center cannot be stopped within the bounds; it
 then gets the library's start-failure reply, which the Worker answers as the retryable `UNAVAILABLE` (the request was not forwarded).

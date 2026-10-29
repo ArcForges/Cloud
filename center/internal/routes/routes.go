@@ -48,6 +48,15 @@ const (
 	// in both environments, pinned by tests/worker/center-config.test.ts). The Worker's rate_limited reply advises a retry this
 	// long after the refused call, which no window of the limiter outlasts (F17).
 	EdgeRateLimitPeriodSeconds = 60
+	// ShutdownMilliseconds bounds the center's graceful stop on SIGTERM: its listeners drain for at most this long.
+	ShutdownMilliseconds = 5_000
+	// StaleStopMilliseconds is how long the Worker's Container class waits for a center started under another Worker version's
+	// settings to stop on SIGTERM before it kills it (AF-CTR-03): the center's shutdown bound and a margin.
+	StaleStopMilliseconds = ShutdownMilliseconds + 1_000
+	// StaleKillMilliseconds is how long the Container class then waits for the kill before it refuses the request as a start
+	// failure; StopPollMilliseconds is how often it looks whether the center stopped.
+	StaleKillMilliseconds = 4_000
+	StopPollMilliseconds  = 100
 )
 
 // Budget is one method's transport budget as the Worker applies it. These are declarations for the Worker; the center keeps
@@ -270,6 +279,9 @@ func Table(modules []Module) (WorkerTable, error) {
 	}
 	if ColdStartMilliseconds < 1 || ColdStartMilliseconds > StreamLifetimeMilliseconds {
 		return WorkerTable{}, fmt.Errorf("%w: the cold start budget is out of range", ErrRegistration)
+	}
+	if StaleStopMilliseconds <= ShutdownMilliseconds || StopPollMilliseconds < 1 || StopPollMilliseconds >= StaleKillMilliseconds {
+		return WorkerTable{}, fmt.Errorf("%w: the stale center's stop bounds are out of range", ErrRegistration)
 	}
 	return WorkerTable{
 		HelloPath:  APIPrefix + HelloMethod,

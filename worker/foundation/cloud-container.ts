@@ -16,6 +16,11 @@ import { Container, type OutboundHandler } from "@cloudflare/containers";
 import { aiInternalOutbound } from "../ai/internal/outbound.ts";
 import { startFailedText } from "../readiness/container.ts";
 import { containerSleepAfter } from "../tables/cloud-tables.generated.ts";
+import {
+  centerStopPollMs,
+  staleCenterKillMs,
+  staleCenterStopMs,
+} from "../tables/center-tables.generated.ts";
 import { centerSurfaces, clientIpHeader } from "../ingress/routes.ts";
 
 export interface CenterEnvironment {
@@ -110,8 +115,6 @@ export async function startDigest(
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-const stopPollMs = 100;
-
 /** Waits until the Container is no longer running, at most `withinMs`; true when it stopped. */
 async function stopped(
   container: { readonly running: boolean },
@@ -120,19 +123,31 @@ async function stopped(
   const deadline = Date.now() + withinMs;
   while (container.running) {
     if (Date.now() >= deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, stopPollMs));
+    await new Promise((resolve) => setTimeout(resolve, centerStopPollMs));
   }
   return true;
+}
+
+/**
+ * The reply to a request that arrived while a center started under another Worker version's settings could not be stopped: the
+ * library's own start-failure reply (HTTP 500, plain text), which worker/readiness classifies as a start failure, so the Worker
+ * answers it as retryable. The request was never forwarded.
+ */
+function stillStopping(): Response {
+  return new Response(`${startFailedText} the previous start environment is still stopping.`, {
+    status: 500,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+  });
 }
 
 export class CloudContainer extends Container {
   override defaultPort = 8080;
   override sleepAfter = containerSleepAfter;
   override enableInternet = false;
-  /** How long a stale center may take to stop on SIGTERM: its own shutdown bound (5 s) and a margin. */
-  protected staleStopMs = 6_000;
+  /** How long a stale center may take to stop on SIGTERM: its own shutdown bound and a margin (generated from the center). */
+  protected staleStopMs = staleCenterStopMs;
   /** How long the forced stop of a stale center may take before the request is refused as a start failure. */
-  protected staleDestroyMs = 4_000;
+  protected staleDestroyMs = staleCenterKillMs;
   #digest?: Promise<string>;
   #following?: Promise<boolean>;
 
@@ -151,11 +166,7 @@ export class CloudContainer extends Container {
     this.#following ??= this.followWorkerVersion().finally(() => {
       this.#following = undefined;
     });
-    if (!(await this.#following))
-      return new Response(`${startFailedText} the previous start environment is still stopping.`, {
-        status: 500,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
+    if (!(await this.#following)) return stillStopping();
     return super.fetch(request);
   }
 

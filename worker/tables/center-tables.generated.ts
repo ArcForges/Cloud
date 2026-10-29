@@ -69,6 +69,15 @@ export const rateLimitedReplyInstantBytes = 5;
 export const edgeRateLimitPeriodSeconds = 60;
 /** The network that keys an IPv6 client at the edge rate limits; an IPv4 client is keyed by its whole address. */
 export const edgeIpv6PrefixBits = 64;
+/**
+ * How long the Container class waits for a center started under another Worker version's settings to stop on SIGTERM: the
+ * center's shutdown bound and a margin (AF-CTR-03).
+ */
+export const staleCenterStopMs = 6000;
+/** How long it then waits for the kill before it refuses the request as a start failure. */
+export const staleCenterKillMs = 4000;
+/** How often it looks whether the center stopped. */
+export const centerStopPollMs = 100;
 
 /** The methods of the switchable surfaces; each is forwarded only while its surface is enabled. */
 export const surfaceRoutes: readonly SurfaceRoute[] = [

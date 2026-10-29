@@ -526,7 +526,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			result = errors.New("a center listener stopped unexpectedly")
 		}
 	}
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdown, cancel := context.WithTimeout(context.Background(), routes.ShutdownMilliseconds*time.Millisecond)
 	defer cancel()
 	for _, server := range servers {
 		_ = server.Shutdown(shutdown)

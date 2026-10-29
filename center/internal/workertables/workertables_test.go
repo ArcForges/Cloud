@@ -146,6 +146,12 @@ func TestTheRateLimitedTemplateTakesTheWorkersInstant(t *testing.T) {
 		!strings.Contains(generated, "export const edgeIpv6PrefixBits = 64;") {
 		t.Fatal("the edge constants are not generated")
 	}
+	// AF-CTR-03: the Container class's bounds for a center left running under another version's settings follow the center's
+	// own shutdown bound.
+	if !strings.Contains(generated, "export const staleCenterStopMs = 6000;") || !strings.Contains(generated, "export const staleCenterKillMs = 4000;") ||
+		!strings.Contains(generated, "export const centerStopPollMs = 100;") {
+		t.Fatal("the stale center's stop bounds are not generated")
+	}
 	template, err := base64.StdEncoding.DecodeString(body)
 	if err != nil {
 		t.Fatal(err)
