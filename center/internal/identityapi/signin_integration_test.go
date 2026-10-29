@@ -538,6 +538,36 @@ func TestRefreshRotatesAndAReusedTokenRevokesTheFamily(t *testing.T) {
 	h.verifyAudit()
 }
 
+// TestAFullDevicePageIsSent (F8): a DeviceService.List page of the maximum 100 devices at the bounds the store and A1b's rename can
+// hold (a 64-character name of three-byte characters, one installation with a 128-character version) is sent whole: the center's
+// reply bound admits the method's 64 KiB budget, not only its request bound.
+func TestAFullDevicePageIsSent(t *testing.T) {
+	h := newHarness(t, settings{})
+	who := h.seedAccount(1, "")
+	native := h.signIn(who, newClaim(t), caller{})
+	ctx := context.Background()
+	seen := h.clock.Now().Add(-time.Hour)
+	for index := range 100 {
+		deviceID := platform.NewID()
+		if _, err := h.migration.Exec(ctx, `INSERT INTO device.device (device_id, user_id, display_name, platform, trust_level, remote_enabled,
+    first_seen_at, last_seen_at, rev) VALUES ($1, $2, $3, 4, 1, false, $4, $4, 1)`, deviceID, who.id, strings.Repeat("\u20ac", 64),
+			seen.Add(time.Duration(index)*time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.migration.Exec(ctx, `INSERT INTO device.installation (installation_id, device_id, user_id, product_id, app_version, platform,
+    installed_at, last_active_at, rev) VALUES ($1, $2, $3, 'arcforges-mobile', $4, $5, $6, $6, 1)`, platform.NewID(), deviceID, who.id,
+			strings.Repeat("9", 128), strings.Repeat("p", 128), seen); err != nil {
+			t.Fatal(err)
+		}
+	}
+	answer := h.post(devicesPath, &publicapiv1.DeviceServiceListRequest{Meta: meta(), Page: page(100)}, caller{bearer: native.GetAccessToken()})
+	var listed publicapiv1.DeviceServiceListResponse
+	if answer.status != "0" || proto.Unmarshal(answer.body, &listed) != nil || len(listed.GetValue().GetItems()) != 100 ||
+		!listed.GetValue().GetPage().GetHasMore() || len(answer.body) <= 16_379 {
+		t.Fatalf("a full device page: grpc-status %q %q, %d bytes, %d items", answer.status, answer.message, len(answer.body), len(listed.GetValue().GetItems()))
+	}
+}
+
 // TestListSessionsLeavesOutLapsedNativeSessions (E4): a native session whose sliding refresh lifetime has passed is no longer
 // listed, although its absolute expiry has not passed.
 func TestListSessionsLeavesOutLapsedNativeSessions(t *testing.T) {

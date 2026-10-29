@@ -30,6 +30,8 @@ type Outcome struct {
 	Call *Call
 	// Domain is the code of a domain refusal the pipeline answered itself (STATE/not_activated of a disabled surface), or empty.
 	Domain string
+	// Correlation is the correlation id of that domain reply, or empty.
+	Correlation string
 }
 
 // Options configure the pipeline.
@@ -151,7 +153,7 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 				p.refuse(writer, request, outcome, ReasonInvalidRequest)
 				return
 			}
-			outcome.Domain = "not_activated"
+			outcome.Domain, outcome.Correlation = "not_activated", call.CorrelationID
 			p.observe(request, outcome)
 			WriteDomainReply(writer, request, reply)
 			return

@@ -179,10 +179,11 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 		}
 	}
 	mux := http.NewServeMux()
-	// The message bound is the largest request bound of the registered methods without the five-byte frame header; the
-	// pipeline applies each method's own bound before any handler reads.
-	limit := routes.MaxRequestBytes(modules) - ingress.HeaderLength
-	connecthttp.Mount(mux, dispatcher, connecthttp.WithReadMaxBytes(limit), connecthttp.WithSendMaxBytes(limit))
+	// The read bound is the largest request bound of the registered methods without the five-byte frame header (the pipeline
+	// applies each method's own bound before any handler reads); the send bound is the largest reply budget without the header, so
+	// every reply a method's budget admits is sent (F8).
+	connecthttp.Mount(mux, dispatcher, connecthttp.WithReadMaxBytes(routes.MaxRequestBytes(modules)-ingress.HeaderLength),
+		connecthttp.WithSendMaxBytes(routes.MaxResponseBytes(modules)-ingress.HeaderLength))
 	mux.HandleFunc(routes.HealthPath, center.serveHealth)
 	pipeline := ingress.NewPipeline(pipelineOptions, mux)
 	center.public = center.track(pipeline)
@@ -310,6 +311,10 @@ func (c *Center) observeAdmission(request *http.Request, outcome ingress.Outcome
 		entry.code = statusName(outcome.Refusal.Status)
 	case outcome.HTTPStatus != 0:
 		entry.code = "http_" + strconv.Itoa(outcome.HTTPStatus)
+	case outcome.Domain != "":
+		// A domain refusal the pipeline answered itself (not_activated) is an OK reply carrying its ArcError, counted as a handler's
+		// domain refusal is, with its correlation id (F18).
+		entry.code, entry.correlation = "ok", outcome.Correlation
 	}
 	if outcome.Call != nil {
 		entry.correlation = outcome.Call.Correlation.CorrelationID

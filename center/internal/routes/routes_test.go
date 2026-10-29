@@ -156,3 +156,23 @@ func TestInconsistentRegistrationsStopTheGenerator(t *testing.T) {
 		}
 	}
 }
+
+// TestTheCenterSendsEveryReplyItsBudgetsAdmit (F8): the Connect writer's bound is the largest reply budget of the registrations, so
+// it admits every method's budget (a full DeviceService.List page among them), not only the largest request.
+func TestTheCenterSendsEveryReplyItsBudgetsAdmit(t *testing.T) {
+	modules, err := Center()
+	if err != nil {
+		t.Fatal(err)
+	}
+	largest := MaxResponseBytes(modules)
+	for _, module := range modules {
+		for path, budget := range module.Budgets {
+			if budget.MaxUnaryResponseBytes > largest || budget.MaxFrameBytes > largest {
+				t.Errorf("%s: a budget of %d/%d bytes over the send bound %d", path, budget.MaxUnaryResponseBytes, budget.MaxFrameBytes, largest)
+			}
+		}
+	}
+	if largest != 65_536 || largest <= MaxRequestBytes(modules) {
+		t.Fatalf("send bound %d, request bound %d", largest, MaxRequestBytes(modules))
+	}
+}

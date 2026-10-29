@@ -19,8 +19,10 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
+	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	hellov1 "github.com/ArcForges/Contracts/go/arcforges/hello/v1"
 	"github.com/ArcForges/Contracts/go/arcforges/hello/v1/hellov1connect"
+	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/buildinfo"
@@ -158,6 +160,12 @@ func grpcWeb(t *testing.T, baseURL, path string, body []byte, header map[string]
 	for name, value := range header {
 		request.Header.Set(name, value)
 	}
+	return send(t, request)
+}
+
+// send posts a gRPC-Web request and reads its reply frames.
+func send(t *testing.T, request *http.Request) grpcWebReply {
+	t.Helper()
 	response, err := (&http.Client{Transport: &http.Transport{}}).Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -495,5 +503,36 @@ func TestAnExpiredBootstrapStillServesHello(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), `"msg":"the owner bootstrap has expired; remove its variables"`) {
 		t.Fatalf("no start-up warning: %s", logs.String())
+	}
+}
+
+// TestANotActivatedReplyIsLoggedWithItsCorrelation (F18): a center whose identity surface is off answers an identity call itself
+// with STATE/not_activated; the request is logged and counted as the OK reply it is, with the reply's correlation id.
+func TestANotActivatedReplyIsLoggedWithItsCorrelation(t *testing.T) {
+	h := start(t, hello.Stateless)
+	message, err := proto.Marshal(&publicapiv1.IdentityServiceGetProfileRequest{Meta: &foundationv1.RequestMeta{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := grpcWeb(t, h.server.URL, "/arcforges.publicapi.v1.IdentityService/GetProfile", ingress.Frame(message),
+		map[string]string{"Traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"})
+	if reply.trailers["grpc-status"] != "0" || len(reply.messages) != 1 {
+		t.Fatalf("not activated: %+v", reply)
+	}
+	var line map[string]any
+	if err = json.Unmarshal([]byte(strings.TrimSpace(h.logs.String())), &line); err != nil {
+		t.Fatalf("one log line: %q", h.logs.String())
+	}
+	if line["method"] != "/arcforges.publicapi.v1.IdentityService/GetProfile" || line["code"] != "ok" ||
+		line["correlationId"] != "4bf92f35-77b3-4da6-a3ce-929d0e0e4736" {
+		t.Fatalf("log line %v", line)
+	}
+	var metrics bytes.Buffer
+	if err = h.center.Metrics.WritePrometheus(&metrics); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(metrics.String(), `arcforges_center_requests_total{method="/arcforges.publicapi.v1.IdentityService/GetProfile",code="ok"} 1`) ||
+		strings.Contains(metrics.String(), `code="unknown"`) {
+		t.Fatalf("metrics %s", metrics.String())
 	}
 }

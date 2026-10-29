@@ -104,12 +104,25 @@ func Surfaces(modules []Module) []string {
 }
 
 // MaxRequestBytes is the largest request bound of any registered method, frame header included: the bound of the Connect reader
-// and of the Worker's disposal of an unread upload.
+// (requests only; replies are bounded by MaxResponseBytes) and of the Worker's disposal of an unread upload.
 func MaxRequestBytes(modules []Module) int {
 	largest := 0
 	for _, module := range modules {
 		for _, policy := range module.Policies {
 			largest = max(largest, policy.MaxRequestBytes)
+		}
+	}
+	return largest
+}
+
+// MaxResponseBytes is the largest reply budget of any registered method (a unary reply or one frame), frame header included: the
+// bound of the Connect writer. The Worker enforces each method's own budget; the center's bound only has to admit every one of
+// them, so a reply the Worker would forward is never refused by the center (F8).
+func MaxResponseBytes(modules []Module) int {
+	largest := 0
+	for _, module := range modules {
+		for _, budget := range module.Budgets {
+			largest = max(largest, budget.MaxUnaryResponseBytes, budget.MaxFrameBytes)
 		}
 	}
 	return largest
