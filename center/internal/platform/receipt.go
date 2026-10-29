@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
@@ -68,10 +69,81 @@ type Command struct {
 	CommandID ID
 	// Operation is the method, for example /arcforges.fleet.v1.FleetService/RevokeNode.
 	Operation string
-	// Request is the request exactly as transmitted. The digest covers these bytes, never a re-encoding (AD-0021 section 10).
+	// Request is what the receipt digests of the request: RequestDigestInput of the request as transmitted, never a re-encoding of
+	// a decoded message (AD-0021 section 10).
 	Request []byte
 	// Retention is how long the receipt answers replays (default 90 days).
 	Retention time.Duration
+}
+
+// correlationField is RequestMeta.correlation_id, and metaField a request's RequestMeta (field 1 of every request message).
+const (
+	metaField        protowire.Number = 1
+	correlationField protowire.Number = 3
+)
+
+// RequestDigestInput is what a command receipt digests of a request as transmitted (B1): its top-level fields in wire order with
+// RequestMeta.correlation_id left out, so a retry that states its own correlation replays the receipt. It walks the wire tags as
+// the node's PayloadDigest does (ArcForges.Node.Store, Design contracts README section 6) and copies every kept field byte for byte,
+// never re-encoding it. Unlike the node, which leaves the whole RequestMeta out, it keeps meta's other fields (command_id,
+// expected_rev, workspace_id, recovery_generation, application_scope): they decide what the command does, so a retry that changes
+// one is another request (CONFLICT/command_id_reused). Only the length of a RequestMeta whose correlation was left out is written
+// anew; a request that states no correlation is digested exactly as transmitted. A malformed message is an error.
+func RequestDigestInput(message []byte) ([]byte, error) {
+	out := make([]byte, 0, len(message))
+	for rest := message; len(rest) > 0; {
+		number, kind, tagLength := protowire.ConsumeTag(rest)
+		if tagLength < 0 {
+			return nil, protowire.ParseError(tagLength)
+		}
+		valueLength := protowire.ConsumeFieldValue(number, kind, rest[tagLength:])
+		if valueLength < 0 {
+			return nil, protowire.ParseError(valueLength)
+		}
+		field := rest[:tagLength+valueLength]
+		rest = rest[tagLength+valueLength:]
+		if number != metaField || kind != protowire.BytesType {
+			out = append(out, field...)
+			continue
+		}
+		meta, length := protowire.ConsumeBytes(field[tagLength:])
+		if length < 0 {
+			return nil, protowire.ParseError(length)
+		}
+		kept, removed, err := withoutField(meta, correlationField)
+		if err != nil {
+			return nil, err
+		}
+		if !removed {
+			out = append(out, field...)
+			continue
+		}
+		out = append(out, field[:tagLength]...)
+		out = protowire.AppendBytes(out, kept)
+	}
+	return out, nil
+}
+
+// withoutField is a message's fields in wire order without every occurrence of one field number, each kept field as transmitted.
+func withoutField(message []byte, drop protowire.Number) (kept []byte, removed bool, err error) {
+	kept = make([]byte, 0, len(message))
+	for rest := message; len(rest) > 0; {
+		number, kind, tagLength := protowire.ConsumeTag(rest)
+		if tagLength < 0 {
+			return nil, false, protowire.ParseError(tagLength)
+		}
+		valueLength := protowire.ConsumeFieldValue(number, kind, rest[tagLength:])
+		if valueLength < 0 {
+			return nil, false, protowire.ParseError(valueLength)
+		}
+		if number == drop {
+			removed = true
+		} else {
+			kept = append(kept, rest[:tagLength+valueLength]...)
+		}
+		rest = rest[tagLength+valueLength:]
+	}
+	return kept, removed, nil
 }
 
 // Refusal is a domain refusal of a command (an ArcError in the reply). Its business changes are rolled back and the refusal is

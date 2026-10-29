@@ -377,3 +377,38 @@ func TestNoReceiptHoldsAnAddress(t *testing.T) {
 	}
 	h.verifyAudit()
 }
+
+// TestARetryWithItsOwnCorrelationReplaysTheReceipt (B1): a receipt digests the request without RequestMeta.correlation_id, so the
+// same command sent again with a new correlation replays its outcome, with that correlation in the reply and no second effect.
+// Every other byte is the request: another expected revision or another target under the same command ID is
+// CONFLICT/command_id_reused.
+func TestARetryWithItsOwnCorrelationReplaysTheReceipt(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	who := h.seedAccount(1, "")
+	from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
+	target, other := h.issue(who.id, session.ScopeAccount, false).sessionID, h.issue(who.id, session.ScopeAccount, false).sessionID
+	h.stepUp(who, from, identity.ClassRevokeSession, target)
+	commandID := platform.NewID()
+	attempt := func(correlation platform.ID, revision *int64, sessionID platform.ID) *publicapiv1.IdentityServiceRevokeSessionResponse {
+		meta := &foundationv1.RequestMeta{CommandId: idOf(commandID), CorrelationId: idOf(correlation)}
+		if revision != nil {
+			meta.ExpectedRev = &foundationv1.Revision{Value: proto.Int64(*revision)}
+		}
+		return h.revokeSession(from, meta, sessionID)
+	}
+	first := attempt(platform.NewID(), nil, target)
+	expect(t, "the first attempt", first.GetError(), "")
+	audits, receipts := h.audits("identity.session.revoked"), h.receipts()
+	correlation := platform.NewID()
+	retry := attempt(correlation, nil, target)
+	if retry.GetError() != nil || !proto.Equal(retry.GetValue(), first.GetValue()) || h.audits("identity.session.revoked") != audits ||
+		h.receipts() != receipts || !bytes.Equal(retry.GetMeta().GetCorrelationId().GetValue(), correlation[:]) {
+		t.Fatalf("the retry with its own correlation: %v", retry)
+	}
+	revision := int64(1)
+	expect(t, "the command with an expected revision", attempt(platform.NewID(), &revision, target).GetError(), "CONFLICT/command_id_reused")
+	expect(t, "the command with another target", attempt(platform.NewID(), nil, other).GetError(), "CONFLICT/command_id_reused")
+	if !h.live(other) {
+		t.Fatal("a reused command ID revoked another session")
+	}
+}

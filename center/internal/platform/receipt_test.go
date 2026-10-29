@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
@@ -203,5 +204,62 @@ func TestLookupAnswersAReceiptWithoutRunning(t *testing.T) {
 	}
 	if f.counter(t, "lookup") != 1 {
 		t.Fatal("a lookup ran the command")
+	}
+}
+
+// TestARetryWithItsOwnCorrelationIsTheSameRequest pins the receipt digest's input (B1): the request as transmitted without
+// RequestMeta.correlation_id, every kept field byte for byte in wire order, and nothing else left out.
+func TestARetryWithItsOwnCorrelationIsTheSameRequest(t *testing.T) {
+	// field is one encoded field; a bytes field's value is passed with its length prefix.
+	field := func(number protowire.Number, kind protowire.Type, value []byte) []byte {
+		return append(protowire.AppendTag(nil, number, kind), value...)
+	}
+	// idField is an Id message {value: 16 bytes of fill} as field number.
+	idField := func(number protowire.Number, fill byte) []byte {
+		id := field(1, protowire.BytesType, protowire.AppendBytes(nil, bytes.Repeat([]byte{fill}, 16)))
+		return field(number, protowire.BytesType, protowire.AppendBytes(nil, id))
+	}
+	meta := func(parts ...[]byte) []byte {
+		return field(1, protowire.BytesType, protowire.AppendBytes(nil, bytes.Join(parts, nil)))
+	}
+	commandID, revision := idField(1, 0x11), field(2, protowire.BytesType, protowire.AppendBytes(nil, field(1, protowire.VarintType, protowire.AppendVarint(nil, 7))))
+	unknown := field(9, protowire.VarintType, protowire.AppendVarint(nil, 3))
+	body := field(10, protowire.BytesType, protowire.AppendBytes(nil, []byte("target")))
+	digest := func(message []byte) []byte {
+		t.Helper()
+		input, err := RequestDigestInput(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return input
+	}
+	plain := append(meta(commandID, revision, unknown), body...)
+	if !bytes.Equal(digest(plain), plain) {
+		t.Fatal("a request without a correlation is not digested as transmitted")
+	}
+	first := append(meta(commandID, idField(3, 0x21), revision, unknown), body...)
+	again := append(meta(commandID, idField(3, 0x22), revision, unknown), body...)
+	twice := append(meta(idField(3, 0x23), commandID, revision, idField(3, 0x24), unknown), body...)
+	for name, message := range map[string][]byte{"one correlation": first, "another correlation": again, "two correlations": twice} {
+		if !bytes.Equal(digest(message), plain) {
+			t.Errorf("%s: %x, want %x", name, digest(message), plain)
+		}
+	}
+	// Everything else is the request: meta's other fields, a second meta and the body.
+	for name, message := range map[string][]byte{
+		"another expected revision": append(meta(commandID, idField(3, 0x21), unknown), body...),
+		"another command":           append(meta(idField(1, 0x12), idField(3, 0x21), revision, unknown), body...),
+		"another body":              append(meta(commandID, idField(3, 0x21), revision, unknown), field(10, protowire.BytesType, protowire.AppendBytes(nil, []byte("other")))...),
+		"another field order":       append(body, meta(commandID, idField(3, 0x21), revision, unknown)...),
+		"a second meta":             append(append(meta(commandID, idField(3, 0x21), revision, unknown), meta(unknown)...), body...),
+	} {
+		if bytes.Equal(digest(message), digest(first)) {
+			t.Errorf("%s digests as the first request", name)
+		}
+	}
+	for _, malformed := range [][]byte{first[:len(first)-1], {0x0a, 0x05, 0x1a}, {0x80}} {
+		if _, err := RequestDigestInput(malformed); err == nil {
+			t.Errorf("a malformed request %x was digested", malformed)
+		}
 	}
 }

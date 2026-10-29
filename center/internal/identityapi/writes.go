@@ -60,13 +60,18 @@ func (s *Server) authorizeCaller(ctx context.Context, call *ingress.Call, meta *
 }
 
 // command is the receipt command of a write: the account's principal, meta.command_id (required), the method and the request
-// message exactly as transmitted.
+// message as transmitted without its correlation (platform.RequestDigestInput).
 func command(call *ingress.Call, caller identity.Caller, meta *foundationv1.RequestMeta) (platform.Command, error) {
 	commandID, ok := parseID(meta.GetCommandId())
 	if !ok {
 		return platform.Command{}, arc.InvalidArgument("meta.command_id", "required")
 	}
-	return platform.Command{Principal: identity.Actor(caller.UserID), CommandID: commandID, Operation: call.Policy.FullName, Request: call.Message}, nil
+	// B1: a retry with its own correlation is the same command; every other byte of the request decides whether it is.
+	digested, err := platform.RequestDigestInput(call.Message)
+	if err != nil {
+		return platform.Command{}, err
+	}
+	return platform.Command{Principal: identity.Actor(caller.UserID), CommandID: commandID, Operation: call.Policy.FullName, Request: digested}, nil
 }
 
 // expectedRevision is meta.expected_rev, or nil when the request states none.
