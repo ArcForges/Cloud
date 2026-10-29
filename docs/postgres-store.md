@@ -37,9 +37,10 @@ migration role, because the runtime role can never delete.
 
 The second migration (`center/internal/schema/migrations/0002_identity_device.sql`) creates the `identity` and `device` schemas
 and the rate-limit table. The tables derive from the D1 manifests
-`src/ArcForges.Cloud.Storage.D1/Physical/manifest/{identity,device}.json` by the rules above. AF-CTR-03 lands it whole in its
-first part (A1a), including what its second part (A1b) writes first (`identity.step_up_challenge` and the registration label of
-`identity.auth_flow`); a later change is a new migration.
+`src/ArcForges.Cloud.Storage.D1/Physical/manifest/{identity,device}.json` by the rules above. AF-CTR-03 landed it whole in its
+first part (A1a), including what its second part (A1b) writes (`identity.step_up_challenge`, the registration label of
+`identity.auth_flow`, the device revocation's columns), so A1b adds no migration; a later change is a new migration. A1b's writes
+run under command receipts (`platform.command_receipt`, [model](#model)) in the same transaction as their change.
 
 | Table                        | Purpose                                                                                                                                                                                                                                    | Runtime role             |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
@@ -85,7 +86,8 @@ Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables ident
 - spent refresh tokens until their family's absolute expiry or with their session, whichever comes first;
 - revoked or expired sessions after 90 days;
 - rate-limit windows after one window has passed;
-- revoked devices and installations with the account;
+- revoked devices 30 days after their revocation (Design 11 §5): the sweep deletes a revoked device's sessions and their
+  children, then its installations, then the device (children first, below); live devices with the account;
 - accounts (`identity.user`) and their credentials (`identity.auth_identity`, revoked credentials included) for the account's
   lifetime: they are removed with the account by AF-ID-02's account deletion;
 - the bootstrap row (`identity.bootstrap`) permanently: it is the record that the database's one bootstrap was used (it names the
@@ -161,12 +163,14 @@ locks. Integration tests against a real PostgreSQL cover each one.
 - a read-write transaction whose COMMIT was sent without a definite answer (a lost connection, a timeout, a cancellation, the
   pooler's `08P01`: anything but a class 40 or 23 refusal or a transaction that had failed) is never retried. When it carries the
   call's effect (a sign-in, the owner bootstrap, a refresh rotation, a flow's creation or its code's send, a step-up's begin or
-  proof, and each effect write a later slice adds) it is `ErrCommitUnknown`: it may have committed, and the identity surface
-  answers `INTERNAL/internal` with effect `UNKNOWN` and retry `NEVER`. A transaction that carries no effect of the call
-  (`TxOptions.Auxiliary`: rate-limit counts, reservations and give-backs, an attempt's count, end and give-back, a step-up
-  challenge's denial, refusal audits) runs before the effect or after its definite rollback, so its unanswered COMMIT is
-  `ErrUnavailable`, answered `RESOURCE/overloaded` with `AFTER_TIME` and logged as one warning line with the call's correlation id
-  (D10). A later slice's own counts, reservations, attempt bookkeeping and refusal audits set `Auxiliary`;
+  proof, a passkey registration's begin, every write under a command receipt, and each effect write a later slice adds) it is
+  `ErrCommitUnknown`: it may have committed, and the identity surface answers `INTERNAL/internal` with effect `UNKNOWN` and retry
+  `NEVER`. A transaction that carries no effect of the call (`TxOptions.Auxiliary`: rate-limit counts, reservations and
+  give-backs, the attempt count, end and give-back of a flow, a step-up challenge or a registration, a step-up challenge's denial,
+  refusal audits) runs before the effect or after its definite rollback, so its unanswered COMMIT is `ErrUnavailable`, answered
+  `RESOURCE/overloaded` with `AFTER_TIME` and logged as one warning line with the call's correlation id (D10). A later slice's own
+  counts, reservations, attempt bookkeeping and refusal audits set `Auxiliary`; the identity surface's roles are pinned by name
+  (`TestEveryTransactionOfTheSurfaceStatesItsRole`);
 - a panic in a transaction's callback rolls the transaction back and gives its connection back before it continues (D1);
 - errors that keep the operation, the SQLSTATE and the constraint name but never the server's message or detail, which can quote
   row values.
