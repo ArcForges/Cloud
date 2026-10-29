@@ -25,6 +25,7 @@ import { edgeClientKey, rateLimitedReplyAt } from "./edge-limit.ts";
 import { guardResponse } from "./frames.ts";
 import { classifyStartFailureResponse, containerUnavailable } from "../readiness/container.ts";
 import { bounded, readBytes, reject, rpcError } from "./io.ts";
+import { handlePageRequest, pageTable } from "./pages.ts";
 import { healthRoute } from "../tables/center-tables.generated.ts";
 import { bodyReadMilliseconds } from "../tables/cloud-tables.generated.ts";
 import {
@@ -111,6 +112,9 @@ export async function handleApiRequest(
 ): Promise<Response> {
   const started = performance.now();
   const url = new URL(request.url);
+  // The center's account pages and their JSON routes have a handler of their own (PLT-1).
+  const pageCandidates = pageTable.get(url.pathname);
+  if (pageCandidates) return handlePageRequest(request, env, pageCandidates);
   const health = url.pathname === healthPath;
   const fixed = health ? healthRoute : findRoute(url.pathname, routes);
   // A surface method is in no route table: it is routed only by the generated surface rows.
