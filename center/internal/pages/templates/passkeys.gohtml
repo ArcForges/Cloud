@@ -1,0 +1,55 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Account and passkeys</h1>
+<p id="status" role="status" aria-live="polite"></p>
+<section aria-labelledby="account-heading">
+<h2 id="account-heading">Account</h2>
+<dl>
+<dt>Display name</dt><dd>{{.Profile.DisplayName}}</dd>
+<dt>Language</dt><dd>{{.Profile.Locale}}</dd>
+<dt>Time zone</dt><dd>{{.Profile.Timezone}}</dd>
+</dl>
+</section>
+<section aria-labelledby="passkeys-heading">
+<h2 id="passkeys-heading">Passkeys</h2>
+<table>
+<caption>Passkeys that can sign in to this account</caption>
+<thead><tr><th scope="col">Name</th><th scope="col">Added</th><th scope="col">Last used</th><th scope="col">Actions</th></tr></thead>
+<tbody>
+{{range .Passkeys}}<tr>
+<th scope="row">{{.Name}}</th>
+<td><time datetime="{{.CreatedAt}}">{{.CreatedText}}</time></td>
+<td>{{if .LastUsedAt}}<time datetime="{{.LastUsedAt}}">{{.LastUsedText}}</time>{{else}}Never{{end}}</td>
+<td class="actions">
+<form method="post" action="{{$.Base}}/account/passkeys/rename" class="inline">
+<input type="hidden" name="csrf" value="{{$.CSRF}}">
+<input type="hidden" name="command_id" value="{{.RenameCommand}}">
+<input type="hidden" name="credential_id" value="{{.ID}}">
+<label for="rename-{{.ID}}" class="visually-hidden">New name for passkey {{.Name}}</label>
+<input id="rename-{{.ID}}" name="name" type="text" maxlength="64" required value="{{.Name}}">
+<button type="submit" aria-label="Rename passkey {{.Name}}">Rename</button>
+</form>
+{{if $.CanRemove}}<form method="post" action="{{$.Base}}/account/passkeys/remove" class="inline" data-step-up-class="identity.removeAuthIdentity" data-step-up-target="{{.RemoveTarget}}">
+<input type="hidden" name="csrf" value="{{$.CSRF}}">
+<input type="hidden" name="command_id" value="{{.RemoveCommand}}">
+<input type="hidden" name="credential_id" value="{{.ID}}">
+<button type="submit" aria-label="Remove passkey {{.Name}}">Remove</button>
+</form>{{end}}
+</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{if not .CanRemove}}<p class="help">This is your only way to sign in, so it cannot be removed. Add another passkey first.</p>{{end}}
+</section>
+<section aria-labelledby="add-heading">
+<h2 id="add-heading">Add a passkey</h2>
+<form method="post" action="{{.Base}}/account/passkeys/add" data-step-up-class="identity.beginPasskeyRegistration" data-step-up-target="{{.AddTarget}}">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<p>
+<label for="display_name">Name for the new passkey</label>
+<input id="display_name" name="display_name" type="text" maxlength="64" required autocomplete="off">
+</p>
+<p><button type="submit" class="primary">Add a passkey</button></p>
+</form>
+</section>
+{{end}}

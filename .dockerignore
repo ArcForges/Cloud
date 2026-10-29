@@ -132,6 +132,11 @@
 !center/internal/identity/passkey/virtual/*.go
 !center/internal/arc/arctest/
 !center/internal/arc/arctest/*.go
+!center/internal/pages/templates/
+!center/internal/pages/templates/*.gohtml
+!center/internal/pages/static/
+!center/internal/pages/static/account.js
+!center/internal/pages/static/account.css
 !center/internal/schema/migrations/
 !center/internal/schema/migrations/*.sql
 center/tools/

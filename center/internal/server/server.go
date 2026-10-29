@@ -38,6 +38,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/observe"
+	"github.com/ArcForges/Cloud/center/internal/pages"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/ArcForges/Cloud/center/internal/session"
@@ -174,17 +175,31 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	pipelineOptions := ingress.Options{Routes: publicRoutes, Observe: center.observeAdmission,
 		SurfaceEnabled: func(surface string) bool { return cfg.Identity.Enabled(config.Surface(surface)) },
 		ClientIP:       ClientAddress(cfg.Mode, cfg.Identity), RequireClientIP: cfg.Mode == config.OfficialHosted}
+	// The page paths are served by the pages handler where the surface is on, and answered 404 (with the security headers) elsewhere.
+	pageHandler := pages.Disabled()
 	if cfg.Identity.Enabled(config.SurfaceIdentity) {
 		if center.Store == nil {
 			center.Close()
 			return nil, errors.New("the identity surface needs the runtime database")
 		}
-		if err = center.composeIdentity(dispatcher, &pipelineOptions, options, logger); err != nil {
+		composed, err := center.composeIdentity(dispatcher, &pipelineOptions, options, logger)
+		if err != nil {
 			center.Close()
 			return nil, err
 		}
+		if cfg.Identity.Enabled(config.SurfacePages) {
+			if pageHandler, err = center.composePages(composed, publicRoutes.Registry, pipelineOptions, logger); err != nil {
+				center.Close()
+				return nil, err
+			}
+		}
 	}
 	mux := http.NewServeMux()
+	for _, module := range modules {
+		for _, row := range module.Pages {
+			mux.Handle(row.Path, pageHandler)
+		}
+	}
 	// The read bound is the largest request bound of the registered methods without the five-byte frame header (the pipeline
 	// applies each method's own bound before any handler reads); the send bound is the largest reply budget without the header, so
 	// every reply a method's budget admits is sent (F8).
@@ -201,8 +216,17 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	return center, nil
 }
 
+// composedIdentity is what the identity surface's composition built, for the pages that call it in process.
+type composedIdentity struct {
+	service    *identity.Service
+	server     *identityapi.Server
+	authorizer *access.Authorizer
+	verifier   *session.Verifier
+	clock      func() time.Time
+}
+
 // composeIdentity registers the identity surface's served methods and its credential verifiers.
-func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.Options, options Options, logger *slog.Logger) error {
+func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.Options, options Options, logger *slog.Logger) (composedIdentity, error) {
 	clock := options.Clock
 	if clock == nil {
 		clock = time.Now
@@ -210,14 +234,27 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	origin := config.Origin(c.Config.PublicBaseURL)
 	rp, err := passkey.New(config.RelyingPartyID(c.Config.PublicBaseURL), origin)
 	if err != nil {
-		return errors.New("the public base URL cannot be a WebAuthn relying party")
+		return composedIdentity{}, errors.New("the public base URL cannot be a WebAuthn relying party")
 	}
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: options.Mail, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: options.Participants})
-	dispatcher.Register(identityapi.New(service, access.NewAuthorizer(c.Store, clock), c.Store, clock, logger).Methods()...)
+	authorizer := access.NewAuthorizer(c.Store, clock)
+	server := identityapi.New(service, authorizer, c.Store, clock, logger)
+	dispatcher.Register(server.Methods()...)
 	verifier := session.NewVerifier(c.Store, origin, clock)
 	pipeline.Bearer, pipeline.Browser = verifier, verifier
-	return nil
+	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock}, nil
+}
+
+// composePages builds the pages handler over the identity surface's composition. The pages surface needs the identity surface; the
+// pages share its operation table, its verifier, its core and its API handlers.
+func (c *Center) composePages(composed composedIdentity, registry *ingress.Registry, pipeline ingress.Options, logger *slog.Logger) (http.Handler, error) {
+	return pages.New(pages.Options{
+		Origin: config.Origin(c.Config.PublicBaseURL), BasePath: config.BasePath(c.Config.PublicBaseURL),
+		Enabled: func() bool { return c.Config.Identity.Enabled(config.SurfacePages) },
+		Policy:  c.Config.Identity.Policy, Identity: composed.service, Direct: composed.server.Direct(), Access: composed.authorizer, Verifier: composed.verifier,
+		DB: c.Store, Registry: registry, ClientIP: pipeline.ClientIP, RequireClientIP: pipeline.RequireClientIP, Clock: composed.clock, Logger: logger,
+	})
 }
 
 // checkIdentityComposition fails closed when the identity surface's registrations, its served Connect methods and the operation
