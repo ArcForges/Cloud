@@ -183,6 +183,7 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var owner *Owner
+	var message []byte
 	stated := ""
 	if policy.ReadsRequestMeta() {
 		body, ok := readBounded(request.Body, policy.MaxRequestBytes)
@@ -195,6 +196,7 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 			p.refuse(writer, request, outcome, *refusal)
 			return
 		}
+		message, _ = ReadSingleMessage(body)
 		request.Body = io.NopCloser(bytes.NewReader(body))
 		request.ContentLength = int64(len(body))
 	} else {
@@ -206,7 +208,7 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 	call := &Call{
 		Policy: policy, Caller: caller, Owner: owner,
 		Correlation: correlation.ForRequest(request.Header.Values(TraceparentHeader), stated),
-		ClientIP:    clientIP,
+		ClientIP:    clientIP, Message: message,
 	}
 	outcome.Call = call
 	p.observe(request, outcome)

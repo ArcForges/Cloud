@@ -167,3 +167,41 @@ func TestReceiptInputsAreBounded(t *testing.T) {
 		t.Fatal("an oversized result was stored")
 	}
 }
+
+// TestLookupAnswersAReceiptWithoutRunning pins Lookup: no receipt is no answer; a stored success or refusal is answered as Execute
+// would replay it; other bytes or another operation under the ID are a reuse; nothing is written.
+func TestLookupAnswersAReceiptWithoutRunning(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	id, refused := NewID(), NewID()
+	if _, found, err := Lookup(ctx, f.db, command("account:1", id, "abc")); err != nil || found {
+		t.Fatalf("no receipt: %v %v", found, err)
+	}
+	if _, err := Execute(ctx, f.db, command("account:1", id, "abc"), store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) ([]byte, error) {
+		return []byte("done"), increment(ctx, tx, "lookup")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Execute(ctx, f.db, command("account:1", refused, "abc"), store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) ([]byte, error) {
+		return nil, &Refusal{Code: "STATE/not_found", Result: []byte("stored refusal")}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	outcome, found, err := Lookup(ctx, f.db, command("account:1", id, "abc"))
+	if err != nil || !found || !outcome.Replayed || !outcome.Succeeded || string(outcome.Result) != "done" {
+		t.Fatalf("stored success: %+v %v %v", outcome, found, err)
+	}
+	outcome, found, err = Lookup(ctx, f.db, command("account:1", refused, "abc"))
+	if err != nil || !found || outcome.Succeeded || outcome.ErrorCode != "STATE/not_found" || string(outcome.Result) != "stored refusal" {
+		t.Fatalf("stored refusal: %+v %v %v", outcome, found, err)
+	}
+	if _, _, err = Lookup(ctx, f.db, command("account:1", id, "abd")); !errors.Is(err, ErrCommandIDReused) {
+		t.Fatalf("other bytes: %v", err)
+	}
+	if _, found, err = Lookup(ctx, f.db, command("account:2", id, "abc")); err != nil || found {
+		t.Fatalf("another principal's ID: %v %v", found, err)
+	}
+	if f.counter(t, "lookup") != 1 {
+		t.Fatal("a lookup ran the command")
+	}
+}

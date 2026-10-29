@@ -257,20 +257,8 @@ func (s *Service) CompletePasskey(ctx context.Context, request Request, flowID p
 		return refuse("passkey_invalid")
 	}
 	result, err := s.signIn(ctx, request, row, found.userID, int16(MethodPasskey), func(ctx context.Context, tx pgx.Tx, now time.Time) error {
-		var current int64
-		if err := tx.QueryRow(ctx, "SELECT sign_count FROM identity.auth_identity WHERE auth_identity_id = $1 AND revoked_at IS NULL FOR UPDATE",
-			found.identityID).Scan(&current); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return arc.Unauthenticated()
-			}
-			return err
-		}
-		if verified.SignCount != 0 && int64(verified.SignCount) <= current {
-			return arc.Unauthenticated() // a concurrent sign-in advanced the counter past this one: a possible clone
-		}
-		_, err := tx.Exec(ctx, `UPDATE identity.auth_identity SET sign_count = $2, backup_state = $3, last_used_at = $4, rev = rev + 1
-WHERE auth_identity_id = $1`, found.identityID, int64(verified.SignCount), verified.BackupState, now)
-		return err
+		// A concurrent sign-in that advanced the counter past this one refuses it as a possible clone.
+		return advanceCounter(ctx, tx, found.identityID, verified, now)
 	})
 	if refusal := refusalOf(err); refusal != nil && refusal.Code == "unauthenticated" {
 		return refuse("sign_in_refused")

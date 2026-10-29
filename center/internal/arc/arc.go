@@ -31,8 +31,16 @@ type Refusal struct {
 	State  string
 	// Limit is the LimitFailure detail of a rate limit or bound.
 	Limit *Limit
+	// Revision is the RevisionConflict detail of a stale expected revision.
+	Revision *Revision
 	// Effect is the effect certainty: DID_NOT_HAPPEN unless set.
 	Effect foundationv1.EffectCertainty
+}
+
+// Revision is a RevisionConflict detail: the revision the request expected and the current one.
+type Revision struct {
+	Expected int64
+	Actual   int64
 }
 
 // Limit is a LimitFailure detail.
@@ -81,6 +89,9 @@ func (r *Refusal) ArcError(call correlation.Context) *foundationv1.ArcError {
 		value.Retry.RetryAt = Instant(r.RetryAt)
 	}
 	switch {
+	case r.Revision != nil:
+		value.Details = &foundationv1.ErrorDetails{Detail: &foundationv1.ErrorDetails_Revision{Revision: &foundationv1.RevisionConflict{
+			Expected: &foundationv1.Revision{Value: proto.Int64(r.Revision.Expected)}, Actual: &foundationv1.Revision{Value: proto.Int64(r.Revision.Actual)}}}}
 	case r.Limit != nil:
 		limit := &foundationv1.LimitFailure{LimitName: proto.String(r.Limit.Name)}
 		if r.Limit.Maximum > 0 {
@@ -166,6 +177,19 @@ func CodeReused() *Refusal {
 // AlreadyExists is CONFLICT/already_exists.
 func AlreadyExists() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "already_exists"}
+}
+
+// RevisionConflict is CONFLICT/revision_conflict: meta.expected_rev differs from the object's current revision (re-read, merge).
+func RevisionConflict(expected, actual int64) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "revision_conflict",
+		Revision: &Revision{Expected: expected, Actual: actual}}
+}
+
+// Final reports a refusal that the same command can never turn into a success (its retry advice is NEVER): a command receipt
+// keeps it and answers a replay with it. Any other refusal (step_up_required, token_expired, rate_limited, overloaded, internal)
+// rolls the receipt back, so the same command ID can succeed after the step-up, the refresh or the wait its advice names.
+func (r *Refusal) Final() bool {
+	return r.Retry == foundationv1.RetryMode_RETRY_MODE_UNSPECIFIED || r.Retry == foundationv1.RetryMode_RETRY_MODE_NEVER
 }
 
 // CommandIDReused is CONFLICT/command_id_reused.

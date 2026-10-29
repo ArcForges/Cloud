@@ -65,6 +65,7 @@ func (rp *RelyingParty) Origin() string { return rp.origin }
 type Options struct {
 	RPID             string
 	UserHandle       []byte
+	Allowed          [][]byte
 	Excluded         [][]byte
 	UserVerification string
 	Algorithms       []int32
@@ -73,6 +74,12 @@ type Options struct {
 // LoginOptions are the options of a discoverable sign-in: no allowed credentials, user verification required.
 func (rp *RelyingParty) LoginOptions() Options {
 	return Options{RPID: rp.rpID, UserVerification: UserVerification, Algorithms: []int32{AlgorithmES256}}
+}
+
+// StepUpOptions are the options of a step-up of a known account: its passkeys are named as the allowed credentials, user
+// verification is required, and the assertion is verified like a discoverable sign-in (it must name the owner's user handle).
+func (rp *RelyingParty) StepUpOptions(allowed [][]byte) Options {
+	return Options{RPID: rp.rpID, Allowed: allowed, UserVerification: UserVerification, Algorithms: []int32{AlgorithmES256}}
 }
 
 // CreationOptions are the options of a registration for a user handle, excluding the user's existing credentials.

@@ -36,6 +36,7 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		{CodeReused(), "CONFLICT/code_reused", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{AlreadyExists(), "CONFLICT/already_exists", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{CommandIDReused(), "CONFLICT/command_id_reused", foundationv1.RetryMode_RETRY_MODE_NEVER},
+		{RevisionConflict(3, 4), "CONFLICT/revision_conflict", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{RateLimited("sign_in_prefix", 30, at), "RESOURCE/rate_limited", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
 		{Unavailable(), "RESOURCE/overloaded", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
 		{Internal(), "INTERNAL/internal", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
@@ -67,6 +68,21 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		limited.GetRetry().GetRetryAt().GetUnixSeconds() != at.Unix() || limited.GetRetry().GetRetryAt().GetNanos() != 123456000 ||
 		limited.GetDetails().GetLimit().GetRecoveryAt().GetUnixSeconds() != at.Unix() {
 		t.Fatalf("limit details %v", limited)
+	}
+	stale := RevisionConflict(3, 4).ArcError(call).GetDetails().GetRevision()
+	if stale.GetExpected().GetValue() != 3 || stale.GetActual().GetValue() != 4 {
+		t.Fatalf("revision details %v", stale)
+	}
+	// A receipt keeps exactly the refusals whose advice is NEVER: the others turn into a success with the same command.
+	for _, refusal := range []*Refusal{NotFound(), InvalidState("credential", "last_credential"), RevisionConflict(1, 2), CodeReused(), AlreadyExists()} {
+		if !refusal.Final() {
+			t.Errorf("%s is not final", refusal.Key())
+		}
+	}
+	for _, refusal := range []*Refusal{StepUpRequired(), TokenExpired(), RateLimited("step_up_account", 10, at), Unavailable(), Internal()} {
+		if refusal.Final() {
+			t.Errorf("%s is final", refusal.Key())
+		}
 	}
 	edge := RateLimited("edge", 0, time.Time{}).ArcError(correlation.Context{})
 	if edge.GetDetails().GetLimit().GetMaximum() != nil || edge.GetRetry().GetRetryAt() != nil || edge.GetCorrelationId() != nil {

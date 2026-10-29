@@ -154,6 +154,30 @@ WHERE principal = $1 AND command_id = $2`, command.Principal, command.CommandID,
 	return outcome, nil
 }
 
+// Lookup answers a command that already has a receipt, without running anything: the stored outcome of its one execution and
+// true, or false when the command has no receipt yet. Another operation or other request bytes under the same ID are
+// ErrCommandIDReused, a command still in progress ErrCommandInProgress. A command whose work begins before its transaction (a
+// ceremony verified outside it, a counted attempt) looks first, so a replay never repeats that work; Execute still decides a race.
+func Lookup(ctx context.Context, db *store.DB, command Command) (Outcome, bool, error) {
+	digest := sha256.Sum256(command.Request)
+	var outcome Outcome
+	found := false
+	err := db.InTx(ctx, "look up a command", store.TxOptions{ReadOnly: true, Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+		outcome, found = Outcome{}, false
+		var exists bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM platform.command_receipt WHERE principal = $1 AND command_id = $2)",
+			command.Principal, command.CommandID).Scan(&exists); err != nil || !exists {
+			return err
+		}
+		found = true
+		return replay(ctx, tx, command, digest[:], &outcome)
+	})
+	if err != nil {
+		return Outcome{}, false, err
+	}
+	return outcome, found, nil
+}
+
 func replay(ctx context.Context, tx pgx.Tx, command Command, digest []byte, outcome *Outcome) error {
 	var operation, errorCode *string
 	var stored, result []byte
