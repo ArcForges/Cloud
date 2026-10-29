@@ -18,6 +18,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/device"
+	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
@@ -535,6 +536,12 @@ func TestNoSecretReachesTheStoreOrTheLogs(t *testing.T) {
 	rpc(h, profilePath, &publicapiv1.IdentityServiceGetProfileRequest{Meta: meta()}, caller{cookie: cookie.handle, csrf: cookie.csrf, origin: origin},
 		&publicapiv1.IdentityServiceGetProfileResponse{})
 	rpc(h, profilePath, &publicapiv1.IdentityServiceGetProfileRequest{Meta: meta()}, caller{bearer: native.GetAccessToken()}, &publicapiv1.IdentityServiceGetProfileResponse{})
+	// A1b: an e-mail step-up (its code is collected as a secret) and a write under a command receipt.
+	h.stepUpByEmail(who, caller{bearer: native.GetAccessToken()}, identity.ClassRevokeAllSessions, who.id)
+	if refusal := rpc(h, revokeAllPath, &publicapiv1.IdentityServiceRevokeAllSessionsRequest{Meta: command()}, caller{bearer: native.GetAccessToken()},
+		&publicapiv1.IdentityServiceRevokeAllSessionsResponse{}).GetError(); refusal != nil || h.receipts() != 1 {
+		t.Fatalf("the write under a receipt: %s", failure(refusal))
+	}
 
 	secrets := *h.secrets
 	if len(secrets) < 12 {

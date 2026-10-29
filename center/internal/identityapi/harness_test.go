@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -105,6 +106,8 @@ type settings struct {
 	policy      string
 	noBootstrap bool
 	mailOff     bool
+	// participants are the device revocation's further participants (AF-CTR-04's node enrolment and AF-CLD-02's pairing).
+	participants []device.Participant
 }
 
 func newHarness(t *testing.T, options settings) *harness {
@@ -156,7 +159,7 @@ func newHarness(t *testing.T, options settings) *harness {
 		sender = mail.Disabled{}
 	}
 	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: sender, Clock: h.clock.Now,
-		Background: func(work func()) { work() }})
+		Background: func(work func()) { work() }, Participants: options.participants})
 	if err != nil {
 		t.Fatal(err)
 	}
