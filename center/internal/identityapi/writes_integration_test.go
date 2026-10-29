@@ -14,8 +14,10 @@ import (
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
@@ -387,7 +389,8 @@ func TestHealthStatesTheServedSurfaces(t *testing.T) {
 // TestNoReceiptHoldsAnAddress (C1): an e-mail address is stored in clear only as the subject of an e-mail identity, so no command
 // receipt's result holds one. UpdateProfile's first answer states the account's primary address and its replay the account's
 // current one, which is none once the e-mail identity is removed. Every receipt-guarded write runs once here, and every stored
-// result is scanned for the address.
+// result is scanned for the address. The writes are checked against the operation table (E7): a row with a receipt that this test
+// does not run, or a receipt of a method whose row names none, fails it.
 func TestNoReceiptHoldsAnAddress(t *testing.T) {
 	h := newHarness(t, settings{policy: writePolicy})
 	address := "c1.person@example.org"
@@ -451,7 +454,7 @@ func TestNoReceiptHoldsAnAddress(t *testing.T) {
 		if err = rows.Scan(&operation, &result); err != nil {
 			t.Fatal(err)
 		}
-		operations[operation] = true
+		operations["/"+strings.TrimPrefix(operation, "/")] = true
 		if bytes.Contains(bytes.ToLower(result), []byte(address)) {
 			t.Errorf("the receipt of %s holds the address", operation)
 		}
@@ -459,11 +462,17 @@ func TestNoReceiptHoldsAnAddress(t *testing.T) {
 	if err = rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	for _, operation := range []string{updateProfilePath, renameCredentialPath, completeRegisterPath, renameDevicePath, revokeSessionPath, revokeAllPath,
-		revokeDevicePath, removeCredentialPath} {
-		if !operations[strings.TrimPrefix(operation, "/")] && !operations[operation] {
-			t.Errorf("no receipt of %s was scanned", operation)
+	for _, operation := range access.Operations() {
+		if !operation.Receipt {
+			continue
 		}
+		if !operations[operation.Path] {
+			t.Errorf("%s runs under a receipt, but this test has no request for it (no receipt of it was scanned)", operation.ID)
+		}
+		delete(operations, operation.Path)
+	}
+	for operation := range operations {
+		t.Errorf("a receipt of %s was stored, but its row in the operation table names no receipt", operation)
 	}
 	h.verifyAudit()
 }
@@ -538,6 +547,67 @@ func TestADuplicateOfARunningRegistrationIsBusy(t *testing.T) {
 	if replay.GetError() != nil || !proto.Equal(replay.GetValue(), answer.GetValue()) || h.receipts() != 1 ||
 		h.count("SELECT count(*) FROM identity.auth_identity WHERE subject = $1", base64.RawURLEncoding.EncodeToString(creation.CredentialID)) != 1 {
 		t.Fatalf("the replay after the first committed: %v", replay)
+	}
+	h.verifyAudit()
+}
+
+// TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt (B4, E1): a duplicate CompletePasskeyRegistration whose receipt
+// lookup runs before the first execution committed, and whose attempt runs after it, finds the flow consumed; its second receipt
+// lookup answers the first's receipt, never a final code_reused. The first execution parks on the account's row; a table lock queued
+// behind it on a second connection parks the duplicate's attempt until the first committed.
+func TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	who := h.seedAccount(1, "")
+	from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
+	h.stepUp(who, from, identity.ClassBeginRegistration, who.id)
+	challenge := rpc(h, beginRegisterPath, &publicapiv1.IdentityServiceBeginPasskeyRegistrationRequest{Meta: meta(), DisplayName: proto.String("Key")}, from,
+		&publicapiv1.IdentityServiceBeginPasskeyRegistrationResponse{}).GetValue().GetChallenge()
+	creation, _ := virtual.New(rpID, origin).Create(challenge.GetChallenge(), who.handle)
+	request := &publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest{Meta: command(), FlowId: challenge.GetFlowId(), Credential: creationOf(creation)}
+	complete := func(into chan<- *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse) {
+		into <- rpc(h, completeRegisterPath, request, from, &publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse{})
+	}
+	ctx := context.Background()
+	other, err := pgx.ConnectConfig(ctx, h.migration.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close(context.Background()) })
+	account := h.holding("SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", who.id)
+	first := make(chan *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse, 1)
+	go complete(first)
+	if !account.waitFor(1) {
+		t.Fatal("the first completion never reached the account's row")
+	}
+	table, err := other.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := make(chan error, 1)
+	go func() {
+		_, err := table.Exec(ctx, "LOCK TABLE identity.auth_flow IN ACCESS EXCLUSIVE MODE")
+		queued <- err
+	}()
+	if !account.waitFor(2) {
+		t.Fatal("the table lock never queued behind the first completion")
+	}
+	duplicate := make(chan *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse, 1)
+	go complete(duplicate)
+	if !account.waitFor(3) {
+		t.Fatal("the duplicate's attempt never queued behind the table lock")
+	}
+	account.release(false)
+	answer := <-first
+	if err = <-queued; err != nil {
+		t.Fatal(err)
+	}
+	if err = table.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	second := <-duplicate
+	if answer.GetError() != nil || second.GetError() != nil || !proto.Equal(second.GetValue(), answer.GetValue()) || h.receipts() != 1 ||
+		h.count("SELECT count(*) FROM identity.auth_identity WHERE subject = $1", base64.RawURLEncoding.EncodeToString(creation.CredentialID)) != 1 {
+		t.Fatalf("the first completion %v, the duplicate refused after it committed %v", answer, second)
 	}
 	h.verifyAudit()
 }
