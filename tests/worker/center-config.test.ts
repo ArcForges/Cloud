@@ -116,10 +116,11 @@ test("the configuration rule refuses a missing or invalid mode or base URL", () 
 });
 
 // AF-CTR-03 (PLT-12): the surface switch. Production enables no surface (Hello stays), the acceptance environment enables the
-// identity surface; FLAGSHIP_SURFACES is exact generated names, comma-separated, in every environment; wherever identity is on, the
-// Worker's ALLOWED_ORIGIN is the origin of the center's public base URL (the one origin browser sessions are bound to); and no
-// environment carries a bootstrap value (the proof bootstrap's digest and expiry are protected-dispatch inputs, never committed).
-const surfaces = new Set(["identity"]);
+// identity and pages surfaces; FLAGSHIP_SURFACES is exact generated names, comma-separated, in every environment; the pages need
+// the identity surface they call; wherever identity is on, the Worker's ALLOWED_ORIGIN is the origin of the center's public base
+// URL (the one origin browser sessions are bound to); and no environment carries a bootstrap value (the proof bootstrap's digest and
+// expiry are protected-dispatch inputs, never committed).
+const surfaces = new Set(["identity", "pages"]);
 
 function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
   const value = vars?.FLAGSHIP_SURFACES;
@@ -128,6 +129,8 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
   const names = value.split(",");
   if (names.some((name) => !surfaces.has(name)) || new Set(names).size !== names.length)
     return ["FLAGSHIP_SURFACES is not a comma-separated list of known surface names"];
+  if (names.includes("pages") && !names.includes("identity"))
+    return ["the pages surface needs the identity surface"];
   if (names.includes("identity")) {
     const base = vars?.ARCFORGES_CENTER_PUBLIC_BASE_URL;
     const origin =
@@ -142,9 +145,9 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
   return [];
 }
 
-test("production enables no surface and the acceptance environment enables identity", () => {
+test("production enables no surface and the acceptance environment enables identity and pages", () => {
   assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
-  assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity");
+  assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity,pages");
   // C1: only the acceptance environment overrides the identity policy, and only with its anonymous-flow ceiling; production keeps
   // the defaults (no global bucket).
   assert.equal(wrangler.vars?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
@@ -188,6 +191,10 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   ])
     assert.equal(surfaceProblems({ ...valid, ALLOWED_ORIGIN: origin }).length, 1, String(origin));
   assert.equal(surfaceProblems({ ...valid, ARCFORGES_HELLO_RUNTIME: "csharp" }).length, 1);
+  // The pages call the identity surface in process: one without the other is refused, both are accepted in either order.
+  assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages" }), []);
+  assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "pages,identity" }), []);
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "pages" }).length, 1);
 });
 
 // AF-CTR-03 (F17): the Worker's rate_limited reply advises a retry after the generated edge period, which must be the surface

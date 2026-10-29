@@ -53,7 +53,10 @@ const { CloudContainer } = worker;
 const { FoundationContainer } = proof;
 type Settings = { entrypoint?: string[]; envVars: Record<string, string>; enableInternet: boolean };
 const containerModule = "../../worker/foundation/cloud-container.ts";
-const { startDigest, startDigestKey } = (await import(containerModule)) as unknown as {
+const { centerContainerSettings, startDigest, startDigestKey } = (await import(
+  containerModule
+)) as unknown as {
+  centerContainerSettings(environment: Record<string, string>): Settings;
   startDigest(revision: string, settings: Settings): Promise<string>;
   startDigestKey: string;
 };
@@ -520,4 +523,38 @@ test("the start digest covers the revision, the entrypoint, the egress switch an
     }),
   ])
     assert.notEqual(await changed, digest);
+});
+
+// AF-CTR-03 A2: the owner bootstrap of a protected proof dispatch (the digest of a one-time token and its expiry) reaches the center
+// as its own variables, never reaches the C# runtime, and restarts a center that was started under another one.
+test("the Worker passes the owner bootstrap through to the center and restarts it when the bootstrap changes", async () => {
+  const bootstrap = {
+    ARCFORGES_CENTER_BOOTSTRAP_SHA256:
+      "09e0b22a38f1d38f287867c42c2969cf2063ee0194d43f87cb6f1ec7654df8b8",
+    ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT: "2026-11-02T10:00:00Z",
+  };
+  const environment = {
+    ARCFORGES_HELLO_RUNTIME: "go",
+    ARCFORGES_CENTER_MODE: "official-hosted",
+    ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
+    ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
+    FLAGSHIP_SURFACES: "identity,pages",
+  };
+  const plain = centerContainerSettings(environment);
+  assert.equal(plain.envVars.ARCFORGES_CENTER_SURFACES, "identity,pages");
+  assert.equal(plain.envVars.ARCFORGES_CENTER_BOOTSTRAP_SHA256, undefined);
+  assert.equal(plain.envVars.ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT, undefined);
+  const bootstrapped = centerContainerSettings({ ...environment, ...bootstrap });
+  assert.equal(
+    bootstrapped.envVars.ARCFORGES_CENTER_BOOTSTRAP_SHA256,
+    bootstrap.ARCFORGES_CENTER_BOOTSTRAP_SHA256,
+  );
+  assert.equal(
+    bootstrapped.envVars.ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT,
+    bootstrap.ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT,
+  );
+  const revision = "c".repeat(40);
+  assert.notEqual(await startDigest(revision, plain), await startDigest(revision, bootstrapped));
+  // The C# runtime never receives one.
+  assert.deepEqual(centerContainerSettings({ ...bootstrap }).envVars, {});
 });

@@ -70,6 +70,72 @@ export interface CandidateConfig {
   [key: string]: unknown;
 }
 
+/**
+ * The owner bootstrap of one proof dispatch (AF-CTR-03 A2): the SHA-256 of the one-time token and its expiry. Both are inputs of
+ * the protected dispatch, never committed; the token itself is generated on the owner's machine by eng/verification/proof-bootstrap.ts
+ * and travels nowhere. The variables are the center's own (ARCFORGES_CENTER_BOOTSTRAP_SHA256 / _EXPIRES_AT).
+ */
+export interface ProofBootstrap {
+  /** 64 lowercase hexadecimal characters: the SHA-256 of the exact token text, its `afb1.` prefix included. */
+  sha256: string;
+  /** An RFC 3339 UTC instant to the second (`2026-11-02T10:00:00Z`), in the future and at most seven days ahead. */
+  expiresAt: string;
+}
+export const bootstrapSha256Variable = "ARCFORGES_CENTER_BOOTSTRAP_SHA256";
+export const bootstrapExpiresAtVariable = "ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT";
+/** The center refuses an expiry further ahead than this (config.MaxBootstrapLead). */
+export const maxBootstrapLeadMs = 7 * 24 * 60 * 60 * 1000;
+
+const bootstrapDigestPattern = /^[0-9a-f]{64}$/u;
+const bootstrapInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u;
+
+/**
+ * Checks the bootstrap inputs of a dispatch. The messages name the input and never echo its value: a token pasted into the wrong
+ * field must not be copied into a log.
+ */
+export function checkProofBootstrap(
+  bootstrap: ProofBootstrap,
+  now: Date = new Date(),
+): ProofBootstrap {
+  assert(
+    bootstrapDigestPattern.test(bootstrap.sha256),
+    "bootstrap_sha256 must be 64 lowercase hexadecimal characters (the digest the proof-bootstrap script prints, never the token).",
+  );
+  assert(
+    bootstrapInstantPattern.test(bootstrap.expiresAt),
+    "bootstrap_expires_at must be an RFC 3339 UTC instant to the second (YYYY-MM-DDTHH:MM:SSZ).",
+  );
+  const at = new Date(bootstrap.expiresAt);
+  assert(
+    !Number.isNaN(at.getTime()) && `${at.toISOString().slice(0, 19)}Z` === bootstrap.expiresAt,
+    "bootstrap_expires_at is not a calendar instant.",
+  );
+  assert(at.getTime() > now.getTime(), "bootstrap_expires_at must be in the future.");
+  assert(
+    at.getTime() - now.getTime() <= maxBootstrapLeadMs,
+    "bootstrap_expires_at must be at most seven days ahead.",
+  );
+  return { sha256: bootstrap.sha256, expiresAt: bootstrap.expiresAt };
+}
+
+/**
+ * The bootstrap of the dispatch from its environment (PROOF_BOOTSTRAP_SHA256 and PROOF_BOOTSTRAP_EXPIRES_AT, which ci.yml fills from
+ * the two inputs): none when both are empty, an error when only one is set or either is invalid.
+ */
+export function proofBootstrapFromEnvironment(
+  environment: Record<string, string | undefined>,
+  now: Date = new Date(),
+): ProofBootstrap | undefined {
+  const sha256 = environment.PROOF_BOOTSTRAP_SHA256 ?? "";
+  const expiresAt = environment.PROOF_BOOTSTRAP_EXPIRES_AT ?? "";
+  if (sha256 === "" && expiresAt === "") return undefined;
+  assert(
+    sha256 !== "" && expiresAt !== "",
+    "bootstrap_sha256 and bootstrap_expires_at are set together or not at all.",
+  );
+  return checkProofBootstrap({ sha256, expiresAt }, now);
+}
+
 /** The standalone config to deploy with `--env proof`: only the proof environment is customized. */
 export function buildProofConfig(
   candidate: CandidateConfig,
@@ -83,6 +149,10 @@ export function buildProofConfig(
     buildIdentity?: string;
     /** Relative to the directory of the generated configuration file. */
     migrationsDir?: string;
+    /** The owner bootstrap of this dispatch; the checked-in configuration carries none, so only a dispatch can set it. */
+    bootstrap?: ProofBootstrap;
+    /** The instant the bootstrap's expiry is judged against (tests). */
+    now?: Date;
   },
 ): CandidateConfig {
   assert.match(
@@ -149,7 +219,24 @@ export function buildProofConfig(
     (proof.containers[0] as { class_name?: string }).class_name,
     acceptanceContainerClass,
   );
+  // The owner bootstrap is a protected-dispatch input (AF-CTR-03 A2): no checked-in environment carries one, and only the proof
+  // environment of the generated file gets the dispatch's.
+  for (const [name, vars] of [
+    ["the top level", (candidate as { vars?: Record<string, string> }).vars],
+    ["env.proof", candidate.env.proof.vars],
+  ] as const)
+    for (const variable of [bootstrapSha256Variable, bootstrapExpiresAtVariable])
+      // A plain assertion: a comparison would print the value it found.
+      assert(
+        vars?.[variable] === undefined,
+        `The checked-in configuration carries ${variable} (${name}).`,
+      );
   proof.vars = { ...proof.vars, SOURCE_REVISION: options.revision };
+  if (options.bootstrap !== undefined) {
+    const bootstrap = checkProofBootstrap(options.bootstrap, options.now);
+    proof.vars[bootstrapSha256Variable] = bootstrap.sha256;
+    proof.vars[bootstrapExpiresAtVariable] = bootstrap.expiresAt;
+  }
   if (options.buildIdentity !== undefined) proof.vars.BUILD_IDENTITY = options.buildIdentity;
   if (options.databaseId !== undefined) {
     assert.match(

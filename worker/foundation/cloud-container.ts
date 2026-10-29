@@ -3,7 +3,8 @@
 // plan configuration, and the runtime role's pooled PostgreSQL URL of its store; the center refuses to start without a valid
 // mode and base URL. It also passes the enabled surfaces the Worker forwards (FLAGSHIP_SURFACES as parsed here, "none" when none)
 // and always names the header the Worker sets to the client's address, so the center and the Worker agree on both, and passes the
-// identity policy override where an environment sets one (only the acceptance environment's anonymous-flow ceiling). The Hello's own Neon credential reaches only the C# host, or a Go center without a store. Proof subclasses
+// identity policy override where an environment sets one (only the acceptance environment's anonymous-flow ceiling) and the owner bootstrap
+// (digest and expiry) that a protected proof dispatch sets (never a checked-in value). The Hello's own Neon credential reaches only the C# host, or a Go center without a store. Proof subclasses
 // keep their closed outbound policy and their own environment hook.
 //
 // The start environment follows the deployed Worker version (AF-CTR-03). A Container image rollout restarts a running instance with
@@ -33,6 +34,9 @@ export interface CenterEnvironment {
   /** The identity policy override; only the acceptance environment sets one (its anonymous-flow ceiling, C1). */
   ARCFORGES_CENTER_IDENTITY_POLICY?: string;
   ARCFORGES_CENTER_DATABASE_URL?: string;
+  /** The owner bootstrap of a protected proof dispatch (AF-CTR-03 A2): the SHA-256 of a one-time token and its expiry. */
+  ARCFORGES_CENTER_BOOTSTRAP_SHA256?: string;
+  ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT?: string;
   FLAGSHIP_SURFACES?: string;
 }
 
@@ -56,6 +60,8 @@ export function centerContainerSettings(center: CenterEnvironment): CenterContai
       "ARCFORGES_CENTER_PUBLIC_BASE_URL",
       "ARCFORGES_CENTER_PLAN_CONFIGURATION",
       "ARCFORGES_CENTER_IDENTITY_POLICY",
+      "ARCFORGES_CENTER_BOOTSTRAP_SHA256",
+      "ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT",
     ] as const) {
       const value = center[name];
       if (value !== undefined) settings.envVars[name] = value;

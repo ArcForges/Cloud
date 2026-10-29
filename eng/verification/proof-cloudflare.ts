@@ -18,6 +18,7 @@ import {
   acceptanceBaseUrl,
   buildProofConfig,
   composeProofAssets,
+  proofBootstrapFromEnvironment,
   profileBundlePin,
   proofAssetsDirName,
   proofDatabaseName,
@@ -958,6 +959,9 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
     withRuntimeCredential,
   } = await import("../../tooling/postgres-deploy.ts");
   const { withNeonRuntimeSecret } = await import("../../tooling/neon-runtime.ts");
+  // AF-CTR-03 A2: the owner bootstrap of this dispatch (none after the owner exists); an invalid one stops the deployment before
+  // anything is pushed.
+  const bootstrap = proofBootstrapFromEnvironment(process.env);
   const candidate = await verifyCandidate();
   assert.equal(candidate.dirty, false, "Uncommitted local builds cannot deploy.");
   const current = await run(
@@ -994,6 +998,7 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
     main: sealedProofBundle,
     buildIdentity: (candidateConfig as { vars?: { BUILD_IDENTITY?: string } }).vars?.BUILD_IDENTITY,
     migrationsDir: "../worker/proof-migrations",
+    bootstrap,
   });
   const configFile = path.join(root, "artifacts", "proof.wrangler.json");
   await writeJson(configFile, config);
@@ -1050,6 +1055,9 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
       // observed (CI makes no live call). The Container restarts a center left running under another version's start environment
       // before it serves a request (AF-CTR-03); the post-deploy acceptance compares the center's health (`center.surfaces`).
       configuredSurfaces: centerSurfaces(config.env.proof.vars.FLAGSHIP_SURFACES),
+      // The owner bootstrap this deployment configured: the digest of a one-time token and its expiry (public by construction), or
+      // null when the dispatch carried none (every dispatch after the owner exists).
+      bootstrap: bootstrap ? { sha256: bootstrap.sha256, expiresAt: bootstrap.expiresAt } : null,
       database: rotation.database,
       runtimeRole: rotation.runtimeRole,
       loginRole: rotation.loginRole,

@@ -20,6 +20,21 @@ on:
         type: choice
         options: [none, access, provision, deploy, observe]
         default: none
+      bootstrap_sha256:
+        description: >-
+          Proof deploy only: the SHA-256 (64 lowercase hex characters) of the owner bootstrap token, as
+          eng/verification/proof-bootstrap.ts prints it on the owner's machine. Never paste the token itself. Leave empty on
+          every dispatch after the owner exists. Set together with bootstrap_expires_at.
+        type: string
+        required: false
+        default: ""
+      bootstrap_expires_at:
+        description: >-
+          Proof deploy only: when the bootstrap token expires, an RFC 3339 UTC instant to the second (2026-11-02T10:00:00Z),
+          in the future and at most seven days ahead. Set together with bootstrap_sha256.
+        type: string
+        required: false
+        default: ""
   schedule:
     - cron: "43 6 * * 1"
 
@@ -421,6 +436,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           NEON_DATABASE_URL_DIRECT: ${{ secrets.NEON_DATABASE_URL_DIRECT }}
           GH_TOKEN: ${{ github.token }}
+          # The owner bootstrap of this dispatch (digest and expiry, both or neither), validated by buildProofConfig and recorded in
+          # proof-deployment.json; the one-time token itself never reaches CI.
+          PROOF_BOOTSTRAP_SHA256: ${{ inputs.bootstrap_sha256 }}
+          PROOF_BOOTSTRAP_EXPIRES_AT: ${{ inputs.bootstrap_expires_at }}
       - name: Preserve proof deployment evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
