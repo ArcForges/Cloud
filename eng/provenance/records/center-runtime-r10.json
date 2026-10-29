@@ -1,0 +1,1355 @@
+{
+  "schemaVersion": 1,
+  "id": "center-runtime-r10",
+  "kind": "generated",
+  "sourceRepository": "https://github.com/ArcForges/Cloud",
+  "sourceCommit": "a3322b4f1275e96c55c0ed964d77c015b415755c",
+  "sourcePaths": [
+    ".dockerignore",
+    "Directory.Build.props",
+    "Directory.Build.targets",
+    "Directory.Packages.props",
+    "Dockerfile",
+    "NuGet.Config",
+    "center/cmd/arcforges-center/main.go",
+    "center/dependencies.json",
+    "center/go.mod",
+    "center/go.sum",
+    "center/internal/access/access.go",
+    "center/internal/arc/arc.go",
+    "center/internal/buildinfo/buildinfo.go",
+    "center/internal/config/config.go",
+    "center/internal/config/identity.go",
+    "center/internal/config/migration.go",
+    "center/internal/config/urls.go",
+    "center/internal/correlation/correlation.go",
+    "center/internal/device/device.go",
+    "center/internal/feature/feature.go",
+    "center/internal/hello/hello.go",
+    "center/internal/identity/account.go",
+    "center/internal/identity/bootstrap.go",
+    "center/internal/identity/email.go",
+    "center/internal/identity/errors.go",
+    "center/internal/identity/flows.go",
+    "center/internal/identity/passkey/passkey.go",
+    "center/internal/identity/passkey/virtual/virtual.go",
+    "center/internal/identity/rules.go",
+    "center/internal/identity/service.go",
+    "center/internal/identity/signin.go",
+    "center/internal/identityapi/convert.go",
+    "center/internal/identityapi/identityapi.go",
+    "center/internal/ingress/caller.go",
+    "center/internal/ingress/envelope.go",
+    "center/internal/ingress/errors.go",
+    "center/internal/ingress/framing.go",
+    "center/internal/ingress/pipeline.go",
+    "center/internal/ingress/policy.go",
+    "center/internal/mail/mail.go",
+    "center/internal/observe/observe.go",
+    "center/internal/page/page.go",
+    "center/internal/pgtest/pgtest.go",
+    "center/internal/platform/audit.go",
+    "center/internal/platform/inbox.go",
+    "center/internal/platform/keys.go",
+    "center/internal/platform/lease.go",
+    "center/internal/platform/outbox.go",
+    "center/internal/platform/receipt.go",
+    "center/internal/provision/provision.go",
+    "center/internal/provision/scram.go",
+    "center/internal/ratelimit/ratelimit.go",
+    "center/internal/routes/identity.go",
+    "center/internal/routes/routes.go",
+    "center/internal/schema/migrations/0001_platform_store.sql",
+    "center/internal/schema/migrations/0002_identity_device.sql",
+    "center/internal/schema/schema.go",
+    "center/internal/server/clientip.go",
+    "center/internal/server/server.go",
+    "center/internal/session/list.go",
+    "center/internal/session/session.go",
+    "center/internal/session/tokens.go",
+    "center/internal/session/verify.go",
+    "center/internal/store/migrate/grants.go",
+    "center/internal/store/migrate/migrate.go",
+    "center/internal/store/store.go",
+    "center/internal/workertables/workertables.go",
+    "center/toolchain.json",
+    "eng/center.py",
+    "eng/version-sources.json",
+    "global.json",
+    "package-lock.json",
+    "src/ArcForges.Cloud.Modules.Abstractions/Agent/ModelDispatchPort.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj",
+    "src/ArcForges.Cloud.Modules.Abstractions/Entitlement/EntitlementGrantPort.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/Families/ModuleFamilyPort.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/Harness/HarnessWakePort.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/IModuleBoundary.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/ModuleDescriptor.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/Storage/ModulePlanPort.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/Storage/PlanValue.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/Workspace/WorkspaceDirectoryPort.cs",
+    "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Agent/AgentModule.cs",
+    "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj",
+    "src/ArcForges.Cloud.Modules.Agent/Dispatch/Application/ModelDispatchClient.cs",
+    "src/ArcForges.Cloud.Modules.Agent/Dispatch/Domain/AiEnvelope.cs",
+    "src/ArcForges.Cloud.Modules.Agent/Dispatch/Domain/ModelDispatchOptions.cs",
+    "src/ArcForges.Cloud.Modules.Agent/Dispatch/Domain/ModelRateBuckets.cs",
+    "src/ArcForges.Cloud.Modules.Agent/Dispatch/TestAccess.cs",
+    "src/ArcForges.Cloud.Modules.Agent/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Audit/ArcForges.Cloud.Modules.Audit.csproj",
+    "src/ArcForges.Cloud.Modules.Audit/AuditModule.cs",
+    "src/ArcForges.Cloud.Modules.Audit/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Chat/ArcForges.Cloud.Modules.Chat.csproj",
+    "src/ArcForges.Cloud.Modules.Chat/ChatModule.cs",
+    "src/ArcForges.Cloud.Modules.Chat/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Commerce/ArcForges.Cloud.Modules.Commerce.csproj",
+    "src/ArcForges.Cloud.Modules.Commerce/CommerceModule.cs",
+    "src/ArcForges.Cloud.Modules.Commerce/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Configuration/ArcForges.Cloud.Modules.Configuration.csproj",
+    "src/ArcForges.Cloud.Modules.Configuration/ConfigurationModule.cs",
+    "src/ArcForges.Cloud.Modules.Configuration/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Devices/ArcForges.Cloud.Modules.Devices.csproj",
+    "src/ArcForges.Cloud.Modules.Devices/DevicesModule.cs",
+    "src/ArcForges.Cloud.Modules.Devices/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj",
+    "src/ArcForges.Cloud.Modules.Entitlement/EntitlementModule.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Persistence/D1EntitlementStore.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Persistence/EntitlementRowCodec.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Persistence/GuidEntitlementIdSource.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Persistence/SnapshotColumns.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/EntitlementGrantPortAdapter.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/EntitlementService.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/GrantAdmission.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/Ports.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/Definitions.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/EntitlementResolver.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/InputValidation.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/Records.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/Snapshot.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/UtcMicros.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Infrastructure/SnapshotCodec.cs",
+    "src/ArcForges.Cloud.Modules.Entitlement/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Application/IdentityService.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Application/Ports.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Application/Requests.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Domain/Identifiers.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Domain/IdentityRules.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Domain/Model.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Domain/UtcMicros.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Infrastructure/CommitContext.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Infrastructure/IdentityStatements.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Core/Infrastructure/PlanArguments.cs",
+    "src/ArcForges.Cloud.Modules.Identity/IdentityModule.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Persistence/D1IdentityStore.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Persistence/IdentityPlans.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Persistence/IdentityRowCodec.cs",
+    "src/ArcForges.Cloud.Modules.Identity/Persistence/RandomIdentityIdSource.cs",
+    "src/ArcForges.Cloud.Modules.Identity/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Notification/ArcForges.Cloud.Modules.Notification.csproj",
+    "src/ArcForges.Cloud.Modules.Notification/NotificationModule.cs",
+    "src/ArcForges.Cloud.Modules.Notification/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.PackageCatalog/ArcForges.Cloud.Modules.PackageCatalog.csproj",
+    "src/ArcForges.Cloud.Modules.PackageCatalog/PackageCatalogModule.cs",
+    "src/ArcForges.Cloud.Modules.PackageCatalog/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Policy/ArcForges.Cloud.Modules.Policy.csproj",
+    "src/ArcForges.Cloud.Modules.Policy/PolicyModule.cs",
+    "src/ArcForges.Cloud.Modules.Policy/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Resource/ArcForges.Cloud.Modules.Resource.csproj",
+    "src/ArcForges.Cloud.Modules.Resource/ResourceModule.cs",
+    "src/ArcForges.Cloud.Modules.Resource/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Scope/ArcForges.Cloud.Modules.Scope.csproj",
+    "src/ArcForges.Cloud.Modules.Scope/ScopeModule.cs",
+    "src/ArcForges.Cloud.Modules.Scope/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Search/ArcForges.Cloud.Modules.Search.csproj",
+    "src/ArcForges.Cloud.Modules.Search/SearchModule.cs",
+    "src/ArcForges.Cloud.Modules.Search/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Support/ArcForges.Cloud.Modules.Support.csproj",
+    "src/ArcForges.Cloud.Modules.Support/SupportModule.cs",
+    "src/ArcForges.Cloud.Modules.Support/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Sync/ArcForges.Cloud.Modules.Sync.csproj",
+    "src/ArcForges.Cloud.Modules.Sync/SyncModule.cs",
+    "src/ArcForges.Cloud.Modules.Sync/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Task/ArcForges.Cloud.Modules.Task.csproj",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/HarnessExecutor.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/HarnessWake.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/Ports.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/TestAccess.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/Budget.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/Checkpoint.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/HarnessPolicy.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/Retry.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/RunIdentity.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/RunModel.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Infrastructure/D1HarnessStore.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Application/HelloAgentSlice.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Application/HelloEffectPort.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Domain/HelloSlicePolicy.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessAlarmClient.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessWakeEndpoint.cs",
+    "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessWakeService.cs",
+    "src/ArcForges.Cloud.Modules.Task/TaskModule.cs",
+    "src/ArcForges.Cloud.Modules.Task/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.TrustSafety/ArcForges.Cloud.Modules.TrustSafety.csproj",
+    "src/ArcForges.Cloud.Modules.TrustSafety/TrustSafetyModule.cs",
+    "src/ArcForges.Cloud.Modules.TrustSafety/packages.lock.json",
+    "src/ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj",
+    "src/ArcForges.Cloud.Modules.Workspace/Persistence/D1WorkspaceDirectory.cs",
+    "src/ArcForges.Cloud.Modules.Workspace/WorkspaceModule.cs",
+    "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json",
+    "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj",
+    "src/ArcForges.Cloud.Storage.D1/Archive/ChangeArchiveReader.cs",
+    "src/ArcForges.Cloud.Storage.D1/Archive/ChangeRecord.cs",
+    "src/ArcForges.Cloud.Storage.D1/D1Values.cs",
+    "src/ArcForges.Cloud.Storage.D1/Deploy/DeployGate.cs",
+    "src/ArcForges.Cloud.Storage.D1/FamilyBinding/FamilyContributionPolicy.cs",
+    "src/ArcForges.Cloud.Storage.D1/FamilyBinding/ModuleFamilyPortFactory.cs",
+    "src/ArcForges.Cloud.Storage.D1/Hmac/Base64Url.cs",
+    "src/ArcForges.Cloud.Storage.D1/Hmac/PrivateRequestSigning.cs",
+    "src/ArcForges.Cloud.Storage.D1/HttpBodies.cs",
+    "src/ArcForges.Cloud.Storage.D1/MigrationRunner/Classifiers.txt",
+    "src/ArcForges.Cloud.Storage.D1/MigrationRunner/MigrationCatalog.cs",
+    "src/ArcForges.Cloud.Storage.D1/MigrationRunner/MigrationClient.cs",
+    "src/ArcForges.Cloud.Storage.D1/MigrationRunner/MigrationEngine.cs",
+    "src/ArcForges.Cloud.Storage.D1/MigrationRunner/MigrationSql.cs",
+    "src/ArcForges.Cloud.Storage.D1/MigrationRunner/RunnerSql.cs",
+    "src/ArcForges.Cloud.Storage.D1/MigrationRunner/Statements.sql",
+    "src/ArcForges.Cloud.Storage.D1/ModuleBinding/ModulePlanPort.cs",
+    "src/ArcForges.Cloud.Storage.D1/Outbox/OutboxEvent.cs",
+    "src/ArcForges.Cloud.Storage.D1/Outbox/OutboxPublisher.cs",
+    "src/ArcForges.Cloud.Storage.D1/Outbox/SequenceStream.cs",
+    "src/ArcForges.Cloud.Storage.D1/Physical/ColumnCodec.cs",
+    "src/ArcForges.Cloud.Storage.D1/Physical/ExactOrderBytes.cs",
+    "src/ArcForges.Cloud.Storage.D1/Physical/Fts5Query.cs",
+    "src/ArcForges.Cloud.Storage.D1/Physical/PhysicalModel.cs",
+    "src/ArcForges.Cloud.Storage.D1/Physical/PhysicalSchema.g.cs",
+    "src/ArcForges.Cloud.Storage.D1/Physical/PhysicalValue.cs",
+    "src/ArcForges.Cloud.Storage.D1/Physical/RowShape.cs",
+    "src/ArcForges.Cloud.Storage.D1/Physical/SchemaCompatibility.cs",
+    "src/ArcForges.Cloud.Storage.D1/PlanDefinition.cs",
+    "src/ArcForges.Cloud.Storage.D1/PlanExecution.cs",
+    "src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs",
+    "src/ArcForges.Cloud.Storage.D1/Receipts/CommandReceipts.cs",
+    "src/ArcForges.Cloud.Storage.D1/Receipts/CommitExecutor.cs",
+    "src/ArcForges.Cloud.Storage.D1/Receipts/CommitTail.cs",
+    "src/ArcForges.Cloud.Storage.D1/Receipts/Inbox.cs",
+    "src/ArcForges.Cloud.Storage.D1/Receipts/StorageFormats.cs",
+    "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyDefinitions.cs",
+    "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyExecutor.cs",
+    "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyGuards.cs",
+    "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyModule.cs",
+    "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyPlanVerifier.cs",
+    "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyUnitOfWork.cs",
+    "src/ArcForges.Cloud.Storage.D1/WorkerPlanExecutor.cs",
+    "src/ArcForges.Cloud.Storage.D1/packages.lock.json",
+    "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+    "src/ArcForges.Cloud/BuildIdentity.cs",
+    "src/ArcForges.Cloud/Composition/HostModules.cs",
+    "src/ArcForges.Cloud/Composition/ModuleBoundaries.cs",
+    "src/ArcForges.Cloud/Foundation/BrowserSessionEndpoints.cs",
+    "src/ArcForges.Cloud/Foundation/BrowserSessionVerifier.cs",
+    "src/ArcForges.Cloud/Foundation/EgressProbe.cs",
+    "src/ArcForges.Cloud/Foundation/FoundationEndpoints.cs",
+    "src/ArcForges.Cloud/Foundation/FoundationHttp.cs",
+    "src/ArcForges.Cloud/Foundation/FoundationJson.cs",
+    "src/ArcForges.Cloud/Foundation/FoundationOperations.cs",
+    "src/ArcForges.Cloud/Foundation/FoundationOptions.cs",
+    "src/ArcForges.Cloud/Foundation/JobSliceService.cs",
+    "src/ArcForges.Cloud/Foundation/ObjectsClient.cs",
+    "src/ArcForges.Cloud/Foundation/SessionService.cs",
+    "src/ArcForges.Cloud/Generation/CorrelationGuards.cs",
+    "src/ArcForges.Cloud/Generation/ProofWireLimits.cs",
+    "src/ArcForges.Cloud/Generation/StorageGuards.cs",
+    "src/ArcForges.Cloud/Generation/TransportBudgets.cs",
+    "src/ArcForges.Cloud/Generation/WorkerWireLimits.cs",
+    "src/ArcForges.Cloud/HealthStatus.cs",
+    "src/ArcForges.Cloud/HelloEndpoint.cs",
+    "src/ArcForges.Cloud/Ingress/Caller.cs",
+    "src/ArcForges.Cloud/Ingress/Correlation.cs",
+    "src/ArcForges.Cloud/Ingress/GrpcWebFraming.cs",
+    "src/ArcForges.Cloud/Ingress/IngressPipeline.cs",
+    "src/ArcForges.Cloud/Ingress/PipelineProbe.cs",
+    "src/ArcForges.Cloud/Ingress/ProtoWire.cs",
+    "src/ArcForges.Cloud/Ingress/RequestEnvelopeReader.cs",
+    "src/ArcForges.Cloud/Ingress/RpcPolicy.cs",
+    "src/ArcForges.Cloud/NeonHello.cs",
+    "src/ArcForges.Cloud/Program.cs",
+    "src/ArcForges.Cloud/Readiness/HostReadiness.cs",
+    "src/ArcForges.Cloud/Readiness/ReadinessEvaluator.cs",
+    "src/ArcForges.Cloud/Readiness/ReadinessModel.cs",
+    "src/ArcForges.Cloud/Readiness/ReadinessObservations.cs",
+    "src/ArcForges.Cloud/Readiness/ReadinessVocabulary.cs",
+    "src/ArcForges.Cloud/packages.lock.json"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+      }
+    ],
+    "scope": "Current Native AOT image preserves the immutable official base and its six full Ubuntu copyright files. Full .NET runtime/ASP.NET, gRPC, Protobuf and Apache Contracts legal texts accompany the owned application. Base/system components retain their original licences. No build-only wrapper/tool implementation is introduced into the runtime image. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped. Copyright (c) 2002-2025, Npgsql. Npgsql 10.0.3 is distributed under the PostgreSQL licence; its complete copyright and permission terms accompany the application. The Go center and its twenty-two locked runtime modules are included alongside the retained C# executable. Go, Go protobuf, the golang.org/x modules, google/uuid, go-webauthn and go-webauthn/x use BSD-3-Clause; Connect, the published Contracts Go bindings and go-tpm use Apache-2.0 (the Contracts NOTICE is retained under third-party/ContractsGo.NOTICE.txt); pgx and its helper modules, fxamacker/cbor, x448/float16, golang-jwt, go-viper/mapstructure, philhofer/fwd and tinylib/msgp use MIT (msgp's portions copyright The Go Authors are under the Go licence shipped as third-party/Go.LICENSE.txt). Complete original texts are shipped.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped.",
+    "Copyright (c) 2002-2025, Npgsql. Npgsql 10.0.3 is distributed under the PostgreSQL licence; its complete copyright and permission terms accompany the application.",
+    "The Go center and its twenty-two locked runtime modules are included alongside the retained C# executable. Go, Go protobuf, the golang.org/x modules, google/uuid, go-webauthn and go-webauthn/x use BSD-3-Clause; Connect, the published Contracts Go bindings and go-tpm use Apache-2.0 (the Contracts NOTICE is retained under third-party/ContractsGo.NOTICE.txt); pgx and its helper modules, fxamacker/cbor, x448/float16, golang-jwt, go-viper/mapstructure, philhofer/fwd and tinylib/msgp use MIT (msgp's portions copyright The Go Authors are under the Go licence shipped as third-party/Go.LICENSE.txt). Complete original texts are shipped."
+  ],
+  "targets": [],
+  "artifactTargets": [
+    {
+      "project": "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+      "package": "arcforges-cloud-container",
+      "kind": "native-image-notices",
+      "profile": "eng/provenance/artifact-profiles/cloud-release-r64.json",
+      "sha256": "ca7c2a89ca2902851c060ba195cbbf31660866177853be2fb3531977331fae74"
+    }
+  ],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "actual-image",
+    "command": "Build the locked Dockerfile Native AOT application with the reviewed SDK image digest; preserve the pinned runtime base and its full legal files. Inspect the stopped final image and source receipt under /app/notices. Promote the sealed candidate by its recorded identity without executing the application.",
+    "expected": "Declared build inputs of the Native AOT image (the src compile closure of the Cloud host plus the root build inputs) and the complete legal files, including the published Contracts NOTICE, match the reviewed profile cloud-release-r64. The sealed candidate preserves the inspected image and Worker identities.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped. Copyright (c) 2002-2025, Npgsql. Npgsql 10.0.3 is distributed under the PostgreSQL licence; its complete copyright and permission terms accompany the application. The Go center and its twenty-two locked runtime modules are included alongside the retained C# executable. Go, Go protobuf, the golang.org/x modules, google/uuid, go-webauthn and go-webauthn/x use BSD-3-Clause; Connect, the published Contracts Go bindings and go-tpm use Apache-2.0 (the Contracts NOTICE is retained under third-party/ContractsGo.NOTICE.txt); pgx and its helper modules, fxamacker/cbor, x448/float16, golang-jwt, go-viper/mapstructure, philhofer/fwd and tinylib/msgp use MIT (msgp's portions copyright The Go Authors are under the Go licence shipped as third-party/Go.LICENSE.txt). Complete original texts are shipped.",
+    "files": [
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Current Native AOT image preserves the immutable official base and its six full Ubuntu copyright files. Full .NET runtime/ASP.NET, gRPC, Protobuf and Apache Contracts legal texts accompany the owned application. Base/system components retain their original licences. No build-only wrapper/tool implementation is introduced into the runtime image. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped. Copyright (c) 2002-2025, Npgsql. Npgsql 10.0.3 is distributed under the PostgreSQL licence; its complete copyright and permission terms accompany the application. The Go center and its twenty-two locked runtime modules are included alongside the retained C# executable. Go, Go protobuf, the golang.org/x modules, google/uuid, go-webauthn and go-webauthn/x use BSD-3-Clause; Connect, the published Contracts Go bindings and go-tpm use Apache-2.0 (the Contracts NOTICE is retained under third-party/ContractsGo.NOTICE.txt); pgx and its helper modules, fxamacker/cbor, x448/float16, golang-jwt, go-viper/mapstructure, philhofer/fwd and tinylib/msgp use MIT (msgp's portions copyright The Go Authors are under the Go licence shipped as third-party/Go.LICENSE.txt). Complete original texts are shipped."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": {
+    "generators": [
+      {
+        "repository": "https://github.com/dotnet/dotnet",
+        "commit": "95017c711e6afc1085133d440e42b4bd78155701",
+        "paths": [
+          "src/runtime/src/coreclr/tools/aot/ILCompiler/Program.cs"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.TXT",
+            "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+            "finding": "Locked .NET 10.0.12 runtime/compiler and ASP.NET Core packages identify this source commit. Their subordinate full notice documents retain every original term."
+          },
+          {
+            "path": "src/runtime/src/coreclr/tools/aot/ILCompiler/Program.cs",
+            "sha256": "fdd1e2c6cb47d67b7f920a449d155434f8ad07a5779a574e9fcb1f52a5db37b6",
+            "finding": "Exact ILCompiler entry point independently fetched at the locked .NET commit. Its own file header explicitly grants MIT. Compiler implementation is a generator, not copied runtime application source."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/golang/go",
+        "commit": "2aae1000ea1d4b28923b96db28acf4e3b99d6aff",
+        "paths": [
+          "src/cmd/compile",
+          "src/runtime"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+            "finding": "Go 1.27.3 official archive hashes and source tag are pinned in center/toolchain.json and bound to the Dockerfile by eng/center.py."
+          }
+        ]
+      }
+    ],
+    "inputs": [
+      {
+        "repository": "https://github.com/ArcForges/Cloud",
+        "commit": "a3322b4f1275e96c55c0ed964d77c015b415755c",
+        "paths": [
+          ".dockerignore",
+          "Directory.Build.props",
+          "Directory.Build.targets",
+          "Directory.Packages.props",
+          "Dockerfile",
+          "NuGet.Config",
+          "center/cmd/arcforges-center/main.go",
+          "center/dependencies.json",
+          "center/go.mod",
+          "center/go.sum",
+          "center/internal/access/access.go",
+          "center/internal/arc/arc.go",
+          "center/internal/buildinfo/buildinfo.go",
+          "center/internal/config/config.go",
+          "center/internal/config/identity.go",
+          "center/internal/config/migration.go",
+          "center/internal/config/urls.go",
+          "center/internal/correlation/correlation.go",
+          "center/internal/device/device.go",
+          "center/internal/feature/feature.go",
+          "center/internal/hello/hello.go",
+          "center/internal/identity/account.go",
+          "center/internal/identity/bootstrap.go",
+          "center/internal/identity/email.go",
+          "center/internal/identity/errors.go",
+          "center/internal/identity/flows.go",
+          "center/internal/identity/passkey/passkey.go",
+          "center/internal/identity/passkey/virtual/virtual.go",
+          "center/internal/identity/rules.go",
+          "center/internal/identity/service.go",
+          "center/internal/identity/signin.go",
+          "center/internal/identityapi/convert.go",
+          "center/internal/identityapi/identityapi.go",
+          "center/internal/ingress/caller.go",
+          "center/internal/ingress/envelope.go",
+          "center/internal/ingress/errors.go",
+          "center/internal/ingress/framing.go",
+          "center/internal/ingress/pipeline.go",
+          "center/internal/ingress/policy.go",
+          "center/internal/mail/mail.go",
+          "center/internal/observe/observe.go",
+          "center/internal/page/page.go",
+          "center/internal/pgtest/pgtest.go",
+          "center/internal/platform/audit.go",
+          "center/internal/platform/inbox.go",
+          "center/internal/platform/keys.go",
+          "center/internal/platform/lease.go",
+          "center/internal/platform/outbox.go",
+          "center/internal/platform/receipt.go",
+          "center/internal/provision/provision.go",
+          "center/internal/provision/scram.go",
+          "center/internal/ratelimit/ratelimit.go",
+          "center/internal/routes/identity.go",
+          "center/internal/routes/routes.go",
+          "center/internal/schema/migrations/0001_platform_store.sql",
+          "center/internal/schema/migrations/0002_identity_device.sql",
+          "center/internal/schema/schema.go",
+          "center/internal/server/clientip.go",
+          "center/internal/server/server.go",
+          "center/internal/session/list.go",
+          "center/internal/session/session.go",
+          "center/internal/session/tokens.go",
+          "center/internal/session/verify.go",
+          "center/internal/store/migrate/grants.go",
+          "center/internal/store/migrate/migrate.go",
+          "center/internal/store/store.go",
+          "center/internal/workertables/workertables.go",
+          "center/toolchain.json",
+          "eng/center.py",
+          "eng/version-sources.json",
+          "global.json",
+          "package-lock.json",
+          "src/ArcForges.Cloud.Modules.Abstractions/Agent/ModelDispatchPort.cs",
+          "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj",
+          "src/ArcForges.Cloud.Modules.Abstractions/Entitlement/EntitlementGrantPort.cs",
+          "src/ArcForges.Cloud.Modules.Abstractions/Families/ModuleFamilyPort.cs",
+          "src/ArcForges.Cloud.Modules.Abstractions/Harness/HarnessWakePort.cs",
+          "src/ArcForges.Cloud.Modules.Abstractions/IModuleBoundary.cs",
+          "src/ArcForges.Cloud.Modules.Abstractions/ModuleDescriptor.cs",
+          "src/ArcForges.Cloud.Modules.Abstractions/Storage/ModulePlanPort.cs",
+          "src/ArcForges.Cloud.Modules.Abstractions/Storage/PlanValue.cs",
+          "src/ArcForges.Cloud.Modules.Abstractions/Workspace/WorkspaceDirectoryPort.cs",
+          "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Agent/AgentModule.cs",
+          "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj",
+          "src/ArcForges.Cloud.Modules.Agent/Dispatch/Application/ModelDispatchClient.cs",
+          "src/ArcForges.Cloud.Modules.Agent/Dispatch/Domain/AiEnvelope.cs",
+          "src/ArcForges.Cloud.Modules.Agent/Dispatch/Domain/ModelDispatchOptions.cs",
+          "src/ArcForges.Cloud.Modules.Agent/Dispatch/Domain/ModelRateBuckets.cs",
+          "src/ArcForges.Cloud.Modules.Agent/Dispatch/TestAccess.cs",
+          "src/ArcForges.Cloud.Modules.Agent/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Audit/ArcForges.Cloud.Modules.Audit.csproj",
+          "src/ArcForges.Cloud.Modules.Audit/AuditModule.cs",
+          "src/ArcForges.Cloud.Modules.Audit/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Chat/ArcForges.Cloud.Modules.Chat.csproj",
+          "src/ArcForges.Cloud.Modules.Chat/ChatModule.cs",
+          "src/ArcForges.Cloud.Modules.Chat/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Commerce/ArcForges.Cloud.Modules.Commerce.csproj",
+          "src/ArcForges.Cloud.Modules.Commerce/CommerceModule.cs",
+          "src/ArcForges.Cloud.Modules.Commerce/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Configuration/ArcForges.Cloud.Modules.Configuration.csproj",
+          "src/ArcForges.Cloud.Modules.Configuration/ConfigurationModule.cs",
+          "src/ArcForges.Cloud.Modules.Configuration/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Devices/ArcForges.Cloud.Modules.Devices.csproj",
+          "src/ArcForges.Cloud.Modules.Devices/DevicesModule.cs",
+          "src/ArcForges.Cloud.Modules.Devices/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Entitlement/ArcForges.Cloud.Modules.Entitlement.csproj",
+          "src/ArcForges.Cloud.Modules.Entitlement/EntitlementModule.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Persistence/D1EntitlementStore.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Persistence/EntitlementRowCodec.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Persistence/GuidEntitlementIdSource.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Persistence/SnapshotColumns.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/EntitlementGrantPortAdapter.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/EntitlementService.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/GrantAdmission.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Application/Ports.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/Definitions.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/EntitlementResolver.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/InputValidation.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/Records.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/Snapshot.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Domain/UtcMicros.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/Resolver/Infrastructure/SnapshotCodec.cs",
+          "src/ArcForges.Cloud.Modules.Entitlement/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Identity/ArcForges.Cloud.Modules.Identity.csproj",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Application/IdentityService.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Application/Ports.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Application/Requests.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Domain/Identifiers.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Domain/IdentityRules.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Domain/Model.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Domain/UtcMicros.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Infrastructure/CommitContext.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Infrastructure/IdentityStatements.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Core/Infrastructure/PlanArguments.cs",
+          "src/ArcForges.Cloud.Modules.Identity/IdentityModule.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Persistence/D1IdentityStore.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Persistence/IdentityPlans.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Persistence/IdentityRowCodec.cs",
+          "src/ArcForges.Cloud.Modules.Identity/Persistence/RandomIdentityIdSource.cs",
+          "src/ArcForges.Cloud.Modules.Identity/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Notification/ArcForges.Cloud.Modules.Notification.csproj",
+          "src/ArcForges.Cloud.Modules.Notification/NotificationModule.cs",
+          "src/ArcForges.Cloud.Modules.Notification/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.PackageCatalog/ArcForges.Cloud.Modules.PackageCatalog.csproj",
+          "src/ArcForges.Cloud.Modules.PackageCatalog/PackageCatalogModule.cs",
+          "src/ArcForges.Cloud.Modules.PackageCatalog/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Policy/ArcForges.Cloud.Modules.Policy.csproj",
+          "src/ArcForges.Cloud.Modules.Policy/PolicyModule.cs",
+          "src/ArcForges.Cloud.Modules.Policy/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Resource/ArcForges.Cloud.Modules.Resource.csproj",
+          "src/ArcForges.Cloud.Modules.Resource/ResourceModule.cs",
+          "src/ArcForges.Cloud.Modules.Resource/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Scope/ArcForges.Cloud.Modules.Scope.csproj",
+          "src/ArcForges.Cloud.Modules.Scope/ScopeModule.cs",
+          "src/ArcForges.Cloud.Modules.Scope/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Search/ArcForges.Cloud.Modules.Search.csproj",
+          "src/ArcForges.Cloud.Modules.Search/SearchModule.cs",
+          "src/ArcForges.Cloud.Modules.Search/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Support/ArcForges.Cloud.Modules.Support.csproj",
+          "src/ArcForges.Cloud.Modules.Support/SupportModule.cs",
+          "src/ArcForges.Cloud.Modules.Support/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Sync/ArcForges.Cloud.Modules.Sync.csproj",
+          "src/ArcForges.Cloud.Modules.Sync/SyncModule.cs",
+          "src/ArcForges.Cloud.Modules.Sync/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Task/ArcForges.Cloud.Modules.Task.csproj",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/HarnessExecutor.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/HarnessWake.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/Ports.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Application/TestAccess.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/Budget.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/Checkpoint.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/HarnessPolicy.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/Retry.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/RunIdentity.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Domain/RunModel.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Executor/Infrastructure/D1HarnessStore.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Application/HelloAgentSlice.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Application/HelloEffectPort.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/HelloSlice/Domain/HelloSlicePolicy.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessAlarmClient.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessWakeEndpoint.cs",
+          "src/ArcForges.Cloud.Modules.Task/Harness/Wake/HarnessWakeService.cs",
+          "src/ArcForges.Cloud.Modules.Task/TaskModule.cs",
+          "src/ArcForges.Cloud.Modules.Task/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.TrustSafety/ArcForges.Cloud.Modules.TrustSafety.csproj",
+          "src/ArcForges.Cloud.Modules.TrustSafety/TrustSafetyModule.cs",
+          "src/ArcForges.Cloud.Modules.TrustSafety/packages.lock.json",
+          "src/ArcForges.Cloud.Modules.Workspace/ArcForges.Cloud.Modules.Workspace.csproj",
+          "src/ArcForges.Cloud.Modules.Workspace/Persistence/D1WorkspaceDirectory.cs",
+          "src/ArcForges.Cloud.Modules.Workspace/WorkspaceModule.cs",
+          "src/ArcForges.Cloud.Modules.Workspace/packages.lock.json",
+          "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj",
+          "src/ArcForges.Cloud.Storage.D1/Archive/ChangeArchiveReader.cs",
+          "src/ArcForges.Cloud.Storage.D1/Archive/ChangeRecord.cs",
+          "src/ArcForges.Cloud.Storage.D1/D1Values.cs",
+          "src/ArcForges.Cloud.Storage.D1/Deploy/DeployGate.cs",
+          "src/ArcForges.Cloud.Storage.D1/FamilyBinding/FamilyContributionPolicy.cs",
+          "src/ArcForges.Cloud.Storage.D1/FamilyBinding/ModuleFamilyPortFactory.cs",
+          "src/ArcForges.Cloud.Storage.D1/Hmac/Base64Url.cs",
+          "src/ArcForges.Cloud.Storage.D1/Hmac/PrivateRequestSigning.cs",
+          "src/ArcForges.Cloud.Storage.D1/HttpBodies.cs",
+          "src/ArcForges.Cloud.Storage.D1/MigrationRunner/Classifiers.txt",
+          "src/ArcForges.Cloud.Storage.D1/MigrationRunner/MigrationCatalog.cs",
+          "src/ArcForges.Cloud.Storage.D1/MigrationRunner/MigrationClient.cs",
+          "src/ArcForges.Cloud.Storage.D1/MigrationRunner/MigrationEngine.cs",
+          "src/ArcForges.Cloud.Storage.D1/MigrationRunner/MigrationSql.cs",
+          "src/ArcForges.Cloud.Storage.D1/MigrationRunner/RunnerSql.cs",
+          "src/ArcForges.Cloud.Storage.D1/MigrationRunner/Statements.sql",
+          "src/ArcForges.Cloud.Storage.D1/ModuleBinding/ModulePlanPort.cs",
+          "src/ArcForges.Cloud.Storage.D1/Outbox/OutboxEvent.cs",
+          "src/ArcForges.Cloud.Storage.D1/Outbox/OutboxPublisher.cs",
+          "src/ArcForges.Cloud.Storage.D1/Outbox/SequenceStream.cs",
+          "src/ArcForges.Cloud.Storage.D1/Physical/ColumnCodec.cs",
+          "src/ArcForges.Cloud.Storage.D1/Physical/ExactOrderBytes.cs",
+          "src/ArcForges.Cloud.Storage.D1/Physical/Fts5Query.cs",
+          "src/ArcForges.Cloud.Storage.D1/Physical/PhysicalModel.cs",
+          "src/ArcForges.Cloud.Storage.D1/Physical/PhysicalSchema.g.cs",
+          "src/ArcForges.Cloud.Storage.D1/Physical/PhysicalValue.cs",
+          "src/ArcForges.Cloud.Storage.D1/Physical/RowShape.cs",
+          "src/ArcForges.Cloud.Storage.D1/Physical/SchemaCompatibility.cs",
+          "src/ArcForges.Cloud.Storage.D1/PlanDefinition.cs",
+          "src/ArcForges.Cloud.Storage.D1/PlanExecution.cs",
+          "src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs",
+          "src/ArcForges.Cloud.Storage.D1/Receipts/CommandReceipts.cs",
+          "src/ArcForges.Cloud.Storage.D1/Receipts/CommitExecutor.cs",
+          "src/ArcForges.Cloud.Storage.D1/Receipts/CommitTail.cs",
+          "src/ArcForges.Cloud.Storage.D1/Receipts/Inbox.cs",
+          "src/ArcForges.Cloud.Storage.D1/Receipts/StorageFormats.cs",
+          "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyDefinitions.cs",
+          "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyExecutor.cs",
+          "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyGuards.cs",
+          "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyModule.cs",
+          "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyPlanVerifier.cs",
+          "src/ArcForges.Cloud.Storage.D1/SharedFamilies/FamilyUnitOfWork.cs",
+          "src/ArcForges.Cloud.Storage.D1/WorkerPlanExecutor.cs",
+          "src/ArcForges.Cloud.Storage.D1/packages.lock.json",
+          "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+          "src/ArcForges.Cloud/BuildIdentity.cs",
+          "src/ArcForges.Cloud/Composition/HostModules.cs",
+          "src/ArcForges.Cloud/Composition/ModuleBoundaries.cs",
+          "src/ArcForges.Cloud/Foundation/BrowserSessionEndpoints.cs",
+          "src/ArcForges.Cloud/Foundation/BrowserSessionVerifier.cs",
+          "src/ArcForges.Cloud/Foundation/EgressProbe.cs",
+          "src/ArcForges.Cloud/Foundation/FoundationEndpoints.cs",
+          "src/ArcForges.Cloud/Foundation/FoundationHttp.cs",
+          "src/ArcForges.Cloud/Foundation/FoundationJson.cs",
+          "src/ArcForges.Cloud/Foundation/FoundationOperations.cs",
+          "src/ArcForges.Cloud/Foundation/FoundationOptions.cs",
+          "src/ArcForges.Cloud/Foundation/JobSliceService.cs",
+          "src/ArcForges.Cloud/Foundation/ObjectsClient.cs",
+          "src/ArcForges.Cloud/Foundation/SessionService.cs",
+          "src/ArcForges.Cloud/Generation/CorrelationGuards.cs",
+          "src/ArcForges.Cloud/Generation/ProofWireLimits.cs",
+          "src/ArcForges.Cloud/Generation/StorageGuards.cs",
+          "src/ArcForges.Cloud/Generation/TransportBudgets.cs",
+          "src/ArcForges.Cloud/Generation/WorkerWireLimits.cs",
+          "src/ArcForges.Cloud/HealthStatus.cs",
+          "src/ArcForges.Cloud/HelloEndpoint.cs",
+          "src/ArcForges.Cloud/Ingress/Caller.cs",
+          "src/ArcForges.Cloud/Ingress/Correlation.cs",
+          "src/ArcForges.Cloud/Ingress/GrpcWebFraming.cs",
+          "src/ArcForges.Cloud/Ingress/IngressPipeline.cs",
+          "src/ArcForges.Cloud/Ingress/PipelineProbe.cs",
+          "src/ArcForges.Cloud/Ingress/ProtoWire.cs",
+          "src/ArcForges.Cloud/Ingress/RequestEnvelopeReader.cs",
+          "src/ArcForges.Cloud/Ingress/RpcPolicy.cs",
+          "src/ArcForges.Cloud/NeonHello.cs",
+          "src/ArcForges.Cloud/Program.cs",
+          "src/ArcForges.Cloud/Readiness/HostReadiness.cs",
+          "src/ArcForges.Cloud/Readiness/ReadinessEvaluator.cs",
+          "src/ArcForges.Cloud/Readiness/ReadinessModel.cs",
+          "src/ArcForges.Cloud/Readiness/ReadinessObservations.cs",
+          "src/ArcForges.Cloud/Readiness/ReadinessVocabulary.cs",
+          "src/ArcForges.Cloud/packages.lock.json"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/grpc/grpc-dotnet",
+        "commit": "4c6997a214601422dd66c5c74c1969db749479e9",
+        "paths": [
+          "LICENSE"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "The restored Grpc 2.84.0 NuGet packages identify this official release source commit. Its complete Apache-2.0 LICENSE matches the retained full legal text."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/protocolbuffers/protobuf",
+        "commit": "f377bfefc5e2cfab68b816903c25b23e091c439d",
+        "paths": [
+          "LICENSE"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+            "finding": "Exact source commit is recorded by Google.Protobuf 3.36.1; this is the full upstream licence."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/ArcForges/Contracts",
+        "commit": "9f0e90f65d57f405fcee311d467a57a255dfd644",
+        "paths": [
+          "LICENSE"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "Normally restored NuGet and npm Contracts 1.0.0-ci.74.1 contain matching clean producer receipts at this source commit. The Hello v1 descriptor is unchanged, and the full published Apache-2.0 licence matches the retained legal text. The additional published NOTICE is independently admitted by contracts-notice-legal-r1 and shipped in full."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/dotnet/dotnet",
+        "commit": "95017c711e6afc1085133d440e42b4bd78155701",
+        "paths": [
+          "LICENSE.TXT",
+          "src/runtime/THIRD-PARTY-NOTICES.TXT",
+          "src/aspnetcore/THIRD-PARTY-NOTICES.txt"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.TXT",
+            "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+            "finding": "Locked .NET 10.0.12 runtime/compiler and ASP.NET Core packages identify this source commit. Their subordinate full notice documents retain every original term."
+          },
+          {
+            "path": "src/runtime/THIRD-PARTY-NOTICES.TXT",
+            "sha256": "66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54",
+            "finding": "Full original legal document. This record permits required unmodified notice reproduction only; it does not relicense listed components or admit their implementation."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/ArcForges/ArcNotes",
+        "commit": "0c797e30690a10d8798ddca19ca7f37b16cecf01",
+        "paths": [
+          "src/ArcForges.ArcNotes.Core/BuildIdentity.cs",
+          "eng/version-sources.json"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Complete AGPL terms retained; owner-specific adaptation and exact targets are reviewed in arcnotes-build-identity-r1."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/npgsql/npgsql",
+        "commit": "d3768398c17877b3a916c3c4d87e8e11698991fc",
+        "paths": [
+          "src/Npgsql",
+          "LICENSE"
+        ],
+        "spdx": "PostgreSQL",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "2e1d9cc6ed4eb7fe6fa82091846c06b4f58571a2c3b54777db6baeca10dd2d74",
+            "finding": "Exact Npgsql 10.0.3 NuGet dependency and source commit; full PostgreSQL terms retained."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/connectrpc/connect-go",
+        "commit": "8f69fe4e4b2d861700b00983b2f55c8cf97e235b",
+        "paths": [
+          "LICENSE",
+          "cmd",
+          "connect.go",
+          "connectgzip",
+          "connecthttp",
+          "connectinprocess",
+          "connectproto",
+          "docs",
+          "go.mod",
+          "internal"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "595c92e7a9bc933c07da143f527d199e2fc3010e2afd8a8c0654c1f43bfa076c",
+            "finding": "Complete module source is pinned by h1:PoPDmOlhc46elsuCdKCKTxjNBb3HJlKF+s/sP2oucPw= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/jackc/pgpassfile",
+        "commit": "99d8e8e28945ffceaf75b0299fcb2bb656b8a683",
+        "paths": [
+          "LICENSE",
+          "go.mod",
+          "pgpass.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "adb1663fda031df8f4344aa68f299fd87d80353e31339406742ded21dae65702",
+            "finding": "Complete module source is pinned by h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/jackc/pgservicefile",
+        "commit": "5a60cdf6a76120dc3d5152b95f3b5fd8aa7cc9eb",
+        "paths": [
+          "LICENSE",
+          "go.mod",
+          "pgservicefile.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "fc505773403fe869ed64cc2235cdd13988a427bb7e3a7e7004a3f4b27420f8fc",
+            "finding": "Complete module source is pinned by h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/jackc/pgx",
+        "commit": "5e583fa7aabfa88b796292f849fc9d7d75ac159d",
+        "paths": [
+          "LICENSE",
+          "batch.go",
+          "ci",
+          "conn.go",
+          "copy_from.go",
+          "derived_types.go",
+          "doc.go",
+          "examples",
+          "extended_query_builder.go",
+          "go.mod",
+          "internal",
+          "large_objects.go",
+          "log",
+          "multitracer",
+          "named_args.go",
+          "pgconn",
+          "pgproto3",
+          "pgtype",
+          "pgxpool",
+          "pgxtest",
+          "rows.go",
+          "scripts",
+          "stdlib",
+          "testsetup",
+          "tracelog",
+          "tracer.go",
+          "tx.go",
+          "values.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "467f95e074fe23079a5623ed652619682692041b8551da27e3c2ddb9659a1507",
+            "finding": "Complete module source is pinned by h1:IzBBtyK9AHqf98cctWFifYSci2hgQR/cd56wB4p+ogg= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/jackc/puddle",
+        "commit": "bd09d14bd4018b6d65a9d7770e2f3ddf8b00af1c",
+        "paths": [
+          "LICENSE",
+          "context.go",
+          "doc.go",
+          "go.mod",
+          "internal",
+          "log.go",
+          "nanotime.go",
+          "pool.go",
+          "resource_list.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "2d50e98a4900b4d6457a38d39c1432fdc156fc2f7b365f2e33ec9344acbb0057",
+            "finding": "Complete module source is pinned by h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://go.googlesource.com/net",
+        "commit": "3de643db506517b3e652a13cc0b56034cea6b8e6",
+        "paths": [
+          "LICENSE",
+          "bpf",
+          "context",
+          "dict",
+          "dns",
+          "go.mod",
+          "html",
+          "http",
+          "http2",
+          "icmp",
+          "idna",
+          "internal",
+          "ipv4",
+          "ipv6",
+          "lif",
+          "nettest",
+          "netutil",
+          "proxy",
+          "publicsuffix",
+          "quic",
+          "route",
+          "trace",
+          "webdav",
+          "websocket",
+          "xsrftoken"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+            "finding": "Complete module source is pinned by h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://go.googlesource.com/sync",
+        "commit": "36f2d70ecde9857dc4e363242a1369c7645d6770",
+        "paths": [
+          "LICENSE",
+          "errgroup",
+          "go.mod",
+          "semaphore",
+          "singleflight",
+          "syncmap"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+            "finding": "Complete module source is pinned by h1:iqiDrGoDgyuvAKrhLQthUEzU/R378N78gXbBjxed7oA= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://go.googlesource.com/text",
+        "commit": "ac40b0f06c159afb5bfca4d1860f8b4b60dbc160",
+        "paths": [
+          "LICENSE",
+          "cases",
+          "cmd",
+          "collate",
+          "currency",
+          "date",
+          "doc.go",
+          "encoding",
+          "feature",
+          "gen.go",
+          "go.mod",
+          "internal",
+          "language",
+          "message",
+          "number",
+          "runes",
+          "search",
+          "secure",
+          "transform",
+          "unicode",
+          "width"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+            "finding": "Complete module source is pinned by h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://go.googlesource.com/protobuf",
+        "commit": "cdd4c5f7406e82462949c7a65defa9f3029c162d",
+        "paths": [
+          "LICENSE",
+          "cmd",
+          "compiler",
+          "encoding",
+          "go.mod",
+          "internal",
+          "proto",
+          "protoadapt",
+          "reflect",
+          "runtime",
+          "src",
+          "testing",
+          "types"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20",
+            "finding": "Complete module source is pinned by h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/ArcForges/Contracts",
+        "commit": "62ccef164ba54b91313a7de2f086aab811aaf1c6",
+        "paths": [
+          "go/LICENSE",
+          "go/NOTICE",
+          "go/arcforges",
+          "go/go.mod",
+          "go/internal"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "go/LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "Published Go module github.com/ArcForges/Contracts/go v1.0.0-ci.416.1 (tag go/v1.0.0-ci.416.1); complete module source is pinned by h1:FArSEysQqxsOZpWay/uye5Zp1l16ilZBfu4XAG1grak= and its exact runtime membership is checked by eng/center.py. Its generated packages are Apache-2.0; its NOTICE is shipped in full."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/go-webauthn/webauthn",
+        "commit": "a4c6fc6a4399bcd1ba982c116189f1598d9d5eec",
+        "paths": [
+          "LICENSE",
+          "go.mod",
+          "metadata",
+          "protocol",
+          "testing",
+          "webauthn"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "5e0435d30b066b2e518bc6e7b6980147f454044123bdc18fbe6a6c599160531c",
+            "finding": "Complete module source is pinned by h1:0BeftmEHU7i3Dv0VFwBtidy/ba37Vcdjvqst9EYu8Sk= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/go-webauthn/x",
+        "commit": "48b3dfde0cdb8239eb3a90e780c60bb06bc63a66",
+        "paths": [
+          "LICENSE",
+          "crypto",
+          "encoding",
+          "go.mod",
+          "revoke"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "3b6f3112ab7231f5b47b7c6c2c626d0ed0622b787b508e732d2cecc4e448a463",
+            "finding": "Complete module source is pinned by h1:1ff37z3XfmTTomkhlURgGizLIDyOvPgTt2t9nlzKLRo= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/fxamacker/cbor",
+        "commit": "be0da0d020e8e6b6f11ae50aadffebb9a4d9fbaa",
+        "paths": [
+          "LICENSE",
+          "bytestring.go",
+          "cache.go",
+          "common.go",
+          "decode.go",
+          "decode_map_utils.go",
+          "diagnose.go",
+          "doc.go",
+          "encode.go",
+          "encode_map.go",
+          "go.mod",
+          "omitzero_go124.go",
+          "omitzero_pre_go124.go",
+          "simplevalue.go",
+          "stream.go",
+          "structfields.go",
+          "tag.go",
+          "valid.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "78cad457d5ea7318230f3d969d4cdf29cef45524a1fc8ca3a97646da1ad7a841",
+            "finding": "Complete module source is pinned by h1:xwjVlxEMR3S605oUlgBjKLTTeGFciYPGYCtF/35LKGo= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/x448/float16",
+        "commit": "cb9afec31f2649663ebb64da5c6c32c3d365c3ca",
+        "paths": [
+          "LICENSE",
+          "float16.go",
+          "go.mod"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "a555f1194fdac34da70fb416968f7e2217b02352c26c1eac2fa45fcb4290ae8d",
+            "finding": "Complete module source is pinned by h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/golang-jwt/jwt",
+        "commit": "7ceae619e739dc8a7bf577214aa8ebf26668e9db",
+        "paths": [
+          "LICENSE",
+          "claims.go",
+          "cmd",
+          "doc.go",
+          "ecdsa.go",
+          "ecdsa_utils.go",
+          "ed25519.go",
+          "ed25519_utils.go",
+          "errors.go",
+          "go.mod",
+          "hmac.go",
+          "map_claims.go",
+          "none.go",
+          "parser.go",
+          "parser_option.go",
+          "registered_claims.go",
+          "request",
+          "rsa.go",
+          "rsa_pss.go",
+          "rsa_utils.go",
+          "signing_method.go",
+          "test",
+          "token.go",
+          "token_option.go",
+          "types.go",
+          "validator.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "fe26ca41577b9b2b4448050a24b25e5753af66b5d5945d5d36094e7790bfcb2f",
+            "finding": "Complete module source is pinned by h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/google/go-tpm",
+        "commit": "6a7f64318ba9e8e7a0f8c5710b07ca47bf911f4c",
+        "paths": [
+          "LICENSE",
+          "examples",
+          "go.mod",
+          "legacy",
+          "tpm",
+          "tpm2",
+          "tpmutil"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "Complete module source is pinned by h1:slArAR9Ft+1ybZu0lBwpSmpwhRXaa85hWtMinMyRAWo= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/google/uuid",
+        "commit": "0f11ee6918f41a04c201eceeadf612a377bc7fbc",
+        "paths": [
+          "LICENSE",
+          "dce.go",
+          "doc.go",
+          "go.mod",
+          "hash.go",
+          "marshal.go",
+          "node.go",
+          "node_js.go",
+          "node_net.go",
+          "null.go",
+          "sql.go",
+          "time.go",
+          "util.go",
+          "uuid.go",
+          "version1.go",
+          "version4.go",
+          "version6.go",
+          "version7.go"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "0a8d61ed3cbfd5312326e8126c31ce9c627a283adc99131b56896d29ada04b2d",
+            "finding": "Complete module source is pinned by h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/go-viper/mapstructure",
+        "commit": "9aa3f77c68e2a56222ea436c1bfa631f1b1072d5",
+        "paths": [
+          "LICENSE",
+          "decode_hooks.go",
+          "errors.go",
+          "go.mod",
+          "internal",
+          "mapstructure.go",
+          "reflect_go1_19.go",
+          "reflect_go1_20.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "22adc4abdece712a737573672f082fd61ac2b21df878efb87ffcff4354a07f26",
+            "finding": "Complete module source is pinned by h1:vM5IJoUAy3d7zRSVtIwQgBj7BiWtMPfmPEgAXnvj1Ro= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/tinylib/msgp",
+        "commit": "6f99c863451752e6aa9c7aacde4215a471a64242",
+        "paths": [
+          "LICENSE",
+          "_generated",
+          "gen",
+          "go.mod",
+          "main.go",
+          "msgp",
+          "parse",
+          "printer",
+          "tinygotest"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "17df22e31ef6a84f70909eed5185f41443a03dd05b14e8dec319d5c2bd7d7b3b",
+            "finding": "Complete module source is pinned by h1:mOwYbyYDLPj35mkA2BjjYejgJk9BuHxDdvRnb6v2ZcQ= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/philhofer/fwd",
+        "commit": "20a13a1f6b7cb47a126dcb75152e21e1383bbaba",
+        "paths": [
+          "LICENSE.md",
+          "go.mod",
+          "reader.go",
+          "writer.go",
+          "writer_appengine.go",
+          "writer_tinygo.go",
+          "writer_unsafe.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.md",
+            "sha256": "430da36bd967b28fc662f05e9245306da10941e93911052114a20ef10e4410f8",
+            "finding": "Complete module source is pinned by h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://go.googlesource.com/crypto",
+        "commit": "8fdf07b3114278fb3b78c1cf1814e08bd851eb4c",
+        "paths": [
+          "LICENSE",
+          "acme",
+          "argon2",
+          "bcrypt",
+          "blake2b",
+          "blake2s",
+          "blowfish",
+          "bn256",
+          "cast5",
+          "chacha20",
+          "chacha20poly1305",
+          "cryptobyte",
+          "curve25519",
+          "ed25519",
+          "go.mod",
+          "hkdf",
+          "internal",
+          "md4",
+          "nacl",
+          "ocsp",
+          "openpgp",
+          "otr",
+          "pbkdf2",
+          "pkcs12",
+          "poly1305",
+          "ripemd160",
+          "salsa20",
+          "scrypt",
+          "sha3",
+          "ssh",
+          "tea",
+          "twofish",
+          "x509roots",
+          "xtea",
+          "xts"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+            "finding": "Complete module source is pinned by h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      },
+      {
+        "repository": "https://go.googlesource.com/sys",
+        "commit": "b6b8557e8e2974925aec7a136ba0e323eedc5f43",
+        "paths": [
+          "LICENSE",
+          "cpu",
+          "execabs",
+          "go.mod",
+          "plan9",
+          "unix",
+          "windows"
+        ],
+        "spdx": "BSD-3-Clause",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+            "finding": "Complete module source is pinned by h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA= and its exact runtime membership is checked by eng/center.py."
+          }
+        ]
+      }
+    ],
+    "command": "Build the locked Dockerfile Native AOT application with the reviewed SDK image digest; preserve the pinned runtime base and its full legal files. Inspect the stopped final image and source receipt under /app/notices. Promote the sealed candidate by its recorded identity without executing the application.",
+    "outputSpdx": "AGPL-3.0-only"
+  },
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-03 delegated author, review fix round 2); PR review is recorded separately",
+    "reviewedOn": "2026-10-29",
+    "decision": "approved",
+    "baselineCommit": "a3322b4f1275e96c55c0ed964d77c015b415755c",
+    "reconciliation": false,
+    "rationale": "AF-CTR-03 part A1a, review fix round 2 (delta review of 61e8e4d): a transaction whose callback panics is rolled back and its connection given back (D1/D8); a COMMIT without an answer of an auxiliary transaction (rate-limit counts and reservations, flow attempts, refusal audits) is reported as an unavailable store and only the call's effect write as an unknown outcome (D10); a right e-mail code whose sign-in failed in the store gets its failure reservation back (D2); the anonymous failures' audit marker is kept per class (D3); a lost race for a new installation is a store contention that gives the flow attempt back (D4); the auth_flow_outcome comment of migration 0002 states the refusal of a succeeded and of an exhausted flow (D6, no SQL change, a new checksum before any deployment applied it). No Worker source, module, package, base image, toolchain or legal file changes."
+  },
+  "supersedes": "center-runtime-r9"
+}
