@@ -265,3 +265,57 @@ func expect(t *testing.T, what string, value *foundationv1.ArcError, want string
 		t.Fatalf("%s: %q, want %q (%v)", what, failure(value), want, value)
 	}
 }
+
+// hold is a migration-role transaction that holds row locks until it ends, so a test can park a call at a chosen statement.
+type hold struct {
+	h  *harness
+	tx pgx.Tx
+}
+
+// holding begins a hold with one locking statement; the hold ends with release or with the test.
+func (h *harness) holding(statement string, arguments ...any) *hold {
+	h.t.Helper()
+	ctx := context.Background()
+	tx, err := h.migration.Begin(ctx)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	if _, err = tx.Exec(ctx, statement, arguments...); err != nil {
+		h.t.Fatal(err)
+	}
+	return &hold{h: h, tx: tx}
+}
+
+// waitFor waits until at least count backends wait on the hold, directly or behind another waiting backend, at most 10 s; it
+// reports whether they did.
+func (l *hold) waitFor(count int) bool {
+	l.h.t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		var waiting int
+		if err := l.tx.QueryRow(context.Background(), `WITH RECURSIVE blocked(pid) AS (
+    SELECT l.pid FROM pg_locks l WHERE NOT l.granted AND pg_backend_pid() = ANY(pg_blocking_pids(l.pid))
+    UNION SELECT l.pid FROM pg_locks l JOIN blocked b ON b.pid = ANY(pg_blocking_pids(l.pid)) WHERE NOT l.granted)
+SELECT count(DISTINCT pid) FROM blocked`).Scan(&waiting); err != nil {
+			l.h.t.Fatal(err)
+		}
+		if waiting >= count {
+			return true
+		}
+	}
+	return false
+}
+
+// release ends the hold: commit keeps what its statements changed, otherwise they are rolled back.
+func (l *hold) release(commit bool) {
+	l.h.t.Helper()
+	var err error
+	if commit {
+		err = l.tx.Commit(context.Background())
+	} else {
+		err = l.tx.Rollback(context.Background())
+	}
+	if err != nil {
+		l.h.t.Fatal(err)
+	}
+}

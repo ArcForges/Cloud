@@ -277,7 +277,8 @@ func (s *Service) BeginRegistration(ctx context.Context, caller Caller, label *s
 	err := s.db.InTx(ctx, "begin a passkey registration", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		var state int16
 		var handle []byte
-		if err := tx.QueryRow(ctx, "SELECT state, passkey_user_handle FROM identity.user WHERE user_id = $1 FOR SHARE", userID).Scan(&state, &handle); err != nil {
+		// FOR UPDATE, the lock ConsumeEvidence takes next: two concurrent begins never upgrade a shared lock (B3).
+		if err := tx.QueryRow(ctx, "SELECT state, passkey_user_handle FROM identity.user WHERE user_id = $1 FOR UPDATE", userID).Scan(&state, &handle); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return arc.NotFound("account", nil)
 			}

@@ -475,11 +475,16 @@ WHERE auth_identity_id = $1`, identityID, int64(verified.SignCount), verified.Ba
 
 // ConsumeEvidence consumes, in the sensitive call's own transaction, one proved step-up of the caller's session for the class and
 // the target object: same account, session, class and target hash, proved within the evidence lifetime, in the session's current
-// epochs. It locks the challenge, so two concurrent calls cannot use one proof; without evidence the call is refused with
-// AUTHENTICATION/step_up_required (retry the same command after a step-up), which rolls the call back.
+// epochs. It first locks the account's row, the lock under which a credential removal moves the authentication epoch, so the
+// evidence is read only after any concurrent removal committed (B3); it locks the challenge, so two concurrent calls cannot use one
+// proof; without evidence the call is refused with AUTHENTICATION/step_up_required (retry the same command after a step-up), which
+// rolls the call back.
 func ConsumeEvidence(ctx context.Context, tx pgx.Tx, caller Caller, class string, targetID platform.ID, now time.Time) error {
 	target, err := hex.DecodeString(TargetHash(class, caller.UserID, targetID))
 	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", caller.UserID); err != nil {
 		return err
 	}
 	var challengeID platform.ID

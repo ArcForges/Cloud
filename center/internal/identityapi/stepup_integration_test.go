@@ -232,3 +232,52 @@ func TestAStepUpChallengeBindsItsMethodSessionAndProof(t *testing.T) {
 	expect(t, "the right code again", complete(from, begun, code), "CONFLICT/code_reused")
 	h.verifyAudit()
 }
+
+// TestARemovalSpendsTheEvidenceProvedBeforeIt (B3): evidence is consumed under the account's row lock, the lock a credential
+// removal moves the authentication epoch under, so a removal whose evidence was proved before a concurrent removal reads the moved
+// epoch and is refused with AUTHENTICATION/step_up_required, whether the first removal is parked after its epoch move (at its
+// audit) or before it (at its credential's row).
+func TestARemovalSpendsTheEvidenceProvedBeforeIt(t *testing.T) {
+	for _, parked := range []string{"at its audit", "at its credential"} {
+		t.Run(parked, func(t *testing.T) {
+			h := newHarness(t, settings{policy: writePolicy})
+			who := h.seedAccount(1, "b3@example.org")
+			h.remember(who.email)
+			h.addPasskey(who)
+			from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
+			ids := h.credentialIDs(who.id)
+			if len(ids) != 3 {
+				t.Fatalf("%d credentials", len(ids))
+			}
+			for _, id := range ids[1:] {
+				h.stepUp(who, from, identity.ClassRemoveCredential, id)
+			}
+			remove := func(id platform.ID) string {
+				return failure(rpc(h, removeCredentialPath, &publicapiv1.IdentityServiceRemoveAuthIdentityRequest{Meta: command(), CredentialId: idOf(id)},
+					from, &publicapiv1.IdentityServiceRemoveAuthIdentityResponse{}).GetError())
+			}
+			var lock *hold
+			if parked == "at its audit" {
+				lock = h.holding("SELECT 1 FROM audit.chain_head WHERE singleton FOR UPDATE")
+			} else {
+				lock = h.holding("SELECT 1 FROM identity.auth_identity WHERE auth_identity_id = $1 FOR UPDATE", ids[1])
+			}
+			results := make([]string, 2)
+			var wait sync.WaitGroup
+			wait.Go(func() { results[0] = remove(ids[1]) })
+			if !lock.waitFor(1) {
+				t.Fatal("the first removal never reached the hold")
+			}
+			wait.Go(func() { results[1] = remove(ids[2]) })
+			if !lock.waitFor(2) {
+				t.Fatal("the second removal never waited behind the first")
+			}
+			lock.release(false)
+			wait.Wait()
+			if results[0] != "" || results[1] != "AUTHENTICATION/step_up_required" || len(h.credentialIDs(who.id)) != 2 {
+				t.Fatalf("two removals of evidence proved before both: %q, %d live credentials", results, len(h.credentialIDs(who.id)))
+			}
+			h.verifyAudit()
+		})
+	}
+}
