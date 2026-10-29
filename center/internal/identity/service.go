@@ -108,6 +108,9 @@ func (s *Service) MailEnabled() bool { return s.mailer.Enabled() }
 type Request struct {
 	ClientIP      netip.Addr
 	CorrelationID *platform.ID
+	// DeviceName names the web device a browser's sign-in creates (device.BrowserName of its User-Agent, a closed set of names);
+	// empty is the default name. A native sign-in ignores it.
+	DeviceName string
 }
 
 func (s *Service) now() time.Time { return s.clock().UTC().Truncate(time.Microsecond) }

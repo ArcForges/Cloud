@@ -36,6 +36,10 @@ type Begin struct {
 	ProviderID *string
 	Claim      device.Claim
 	HasClaim   bool
+	// Browser is a browser's begin on the account pages (the WebBrowserSession routes): the flow belongs to the browser channel and
+	// to the relying party's origin, the claim is a WebBrowserInstallationClaim (product arcforges-web), and only the passkey method
+	// is offered (e-mail codes on the browser channel arrive with the live mail adapters).
+	Browser bool
 }
 
 // Challenge is a started ceremony (the contract's AuthChallenge).
@@ -50,10 +54,13 @@ type Challenge struct {
 	Options *passkey.Options
 }
 
-// SignedIn is a completed sign-in: the native session and its device.
+// SignedIn is a completed sign-in: the session and its device. A native sign-in holds the native session; a browser's holds the
+// cookie session (Browser is non-nil).
 type SignedIn struct {
 	Session session.Native
+	Browser *session.Browser
 	Device  device.View
+	UserID  platform.ID
 }
 
 func randomBytes(size int) []byte {
@@ -82,8 +89,12 @@ func EmailHash(normalized string) []byte {
 // until RequestEmailCode. E-mail enrollment is not offered (accounts are never created from an e-mail address), and the e-mail
 // method is not offered at all while mail is disabled.
 func (s *Service) BeginAuthentication(ctx context.Context, request Request, in Begin) (Challenge, error) {
-	if refusal := device.ValidateNativeClaim(in.Claim, in.HasClaim); refusal != nil {
-		return Challenge{}, refusal
+	claimRefusal := device.ValidateNativeClaim(in.Claim, in.HasClaim)
+	if in.Browser {
+		claimRefusal = device.ValidateBrowserClaim(in.Claim, in.HasClaim)
+	}
+	if claimRefusal != nil {
+		return Challenge{}, claimRefusal
 	}
 	var normalized string
 	switch {
@@ -94,7 +105,7 @@ func (s *Service) BeginAuthentication(ctx context.Context, request Request, in B
 			return Challenge{}, arc.InvalidArgument("provider_id", "unknown")
 		}
 	case in.Method == MethodValueEmail:
-		if !s.mailer.Enabled() {
+		if !s.mailer.Enabled() || in.Browser {
 			return Challenge{}, arc.InvalidArgument("method", "not_offered")
 		}
 		if in.Purpose != int32(PurposeAuthenticate) {
@@ -125,6 +136,10 @@ func (s *Service) BeginAuthentication(ctx context.Context, request Request, in B
 	now := s.now()
 	claim := in.Claim
 	row := flow{ID: platform.NewID(), Channel: ChannelNative, Purpose: Purpose(in.Purpose), Claim: &claim, CreatedAt: now}
+	if in.Browser {
+		origin := s.rp.Origin()
+		row.Channel, row.Origin = ChannelBrowser, &origin
+	}
 	result := Challenge{FlowID: row.ID, Method: in.Method, Purpose: row.Purpose}
 	switch {
 	case in.Method == MethodValueEmail:
@@ -219,6 +234,18 @@ func validAssertion(assertion passkey.Assertion) *arc.Refusal {
 // Every failure of the proof (unknown credential, an account that may not sign in, a ceremony that does not verify) gives the
 // same AUTHENTICATION/unauthenticated.
 func (s *Service) CompletePasskey(ctx context.Context, request Request, flowID platform.ID, assertion passkey.Assertion) (SignedIn, error) {
+	return s.completePasskey(ctx, request, ChannelNative, flowID, assertion)
+}
+
+// CompleteBrowserPasskey completes a discoverable passkey sign-in of a browser (the WebBrowserSession route authentication/complete):
+// the same checks, buckets, ceremony and success transaction as CompletePasskey, for a flow of the browser channel and the relying
+// party's origin, issuing a cookie session on the browser's own web device and installation (arcforges-web; the device is named
+// request.DeviceName when it is new).
+func (s *Service) CompleteBrowserPasskey(ctx context.Context, request Request, flowID platform.ID, assertion passkey.Assertion) (SignedIn, error) {
+	return s.completePasskey(ctx, request, ChannelBrowser, flowID, assertion)
+}
+
+func (s *Service) completePasskey(ctx context.Context, request Request, channel Channel, flowID platform.ID, assertion passkey.Assertion) (SignedIn, error) {
 	if refusal := validAssertion(assertion); refusal != nil {
 		return SignedIn{}, refusal
 	}
@@ -238,7 +265,7 @@ func (s *Service) CompletePasskey(ctx context.Context, request Request, flowID p
 	if err = s.check(ctx, request, failures, actor); err != nil {
 		return SignedIn{}, err
 	}
-	row, err := s.takeAttempt(ctx, flowID, ChannelNative, []FlowKind{FlowPasskeySignIn}, PurposeAuthenticate)
+	row, err := s.takeAttempt(ctx, flowID, channel, []FlowKind{FlowPasskeySignIn}, PurposeAuthenticate)
 	if err != nil {
 		return SignedIn{}, err
 	}
@@ -247,10 +274,14 @@ func (s *Service) CompletePasskey(ctx context.Context, request Request, flowID p
 		if err := s.exhaust(ctx, row.ID); err != nil {
 			return SignedIn{}, err
 		}
-		if err := s.fail(ctx, request, failures, actor, "identity.sign_in.failed", reason, map[string]any{"method": "passkey", "channel": "native"}); err != nil {
+		if err := s.fail(ctx, request, failures, actor, "identity.sign_in.failed", reason, map[string]any{"method": "passkey", "channel": channelName(channel)}); err != nil {
 			return SignedIn{}, err
 		}
 		return SignedIn{}, arc.Unauthenticated()
+	}
+	if channel == ChannelBrowser && (row.Origin == nil || *row.Origin != s.rp.Origin()) {
+		// A browser flow is bound to the relying party's origin it was begun for (the pages check the request's Origin as well).
+		return refuse("flow_origin")
 	}
 	if found == nil {
 		return refuse("unknown_credential")
@@ -302,22 +333,13 @@ func (s *Service) signIn(ctx context.Context, request Request, row flow, userID 
 		if !UserState(state).MaySignIn() {
 			return arc.Unauthenticated()
 		}
-		deviceID, err := device.EnsureNative(ctx, tx, userID, *row.Claim, now)
+		issued, err := s.issueSession(ctx, tx, userID, *row.Claim, row.Channel, session.PurposeAuthenticate, method, request.DeviceName, now)
 		if err != nil {
 			return err
 		}
-		issued, err := session.IssueNative(ctx, tx, s.policy, session.Grant{UserID: userID, DeviceID: deviceID, InstallationID: row.Claim.InstallationID,
-			Scope: session.ScopeAccount, Product: row.Claim.Product, Purpose: session.PurposeAuthenticate, AuthMethod: method, AuthenticatedAt: now}, now)
-		if err != nil {
-			return err
-		}
-		view, err := device.Get(ctx, tx, userID, deviceID)
-		if err != nil || view == nil {
-			return errors.Join(err, errors.New("the new device is not readable"))
-		}
-		result = SignedIn{Session: issued, Device: *view}
-		return s.audit(ctx, tx, request, Actor(userID), "identity.sign_in.succeeded", "", "session", issued.SessionID.String(),
-			map[string]any{"method": methodName(method), "channel": "native", "scope": "account"})
+		result = issued
+		return s.audit(ctx, tx, request, Actor(userID), "identity.sign_in.succeeded", "", "session", result.sessionID().String(),
+			map[string]any{"method": methodName(method), "channel": channelName(row.Channel), "scope": "account"})
 	})
 	if err != nil {
 		if refusalOf(err) == nil {
@@ -330,6 +352,51 @@ func (s *Service) signIn(ctx context.Context, request Request, row flow, userID 
 		return SignedIn{}, err
 	}
 	s.events.ObserveIdentity("sign_in_complete", "succeeded")
+	return result, nil
+}
+
+// sessionID is the ID of the session a sign-in issued.
+func (r SignedIn) sessionID() platform.ID {
+	if r.Browser != nil {
+		return r.Browser.SessionID
+	}
+	return r.Session.SessionID
+}
+
+// issueSession finds or creates the device and installation of a sign-in's claim and issues the session of its channel in the
+// caller's transaction: a native sign-in's bearer session on the claim's own installation, or a browser's cookie session bound to
+// the relying party's origin on the browser's web device (named by name when it is new).
+func (s *Service) issueSession(ctx context.Context, tx pgx.Tx, userID platform.ID, claim device.Claim, channel Channel, purpose session.Purpose, method int16,
+	deviceName string, now time.Time) (SignedIn, error) {
+	grant := session.Grant{UserID: userID, Scope: session.ScopeAccount, Product: claim.Product, Purpose: purpose, AuthMethod: method, AuthenticatedAt: now}
+	var err error
+	if channel == ChannelBrowser {
+		if grant.DeviceID, grant.InstallationID, err = device.EnsureBrowser(ctx, tx, userID, claim.InstallationID, claim.AppVersion, deviceName, now); err != nil {
+			return SignedIn{}, err
+		}
+	} else {
+		if grant.DeviceID, err = device.EnsureNative(ctx, tx, userID, claim, now); err != nil {
+			return SignedIn{}, err
+		}
+		grant.InstallationID = claim.InstallationID
+	}
+	result := SignedIn{UserID: userID}
+	if channel == ChannelBrowser {
+		issued, err := session.IssueBrowser(ctx, tx, s.policy, grant, s.rp.Origin(), now)
+		if err != nil {
+			return SignedIn{}, err
+		}
+		result.Browser = &issued
+	} else {
+		if result.Session, err = session.IssueNative(ctx, tx, s.policy, grant, now); err != nil {
+			return SignedIn{}, err
+		}
+	}
+	view, err := device.Get(ctx, tx, userID, grant.DeviceID)
+	if err != nil || view == nil {
+		return SignedIn{}, errors.Join(err, errors.New("the new device is not readable"))
+	}
+	result.Device = *view
 	return result, nil
 }
 

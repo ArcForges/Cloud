@@ -246,13 +246,17 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		"audit an identity refusal": auxiliary, "audit an access refusal": auxiliary, "count a flow attempt": auxiliary,
 		"end an exhausted flow": auxiliary, "release a flow attempt": auxiliary, "count a step-up attempt": auxiliary, "deny a step-up": auxiliary,
 		"release a step-up attempt": auxiliary, "count a registration attempt": auxiliary,
+		// A2: a browser session's renewal on a page load or the bootstrap read.
+		"renew a browser session": auxiliary,
 		// Effects.
 		"begin a sign-in": effect, "send an e-mail code": effect, "complete a sign-in": effect, "bootstrap the owner": effect,
 		"refresh a session": effect, "begin a step-up": effect, "prove a step-up": effect, "begin a passkey registration": effect,
 		"execute a command under its receipt": effect,
+		// A2: the browser's sign-out (the pages' logout route).
+		"sign out": effect,
 	}
 	found := map[string]string{}
-	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device"} {
+	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages"} {
 		files, err := filepath.Glob(filepath.Join(directory, "*.go"))
 		if err != nil {
 			t.Fatal(err)

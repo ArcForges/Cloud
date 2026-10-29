@@ -47,7 +47,7 @@ func (h *harness) issue(userID platform.ID, scope session.Scope, browser bool) i
 	var result issued
 	grant := session.Grant{UserID: userID, Scope: scope, Purpose: session.PurposeAuthenticate, AuthMethod: 1, AuthenticatedAt: now}
 	if browser {
-		grant.DeviceID, grant.InstallationID, err = device.EnsureBrowser(ctx, tx, userID, platform.NewID(), "1.0.0", now)
+		grant.DeviceID, grant.InstallationID, err = device.EnsureBrowser(ctx, tx, userID, platform.NewID(), "1.0.0", "", now)
 		if err != nil {
 			h.t.Fatal(err)
 		}

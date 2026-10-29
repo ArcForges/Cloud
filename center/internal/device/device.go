@@ -128,6 +128,72 @@ func ValidateNativeClaim(claim Claim, present bool) *arc.Refusal {
 	return nil
 }
 
+// ValidateBrowserClaim checks the claim of a browser's sign-in (the contract's WebBrowserInstallationClaim): the browser's own
+// installation ID (a canonical, nonzero UUID it keeps in its local storage), the product arcforges-web (the browser's own cookie
+// session; the claim schema also names arcscope and companion, which are not served here) and the contract's text rules. The field
+// paths are the JSON request's.
+func ValidateBrowserClaim(claim Claim, present bool) *arc.Refusal {
+	switch {
+	case !present:
+		return arc.InvalidArgument("installation", "required")
+	case claim.InstallationID == platform.ID{}:
+		return arc.InvalidArgument("installation.installationId", "required")
+	case !isClaimText(claim.Product):
+		return arc.InvalidArgument("installation.product", "pattern")
+	case claim.Product != ProductWeb:
+		return arc.InvalidArgument("installation.product", "not_admitted")
+	case !isClaimText(claim.Platform):
+		return arc.InvalidArgument("installation.platform", "pattern")
+	case !isClaimText(claim.AppVersion):
+		return arc.InvalidArgument("installation.appVersion", "pattern")
+	}
+	return nil
+}
+
+// The browser names a device can have: a closed set built from the User-Agent header (DC-02), never the header itself.
+var (
+	browserFamilies = []struct{ token, name string }{
+		// The order matters: Edge and Opera say Chrome too, and Chrome says Safari.
+		{"Edg/", "Edge"}, {"EdgA/", "Edge"}, {"EdgiOS/", "Edge"}, {"OPR/", "Opera"}, {"Firefox/", "Firefox"}, {"FxiOS/", "Firefox"},
+		{"CriOS/", "Chrome"}, {"Chrome/", "Chrome"}, {"Chromium/", "Chromium"}, {"Safari/", "Safari"},
+	}
+	browserSystems = []struct{ token, name string }{
+		{"Windows", "Windows"}, {"Android", "Android"}, {"iPhone", "iOS"}, {"iPad", "iOS"}, {"CrOS", "ChromeOS"}, {"Mac OS X", "macOS"},
+		{"Macintosh", "macOS"}, {"Linux", "Linux"}, {"X11", "Linux"},
+	}
+)
+
+// BrowserName is the name of a browser's new device: its browser family and operating system from the User-Agent header, for
+// example "Edge on Windows". It is one of a closed set of at most 9 x 9 names, so an attacker's header cannot put its own text in
+// an account's device list; a header that names neither is "Web browser".
+func BrowserName(userAgent string) string {
+	if len(userAgent) > 512 {
+		userAgent = userAgent[:512]
+	}
+	family, system := "", ""
+	for _, candidate := range browserFamilies {
+		if strings.Contains(userAgent, candidate.token) {
+			family = candidate.name
+			break
+		}
+	}
+	for _, candidate := range browserSystems {
+		if strings.Contains(userAgent, candidate.token) {
+			system = candidate.name
+			break
+		}
+	}
+	switch {
+	case family != "" && system != "":
+		return family + " on " + system
+	case family != "":
+		return family
+	case system != "":
+		return "Browser on " + system
+	}
+	return defaultName(PlatformWeb)
+}
+
 func defaultName(platform Platform) string {
 	switch platform {
 	case PlatformAndroid:
@@ -191,10 +257,15 @@ WHERE installation_id = $1`, claim.InstallationID, claim.AppVersion, claim.Platf
 
 // EnsureBrowser finds or creates the web device and installation of a browser's claimed installation ID for an account, in the
 // caller's transaction: the live installation of that account with that claim, or a new device and installation (with an ID the
-// center generates) when there is none, so a claim of another account or of a revoked device never links to it.
-func EnsureBrowser(ctx context.Context, tx pgx.Tx, userID, claimed platform.ID, appVersion string, now time.Time) (deviceID, installationID platform.ID, err error) {
+// center generates) when there is none, so a claim of another account or of a revoked device never links to it. A new device is
+// named by name (BrowserName of the browser's User-Agent; empty is the default); a known device keeps the name it has, which the
+// account may have changed.
+func EnsureBrowser(ctx context.Context, tx pgx.Tx, userID, claimed platform.ID, appVersion, name string, now time.Time) (deviceID, installationID platform.ID, err error) {
 	if !isClaimText(appVersion) {
-		return platform.ID{}, platform.ID{}, arc.InvalidArgument("installation.app_version", "pattern")
+		return platform.ID{}, platform.ID{}, arc.InvalidArgument("installation.appVersion", "pattern")
+	}
+	if name == "" {
+		name = defaultName(PlatformWeb)
 	}
 	err = tx.QueryRow(ctx, `SELECT i.device_id, i.installation_id FROM device.installation i JOIN device.device d ON d.device_id = i.device_id
 WHERE i.user_id = $1 AND i.client_installation_id = $2 AND i.revoked_at IS NULL AND d.revoked_at IS NULL FOR UPDATE OF i, d`, userID, claimed).
@@ -203,7 +274,7 @@ WHERE i.user_id = $1 AND i.client_installation_id = $2 AND i.revoked_at IS NULL 
 	case errors.Is(err, pgx.ErrNoRows):
 		deviceID, installationID = platform.NewID(), platform.NewID()
 		if _, err = tx.Exec(ctx, `INSERT INTO device.device (device_id, user_id, display_name, platform, trust_level, remote_enabled, first_seen_at,
-    last_seen_at, rev) VALUES ($1, $2, $3, 6, 1, false, $4, $4, 1)`, deviceID, userID, defaultName(PlatformWeb), now); err != nil {
+    last_seen_at, rev) VALUES ($1, $2, $3, 6, 1, false, $4, $4, 1)`, deviceID, userID, name, now); err != nil {
 			return platform.ID{}, platform.ID{}, store.Sanitize("create a web device", err)
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO device.installation (installation_id, device_id, user_id, product_id, app_version, platform,

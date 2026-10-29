@@ -79,3 +79,24 @@ func TestTheCSRFTokenIsBoundToItsHandle(t *testing.T) {
 		t.Fatal("the CSRF token is the handle")
 	}
 }
+
+// TestThePreSessionCSRFIsAFunctionOfTheOriginAlone (decision 4.2): a public constant derived from the origin, 43 base64url
+// characters, different for every origin and for the session's own derived token.
+func TestThePreSessionCSRFIsAFunctionOfTheOriginAlone(t *testing.T) {
+	const origin = "https://arcforges.com"
+	token := PreSessionCSRF(origin)
+	// SHA-256 of "af-csrf-pre-v1\n" + origin, unpadded base64url: a fixed answer, so the label can never change by accident.
+	if token != "lFQXZwfA0cmNHDo26xwWyrCfqRfgY4SqfivQXhp1Pv0" {
+		t.Fatalf("the constant is %q", token)
+	}
+	if len(token) != EncodedLength || token != PreSessionCSRF(origin) || token == PreSessionCSRF("https://proof.arcforges.com") || token == PreSessionCSRF(origin+"/") {
+		t.Fatal("the constant is not a function of the origin")
+	}
+	secret := NewSecret()
+	if token == CSRF(secret) {
+		t.Fatal("a session's token is the constant")
+	}
+	if _, ok := ParseHandle(token); !ok {
+		t.Fatal("the constant is not a 43-character base64url token")
+	}
+}
