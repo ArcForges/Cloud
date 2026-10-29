@@ -275,7 +275,16 @@ func rpc[Response proto.Message](h *harness, path string, request proto.Message,
 	if err := proto.Unmarshal(answer.body, response); err != nil {
 		h.t.Fatal(err)
 	}
+	domainError(h.t, answer) // checks the retry advice of a refusal
 	return response
+}
+
+// retryAdvice is the Contracts rule retryAdvice (foundation-baseline.json; E4): retry_at if and only if the advice is AFTER_TIME,
+// a reconciliation operation if and only if it is RECONCILE. domainError checks every refusal a test decodes against it.
+func retryAdvice(value *foundationv1.ArcError) bool {
+	retry := value.GetRetry()
+	return (retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_AFTER_TIME) == (retry.GetRetryAt() != nil) &&
+		(retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_RECONCILE) == (retry != nil && retry.ReconciliationOperation != nil)
 }
 
 // failure is the ArcError a reply carries, as CATEGORY/code.

@@ -162,6 +162,9 @@ func domainError(t *testing.T, answer reply) *foundationv1.ArcError {
 			if err := proto.Unmarshal(payload, &value); err != nil {
 				t.Fatal(err)
 			}
+			if !retryAdvice(&value) {
+				t.Errorf("%s breaks the retryAdvice rule: %v", failure(&value), value.GetRetry())
+			}
 			return &value
 		}
 		message = message[size:]

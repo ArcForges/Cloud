@@ -35,7 +35,7 @@ func unknownCommit(value *foundationv1.ArcError) bool {
 
 func undoneCommit(value *foundationv1.ArcError) bool {
 	return failure(value) == "RESOURCE/overloaded" && value.GetRetry().GetMode() == foundationv1.RetryMode_RETRY_MODE_AFTER_TIME &&
-		value.GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN
+		value.GetRetry().GetRetryAt() != nil && value.GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN
 }
 
 // losing fails the COMMIT of the transactions that change a table as the event (and condition) names, while run runs.

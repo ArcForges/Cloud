@@ -145,7 +145,8 @@ func (s *Server) failure(ctx context.Context, call *ingress.Call, err error) *fo
 		s.logger.ErrorContext(ctx, "identity call failed", "method", call.Policy.FullName, "correlationId", call.Correlation.CorrelationID, "error", err.Error())
 		refusal = arc.Internal()
 	}
-	return refusal.ArcError(call.Correlation)
+	// The single point where a refusal becomes the reply's ArcError: an AFTER_TIME refusal gets its retry instant here (E4).
+	return refusal.Dated(s.clock()).ArcError(call.Correlation)
 }
 
 // checkMeta refuses a RequestMeta that names a workspace (DC-19): identity and device methods are account-scoped.

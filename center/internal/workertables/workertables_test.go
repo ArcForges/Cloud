@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
+
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -113,12 +115,20 @@ func TestTheSurfaceRepliesAreTheCentersRefusals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		message, err := arc.ReplyMessage(want.ArcError(correlation.Context{}))
+		value := want.ArcError(correlation.Context{})
+		message, err := arc.ReplyMessage(value)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !bytes.Equal(body, append(ingress.Frame(message), ingress.TrailerFrame(ingress.StatusOK, "", false)...)) {
 			t.Fatalf("%s is not the center's refusal", name)
+		}
+		// E4: the Contracts rule retryAdvice: retry_at if and only if AFTER_TIME (the rate_limited template carries one, which the
+		// Worker sets at refusal time; not_activated is NEVER), a reconciliation operation if and only if RECONCILE.
+		retry := value.GetRetry()
+		if (retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_AFTER_TIME) != (retry.GetRetryAt() != nil) ||
+			(retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_RECONCILE) != (retry.ReconciliationOperation != nil) {
+			t.Fatalf("%s breaks the retryAdvice rule: %v", name, retry)
 		}
 	}
 	if !strings.Contains(generated, `export const surfaceNames: readonly Surface[] = ["identity"];`) ||

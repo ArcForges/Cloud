@@ -8,6 +8,7 @@ package arc
 
 import (
 	"bytes"
+	"math/rand/v2"
 	"regexp"
 	"strconv"
 	"strings"
@@ -256,7 +257,27 @@ func RateLimited(bucket string, maximum int64, retryAt time.Time) *Refusal {
 		Limit: &Limit{Name: bucket, Maximum: maximum, RecoveryAt: retryAt}}
 }
 
-// Unavailable is a store that could not be reached: RESOURCE/overloaded, retry after a short time with jitter.
+// The retry instant Dated gives an AFTER_TIME refusal that names none: one second after the refusal, plus up to one second of
+// jitter, so the clients a store outage refused do not all come back at once.
+const (
+	retryDelay  = time.Second
+	retryJitter = time.Second
+)
+
+// Dated is the refusal as it goes on the wire at now (E4): an AFTER_TIME refusal that names no instant (Unavailable, Internal)
+// gets retry_at now plus retryDelay and the jitter, because the Contracts rule retryAdvice (foundation-baseline.json) pairs
+// AFTER_TIME with retry_at. A refusal that names its instant (RateLimited) and any other advice are returned as they are. It is
+// applied once, where a refusal becomes the reply's ArcError.
+func (r *Refusal) Dated(now time.Time) *Refusal {
+	if r.Retry != foundationv1.RetryMode_RETRY_MODE_AFTER_TIME || !r.RetryAt.IsZero() {
+		return r
+	}
+	dated := *r
+	dated.RetryAt = now.Add(retryDelay + rand.N(retryJitter))
+	return &dated
+}
+
+// Unavailable is a store that could not be reached: RESOURCE/overloaded, retry after a short time with jitter (Dated).
 func Unavailable() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE, Code: "overloaded",
 		Retry: foundationv1.RetryMode_RETRY_MODE_AFTER_TIME}

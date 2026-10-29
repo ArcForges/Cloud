@@ -16,8 +16,9 @@ import (
 
 // TestEveryRefusalIsAnErrorsRow pins each constructor to its errors.md row: category, code, message key, retry advice and the
 // details that row defines, exactly: a row without details carries none, and not_found and already_exists carry state.resource
-// with the kind and only the ID the caller named (F19). Every rendering is also a valid foundation message (B6,
-// foundationViolations): its StateFailure states a state and a reason, and a resource always has its Id.
+// with the kind and only the ID the caller named (F19). Every rendering, dated as the reply dates it, is also a valid foundation
+// message (B6, E4, foundationViolations): its StateFailure states a state and a reason, a resource always has its Id, and an
+// AFTER_TIME advice carries its retry_at.
 func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 	at := time.Date(2026, 10, 28, 12, 0, 0, 123456789, time.UTC)
 	flowID := []byte{0x0b, 0x6e, 0x1c, 0x52, 0x2d, 0x40, 0x4e, 0x0f, 0x8a, 0x5c, 0x41, 0x7f, 0x19, 0x9d, 0x60, 0x21}
@@ -51,7 +52,7 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 	}
 	call := correlation.New()
 	for _, item := range cases {
-		value := item.refusal.ArcError(call)
+		value := item.refusal.Dated(at).ArcError(call)
 		for _, violation := range foundationViolations(value, true) {
 			t.Errorf("%s: %s", item.row, violation)
 		}
@@ -137,6 +138,24 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 			t.Errorf("%s is final", refusal.Key())
 		}
 	}
+	// E4: an AFTER_TIME refusal without an instant breaks the rule until it is dated; Dated gives it one to two seconds from the
+	// refusal and leaves a stated instant and every other advice as they are.
+	if len(foundationViolations(Unavailable().ArcError(call), true)) != 1 {
+		t.Fatal("the foundation check admits AFTER_TIME without retry_at")
+	}
+	for range 50 {
+		for _, refusal := range []*Refusal{Unavailable(), Internal()} {
+			dated := refusal.Dated(at)
+			if dated.RetryAt.Before(at.Add(time.Second)) || !dated.RetryAt.Before(at.Add(2*time.Second)) || !refusal.RetryAt.IsZero() {
+				t.Fatalf("%s dated %v at %v", refusal.Key(), dated.RetryAt, at)
+			}
+		}
+	}
+	for _, refusal := range []*Refusal{RateLimited("sign_in_prefix", 30, at.Add(time.Hour)), StepUpRequired(), CommitUnknown(), Expired()} {
+		if refusal.Dated(at) != refusal {
+			t.Errorf("%s was dated", refusal.Key())
+		}
+	}
 	edge := RateLimited("edge", 0, time.Time{}).ArcError(correlation.Context{})
 	if edge.GetDetails().GetLimit().GetMaximum() != nil || edge.GetRetry().GetRetryAt() != nil || edge.GetCorrelationId() != nil {
 		t.Fatalf("a zero instant and maximum and an empty correlation are not stated %v", edge)
@@ -151,7 +170,8 @@ var foundationPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]{1,128}$`)
 // states for it and the messages it carries (B6): ArcError's code, category, message key, retry, effect and, when the call has one,
 // correlation id are required; ErrorDetails holds one detail; StateFailure requires its state (pattern) and reason; an AggregateRef
 // requires its kind (pattern) and an Id of 16 bytes that are not all zero; LimitFailure requires its limit name (pattern); a
-// Revision's value is at least 0.
+// Revision's value is at least 0; RetryAdvice follows the rule retryAdvice (retry_at if and only if AFTER_TIME, a reconciliation
+// operation, matching the pattern, if and only if RECONCILE; E4) and an Instant's nanos are below one second.
 func foundationViolations(value *foundationv1.ArcError, correlated bool) []string {
 	var found []string
 	check := func(ok bool, rule string) {
@@ -168,6 +188,16 @@ func foundationViolations(value *foundationv1.ArcError, correlated bool) []strin
 	check(value.GetRetry() != nil && value.GetRetry().Mode != nil && value.GetRetry().GetMode() >= 1 && value.GetRetry().GetMode() <= 4,
 		"ArcError.retry.mode is required (1 to 4)")
 	check(value.Effect != nil && value.GetEffect() >= 1 && value.GetEffect() <= 3, "ArcError.effect is required (1 to 3)")
+	retry := value.GetRetry()
+	reconciliation := retry != nil && retry.ReconciliationOperation != nil
+	check((retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_AFTER_TIME) == (retry.GetRetryAt() != nil) &&
+		(retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_RECONCILE) == reconciliation,
+		"RetryAdvice: retry_at if and only if AFTER_TIME, reconciliation_operation if and only if RECONCILE (rule retryAdvice)")
+	check(!reconciliation || foundationPattern.MatchString(retry.GetReconciliationOperation()),
+		"RetryAdvice.reconciliation_operation matches the pattern")
+	if at := retry.GetRetryAt(); at != nil {
+		check(at.UnixSeconds != nil && at.Nanos != nil && at.GetNanos() <= 999_999_999, "Instant: unix_seconds and nanos are required, nanos below 1e9")
+	}
 	if correlated {
 		check(validID(value.GetCorrelationId()), "ArcError.correlation_id is required")
 	}
