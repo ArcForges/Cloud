@@ -76,7 +76,7 @@ type Window struct {
 
 // IdentityPolicy holds every lifetime and limit of the identity surface in one place, with documented defaults (docs/center.md,
 // "Identity policy"). An operator may override values within their bounds with ARCFORGES_CENTER_IDENTITY_POLICY (JSON); the hosted
-// Worker never passes it.
+// Worker passes it only where wrangler.json sets it, which only the acceptance environment does (its anonymous-flow ceiling).
 type IdentityPolicy struct {
 	AccessTokenLifetime   time.Duration
 	RefreshIdleLifetime   time.Duration
@@ -97,6 +97,11 @@ type IdentityPolicy struct {
 	RefreshPerPrefix      Window
 	StepUpPerAccount      Window
 	BootstrapPerPrefix    Window
+	// AnonymousFlows is an opt-in global ceiling on the flows anonymous calls create (C1): every BeginAuthentication, of every method
+	// and purpose, counts in one bucket. A limit of 0 (the default) sets no ceiling. Only the acceptance environment sets one: it
+	// shares the production Neon project, and its flows are never deleted before AF-PLAT-01's sweeps exist. A global bucket would let
+	// anyone lock every sign-in out, so production sets none (AF-PROD-01 decides with the sweeps).
+	AnonymousFlows Window
 }
 
 // DefaultIdentityPolicy is the policy without an override.
@@ -121,6 +126,7 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		RefreshPerPrefix:      Window{Limit: 120, Window: 10 * time.Minute},
 		StepUpPerAccount:      Window{Limit: 10, Window: 10 * time.Minute},
 		BootstrapPerPrefix:    Window{Limit: 10, Window: time.Hour},
+		AnonymousFlows:        Window{Limit: 0, Window: time.Hour},
 	}
 }
 
@@ -159,6 +165,9 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		counts[name+"Limit"] = countBound{&window.Limit, 1, 10_000}
 		durations[name+"Window"] = durationBound{&window.Window, time.Minute, 24 * time.Hour}
 	}
+	// The anonymous-flow ceiling is opt-in: 0 sets none.
+	counts["anonymousFlowsLimit"] = countBound{&p.AnonymousFlows.Limit, 0, 10_000}
+	durations["anonymousFlowsWindow"] = durationBound{&p.AnonymousFlows.Window, time.Minute, 24 * time.Hour}
 	return durations, counts
 }
 

@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
 )
@@ -122,4 +124,50 @@ func TestAnonymousFailuresAreAuditedOncePerPrefix(t *testing.T) {
 		t.Fatalf("wrong codes of four addresses from one prefix: %d audits", failed())
 	}
 	h.verifyAudit()
+}
+
+// TestTheAnonymousFlowCeilingBoundsEveryNewFlow (C1): with the opt-in ceiling, every flow an anonymous call creates (a passkey
+// sign-in, the owner's enrollment, an e-mail flow) counts in one global bucket, whatever its client; past the ceiling begin is
+// RESOURCE/rate_limited with a retry instant, writes no flow, and the first refusal of the window is audited. Without the ceiling no
+// global bucket is counted.
+func TestTheAnonymousFlowCeilingBoundsEveryNewFlow(t *testing.T) {
+	h := newHarness(t, settings{policy: `{"anonymousFlowsLimit": 3, "anonymousFlowsWindow": "10m", "signInPerPrefixLimit": 1000}`})
+	begin := func(method publicapiv1.AuthMethod, purpose publicapiv1.AuthPurpose, ip string) *foundationv1.ArcError {
+		t.Helper()
+		request := &publicapiv1.IdentityServiceBeginAuthenticationRequest{Meta: meta(), Method: method.Enum(), Purpose: purpose.Enum(), Installation: newClaim(t)}
+		if method == publicapiv1.AuthMethod_AUTH_METHOD_EMAIL {
+			request.LoginHint = proto.String("someone@example.org")
+		}
+		return rpc(h, beginPath, request, caller{ip: ip}, &publicapiv1.IdentityServiceBeginAuthenticationResponse{}).GetError()
+	}
+	h.remember("someone@example.org")
+	passkey, email := publicapiv1.AuthMethod_AUTH_METHOD_PASSKEY, publicapiv1.AuthMethod_AUTH_METHOD_EMAIL
+	authenticate, enroll := publicapiv1.AuthPurpose_AUTH_PURPOSE_AUTHENTICATE, publicapiv1.AuthPurpose_AUTH_PURPOSE_ENROLL
+	if begin(passkey, authenticate, "192.0.2.1") != nil || begin(passkey, enroll, "198.51.100.1") != nil || begin(email, authenticate, "203.0.113.1") != nil {
+		t.Fatal("within the ceiling")
+	}
+	for _, ip := range []string{"100.64.0.1", "2001:db8::1"} {
+		refusal := begin(passkey, authenticate, ip)
+		if failure(refusal) != "RESOURCE/rate_limited" || refusal.GetDetails().GetLimit().GetLimitName() != "anonymous_flows" ||
+			refusal.GetDetails().GetLimit().GetMaximum().GetValue() != "3" || refusal.GetRetry().GetRetryAt().GetUnixSeconds() <= h.clock.Now().Unix() {
+			t.Fatalf("past the ceiling from %s: %v", ip, refusal)
+		}
+	}
+	if h.count("SELECT count(*) FROM identity.auth_flow") != 3 || h.audits("identity.rate_limited") != 1 {
+		t.Fatalf("%d flows, %d audits", h.count("SELECT count(*) FROM identity.auth_flow"), h.audits("identity.rate_limited"))
+	}
+	h.clock.Advance(11 * time.Minute)
+	if refusal := begin(passkey, authenticate, "100.64.0.1"); refusal != nil {
+		t.Fatalf("a new window: %s", failure(refusal))
+	}
+	h.verifyAudit()
+
+	open := newHarness(t, settings{})
+	for range 5 {
+		open.beginPasskey(newClaim(t), caller{})
+	}
+	bucket := sha256.Sum256([]byte("anonymous_flows\x00all"))
+	if open.count("SELECT count(*) FROM platform.rate_limit WHERE bucket_hash = $1", bucket[:]) != 0 {
+		t.Fatal("a global bucket was counted without the ceiling")
+	}
 }

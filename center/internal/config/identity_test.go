@@ -157,6 +157,20 @@ func TestTheIdentityPolicyHasDocumentedDefaultsAndBoundedOverrides(t *testing.T)
 	if err := defaults.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	// C1: the anonymous-flow ceiling is opt-in (0 sets none) and bounded.
+	if defaults.AnonymousFlows != (Window{Limit: 0, Window: time.Hour}) {
+		t.Fatalf("the anonymous-flow ceiling is set by default: %+v", defaults.AnonymousFlows)
+	}
+	if ceiling, err := ParseIdentityPolicy(`{"anonymousFlowsLimit":600,"anonymousFlowsWindow":"1h"}`); err != nil ||
+		ceiling.AnonymousFlows != (Window{Limit: 600, Window: time.Hour}) {
+		t.Fatalf("the proof ceiling: %+v %v", ceiling.AnonymousFlows, err)
+	}
+	for _, document := range []string{`{"anonymousFlowsLimit": -1}`, `{"anonymousFlowsLimit": 10001}`, `{"anonymousFlowsWindow": "30s"}`,
+		`{"anonymousFlowsWindow": "25h"}`, `{"anonymousFlowsLimit": "600"}`} {
+		if _, err := ParseIdentityPolicy(document); err == nil {
+			t.Errorf("%s was admitted", document)
+		}
+	}
 	if defaults.BrowserAbsolute != 12*time.Hour || defaults.BrowserIdle != 30*time.Minute || defaults.StepUpEvidenceTTL != 5*time.Minute ||
 		defaults.EmailCodeAttempts != 5 || defaults.EmailCodeSends != 3 || defaults.EmailCodeIterations != 20_000 || defaults.AccessTokenLifetime != 15*time.Minute {
 		t.Fatalf("defaults %+v", defaults)

@@ -116,6 +116,12 @@ func (s *Service) BeginAuthentication(ctx context.Context, request Request, in B
 	if err := s.take(ctx, request, s.bucket(ratelimit.SignInPrefix, ratelimit.Prefix(request.ClientIP)), Anonymous); err != nil {
 		return Challenge{}, err
 	}
+	// The opt-in global ceiling on the flows anonymous calls create (C1; set only in the acceptance environment).
+	if s.policy.AnonymousFlows.Limit > 0 {
+		if err := s.take(ctx, request, s.bucket(ratelimit.AnonymousFlows, "all"), Anonymous); err != nil {
+			return Challenge{}, err
+		}
+	}
 	now := s.now()
 	claim := in.Claim
 	row := flow{ID: platform.NewID(), Channel: ChannelNative, Purpose: Purpose(in.Purpose), Claim: &claim, CreatedAt: now}

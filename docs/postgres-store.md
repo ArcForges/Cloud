@@ -91,6 +91,9 @@ Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables ident
 - the bootstrap row (`identity.bootstrap`) permanently: it is the record that the database's one bootstrap was used (it names the
   owner's account, so purging that account is AF-ID-02's decision).
 
+The acceptance environment's tables grow on the production Neon project until then, bounded by its anonymous-flow ceiling
+([acceptance environment](#acceptance-environment)).
+
 Every foreign key is `NO ACTION`, so a sweep or a purge deletes children before their parents: a session's spent refresh tokens,
 flows and step-up challenges, then the session; a device's sessions, then its installations, then the device; and for an account,
 those, then its credentials, then the account. Until the sweeps exist these tables only grow.
@@ -472,6 +475,11 @@ environment of the Go center since AF-CTR-02.
 - **Its database:** its own database `arcforges_acceptance` in the same Neon project, created idempotently by
   `admin ensure-database` through the migration role's direct connection, with its own runtime role
   `arcforges_acceptance_runtime`. Neither environment's credential reaches the other's database.
+- **Its growth counts against production:** the acceptance database shares the production Neon project, branch and compute, so its
+  storage and connections count against production's. Its public identity surface (AF-CTR-03) writes flows, rate-limit windows and
+  audit events that nothing deletes until AF-PLAT-01's sweeps exist; the opt-in anonymous-flow ceiling of its identity policy (600
+  flows per hour, [identity policy](center-identity.md#identity-policy)) bounds that growth. Production sets no ceiling. The owner can
+  drop `arcforges_acceptance` at any time; the next acceptance deployment recreates and migrates it.
 - **The deployment job:** after the retained D1 gate, `node tooling/postgres-deploy.ts migrate --target acceptance` ensures the
   database and migrates it. `npm run deploy:proof` then detaches the retired C# queue consumers (below), rotates the acceptance
   credential and deploys the sealed acceptance bundle.

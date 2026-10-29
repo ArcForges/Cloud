@@ -44,11 +44,15 @@ const (
 	StepUpAccount Kind = "step_up_account"
 	// BootstrapPrefix counts bootstrap token mismatches per client address prefix (there is no global bucket).
 	BootstrapPrefix Kind = "bootstrap_prefix"
+	// AnonymousFlows counts every flow an anonymous call creates in one global bucket (key "all"), only where the policy sets its
+	// opt-in ceiling (the acceptance environment, C1).
+	AnonymousFlows Kind = "anonymous_flows"
 )
 
 // Kinds is every bucket kind.
 func Kinds() []Kind {
-	return []Kind{SignInPrefix, SignInFailuresAccount, EmailPrefix, EmailAddress, RedeemFailuresAddress, RefreshPrefix, StepUpAccount, BootstrapPrefix}
+	return []Kind{SignInPrefix, SignInFailuresAccount, EmailPrefix, EmailAddress, RedeemFailuresAddress, RefreshPrefix, StepUpAccount, BootstrapPrefix,
+		AnonymousFlows}
 }
 
 // Window is the window of a bucket kind in a policy.
@@ -70,6 +74,8 @@ func Window(policy config.IdentityPolicy, kind Kind) config.Window {
 		return policy.StepUpPerAccount
 	case BootstrapPrefix:
 		return policy.BootstrapPerPrefix
+	case AnonymousFlows:
+		return policy.AnonymousFlows
 	}
 	return config.Window{}
 }

@@ -2,7 +2,8 @@
 // ARCFORGES_HELLO_RUNTIME=go selects the Go center (/app/arcforges-center) and passes it its explicit mode, public base URL and
 // plan configuration, and the runtime role's pooled PostgreSQL URL of its store; the center refuses to start without a valid
 // mode and base URL. It also passes the enabled surfaces the Worker forwards (FLAGSHIP_SURFACES as parsed here, "none" when none)
-// and always names the header the Worker sets to the client's address, so the center and the Worker agree on both. The Hello's own Neon credential reaches only the C# host, or a Go center without a store. Proof subclasses
+// and always names the header the Worker sets to the client's address, so the center and the Worker agree on both, and passes the
+// identity policy override where an environment sets one (only the acceptance environment's anonymous-flow ceiling). The Hello's own Neon credential reaches only the C# host, or a Go center without a store. Proof subclasses
 // keep their closed outbound policy and their own environment hook.
 import { Container, type OutboundHandler } from "@cloudflare/containers";
 import { aiInternalOutbound } from "../ai/internal/outbound.ts";
@@ -16,6 +17,8 @@ export interface CenterEnvironment {
   ARCFORGES_CENTER_MODE?: string;
   ARCFORGES_CENTER_PUBLIC_BASE_URL?: string;
   ARCFORGES_CENTER_PLAN_CONFIGURATION?: string;
+  /** The identity policy override; only the acceptance environment sets one (its anonymous-flow ceiling, C1). */
+  ARCFORGES_CENTER_IDENTITY_POLICY?: string;
   ARCFORGES_CENTER_DATABASE_URL?: string;
   FLAGSHIP_SURFACES?: string;
 }
@@ -39,6 +42,7 @@ export function centerContainerSettings(center: CenterEnvironment): CenterContai
       "ARCFORGES_CENTER_MODE",
       "ARCFORGES_CENTER_PUBLIC_BASE_URL",
       "ARCFORGES_CENTER_PLAN_CONFIGURATION",
+      "ARCFORGES_CENTER_IDENTITY_POLICY",
     ] as const) {
       const value = center[name];
       if (value !== undefined) settings.envVars[name] = value;

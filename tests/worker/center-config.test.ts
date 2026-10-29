@@ -145,6 +145,16 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
 test("production enables no surface and the acceptance environment enables identity", () => {
   assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
   assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity");
+  // C1: only the acceptance environment overrides the identity policy, and only with its anonymous-flow ceiling; production keeps
+  // the defaults (no global bucket).
+  assert.equal(wrangler.vars?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
+  assert.deepEqual(
+    JSON.parse(String(wrangler.env?.proof?.vars?.ARCFORGES_CENTER_IDENTITY_POLICY)),
+    {
+      anonymousFlowsLimit: 600,
+      anonymousFlowsWindow: "1h",
+    },
+  );
   assert.equal(wrangler.env?.proof?.vars?.ALLOWED_ORIGIN, "https://proof.arcforges.com");
   for (const [name, environment] of environments) {
     assert.deepEqual(surfaceProblems(environment.vars), [], `wrangler.json environment ${name}`);

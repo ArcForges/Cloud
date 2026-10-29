@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
@@ -59,8 +60,9 @@ func proofEnvironment(t *testing.T) map[string]string {
 
 // TestTheProofCompositionRequiresTheWorkersClientAddress composes the acceptance environment's exact configuration (N3, G2):
 // official-hosted with the identity surface, the Worker's client-address header and no trusted proxies, under the proof host's
-// public base URL. Its relying party is the proof host, and a surface call that does not carry exactly one client address is
-// refused validation.invalid_request before the store is touched; with one address the call reaches the store.
+// public base URL, with its anonymous-flow ceiling (C1). Its relying party is the proof host, and a surface call that does not carry
+// exactly one client address is refused validation.invalid_request before the store is touched; with one address the call reaches
+// the store.
 func TestTheProofCompositionRequiresTheWorkersClientAddress(t *testing.T) {
 	values := proofEnvironment(t)
 	cfg, err := config.Load(func(name string) (string, bool) { value, ok := values[name]; return value, ok })
@@ -69,7 +71,8 @@ func TestTheProofCompositionRequiresTheWorkersClientAddress(t *testing.T) {
 	}
 	if cfg.Mode != config.OfficialHosted || !cfg.Identity.Enabled(config.SurfaceIdentity) || cfg.Identity.ClientIPHeader != config.ClientIPHeader ||
 		len(cfg.Identity.TrustedProxies) != 0 || cfg.PublicBaseURL != "https://proof.arcforges.com/api" ||
-		config.RelyingPartyID(cfg.PublicBaseURL) != "proof.arcforges.com" || config.Origin(cfg.PublicBaseURL) != "https://proof.arcforges.com" {
+		config.RelyingPartyID(cfg.PublicBaseURL) != "proof.arcforges.com" || config.Origin(cfg.PublicBaseURL) != "https://proof.arcforges.com" ||
+		cfg.Identity.Policy.AnonymousFlows != (config.Window{Limit: 600, Window: time.Hour}) {
 		t.Fatalf("the proof configuration: %+v", cfg)
 	}
 	center, err := New(cfg, observe.NewLogger(&lockedBuffer{}, slog.LevelDebug), Options{})

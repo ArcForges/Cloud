@@ -158,7 +158,8 @@
         "ARCFORGES_CENTER_PUBLIC_BASE_URL": "https://proof.arcforges.com/api",
         "ARCFORGES_CENTER_PLAN_CONFIGURATION": "development-fixtures",
         "FLAGSHIP_SURFACES": "identity",
-        "ALLOWED_ORIGIN": "https://proof.arcforges.com"
+        "ALLOWED_ORIGIN": "https://proof.arcforges.com",
+        "ARCFORGES_CENTER_IDENTITY_POLICY": "{\"anonymousFlowsLimit\":600,\"anonymousFlowsWindow\":\"1h\"}"
       }
     }
   }

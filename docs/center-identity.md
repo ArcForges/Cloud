@@ -136,29 +136,41 @@ a live session, and a revoked device is not listed. ListAuthIdentities lists the
 
 Every lifetime and limit comes from one source, `config.IdentityPolicy`, with these defaults. An operator may override values
 within their bounds with `ARCFORGES_CENTER_IDENTITY_POLICY`, a JSON object (durations as Go duration strings, counts as
-integers; unknown or repeated keys and values out of bounds refuse to start). The hosted Worker never passes it.
+integers; unknown or repeated keys and values out of bounds refuse to start). The hosted Worker passes it only where `wrangler.json`
+sets it: only the acceptance environment does, with its anonymous-flow ceiling (below).
 
-| Setting                                                        | Default            | Bounds                       |
-| -------------------------------------------------------------- | ------------------ | ---------------------------- |
-| `accessTokenLifetime`                                          | 15m                | 1m to 1h                     |
-| `refreshIdleLifetime` / `refreshAbsolute`                      | 720h / 2160h       | 1h to 2160h / 1h to 9600h    |
-| `browserIdle` / `browserAbsolute`                              | 30m / 12h          | 1m to 24h / 10m to 168h      |
-| `passkeyFlowLifetime` / `emailCodeLifetime`                    | 5m / 10m           | 1m to 15m / 1m to 30m        |
-| `emailCodeAttempts` / `emailCodeSends` / `emailCodeIterations` | 5 / 3 / 20000      | 1–10 / 1–3 / 10000–600000    |
-| `stepUpEvidenceTtl` (A1b)                                      | 5m                 | 1m to 5m                     |
-| `signInPerPrefix` (begin, completion, redemption)              | 30 per 10m         | limit 1–10000, window 1m–24h |
-| `signInFailuresAccount` (failed proofs per account)            | 10 per 10m         | as above                     |
-| `emailPerPrefix` / `emailPerAddress` (code sends)              | 10 per h / 5 per h | as above                     |
-| `redeemFailuresAddress` (wrong codes per address)              | 10 per h           | as above                     |
-| `refreshPerPrefix`                                             | 120 per 10m        | as above                     |
-| `stepUpPerAccount` (A1b)                                       | 10 per 10m         | as above                     |
-| `bootstrapPerPrefix` (refused bootstraps)                      | 10 per h           | as above                     |
+| Setting                                                        | Default              | Bounds                       |
+| -------------------------------------------------------------- | -------------------- | ---------------------------- |
+| `accessTokenLifetime`                                          | 15m                  | 1m to 1h                     |
+| `refreshIdleLifetime` / `refreshAbsolute`                      | 720h / 2160h         | 1h to 2160h / 1h to 9600h    |
+| `browserIdle` / `browserAbsolute`                              | 30m / 12h            | 1m to 24h / 10m to 168h      |
+| `passkeyFlowLifetime` / `emailCodeLifetime`                    | 5m / 10m             | 1m to 15m / 1m to 30m        |
+| `emailCodeAttempts` / `emailCodeSends` / `emailCodeIterations` | 5 / 3 / 20000        | 1–10 / 1–3 / 10000–600000    |
+| `stepUpEvidenceTtl` (A1b)                                      | 5m                   | 1m to 5m                     |
+| `signInPerPrefix` (begin, completion, redemption)              | 30 per 10m           | limit 1–10000, window 1m–24h |
+| `signInFailuresAccount` (failed proofs per account)            | 10 per 10m           | as above                     |
+| `emailPerPrefix` / `emailPerAddress` (code sends)              | 10 per h / 5 per h   | as above                     |
+| `redeemFailuresAddress` (wrong codes per address)              | 10 per h             | as above                     |
+| `refreshPerPrefix`                                             | 120 per 10m          | as above                     |
+| `stepUpPerAccount` (A1b)                                       | 10 per 10m           | as above                     |
+| `bootstrapPerPrefix` (refused bootstraps)                      | 10 per h             | as above                     |
+| `anonymousFlows` (every flow an anonymous call creates)        | none (limit 0) per h | limit 0–10000, window 1m–24h |
 
 A prefix is the client address's /24 (IPv4) or /56 (IPv6) network; an IPv4-mapped address counts as IPv4. A bucket is the
 SHA-256 of its kind and key in `platform.rate_limit`, counted in its own short transaction before the work it guards. A refusal is
 `RESOURCE/rate_limited` with `retry_at` and a `LimitFailure` naming the bucket kind; the first refusal of a bucket's window is
 audited as `identity.rate_limited`, the others only counted. The failed-proof buckets of an account (or of an unknown credential's
 digest) and of an address count only failures, so two prefixes cannot together exceed an account's limit.
+
+**Anonymous-flow ceiling** (C1). `anonymousFlows` is an opt-in global bucket (`anonymous_flows`, one key for every client): every
+flow an anonymous call creates counts in it (BeginAuthentication of every method and purpose, the owner's enrollment included), and
+past it BeginAuthentication is `RESOURCE/rate_limited` with `retry_at`, the first refusal of a window audited. A limit of 0, the
+default, sets none. Only the acceptance environment sets one, 600 flows per hour (`wrangler.json`, pinned by
+`tests/worker/center-config.test.ts` and `TestTheProofCompositionRequiresTheWorkersClientAddress`): `proof` shares the production
+Neon project and compute, and the runtime role can never delete, so until AF-PLAT-01's retention sweeps exist its identity tables
+only grow; the ceiling bounds that growth (failure buckets and audit markers grow at most in step with the flows). Production sets
+none: one global bucket would let anyone lock every sign-in out, so AF-PROD-01 decides about it together with the sweeps. The owner
+can also drop the whole acceptance database `arcforges_acceptance` ([PostgreSQL store](postgres-store.md#acceptance-environment)).
 
 **Client address.** In official-hosted mode the Worker sets `x-arcforges-client-ip` from `cf-connecting-ip` (never from the
 client's own header) and omits it when Cloudflare sent none; the center needs exactly one valid value, refuses a call without one
@@ -240,6 +252,9 @@ after AF-PLAT-01's retention sweeps exist ([PostgreSQL store](postgres-store.md#
 - **Rate-limit relief** (a legitimate client locked out): the buckets are fixed windows that reset by themselves within one window;
   an operator may raise a limit for a self-hosted center with `ARCFORGES_CENTER_IDENTITY_POLICY`. Never delete `platform.rate_limit`
   rows of a live attack.
+- **The acceptance ceiling is reached** (every new proof sign-in answers `anonymous_flows`): it resets after its window. To change it,
+  edit the acceptance environment's `ARCFORGES_CENTER_IDENTITY_POLICY` in `wrangler.json` through a reviewed PR; to reclaim the
+  space, the owner may drop `arcforges_acceptance` (the next acceptance deployment recreates and migrates it).
 - **Mass session revocation** before A1b's `admin revoke-sessions`: as the migration role,
   `UPDATE identity.session SET revoked_at = now(), revoke_reason = 6, rev = rev + 1 WHERE revoked_at IS NULL` (optionally
   `AND user_id = '<account>'`); every credential is refused at its next call.
