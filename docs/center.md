@@ -87,8 +87,8 @@ variable and never repeats its value.
 | `ARCFORGES_CENTER_SURFACES`             | per mode | The enabled surfaces: exact names (`identity`), comma-separated, or `none`; official-hosted enables none by default, self-hosted all ([surface switch](center-identity.md#surface-switch)); a surface needs the runtime database           |
 | `ARCFORGES_CENTER_CLIENT_IP_HEADER`     | none     | Empty or `X-Arcforges-Client-Ip`; required in official-hosted mode while a surface is enabled (the Worker always passes it); self-hosted only with trusted proxies                                                                         |
 | `ARCFORGES_CENTER_TRUSTED_PROXIES`      | none     | Self-hosted only: CIDR prefixes, comma-separated, whose client-address header is trusted                                                                                                                                                   |
-| `ARCFORGES_CENTER_BOOTSTRAP_SHA256`     | none     | With `..._EXPIRES_AT`: the SHA-256 (64 lowercase hex characters) of the owner bootstrap token; never the token itself                                                                                                                      |
-| `ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT` | none     | RFC 3339 UTC instant in the future and at most seven days ahead                                                                                                                                                                            |
+| `ARCFORGES_CENTER_BOOTSTRAP_SHA256`     | none     | With `..._EXPIRES_AT`: the SHA-256 (64 lowercase hex characters) of the exact owner bootstrap token text, prefix included (`printf %s "$TOKEN" \| sha256sum`); never the token itself                                                      |
+| `ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT` | none     | RFC 3339 UTC instant at most seven days ahead; a past one still starts the center (the bootstrap is then refused as expired, and the start-up log warns that both variables can be removed)                                                |
 | `ARCFORGES_CENTER_IDENTITY_POLICY`      | defaults | A bounded JSON override of the identity lifetimes and limits ([identity policy](center-identity.md#identity-policy)); the hosted Worker passes it only where `wrangler.json` sets it (the acceptance environment's anonymous-flow ceiling) |
 
 The `migrate` and `admin` commands read their own variables (`ARCFORGES_CENTER_MIGRATION_DATABASE_URL`, the migration role's
@@ -270,8 +270,9 @@ listener is not configured in the hosted Container, so production adds no route;
 periodic `metrics` log line, which the Container's logs carry.
 
 Logs are JSON lines (`log/slog`) with `service=arcforges-center`. A request line holds the method label, the outcome code, the
-duration, the correlation id of an admitted call and the refusal code and category; it never holds a header value, a credential,
-a request or response body, a command line, output or file content. A configuration error names the variable only.
+duration, the correlation id of an admitted call or of a domain reply the pipeline answered itself (a disabled surface's
+`not_activated`, logged and counted as the OK reply it is) and the refusal code and category; it never holds a header value, a
+credential, a request or response body, a command line, output or file content. A configuration error names the variable only.
 
 ## Hosted deployment
 
@@ -285,15 +286,15 @@ candidate inspects both ELF members and their legal files without running them (
 
 Structural cost bounds of the production deployment, enforced by configuration:
 
-| Bound               | Value                                                           | Where                                                                                                   |
-| ------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Container instances | `max_instances: 1`, `instance_type: lite`                       | `wrangler.json` (checked by the candidate)                                                              |
-| Idle stop           | `sleepAfter` 60 s                                               | generated `containerSleepAfter`                                                                         |
-| Worker CPU          | `cpu_ms: 50`                                                    | `wrangler.json`                                                                                         |
-| Public rate limit   | 60 requests per 60 s                                            | `HELLO_RATE_LIMITER` in `wrangler.json`                                                                 |
-| Center connections  | 64 per listener                                                 | `ARCFORGES_CENTER_MAX_CONNECTIONS` default                                                              |
-| Hello database      | pool of 2, 5 s statement timeout, 15 s call                     | `internal/config`, `internal/hello`                                                                     |
-| Runtime database    | pool of 4 (1 to 32); login roles limited to 16 connections each | `ARCFORGES_CENTER_DATABASE_MAX_CONNS` default; [PostgreSQL store](postgres-store.md#connection-budgets) |
+| Bound               | Value                                                                    | Where                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Container instances | `max_instances: 1`, `instance_type: lite`                                | `wrangler.json` (checked by the candidate)                                                              |
+| Idle stop           | `sleepAfter` 60 s                                                        | generated `containerSleepAfter`                                                                         |
+| Worker CPU          | `cpu_ms: 50`                                                             | `wrangler.json`                                                                                         |
+| Public rate limit   | 60 requests per 60 s per location and client (an IPv6 client by its /64) | `HELLO_RATE_LIMITER` in `wrangler.json`; the key is `edgeClientKey` (`worker/ingress/edge-limit.ts`)    |
+| Center connections  | 64 per listener                                                          | `ARCFORGES_CENTER_MAX_CONNECTIONS` default                                                              |
+| Hello database      | pool of 2, 5 s statement timeout, 15 s call                              | `internal/config`, `internal/hello`                                                                     |
+| Runtime database    | pool of 4 (1 to 32); login roles limited to 16 connections each          | `ARCFORGES_CENTER_DATABASE_MAX_CONNS` default; [PostgreSQL store](postgres-store.md#connection-budgets) |
 
 While a node is connected (AF-CTR-05 onward) the one instance stays running; that always-on worst case is one `lite` instance
 per deployment, which AF-PLAT-01's budgets take as the bound.

@@ -83,10 +83,12 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   (comma-separated generated names, no spaces or repetition; anything else enables none), it is answered with the surface's
   generated reply, the domain refusal `STATE/not_activated` as one reply frame and the OK status trailer, before any rate limit,
   credential, body or Container. An enabled one is counted by its own `IDENTITY_RATE_LIMITER` (not the Hello limiter); over it, or
-  without the binding, the generated domain refusal `RESOURCE/rate_limited` answers. A forwarded surface call carries
-  `x-arcforges-client-ip` set from `cf-connecting-ip` (left out when Cloudflare sent none; a client's own value is never copied).
-  The generated replies are the center's own refusals without a correlation id, so a client reads them exactly as the center's
-  ([accounts, sessions and devices](center-identity.md#surface-switch)).
+  without the binding, the generated domain refusal `RESOURCE/rate_limited` answers, with its `retry_at` and `recovery_at` written by
+  the Worker into the generated template: the refusal's time rounded up to the second plus the generated edge period (60 s, the
+  limiter's `simple.period`). Both limiters key a client by its address, an IPv6 client by its /64 (`edgeClientKey`). A forwarded
+  surface call carries `x-arcforges-client-ip` set from `cf-connecting-ip` (left out when Cloudflare sent none; a client's own value
+  is never copied). The generated replies are the center's own refusals without a correlation id or `ResponseMeta`, so a client reads
+  them exactly as the center's ([accounts, sessions and devices](center-identity.md#surface-switch)).
 - **Reply.** Only `content-type`, `grpc-status`, `grpc-message` and the Worker's own headers (`cache-control: no-store`,
   `x-content-type-options`, the revision and build headers) are returned; cookies and any other Container header are
   dropped. A Worker-generated domain reply (a disabled surface, the surface rate limit) carries the reply frame and the OK trailer

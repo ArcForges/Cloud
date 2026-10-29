@@ -73,8 +73,13 @@ transaction, consumes the flow, advances the credential's counter, finds or crea
 claim and issues an `account` session. The policy is fixed: the RP ID is the host of the public base URL and the only origin its
 origin (no cross-origin, no top origins, no Android origins until the Android task); user verification is required on every
 ceremony; ES256 only; attestation `none` only; the assertion's user handle must be the credential owner's; a counter that does not
-advance is refused; every library error is one refusal. A public base URL whose host is an IP address cannot be a relying party: a
+advance is refused; every library error is one refusal. A credential ID may have up to 1023 bytes, the contract's and WebAuthn's
+bound (`TestThePasskeyCredentialIDBoundIsTheContracts`). A public base URL whose host is an IP address cannot be a relying party: a
 self-hosted center's default leaves identity off and logs why; an explicit surface list refuses to start.
+
+**Profile values.** A display name is plain text of 1 to 128 UTF-16 units; a locale a BCP 47 shaped tag of at most 35 characters; a
+time zone an IANA name shape of at most 64 characters within the contract's timezone pattern, which has no `+` (so `Etc/GMT+5`
+is refused and `Etc/GMT-5` admitted).
 
 **Native installation claims.** Every BeginAuthentication names an `InstallationClaim`; a native account sign-in admits the product
 `arcforges-mobile` on an Android or iOS platform (nodes enroll with AF-CTR-04). The installation ID is the client's and global: an ID
@@ -94,7 +99,10 @@ delivery is decided (AR-14, H-19), the e-mail method is left out of ListAuthProv
 (`method: not_offered`). Tests inject the fake sender and close the loop through it.
 
 **Owner bootstrap** (AD-0021 §6). The deployment configures the SHA-256 of a one-time token and its expiry
-(`ARCFORGES_CENTER_BOOTSTRAP_SHA256`, `ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT`, at most seven days ahead). The owner runs
+(`ARCFORGES_CENTER_BOOTSTRAP_SHA256`, `ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT`, at most seven days ahead). The digest is the SHA-256 of
+the exact token text, its `afb1.` prefix included, in lowercase hexadecimal: `printf %s "$TOKEN" | sha256sum`
+(`session.BootstrapDigest`, pinned by a known-answer test). A past expiry still starts the center: the bootstrap is refused as
+expired, and the start-up log warns that the two variables can be removed, which the owner does once the account exists. The owner runs
 `BeginAuthentication(PASSKEY, ENROLL, installation)`, which always returns creation options, whatever the bootstrap's state, and is
 rate limited, then `CompleteEnrollment(flow_id, proof.local_code = token, credential.passkey, profile.display_name)`. The token is
 compared first, in constant time, before any WebAuthn verification or write; a disabled, expired, used or wrong bootstrap and an
@@ -103,6 +111,13 @@ wrong token counts in its client prefix's bucket; there is no global bucket, so 
 transaction takes the bootstrap's advisory lock and inserts the singleton `identity.bootstrap` row, so concurrent attempts create
 one account (`TestConcurrentBootstrapsCreateOneAccount`). The token never appears in the repository, a log or a database row. A2
 adds the operator script that generates it and the proof environment's dispatch inputs.
+
+**A store failure after a verified proof** (F9). A flow's attempt is taken before its proof is checked. When the proof verified (a
+passkey assertion, an e-mail code, the bootstrap token and creation) but the success transaction failed in the store, the reply is
+`RESOURCE/overloaded` with `AFTER_TIME` and the attempt is given back, best effort, so the identical retry succeeds; a wrong proof
+never gets its attempt back, and a flow consumed meanwhile is never changed (`TestAStoreFailureAfterTheProofGivesTheAttemptBack`).
+The passkey counter is checked again under the credential's row lock with go-webauthn's rule: a counter that does not exceed the
+stored one is refused unless both are zero (`TestThePasskeyCounterIsRecheckedUnderTheRowLock`).
 
 ## Sessions
 
@@ -122,15 +137,21 @@ bearer or a cookie against the store on every call: a revoked session, device or
 
 **Refresh rotation and reuse** (n3). `RefreshSession(refresh_token, installation_id)` locks the session by the token's digest,
 checks revocation and expiry, then the installation, the scope (`account` and `mobile.limited` only) and the account, records the
-presented digest as spent and issues the next generation. A spent digest presented again is a reuse: every live session of its
-family is revoked, `identity.session.refresh_reused` is audited and the call answers `AUTHENTICATION/credential_revoked`. There is
+presented digest as spent and issues the next generation, and reads the session's device for the reply in the same transaction, so a
+reply that cannot be built leaves the token unspent. A spent digest presented again is a reuse: every live session of its family is
+revoked, `identity.session.refresh_reused` is audited when the reuse revoked a session (later presentations of the family's spent
+tokens are only counted, in the `refresh`/`reused` metric) and the call answers `AUTHENTICATION/credential_revoked`. There is
 no grace window: a client that lost the response to a refresh must sign in again (`TestRefreshRotatesAndAReusedTokenRevokesTheFamily`
 pins this). Two concurrent refreshes with one token serialize on the row and the second revokes the family.
 
-**Lists.** ListSessions lists the account's live `account` and `mobile.limited` sessions, newest first, marking the caller's.
+**Lists.** ListSessions lists the account's live `account` and `mobile.limited` sessions, newest first, marking the caller's; a
+session is live while it is not revoked and within its absolute and its sliding expiry (a browser session's idle expiry, a native
+session's refresh expiry).
 DeviceService.List lists the account's live devices with their live installations; a browser's device is listed only while it has
 a live session, and a revoked device is not listed. ListAuthIdentities lists the live credentials. Pages hold at most 100 items
-(default 50); a cursor is opaque and bound to its listing, and a malformed one is `VALIDATION/invalid_cursor`.
+(default 50); a cursor is opaque and bound to its listing, and a malformed one, or one whose instant is outside the contract's
+range (years 1 to 9999), is `VALIDATION/invalid_cursor`. A full page of 100 devices fits the method's 64 KiB reply budget, which the
+center's Connect writer admits (`TestAFullDevicePageIsSent`).
 
 ## Identity policy
 
@@ -158,9 +179,14 @@ sets it: only the acceptance environment does, with its anonymous-flow ceiling (
 
 A prefix is the client address's /24 (IPv4) or /56 (IPv6) network; an IPv4-mapped address counts as IPv4. A bucket is the
 SHA-256 of its kind and key in `platform.rate_limit`, counted in its own short transaction before the work it guards. A refusal is
-`RESOURCE/rate_limited` with `retry_at` and a `LimitFailure` naming the bucket kind; the first refusal of a bucket's window is
-audited as `identity.rate_limited`, the others only counted. The failed-proof buckets of an account (or of an unknown credential's
-digest) and of an address count only failures, so two prefixes cannot together exceed an account's limit.
+`RESOURCE/rate_limited` with `retry_at` and a `LimitFailure` naming the bucket kind; the first refusal of a request bucket's window
+is audited as `identity.rate_limited`, the others only counted. The failed-proof buckets of an account (or of an unknown credential's
+digest) and of an address count only failures, so two prefixes cannot together exceed an account's limit. A wrong e-mail code is
+reserved in its address's bucket before the code is checked, in one statement that counts only under the limit, so concurrent codes
+over several flows reach the check at most the limit's number of times; a refused reservation gives the flow attempt back, and a
+right code gives its reservation back with its sign-in (`TestConcurrentWrongCodesNeverPassTheAddressLimit`). A failed proof is
+audited once per window: a failure that names an account once per account, an anonymous one (an unknown credential, any e-mail
+code) once per client prefix, whatever keys it names (`TestAnonymousFailuresAreAuditedOncePerPrefix`).
 
 **Anonymous-flow ceiling** (C1). `anonymousFlows` is an opt-in global bucket (`anonymous_flows`, one key for every client): every
 flow an anonymous call creates counts in it (BeginAuthentication of every method and purpose, the owner's enrollment included), and
@@ -176,29 +202,32 @@ can also drop the whole acceptance database `arcforges_acceptance` ([PostgreSQL 
 client's own header) and omits it when Cloudflare sent none; the center needs exactly one valid value, refuses a call without one
 (`validation.invalid_request`) and refuses to start with a surface enabled unless `ARCFORGES_CENTER_CLIENT_IP_HEADER` names that
 header. A self-hosted center keys by the TCP peer, or by exactly one valid header value when the peer is in
-`ARCFORGES_CENTER_TRUSTED_PROXIES` (CIDR prefixes).
+`ARCFORGES_CENTER_TRUSTED_PROXIES` (CIDR prefixes). The acceptance composition is tested as deployed: official-hosted, identity on,
+that header without trusted proxies, the proof host as relying party; a call without exactly one address is refused before the store
+(`TestTheProofCompositionRequiresTheWorkersClientAddress`). The Worker's own edge limits key a client by its address, an IPv6 client by
+its /64 ([deployment](deployment.md)).
 
 ## Refusals
 
 Every domain refusal is one row of ArcForges-Design `contracts/errors.md`, rendered as `ArcError` (snake_case code, category,
-`message_key` `error.<category>.<code>`, retry advice, effect `DID_NOT_HAPPEN` except `INTERNAL/internal`) with the call's
+`message_key` `error.<category>.<code>`, retry advice, effect `DID_NOT_HAPPEN` except `INTERNAL/internal`, whose effect is `UNKNOWN`) with the call's
 correlation id, in the reply with gRPC `OK`:
 
-| Refusal                             | When                                                                                             |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `VALIDATION/invalid_argument`       | a field outside its rule (`state.reason` = field path and rule), a method or purpose not offered |
-| `VALIDATION/invalid_cursor`         | a malformed page cursor or one of another listing                                                |
-| `AUTHENTICATION/unauthenticated`    | a wrong or unknown proof, an account that may not sign in, a refused bootstrap (all alike)       |
-| `AUTHENTICATION/token_expired`      | an expired refresh token                                                                         |
-| `AUTHENTICATION/credential_revoked` | a revoked session, device or installation; a reused refresh token                                |
-| `AUTHORIZATION/permission_denied`   | a scope or account state the operation does not admit; another account's installation            |
-| `CONFLICT/code_reused`              | a completed flow presented again, or a completion still in progress                              |
-| `STATE/not_found`                   | an unknown flow, or one of another channel, kind, purpose or address                             |
-| `STATE/expired`                     | an expired flow, or one whose attempts are exhausted                                             |
-| `STATE/not_activated`               | a method of a disabled surface (`state.reason` = the surface)                                    |
-| `RESOURCE/rate_limited`             | a rate-limit bucket over its limit, or a flow's sends exhausted (`email_code_sends`)             |
-| `RESOURCE/overloaded`               | the store is unreachable or contended                                                            |
-| `INTERNAL/internal`                 | anything else (logged with the correlation id, never with request content)                       |
+| Refusal                             | When                                                                                                                                                                    |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VALIDATION/invalid_argument`       | a field outside its rule (`state.reason` = field path and rule), a method or purpose not offered                                                                        |
+| `VALIDATION/invalid_cursor`         | a malformed page cursor, one of another listing or one whose instant is out of range                                                                                    |
+| `AUTHENTICATION/unauthenticated`    | a wrong or unknown proof, an account that may not sign in, a refused bootstrap (all alike)                                                                              |
+| `AUTHENTICATION/token_expired`      | an expired refresh token                                                                                                                                                |
+| `AUTHENTICATION/credential_revoked` | a revoked session, device or installation; a reused refresh token                                                                                                       |
+| `AUTHORIZATION/permission_denied`   | a scope or account state the operation does not admit; another account's installation                                                                                   |
+| `CONFLICT/code_reused`              | a completed flow presented again, or a completion still in progress                                                                                                     |
+| `STATE/not_found`                   | an unknown flow, or one of another channel, kind, purpose or address                                                                                                    |
+| `STATE/expired`                     | an expired flow, or one whose attempts are exhausted                                                                                                                    |
+| `STATE/not_activated`               | a method of a disabled surface (`state.reason` = the surface)                                                                                                           |
+| `RESOURCE/rate_limited`             | a rate-limit bucket over its limit, or a flow's sends exhausted (`email_code_sends`)                                                                                    |
+| `RESOURCE/overloaded`               | the store is unreachable or contended (before any commit: retry after a while)                                                                                          |
+| `INTERNAL/internal`                 | a write whose commit went unanswered (effect `UNKNOWN`, retry `NEVER`); anything else (retry after a while); logged with the correlation id, never with request content |
 
 The ingress adds two transport refusals for a known bearer (both gRPC 16 `UNAUTHENTICATED`): `auth.token_expired` and
 `auth.credential_revoked`. They need companion rows in errors.md's center ingress table (DC-14).
@@ -206,23 +235,24 @@ The ingress adds two transport refusals for a known bearer (both gRPC 16 `UNAUTH
 ## Audit
 
 Events are appended to the platform audit chain (`platform.AppendAudit`) as the last statement of the transaction they describe,
-or in their own transaction for a refusal: `identity.sign_in.succeeded`, `identity.sign_in.failed` (the first failure of a
-bucket window), `identity.bootstrap.completed`, `identity.bootstrap.refused` (first per window, with the reason),
-`identity.session.refresh_reused`, `identity.rate_limited` (first per window) and `access.refused`. Payloads are closed JSON:
+or in their own transaction for a refusal: `identity.sign_in.succeeded`, `identity.sign_in.failed` (the first failure of a window
+per account, or per client prefix for an anonymous failure), `identity.bootstrap.completed`, `identity.bootstrap.refused` (first per
+window, with the reason), `identity.session.refresh_reused` (when a reuse revoked a session), `identity.rate_limited` (first per
+window) and `access.refused`. Payloads are closed JSON:
 method, channel, scope, reasons and counts, never a token, code, e-mail address or IP address. A sign-in whose audit event cannot be
 written is refused and writes nothing (`TestARefusedAuditRefusesTheSignIn`).
 
 ## Transactions per request
 
-| Call                             | Transactions                                                                                                                |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| BeginAuthentication              | 1 bucket count, 1 flow insert (+1 audit on a first refusal)                                                                 |
-| CompleteAuthentication (passkey) | 1 bucket count, 1 credential read, 1 bucket check, 1 attempt, then 1 success transaction (or 1 flow end and 1 bucket count) |
-| RequestEmailCode                 | 2 bucket counts, 1 flow update (PBKDF2 before it, the mail after the response)                                              |
-| RedeemEmailCode                  | 1 bucket count, 1 flow read, 1 bucket check, 1 attempt, then 1 success transaction (or failure counts)                      |
-| CompleteEnrollment               | 1 account check, 1 attempt, 1 creating transaction under the advisory lock (or 1 bucket count and 1 audit)                  |
-| RefreshSession                   | 1 bucket count, 1 rotation, 1 device read                                                                                   |
-| Session reads                    | 1 read-only credential check (ingress), 1 read-only query (+1 audit on an access refusal)                                   |
+| Call                             | Transactions                                                                                                                                                           |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BeginAuthentication              | 1 bucket count (2 with the anonymous-flow ceiling), 1 flow insert (+1 audit on a first refusal)                                                                        |
+| CompleteAuthentication (passkey) | 1 bucket count, 1 credential read, 1 bucket check, 1 attempt, then 1 success transaction (or 1 flow end and 2 failure counts; 1 attempt release after a store failure) |
+| RequestEmailCode                 | 2 bucket counts, 1 flow update (PBKDF2 before it, the mail after the response)                                                                                         |
+| RedeemEmailCode                  | 1 bucket count, 1 flow read, 1 bucket check, 1 attempt, 1 failure reservation, then 1 success transaction (or 1 failure marker count)                                  |
+| CompleteEnrollment               | 1 account check, 1 attempt, 1 creating transaction under the advisory lock (or 1 bucket count and 1 audit)                                                             |
+| RefreshSession                   | 1 bucket count, 1 rotation that also reads the device                                                                                                                  |
+| Session reads                    | 1 read-only credential check (ingress), 1 read-only query (+1 audit on an access refusal)                                                                              |
 
 No transaction is open while PBKDF2, WebAuthn or the mail provider runs. The runtime pool stays four connections
 ([PostgreSQL store](postgres-store.md#connection-budgets)).
@@ -235,8 +265,9 @@ The identity methods form the `identity` surface. The center and the generated W
 self-hosted mode enables every known surface unless listed (an explicit list pins the surfaces across upgrades; `none` enables
 none). A disabled surface's method is answered with the domain refusal `STATE/not_activated` (`state.reason = identity`): by the
 Worker from the generated reply, before any rate limit, credential, body or Container (`tests/worker/ingress-surfaces.test.ts`), and
-by the center with the call's correlation id. An enabled one passes the Worker's own edge limit `IDENTITY_RATE_LIMITER` (over it, the
-generated domain refusal `RESOURCE/rate_limited`) before it is forwarded. The Worker passes its parsed list to the Container as
+by the center with the call's correlation id (logged and counted as an OK reply with that id). An enabled one passes the Worker's own
+edge limit `IDENTITY_RATE_LIMITER` (over it, the generated domain refusal `RESOURCE/rate_limited` with its `retry_at`: the refusal's
+time rounded up to the second plus the limiter's 60-second period) before it is forwarded. The Worker passes its parsed list to the Container as
 `ARCFORGES_CENTER_SURFACES` (`none` when the list enables nothing, so a mistyped list never stops the center) and always
 `ARCFORGES_CENTER_CLIENT_IP_HEADER`; surfaces take effect only with `ARCFORGES_HELLO_RUNTIME=go`.
 

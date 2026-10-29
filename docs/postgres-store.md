@@ -153,6 +153,9 @@ locks. Integration tests against a real PostgreSQL cover each one.
 
 - transactions with a deadline (10 s by default) and cancellation;
 - a bounded retry of serialization failures and deadlocks (5 attempts with jittered backoff);
+- a read-write transaction whose COMMIT was sent without a definite answer (a lost connection, a timeout, a cancellation, the
+  pooler's `08P01`: anything but a class 40 or 23 refusal or a transaction that had failed) is `ErrCommitUnknown`: it may have
+  committed, so it is never retried, and the identity surface answers `INTERNAL/internal` with effect `UNKNOWN` and retry `NEVER`;
 - errors that keep the operation, the SQLSTATE and the constraint name but never the server's message or detail, which can quote
   row values.
 

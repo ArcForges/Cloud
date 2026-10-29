@@ -44,12 +44,21 @@ The `identity` surface (AF-CTR-03, [accounts, sessions and devices](center-ident
 `FLAGSHIP_SURFACES`: production carries `""` (no surface; Hello only), the acceptance environment `identity` with `ALLOWED_ORIGIN`
 set to its own origin. The Worker passes the parsed list to the Container as `ARCFORGES_CENTER_SURFACES` and always
 `ARCFORGES_CENTER_CLIENT_IP_HEADER`; a disabled surface is answered at the edge without waking the Container. Both environments bind
-an `IDENTITY_RATE_LIMITER` (60 per minute per location and address) for the surface methods. No bootstrap or mail value is ever in
+an `IDENTITY_RATE_LIMITER` (60 per minute per location and client) for the surface methods; over it the Worker answers the generated
+`RESOURCE/rate_limited` with a retry instant one limiter period (60 s) after the refusal. The acceptance environment also passes
+`ARCFORGES_CENTER_IDENTITY_POLICY` with its anonymous-flow ceiling (600 flows per hour), because it shares the production Neon
+project ([identity policy](center-identity.md#identity-policy)); production passes no policy. No bootstrap or mail value is ever in
 `wrangler.json`; e-mail delivery stays disabled in every environment.
+
+Both edge rate limits, the Hello's and the surface's, key a client by `edgeClientKey` (AF-CTR-03 F7): an IPv4 address, or the IPv4
+address of an IPv4-mapped IPv6 address, by itself; an IPv6 address by its /64 network (the generated `edgeIpv6PrefixBits`), so one
+host cannot pass the limit by changing its address within its own network. This changes the production Hello's keying for IPv6
+clients only: every address of one /64 now shares the Hello's 60 requests per minute and location. The full address still reaches the
+center in `x-arcforges-client-ip` for the surface methods.
 
 Structural cost bounds stay in configuration: one `lite` Container instance (`max_instances: 1`), a 60-second idle `sleepAfter`, a 50 ms Worker CPU limit, the per-location Hello rate limit, at most 64 connections per center listener and a runtime database pool of four ([center](center.md#hosted-deployment), [PostgreSQL store](postgres-store.md#connection-budgets)).
 
-Anyone can construct a valid Hello request. Rate limiting is per Cloudflare location and IP, not authorization or a hard spending cap. A single lite instance, idle sleep, request limits and disabled egress reduce exposure; sustained traffic can still keep it running and incur Worker/Container charges. Configure Cloudflare usage alerts and inspect logs/metrics.
+Anyone can construct a valid Hello request. Rate limiting is per Cloudflare location and client (an IPv4 address or an IPv6 /64), not authorization or a hard spending cap. A single lite instance, idle sleep, request limits and disabled egress reduce exposure; sustained traffic can still keep it running and incur Worker/Container charges. Configure Cloudflare usage alerts and inspect logs/metrics.
 
 ## Recovery
 
