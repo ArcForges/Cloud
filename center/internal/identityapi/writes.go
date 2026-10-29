@@ -26,7 +26,10 @@ import (
 // requires meta.command_id and runs at most once per account and command ID (platform.Execute, AD-0021 section 10): the step-up
 // evidence it needs is consumed in its own transaction, a final refusal (retry NEVER) is kept by the receipt and answered to every
 // replay, and any other refusal (step_up_required, rate_limited, overloaded) or failure rolls the receipt back, so the same command
-// can succeed after the step-up or the wait its advice names. The receipt keeps the reply message without tokens.
+// can succeed after the step-up or the wait its advice names. The receipt keeps the reply message without tokens and without an
+// e-mail address (C1). The one final refusal no receipt keeps is CompletePasskeyRegistration's credential: not_verified (B5): the
+// creation is verified before the receipt, so that refusal ends the flow outside it, and the identical replay answers STATE/expired.
+// A duplicate of a registration whose first execution still runs answers RESOURCE/overloaded (B4).
 
 // storedRefusal is a refusal a command receipt answered: the ArcError of the command's one execution, without a correlation id.
 type storedRefusal struct{ value *foundationv1.ArcError }

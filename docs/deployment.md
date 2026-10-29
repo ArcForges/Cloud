@@ -19,7 +19,7 @@ PR checks use no cloud credentials. Main builds a versioned Linux Native AOT ima
 
 Publication consumes the candidate by its workflow artifact ID. Before anything is pushed or promoted, the gated PostgreSQL step runs the sealed image's own `arcforges-center migrate` with the migration role (`tooling/postgres-deploy.ts`, [PostgreSQL store](postgres-store.md#deployment)) and records `artifacts/postgres-gate-production.json`. The deployment entry point then performs one promotion identity/integrity check, requires both gate records (D1 and PostgreSQL) for this candidate, loads the image and checks the Docker image ID. It pushes that image, reads the live Worker version's runtime slot from Cloudflare (its version message `runtime-slot=<slot>`), rotates the other slot with the image's `admin rotate-runtime-credential` (proved directly and through the pooled endpoint, never printed), deploys the same bundled Worker with it using the returned registry digest and the new slot's label and, only after that deployment succeeded, records the slot as promoted with `admin confirm-runtime-credential` ([runtime credential rotation](postgres-store.md#runtime-credential-rotation)). Publication does not rebuild. Deployments serialize and reject superseded main commits.
 
-`artifacts/deployment.json` records the source, version and image/digest after the provider operation succeeds, and the surfaces the deployed Worker version starts the Go center with (`center.surfaces`, as `ARCFORGES_CENTER_SURFACES` states them; the acceptance deployment's `artifacts/proof-deployment.json` records the same field). A prerelease preserves the candidate and deployment record. There is no automatic health/RPC/readiness polling, browser test or public archive download. A successful deployment is reported as deployment completion, not live runtime acceptance.
+`artifacts/deployment.json` records the source, version and image/digest after the provider operation succeeds, and the configured surfaces: those the deployed Worker version starts the Go center with (`center.configuredSurfaces`, as `ARCFORGES_CENTER_SURFACES` states them; the acceptance deployment's `artifacts/proof-deployment.json` records the same field). The field is computed from the version's configuration, not observed from the running center ([start environment](#start-environment-after-a-deployment)). A prerelease preserves the candidate and deployment record. There is no automatic health/RPC/readiness polling, browser test or public archive download. A successful deployment is reported as deployment completion, not live runtime acceptance.
 
 Existing `test:live` command remains an explicit local diagnostic for a concrete affected behavior. They are not merge/publication gates. The Web page may be exercised locally when needed; no mandatory cross-owner test is implied. Preserve the API route and Web's apex binding.
 
@@ -75,13 +75,35 @@ settings before the request is forwarded. The bounds are generated from the cent
 `centerStopPollMs` in `worker/tables/center-tables.generated.ts`, from `routes.ShutdownMilliseconds`, the center's own shutdown
 bound). Requests that arrive meanwhile wait for the same restart, so with `max_instances: 1` the
 previous environment never serves a request of the new version. Health and the Hello go through the same rule: the first request
-after a deployment pays one restart and is never refused by it, unless the previous center cannot be stopped within the bounds; it
-then gets the library's start-failure reply, which the Worker answers as the retryable `UNAVAILABLE` (the request was not forwarded).
+after a deployment pays one restart and is never refused by it. A previous center that cannot be stopped within the bounds is never
+forwarded to: after up to about 10 s (6 s for SIGTERM, then 4 s for SIGKILL) the request gets the library's start-failure reply,
+which the Worker answers as the retryable `UNAVAILABLE`, but only if the request's own deadline has not run out first. Health and
+the identity methods (15 s budgets) get that reply. The Hello (a 10 s budget), and any call whose client deadline is shorter than
+about 10 s, reaches its deadline first and gets `DEADLINE_EXCEEDED`, which carries no retry advice
+([development](development.md)), again without having been forwarded; so does a Hello whose restart and cold start together take
+longer than 10 s.
 The digest covers the runtime credential, so it stays in the Durable Object's storage and is never logged or returned.
 
 The center states the surfaces it serves in its health document (`center.surfaces`, [center](center.md#health-readiness-logs-and-metrics)).
-`npm run test:live` compares it with `artifacts/deployment.json`, and the local Worker check (`npm run test:worker`) with the
-surfaces the candidate's Worker forwards; CI makes no such request ([validation policy](validation-policy.md)).
+The deployment evidence (`center.configuredSurfaces` in `artifacts/deployment.json` and `artifacts/proof-deployment.json`) is
+what the deployed version starts the center with, computed from its configuration; it is not an observation of the running center.
+`npm run test:live` compares the production health with `artifacts/deployment.json`, and the local Worker check
+(`npm run test:worker`) compares it with the surfaces the candidate's Worker forwards. CI makes no such request
+([validation policy](validation-policy.md)), so for both environments the post-deploy acceptance reads `/api/healthz`
+`center.surfaces` and compares it with the deployment evidence (`none` on production, `identity` on proof).
+
+A rollback to a Worker version from before AF-CTR-03 part A1b (`wrangler rollback` or the dashboard, which reach only the
+immediately previous version) brings back a Container class without the start digest. The running center keeps the start
+environment of the newer version (its surfaces, client-address header, identity policy and runtime credential) until it has been
+idle for `sleepAfter` (60 s); only its next start takes the rolled-back version's variables. Meanwhile its health can state other
+surfaces than the rolled-back Worker forwards, and on proof an identity call can be answered by a center whose surfaces differ from
+the Worker's. The operator step after such a rollback: read `/api/healthz` `center.surfaces`; while it differs from the rolled-back
+version's configured surfaces, keep the environment's API route without traffic for at least 60 s (for production, remove only the
+`arcforges.com/api/*` route, as for containment under [recovery](#recovery)), then restore the route and read it again. The digest
+the newer version recorded stays in the Durable Object's storage, so the next deployment of a new version restarts the center as
+above; a second rollback, back to exactly that newer version, finds its own digest and does not restart a center the older version
+started, so the same check follows it. A rollback between two versions that have the digest restarts the center once, as a
+deployment does.
 
 ## Recovery
 

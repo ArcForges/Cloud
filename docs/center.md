@@ -199,7 +199,9 @@ own statuses: `INVALID_ARGUMENT` ("Name must not be empty."), `RESOURCE_EXHAUSTE
 [cloud-ingress](cloud-ingress.md)). The Design records this mapping in a companion change of `contracts/errors.md`.
 
 Signatures and request digests always cover the bytes as transmitted, never a re-encoding (AD-0021 §10): the Go and C# protobuf
-encoders order `oneof` fields differently, so a verifier must never re-encode a decoded message.
+encoders order `oneof` fields differently, so a verifier must never re-encode a decoded message. A command receipt's digest leaves
+out only `RequestMeta.correlation_id`, which is per attempt, and copies every other byte as transmitted
+([center identity](center-identity.md#command-receipts)).
 
 ## Worker table authority
 

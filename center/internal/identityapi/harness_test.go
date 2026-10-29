@@ -106,7 +106,8 @@ type settings struct {
 	policy      string
 	noBootstrap bool
 	mailOff     bool
-	// participants are the device revocation's further participants (AF-CTR-04's node enrolment and AF-CLD-02's pairing).
+	// participants are the device revocation's cascade participants (DC-06, DC-17: AF-CTR-07's agent grants and AF-CLD-06's push
+	// registrations).
 	participants []device.Participant
 }
 

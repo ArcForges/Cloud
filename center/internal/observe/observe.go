@@ -82,8 +82,9 @@ func (m *Metrics) ObserveRefusal(code, category string) {
 }
 
 // ObserveIdentity counts one outcome of the identity surface (AF-CTR-03): sign-in stages by method and outcome, refreshes
-// (rotated, refused, reused), rate-limit refusals by bucket kind, bootstrap outcomes and e-mail deliveries. Both labels are closed
-// values chosen by the code, never request content.
+// (rotated, refused, reused), rate-limit refusals by bucket kind, bootstrap outcomes, e-mail code requests and deliveries, step-up
+// stages (step_up_begin by method; step_up_complete proved, refused or upgraded) and passkey registration (registration_begin;
+// registration_complete succeeded or refused). Both labels are closed values chosen by the code, never request content.
 func (m *Metrics) ObserveIdentity(event, outcome string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

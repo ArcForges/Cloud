@@ -18,17 +18,17 @@ One schema per module, owned by the migration role. The model follows data/cloud
 
 The first migration (`center/internal/schema/migrations/0001_platform_store.sql`) creates these tables:
 
-| Table                         | Purpose                                                                                                                                                                 | Runtime role             |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `platform.schema_migration`   | The applied migrations: version, name, SHA-256, time, role, duration and the build that applied them (created by the runner before the first migration)                 | `SELECT`                 |
-| `platform.command_receipt`    | One receipt per principal and command ID: operation, SHA-256 of the transmitted request bytes, status, stored result or error code, expiry                              | `SELECT, INSERT, UPDATE` |
-| `platform.inbox`              | One row per provider message (source, message ID): received, processed, outcome, expiry                                                                                 | `SELECT, INSERT, UPDATE` |
-| `platform.outbox`             | Events committed with their business change: unique dedup key, topic, aggregate, payload, correlation, state, attempts, availability                                    | `SELECT, INSERT, UPDATE` |
-| `platform.job_lease`          | Jobs with a holder, a lease expiry and a fence that increases with every claim                                                                                          | `SELECT, INSERT, UPDATE` |
-| `platform.runtime_credential` | The two login roles of the runtime credential rotation, when each was rotated and when its deployment was promoted                                                      | none                     |
-| `audit.audit_event`           | The append-only audit chain: each event's SHA-256 covers the previous event's hash and the event's fields                                                               | `SELECT, INSERT`         |
-| `audit.chain_head`            | The chain's single head row, locked by every append                                                                                                                     | `SELECT, UPDATE`         |
-| `fleet.signing_key`           | Signing-key metadata (key ID, purpose, algorithm, public key, the name of the platform secret that holds the private key, validity); private keys are never stored here | `SELECT`                 |
+| Table                         | Purpose                                                                                                                                                                         | Runtime role             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `platform.schema_migration`   | The applied migrations: version, name, SHA-256, time, role, duration and the build that applied them (created by the runner before the first migration)                         | `SELECT`                 |
+| `platform.command_receipt`    | One receipt per principal and command ID: operation, SHA-256 of the transmitted request bytes without `RequestMeta.correlation_id`, status, stored result or error code, expiry | `SELECT, INSERT, UPDATE` |
+| `platform.inbox`              | One row per provider message (source, message ID): received, processed, outcome, expiry                                                                                         | `SELECT, INSERT, UPDATE` |
+| `platform.outbox`             | Events committed with their business change: unique dedup key, topic, aggregate, payload, correlation, state, attempts, availability                                            | `SELECT, INSERT, UPDATE` |
+| `platform.job_lease`          | Jobs with a holder, a lease expiry and a fence that increases with every claim                                                                                                  | `SELECT, INSERT, UPDATE` |
+| `platform.runtime_credential` | The two login roles of the runtime credential rotation, when each was rotated and when its deployment was promoted                                                              | none                     |
+| `audit.audit_event`           | The append-only audit chain: each event's SHA-256 covers the previous event's hash and the event's fields                                                                       | `SELECT, INSERT`         |
+| `audit.chain_head`            | The chain's single head row, locked by every append                                                                                                                             | `SELECT, UPDATE`         |
+| `fleet.signing_key`           | Signing-key metadata (key ID, purpose, algorithm, public key, the name of the platform secret that holds the private key, validity); private keys are never stored here         | `SELECT`                 |
 
 Retention sweeps (receipts after 90 days, the inbox, dispatched outbox rows, audit partitions) are AF-PLAT-01's. They run with the
 migration role, because the runtime role can never delete.
@@ -113,6 +113,12 @@ flow (`identity.auth_flow.email_hash`) keeps the unsalted SHA-256 of the normali
 has it, and a rate-limit bucket key is the SHA-256 of a client IP prefix, an account or an e-mail address. Such a digest can be
 reversed by trying every value, so these rows are personal data, also of people without an account, under the retention above.
 
+Command receipts (`platform.command_receipt.result`) hold no e-mail address: UpdateProfile stores its profile without
+`primary_email` and fills it from the account's live e-mail identity when it answers ([center identity](center-identity.md#command-receipts)).
+Receipt results do hold personal data: the profile's display name, locale and time zone, and credential and device labels. They
+are a second copy under the receipts' own 90-day retention (above), separate from the account's, and the runtime role cannot
+delete them, so AF-ID-02's account purge deletes `platform.command_receipt` rows by principal (the account) with the account.
+
 ## Guarantees
 
 `center/internal/platform` re-implements the guarantees of the D1 storage plans with native transactions, constraints and row
@@ -126,7 +132,10 @@ locks. Integration tests against a real PostgreSQL cover each one.
     execute once. This holds under read committed and under serializable isolation.
   - A domain refusal (`Refusal`) rolls back the command's changes and is stored, so a replay answers the same refusal.
   - Any other failure rolls back everything and stores nothing, so a retry runs the command again.
-  - The digest covers the request bytes as transmitted, never a re-encoding (AD-0021 §10).
+  - The digest covers the request bytes as transmitted without `RequestMeta.correlation_id`, which is per attempt
+    (`RequestDigestInput`): the message is walked on the wire and every kept byte is copied, never re-encoded (AD-0021 §10), so a
+    retry under a new correlation id replays the receipt and any other difference (`command_id`, `expected_rev`, the body) is
+    refused.
 - **Inbox** (`Receive`, `Processed`): the provider message is recorded in the transaction that applies it. A redelivery or a
   concurrent duplicate is recognized and not applied again.
 - **Outbox** (`Enqueue`, `Publisher`):
@@ -598,8 +607,13 @@ These are exposed today:
 - **Migrations:** the deployment's gate record and the job log hold each migration's name, checksum and duration.
 - **Identity surface** (AF-CTR-03): `arcforges_center_identity_events_total{event,outcome}` counts sign-in stages
   (`sign_in_begin` by method, `sign_in_complete` succeeded or refused), refreshes (rotated, refused, reused), rate-limit refusals
-  by bucket kind (`rate_limited`), bootstrap outcomes and e-mail deliveries (`email_send` sent or failed); the periodic metrics log
-  line carries them.
+  by bucket kind (`rate_limited`), bootstrap outcomes, e-mail code requests (`email_request` accepted) and e-mail deliveries
+  (`email_send` sent or failed); since A1b also step-up stages (`step_up_begin` by method; `step_up_complete` proved, refused or
+  upgraded, where `upgraded` is counted in addition to `proved`) and passkey registration (`registration_begin`;
+  `registration_complete` succeeded or refused). The periodic metrics log line carries them.
+- **Unanswered auxiliary commits** (D10): a transaction of auxiliary bookkeeping (a count, an attempt, a reservation, a denial, a
+  give-back, a refusal audit) whose COMMIT went unanswered is answered `RESOURCE/overloaded` and logged as the WARN line
+  `an auxiliary commit went unanswered`, with the method, the correlation id and the transaction's name (`operation`).
 
 Alert conditions for AF-OPS-01:
 
@@ -611,7 +625,11 @@ Alert conditions for AF-OPS-01:
   metric of AF-PLAT-01's sweeps; until then it is a query.
 - identity: any `refresh` `reused` (a stolen or replayed refresh token), `rate_limited` growing for one bucket kind (an attack
   or a misconfigured client), `bootstrap` outcomes other than `completed` on a deployment that has an owner, `email_send` `failed`,
-  and `access.refused` audit events (a node, push or automation credential calling account methods).
+  and `access.refused` audit events (a node, push or automation credential calling account methods);
+- identity since A1b: `step_up_complete` `refused` growing without `rate_limited` for `sign_in_failures_account` following (a slow
+  guessing of step-up proofs against one session that stays under the limit; `identity.step_up.failed` is audited only once per
+  window), and `registration_complete` `refused` growing;
+- the WARN line `an auxiliary commit went unanswered` recurring (the pooler or the network losing commits).
 
 ## Recovery
 
