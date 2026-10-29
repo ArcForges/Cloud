@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/identity"
@@ -94,8 +95,49 @@ func sessionReads() map[string]proto.Message {
 	}
 }
 
-var operationIDs = map[string]string{profilePath: "identity.getProfile", identities: "identity.listAuthIdentities", sessionsPath: "identity.listSessions",
-	devicesPath: "device.list"}
+// sessionRequests is one request for every session row of the operation table. RevokeSession and DeviceService.Revoke name the
+// given session and device, and the writes name the given credential, so a call admitted by mistake would take effect.
+func sessionRequests(who account, credential, target platform.ID, targetDevice platform.ID) map[string]proto.Message {
+	requests := sessionReads()
+	requests[beginStepUpPath] = &publicapiv1.IdentityServiceBeginStepUpRequest{Meta: meta(), OperationClass: proto.String(identity.ClassRevokeAllSessions),
+		Method: publicapiv1.AuthMethod_AUTH_METHOD_PASSKEY.Enum(), TargetHash: proto.String(identity.TargetHash(identity.ClassRevokeAllSessions, who.id, who.id))}
+	requests[completeStepUpPath] = &publicapiv1.IdentityServiceCompleteStepUpRequest{Meta: meta(), FlowId: idOf(platform.NewID()),
+		Proof: &publicapiv1.AuthProof{Proof: &publicapiv1.AuthProof_EmailCode{EmailCode: "BCDF-GHJK"}}}
+	requests[updateProfilePath] = &publicapiv1.IdentityServiceUpdateProfileRequest{Meta: command(), Patch: &publicapiv1.ProfileUpdate{
+		DisplayName: proto.String("Changed")}}
+	requests[beginRegisterPath] = &publicapiv1.IdentityServiceBeginPasskeyRegistrationRequest{Meta: meta(), DisplayName: proto.String("Phone")}
+	requests[completeRegisterPath] = &publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest{Meta: command(), FlowId: idOf(platform.NewID()),
+		Credential: &publicapiv1.WebAuthnCreation{}}
+	requests[renameCredentialPath] = &publicapiv1.IdentityServiceRenameAuthIdentityRequest{Meta: command(), CredentialId: idOf(credential),
+		Name: proto.String("Renamed")}
+	requests[removeCredentialPath] = &publicapiv1.IdentityServiceRemoveAuthIdentityRequest{Meta: command(), CredentialId: idOf(credential)}
+	requests[revokeSessionPath] = &publicapiv1.IdentityServiceRevokeSessionRequest{Meta: command(), SessionId: idOf(target)}
+	requests[revokeAllPath] = &publicapiv1.IdentityServiceRevokeAllSessionsRequest{Meta: command()}
+	requests[renameDevicePath] = &publicapiv1.DeviceServiceRenameRequest{Meta: command(), DeviceId: idOf(targetDevice), Name: proto.String("Renamed")}
+	requests[revokeDevicePath] = &publicapiv1.DeviceServiceRevokeRequest{Meta: command(), DeviceId: idOf(targetDevice)}
+	return requests
+}
+
+// sessionRows walks every session row of the operation table with its request. A row without a request, or a request without a
+// row, fails the test, so a new row cannot be left out of the matrix.
+func sessionRows(t *testing.T, requests map[string]proto.Message, each func(operation access.Operation, request proto.Message)) {
+	t.Helper()
+	for _, operation := range access.Operations() {
+		if !operation.Session {
+			continue
+		}
+		request, ok := requests[operation.Path]
+		if !ok {
+			t.Errorf("%s is a session method, but this test has no request for it", operation.ID)
+			continue
+		}
+		delete(requests, operation.Path)
+		each(operation, request)
+	}
+	for path := range requests {
+		t.Errorf("%s has a request, but no session row", path)
+	}
+}
 
 // domainError is the ArcError of a completed call (field 3 of every reply).
 func domainError(t *testing.T, answer reply) *foundationv1.ArcError {
@@ -142,24 +184,27 @@ func (h *harness) writes() string {
 	return fingerprint
 }
 
-// TestOnlyAccountSessionsReachTheSessionMethods is the scope by method matrix of SEC-01: node, push and automation credentials are
-// refused with permission_denied before any handler runs, nothing is written, and each refusal is audited; mobile.limited reaches
-// every A1a read; a restricted account reaches only its security reads.
+// TestOnlyAccountSessionsReachTheSessionMethods is the scope by method matrix of SEC-01, driven by the operation table: node,
+// push and automation credentials are refused every session method with permission_denied before any handler runs (SEC-15: no
+// production policy admits them), nothing is written, no receipt is kept, and each refusal is audited; mobile.limited reaches
+// every A1a read; a restricted account is refused exactly the methods that are not its security operations.
 func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
-	h := newHarness(t, settings{})
+	h := newHarness(t, settings{policy: writePolicy})
 	who := h.seedAccount(1, "")
 	for _, scope := range []session.Scope{session.ScopeNode, session.ScopePush, session.ScopeAutomation} {
 		credential := h.issue(who.id, scope, false)
-		for path, request := range sessionReads() {
-			before, audits := h.writes(), h.audits("access.refused")
-			refusal := domainError(t, h.post(path, request, caller{bearer: credential.access}))
-			if failure(refusal) != "AUTHORIZATION/permission_denied" || refusal.GetDetails().GetState().GetReason() != operationIDs[path] {
-				t.Errorf("%s on %s: %v", scope, path, refusal)
+		// Its own session and device: the targets a mobile.limited session may reach without evidence.
+		requests := sessionRequests(who, h.credentialIDs(who.id)[0], credential.sessionID, h.deviceOf(credential.sessionID))
+		sessionRows(t, requests, func(operation access.Operation, request proto.Message) {
+			before, receipts, audits := h.writes(), h.receipts(), h.audits("access.refused")
+			refusal := domainError(t, h.post(operation.Path, request, bearer(credential.access)))
+			if failure(refusal) != "AUTHORIZATION/permission_denied" || refusal.GetDetails().GetState().GetReason() != operation.ID {
+				t.Errorf("%s on %s: %v", scope, operation.ID, refusal)
 			}
-			if h.writes() != before || h.audits("access.refused") != audits+1 {
-				t.Errorf("%s on %s wrote or was not audited", scope, path)
+			if h.writes() != before || h.receipts() != receipts || h.audits("access.refused") != audits+1 {
+				t.Errorf("%s on %s wrote, kept a receipt or was not audited", scope, operation.ID)
 			}
-		}
+		})
 		refreshed := rpc(h, refreshPath, &publicapiv1.IdentityServiceRefreshSessionRequest{Meta: meta(), RefreshToken: proto.String(credential.refresh),
 			InstallationId: &foundationv1.Id{Value: credential.installation[:]}}, caller{}, &publicapiv1.IdentityServiceRefreshSessionResponse{})
 		if failure(refreshed.GetError()) != "AUTHORIZATION/permission_denied" {
@@ -187,19 +232,23 @@ func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
 			t.Errorf("mobile.limited on %s: %s", path, failure(refusal))
 		}
 	}
-	// A restricted account reaches its security reads, not its profile.
+	// A restricted account is refused exactly the rows that are not security operations; the security operations answer as they
+	// would for any account (a step-up, a domain refusal or success), never permission_denied.
 	restricted := h.seedAccount(2, "")
 	credential := h.issue(restricted.id, session.ScopeAccount, false)
-	for path, request := range sessionReads() {
-		refusal := domainError(t, h.post(path, request, caller{bearer: credential.access}))
-		if path == profilePath {
-			if failure(refusal) != "AUTHORIZATION/permission_denied" {
-				t.Errorf("a restricted account's profile: %s", failure(refusal))
-			}
-		} else if refusal != nil {
-			t.Errorf("a restricted account on %s: %s", path, failure(refusal))
+	other := h.issue(restricted.id, session.ScopeAccount, false)
+	requests := sessionRequests(restricted, h.credentialIDs(restricted.id)[0], other.sessionID, h.deviceOf(other.sessionID))
+	sessionRows(t, requests, func(operation access.Operation, request proto.Message) {
+		before, receipts, audits := h.writes(), h.receipts(), h.audits("access.refused")
+		refusal := domainError(t, h.post(operation.Path, request, bearer(credential.access)))
+		denied := failure(refusal) == "AUTHORIZATION/permission_denied"
+		if denied == operation.Restricted || denied && refusal.GetDetails().GetState().GetReason() != operation.ID {
+			t.Errorf("a restricted account on %s (a security operation: %v): %v", operation.ID, operation.Restricted, refusal)
 		}
-	}
+		if denied && (h.writes() != before || h.receipts() != receipts || h.audits("access.refused") != audits+1) {
+			t.Errorf("a restricted account on %s wrote, kept a receipt or was not audited", operation.ID)
+		}
+	})
 	h.verifyAudit()
 }
 

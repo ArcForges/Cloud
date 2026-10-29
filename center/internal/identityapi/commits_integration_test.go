@@ -161,6 +161,9 @@ func TestALostCommitOfBookkeepingIsRetryable(t *testing.T) {
 			Proof: &publicapiv1.AuthProof{Proof: &publicapiv1.AuthProof_Passkey{Passkey: assertionOf(stranger.Assert(strangerKey, denied.GetChallenge()))}}},
 			from, &publicapiv1.IdentityServiceCompleteStepUpResponse{}).GetError())
 	})
+	// The lost denial leaves the challenge pending with its one attempt spent: even the owner's proof is STATE/expired (B12, the
+	// per-challenge attempt bound).
+	expect(t, "the owner's proof after the lost denial", h.completeStepUp(who, from, denied).GetError(), "STATE/expired")
 
 	// A1b: a registration attempt's count; the same command then registers the passkey.
 	h.stepUp(who, from, identity.ClassBeginRegistration, who.id)
@@ -185,6 +188,47 @@ func TestALostCommitOfBookkeepingIsRetryable(t *testing.T) {
 			t.Errorf("the unanswered commit of %q was not logged as a warning", operation)
 		}
 	}
+	h.verifyAudit()
+}
+
+// TestAStoreFailureAfterAStepUpProofGivesTheAttemptBack (F9, D2, B17): a passkey step-up whose proof verified but whose proof
+// transaction failed in the store answers RESOURCE/overloaded (AFTER_TIME, DID_NOT_HAPPEN) and gives back both its single attempt
+// and its reservation in the account's failure bucket, however often the store fails; the identical retry then proves, and once
+// more is CONFLICT/code_reused.
+func TestAStoreFailureAfterAStepUpProofGivesTheAttemptBack(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	who := h.seedAccount(1, "")
+	from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
+	target := h.issue(who.id, session.ScopeAccount, false).sessionID
+	bucket := sha256.Sum256([]byte("sign_in_failures_account\x00account:" + who.id.String()))
+	failures := func() int {
+		return h.count("SELECT coalesce(sum(count), 0)::int FROM platform.rate_limit WHERE bucket_hash = $1", bucket[:])
+	}
+	challenge := h.beginStepUp(who, from, identity.ClassRevokeSession, target).GetValue().GetChallenge()
+	challengeID := idFrom(challenge.GetFlowId())
+	attempts := func() int {
+		return h.count("SELECT attempt_count FROM identity.step_up_challenge WHERE challenge_id = $1", challengeID)
+	}
+	request := &publicapiv1.IdentityServiceCompleteStepUpRequest{Meta: meta(), FlowId: challenge.GetFlowId(),
+		Proof: &publicapiv1.AuthProof{Proof: &publicapiv1.AuthProof_Passkey{Passkey: assertionOf(who.authenticator.Assert(who.key, challenge.GetChallenge()))}}}
+	complete := func() *publicapiv1.IdentityServiceCompleteStepUpResponse {
+		return rpc(h, completeStepUpPath, request, from, &publicapiv1.IdentityServiceCompleteStepUpResponse{})
+	}
+	before := failures()
+	h.exec("CREATE SCHEMA testfault",
+		"CREATE FUNCTION testfault.unavailable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'the store is unavailable (test)' USING ERRCODE = '57P01'; END; $$",
+		"CREATE TRIGGER test_unavailable BEFORE UPDATE ON identity.step_up_challenge FOR EACH ROW WHEN (OLD.state = 1 AND NEW.state = 2) EXECUTE FUNCTION testfault.unavailable()")
+	for try := range 2 {
+		if refusal := complete().GetError(); !undoneCommit(refusal) || attempts() != 0 || failures() != before {
+			t.Fatalf("try %d of the right proof with the store failing: %v (%d attempts, %d failures, %d before)", try+1, refusal, attempts(), failures(), before)
+		}
+	}
+	h.exec("DROP TRIGGER test_unavailable ON identity.step_up_challenge")
+	if response := complete(); response.GetError() != nil || response.GetValue().GetEvidence() == nil || attempts() != 1 || failures() != before ||
+		h.count("SELECT state FROM identity.step_up_challenge WHERE challenge_id = $1", challengeID) != 2 {
+		t.Fatalf("the identical retry: %s (%d attempts, %d failures, %d before)", failure(response.GetError()), attempts(), failures(), before)
+	}
+	expect(t, "the identical retry after its success", complete().GetError(), "CONFLICT/code_reused")
 	h.verifyAudit()
 }
 

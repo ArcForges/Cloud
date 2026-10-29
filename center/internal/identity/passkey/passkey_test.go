@@ -332,7 +332,8 @@ func TestOnlyANoneAttestationReachesTheLibrary(t *testing.T) {
 			t.Errorf("%s reached the library", name)
 		}
 	}
-	// A whole registration in another format is refused, as before, now without the library parsing its statement.
+	// A whole registration in another format is refused; TestNoStatementParserRunsForAnotherFormat shows that the library never
+	// parses its statement.
 	authenticator := virtual.New(rpID, origin)
 	authenticator.Format = "packed"
 	handle, challenge := randomBytes(t, 32), randomBytes(t, 32)

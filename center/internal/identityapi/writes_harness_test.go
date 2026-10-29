@@ -122,6 +122,11 @@ func (h *harness) stepUpByEmail(who account, from caller, class string, target p
 // receipts is the number of command receipts.
 func (h *harness) receipts() int { return h.count("SELECT count(*) FROM platform.command_receipt") }
 
+// refusalsKept is the number of command receipts that keep a refusal with the code (only a refused command sets error_code).
+func (h *harness) refusalsKept(code string) int {
+	return h.count("SELECT count(*) FROM platform.command_receipt WHERE error_code = $1", code)
+}
+
 // live reports whether a session is live (not revoked).
 func (h *harness) live(sessionID platform.ID) bool {
 	return h.count("SELECT count(*) FROM identity.session WHERE session_id = $1 AND revoked_at IS NULL", sessionID) == 1

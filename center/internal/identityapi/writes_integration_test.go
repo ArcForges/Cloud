@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/identity"
+	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/session"
@@ -240,14 +241,21 @@ func TestAnAccountCannotReachAnotherAccountsObjects(t *testing.T) {
 		Credential: creationOf(stray)}, from,
 		&publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse{}).GetError()
 	notFound("completing an unknown registration flow", completed, "auth_flow", unknown)
+	// Each refusal inside a receipt is kept by it (B16); the unknown flow is refused before its receipt.
+	if kept := h.refusalsKept("STATE/not_found"); kept != 5 || h.receipts() != kept {
+		t.Fatalf("receipts keeping not_found: %d of %d", kept, h.receipts())
+	}
 	if state() != before {
 		t.Fatal("another account's objects changed")
 	}
 	h.verifyAudit()
 }
 
-// TestTheLastCredentialStays: the last live credential cannot be removed (STATE/invalid_state, reason last_credential; the receipt
-// keeps the refusal), and two concurrent removals of an account's two credentials leave one: the account's row lock orders them.
+// TestTheLastCredentialStays: the last live credential cannot be removed (STATE/invalid_state, reason last_credential), and the
+// receipt keeps that refusal (B16): its replay answers it even once the account has a second credential. Two concurrent removals of
+// an account's two credentials are ordered by the account's row lock, which evidence consumption takes (B3, B15): the first is
+// parked at its credential's row while it holds that lock, the second waits behind it and then finds its evidence spent by the
+// first's epoch move, so one credential stays; a fresh step-up then meets the last-credential rule.
 func TestTheLastCredentialStays(t *testing.T) {
 	h := newHarness(t, settings{policy: writePolicy})
 	only := h.seedAccount(1, "")
@@ -256,15 +264,28 @@ func TestTheLastCredentialStays(t *testing.T) {
 		return rpc(h, removeCredentialPath, &publicapiv1.IdentityServiceRemoveAuthIdentityRequest{Meta: meta, CredentialId: idOf(credential)}, from,
 			&publicapiv1.IdentityServiceRemoveAuthIdentityResponse{}).GetError()
 	}
+	lastCredential := func(what string, refusal *foundationv1.ArcError) {
+		t.Helper()
+		if failure(refusal) != "STATE/invalid_state" || refusal.GetDetails().GetState().GetReason() != "last_credential" {
+			t.Fatalf("%s: %v", what, refusal)
+		}
+	}
 	credential := h.credentialIDs(only.id)[0]
 	h.stepUp(only, from, identity.ClassRemoveCredential, credential)
 	last := command()
-	for range 2 {
-		refusal := remove(from, last, credential)
-		if failure(refusal) != "STATE/invalid_state" || refusal.GetDetails().GetState().GetReason() != "last_credential" ||
-			len(h.credentialIDs(only.id)) != 1 {
-			t.Fatalf("removing the last credential: %v", refusal)
-		}
+	lastCredential("removing the last credential", remove(from, last, credential))
+	if len(h.credentialIDs(only.id)) != 1 || h.refusalsKept("STATE/invalid_state") != 1 {
+		t.Fatal("the refusal removed the credential or was not kept by the receipt")
+	}
+	if _, err := h.migration.Exec(context.Background(), `INSERT INTO identity.auth_identity (auth_identity_id, user_id, method, provider_id, subject, public_key,
+    user_handle, sign_count, backup_eligible, backup_state, transports, aaguid, attestation_format, created_at, rev)
+SELECT $1, user_id, 1, 'passkey', $2, public_key, user_handle, 0, false, false, '{}', aaguid, 'none', now(), 1
+FROM identity.auth_identity WHERE user_id = $3 AND method = 1`, platform.NewID(), base64.RawURLEncoding.EncodeToString(randomBytes(t, 32)), only.id); err != nil {
+		t.Fatal(err)
+	}
+	lastCredential("the replay once the account has a second credential", remove(from, last, credential))
+	if len(h.credentialIDs(only.id)) != 2 || h.audits("identity.credential.removed") != 0 {
+		t.Fatal("the replay removed a credential")
 	}
 
 	both := h.seedAccount(1, "both@example.org")
@@ -274,26 +295,71 @@ func TestTheLastCredentialStays(t *testing.T) {
 	for _, id := range ids {
 		h.stepUp(both, signedIn, identity.ClassRemoveCredential, id)
 	}
-	results := make([]string, 2)
+	lock := h.holding("SELECT 1 FROM identity.auth_identity WHERE auth_identity_id = $1 FOR UPDATE", ids[0])
+	results := make([]*foundationv1.ArcError, 2)
 	var wait sync.WaitGroup
-	for index := range results {
-		wait.Go(func() { results[index] = failure(remove(signedIn, command(), ids[index])) })
+	wait.Go(func() { results[0] = remove(signedIn, command(), ids[0]) })
+	if !lock.waitFor(1) {
+		t.Fatal("the first removal never reached its credential's row")
 	}
+	wait.Go(func() { results[1] = remove(signedIn, command(), ids[1]) })
+	if !lock.waitFor(2) {
+		t.Fatal("the second removal never waited behind the first")
+	}
+	lock.release(false)
 	wait.Wait()
-	succeeded := 0
-	for _, result := range results {
-		switch result {
-		case "":
-			succeeded++
-		case "STATE/invalid_state", "AUTHENTICATION/step_up_required":
-		default:
-			t.Fatalf("a concurrent removal: %q", result)
+	if results[0] != nil || failure(results[1]) != "AUTHENTICATION/step_up_required" || len(h.credentialIDs(both.id)) != 1 {
+		t.Fatalf("two concurrent removals: %v, %v, %d live credentials", results[0], results[1], len(h.credentialIDs(both.id)))
+	}
+	// The passkey is gone, so the fresh evidence is proved by e-mail.
+	h.stepUpByEmail(both, signedIn, identity.ClassRemoveCredential, ids[1])
+	lastCredential("the remaining credential with fresh evidence", remove(signedIn, command(), ids[1]))
+	h.verifyAudit()
+}
+
+// TestARegistrationFlowIsItsBeginningSessions (SEC-07, B2): a registration flow belongs to the session that began it with the
+// account's evidence. Another account and another session of the same account completing it get STATE/not_found (auth_flow, the
+// flow's ID) and count no attempt; a creation for another challenge is VALIDATION/invalid_argument (credential: not_verified) and
+// ends the flow, so the right creation afterwards is STATE/expired. That refusal comes before the command's receipt, so the
+// identical replay answers STATE/expired too (B5).
+func TestARegistrationFlowIsItsBeginningSessions(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	alice, bob := h.seedAccount(1, ""), h.seedAccount(1, "")
+	first := bearer(h.signIn(alice, newClaim(t), caller{}).GetAccessToken())
+	second := bearer(h.signIn(alice, newClaim(t), caller{}).GetAccessToken())
+	other := bearer(h.signIn(bob, newClaim(t), caller{}).GetAccessToken())
+	h.stepUp(alice, first, identity.ClassBeginRegistration, alice.id)
+	challenge := rpc(h, beginRegisterPath, &publicapiv1.IdentityServiceBeginPasskeyRegistrationRequest{Meta: meta(), DisplayName: proto.String("Key")}, first,
+		&publicapiv1.IdentityServiceBeginPasskeyRegistrationResponse{}).GetValue().GetChallenge()
+	flowID := idFrom(challenge.GetFlowId())
+	authenticator := virtual.New(rpID, origin)
+	complete := func(from caller, meta *foundationv1.RequestMeta, creation passkey.Creation) *foundationv1.ArcError {
+		return rpc(h, completeRegisterPath, &publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest{Meta: meta, FlowId: challenge.GetFlowId(),
+			Credential: creationOf(creation)}, from, &publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse{}).GetError()
+	}
+	stored := func(creation passkey.Creation) int {
+		return h.count("SELECT count(*) FROM identity.auth_identity WHERE subject = $1", base64.RawURLEncoding.EncodeToString(creation.CredentialID))
+	}
+	for what, intruder := range map[string]caller{"another account": other, "another session of the account": second} {
+		creation, _ := authenticator.Create(challenge.GetChallenge(), alice.handle)
+		refusal := complete(intruder, command(), creation)
+		if kind, raw := resourceOf(refusal); failure(refusal) != "STATE/not_found" || kind != "auth_flow" || !bytes.Equal(raw, flowID[:]) ||
+			stored(creation) != 0 || h.count("SELECT attempts FROM identity.auth_flow WHERE flow_id = $1", flowID) != 0 {
+			t.Fatalf("%s completing the flow: %v", what, refusal)
 		}
 	}
-	if succeeded != 1 || len(h.credentialIDs(both.id)) != 1 {
-		t.Fatalf("two concurrent removals: %q, %d live credentials", results, len(h.credentialIDs(both.id)))
+	stray, _ := authenticator.Create(randomBytes(t, 32), alice.handle)
+	refused := command()
+	refusal := complete(first, refused, stray)
+	if failure(refusal) != "VALIDATION/invalid_argument" || refusal.GetDetails().GetState().GetReason() != "credential: not_verified" {
+		t.Fatalf("a creation that does not verify: %v", refusal)
 	}
-	h.verifyAudit()
+	expect(t, "the identical replay of the refused creation", complete(first, refused, stray), "STATE/expired")
+	right, _ := authenticator.Create(challenge.GetChallenge(), alice.handle)
+	expect(t, "the right creation after a failed one", complete(first, command(), right), "STATE/expired")
+	if stored(stray) != 0 || stored(right) != 0 || h.receipts() != 0 {
+		t.Fatal("a credential or a receipt was stored")
+	}
 }
 
 // TestHealthStatesTheServedSurfaces: the health document names the surfaces the center serves (AF-CTR-03), which a deployment

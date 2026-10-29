@@ -4,6 +4,8 @@ package identityapi_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -112,7 +114,8 @@ func TestMobileLimitedNeedsStepUp(t *testing.T) {
 
 // TestStepUpEvidenceIsSingleUse (DC-01, SEC-02): evidence is one proved challenge of one session for one class and one target,
 // consumed by the call's own transaction within five minutes and in the session's current epochs. Each case below is refused with
-// AUTHENTICATION/step_up_required and keeps no receipt; a receipt's replay answers again without new evidence.
+// AUTHENTICATION/step_up_required and keeps no receipt; a receipt's replay answers again without new evidence. A challenge begun
+// before a credential change and proved after it proves nothing (B10).
 func TestStepUpEvidenceIsSingleUse(t *testing.T) {
 	h := newHarness(t, settings{policy: writePolicy})
 	who := h.seedAccount(1, "single.use@example.org")
@@ -166,21 +169,48 @@ func TestStepUpEvidenceIsSingleUse(t *testing.T) {
 	h.stepUpByEmail(who, from, identity.ClassRevokeAllSessions, who.id)
 	refused("another class", command(), from, fifth)
 
+	// Another class whose target hash names this operation's target: only the class binds it (B14).
+	crossedTarget := target()
+	crossed := rpc(h, beginStepUpPath, &publicapiv1.IdentityServiceBeginStepUpRequest{Meta: meta(), OperationClass: proto.String(identity.ClassRevokeAllSessions),
+		Method: publicapiv1.AuthMethod_AUTH_METHOD_PASSKEY.Enum(), TargetHash: proto.String(identity.TargetHash(identity.ClassRevokeSession, who.id, crossedTarget))},
+		from, &publicapiv1.IdentityServiceBeginStepUpResponse{})
+	if crossed.GetError() != nil || h.completeStepUp(who, from, crossed.GetValue().GetChallenge()).GetError() != nil {
+		t.Fatalf("a step-up of another class with this target's hash: %s", failure(crossed.GetError()))
+	}
+	refused("another class with this target's hash", command(), from, crossedTarget)
+
 	// Older than five minutes.
 	sixth := target()
 	h.stepUp(who, from, identity.ClassRevokeSession, sixth)
 	h.clock.Advance(5*time.Minute + time.Second)
 	refused("evidence older than five minutes", command(), from, sixth)
 
-	// Spent by a credential change: removing a credential moves the authentication epoch of the account's live sessions.
+	// Spent by a credential change: removing a credential moves the authentication epoch of the account's live sessions. An upgrade
+	// begun before the change cannot be proved after it either (B10): the proof checks the epoch, and the upgrade is its only use.
 	seventh := target()
 	h.stepUp(who, from, identity.ClassRevokeSession, seventh)
+	limited := h.issue(who.id, session.ScopeMobileLimited, false)
+	upgrade := rpc(h, beginStepUpPath, &publicapiv1.IdentityServiceBeginStepUpRequest{Meta: meta(), OperationClass: proto.String(access.UpgradeClass),
+		Method: publicapiv1.AuthMethod_AUTH_METHOD_EMAIL.Enum(), TargetHash: proto.String(identity.TargetHash(access.UpgradeClass, who.id, limited.sessionID))},
+		bearer(limited.access), &publicapiv1.IdentityServiceBeginStepUpResponse{})
+	if upgrade.GetError() != nil {
+		t.Fatalf("begin an e-mail upgrade: %s", failure(upgrade.GetError()))
+	}
+	code := h.lastCode(who.email)
 	email := h.credentialIDs(who.id)[1]
 	h.stepUp(who, from, identity.ClassRemoveCredential, email)
 	removed := rpc(h, removeCredentialPath, &publicapiv1.IdentityServiceRemoveAuthIdentityRequest{Meta: command(), CredentialId: idOf(email)}, from,
 		&publicapiv1.IdentityServiceRemoveAuthIdentityResponse{})
 	expect(t, "the removal of the e-mail credential", removed.GetError(), "")
 	refused("evidence from before a credential change", command(), from, seventh)
+	late := rpc(h, completeStepUpPath, &publicapiv1.IdentityServiceCompleteStepUpRequest{Meta: meta(), FlowId: upgrade.GetValue().GetChallenge().GetFlowId(),
+		Proof: &publicapiv1.AuthProof{Proof: &publicapiv1.AuthProof_EmailCode{EmailCode: code}}}, bearer(limited.access),
+		&publicapiv1.IdentityServiceCompleteStepUpResponse{})
+	expect(t, "an upgrade begun before a credential change, proved after it", late.GetError(), "STATE/expired")
+	if h.count("SELECT scope FROM identity.session WHERE session_id = $1", limited.sessionID) != int(session.ScopeMobileLimited) ||
+		h.count("SELECT count(*) FROM identity.step_up_challenge WHERE session_id = $1 AND state <> 1", limited.sessionID) != 0 {
+		t.Fatal("an upgrade begun before a credential change upgraded the session or was proved")
+	}
 
 	// Two concurrent uses of one proof: one consumes it, the other is refused.
 	eighth := target()
@@ -280,4 +310,206 @@ func TestARemovalSpendsTheEvidenceProvedBeforeIt(t *testing.T) {
 			h.verifyAudit()
 		})
 	}
+}
+
+// TestAnotherAccountsPasskeyProvesNoStepUp (B9): a step-up passkey must be the account's own. Another account's passkey is refused
+// as a wrong proof (counted in the account's failure bucket, audited, the challenge denied) on the upgrade of a mobile.limited
+// session (T-19's bound) and on an account session's class.
+func TestAnotherAccountsPasskeyProvesNoStepUp(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	victim, attacker := h.seedAccount(1, ""), h.seedAccount(1, "")
+	bucket := sha256.Sum256([]byte("sign_in_failures_account\x00account:" + victim.id.String()))
+	failures := func() int {
+		return h.count("SELECT coalesce(sum(count), 0)::int FROM platform.rate_limit WHERE bucket_hash = $1", bucket[:])
+	}
+	phone := h.issue(victim.id, session.ScopeMobileLimited, false)
+	begun := h.beginStepUp(victim, bearer(phone.access), access.UpgradeClass, phone.sessionID)
+	expect(t, "begin the upgrade", begun.GetError(), "")
+	challenge := begun.GetValue().GetChallenge()
+	audits, counted := h.audits("identity.step_up.failed"), failures()
+	expect(t, "the upgrade with another account's passkey", h.completeStepUp(attacker, bearer(phone.access), challenge).GetError(),
+		"AUTHENTICATION/unauthenticated")
+	if h.count("SELECT scope FROM identity.session WHERE session_id = $1", phone.sessionID) != int(session.ScopeMobileLimited) ||
+		h.audits("identity.step_up.failed") != audits+1 || failures() != counted+1 ||
+		h.count("SELECT state FROM identity.step_up_challenge WHERE challenge_id = $1", idFrom(challenge.GetFlowId())) != 5 {
+		t.Fatal("another account's passkey upgraded the session, or the failure was not counted, audited and the challenge denied")
+	}
+	expect(t, "the owner's passkey on the denied challenge", h.completeStepUp(victim, bearer(phone.access), challenge).GetError(), "STATE/expired")
+	from := bearer(h.signIn(victim, newClaim(t), caller{}).GetAccessToken())
+	target := h.issue(victim.id, session.ScopeAccount, false).sessionID
+	other := h.beginStepUp(victim, from, identity.ClassRevokeSession, target).GetValue().GetChallenge()
+	expect(t, "an account session's step-up with another account's passkey", h.completeStepUp(attacker, from, other).GetError(),
+		"AUTHENTICATION/unauthenticated")
+	expect(t, "the revocation without evidence", h.revokeSession(from, command(), target).GetError(), "AUTHENTICATION/step_up_required")
+	h.verifyAudit()
+}
+
+// stepUpByCode begins an e-mail step-up of RevokeSession of a target and returns its challenge and the code the Fake delivered.
+func (h *harness) stepUpByCode(who account, from caller, target platform.ID) (*publicapiv1.AuthChallenge, string) {
+	h.t.Helper()
+	begun := rpc(h, beginStepUpPath, &publicapiv1.IdentityServiceBeginStepUpRequest{Meta: meta(), OperationClass: proto.String(identity.ClassRevokeSession),
+		Method: publicapiv1.AuthMethod_AUTH_METHOD_EMAIL.Enum(), TargetHash: proto.String(identity.TargetHash(identity.ClassRevokeSession, who.id, target))},
+		from, &publicapiv1.IdentityServiceBeginStepUpResponse{})
+	if begun.GetError() != nil {
+		h.t.Fatalf("begin an e-mail step-up: %s", failure(begun.GetError()))
+	}
+	return begun.GetValue().GetChallenge(), h.lastCode(who.email)
+}
+
+// proveByCode completes an e-mail step-up challenge with a code.
+func (h *harness) proveByCode(from caller, challenge *publicapiv1.AuthChallenge, code string) *foundationv1.ArcError {
+	return rpc(h, completeStepUpPath, &publicapiv1.IdentityServiceCompleteStepUpRequest{Meta: meta(), FlowId: challenge.GetFlowId(),
+		Proof: &publicapiv1.AuthProof{Proof: &publicapiv1.AuthProof_EmailCode{EmailCode: code}}}, from, &publicapiv1.IdentityServiceCompleteStepUpResponse{}).GetError()
+}
+
+// TestTheStepUpLimitsHold (B12): BeginStepUp counts in the account's step_up_account bucket and a refused begin writes no
+// challenge; a wrong proof counts as a failure of the account, so the right code at the limit is refused before it takes an
+// attempt; concurrent wrong proofs over many challenges reach the check exactly the limit's number of times (Reserve); concurrent
+// wrong proofs on one challenge reach it at most its attempts.
+func TestTheStepUpLimitsHold(t *testing.T) {
+	t.Run("the begin bucket", func(t *testing.T) {
+		h := newHarness(t, settings{policy: `{"stepUpPerAccountLimit": 2, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000}`})
+		who := h.seedAccount(1, "")
+		from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
+		target := h.issue(who.id, session.ScopeAccount, false).sessionID
+		for range 2 {
+			expect(t, "a begin within the limit", h.beginStepUp(who, from, identity.ClassRevokeSession, target).GetError(), "")
+		}
+		refusal := h.beginStepUp(who, from, identity.ClassRevokeSession, target).GetError()
+		if failure(refusal) != "RESOURCE/rate_limited" || refusal.GetDetails().GetLimit().GetLimitName() != "step_up_account" ||
+			refusal.GetDetails().GetLimit().GetMaximum().GetValue() != "2" || h.count("SELECT count(*) FROM identity.step_up_challenge") != 2 {
+			t.Fatalf("a begin over the limit: %v", refusal)
+		}
+	})
+	limited := `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 2, "signInPerPrefixLimit": 1000}`
+	t.Run("wrong proofs count", func(t *testing.T) {
+		h := newHarness(t, settings{policy: limited})
+		who := h.seedAccount(1, "b12.wrong@example.org")
+		h.remember(who.email)
+		from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
+		challenge, code := h.stepUpByCode(who, from, h.issue(who.id, session.ScopeAccount, false).sessionID)
+		for range 2 {
+			expect(t, "a wrong code", h.proveByCode(from, challenge, "BCDF-GHJK"), "AUTHENTICATION/unauthenticated")
+		}
+		refusal := h.proveByCode(from, challenge, code)
+		if failure(refusal) != "RESOURCE/rate_limited" || refusal.GetDetails().GetLimit().GetLimitName() != "sign_in_failures_account" ||
+			h.count("SELECT attempt_count FROM identity.step_up_challenge WHERE challenge_id = $1", idFrom(challenge.GetFlowId())) != 2 {
+			t.Fatalf("the right code at the limit: %v", refusal)
+		}
+	})
+	t.Run("concurrent wrong proofs over many challenges", func(t *testing.T) {
+		h := newHarness(t, settings{policy: limited})
+		who := h.seedAccount(1, "b12.race@example.org")
+		h.remember(who.email)
+		from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
+		target := h.issue(who.id, session.ScopeAccount, false).sessionID
+		challenges := make([]*publicapiv1.AuthChallenge, 8)
+		for index := range challenges {
+			challenges[index], _ = h.stepUpByCode(who, from, target)
+		}
+		results := make([]string, len(challenges))
+		var wait sync.WaitGroup
+		for index := range challenges {
+			wait.Go(func() { results[index] = failure(h.proveByCode(from, challenges[index], "BCDF-GHJK")) })
+		}
+		wait.Wait()
+		outcomes := map[string]int{}
+		for _, result := range results {
+			outcomes[result]++
+		}
+		if outcomes["AUTHENTICATION/unauthenticated"] != 2 || outcomes["RESOURCE/rate_limited"] != 6 ||
+			h.count("SELECT coalesce(sum(attempt_count), 0)::int FROM identity.step_up_challenge") != 2 {
+			t.Fatalf("outcomes %v", outcomes)
+		}
+	})
+	t.Run("concurrent wrong proofs on one challenge", func(t *testing.T) {
+		h := newHarness(t, settings{policy: `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000,
+"emailCodeAttempts": 2}`})
+		who := h.seedAccount(1, "b12.one@example.org")
+		h.remember(who.email)
+		from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
+		challenge, code := h.stepUpByCode(who, from, h.issue(who.id, session.ScopeAccount, false).sessionID)
+		results := make([]string, 8)
+		var wait sync.WaitGroup
+		for index := range results {
+			wait.Go(func() { results[index] = failure(h.proveByCode(from, challenge, "BCDF-GHJK")) })
+		}
+		wait.Wait()
+		outcomes := map[string]int{}
+		for _, result := range results {
+			outcomes[result]++
+		}
+		if outcomes["AUTHENTICATION/unauthenticated"] != 2 || outcomes["STATE/expired"] != 6 {
+			t.Fatalf("outcomes %v", outcomes)
+		}
+		expect(t, "the right code after the attempts", h.proveByCode(from, challenge, code), "STATE/expired")
+		if h.count("SELECT state FROM identity.step_up_challenge WHERE challenge_id = $1", idFrom(challenge.GetFlowId())) != 5 {
+			t.Fatal("the exhausted challenge was not denied")
+		}
+	})
+}
+
+// TestTheStepUpPasskeyCounterAdvances (B13, F14): a proved passkey step-up stores the assertion's counter, and a later equal or
+// lower counter is a failed proof (counted, nothing proved, the counter kept), checked again under the credential's row lock when a
+// concurrent use advanced it after the library accepted the assertion.
+func TestTheStepUpPasskeyCounterAdvances(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	limits := func() int { return h.count("SELECT coalesce(sum(count), 0)::int FROM platform.rate_limit") }
+	stored := func(who account) int {
+		return h.count("SELECT sign_count FROM identity.auth_identity WHERE user_id = $1 AND provider_id = 'passkey'", who.id)
+	}
+	prove := func(from caller, challenge *publicapiv1.AuthChallenge, assertion *publicapiv1.WebAuthnAssertion) string {
+		return failure(rpc(h, completeStepUpPath, &publicapiv1.IdentityServiceCompleteStepUpRequest{Meta: meta(), FlowId: challenge.GetFlowId(),
+			Proof: &publicapiv1.AuthProof{Proof: &publicapiv1.AuthProof_Passkey{Passkey: assertion}}}, from, &publicapiv1.IdentityServiceCompleteStepUpResponse{}).GetError())
+	}
+	t.Run("in order", func(t *testing.T) {
+		who := h.seedAccount(1, "")
+		from := bearer(h.signIn(who, newClaim(t), caller{ip: "198.51.100.30"}).GetAccessToken())
+		target := h.issue(who.id, session.ScopeAccount, false).sessionID
+		challenge := h.beginStepUp(who, from, identity.ClassRevokeSession, target).GetValue().GetChallenge()
+		if result := prove(from, challenge, assertionOf(who.authenticator.Assert(who.key, challenge.GetChallenge(), 9))); result != "" || stored(who) != 9 {
+			t.Fatalf("a step-up with counter 9: %q, stored %d", result, stored(who))
+		}
+		for _, counter := range []uint32{9, 8} {
+			before := limits()
+			challenge = h.beginStepUp(who, from, identity.ClassRevokeSession, target).GetValue().GetChallenge()
+			result := prove(from, challenge, assertionOf(who.authenticator.Assert(who.key, challenge.GetChallenge(), counter)))
+			if result != "AUTHENTICATION/unauthenticated" || limits() <= before || stored(who) != 9 {
+				t.Fatalf("counter %d: %q, stored %d", counter, result, stored(who))
+			}
+		}
+	})
+	for index, item := range []struct {
+		name                       string
+		stored, assertion, current uint32
+	}{
+		{"under the row lock, an equal counter", 3, 5, 5},
+		{"under the row lock, a lower counter", 3, 4, 6},
+		{"under the row lock, zero after a nonzero counter", 0, 0, 5},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			who := h.seedAccount(1, "")
+			from := bearer(h.signIn(who, newClaim(t), caller{ip: fmt.Sprintf("198.51.%d.20", index+1)}).GetAccessToken())
+			target := h.issue(who.id, session.ScopeAccount, false).sessionID
+			h.exec(fmt.Sprintf("UPDATE identity.auth_identity SET sign_count = %d WHERE user_id = '%s' AND provider_id = 'passkey'", item.stored, who.id))
+			challenge := h.beginStepUp(who, from, identity.ClassRevokeSession, target).GetValue().GetChallenge()
+			assertion := assertionOf(who.authenticator.Assert(who.key, challenge.GetChallenge(), item.assertion))
+			before, proved := limits(), h.audits("identity.step_up.proved")
+			lock := h.holding("UPDATE identity.auth_identity SET sign_count = $2, rev = rev + 1 WHERE user_id = $1 AND provider_id = 'passkey'",
+				who.id, int64(item.current))
+			done := make(chan string, 1)
+			go func() { done <- prove(from, challenge, assertion) }()
+			waited := lock.waitFor(1)
+			lock.release(true)
+			result := <-done
+			if !waited {
+				t.Fatalf("the step-up never waited on the credential's row (%s)", result)
+			}
+			if result != "AUTHENTICATION/unauthenticated" || limits() <= before || h.audits("identity.step_up.proved") != proved ||
+				stored(who) != int(item.current) || h.count("SELECT count(*) FROM identity.step_up_challenge WHERE user_id = $1 AND state IN (2, 3)", who.id) != 0 {
+				t.Fatalf("result %s, stored %d", result, stored(who))
+			}
+		})
+	}
+	h.verifyAudit()
 }
