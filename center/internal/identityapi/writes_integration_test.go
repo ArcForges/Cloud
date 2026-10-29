@@ -182,6 +182,13 @@ func TestProfileCredentialAndDeviceNamesFollowTheirRevisions(t *testing.T) {
 		return rpc(h, renameDevicePath, &publicapiv1.DeviceServiceRenameRequest{Meta: meta, DeviceId: idOf(deviceID), Name: proto.String(name)}, from,
 			&publicapiv1.DeviceServiceRenameResponse{})
 	}
+	// A device name follows the credential label rule (UTF-16 units; control characters and blank names are rule pattern).
+	for name, reason := range map[string]string{strings.Repeat("\U0001F600", 33): "name: length", "Bell\a": "name: pattern", "   ": "name: pattern"} {
+		if refusal := renameDevice(command(), name).GetError(); refusal.GetDetails().GetState().GetReason() != reason {
+			t.Fatalf("the device name %q: %v", name, refusal)
+		}
+	}
+	expect(t, "a device name of 64 UTF-16 units", renameDevice(command(), strings.Repeat("\U0001F600", 32)).GetError(), "")
 	current = revision("device.device", "device_id", deviceID)
 	conflict("a stale device revision", renameDevice(at(current-1), "Pixel").GetError(), current-1, current)
 	renamed := renameDevice(at(current), "Pixel")

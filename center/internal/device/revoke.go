@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -27,7 +28,8 @@ const (
 // trustRevoked is device.trust_level revoked, set only by the revocation cascade.
 const trustRevoked = 3
 
-// MaxNameUnits bounds a device name (device.device.display_name): 1 to 64 characters of plain text.
+// MaxNameUnits bounds a device name (device.device.display_name): 1 to 64 UTF-16 units of plain text, the credential label rule
+// (con-07 bounds the name at 256 Unicode scalar values and the store at 64 code points; every admitted name meets both).
 const MaxNameUnits = 64
 
 // Participant is a part of the center that holds a credential or grant bound to a device and revokes it in the device revocation's
@@ -81,9 +83,18 @@ WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL RETURNING rev`, dev
 	return cascade, nil
 }
 
-// ValidName is a device name: plain text of 1 to 64 characters without control characters that is not only white space.
+// nameUnits is a name's length in UTF-16 units.
+func nameUnits(name string) int {
+	units := 0
+	for _, r := range name {
+		units += utf16.RuneLen(r)
+	}
+	return units
+}
+
+// ValidName is a device name: plain text of 1 to 64 UTF-16 units without control characters that is not only white space.
 func ValidName(name string) bool {
-	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > MaxNameUnits || strings.TrimFunc(name, unicode.IsSpace) == "" {
+	if name == "" || !utf8.ValidString(name) || nameUnits(name) > MaxNameUnits || strings.TrimFunc(name, unicode.IsSpace) == "" {
 		return false
 	}
 	for _, r := range name {
@@ -98,8 +109,11 @@ func ValidName(name string) bool {
 // meta.expected_rev (expected, when set) is CONFLICT/revision_conflict with the current revision; a device of another account, a
 // revoked one and an unknown one are STATE/not_found with the device the caller named.
 func Rename(ctx context.Context, tx pgx.Tx, userID, deviceID platform.ID, name string, expected *int64, now time.Time) (*View, error) {
-	if !ValidName(name) {
+	switch {
+	case nameUnits(name) > MaxNameUnits:
 		return nil, arc.InvalidArgument("name", "length")
+	case !ValidName(name):
+		return nil, arc.InvalidArgument("name", "pattern")
 	}
 	var current int64
 	err := tx.QueryRow(ctx, "SELECT rev FROM device.device WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL FOR UPDATE", deviceID, userID).

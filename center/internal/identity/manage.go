@@ -215,10 +215,12 @@ func (s *Service) RevokeAllSessions(ctx context.Context, tx pgx.Tx, caller Calle
 		map[string]any{"sessions": count})
 }
 
-// RenameDevice renames one of the caller's live devices in the receipt's transaction (DeviceService.Rename).
+// RenameDevice renames one of the caller's live devices in the receipt's transaction (DeviceService.Rename), by the label rule.
 func (s *Service) RenameDevice(ctx context.Context, tx pgx.Tx, caller Caller, deviceID platform.ID, name *string, expected *int64, now time.Time) (*device.View, error) {
-	if name == nil {
-		return nil, arc.InvalidArgument("name", "required")
+	// A device name follows the credential label rule: required, at most 64 UTF-16 units (rule length), plain text that is not only
+	// white space (rule pattern).
+	if refusal := labelRefusal("name", name); refusal != nil {
+		return nil, refusal
 	}
 	view, err := device.Rename(ctx, tx, caller.UserID, deviceID, *name, expected, now)
 	if err != nil {
