@@ -20,17 +20,22 @@ import {
   deadlineError,
   grpcStatus,
 } from "./errors.ts";
+import { edgeClientKey, rateLimitedReplyAt } from "./edge-limit.ts";
 import { guardResponse } from "./frames.ts";
 import { classifyStartFailureResponse, containerUnavailable } from "../readiness/container.ts";
 import { bounded, readBytes, reject, rpcError } from "./io.ts";
 import { healthRoute } from "../tables/center-tables.generated.ts";
 import { bodyReadMilliseconds } from "../tables/cloud-tables.generated.ts";
 import {
+  clientIpHeader,
   coldStartBudgetMs,
+  enabledSurfaces,
   findRoute,
   healthPath,
+  notActivatedReplies,
   productionTable,
   streamLifetimeMs,
+  surfaceTable,
   type RouteTable,
 } from "./routes.ts";
 
@@ -39,10 +44,32 @@ export interface IngressEnv {
   BUILD_IDENTITY?: string;
   FOUNDATION_PROOF?: string;
   ALLOWED_ORIGIN?: string;
+  /** The enabled switchable surfaces (AF-CTR-03): exact generated names, comma-separated; absent or empty enables none. */
+  FLAGSHIP_SURFACES?: string;
   CLOUD_CONTAINER: {
     getByName(name: string): { fetch(request: Request): Promise<Response> };
   };
   HELLO_RATE_LIMITER: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** The edge rate limit of the surface methods; without it no surface call is forwarded. */
+  IDENTITY_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+}
+
+/**
+ * A domain reply the Worker answers itself: one generated gRPC-Web reply frame (an ArcError outcome) and the OK status trailer,
+ * so a client reads the refusal exactly as it reads the center's.
+ */
+function domainReply(base64: string): Response {
+  return domainReplyBody(Uint8Array.from(atob(base64), (character) => character.charCodeAt(0)));
+}
+
+function domainReplyBody(body: Uint8Array<ArrayBuffer>): Response {
+  return new Response(body, {
+    headers: {
+      "content-type": "application/grpc-web+proto",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    },
+  });
 }
 
 /** The stable message key of the registered refusal for a request that cannot be admitted as stated. */
@@ -80,7 +107,10 @@ export async function handleApiRequest(
   const started = performance.now();
   const url = new URL(request.url);
   const health = url.pathname === healthPath;
-  const route = health ? healthRoute : findRoute(url.pathname, routes);
+  const fixed = health ? healthRoute : findRoute(url.pathname, routes);
+  // A surface method is in no route table: it is routed only by the generated surface rows.
+  const surfaceRoute = fixed ? undefined : surfaceTable.get(url.pathname);
+  const route = fixed ?? surfaceRoute;
   if (!route) return reject(404, "Unknown API method.");
   if (url.search) return reject(400, "Query parameters are not supported.");
   if (request.method !== (health ? "GET" : "POST")) return reject(405, "Method not allowed.");
@@ -93,6 +123,9 @@ export async function handleApiRequest(
       ![null, "identity"].includes(request.headers.get("grpc-encoding")))
   )
     return reject(415, "Compressed requests are not supported.");
+  // A disabled surface is answered here, before any rate limit, credential, body or Container (DC-04).
+  if (surfaceRoute && !enabledSurfaces(env.FLAGSHIP_SURFACES).has(surfaceRoute.surface))
+    return domainReply(notActivatedReplies[surfaceRoute.surface]);
 
   const streaming = route.kind === "serverStream";
   const cap = streaming ? Math.min(route.maxDurationMs, streamLifetimeMs) : route.maxDurationMs;
@@ -118,18 +151,27 @@ export async function handleApiRequest(
   };
   try {
     signal.throwIfAborted();
-    // Cloudflare supplies this header. The limit is not authentication or a billing quota.
-    const { success } = await bounded(
-      env.HELLO_RATE_LIMITER.limit({
-        key: request.headers.get("cf-connecting-ip") ?? "local",
-      }),
-      signal,
-    );
-    if (!success) return reject(429, "Hello rate limit exceeded.");
+    // Cloudflare supplies this header. The limit is not authentication or a billing quota. Both limits key a client by its
+    // address, an IPv6 client by its generated network (F7).
+    const client = request.headers.get("cf-connecting-ip");
+    const key = edgeClientKey(client);
+    if (surfaceRoute) {
+      // The surface methods have their own edge limit; over it (or without the binding) the call is refused with the generated
+      // domain refusal RESOURCE/rate_limited (PLT-11) with its retry instant (F17), and the Container never sees it.
+      const limiter = env.IDENTITY_RATE_LIMITER;
+      const underLimit = limiter ? (await bounded(limiter.limit({ key }), signal)).success : false;
+      if (!underLimit) return domainReplyBody(rateLimitedReplyAt(Date.now()));
+    } else {
+      const { success } = await bounded(env.HELLO_RATE_LIMITER.limit({ key }), signal);
+      if (!success) return reject(429, "Hello rate limit exceeded.");
+    }
 
     // Only what the Worker builds reaches the Container: never arbitrary client metadata, and a
     // credential only for a session method after the edge checks.
     const headers = new Headers();
+    // The client's address keys the center's rate limits; it is set from Cloudflare's header only, never from the client's, and
+    // left out when Cloudflare sent none (the hosted center then refuses the call instead of counting it in a shared bucket).
+    if (surfaceRoute && client !== null) headers.set(clientIpHeader, client);
     if (route.auth === "session") {
       const credentials = edgeCredentials(request, env.ALLOWED_ORIGIN);
       if (!credentials.ok) return rpcError(credentials.code, credentials.message);

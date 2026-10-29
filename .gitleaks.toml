@@ -1,4 +1,6 @@
-# Exact SHA-256 file-digest false positives in the immutable release profiles (S31).
+# Exact SHA-256 file-digest false positives in the immutable release profiles (S31), the Contracts identity copy (S44) and
+# exact key-and-digest rows of the dependency policy and its receipts (AF-CTR-03). tests/worker/provenance.test.ts pins every
+# block and row: a new row is a reviewed change to that test.
 [extend]
 useDefault = true
 
@@ -17,3 +19,47 @@ targetRules = ["generic-api-key"]
 paths = ['''^eng/generated/contracts-identity\.json$''']
 regexTarget = "secret"
 regexes = ['''^[0-9a-f]{64}$''']
+
+[[allowlists]]
+description = "AF-CTR-03: the reviewed SHA-256 digests of the immutable legal records go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in the inputs maps of the dependency policy. The generic-api-key rule fires on the record names, which contain auth. Only these two exact key-and-digest lines of this exact file are exempt."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^eng/policy/dependency\-policy\.json$''']
+regexTarget = "line"
+regexes = [
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthn\-legal\-r1\.json":\s*"fecb236888c74fd6195890d16720689d5341b51bbe8ac3a3d942171a936e4d07",?\s*$''',
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthnx\-legal\-r1\.json":\s*"f1680c3b153114ea4cc145264a716e4669e14212976d6584c1b3f41eda1202c4",?\s*$''',
+]
+
+[[allowlists]]
+description = "AF-CTR-03: the same two reviewed record digests in the inputs map of the immutable dependency review receipt af-ctr-03-r1. Only these two exact key-and-digest lines of this exact file are exempt."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^eng/policy/dependency\-reviews/af\-ctr\-03\-r1\.json$''']
+regexTarget = "line"
+regexes = [
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthn\-legal\-r1\.json":\s*"fecb236888c74fd6195890d16720689d5341b51bbe8ac3a3d942171a936e4d07",?\s*$''',
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthnx\-legal\-r1\.json":\s*"f1680c3b153114ea4cc145264a716e4669e14212976d6584c1b3f41eda1202c4",?\s*$''',
+]
+
+[[allowlists]]
+description = "AF-CTR-03: the same two reviewed record digests in the inputs map of the immutable dependency review receipt af-ctr-03-r2 (the A1a review fix round). Only these two exact key-and-digest lines of this exact file are exempt."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^eng/policy/dependency\-reviews/af\-ctr\-03\-r2\.json$''']
+regexTarget = "line"
+regexes = [
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthn\-legal\-r1\.json":\s*"fecb236888c74fd6195890d16720689d5341b51bbe8ac3a3d942171a936e4d07",?\s*$''',
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthnx\-legal\-r1\.json":\s*"f1680c3b153114ea4cc145264a716e4669e14212976d6584c1b3f41eda1202c4",?\s*$''',
+]
+
+[[allowlists]]
+description = "AF-CTR-03: the same two reviewed record digests in the inputs map of the immutable dependency review receipt af-ctr-03-r3 (the A1a review fix round 2). Only these two exact key-and-digest lines of this exact file are exempt."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^eng/policy/dependency\-reviews/af\-ctr\-03\-r3\.json$''']
+regexTarget = "line"
+regexes = [
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthn\-legal\-r1\.json":\s*"fecb236888c74fd6195890d16720689d5341b51bbe8ac3a3d942171a936e4d07",?\s*$''',
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthnx\-legal\-r1\.json":\s*"f1680c3b153114ea4cc145264a716e4669e14212976d6584c1b3f41eda1202c4",?\s*$''',
+]

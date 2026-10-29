@@ -8,6 +8,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
 import { probeProject, runProbe, waitForHealth } from "./protocol.ts";
+import { notActivatedReplies, surfaceRoutes } from "../worker/tables/center-tables.generated.ts";
 import { sealedToolName } from "./sealed-tool.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
 import { auditProvenance } from "./provenance.ts";
@@ -88,6 +89,7 @@ export type WorkerConfig = {
     BUILD_IDENTITY?: string;
     ARCFORGES_NEON_HELLO?: string;
     ARCFORGES_HELLO_RUNTIME?: string;
+    FLAGSHIP_SURFACES?: string;
   };
   containers: [
     {
@@ -355,6 +357,29 @@ async function testCenterContainer(
   }
 }
 
+/**
+ * AF-CTR-03: with the production configuration (no surface enabled), every surface method of the generated table is answered by the
+ * real Worker with the generated STATE/not_activated reply, without a Container call.
+ */
+async function probeDisabledSurfaces(base: string, flag: string | undefined) {
+  assert.equal(
+    flag ?? "",
+    "",
+    "The local Worker test runs the production configuration, which enables no surface.",
+  );
+  const expected = Buffer.from(notActivatedReplies.identity, "base64");
+  for (const route of surfaceRoutes) {
+    const response = await fetch(`${base}${route.path}`, {
+      method: "POST",
+      headers: { "content-type": "application/grpc-web+proto" },
+      body: new Uint8Array([0, 0, 0, 0, 0]),
+    });
+    assert.equal(response.status, 200, route.path);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, route.path);
+  }
+  return { notActivated: surfaceRoutes.length };
+}
+
 async function testWorker(candidate: Candidate) {
   assert.notEqual(process.env.CI, "true", "Worker runtime tests are local opt-in only.");
   assert.equal(process.platform, "linux", "The real local Containers runtime requires Linux.");
@@ -401,11 +426,16 @@ async function testWorker(candidate: Candidate) {
     );
     verifyHealthIdentity(health, expectedIdentity(candidate.version));
     const result = await runProbe("http://127.0.0.1:18787/api", true);
+    const surfaces = await probeDisabledSurfaces(
+      "http://127.0.0.1:18787/api",
+      config.vars.FLAGSHIP_SURFACES,
+    );
     await writeJson(path.join(root, "artifacts", "worker-evidence.json"), {
       workerName,
       revision: candidate.revision,
       health,
       ...result,
+      surfaces,
     });
   } finally {
     // Own the process group; Wrangler and its runtime children cannot signal the test runner.

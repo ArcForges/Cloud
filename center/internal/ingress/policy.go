@@ -64,6 +64,15 @@ type Policy struct {
 	// the method is not workspace-scoped. A method whose field 1 means something else (the Hello name) never does, so its
 	// body is not interpreted.
 	CarriesRequestMeta bool
+	// Surface names the switchable surface the method belongs to (AF-CTR-03; empty for the always-on Hello). A method of a disabled
+	// surface is answered with the domain refusal STATE/not_activated before any credential is read.
+	Surface string
+}
+
+// InSurface is the policy as a method of a surface.
+func (p Policy) InSurface(surface string) Policy {
+	p.Surface = surface
+	return p
 }
 
 // ReadsRequestMeta reports whether the pipeline reads and validates the RequestMeta envelope of the method's request.

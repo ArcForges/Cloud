@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -403,4 +404,157 @@ test("the exact Npgsql licence is admitted while unknown licence claims remain r
   assert.equal(validateRecord(record).id, "npgsql-postgresql-legal-r1");
   record.licence.spdx = "Unreviewed-Database-License";
   assert.throws(() => validateRecord(record), /Unreviewed licence/u);
+});
+
+type Allowlist = Record<string, string | string[]>;
+
+/**
+ * The allowlist blocks of .gitleaks.toml, read for exactly the subset the file uses: one `[extend]` table and `[[allowlists]]`
+ * tables of string and string-array values. Anything else (another table, a value of another kind, text between the strings
+ * of an array) fails, so the pins below see every row the scanner would.
+ */
+function gitleaksConfig(text: string): { extend: string[]; allowlists: Allowlist[] } {
+  const strings = (body: string) => {
+    const values: string[] = [];
+    const rest = body.replace(/'''([^']*)'''|"((?:[^"\\]|\\.)*)"/gu, (_, literal, basic) => {
+      values.push(literal ?? JSON.parse(`"${basic}"`));
+      return "";
+    });
+    return { values, rest };
+  };
+  const extend: string[] = [];
+  const allowlists: Allowlist[] = [];
+  let table: "none" | "extend" | "allowlist" = "none";
+  const lines = text.split("\n");
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index] ?? "";
+    if (line === "" || line.startsWith("#")) continue;
+    if (line === "[extend]" || line === "[[allowlists]]") {
+      table = line === "[extend]" ? "extend" : "allowlist";
+      if (table === "allowlist") allowlists.push({});
+      continue;
+    }
+    const entry = /^([A-Za-z]+) = (.*)$/u.exec(line);
+    assert.ok(entry, `unexpected .gitleaks.toml line ${index + 1}`);
+    const [, key = "", start = ""] = entry;
+    if (table === "extend") {
+      extend.push(`${key} = ${start}`);
+      continue;
+    }
+    const current = allowlists.at(-1);
+    assert.ok(current && table === "allowlist" && !(key in current), `unexpected key ${key}`);
+    let value = start;
+    if (value === "[") {
+      while (lines[index + 1] !== "]") {
+        index++;
+        assert.ok(index < lines.length, "unterminated array");
+        value += `\n${lines[index]}`;
+      }
+      index++;
+      value += "\n]";
+    }
+    if (value.startsWith("[")) {
+      const { values, rest } = strings(value);
+      assert.match(rest, /^\[[\s,]*\]$/u, `unexpected array content in ${key}`);
+      current[key] = values;
+    } else {
+      const { values, rest } = strings(value);
+      assert.ok(values.length === 1 && rest === "", `unexpected value of ${key}`);
+      current[key] = values[0] ?? "";
+    }
+  }
+  return { extend, allowlists };
+}
+
+/**
+ * A gitleaks (RE2) pattern as a JavaScript expression. The patterns use only a leading (?s) flag and escaped punctuation, which
+ * needs the non-Unicode mode (RE2 accepts `\-` anywhere).
+ */
+function gitleaksPattern(pattern: string) {
+  return pattern.startsWith("(?s)") ? new RegExp(pattern.slice(4), "s") : new RegExp(pattern);
+}
+
+test("the secret-scan allowlist holds exactly its reviewed blocks and the exact AF-CTR-03 digest rows", () => {
+  const regexText = (value: string) => value.replace(/[-.]/gu, (c) => `\\${c}`);
+  const lf = (file: string) =>
+    createHash("sha256")
+      .update(readFileSync(path.join(owner, file), "utf8").replaceAll("\r\n", "\n"))
+      .digest("hex");
+  const config = gitleaksConfig(readFileSync(path.join(owner, ".gitleaks.toml"), "utf8"));
+  assert.deepEqual(config.extend, ["useDefault = true"]);
+  const keys = ["description", "condition", "targetRules", "paths", "regexTarget", "regexes"];
+  for (const block of config.allowlists) {
+    assert.deepEqual(Object.keys(block), keys);
+    assert.equal(block.condition, "AND");
+    assert.deepEqual(block.targetRules, ["generic-api-key"]);
+  }
+  // S31 and S44: 64-hex values of the release profiles and of the Contracts identity copy, unchanged.
+  const [s31, s44, ...rows] = config.allowlists;
+  assert.ok(s31 && s44);
+  assert.match(String(s31.description), /^S31: /u);
+  assert.deepEqual(s31.paths, ["^eng/provenance/artifact-profiles/cloud-release-r[0-9]+\\.json$"]);
+  assert.match(String(s44.description), /^S44: /u);
+  assert.deepEqual(s44.paths, ["^eng/generated/contracts-identity\\.json$"]);
+  for (const block of [s31, s44]) {
+    assert.equal(block.regexTarget, "secret");
+    assert.deepEqual(block.regexes, ["^[0-9a-f]{64}$"]);
+  }
+  // AF-CTR-03: one block per file (the policy and the receipts af-ctr-03-r1 to af-ctr-03-r3), each row one exact
+  // key-and-digest line of an immutable record named in the inputs maps.
+  // The digests are computed here from the records, so this file holds no digest literal.
+  const records = [
+    "eng/provenance/records/go-gowebauthn-legal-r1.json",
+    "eng/provenance/records/go-gowebauthnx-legal-r1.json",
+  ];
+  const files = [
+    "eng/policy/dependency-policy.json",
+    "eng/policy/dependency-reviews/af-ctr-03-r1.json",
+    "eng/policy/dependency-reviews/af-ctr-03-r2.json",
+    "eng/policy/dependency-reviews/af-ctr-03-r3.json",
+  ];
+  assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
+  const expected = records.map(
+    (record) => `(?s)^\\s*"${regexText(record)}":\\s*"${lf(record)}",?\\s*$`,
+  );
+  files.forEach((file, index) => {
+    const block = rows[index];
+    assert.ok(block);
+    assert.match(String(block.description), /^AF-CTR-03: /u);
+    assert.equal(block.regexTarget, "line");
+    assert.deepEqual(block.paths, [`^${regexText(file)}$`]);
+    assert.deepEqual(block.regexes, expected);
+    const exempt = gitleaksPattern(String(block.paths?.[0]));
+    assert.ok(exempt.test(file));
+    for (const other of [
+      `${file}.backup`,
+      `x/${file}`,
+      ...files.filter((_, other) => other !== index),
+      "eng/policy/dependency-reviews/af-ctr-03-r4.json",
+    ])
+      assert.ok(!exempt.test(other), other);
+    // Positive control: the rows match exactly the lines that name the two records, and every row matches one.
+    const patterns = expected.map(gitleaksPattern);
+    const lines = readFileSync(path.join(owner, file), "utf8").split("\n");
+    const naming = lines.filter((line) => records.some((record) => line.includes(`"${record}"`)));
+    assert.deepEqual(
+      lines.filter((line) => patterns.some((pattern) => pattern.test(line))),
+      naming,
+    );
+    assert.equal(naming.length, index === 0 ? 4 : 2);
+    for (const pattern of patterns) assert.ok(lines.some((line) => pattern.test(line)));
+    // Negative controls: another digest, an upper-case digest, another key, more on the line.
+    records.forEach((record, row) => {
+      const pattern = patterns[row] ?? /$^/u;
+      const digest = lf(record);
+      assert.ok(pattern.test(`    "${record}": "${digest}",`));
+      for (const line of [
+        `    "${record}": "${"0".repeat(64)}",`,
+        `    "${record}": "${digest.toUpperCase()}",`,
+        `    "${record.replace("-r1.json", "-r2.json")}": "${digest}",`,
+        `    "${record}": "${digest}", "other": "value",`,
+        `    "${record}": "${digest}1",`,
+      ])
+        assert.ok(!pattern.test(line), line);
+    });
+  });
 });

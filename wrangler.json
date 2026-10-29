@@ -58,6 +58,14 @@
         "limit": 60,
         "period": 60
       }
+    },
+    {
+      "name": "IDENTITY_RATE_LIMITER",
+      "namespace_id": "1003",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
     }
   ],
   "limits": {
@@ -72,7 +80,8 @@
     "ARCFORGES_NEON_HELLO": "enabled",
     "ARCFORGES_HELLO_RUNTIME": "go",
     "ARCFORGES_CENTER_MODE": "official-hosted",
-    "ARCFORGES_CENTER_PUBLIC_BASE_URL": "https://arcforges.com/api"
+    "ARCFORGES_CENTER_PUBLIC_BASE_URL": "https://arcforges.com/api",
+    "FLAGSHIP_SURFACES": ""
   },
   "env": {
     "proof": {
@@ -131,6 +140,14 @@
             "limit": 60,
             "period": 60
           }
+        },
+        {
+          "name": "IDENTITY_RATE_LIMITER",
+          "namespace_id": "1004",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
         }
       ],
       "vars": {
@@ -139,7 +156,10 @@
         "ARCFORGES_HELLO_RUNTIME": "go",
         "ARCFORGES_CENTER_MODE": "official-hosted",
         "ARCFORGES_CENTER_PUBLIC_BASE_URL": "https://proof.arcforges.com/api",
-        "ARCFORGES_CENTER_PLAN_CONFIGURATION": "development-fixtures"
+        "ARCFORGES_CENTER_PLAN_CONFIGURATION": "development-fixtures",
+        "FLAGSHIP_SURFACES": "identity",
+        "ALLOWED_ORIGIN": "https://proof.arcforges.com",
+        "ARCFORGES_CENTER_IDENTITY_POLICY": "{\"anonymousFlowsLimit\":600,\"anonymousFlowsWindow\":\"1h\"}"
       }
     }
   }

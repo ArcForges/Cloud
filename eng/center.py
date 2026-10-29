@@ -41,6 +41,9 @@ FUZZ_TARGETS = (
     ("./internal/correlation", "FuzzParseTraceparent"),
     ("./internal/ingress", "FuzzReadEnvelope"),
     ("./internal/config", "FuzzPublicBaseURL"),
+    ("./internal/identity", "FuzzNormalizeEmail"),
+    ("./internal/page", "FuzzParseCursor"),
+    ("./internal/server", "FuzzClientAddressHeader"),
 )
 FUZZ_TIME = "10s"
 TEST_TIMEOUT = "10m"

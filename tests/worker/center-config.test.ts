@@ -5,6 +5,7 @@
 // rather than the deployment. Wrangler does not inherit `vars` into a named environment, so each environment is checked on
 // its own.
 import assert from "node:assert/strict";
+import { edgeRateLimitPeriodSeconds } from "../../worker/tables/center-tables.generated.ts";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -112,4 +113,96 @@ test("the configuration rule refuses a missing or invalid mode or base URL", () 
     );
   // Removing both values from an environment that selects the Go center reports both.
   assert.equal(centerProblems({ ARCFORGES_HELLO_RUNTIME: "go" }).length, 2);
+});
+
+// AF-CTR-03 (PLT-12): the surface switch. Production enables no surface (Hello stays), the acceptance environment enables the
+// identity surface; FLAGSHIP_SURFACES is exact generated names, comma-separated, in every environment; wherever identity is on, the
+// Worker's ALLOWED_ORIGIN is the origin of the center's public base URL (the one origin browser sessions are bound to); and no
+// environment carries a bootstrap value (the proof bootstrap's digest and expiry are protected-dispatch inputs, never committed).
+const surfaces = new Set(["identity"]);
+
+function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
+  const value = vars?.FLAGSHIP_SURFACES;
+  if (value === undefined || value === "") return [];
+  if (typeof value !== "string") return ["FLAGSHIP_SURFACES is not a string"];
+  const names = value.split(",");
+  if (names.some((name) => !surfaces.has(name)) || new Set(names).size !== names.length)
+    return ["FLAGSHIP_SURFACES is not a comma-separated list of known surface names"];
+  if (names.includes("identity")) {
+    const base = vars?.ARCFORGES_CENTER_PUBLIC_BASE_URL;
+    const origin =
+      typeof base === "string" && baseUrlProblem(base) === undefined
+        ? new URL(base).origin
+        : undefined;
+    if (vars?.ALLOWED_ORIGIN !== origin)
+      return ["ALLOWED_ORIGIN is not the origin of the public base URL"];
+    if (vars?.ARCFORGES_HELLO_RUNTIME !== "go")
+      return ["the surfaces take effect only with the Go center"];
+  }
+  return [];
+}
+
+test("production enables no surface and the acceptance environment enables identity", () => {
+  assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
+  assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity");
+  // C1: only the acceptance environment overrides the identity policy, and only with its anonymous-flow ceiling; production keeps
+  // the defaults (no global bucket).
+  assert.equal(wrangler.vars?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
+  assert.deepEqual(
+    JSON.parse(String(wrangler.env?.proof?.vars?.ARCFORGES_CENTER_IDENTITY_POLICY)),
+    {
+      anonymousFlowsLimit: 600,
+      anonymousFlowsWindow: "1h",
+    },
+  );
+  assert.equal(wrangler.env?.proof?.vars?.ALLOWED_ORIGIN, "https://proof.arcforges.com");
+  for (const [name, environment] of environments) {
+    assert.deepEqual(surfaceProblems(environment.vars), [], `wrangler.json environment ${name}`);
+    for (const key of Object.keys(environment.vars ?? {}))
+      assert(!/BOOTSTRAP/u.test(key), `wrangler.json environment ${name} carries ${key}`);
+  }
+});
+
+test("the surface rule refuses unknown names, a wrong origin and the C# runtime", () => {
+  const valid = {
+    ARCFORGES_HELLO_RUNTIME: "go",
+    ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
+    ALLOWED_ORIGIN: "https://proof.arcforges.com",
+    FLAGSHIP_SURFACES: "identity",
+  };
+  assert.deepEqual(surfaceProblems(valid), []);
+  for (const value of [
+    "Identity",
+    "identity,",
+    "identity,identity",
+    " identity",
+    "operations",
+    "none",
+  ])
+    assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: value }).length, 1, value);
+  for (const origin of [
+    undefined,
+    "https://arcforges.com",
+    "https://proof.arcforges.com/",
+    "http://proof.arcforges.com",
+  ])
+    assert.equal(surfaceProblems({ ...valid, ALLOWED_ORIGIN: origin }).length, 1, String(origin));
+  assert.equal(surfaceProblems({ ...valid, ARCFORGES_HELLO_RUNTIME: "csharp" }).length, 1);
+});
+
+// AF-CTR-03 (F17): the Worker's rate_limited reply advises a retry after the generated edge period, which must be the surface
+// limiter's own period in every environment, so the advised instant is never inside the limiter's window.
+test("the surface limiter's period is the generated edge period in every environment", () => {
+  for (const [name, environment] of environments) {
+    const limiters =
+      (environment as { ratelimits?: { name?: string; simple?: { period?: unknown } }[] })
+        .ratelimits ?? [];
+    const identity = limiters.filter((limiter) => limiter.name === "IDENTITY_RATE_LIMITER");
+    assert.equal(identity.length, 1, `wrangler.json environment ${name}`);
+    assert.equal(
+      identity[0]?.simple?.period,
+      edgeRateLimitPeriodSeconds,
+      `wrangler.json environment ${name}`,
+    );
+  }
 });

@@ -321,6 +321,8 @@ internal static partial class HarnessArchitectureFixtures
             "import { BinaryReader } from \"@bufbuild/protobuf/wire\";\nvoid BinaryReader;\n")),
         Fail("wire-codec", "alternative runtime", Put("worker/deployment.ts", "import \"protobufjs\";\n")),
         Fail("wire-codec", "manual varint masks", Put("worker/deployment.ts", "export const low = (byte: number) => (byte & 0x7f) | 0x80;\n")),
+        Fail("wire-codec", "radix-128 varint arithmetic", Put("worker/deployment.ts",
+            "const varintRadix = 128;\nexport const group = (value: number, last: boolean) => (value % varintRadix) + (last ? 0 : varintRadix);\n")),
         Pass("wire-schema", "schema imported from the published package"),
         Fail("wire-schema", "locally defined schema", Put("worker/deployment.ts",
             "import { fromBinary } from \"@bufbuild/protobuf\";\nconst localSchema = {};\nexport const decode = (bytes: Uint8Array) => fromBinary(localSchema as never, bytes);\n")),

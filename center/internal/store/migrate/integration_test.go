@@ -315,6 +315,12 @@ func TestTheRuntimeRoleHasExactlyItsGrants(t *testing.T) {
 		"UPDATE platform.inbox SET processed_at = now(), outcome = 1 WHERE source = 'test'",
 		"SELECT count(*) FROM fleet.signing_key",
 		"SELECT last_sequence FROM audit.chain_head",
+		"SELECT count(*) FROM identity.user",
+		"SELECT count(*) FROM identity.session",
+		"SELECT count(*) FROM device.installation",
+		"SELECT count(*) FROM platform.rate_limit",
+		"INSERT INTO platform.rate_limit (bucket_hash, window_start, count) VALUES (decode(repeat('ab', 32), 'hex'), now(), 1)",
+		"UPDATE platform.rate_limit SET count = count + 1",
 	}
 	for _, statement := range allowed {
 		if _, err := runtime.Exec(ctx, statement); err != nil {
@@ -338,6 +344,15 @@ func TestTheRuntimeRoleHasExactlyItsGrants(t *testing.T) {
 		"SELECT * FROM other.secret",
 		"CREATE INDEX extra ON platform.outbox (topic)",
 		"CREATE TEMP TABLE extra_temporary (x int)",
+		// AF-CTR-03: nothing of the identity and device store is deleted at runtime, and the append-only rows stay so.
+		"DELETE FROM identity.session",
+		"DELETE FROM identity.auth_flow",
+		"DELETE FROM device.device",
+		"DELETE FROM platform.rate_limit",
+		"UPDATE identity.spent_refresh SET generation = 2",
+		"UPDATE identity.bootstrap SET consumed_at = now()",
+		"TRUNCATE identity.user",
+		"ALTER TABLE identity.session ADD COLUMN extra int",
 	}
 	for _, statement := range refused {
 		_, err := runtime.Exec(ctx, statement)

@@ -78,9 +78,21 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   characters), the exact configured `Origin` (`ALLOWED_ORIGIN`) and a well-formed `X-AF-CSRF` token, because every RPC is
   an unsafe request; the Worker forwards only that cookie, the Origin and the token. Both kinds together, a repeated or
   malformed cookie, or no configured origin is refused. The Worker cannot prove a session: the host validates it.
+- **Switchable surfaces (AF-CTR-03).** A method of a surface (`surfaceRoutes` of the generated center table; only `identity` exists)
+  is in no route table. It keeps every admission rule above, and then: while `FLAGSHIP_SURFACES` does not name its surface exactly
+  (comma-separated generated names, no spaces or repetition; anything else enables none), it is answered with the surface's
+  generated reply, the domain refusal `STATE/not_activated` as one reply frame and the OK status trailer, before any rate limit,
+  credential, body or Container. An enabled one is counted by its own `IDENTITY_RATE_LIMITER` (not the Hello limiter); over it, or
+  without the binding, the generated domain refusal `RESOURCE/rate_limited` answers, with its `retry_at` and `recovery_at` written by
+  the Worker into the generated template: the refusal's time rounded up to the second plus the generated edge period (60 s, the
+  limiter's `simple.period`). Both limiters key a client by its address, an IPv6 client by its /64 (`edgeClientKey`). A forwarded
+  surface call carries `x-arcforges-client-ip` set from `cf-connecting-ip` (left out when Cloudflare sent none; a client's own value
+  is never copied). The generated replies are the center's own refusals without a correlation id or `ResponseMeta`, so a client reads
+  them exactly as the center's ([accounts, sessions and devices](center-identity.md#surface-switch)).
 - **Reply.** Only `content-type`, `grpc-status`, `grpc-message` and the Worker's own headers (`cache-control: no-store`,
   `x-content-type-options`, the revision and build headers) are returned; cookies and any other Container header are
-  dropped. A non-200 Container status is HTTP 503 with a fixed text, never the Container's body. When the Containers
+  dropped. A Worker-generated domain reply (a disabled surface, the surface rate limit) carries the reply frame and the OK trailer
+  in the body and no cookie. A non-200 Container status is HTTP 503 with a fixed text, never the Container's body. When the Containers
   platform could not start the Container (its own plain-text 503, 500 or 429, which proves the request never reached the
   host), the 503 carries `Retry-After: 2`; any other non-200 status and any thrown error carries none, because the call
   may have been forwarded ([cloud-readiness](cloud-readiness.md)).

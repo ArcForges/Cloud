@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "goVersion": "go1.27.3",
   "inputs": {
-    "go.mod": "9e7951400458d012908d5b95b18543bc2f0f59561313169b4f0f1de77422daed",
-    "go.sum": "12ab12e467aaad6c9d2d8cd8896a7c45acf6e4ea99ae2dbb02575e1955843d9b",
+    "go.mod": "f9a14dfdd32b4846de16228131f16f305f82f410175cb1ecd86e26ceb5f3d360",
+    "go.sum": "df79b52d2e668ff1cfc62205e90a3fe7bbb15b0aa1f0ff8b48df979b6d145f17",
     "toolchain.json": "ad46e23c3a42ecc48b5f2383e6039aeffb11d9723bafac038fc6c648b7bd5a51",
     "tools/go.mod": "1abc5df8e2b367cff0d4de646d089c62eb89ade03538ae799450a096a86d600b",
     "tools/go.sum": "6394a2049a55c360f2fc72d96588570ece75a3b1350fad580da4070d53b0ae2f"
@@ -22,16 +22,93 @@
     },
     {
       "path": "github.com/ArcForges/Contracts/go",
-      "version": "v1.0.0-ci.410.1",
-      "sum": "h1:Ei//1YQhfZ5yTsP2mwP2XCvzqR+4pdDjtOzR6IR0R3Y=",
+      "version": "v1.0.0-ci.416.1",
+      "sum": "h1:FArSEysQqxsOZpWay/uye5Zp1l16ilZBfu4XAG1grak=",
       "goModSum": "h1:9MwtkvawAZ6+s9I5pbTsJit1/7htfvowqEREcJlIXME=",
       "repository": "https://github.com/ArcForges/Contracts",
-      "commit": "7205743648c6d5e81f539fe99b4d937dd4a0cbbc",
+      "commit": "62ccef164ba54b91313a7de2f086aab811aaf1c6",
       "spdx": "Apache-2.0",
       "licenceFile": "third-party/ContractsGo.LICENSE.txt",
       "licenceSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
       "noticeFile": "third-party/ContractsGo.NOTICE.txt",
       "noticeSha256": "8aa487acf6a48132c861cb00e83ffe6bda718771cbbc6809b7e734a2dd6d366d"
+    },
+    {
+      "path": "github.com/fxamacker/cbor/v2",
+      "version": "v2.9.4",
+      "sum": "h1:xwjVlxEMR3S605oUlgBjKLTTeGFciYPGYCtF/35LKGo=",
+      "goModSum": "h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=",
+      "repository": "https://github.com/fxamacker/cbor",
+      "commit": "be0da0d020e8e6b6f11ae50aadffebb9a4d9fbaa",
+      "spdx": "MIT",
+      "licenceFile": "third-party/FxamackerCbor.LICENSE.txt",
+      "licenceSha256": "78cad457d5ea7318230f3d969d4cdf29cef45524a1fc8ca3a97646da1ad7a841"
+    },
+    {
+      "path": "github.com/go-viper/mapstructure/v2",
+      "version": "v2.5.0",
+      "sum": "h1:vM5IJoUAy3d7zRSVtIwQgBj7BiWtMPfmPEgAXnvj1Ro=",
+      "goModSum": "h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=",
+      "repository": "https://github.com/go-viper/mapstructure",
+      "commit": "9aa3f77c68e2a56222ea436c1bfa631f1b1072d5",
+      "spdx": "MIT",
+      "licenceFile": "third-party/Mapstructure.LICENSE.txt",
+      "licenceSha256": "22adc4abdece712a737573672f082fd61ac2b21df878efb87ffcff4354a07f26"
+    },
+    {
+      "path": "github.com/go-webauthn/webauthn",
+      "version": "v0.18.2",
+      "sum": "h1:0BeftmEHU7i3Dv0VFwBtidy/ba37Vcdjvqst9EYu8Sk=",
+      "goModSum": "h1:hEXaOuLxvZ3zG9miZe3ehlyeVso9AtklXG+kTn36k+A=",
+      "repository": "https://github.com/go-webauthn/webauthn",
+      "commit": "a4c6fc6a4399bcd1ba982c116189f1598d9d5eec",
+      "spdx": "BSD-3-Clause",
+      "licenceFile": "third-party/GoWebAuthn.LICENSE.txt",
+      "licenceSha256": "5e0435d30b066b2e518bc6e7b6980147f454044123bdc18fbe6a6c599160531c"
+    },
+    {
+      "path": "github.com/go-webauthn/x",
+      "version": "v0.3.1",
+      "sum": "h1:1ff37z3XfmTTomkhlURgGizLIDyOvPgTt2t9nlzKLRo=",
+      "goModSum": "h1:ZInxAynYXfBPvvm5gzKZ7geBlL23K71xASMgohHl/Rg=",
+      "repository": "https://github.com/go-webauthn/x",
+      "commit": "48b3dfde0cdb8239eb3a90e780c60bb06bc63a66",
+      "spdx": "BSD-3-Clause",
+      "licenceFile": "third-party/GoWebAuthnX.LICENSE.txt",
+      "licenceSha256": "3b6f3112ab7231f5b47b7c6c2c626d0ed0622b787b508e732d2cecc4e448a463"
+    },
+    {
+      "path": "github.com/golang-jwt/jwt/v5",
+      "version": "v5.3.1",
+      "sum": "h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=",
+      "goModSum": "h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=",
+      "repository": "https://github.com/golang-jwt/jwt",
+      "commit": "7ceae619e739dc8a7bf577214aa8ebf26668e9db",
+      "spdx": "MIT",
+      "licenceFile": "third-party/GolangJwt.LICENSE.txt",
+      "licenceSha256": "fe26ca41577b9b2b4448050a24b25e5753af66b5d5945d5d36094e7790bfcb2f"
+    },
+    {
+      "path": "github.com/google/go-tpm",
+      "version": "v0.9.8",
+      "sum": "h1:slArAR9Ft+1ybZu0lBwpSmpwhRXaa85hWtMinMyRAWo=",
+      "goModSum": "h1:h9jEsEECg7gtLis0upRBQU+GhYVH6jMjrFxI8u6bVUY=",
+      "repository": "https://github.com/google/go-tpm",
+      "commit": "6a7f64318ba9e8e7a0f8c5710b07ca47bf911f4c",
+      "spdx": "Apache-2.0",
+      "licenceFile": "third-party/GoTpm.LICENSE.txt",
+      "licenceSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "github.com/google/uuid",
+      "version": "v1.6.0",
+      "sum": "h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=",
+      "goModSum": "h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=",
+      "repository": "https://github.com/google/uuid",
+      "commit": "0f11ee6918f41a04c201eceeadf612a377bc7fbc",
+      "spdx": "BSD-3-Clause",
+      "licenceFile": "third-party/GoogleUuid.LICENSE.txt",
+      "licenceSha256": "0a8d61ed3cbfd5312326e8126c31ce9c627a283adc99131b56896d29ada04b2d"
     },
     {
       "path": "github.com/jackc/pgpassfile",
@@ -78,6 +155,50 @@
       "licenceSha256": "2d50e98a4900b4d6457a38d39c1432fdc156fc2f7b365f2e33ec9344acbb0057"
     },
     {
+      "path": "github.com/philhofer/fwd",
+      "version": "v1.2.0",
+      "sum": "h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=",
+      "goModSum": "h1:RqIHx9QI14HlwKwm98g9Re5prTQ6LdeRQn+gXJFxsJM=",
+      "repository": "https://github.com/philhofer/fwd",
+      "commit": "20a13a1f6b7cb47a126dcb75152e21e1383bbaba",
+      "spdx": "MIT",
+      "licenceFile": "third-party/Fwd.LICENSE.txt",
+      "licenceSha256": "430da36bd967b28fc662f05e9245306da10941e93911052114a20ef10e4410f8"
+    },
+    {
+      "path": "github.com/tinylib/msgp",
+      "version": "v1.6.4",
+      "sum": "h1:mOwYbyYDLPj35mkA2BjjYejgJk9BuHxDdvRnb6v2ZcQ=",
+      "goModSum": "h1:RSp0LW9oSxFut3KzESt5Voq4GVWyS+PSulT77roAqEA=",
+      "repository": "https://github.com/tinylib/msgp",
+      "commit": "6f99c863451752e6aa9c7aacde4215a471a64242",
+      "spdx": "MIT",
+      "licenceFile": "third-party/Msgp.LICENSE.txt",
+      "licenceSha256": "17df22e31ef6a84f70909eed5185f41443a03dd05b14e8dec319d5c2bd7d7b3b"
+    },
+    {
+      "path": "github.com/x448/float16",
+      "version": "v0.8.4",
+      "sum": "h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=",
+      "goModSum": "h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=",
+      "repository": "https://github.com/x448/float16",
+      "commit": "cb9afec31f2649663ebb64da5c6c32c3d365c3ca",
+      "spdx": "MIT",
+      "licenceFile": "third-party/Float16.LICENSE.txt",
+      "licenceSha256": "a555f1194fdac34da70fb416968f7e2217b02352c26c1eac2fa45fcb4290ae8d"
+    },
+    {
+      "path": "golang.org/x/crypto",
+      "version": "v0.58.0",
+      "sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+      "goModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=",
+      "repository": "https://go.googlesource.com/crypto",
+      "commit": "8fdf07b3114278fb3b78c1cf1814e08bd851eb4c",
+      "spdx": "BSD-3-Clause",
+      "licenceFile": "third-party/GoCrypto.LICENSE.txt",
+      "licenceSha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+    },
+    {
       "path": "golang.org/x/net",
       "version": "v0.62.0",
       "sum": "h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY=",
@@ -97,6 +218,17 @@
       "commit": "36f2d70ecde9857dc4e363242a1369c7645d6770",
       "spdx": "BSD-3-Clause",
       "licenceFile": "third-party/GoSync.LICENSE.txt",
+      "licenceSha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+    },
+    {
+      "path": "golang.org/x/sys",
+      "version": "v0.49.0",
+      "sum": "h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=",
+      "goModSum": "h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=",
+      "repository": "https://go.googlesource.com/sys",
+      "commit": "b6b8557e8e2974925aec7a136ba0e323eedc5f43",
+      "spdx": "BSD-3-Clause",
+      "licenceFile": "third-party/GoSys.LICENSE.txt",
       "licenceSha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
     },
     {

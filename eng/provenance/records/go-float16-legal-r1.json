@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-float16-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/x448/float16",
+  "sourceCommit": "cb9afec31f2649663ebb64da5c6c32c3d365c3ca",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "MIT",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "a555f1194fdac34da70fb416968f7e2217b02352c26c1eac2fa45fcb4290ae8d",
+        "finding": "Complete licence from the exact Go module source; module integrity is pinned by go.sum."
+      }
+    ],
+    "scope": "github.com/x448/float16 v0.8.4: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "github.com/x448/float16 v0.8.4: MIT. Complete upstream copyright, permission and disclaimer terms are retained."
+  ],
+  "targets": [
+    {
+      "path": "third-party/Float16.LICENSE.txt",
+      "sha256": "a555f1194fdac34da70fb416968f7e2217b02352c26c1eac2fa45fcb4290ae8d",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "github.com/x448/float16 v0.8.4: MIT. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/Float16.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "github.com/x448/float16 v0.8.4: MIT. Complete upstream copyright, permission and disclaimer terms are retained."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-03 delegated author); PR review is recorded separately",
+    "reviewedOn": "2026-10-28",
+    "decision": "approved",
+    "rationale": "github.com/x448/float16 v0.8.4: MIT. Complete upstream copyright, permission and disclaimer terms are retained. Linked into arcforges-center through github.com/go-webauthn/webauthn (AF-CTR-03 passkeys).",
+    "baselineCommit": "aecf53fd34e7e7d15cc5d40d36db1ffae383a305",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

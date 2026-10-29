@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-gowebauthn-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/go-webauthn/webauthn",
+  "sourceCommit": "a4c6fc6a4399bcd1ba982c116189f1598d9d5eec",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "BSD-3-Clause",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "5e0435d30b066b2e518bc6e7b6980147f454044123bdc18fbe6a6c599160531c",
+        "finding": "Complete licence from the exact Go module source; module integrity is pinned by go.sum."
+      }
+    ],
+    "scope": "github.com/go-webauthn/webauthn v0.18.2: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "github.com/go-webauthn/webauthn v0.18.2: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained."
+  ],
+  "targets": [
+    {
+      "path": "third-party/GoWebAuthn.LICENSE.txt",
+      "sha256": "5e0435d30b066b2e518bc6e7b6980147f454044123bdc18fbe6a6c599160531c",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "github.com/go-webauthn/webauthn v0.18.2: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/GoWebAuthn.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "github.com/go-webauthn/webauthn v0.18.2: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-03 delegated author); PR review is recorded separately",
+    "reviewedOn": "2026-10-28",
+    "decision": "approved",
+    "rationale": "github.com/go-webauthn/webauthn v0.18.2: BSD-3-Clause. Complete upstream copyright, permission and disclaimer terms are retained. Linked into arcforges-center through github.com/go-webauthn/webauthn (AF-CTR-03 passkeys).",
+    "baselineCommit": "aecf53fd34e7e7d15cc5d40d36db1ffae383a305",
+    "reconciliation": false
+  },
+  "supersedes": null
+}

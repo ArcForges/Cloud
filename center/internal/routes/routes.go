@@ -10,6 +10,8 @@ package routes
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
 	"sort"
 
 	"github.com/ArcForges/Contracts/go/arcforges/hello/v1/hellov1connect"
@@ -24,8 +26,8 @@ const (
 	APIPrefix = "/api"
 	// HealthPath is the one plain route of the production table.
 	HealthPath = "/healthz"
-	// MaxBodyBytes bounds a whole request body, frame header included; it equals the Hello policy's bound.
-	MaxBodyBytes = 4096
+	// HelloMaxBodyBytes is the Hello policy's request bound, frame header included.
+	HelloMaxBodyBytes = 4096
 	// ColdStartMilliseconds is how long the Container may take to start before a stream's response headers arrive.
 	ColdStartMilliseconds = 15_000
 	// StreamLifetimeMilliseconds is a server stream's lifetime when the client states no shorter deadline: the annex 10 server
@@ -37,6 +39,15 @@ const (
 	HealthMaxDurationMilliseconds = 15_000
 	// HealthInstance is the Container instance that answers the health route.
 	HealthInstance = "hello"
+	// EdgeIPv6PrefixBits is the network that keys an IPv6 client at the Worker's rate limits (F7): its /64, the smallest standard
+	// per-subscriber allocation, so one host cannot slip past the edge limit by changing its address within its own network. An
+	// IPv4 client (an IPv4-mapped IPv6 address included) is keyed by its whole address, so the users behind a carrier-grade NAT do not
+	// share one key. The center's own buckets group clients more coarsely (ratelimit.Prefix).
+	EdgeIPv6PrefixBits = 64
+	// EdgeRateLimitPeriodSeconds is the period of the Worker's surface rate limit (wrangler.json IDENTITY_RATE_LIMITER simple.period
+	// in both environments, pinned by tests/worker/center-config.test.ts). The Worker's rate_limited reply advises a retry this
+	// long after the refused call, which no window of the limiter outlasts (F17).
+	EdgeRateLimitPeriodSeconds = 60
 )
 
 // Budget is one method's transport budget as the Worker applies it. These are declarations for the Worker; the center keeps
@@ -50,7 +61,9 @@ type Budget struct {
 
 // Module is one independently registered part of the center.
 type Module struct {
-	Name       string
+	Name string
+	// Surface is the switchable surface of every policy of the module (AF-CTR-03), or empty for the always-on Hello.
+	Surface    string
 	Policies   []ingress.Policy
 	PlainPaths []string
 	Budgets    map[string]Budget
@@ -61,7 +74,7 @@ const HelloMethod = hellov1connect.HelloServiceSayHelloProcedure
 
 // Hello is the anonymous Hello module and the health route.
 func Hello() (Module, error) {
-	policy, err := ingress.NewUnary(HelloMethod, ingress.Anonymous, ingress.NoScope, MaxBodyBytes, false)
+	policy, err := ingress.NewUnary(HelloMethod, ingress.Anonymous, ingress.NoScope, HelloMaxBodyBytes, false)
 	if err != nil {
 		return Module{}, err
 	}
@@ -81,7 +94,47 @@ func Center() ([]Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Module{hello}, nil
+	identity, err := Identity()
+	if err != nil {
+		return nil, err
+	}
+	return []Module{hello, identity}, nil
+}
+
+// Surfaces are the switchable surfaces of the registrations, in registration order.
+func Surfaces(modules []Module) []string {
+	var surfaces []string
+	for _, module := range modules {
+		if module.Surface != "" && !slices.Contains(surfaces, module.Surface) {
+			surfaces = append(surfaces, module.Surface)
+		}
+	}
+	return surfaces
+}
+
+// MaxRequestBytes is the largest request bound of any registered method, frame header included: the bound of the Connect reader
+// (requests only; replies are bounded by MaxResponseBytes) and of the Worker's disposal of an unread upload.
+func MaxRequestBytes(modules []Module) int {
+	largest := 0
+	for _, module := range modules {
+		for _, policy := range module.Policies {
+			largest = max(largest, policy.MaxRequestBytes)
+		}
+	}
+	return largest
+}
+
+// MaxResponseBytes is the largest reply budget of any registered method (a unary reply or one frame), frame header included: the
+// bound of the Connect writer. The Worker enforces each method's own budget; the center's bound only has to admit every one of
+// them, so a reply the Worker would forward is never refused by the center (F8).
+func MaxResponseBytes(modules []Module) int {
+	largest := 0
+	for _, module := range modules {
+		for _, budget := range module.Budgets {
+			largest = max(largest, budget.MaxUnaryResponseBytes, budget.MaxFrameBytes)
+		}
+	}
+	return largest
 }
 
 // Row is one route of the Worker's table: the fields of the generated ApiRoute.
@@ -95,18 +148,28 @@ type Row struct {
 	MaxDurationMilliseconds int
 	Instance                string
 	RequestMeta             bool
+	// Surface is the row's switchable surface, or empty for a production row.
+	Surface string
 }
 
 // WorkerTable is everything the Worker's production table is generated from.
 type WorkerTable struct {
-	HelloPath                  string
-	HealthPath                 string
-	Health                     Row
-	Production                 []Row
+	HelloPath  string
+	HealthPath string
+	Health     Row
+	// Production is the always-on rows (Hello); Surfaces and SurfaceRows are the switchable surfaces and their rows, which the Worker
+	// forwards only while the surface is enabled.
+	Production  []Row
+	Surfaces    []string
+	SurfaceRows []Row
+	// MaxBodyBytes is the bound of a request body of a method that declares no larger one: the Hello bound, which the C#
+	// rollback host generates too. Every row carries its own bound; the center's Connect reader takes MaxRequestBytes.
 	MaxBodyBytes               int
 	ColdStartMilliseconds      int
 	StreamLifetimeMilliseconds int
 }
+
+var surfacePattern = regexp.MustCompile(`^[a-z][a-z0-9]{1,31}$`)
 
 // ErrRegistration is the error of every inconsistent registration.
 var ErrRegistration = errors.New("inconsistent center registration")
@@ -129,7 +192,7 @@ func Ingress(modules []Module) (*ingress.Routes, error) {
 // Table reads the Worker's production table from the registrations, fail-closed.
 func Table(modules []Module) (WorkerTable, error) {
 	budgets := map[string]Budget{}
-	var rows []Row
+	var rows, surfaceRows []Row
 	var plain []string
 	names := map[string]bool{}
 	for _, module := range modules {
@@ -152,12 +215,24 @@ func Table(modules []Module) (WorkerTable, error) {
 			if err := checkBudget(policy.FullName, budget); err != nil {
 				return WorkerTable{}, err
 			}
-			rows = append(rows, Row{
+			if policy.Surface != module.Surface {
+				return WorkerTable{}, fmt.Errorf("%w: the policy %s is not in its module's surface", ErrRegistration, policy.FullName)
+			}
+			row := Row{
 				Path: policy.FullName, Kind: kindName(policy.Kind), Auth: authName(policy.Authentication),
 				MaxRequestBytes: policy.MaxRequestBytes, MaxFrameBytes: budget.MaxFrameBytes,
 				MaxUnaryResponseBytes: budget.MaxUnaryResponseBytes, MaxDurationMilliseconds: budget.MaxDurationMilliseconds,
-				Instance: budget.Instance, RequestMeta: policy.ReadsRequestMeta(),
-			})
+				Instance: budget.Instance, RequestMeta: policy.ReadsRequestMeta(), Surface: policy.Surface,
+			}
+			if policy.Surface == "" {
+				rows = append(rows, row)
+				continue
+			}
+			// Every surface row is served by the one center instance (PLT-6) and is a method whose request starts with a RequestMeta.
+			if !surfacePattern.MatchString(policy.Surface) || budget.Instance != HealthInstance || !policy.ReadsRequestMeta() {
+				return WorkerTable{}, fmt.Errorf("%w: the surface method %s needs a surface name, the %s instance and a RequestMeta", ErrRegistration, policy.FullName, HealthInstance)
+			}
+			surfaceRows = append(surfaceRows, row)
 		}
 	}
 	unused := []string{}
@@ -185,8 +260,13 @@ func Table(modules []Module) (WorkerTable, error) {
 	if hello == nil {
 		return WorkerTable{}, fmt.Errorf("%w: the production table must serve the Hello method", ErrRegistration)
 	}
-	if hello.MaxRequestBytes != MaxBodyBytes {
-		return WorkerTable{}, fmt.Errorf("%w: MaxBodyBytes must equal the Hello policy's request bound", ErrRegistration)
+	if hello.MaxRequestBytes != HelloMaxBodyBytes {
+		return WorkerTable{}, fmt.Errorf("%w: the Hello policy's request bound changed", ErrRegistration)
+	}
+	for _, module := range modules {
+		if module.Surface != "" && len(module.PlainPaths) > 0 {
+			return WorkerTable{}, fmt.Errorf("%w: a surface module declares a plain path", ErrRegistration)
+		}
 	}
 	if ColdStartMilliseconds < 1 || ColdStartMilliseconds > StreamLifetimeMilliseconds {
 		return WorkerTable{}, fmt.Errorf("%w: the cold start budget is out of range", ErrRegistration)
@@ -199,7 +279,9 @@ func Table(modules []Module) (WorkerTable, error) {
 			MaxDurationMilliseconds: HealthMaxDurationMilliseconds, Instance: HealthInstance,
 		},
 		Production:                 rows,
-		MaxBodyBytes:               MaxBodyBytes,
+		Surfaces:                   Surfaces(modules),
+		SurfaceRows:                surfaceRows,
+		MaxBodyBytes:               HelloMaxBodyBytes,
 		ColdStartMilliseconds:      ColdStartMilliseconds,
 		StreamLifetimeMilliseconds: StreamLifetimeMilliseconds,
 	}, nil

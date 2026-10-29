@@ -26,14 +26,20 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/net/netutil"
 
+	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/buildinfo"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/feature"
 	"github.com/ArcForges/Cloud/center/internal/hello"
+	"github.com/ArcForges/Cloud/center/internal/identity"
+	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
+	"github.com/ArcForges/Cloud/center/internal/identityapi"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
+	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/schema"
+	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
 	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
@@ -81,6 +87,13 @@ type component struct {
 type Options struct {
 	// Greeting replaces the configured Hello greeting.
 	Greeting hello.Greeting
+	// Mail is the e-mail sender of the identity surface; nil is the disabled sender, the only one a deployment uses until live
+	// delivery is decided (tests inject the fake sender).
+	Mail mail.Sender
+	// Clock replaces the identity surface's clock.
+	Clock func() time.Time
+	// Background runs the identity surface's deliveries after a response; nil runs each on a new goroutine.
+	Background func(func())
 }
 
 // New composes a center from its configuration. Pools connect lazily, so a database that is down does not stop the start; it
@@ -145,15 +158,34 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 		center.Close()
 		return nil, err
 	}
+	if err = checkIdentityComposition(modules); err != nil {
+		center.Close()
+		return nil, err
+	}
 
 	dispatcher := connect.NewServer(center.recordOutcome)
 	hellov1connect.RegisterHelloServiceHandler(dispatcher, &hello.Server{Greeting: greeting})
+	pipelineOptions := ingress.Options{Routes: publicRoutes, Observe: center.observeAdmission,
+		SurfaceEnabled: func(surface string) bool { return cfg.Identity.Enabled(config.Surface(surface)) },
+		ClientIP:       ClientAddress(cfg.Mode, cfg.Identity), RequireClientIP: cfg.Mode == config.OfficialHosted}
+	if cfg.Identity.Enabled(config.SurfaceIdentity) {
+		if center.Store == nil {
+			center.Close()
+			return nil, errors.New("the identity surface needs the runtime database")
+		}
+		if err = center.composeIdentity(dispatcher, &pipelineOptions, options, logger); err != nil {
+			center.Close()
+			return nil, err
+		}
+	}
 	mux := http.NewServeMux()
-	// The message bound is the Hello policy's request bound without the five-byte frame header, as before.
-	limit := routes.MaxBodyBytes - ingress.HeaderLength
-	connecthttp.Mount(mux, dispatcher, connecthttp.WithReadMaxBytes(limit), connecthttp.WithSendMaxBytes(limit))
+	// The read bound is the largest request bound of the registered methods without the five-byte frame header (the pipeline
+	// applies each method's own bound before any handler reads); the send bound is the largest reply budget without the header, so
+	// every reply a method's budget admits is sent (F8).
+	connecthttp.Mount(mux, dispatcher, connecthttp.WithReadMaxBytes(routes.MaxRequestBytes(modules)-ingress.HeaderLength),
+		connecthttp.WithSendMaxBytes(routes.MaxResponseBytes(modules)-ingress.HeaderLength))
 	mux.HandleFunc(routes.HealthPath, center.serveHealth)
-	pipeline := ingress.NewPipeline(ingress.Options{Routes: publicRoutes, Observe: center.observeAdmission}, mux)
+	pipeline := ingress.NewPipeline(pipelineOptions, mux)
 	center.public = center.track(pipeline)
 
 	admin := http.NewServeMux()
@@ -161,6 +193,52 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	admin.HandleFunc("/metrics", center.serveMetrics)
 	center.admin = admin
 	return center, nil
+}
+
+// composeIdentity registers the identity surface's served methods and its credential verifiers.
+func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.Options, options Options, logger *slog.Logger) error {
+	clock := options.Clock
+	if clock == nil {
+		clock = time.Now
+	}
+	origin := config.Origin(c.Config.PublicBaseURL)
+	rp, err := passkey.New(config.RelyingPartyID(c.Config.PublicBaseURL), origin)
+	if err != nil {
+		return errors.New("the public base URL cannot be a WebAuthn relying party")
+	}
+	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: options.Mail, Bootstrap: c.Config.Identity.Bootstrap,
+		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background})
+	dispatcher.Register(identityapi.New(service, access.NewAuthorizer(c.Store, clock), c.Store, clock, logger).Methods()...)
+	verifier := session.NewVerifier(c.Store, origin, clock)
+	pipeline.Bearer, pipeline.Browser = verifier, verifier
+	return nil
+}
+
+// checkIdentityComposition fails closed when the identity surface's registrations, its served Connect methods and the operation
+// table disagree (SEC-01, F13): every method of the surface is served and has exactly one operation row, and nothing else is.
+func checkIdentityComposition(modules []routes.Module) error {
+	var policies []ingress.Policy
+	for _, module := range modules {
+		if module.Surface == routes.SurfaceIdentity {
+			policies = append(policies, module.Policies...)
+		}
+	}
+	if err := access.Check(policies); err != nil {
+		return err
+	}
+	served := map[string]bool{}
+	for _, method := range identityapi.New(nil, nil, nil, nil, nil).Methods() {
+		served[method.Spec.Procedure] = true
+	}
+	if len(served) != len(policies) {
+		return errors.New("the identity surface serves other methods than it registers")
+	}
+	for _, policy := range policies {
+		if !served[policy.FullName] {
+			return errors.New("the identity surface registers a method it does not serve")
+		}
+	}
+	return nil
 }
 
 // Public is the handler of the public listeners.
@@ -233,6 +311,10 @@ func (c *Center) observeAdmission(request *http.Request, outcome ingress.Outcome
 		entry.code = statusName(outcome.Refusal.Status)
 	case outcome.HTTPStatus != 0:
 		entry.code = "http_" + strconv.Itoa(outcome.HTTPStatus)
+	case outcome.Domain != "":
+		// A domain refusal the pipeline answered itself (not_activated) is an OK reply carrying its ArcError, counted as a handler's
+		// domain refusal is, with its correlation id (F18).
+		entry.code, entry.correlation = "ok", outcome.Correlation
 	}
 	if outcome.Call != nil {
 		entry.correlation = outcome.Call.Correlation.CorrelationID
@@ -410,9 +492,20 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		servers = append(servers, server)
 		go func() { failures <- server.Serve(netutil.LimitListener(listener, cfg.MaxConnections)) }()
 	}
+	surfaces := make([]string, 0, len(cfg.Identity.Surfaces))
+	for _, surface := range cfg.Identity.Surfaces {
+		surfaces = append(surfaces, string(surface))
+	}
 	logger.Info("center started", "mode", string(cfg.Mode), "planConfiguration", planName(cfg.Plan), "publicBaseUrl", cfg.PublicBaseURL, "listeners", bound,
 		"helloBackend", center.Health.HelloBackend, "store", center.Store != nil, "schemaBuildVersion", center.buildVersion,
-		"revision", center.Health.Revision, "version", center.Health.Artifact.Version)
+		"revision", center.Health.Revision, "version", center.Health.Artifact.Version, "surfaces", surfaces,
+		"bootstrapConfigured", cfg.Identity.Bootstrap != nil)
+	if cfg.Identity.Disabled != "" {
+		logger.Error("the identity surface is off", "reason", cfg.Identity.Disabled)
+	}
+	if bootstrap := cfg.Identity.Bootstrap; bootstrap != nil && !time.Now().Before(bootstrap.ExpiresAt) {
+		logger.Warn("the owner bootstrap has expired; remove its variables", "expiresAt", bootstrap.ExpiresAt.Format(time.RFC3339))
+	}
 	if center.Store != nil {
 		go center.logReadiness(ctx)
 	}

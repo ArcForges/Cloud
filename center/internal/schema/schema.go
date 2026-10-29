@@ -25,7 +25,7 @@ func Migrations() fs.FS {
 
 // Schemas are the module schemas the migrations own, in creation order. platform is created by the runner before the first
 // migration (it holds platform.schema_migration).
-var Schemas = []string{"platform", "audit", "fleet"}
+var Schemas = []string{"platform", "audit", "fleet", "identity", "device"}
 
 // Privilege is one table privilege of the runtime role.
 type Privilege string
@@ -56,6 +56,19 @@ var RuntimeGrants = []Grant{
 	{"audit", "audit_event", []Privilege{Select, Insert}},
 	{"audit", "chain_head", []Privilege{Select, Update}},
 	{"fleet", "signing_key", []Privilege{Select}},
+	// AF-CTR-03 (0002): accounts, credentials, sessions, flows, step-up challenges and the bootstrap record; devices and
+	// installations; rate-limit windows. Nothing is deleted at runtime: rows are marked, and the retention sweeps run with the
+	// migration role (AF-PLAT-01).
+	{"platform", "rate_limit", []Privilege{Select, Insert, Update}},
+	{"identity", "user", []Privilege{Select, Insert, Update}},
+	{"identity", "auth_identity", []Privilege{Select, Insert, Update}},
+	{"identity", "session", []Privilege{Select, Insert, Update}},
+	{"identity", "spent_refresh", []Privilege{Select, Insert}},
+	{"identity", "auth_flow", []Privilege{Select, Insert, Update}},
+	{"identity", "step_up_challenge", []Privilege{Select, Insert, Update}},
+	{"identity", "bootstrap", []Privilege{Select, Insert}},
+	{"device", "device", []Privilege{Select, Insert, Update}},
+	{"device", "installation", []Privilege{Select, Insert, Update}},
 }
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted

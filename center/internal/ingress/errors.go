@@ -3,6 +3,8 @@
 package ingress
 
 import (
+	"errors"
+
 	"connectrpc.com/connect/v2"
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	"google.golang.org/protobuf/proto"
@@ -39,13 +41,26 @@ var (
 	ReasonStaleGeneration = Reason{Code: "state.stale_generation", Status: StatusFailedPrecondition, Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE}
 	// ReasonDependencyUnavailable answers a credential check whose store could not be reached.
 	ReasonDependencyUnavailable = Reason{Code: "dependency.unavailable", Status: StatusUnavailable, Category: foundationv1.ErrorCategory_ERROR_CATEGORY_EXECUTION}
+	// ReasonTokenExpired answers a known bearer whose access token expired; the client refreshes and retries (AF-CTR-03,
+	// errors.md AUTHENTICATION/token_expired as a transport status).
+	ReasonTokenExpired = Reason{Code: "auth.token_expired", Status: StatusUnauthenticated, Category: foundationv1.ErrorCategory_ERROR_CATEGORY_AUTHENTICATION}
+	// ReasonCredentialRevoked answers a known bearer whose session, device or installation was revoked (AF-CTR-03, errors.md
+	// AUTHENTICATION/credential_revoked as a transport status).
+	ReasonCredentialRevoked = Reason{Code: "auth.credential_revoked", Status: StatusUnauthenticated, Category: foundationv1.ErrorCategory_ERROR_CATEGORY_AUTHENTICATION}
+)
+
+// The errors a BearerVerifier returns for a known credential that is no longer usable; any other error is a store that could not be
+// reached.
+var (
+	ErrTokenExpired      = errors.New("the access token expired")
+	ErrCredentialRevoked = errors.New("the credential was revoked")
 )
 
 // Reasons is every refusal the pipeline produces, in the order of the table in docs/center.md.
 func Reasons() []Reason {
 	return []Reason{
 		ReasonUnimplemented, ReasonUnauthenticated, ReasonPermissionDenied, ReasonInvalidRequest, ReasonRequestTooLarge,
-		ReasonStaleGeneration, ReasonDependencyUnavailable,
+		ReasonStaleGeneration, ReasonDependencyUnavailable, ReasonTokenExpired, ReasonCredentialRevoked,
 	}
 }
 
