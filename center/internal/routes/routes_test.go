@@ -34,7 +34,7 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		table.MaxBodyBytes != 4096 || table.ColdStartMilliseconds != 15_000 || table.StreamLifetimeMilliseconds != 310_000 {
 		t.Fatalf("table: %+v", table)
 	}
-	// The identity surface is exactly the methods A1a serves (F13 pins the same set against the service descriptors), each
+	// The identity surface is exactly the methods AF-CTR-03 serves (F13 pins the same set against the service descriptors), each
 	// reading a RequestMeta, served by the one center instance and switched by the surface.
 	served := []string{
 		"/arcforges.publicapi.v1.IdentityService/BeginAuthentication anonymous 4096",
@@ -48,6 +48,17 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.publicapi.v1.IdentityService/ListAuthIdentities session 4096",
 		"/arcforges.publicapi.v1.IdentityService/ListSessions session 4096",
 		"/arcforges.publicapi.v1.DeviceService/List session 4096",
+		"/arcforges.publicapi.v1.IdentityService/BeginStepUp session 4096",
+		"/arcforges.publicapi.v1.IdentityService/CompleteStepUp session 16384",
+		"/arcforges.publicapi.v1.IdentityService/UpdateProfile session 4096",
+		"/arcforges.publicapi.v1.IdentityService/BeginPasskeyRegistration session 4096",
+		"/arcforges.publicapi.v1.IdentityService/CompletePasskeyRegistration session 16384",
+		"/arcforges.publicapi.v1.IdentityService/RenameAuthIdentity session 4096",
+		"/arcforges.publicapi.v1.IdentityService/RemoveAuthIdentity session 4096",
+		"/arcforges.publicapi.v1.IdentityService/RevokeSession session 4096",
+		"/arcforges.publicapi.v1.IdentityService/RevokeAllSessions session 4096",
+		"/arcforges.publicapi.v1.DeviceService/Rename session 4096",
+		"/arcforges.publicapi.v1.DeviceService/Revoke session 4096",
 	}
 	if len(table.Surfaces) != 1 || table.Surfaces[0] != SurfaceIdentity || len(table.SurfaceRows) != len(served) {
 		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))

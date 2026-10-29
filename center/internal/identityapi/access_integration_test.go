@@ -349,14 +349,19 @@ func TestADisabledSurfaceAnswersNotActivated(t *testing.T) {
 	}
 }
 
-// TestTheServedMethodsAreExactlyA1asSet (F13): of the contract's IdentityService, DeviceService and WorkspaceService methods the
-// composed center serves exactly the pinned A1a set; every other method is UNIMPLEMENTED, and the Worker table lists only the set.
-func TestTheServedMethodsAreExactlyA1asSet(t *testing.T) {
+// TestTheServedMethodsAreExactlyTheIdentitySet (F13): of the contract's IdentityService, DeviceService and WorkspaceService methods
+// the composed center serves exactly the pinned set of A1a (sign-in, refresh, reads) and A1b (step-up, profile, passkey
+// registration, credentials, sign-out and revocation, devices); every other method (AF-ID-02's among them) is UNIMPLEMENTED, and the
+// Worker table lists only the set.
+func TestTheServedMethodsAreExactlyTheIdentitySet(t *testing.T) {
 	h := newHarness(t, settings{})
 	pinned := map[string]bool{}
 	for _, name := range []string{"IdentityService/BeginAuthentication", "IdentityService/CompleteAuthentication", "IdentityService/RequestEmailCode",
 		"IdentityService/RedeemEmailCode", "IdentityService/CompleteEnrollment", "IdentityService/ListAuthProviders", "IdentityService/RefreshSession",
-		"IdentityService/GetProfile", "IdentityService/ListAuthIdentities", "IdentityService/ListSessions", "DeviceService/List"} {
+		"IdentityService/GetProfile", "IdentityService/ListAuthIdentities", "IdentityService/ListSessions", "DeviceService/List",
+		"IdentityService/BeginStepUp", "IdentityService/CompleteStepUp", "IdentityService/UpdateProfile", "IdentityService/BeginPasskeyRegistration",
+		"IdentityService/CompletePasskeyRegistration", "IdentityService/RenameAuthIdentity", "IdentityService/RemoveAuthIdentity",
+		"IdentityService/RevokeSession", "IdentityService/RevokeAllSessions", "DeviceService/Rename", "DeviceService/Revoke"} {
 		pinned["/arcforges.publicapi.v1."+name] = true
 	}
 	registered := map[string]bool{}

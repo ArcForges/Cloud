@@ -11,8 +11,15 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
+	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/session"
 )
 
 func TestTheMigrationAndAdministrationCommands(t *testing.T) {
@@ -94,6 +101,35 @@ func TestTheMigrationAndAdministrationCommands(t *testing.T) {
 	}
 	// The file is never overwritten.
 	command(1, "admin", "rotate-runtime-credential")
+	// admin revoke-sessions (PLT-10): every unrevoked session of the account, whatever its scope, audited; another account's stay.
+	center := pgtest.Connect(t, pgtest.WithDatabase(t, url, name+"_center"))
+	owner, other := seedSessions(t, center), seedSessions(t, center)
+	command(2, "admin", "revoke-sessions")
+	command(2, "admin", "revoke-sessions", "--account", "not-a-uuid")
+	command(2, "admin", "revoke-sessions", "--account", strings.ToUpper(owner.String()))
+	command(2, "admin", "revoke-sessions", "--all", "--account", owner.String())
+	revoked := command(0, "admin", "revoke-sessions", "--account", owner.String())
+	if counts, _ := revoked["revoked"].(map[string]any); revoked["target"] != "account" || revoked["account"] != owner.String() || len(counts) != 2 ||
+		number(counts["account"]) != 1 || number(counts["node"]) != 1 {
+		t.Fatalf("revoke-sessions: %v", revoked)
+	}
+	var live, audits int
+	if err = center.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE revoked_at IS NULL) FROM identity.session WHERE user_id = $1", other).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if err = center.QueryRow(t.Context(), `SELECT count(*) FROM audit.audit_event WHERE event_type = 'identity.sessions.revoked_by_operator'
+    AND actor_ref = 'operator:cli' AND target_id = $1`, owner.String()).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if live != 2 || audits != 1 {
+		t.Fatalf("another account's live sessions %d, audits %d", live, audits)
+	}
+	if again := command(0, "admin", "revoke-sessions", "--account="+owner.String()); len(again["revoked"].(map[string]any)) != 0 {
+		t.Fatalf("revoke-sessions again: %v", again)
+	}
+	if all := command(0, "admin", "revoke-sessions", "--all"); all["target"] != "center" || number(all["revoked"].(map[string]any)["account"]) != 1 {
+		t.Fatalf("revoke-sessions --all: %v", all)
+	}
 	// An edited applied migration refuses with status 3.
 	if _, err = pgtest.Connect(t, pgtest.WithDatabase(t, url, name+"_center")).Exec(t.Context(), "UPDATE platform.schema_migration SET sha256 = repeat('0', 64) WHERE version = 1"); err != nil {
 		t.Fatal(err)
@@ -110,4 +146,38 @@ func number(value any) float64 {
 		return number
 	}
 	return -1
+}
+
+// seedSessions creates an account with one device, an account session and a node session on it, and returns the account.
+func seedSessions(t *testing.T, conn *pgx.Conn) platform.ID {
+	t.Helper()
+	ctx := t.Context()
+	userID := platform.NewID()
+	handle := make([]byte, 32)
+	copy(handle, userID[:])
+	now := time.Now().UTC()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err = tx.Exec(ctx, "INSERT INTO identity.user (user_id, display_name, state, passkey_user_handle, created_at, rev) VALUES ($1, 'Seeded', 1, $2, $3, 1)",
+		userID, handle, now); err != nil {
+		t.Fatal(err)
+	}
+	claim := device.Claim{InstallationID: platform.NewID(), Product: "arcforges-mobile", Platform: "android-15", AppVersion: "1.0.0"}
+	deviceID, err := device.EnsureNative(ctx, tx, userID, claim, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []session.Scope{session.ScopeAccount, session.ScopeNode} {
+		if _, err = session.IssueNative(ctx, tx, config.DefaultIdentityPolicy(), session.Grant{UserID: userID, DeviceID: deviceID, InstallationID: claim.InstallationID,
+			Scope: scope, Product: claim.Product, Purpose: session.PurposeAuthenticate, AuthMethod: 1, AuthenticatedAt: now}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return userID
 }

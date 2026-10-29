@@ -256,12 +256,12 @@ func classifyStepUp(ctx context.Context, tx pgx.Tx, id platform.ID, caller Calle
 	return arc.Expired() // pending, unexpired and out of attempts
 }
 
-// takeStepUpAttempt counts one completion attempt of a challenge of the caller's session in its own transaction, before the proof
-// is checked.
+// takeStepUpAttempt counts one completion attempt of a challenge of the caller's session in its own auxiliary transaction (D10),
+// before the proof is checked.
 func (s *Service) takeStepUpAttempt(ctx context.Context, id platform.ID, caller Caller, method int32) (stepUpChallenge, error) {
 	now := s.now()
 	var item stepUpChallenge
-	err := s.db.InTx(ctx, "count a step-up attempt", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.InTx(ctx, "count a step-up attempt", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		var storedMethod int16
 		err := tx.QueryRow(ctx, `UPDATE identity.step_up_challenge SET attempt_count = attempt_count + 1, rev = rev + 1
 WHERE challenge_id = $1 AND session_id = $2 AND user_id = $3 AND method = $4 AND state = 1 AND expires_at > $5 AND attempt_count < $6
@@ -277,19 +277,32 @@ RETURNING operation_id, method, challenge, code_hash, code_salt, attempt_count, 
 	return item, err
 }
 
-// denyStepUp ends a challenge whose last attempt failed, in its own transaction.
+// denyStepUp ends a challenge whose last attempt failed, in its own auxiliary transaction (D10).
 func (s *Service) denyStepUp(ctx context.Context, id platform.ID) error {
-	return s.db.InTx(ctx, "deny a step-up", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.InTx(ctx, "deny a step-up", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "UPDATE identity.step_up_challenge SET state = $2, rev = rev + 1 WHERE challenge_id = $1 AND state = 1", id, stepUpDenied)
 		return err
 	})
 }
 
-// CompleteStepUp proves a step-up challenge of the caller's session: the account's failure bucket, the challenge's attempt, the
-// proof checked outside any transaction (a passkey of this account, or the code), and one transaction that marks the challenge
-// proved with an expiry of the policy's evidence lifetime (at most five minutes) from now, records the session's epochs and, for
-// a mobile.limited session, upgrades the session to account (the upgrade class consumes the evidence at once). A wrong proof gives
-// AUTHENTICATION/unauthenticated.
+// releaseStepUp gives back the attempt a step-up completion took when its proof verified but its transaction failed in the store
+// (as release does for a flow; F9): best effort, in its own short auxiliary transaction, and only while the challenge is pending.
+func (s *Service) releaseStepUp(ctx context.Context, id platform.ID) {
+	_ = s.db.InTx(context.WithoutCancel(ctx), "release a step-up attempt", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true},
+		func(ctx context.Context, tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, "UPDATE identity.step_up_challenge SET attempt_count = attempt_count - 1, rev = rev + 1 WHERE challenge_id = $1 AND state = 1 AND attempt_count > 0", id)
+			return err
+		})
+}
+
+// CompleteStepUp proves a step-up challenge of the caller's session: the account's failure bucket is checked, the challenge's
+// attempt is counted, and one failure of the account is reserved atomically under the bucket's limit (as a wrong e-mail code's is,
+// E6), so concurrent proofs over several challenges cannot pass the limit; a refused reservation gives the attempt back. The proof is
+// checked outside any transaction (a passkey of this account under the F14 counter rule, or the code), and one transaction marks the
+// challenge proved with an expiry of the policy's evidence lifetime (at most five minutes) from now, records the session's epochs,
+// gives the reservation back and, for a mobile.limited session, upgrades the session to account (the upgrade class consumes the
+// evidence at once). A wrong proof keeps its reservation as the counted failure and gives AUTHENTICATION/unauthenticated; a
+// right proof whose transaction failed in the store gets its attempt and its reservation back (F9, D2).
 func (s *Service) CompleteStepUp(ctx context.Context, caller Caller, challengeID platform.ID, proof StepUpProof) (Evidence, error) {
 	method := int32(MethodValuePasskey)
 	switch {
@@ -316,6 +329,15 @@ func (s *Service) CompleteStepUp(ctx context.Context, caller Caller, challengeID
 	if err != nil {
 		return Evidence{}, err
 	}
+	reservation, err := s.limits.Reserve(ctx, failures, s.now())
+	if err != nil {
+		return Evidence{}, err
+	}
+	if !reservation.Allowed {
+		// No proof was checked: the attempt is given back, and the refusal is a limited request.
+		s.releaseStepUp(ctx, challengeID)
+		return Evidence{}, s.limited(ctx, caller.Request, failures, reservation, Actor(caller.UserID))
+	}
 	refuse := func(reason string) (Evidence, error) {
 		s.events.ObserveIdentity("step_up_complete", "refused")
 		if row.attempts >= s.maxStepUpAttempts(method) {
@@ -323,7 +345,7 @@ func (s *Service) CompleteStepUp(ctx context.Context, caller Caller, challengeID
 				return Evidence{}, err
 			}
 		}
-		if err := s.fail(ctx, caller.Request, failures, Actor(caller.UserID), "identity.step_up.failed", reason,
+		if err := s.audited(ctx, caller.Request, failures, reservation, Actor(caller.UserID), "identity.step_up.failed", reason,
 			map[string]any{"method": methodLabel(method), "class": row.class}); err != nil {
 			return Evidence{}, err
 		}
@@ -381,6 +403,9 @@ WHERE challenge_id = $1 AND state = 1`, challengeID, now, expiresAt)
 		if tag.RowsAffected() != 1 {
 			return arc.CodeReused()
 		}
+		if err = ratelimit.Release(ctx, tx, failures, reservation); err != nil {
+			return err
+		}
 		if method == MethodValuePasskey {
 			if err = advanceCounter(ctx, tx, found.identityID, verified, now); err != nil {
 				return err
@@ -406,8 +431,17 @@ WHERE user_id = $1 AND provider_id = 'email' AND revoked_at IS NULL`, caller.Use
 			map[string]any{"class": row.class, "method": methodLabel(method), "upgraded": upgraded})
 	})
 	if err != nil {
-		if refusal := refusalOf(err); refusal != nil && refusal.Code == "unauthenticated" {
-			return refuse("step_up_refused")
+		refusal := refusalOf(err)
+		if refusal != nil && refusal.Code == "unauthenticated" {
+			return refuse("step_up_refused") // the F14 counter rule: a possible clone is a failed proof
+		}
+		if !errors.Is(err, store.ErrCommitUnknown) {
+			// The proof verified: it is no failure. Its reservation goes back (the transaction that gave it back rolled back), and
+			// after a store failure (not a refusal) its attempt too, so the advised retry can prove the same challenge.
+			s.giveBack(ctx, failures, reservation)
+			if refusal == nil {
+				s.releaseStepUp(ctx, challengeID)
+			}
 		}
 		return Evidence{}, err
 	}
