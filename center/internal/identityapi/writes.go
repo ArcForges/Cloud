@@ -32,8 +32,9 @@ import (
 // meta.command_id, a missing patch, patch.avatar: not_offered, a missing credential, a missing flow_id, credential_id, session_id or
 // device_id) and CompletePasskeyRegistration's not_found, expired, code_reused and credential: not_verified; of these only
 // not_verified ends the flow (B5), so its identical replay answers STATE/expired. A duplicate of a registration whose first
-// execution still runs answers RESOURCE/overloaded, and one refused just after that execution committed answers its receipt from a
-// second lookup, or that lookup's own failure (B4, F-1).
+// execution still runs answers RESOURCE/overloaded, until the flow's expiry plus identity.RunningGrace (A-1), and one refused just
+// after that execution committed answers its receipt from a second lookup, or that lookup's own failure (B4, F-1); only the
+// refusals a committed first execution causes look again, so a failing lookup never replaces not_verified.
 
 // storedRefusal is a refusal a command receipt answered: the ArcError of the command's one execution, without a correlation id.
 type storedRefusal struct{ value *foundationv1.ArcError }
@@ -288,6 +289,22 @@ func (s *Server) beginPasskeyRegistration(ctx context.Context, call *ingress.Cal
 	return response, nil
 }
 
+// mayHaveCommitted reports whether a refusal of PrepareRegistration is one a first execution of the same command that committed
+// causes in its duplicate: the flow consumed (CONFLICT/code_reused) or expired meanwhile (STATE/expired), the flow's attempt held by
+// that execution (RESOURCE/overloaded), or a store failure that says nothing. Any other refusal (VALIDATION/*, STATE/not_found) is
+// decided by the request alone.
+func mayHaveCommitted(err error) bool {
+	var refusal *arc.Refusal
+	if !errors.As(err, &refusal) {
+		return true
+	}
+	switch refusal.Key() {
+	case "CONFLICT/code_reused", "STATE/expired", "RESOURCE/overloaded":
+		return true
+	}
+	return false
+}
+
 func (s *Server) completePasskeyRegistration(ctx context.Context, call *ingress.Call, request *publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest) (*publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse, error) {
 	value, err := func() (*publicapiv1.IdentityServiceCompletePasskeyRegistrationValue, error) {
 		_, caller, err := s.authorizeCaller(ctx, call, request.GetMeta())
@@ -314,9 +331,15 @@ func (s *Server) completePasskeyRegistration(ctx context.Context, call *ingress.
 		if err != nil {
 			// B4: a duplicate refused because its first execution held the flow's attempt answers that execution's receipt when it
 			// committed meanwhile. The command may have committed, so a lookup that fails answers its own (retryable) failure, never
-			// the refusal (F-1).
-			if outcome, found, lookupErr := platform.Lookup(ctx, s.db, receiptCommand); lookupErr != nil || found {
-				return decode(outcome, lookupErr, &publicapiv1.IdentityServiceCompletePasskeyRegistrationValue{})
+			// the refusal (F-1). Only a refusal that a committed first execution causes looks again (mayHaveCommitted): the flow
+			// consumed (code_reused), expired or held by a running completion (the busy store), or a store failure. A creation that
+			// does not verify, a flow that is not the caller's and a malformed request are not caused by a command that committed
+			// (a duplicate never verifies: the first execution took the flow's only attempt), so their reasons are answered as they
+			// are and a failing lookup cannot replace them (the double fault of not_verified).
+			if mayHaveCommitted(err) {
+				if outcome, found, lookupErr := platform.Lookup(ctx, s.db, receiptCommand); lookupErr != nil || found {
+					return decode(outcome, lookupErr, &publicapiv1.IdentityServiceCompletePasskeyRegistrationValue{})
+				}
 			}
 			return nil, err
 		}

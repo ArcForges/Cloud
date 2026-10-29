@@ -150,6 +150,33 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 	if len(foundationViolations(unknown.ArcError(call), true)) != 1 || len(foundationViolations(Internal().Dated(at).ArcError(call), true)) != 0 {
 		t.Fatal("the arcError clause or its one exemption")
 	}
+	// A-2: the exemption needs both the category INTERNAL and the code "internal": either alone does not exempt the pair, and the
+	// bound of LimitFailure.recovery_at is held like retry_at's.
+	for name, mutate := range map[string]func(*foundationv1.ArcError){
+		"INTERNAL with another code": func(value *foundationv1.ArcError) { value.Code = proto.String("store_corrupt") },
+		"another category with the code": func(value *foundationv1.ArcError) {
+			value.Category = foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE.Enum()
+		},
+	} {
+		value := Internal().Dated(at).ArcError(call)
+		value.Effect = foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN.Enum()
+		if len(foundationViolations(value, true)) != 0 {
+			t.Fatalf("the exempt pair itself is refused: %v", foundationViolations(value, true))
+		}
+		mutate(value)
+		if len(foundationViolations(value, true)) != 1 {
+			t.Errorf("%s is exempt from the arcError clause", name)
+		}
+	}
+	for _, bad := range []*foundationv1.Instant{{UnixSeconds: proto.Int64(instantMaxSeconds + 1), Nanos: proto.Uint32(0)},
+		{UnixSeconds: proto.Int64(instantMinSeconds - 1), Nanos: proto.Uint32(0)}, {UnixSeconds: proto.Int64(0), Nanos: proto.Uint32(instantMaxNanos + 1)},
+		{Nanos: proto.Uint32(0)}} {
+		value := RateLimited("sign_in_prefix", 30, at).ArcError(call)
+		value.GetDetails().GetLimit().RecoveryAt = bad
+		if len(foundationViolations(value, true)) != 1 {
+			t.Fatalf("the recovery_at bounds admit %v", bad)
+		}
+	}
 	for _, bad := range []*foundationv1.Instant{{UnixSeconds: proto.Int64(instantMaxSeconds + 1), Nanos: proto.Uint32(0)},
 		{UnixSeconds: proto.Int64(instantMinSeconds - 1), Nanos: proto.Uint32(0)}, {UnixSeconds: proto.Int64(0), Nanos: proto.Uint32(instantMaxNanos + 1)},
 		{Nanos: proto.Uint32(0)}} {

@@ -134,14 +134,28 @@ Authentication time is never evidence.
   `state.resource` names the account's own live credential with that ID and is left out otherwise, so another account's credential
   is never named. Two completions of one flow store one credential (`TestAPasskeyRegistersOnceWithItsLabel`); a duplicate of the
   command sent while its first execution still runs is `RESOURCE/overloaded` (retry after a while) and its retry answers the
-  receipt (`TestADuplicateOfARunningRegistrationIsBusy`); a duplicate whose attempt comes just after the first execution committed
-  finds the flow consumed and answers that receipt too, from a second receipt lookup
-  (`TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt`). When that second lookup fails, the command may have
+  receipt (`TestADuplicateOfARunningRegistrationIsBusy`). The first execution takes its attempt before the flow expires, and its
+  success transaction ends within the store's transaction bound (10 s) after that, so the flow's attempt counts as held by a
+  running completion until the flow's expiry plus `identity.RunningGrace` (15 s): a duplicate that arrives after the flow's
+  five-minute expiry while the first execution is still in its transaction is told the same (A-1,
+  `TestADuplicateAfterTheFlowsExpiryWhileTheFirstRunsIsBusy`), never the final `STATE/expired` of a command that then commits. A
+  duplicate whose attempt comes just after the first execution committed finds the flow consumed and answers that receipt too,
+  from a second receipt lookup (`TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt`); a duplicate with the same command
+  ID and other request bytes meets the first's receipt there and is `CONFLICT/command_id_reused`
+  (`TestADuplicateWithAnotherPayloadIsACommandIDReusedAfterTheFirstCommitted`). When that second lookup fails, the command may have
   committed, so the duplicate answers the lookup's own failure (`RESOURCE/overloaded` with its `retry_at`), never the consumed
-  flow's final `code_reused`, and its retry replays the receipt (`TestADuplicateWhoseSecondLookupFailsIsRetryable`). An attempt
-  that is never settled answers `RESOURCE/overloaded` until the flow expires, then `STATE/expired`: the process stopped before the
-  attempt was settled, or the store failed when the attempt was to be given back or the flow ended (the flow's end after
-  `not_verified` or an abandoned registration).
+  flow's final `code_reused`, and its retry replays the receipt (`TestADuplicateWhoseSecondLookupFailsIsRetryable`). Only the
+  refusals a committed first execution causes look again (`code_reused`, `expired`, the busy store and a store failure); a creation
+  that does not verify, a flow that is not the caller's and a malformed request are decided by the request alone (a duplicate never
+  verifies: the first execution took the flow's only attempt), so a failing lookup cannot replace `credential: not_verified` with
+  `RESOURCE/overloaded`, after which the retry would find the flow ended and the reason lost
+  (`TestAVerificationFailureIsAnsweredWhenTheSecondLookupWouldFail`). An attempt that is never settled answers
+  `RESOURCE/overloaded` until the flow's expiry plus `identity.RunningGrace`, then `STATE/expired`
+  (`TestAnAttemptNeverSettledTurnsExpiredAfterTheGrace`): the process stopped before the attempt was settled, or the store failed
+  when the attempt was to be given back or the flow ended (the flow's end after `not_verified` or an abandoned registration). That
+  store failure after a verification failure is the one double fault left: the flow's attempt stays unsettled, the first answer is
+  `RESOURCE/overloaded`, and the advised retries meet `STATE/expired` once the flow and its grace have ended, so the
+  `not_verified` reason is not delivered; nothing is stored, and the client begins a new registration.
 - **Profile.** `UpdateProfile(patch)` changes `display_name`, `locale` and `timezone` (the profile values above; field paths
   `patch.*`); an avatar change is `VALIDATION/invalid_argument` (`patch.avatar: not_offered`) until avatars exist.
 - **Credential names and removal.** `RenameAuthIdentity` sets a credential's label by the label rule (field `name`).
