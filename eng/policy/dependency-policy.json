@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "cb4cba328d9dabf5a78d2747ef3be47300df5a4b",
+  "sourceCommit": "028830f53f6835e6506df451a26c45ea43fb2fd3",
   "manifests": ["package.json"],
   "inputs": {
     ".github/workflows/ci.yml": "88cc86554af64d5948b4d0981e7ac5bb7dd022b8ccae9fceec4fb68ed3271324",
@@ -31,6 +31,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r60.json": "01ad4cfe28d08ee6fb9c5a9bbc089cb49a0a1eeec58bcc59a9301ee30c9130cc",
     "eng/provenance/artifact-profiles/cloud-release-r61.json": "be20e3dbf6e69be2c1b8aee244cbfce68b9abd8dfd5f91910b22e0d80a0511c5",
     "eng/provenance/artifact-profiles/cloud-release-r62.json": "6da2c9c4a250b0c92b06a1be6f03bac04b2afa4bc022f59d28dc65230d7d0ea9",
+    "eng/provenance/artifact-profiles/cloud-release-r63.json": "fe747695e123b3ad258342b1a865bc58e61ff3444f0e0fe848c51eed0d5e654f",
     "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
     "eng/provenance/records/center-runtime-r2.json": "7a77f19fbd13e0380cec6294d8e99be4fa9d5ad910e2aae916df731e4ea114c1",
     "eng/provenance/records/center-runtime-r3.json": "d5a7a237da63a5b40cc126e17bb4799b1104671437640f61c83ec12115d1d9de",
@@ -39,6 +40,7 @@
     "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
     "eng/provenance/records/center-runtime-r7.json": "28fc61a1cab132c0302eb884a3b1756f2d52908849277bdf5b57581ac8ec8e48",
     "eng/provenance/records/center-runtime-r8.json": "e3850d04a0f707a8b775d9c7fe4fa477487e18fb2d011f3e7f26c3f9b9427486",
+    "eng/provenance/records/center-runtime-r9.json": "2b574ad614410e1a9d08ed0c427aef0088df33b70c986f5c811c82685538cc03",
     "eng/provenance/records/center-worker-r1.json": "fcf19e96c9247818af2edbbaa811fd6f897acea134b2a526b287f5533104adfa",
     "eng/provenance/records/center-worker-r2.json": "85081952fdf6b3f25915bcd4547b43cae5db26dd3044c5089f67eb592916a540",
     "eng/provenance/records/center-worker-r3.json": "628fc3b8b715491124752c544cc10bc135a7c9965aa0013f5aecc6d73080f97e",
@@ -47,6 +49,7 @@
     "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
     "eng/provenance/records/center-worker-r7.json": "bd62fdf8cdc4a5f4138bdec6a95752b8dcd6c73cde2f0390192efd1c1b560997",
     "eng/provenance/records/center-worker-r8.json": "e5d77c80a5e0e9eea509c71a25dba9dd9961a82ac36e74091d26d121ee52ffdc",
+    "eng/provenance/records/center-worker-r9.json": "f753d45fdcf45e3f088619a8a5478ca10becd63ce72c66f86fa870ac36318cbd",
     "eng/provenance/records/go-connectgo-legal-r1.json": "b015702a97d2e9f8c7c83d4760c24392b52f13a0f23b9b66b13d2532f5478cb8",
     "eng/provenance/records/go-contractsgo-legal-r1.json": "089b60868e2591af4054cb1649f73271ce660b1c11bafbf4bffe187ceab8ad6f",
     "eng/provenance/records/go-contractsgo-legal-r2.json": "d31bad89a74fe6e06604b1fb1aff4744d7cf082241b0173b88641206e6a64454",
@@ -139,13 +142,13 @@
     "tooling/release-provenance.ts": "a3763964fe3fd3fabb66fa69aaf2296253c36812cf66e0fc526e5c2d909ee171",
     "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
     "tools/ArcForges.Cloud.Generation/packages.lock.json": "36965c2f5b447302352d2abd554b1a034f9e277753f30583c036c86e14fbd256",
-    "wrangler.json": "f9ae9104e4c396eb25a98ccebe9e8abf28c5ddb1423ea3a66b8866ef81b46103"
+    "wrangler.json": "4f43f428aecaadf0c0e092080b39a9d71786232757bde7d7e2a7d5fb9a8b012d"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-03 delegated author); PR review is recorded separately",
-    "date": "2026-10-28",
-    "rationale": "AF-CTR-03 part A1a, after af-ctr-02-r7. center/go.mod, center/go.sum and center/dependencies.json admit github.com/go-webauthn/webauthn v0.18.2 for the center's passkeys and its linked closure: github.com/go-webauthn/x v0.3.1, github.com/fxamacker/cbor/v2 v2.9.4, github.com/x448/float16 v0.8.4, github.com/golang-jwt/jwt/v5 v5.3.1, github.com/google/go-tpm v0.9.8, github.com/google/uuid v1.6.0, github.com/go-viper/mapstructure/v2 v2.5.0, github.com/tinylib/msgp v1.6.4, github.com/philhofer/fwd v1.2.0, golang.org/x/crypto v0.58.0 and golang.org/x/sys v0.49.0. The runtime closure is now twenty-two modules, each pinned by go.sum and the checksum database, each with its complete licence under third-party/ and a go-<name>-legal-r1 record (BSD-3-Clause, MIT or Apache-2.0; go-tpm and the golang.org/x modules carry no NOTICE file); eng/center.py checks the exact closure. govulncheck reports no vulnerability in called code (GO-2026-5932 is reported at module level for golang.org/x/crypto/openpgp, which the center does not import). The Contracts Go module moves from v1.0.0-ci.410.1 to v1.0.0-ci.416.1 (Contracts #121, tag go/v1.0.0-ci.416.1 at 62ccef1; unchanged licence and NOTICE bytes) under go-contractsgo-legal-r2, which supersedes r1. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this inputs map as credentials (their keys contain \"auth\"); .gitleaks.toml allows exactly those rows of the policy and of this receipt, and tests/worker/provenance.test.ts pins every allowlist row. package.json lists the new Worker test, wrangler.json adds the identity surface switch (FLAGSHIP_SURFACES: empty in production, identity in the acceptance environment, with its exact allowed origin) and the IDENTITY_RATE_LIMITER rate-limiting bindings (namespaces 1003 and 1004), and eng/center.py fuzzes three more targets. The release profile cloud-release-r62 with its successor records center-runtime-r8 and center-worker-r8 binds the changed center and Worker sources and ships the twelve new licence files with the image notices. No npm or NuGet package, base image or toolchain changes. No D1 or business data migration; the center's PostgreSQL migration 0002 creates new, empty identity and device schemas.",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-03 delegated author, review fix round); PR review is recorded separately",
+    "date": "2026-10-29",
+    "rationale": "AF-CTR-03 part A1a review fix round, after af-ctr-03-r1. No dependency changes: center/go.mod, center/go.sum, center/dependencies.json, package.json, package-lock.json, the NuGet locks, the base images and the toolchains are unchanged, the twenty-two locked Go runtime modules and their legal records stay as admitted, and no npm or NuGet package is added. wrangler.json gives the acceptance environment ARCFORGES_CENTER_IDENTITY_POLICY with an opt-in ceiling of 600 anonymous flows per hour (C1; production sets none). The release profile cloud-release-r63 with its successor records center-runtime-r9 and center-worker-r9 binds the fix round's center sources (migration 0002 finished before it is first applied, the store's unknown commit outcome, the identity core's fixes) and the Worker's edge client key and dated rate_limited reply. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a third exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration; the center's PostgreSQL migration 0002 is still applied by no deployment and lands whole.",
     "inputs": {
       ".github/workflows/ci.yml": "88cc86554af64d5948b4d0981e7ac5bb7dd022b8ccae9fceec4fb68ed3271324",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -174,6 +177,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r60.json": "01ad4cfe28d08ee6fb9c5a9bbc089cb49a0a1eeec58bcc59a9301ee30c9130cc",
       "eng/provenance/artifact-profiles/cloud-release-r61.json": "be20e3dbf6e69be2c1b8aee244cbfce68b9abd8dfd5f91910b22e0d80a0511c5",
       "eng/provenance/artifact-profiles/cloud-release-r62.json": "6da2c9c4a250b0c92b06a1be6f03bac04b2afa4bc022f59d28dc65230d7d0ea9",
+      "eng/provenance/artifact-profiles/cloud-release-r63.json": "fe747695e123b3ad258342b1a865bc58e61ff3444f0e0fe848c51eed0d5e654f",
       "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
       "eng/provenance/records/center-runtime-r2.json": "7a77f19fbd13e0380cec6294d8e99be4fa9d5ad910e2aae916df731e4ea114c1",
       "eng/provenance/records/center-runtime-r3.json": "d5a7a237da63a5b40cc126e17bb4799b1104671437640f61c83ec12115d1d9de",
@@ -182,6 +186,7 @@
       "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
       "eng/provenance/records/center-runtime-r7.json": "28fc61a1cab132c0302eb884a3b1756f2d52908849277bdf5b57581ac8ec8e48",
       "eng/provenance/records/center-runtime-r8.json": "e3850d04a0f707a8b775d9c7fe4fa477487e18fb2d011f3e7f26c3f9b9427486",
+      "eng/provenance/records/center-runtime-r9.json": "2b574ad614410e1a9d08ed0c427aef0088df33b70c986f5c811c82685538cc03",
       "eng/provenance/records/center-worker-r1.json": "fcf19e96c9247818af2edbbaa811fd6f897acea134b2a526b287f5533104adfa",
       "eng/provenance/records/center-worker-r2.json": "85081952fdf6b3f25915bcd4547b43cae5db26dd3044c5089f67eb592916a540",
       "eng/provenance/records/center-worker-r3.json": "628fc3b8b715491124752c544cc10bc135a7c9965aa0013f5aecc6d73080f97e",
@@ -190,6 +195,7 @@
       "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
       "eng/provenance/records/center-worker-r7.json": "bd62fdf8cdc4a5f4138bdec6a95752b8dcd6c73cde2f0390192efd1c1b560997",
       "eng/provenance/records/center-worker-r8.json": "e5d77c80a5e0e9eea509c71a25dba9dd9961a82ac36e74091d26d121ee52ffdc",
+      "eng/provenance/records/center-worker-r9.json": "f753d45fdcf45e3f088619a8a5478ca10becd63ce72c66f86fa870ac36318cbd",
       "eng/provenance/records/go-connectgo-legal-r1.json": "b015702a97d2e9f8c7c83d4760c24392b52f13a0f23b9b66b13d2532f5478cb8",
       "eng/provenance/records/go-contractsgo-legal-r1.json": "089b60868e2591af4054cb1649f73271ce660b1c11bafbf4bffe187ceab8ad6f",
       "eng/provenance/records/go-contractsgo-legal-r2.json": "d31bad89a74fe6e06604b1fb1aff4744d7cf082241b0173b88641206e6a64454",
@@ -282,7 +288,7 @@
       "tooling/release-provenance.ts": "a3763964fe3fd3fabb66fa69aaf2296253c36812cf66e0fc526e5c2d909ee171",
       "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
       "tools/ArcForges.Cloud.Generation/packages.lock.json": "36965c2f5b447302352d2abd554b1a034f9e277753f30583c036c86e14fbd256",
-      "wrangler.json": "f9ae9104e4c396eb25a98ccebe9e8abf28c5ddb1423ea3a66b8866ef81b46103"
+      "wrangler.json": "4f43f428aecaadf0c0e092080b39a9d71786232757bde7d7e2a7d5fb9a8b012d"
     },
     "checks": [
       "locked-restore",
@@ -293,11 +299,11 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "AF-CTR-03 part A1a, after af-ctr-02-r7. center/go.mod, center/go.sum and center/dependencies.json admit github.com/go-webauthn/webauthn v0.18.2 for the center's passkeys and its linked closure: github.com/go-webauthn/x v0.3.1, github.com/fxamacker/cbor/v2 v2.9.4, github.com/x448/float16 v0.8.4, github.com/golang-jwt/jwt/v5 v5.3.1, github.com/google/go-tpm v0.9.8, github.com/google/uuid v1.6.0, github.com/go-viper/mapstructure/v2 v2.5.0, github.com/tinylib/msgp v1.6.4, github.com/philhofer/fwd v1.2.0, golang.org/x/crypto v0.58.0 and golang.org/x/sys v0.49.0. The runtime closure is now twenty-two modules, each pinned by go.sum and the checksum database, each with its complete licence under third-party/ and a go-<name>-legal-r1 record (BSD-3-Clause, MIT or Apache-2.0; go-tpm and the golang.org/x modules carry no NOTICE file); eng/center.py checks the exact closure. govulncheck reports no vulnerability in called code (GO-2026-5932 is reported at module level for golang.org/x/crypto/openpgp, which the center does not import). The Contracts Go module moves from v1.0.0-ci.410.1 to v1.0.0-ci.416.1 (Contracts #121, tag go/v1.0.0-ci.416.1 at 62ccef1; unchanged licence and NOTICE bytes) under go-contractsgo-legal-r2, which supersedes r1. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this inputs map as credentials (their keys contain \"auth\"); .gitleaks.toml allows exactly those rows of the policy and of this receipt, and tests/worker/provenance.test.ts pins every allowlist row. package.json lists the new Worker test, wrangler.json adds the identity surface switch (FLAGSHIP_SURFACES: empty in production, identity in the acceptance environment, with its exact allowed origin) and the IDENTITY_RATE_LIMITER rate-limiting bindings (namespaces 1003 and 1004), and eng/center.py fuzzes three more targets. The release profile cloud-release-r62 with its successor records center-runtime-r8 and center-worker-r8 binds the changed center and Worker sources and ships the twelve new licence files with the image notices. No npm or NuGet package, base image or toolchain changes. No D1 or business data migration; the center's PostgreSQL migration 0002 creates new, empty identity and device schemas.",
+    "runtimeAssessment": "AF-CTR-03 part A1a review fix round, after af-ctr-03-r1. No dependency changes: center/go.mod, center/go.sum, center/dependencies.json, package.json, package-lock.json, the NuGet locks, the base images and the toolchains are unchanged, the twenty-two locked Go runtime modules and their legal records stay as admitted, and no npm or NuGet package is added. wrangler.json gives the acceptance environment ARCFORGES_CENTER_IDENTITY_POLICY with an opt-in ceiling of 600 anonymous flows per hour (C1; production sets none). The release profile cloud-release-r63 with its successor records center-runtime-r9 and center-worker-r9 binds the fix round's center sources (migration 0002 finished before it is first applied, the store's unknown commit outcome, the identity core's fixes) and the Worker's edge client key and dated rate_limited reply. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a third exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration; the center's PostgreSQL migration 0002 is still applied by no deployment and lands whole.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-02-r7.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-03-r1.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
-    "reviewedOn": "2026-10-28",
+    "reviewedOn": "2026-10-29",
     "decision": "approved"
   },
   "closure": {
@@ -1075,7 +1081,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["center-runtime-r8", "center-worker-r8"],
+  "artifactRecords": ["center-runtime-r9", "center-worker-r9"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1089,7 +1095,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-03-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-03-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
