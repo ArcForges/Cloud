@@ -66,3 +66,13 @@ export function enabledSurfaces(value: string | undefined): ReadonlySet<Surface>
     return new Set();
   return new Set(names as Surface[]);
 }
+
+/**
+ * The surfaces the center is started with for a FLAGSHIP_SURFACES value (ARCFORGES_CENTER_SURFACES): the surfaces the Worker forwards,
+ * comma-separated in the flag's order, or "none". The center reports the same value on its health document, and the deployment
+ * evidence records it (AF-CTR-03).
+ */
+export function centerSurfaces(value: string | undefined): string {
+  const surfaces = [...enabledSurfaces(value)];
+  return surfaces.length > 0 ? surfaces.join(",") : "none";
+}

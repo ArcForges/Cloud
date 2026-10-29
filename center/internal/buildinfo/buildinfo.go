@@ -44,12 +44,14 @@ type Artifact struct {
 	Version string `json:"version"`
 }
 
-// Center is the center's own identity in the health document: the executable, the configured mode and the configured public
-// base URL, from which every URL the center issues is derived.
+// Center is the center's own identity in the health document: the executable, the configured mode, the configured public
+// base URL, from which every URL the center issues is derived, and the surfaces it serves (comma-separated, "none" when none, as
+// ARCFORGES_CENTER_SURFACES states them), so a deployment can be checked against the surfaces its Worker forwards.
 type Center struct {
 	Binary        string `json:"binary"`
 	Mode          string `json:"mode,omitempty"`
 	PublicBaseURL string `json:"publicBaseUrl,omitempty"`
+	Surfaces      string `json:"surfaces,omitempty"`
 }
 
 // Health is the health document. It keeps the fields the Worker and the release tooling read (service, revision, nativeAot,

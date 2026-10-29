@@ -19,7 +19,7 @@ PR checks use no cloud credentials. Main builds a versioned Linux Native AOT ima
 
 Publication consumes the candidate by its workflow artifact ID. Before anything is pushed or promoted, the gated PostgreSQL step runs the sealed image's own `arcforges-center migrate` with the migration role (`tooling/postgres-deploy.ts`, [PostgreSQL store](postgres-store.md#deployment)) and records `artifacts/postgres-gate-production.json`. The deployment entry point then performs one promotion identity/integrity check, requires both gate records (D1 and PostgreSQL) for this candidate, loads the image and checks the Docker image ID. It pushes that image, reads the live Worker version's runtime slot from Cloudflare (its version message `runtime-slot=<slot>`), rotates the other slot with the image's `admin rotate-runtime-credential` (proved directly and through the pooled endpoint, never printed), deploys the same bundled Worker with it using the returned registry digest and the new slot's label and, only after that deployment succeeded, records the slot as promoted with `admin confirm-runtime-credential` ([runtime credential rotation](postgres-store.md#runtime-credential-rotation)). Publication does not rebuild. Deployments serialize and reject superseded main commits.
 
-`artifacts/deployment.json` records the source, version and image/digest after the provider operation succeeds. A prerelease preserves the candidate and deployment record. There is no automatic health/RPC/readiness polling, browser test or public archive download. A successful deployment is reported as deployment completion, not live runtime acceptance.
+`artifacts/deployment.json` records the source, version and image/digest after the provider operation succeeds, and the surfaces the deployed Worker version starts the Go center with (`center.surfaces`, as `ARCFORGES_CENTER_SURFACES` states them; the acceptance deployment's `artifacts/proof-deployment.json` records the same field). A prerelease preserves the candidate and deployment record. There is no automatic health/RPC/readiness polling, browser test or public archive download. A successful deployment is reported as deployment completion, not live runtime acceptance.
 
 Existing `test:live` command remains an explicit local diagnostic for a concrete affected behavior. They are not merge/publication gates. The Web page may be exercised locally when needed; no mandatory cross-owner test is implied. Preserve the API route and Web's apex binding.
 
@@ -59,6 +59,27 @@ center in `x-arcforges-client-ip` for the surface methods.
 Structural cost bounds stay in configuration: one `lite` Container instance (`max_instances: 1`), a 60-second idle `sleepAfter`, a 50 ms Worker CPU limit, the per-location Hello rate limit, at most 64 connections per center listener and a runtime database pool of four ([center](center.md#hosted-deployment), [PostgreSQL store](postgres-store.md#connection-budgets)).
 
 Anyone can construct a valid Hello request. Rate limiting is per Cloudflare location and client (an IPv4 address or an IPv6 /64), not authorization or a hard spending cap. A single lite instance, idle sleep, request limits and disabled egress reduce exposure; sustained traffic can still keep it running and incur Worker/Container charges. Configure Cloudflare usage alerts and inspect logs/metrics.
+
+### Start environment after a deployment
+
+The Container's start environment follows the deployed Worker version (AF-CTR-03). A `--containers-rollout immediate` deployment
+restarts the running instance with the new image but with the environment of its previous start; the new variables (surfaces, the
+client-address header, the identity policy, the rotated runtime credential) apply only at the next start. Before AF-CTR-03 that next
+start was the first idle sleep (`sleepAfter`), so after the A1a deployment the acceptance Worker forwarded identity calls to a
+center still started without `ARCFORGES_CENTER_SURFACES`, which answered `STATE/not_activated` until it slept. Now the Container
+class (`worker/foundation/cloud-container.ts`) records, in its Durable Object's storage and before every start, the SHA-256 of the
+start settings: the Worker's `SOURCE_REVISION`, the entrypoint, the egress switch and every variable. Every request first compares
+it with the digest of this version's settings. A center started under another digest (or before the digest existed) gets SIGTERM
+(the center stops within 5 s; the class waits up to 6 s), then SIGKILL (bounded at 4 s), and is started again with this version's
+settings before the request is forwarded. Requests that arrive meanwhile wait for the same restart, so with `max_instances: 1` the
+previous environment never serves a request of the new version. Health and the Hello go through the same rule: the first request
+after a deployment pays one restart and is never refused by it, unless the previous center cannot be stopped within the bounds; it
+then gets the library's start-failure reply, which the Worker answers as the retryable `UNAVAILABLE` (the request was not forwarded).
+The digest covers the runtime credential, so it stays in the Durable Object's storage and is never logged or returned.
+
+The center states the surfaces it serves in its health document (`center.surfaces`, [center](center.md#health-readiness-logs-and-metrics)).
+`npm run test:live` compares it with `artifacts/deployment.json`, and the local Worker check (`npm run test:worker`) with the
+surfaces the candidate's Worker forwards; CI makes no such request ([validation policy](validation-policy.md)).
 
 ## Recovery
 

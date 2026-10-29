@@ -8,6 +8,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
 import { probeProject, runProbe, waitForHealth } from "./protocol.ts";
+import { centerSurfaces } from "../worker/ingress/routes.ts";
 import { notActivatedReplies, surfaceRoutes } from "../worker/tables/center-tables.generated.ts";
 import { sealedToolName } from "./sealed-tool.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
@@ -326,7 +327,13 @@ async function testCenterContainer(
     };
     verifyHealthIdentity(health, identity);
     assert.equal(health.helloBackend, "stateless");
-    assert.deepEqual(health.center, { binary: "arcforges-center", mode, publicBaseUrl });
+    // No ARCFORGES_CENTER_SURFACES: an official-hosted center serves no surface and says so.
+    assert.deepEqual(health.center, {
+      binary: "arcforges-center",
+      mode,
+      publicBaseUrl,
+      surfaces: "none",
+    });
     const grpcWeb = await runProbe(web, false);
     await run("dotnet", [
       "run",
@@ -425,6 +432,13 @@ async function testWorker(candidate: Candidate) {
       config.vars.ARCFORGES_HELLO_RUNTIME === "go" ? "go" : "csharp",
     );
     verifyHealthIdentity(health, expectedIdentity(candidate.version));
+    // AF-CTR-03: the center was started with the surfaces this Worker forwards.
+    if (config.vars.ARCFORGES_HELLO_RUNTIME === "go")
+      assert.equal(
+        (health as { center?: { surfaces?: unknown } }).center?.surfaces,
+        centerSurfaces(config.vars.FLAGSHIP_SURFACES),
+        "The center must serve exactly the surfaces the Worker forwards.",
+      );
     const result = await runProbe("http://127.0.0.1:18787/api", true);
     const surfaces = await probeDisabledSurfaces(
       "http://127.0.0.1:18787/api",

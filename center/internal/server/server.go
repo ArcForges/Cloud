@@ -142,7 +142,9 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	if options.Greeting != nil {
 		greeting = options.Greeting
 	}
-	health, err := buildinfo.Document(backend, buildinfo.Center{Mode: string(cfg.Mode), PublicBaseURL: cfg.PublicBaseURL})
+	health, err := buildinfo.Document(backend, buildinfo.Center{
+		Mode: string(cfg.Mode), PublicBaseURL: cfg.PublicBaseURL, Surfaces: surfaceList(cfg.Identity.Surfaces),
+	})
 	if err != nil {
 		center.Close()
 		return nil, err
@@ -531,6 +533,18 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	logger.Info("center stopped")
 	return result
+}
+
+// surfaceList is the health document's statement of the served surfaces: their names comma-separated, or "none".
+func surfaceList(surfaces []config.Surface) string {
+	if len(surfaces) == 0 {
+		return "none"
+	}
+	names := make([]string, 0, len(surfaces))
+	for _, surface := range surfaces {
+		names = append(names, string(surface))
+	}
+	return strings.Join(names, ",")
 }
 
 func planName(plan config.PlanConfiguration) string {

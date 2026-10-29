@@ -16,6 +16,7 @@ import {
 } from "./postgres-deploy.ts";
 
 import { expectedIdentity, verifyHealthIdentity } from "./build-identity.ts";
+import { centerSurfaces } from "../worker/ingress/routes.ts";
 
 const productionBase = "https://arcforges.com/api";
 const deploymentFile = path.join(root, "artifacts", "deployment.json");
@@ -42,6 +43,12 @@ interface Deployment {
   imageId: string;
   imageDigest: string;
   baseUrl: string;
+  /**
+   * The surfaces the deployed Worker version forwards and starts the Go center with (ARCFORGES_CENTER_SURFACES). The Container
+   * restarts a center left running under another version's start environment before it serves a request (AF-CTR-03), so the
+   * center's health states the same value; the local live check compares them.
+   */
+  center?: { surfaces: string };
   deployedAt: string;
   verified?: unknown;
 }
@@ -150,6 +157,9 @@ async function deploy() {
     imageId,
     imageDigest,
     baseUrl: productionBase,
+    ...(config.vars.ARCFORGES_HELLO_RUNTIME === "go"
+      ? { center: { surfaces: centerSurfaces(config.vars.FLAGSHIP_SURFACES) } }
+      : {}),
     deployedAt: new Date().toISOString(),
   } satisfies Deployment);
 }
@@ -178,6 +188,12 @@ async function smoke() {
     runtime,
   );
   verifyHealthIdentity(health, expectedIdentity(candidate.version));
+  if (deployment.center)
+    assert.equal(
+      (health as { center?: { surfaces?: unknown } }).center?.surfaces,
+      deployment.center.surfaces,
+      "The running center must serve exactly the surfaces the deployed Worker forwards.",
+    );
   const protocol = await runProbe(productionBase, true);
   // The Cloud API route must not replace the already deployed static Web origin.
   const home = await fetch("https://arcforges.com/", {

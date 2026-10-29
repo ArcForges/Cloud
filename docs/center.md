@@ -250,14 +250,17 @@ hand-written Worker sources.
   "center": {
     "binary": "arcforges-center",
     "mode": "official-hosted",
-    "publicBaseUrl": "https://…"
+    "publicBaseUrl": "https://…",
+    "surfaces": "none | identity"
   }
 }
 ```
 
 Go is compiled native code but not .NET Native AOT, so `nativeAot` is false. The build identity is set with `-ldflags -X` from
 the same inputs as the C# executable's (`tooling/build-identity.ts`), and the release tooling compares `artifact` and `build`
-with the candidate. `arcforges-center version` prints the same document with `helloBackend` `not-probed` and no mode.
+with the candidate. `center.surfaces` states the surfaces the center serves, as `ARCFORGES_CENTER_SURFACES` names them (`none` when
+it serves none), so a deployment can be compared with the surfaces its Worker forwards ([deployment](deployment.md#start-environment-after-a-deployment)).
+`arcforges-center version` prints the same document with `helloBackend` `not-probed` and no mode or surfaces.
 
 Readiness is separate from health. `GET /readyz` on the admin listener answers `200` with `{"status":"ready","components":{…}}`
 when every configured database answers a ping within two seconds (`helloDatabase`, `database`) and the store's schema carries

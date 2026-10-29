@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { centerSurfaces } from "../../worker/ingress/routes.ts";
 import { centerResources, provisionCenter } from "./center-provision.ts";
 import {
   acceptanceBaseUrl,
@@ -1045,6 +1046,9 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
     center: {
       mode: "official-hosted",
       planConfiguration: "development-fixtures",
+      // The surfaces this Worker version forwards and starts the center with; the Container restarts a center left running under
+      // another version's start environment before it serves a request (AF-CTR-03), and the center's health states the same value.
+      surfaces: centerSurfaces(config.env.proof.vars.FLAGSHIP_SURFACES),
       database: rotation.database,
       runtimeRole: rotation.runtimeRole,
       loginRole: rotation.loginRole,
