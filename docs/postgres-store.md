@@ -91,12 +91,17 @@ Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables ident
 - the bootstrap row (`identity.bootstrap`) permanently: it is the record that the database's one bootstrap was used (it names the
   owner's account, so purging that account is AF-ID-02's decision).
 
-The acceptance environment's tables grow on the production Neon project until then, bounded by its anonymous-flow ceiling
-([acceptance environment](#acceptance-environment)).
+The acceptance environment's tables grow on the production Neon project until then. Its anonymous-flow ceiling bounds the flows
+anonymous calls create and the failure rows and audit markers that need a flow; it does not bound the prefix-keyed buckets
+(`sign_in_prefix`, `refresh_prefix`, `bootstrap_prefix`: one row per distinct client /24 or /56, reset in place) or the
+once-per-window refusal audits (`identity.rate_limited`, `identity.bootstrap.refused`), which grow with distinct prefixes and with
+prefixes times windows ([acceptance environment](#acceptance-environment)).
 
 Every foreign key is `NO ACTION`, so a sweep or a purge deletes children before their parents: a session's spent refresh tokens,
 flows and step-up challenges, then the session; a device's sessions, then its installations, then the device; and for an account,
-those, then its credentials, then the account. Until the sweeps exist these tables only grow.
+those, then the flows that name it (`identity.auth_flow.user_id`; an e-mail code flow names the account without a session, and
+anyone who knows the address can create one, so the 7-day flow sweep does not remove them all), then its credentials, then the
+account; the owner's account is also named by the bootstrap row (above). Until the sweeps exist these tables only grow.
 
 Personal data: e-mail addresses are stored in clear only as the subject of an e-mail identity (`identity.auth_identity`). An e-mail
 flow (`identity.auth_flow.email_hash`) keeps the unsalted SHA-256 of the normalised address submitted, whether or not an account
@@ -154,8 +159,14 @@ locks. Integration tests against a real PostgreSQL cover each one.
 - transactions with a deadline (10 s by default) and cancellation;
 - a bounded retry of serialization failures and deadlocks (5 attempts with jittered backoff);
 - a read-write transaction whose COMMIT was sent without a definite answer (a lost connection, a timeout, a cancellation, the
-  pooler's `08P01`: anything but a class 40 or 23 refusal or a transaction that had failed) is `ErrCommitUnknown`: it may have
-  committed, so it is never retried, and the identity surface answers `INTERNAL/internal` with effect `UNKNOWN` and retry `NEVER`;
+  pooler's `08P01`: anything but a class 40 or 23 refusal or a transaction that had failed) is never retried. When it carries the
+  call's effect (a sign-in, the owner bootstrap, a refresh rotation, a flow's creation or its code's send; every later write) it is
+  `ErrCommitUnknown`: it may have committed, and the identity surface answers `INTERNAL/internal` with effect `UNKNOWN` and retry
+  `NEVER`. A transaction that carries no effect of the call (`TxOptions.Auxiliary`: rate-limit counts, reservations and give-backs,
+  a flow attempt's count, end and give-back, refusal audits) runs before the effect or after its definite rollback, so its
+  unanswered COMMIT is `ErrUnavailable`, answered `RESOURCE/overloaded` with `AFTER_TIME` (D10). A later slice marks each new
+  transaction by the same rule;
+- a panic in a transaction's callback rolls the transaction back and gives its connection back before it continues (D1);
 - errors that keep the operation, the SQLSTATE and the constraint name but never the server's message or detail, which can quote
   row values.
 
@@ -480,9 +491,11 @@ environment of the Go center since AF-CTR-02.
   `arcforges_acceptance_runtime`. Neither environment's credential reaches the other's database.
 - **Its growth counts against production:** the acceptance database shares the production Neon project, branch and compute, so its
   storage and connections count against production's. Its public identity surface (AF-CTR-03) writes flows, rate-limit windows and
-  audit events that nothing deletes until AF-PLAT-01's sweeps exist; the opt-in anonymous-flow ceiling of its identity policy (600
-  flows per hour, [identity policy](center-identity.md#identity-policy)) bounds that growth. Production sets no ceiling. The owner can
-  drop `arcforges_acceptance` at any time; the next acceptance deployment recreates and migrates it.
+  audit events that nothing deletes until AF-PLAT-01's sweeps exist. The opt-in anonymous-flow ceiling of its identity policy (600
+  flows per hour, [identity policy](center-identity.md#identity-policy)) bounds the flows and the failure rows and markers that need
+  a flow, not the prefix-keyed request and bootstrap buckets (one row per distinct client /24 or /56) or the once-per-window refusal
+  audits, which grow with distinct prefixes and with prefixes times windows until the sweeps. Production sets no ceiling. The owner
+  can drop `arcforges_acceptance` at any time; the next acceptance deployment recreates and migrates it.
 - **The deployment job:** after the retained D1 gate, `node tooling/postgres-deploy.ts migrate --target acceptance` ensures the
   database and migrates it. `npm run deploy:proof` then detaches the retired C# queue consumers (below), rotates the acceptance
   credential and deploys the sealed acceptance bundle.
