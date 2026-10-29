@@ -122,9 +122,10 @@ Receipt results do hold personal data:
   times);
 - DeviceService.Rename's: the full device view (device ID, name, platform, trust level, remote-control flag, revision, revocation
   time, and each installed product with its version and install time);
-- RemoveAuthIdentity's, RevokeSession's, RevokeAllSessions' and DeviceService.Revoke's: only the receipt (command ID, effect,
-  revision);
-- a kept refusal: its `ArcError`, with the ID the caller sent.
+- RemoveAuthIdentity's, RevokeSession's, RevokeAllSessions' and DeviceService.Revoke's: only the receipt (command ID, effect and
+  the revision it produced, except RevokeAllSessions, which states none);
+- a kept refusal: its `ArcError`, which can name the object the caller sent or, for `already_exists`, the account's own
+  credential row ID.
 
 They are a second copy under the receipts' own 90-day retention (above), separate from the account's, and the runtime role cannot
 delete them, so AF-ID-02's account purge deletes `platform.command_receipt` rows by principal (the account) with the account.

@@ -127,18 +127,21 @@ Authentication time is never evidence.
   and stores the credential. A flow of another account or of another session of the account is `STATE/not_found`
   (`TestARegistrationFlowIsItsBeginningSessions`). A creation that does not verify is `VALIDATION/invalid_argument`
   (`credential: not_verified`) and ends the flow. Every refusal of this method decided before the receipt (`not_found`,
-  `expired`, `code_reused`, `invalid_argument`, `permission_denied`) is not kept by a receipt, and its replay is decided afresh;
-  `not_verified` is the one that ends the flow, so its identical replay, like any later completion of that flow, answers
-  `STATE/expired`. A credential ID registered
+  `expired`, `code_reused`, `invalid_argument` including a missing `meta.command_id`, `flow_id` or `credential`,
+  `permission_denied`) is not kept by a receipt, and its replay is decided afresh; `not_verified` is the one that ends the flow,
+  so its identical replay, like any later completion of that flow, answers `STATE/expired`. A credential ID registered
   already, to this account or another, revoked ones included, is `CONFLICT/already_exists` (`state.state` `credential`); its
   `state.resource` names the account's own live credential with that ID and is left out otherwise, so another account's credential
   is never named. Two completions of one flow store one credential (`TestAPasskeyRegistersOnceWithItsLabel`); a duplicate of the
   command sent while its first execution still runs is `RESOURCE/overloaded` (retry after a while) and its retry answers the
   receipt (`TestADuplicateOfARunningRegistrationIsBusy`); a duplicate whose attempt comes just after the first execution committed
   finds the flow consumed and answers that receipt too, from a second receipt lookup
-  (`TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt`). An attempt that is never settled, because the process stopped
-  between the attempt and the receipt or because the best-effort give-back after a store failure failed during the outage,
-  answers `RESOURCE/overloaded` until the flow expires, then `STATE/expired`.
+  (`TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt`). When that second lookup fails, the command may have
+  committed, so the duplicate answers the lookup's own failure (`RESOURCE/overloaded` with its `retry_at`), never the consumed
+  flow's final `code_reused`, and its retry replays the receipt (`TestADuplicateWhoseSecondLookupFailsIsRetryable`). An attempt
+  that is never settled answers `RESOURCE/overloaded` until the flow expires, then `STATE/expired`: the process stopped before the
+  attempt was settled, or the store failed when the attempt was to be given back or the flow ended (the flow's end after
+  `not_verified` or an abandoned registration).
 - **Profile.** `UpdateProfile(patch)` changes `display_name`, `locale` and `timezone` (the profile values above; field paths
   `patch.*`); an avatar change is `VALIDATION/invalid_argument` (`patch.avatar: not_offered`) until avatars exist.
 - **Credential names and removal.** `RenameAuthIdentity` sets a credential's label by the label rule (field `name`).
@@ -175,8 +178,10 @@ consumption, the change and its audit event, in one transaction. A success keeps
 address) and a refusal whose retry advice is `NEVER` keeps its `ArcError`; a replay of the same request answers either again, with
 the replay's own correlation id, without new evidence or a second effect. Any other refusal (`step_up_required`, `rate_limited`,
 `overloaded`) or failure rolls the receipt back, so the same command can succeed after the step-up or the wait its advice names.
-A refusal decided before the receipt (the access check's, a missing `meta.command_id`, CompletePasskeyRegistration's flow and
-creation checks) is not kept either, and a replay is decided afresh; of these only CompletePasskeyRegistration's
+A refusal decided before the receipt is not kept either, and a replay is decided afresh: the access check's
+(`permission_denied`, `step_up_required` on an `upgrade` row), the request's validation (a `RequestMeta` that names a workspace, a
+missing `meta.command_id`, a missing `patch`, `patch.avatar: not_offered`, a missing `credential` or a missing object ID:
+`flow_id`, `credential_id`, `session_id` or `device_id`) and CompletePasskeyRegistration's flow and creation checks; of these only CompletePasskeyRegistration's
 `credential: not_verified` changes what its replay meets: it ends the flow, so the replay answers `STATE/expired`
 ([passkey registration](#account-writes)).
 
@@ -196,7 +201,8 @@ receipts' 90 days ([PostgreSQL store](postgres-store.md#identity-and-device-af-c
 name, locale, time zone, revision); CompletePasskeyRegistration's and RenameAuthIdentity's a credential summary (credential ID,
 kind, label, creation and last-use times); DeviceService.Rename's the full device view (device ID, name, platform, trust level,
 remote-control flag, revision, revocation time, and each installed product with its version and install time); the others only
-the receipt (command ID, effect, revision); a kept refusal its `ArcError`, with the ID the caller sent.
+the receipt (command ID, effect and the revision it produced, except RevokeAllSessions, which states none); a kept refusal its
+`ArcError`, which can name the object the caller sent or, for `already_exists`, the account's own credential row ID.
 
 ## Sign-in
 
@@ -382,12 +388,16 @@ correlation id, in the reply with gRPC `OK`:
 Every `StateFailure` detail is a valid foundation message (Contracts `foundation-baseline.json`): `state` and `reason` are always
 set, `state` matches `^[A-Za-z0-9._:/-]{1,128}$`, and a `state.resource` (`AggregateRef`) always carries a 16-byte, nonzero `id`;
 a refusal without such an ID carries no resource. For not_found and already_exists `state` is the object's kind and `reason` the
-code. Every `AFTER_TIME` advice carries `retry.retry_at` (rule `retryAdvice`): a rate limit's is the end of its window, and a
-refusal that names no instant (`RESOURCE/overloaded`, `INTERNAL/internal` with `AFTER_TIME`) is dated where it becomes the reply's
+code. Every `AFTER_TIME` advice carries `retry.retry_at` (rule `retryAdvice`): a rate-limit bucket's is the end of its window, a
+flow's exhausted e-mail code sends (`email_code_sends`) name the flow's expiry, after which a new flow is needed, and a refusal
+that names no instant (`RESOURCE/overloaded`, `INTERNAL/internal` with `AFTER_TIME`) is dated where it becomes the reply's
 `ArcError`, one second after the refusal plus up to one second of jitter (`arc.Refusal.Dated`, E4). `TestEveryRefusalIsAnErrorsRow`
 checks every constructor's rendering against those rules, the integration tests check every refusal they decode against
 `retryAdvice`, and the Worker's generated replies meet it (`rate_limited` carries the instant the Worker writes, `not_activated` is
-`NEVER`).
+`NEVER`). Two contract gaps predate this part (#118): `INTERNAL/internal` pairs `AFTER_TIME` with effect `UNKNOWN`, as Design
+errors.md prescribes but the Contracts `arcError` rule forbids (the test's one named exemption, routed to the AF-CTR-03 Design
+companion), and the Worker's generated replies carry no correlation id (routed to A2, which writes a correlation slot into
+them).
 
 The ingress adds two transport refusals for a known bearer (both gRPC 16 `UNAUTHENTICATED`): `auth.token_expired` and
 `auth.credential_revoked`. They need companion rows in errors.md's center ingress table (DC-14).

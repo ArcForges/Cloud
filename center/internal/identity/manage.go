@@ -339,8 +339,9 @@ RETURNING `+flowColumns, id, int16(channel), int16(FlowPasskeyRegistration), int
 		// B4: a flow of this caller whose only attempt is taken but which has no outcome is held by a completion that is still
 		// running (a duplicate of the same command, say): the duplicate is answered as a busy store, so it retries and then replays
 		// that completion's receipt, rather than a final code_reused although the command succeeds. An attempt that is never
-		// settled, because the process stopped between the attempt and the receipt or because the best-effort give-back after a store
-		// failure failed during the outage, answers RESOURCE/overloaded until the flow expires, then STATE/expired.
+		// settled answers RESOURCE/overloaded until the flow expires, then STATE/expired: the process stopped before the attempt was
+		// settled, or the store failed when the attempt was to be given back or the flow ended (exhaust, after not_verified or from
+		// AbandonRegistration).
 		var running bool
 		if err := tx.QueryRow(ctx, `SELECT count(*) = 1 FROM identity.auth_flow WHERE flow_id = $1 AND channel = $2 AND kind = $3 AND purpose = $4
     AND consumed_at IS NULL AND outcome IS NULL AND expires_at > $5 AND attempts >= max_attempts`, id, int16(channel), int16(FlowPasskeyRegistration),
