@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 )
@@ -222,7 +223,8 @@ func (p *commitProxy) relay(client net.Conn) {
 }
 
 // TestACommitWithoutAnAnswerIsUnknownAndNeverRetried loses the connection of a COMMIT after the server committed, and before the
-// COMMIT reached the server: both are ErrCommitUnknown, fn runs once, and only the first committed (F6).
+// COMMIT reached the server: both are ErrCommitUnknown, fn runs once, and only the first committed (F6). An auxiliary transaction
+// (D10) reports the same two cases as ErrUnavailable, and never runs fn again either.
 func TestACommitWithoutAnAnswerIsUnknownAndNeverRetried(t *testing.T) {
 	url, _ := pgtest.Database(t)
 	setup := pgtest.Connect(t, url)
@@ -235,11 +237,14 @@ func TestACommitWithoutAnAnswerIsUnknownAndNeverRetried(t *testing.T) {
 		t.Fatal("the test URL does not name the server's host")
 	}
 	db := New(pgtest.Pool(t, proxied, 2))
-	for index, mode := range []string{"drop", "lose"} {
-		id := index + 1
+	for index, item := range []struct {
+		mode      string
+		auxiliary bool
+	}{{"drop", false}, {"lose", false}, {"drop", true}, {"lose", true}} {
+		id, mode := index+1, item.mode
 		var runs atomic.Int32
 		proxy.mode.Store(mode)
-		err := db.InTx(context.Background(), "insert", TxOptions{Timeout: 2 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+		err := db.InTx(context.Background(), "insert", TxOptions{Timeout: 2 * time.Second, Auxiliary: item.auxiliary}, func(ctx context.Context, tx pgx.Tx) error {
 			runs.Add(1)
 			_, err := tx.Exec(ctx, "INSERT INTO ledger VALUES ($1)", id)
 			return err
@@ -248,8 +253,12 @@ func TestACommitWithoutAnAnswerIsUnknownAndNeverRetried(t *testing.T) {
 		if scanErr := setup.QueryRow(context.Background(), "SELECT count(*) FROM ledger WHERE id = $1", id).Scan(&stored); scanErr != nil {
 			t.Fatal(scanErr)
 		}
-		if !errors.Is(err, ErrCommitUnknown) || errors.Is(err, ErrUnavailable) || runs.Load() != 1 || proxy.commits.Load() != int32(id) {
-			t.Fatalf("%s: %v after %d runs (%d commits seen)", mode, err, runs.Load(), proxy.commits.Load())
+		kind, other := ErrCommitUnknown, ErrUnavailable
+		if item.auxiliary {
+			kind, other = ErrUnavailable, ErrCommitUnknown
+		}
+		if !errors.Is(err, kind) || errors.Is(err, other) || runs.Load() != 1 || proxy.commits.Load() != int32(id) {
+			t.Fatalf("%s (auxiliary %v): %v after %d runs (%d commits seen)", mode, item.auxiliary, err, runs.Load(), proxy.commits.Load())
 		}
 		if (mode == "drop") != (stored == 1) {
 			t.Fatalf("%s: %d rows", mode, stored)
@@ -257,7 +266,7 @@ func TestACommitWithoutAnAnswerIsUnknownAndNeverRetried(t *testing.T) {
 	}
 	// The proxy is disarmed: the next transaction commits normally.
 	if err := db.InTx(context.Background(), "insert", TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, "INSERT INTO ledger VALUES (3)")
+		_, err := tx.Exec(ctx, "INSERT INTO ledger VALUES (5)")
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -270,5 +279,78 @@ func TestACommitWithoutAnAnswerIsUnknownAndNeverRetried(t *testing.T) {
 	})
 	if errors.Is(err, ErrCommitUnknown) || !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("a read-only commit: %v", err)
+	}
+}
+
+// TestAPanicInFnRollsBackAndReleasesTheConnection (D1): a callback that panics while it holds a row lock still ends its transaction
+// and gives its connection back, as pgx.BeginTxFunc did: the pool's only connection is free, no session stays idle in a transaction,
+// the row is unchanged and the next transaction takes its lock at once. The pool is the test's own and is closed with a bounded
+// wait, so a leaked connection fails the test instead of hanging it.
+func TestAPanicInFnRollsBackAndReleasesTheConnection(t *testing.T) {
+	url, _ := pgtest.Database(t)
+	setup := pgtest.Connect(t, url)
+	ctx := context.Background()
+	if _, err := setup.Exec(ctx, "CREATE TABLE counter (id int PRIMARY KEY, value int NOT NULL); INSERT INTO counter VALUES (1, 0)"); err != nil {
+		t.Fatal(err)
+	}
+	config, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.MaxConns = 1
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		closed := make(chan struct{})
+		go func() {
+			pool.Close()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.After(5 * time.Second):
+			t.Error("pool.Close blocked: a connection was never given back")
+		}
+	}()
+	db := New(pool)
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("the callback's panic did not reach the caller")
+			}
+		}()
+		_ = db.InTx(ctx, "panic", TxOptions{Timeout: 2 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, "UPDATE counter SET value = value + 1 WHERE id = 1"); err != nil {
+				return err
+			}
+			panic("a defect in the callback")
+		})
+	}()
+	if acquired := pool.Stat().AcquiredConns(); acquired != 0 {
+		t.Fatalf("%d connections stay acquired after the panic", acquired)
+	}
+	var idle int
+	if err = setup.QueryRow(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state LIKE 'idle in transaction%'").
+		Scan(&idle); err != nil {
+		t.Fatal(err)
+	}
+	if idle != 0 {
+		t.Fatalf("%d sessions stay idle in a transaction after the panic", idle)
+	}
+	if err = db.InTx(ctx, "next", TxOptions{Timeout: 2 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE counter SET value = value + 10 WHERE id = 1")
+		return err
+	}); err != nil {
+		t.Fatalf("the next transaction on the row: %v", err)
+	}
+	var value int
+	if err = setup.QueryRow(ctx, "SELECT value FROM counter WHERE id = 1").Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value != 10 {
+		t.Fatalf("the row holds %d: the panicked transaction was not rolled back", value)
 	}
 }

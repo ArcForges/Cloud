@@ -46,9 +46,10 @@ var (
 	ErrPermission = errors.New("the runtime role lacks a privilege")
 	// ErrInternal: any other database error.
 	ErrInternal = errors.New("the database refused the operation")
-	// ErrCommitUnknown: a read-write transaction sent its COMMIT and did not learn the outcome (the connection failed, the
-	// deadline passed or the call was cancelled while the COMMIT was in flight, or the server answered with an error that does not
-	// say it rolled back): the transaction may have committed. It is never retried; callers answer that the effect is unknown.
+	// ErrCommitUnknown: a read-write transaction that carries the call's effect sent its COMMIT and did not learn the outcome (the
+	// connection failed, the deadline passed or the call was cancelled while the COMMIT was in flight, or the server answered with an
+	// error that does not say it rolled back): the transaction may have committed. It is never retried; callers answer that the
+	// effect is unknown. An auxiliary transaction (TxOptions.Auxiliary) reports the same case as ErrUnavailable.
 	ErrCommitUnknown = errors.New("the outcome of the commit is unknown")
 )
 
@@ -153,12 +154,20 @@ type TxOptions struct {
 	Timeout time.Duration
 	// Attempts bounds the retries of serialization failures and deadlocks (default 5).
 	Attempts int
+	// Auxiliary marks a transaction that carries no effect of the call it serves: a rate-limit count, reservation or give-back, a
+	// flow attempt's count, end or give-back, a refusal's audit. Such a transaction runs before the call's effect, or after a
+	// definite rollback of it, so a COMMIT of it without an answer leaves the call's effect undone: it is still never run again,
+	// but it is reported as ErrUnavailable (retry after a while) instead of ErrCommitUnknown (D10). A transaction that carries the
+	// call's effect (a sign-in, an owner bootstrap, a refresh rotation, a flow's creation or its code's send, and every write of a
+	// later slice) leaves it false.
+	Auxiliary bool
 }
 
 // InTx runs fn in a transaction and commits it. A serialization failure or a deadlock (of fn or of the commit) rolls back and
 // runs fn again, up to the attempts and within the deadline, so fn must be safe to repeat: it may touch only the database
-// through tx. An error fn returns that is not a database error is returned unchanged after the rollback. A read-write
-// transaction whose COMMIT was sent without a definite answer is ErrCommitUnknown and never runs again (see commitRolledBack).
+// through tx. An error fn returns that is not a database error is returned unchanged after the rollback, and a panic of fn rolls
+// the transaction back and gives its connection back before it continues. A read-write transaction whose COMMIT was sent without a
+// definite answer never runs again (see commitRolledBack): it is ErrCommitUnknown, or ErrUnavailable when it is Auxiliary.
 func (db *DB) InTx(ctx context.Context, operation string, options TxOptions, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	timeout := options.Timeout
 	if timeout <= 0 {
@@ -181,7 +190,11 @@ func (db *DB) InTx(ctx context.Context, operation string, options TxOptions, fn 
 		}
 		var unknown *commitUnknown
 		if errors.As(err, &unknown) {
-			sanitized := &Error{Operation: operation, Kind: ErrCommitUnknown}
+			kind := ErrCommitUnknown
+			if options.Auxiliary {
+				kind = ErrUnavailable
+			}
+			sanitized := &Error{Operation: operation, Kind: kind}
 			var pgError *pgconn.PgError
 			if errors.As(unknown.err, &pgError) {
 				sanitized.SQLState, sanitized.Constraint = pgError.Code, pgError.ConstraintName
@@ -215,6 +228,10 @@ func (db *DB) run(ctx context.Context, options pgx.TxOptions, fn func(ctx contex
 	if err != nil {
 		return err
 	}
+	// A panic (or Goexit) in fn must still end the transaction and give the connection back with its locks, as pgx.BeginTxFunc
+	// did (D1); the attempt's context is still live while the stack unwinds. After the commit or the rollback below it is a no-op
+	// (pgx.ErrTxClosed).
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err = fn(ctx, tx); err != nil {
 		_ = tx.Rollback(ctx)
 		return err
