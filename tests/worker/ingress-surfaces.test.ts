@@ -109,6 +109,8 @@ const templateId = "6c1d7f0e-3a52-4b9c-8e47-90a1b2c3d4e5";
 
 test("FLAGSHIP_SURFACES enables exact generated names only", () => {
   assert.deepEqual([...enabledSurfaces("identity")], ["identity"]);
+  assert.deepEqual([...enabledSurfaces("identity,pages")], ["identity", "pages"]);
+  assert.deepEqual([...enabledSurfaces("pages,identity")], ["pages", "identity"]);
   for (const value of [
     undefined,
     "",
@@ -120,13 +122,17 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
     "identity,identity",
     "none",
     "identity,operations",
+    "identity,pages,",
+    "identity, pages",
+    "identity,pages,identity",
   ]) {
     assert.equal(enabledSurfaces(value).size, 0, String(value));
     // The center is started with "none" for every such value, as its health then states.
     assert.equal(centerSurfaces(value), "none", String(value));
   }
   assert.equal(centerSurfaces("identity"), "identity");
-  assert.deepEqual([...surfaceNames], ["identity"]);
+  assert.equal(centerSurfaces("identity,pages"), "identity,pages");
+  assert.deepEqual([...surfaceNames], ["identity", "pages"]);
   assert.equal(surfaceTable.size, surfaceRoutes.length);
   for (const route of surfaceRoutes) {
     assert.equal(route.instance, "hello");

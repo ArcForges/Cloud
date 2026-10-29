@@ -82,6 +82,33 @@ export interface SurfaceRoute extends ApiRoute {
   readonly surface: Surface;
 }
 
+/** How a page route may set a cookie: never, the session cookie of a new session, or the removal of the session cookie. */
+export type PageSetCookie = "none" | "session" | "clear";
+
+/**
+ * A route of the center's account pages (AF-CTR-03 A2, PLT-1): an exact method and path below the owned /api prefix. The page handler
+ * admits a request only for such a row, whose surface is enabled, and answers only what the row allows.
+ */
+export interface PageRoute {
+  readonly method: "GET" | "POST";
+  /** The path without the owned /api prefix. */
+  readonly path: string;
+  readonly kind: "html" | "asset" | "json";
+  /** The exact media type of a POST's body, or empty for a route without a body. */
+  readonly requestType: string;
+  /** The media types of the route's replies. */
+  readonly responseTypes: readonly string[];
+  /** Bound of the request body. */
+  readonly maxRequestBytes: number;
+  /** Bound of the reply body. */
+  readonly maxResponseBytes: number;
+  /** Whether the session cookie reaches the center. */
+  readonly cookie: boolean;
+  readonly setCookie: PageSetCookie;
+  /** Whether the route may answer 303. */
+  readonly redirects: boolean;
+}
+
 `
 
 // ErrUnsafeText reports a value that cannot be written as a plain TypeScript string.
@@ -104,6 +131,14 @@ func Render(table routes.WorkerTable) (string, error) {
 		values = append(values, row.Path, row.Instance, row.Surface)
 	}
 	values = append(values, table.Surfaces...)
+	for _, row := range table.Pages {
+		values = append(values, row.Method, row.Path, row.RequestType, string(row.SetCookie), string(row.Kind))
+		values = append(values, row.ResponseTypes...)
+	}
+	for _, header := range routes.PageSecurityHeaders() {
+		values = append(values, header.Name, header.Value)
+	}
+	values = append(values, routes.PageCookieName, routes.PageRedirectFragment)
 	for _, value := range values {
 		if strings.ContainsAny(value, "\"\\\n\r") {
 			return "", ErrUnsafeText
@@ -176,6 +211,7 @@ func Render(table routes.WorkerTable) (string, error) {
 		text.WriteString("  },\n")
 	}
 	text.WriteString("];\n\n")
+	pageTable(&text, table)
 	text.WriteString("export const helloPath = " + quote(table.HelloPath) + ";\n")
 	text.WriteString("export const healthPath = " + quote(table.HealthPath) + ";\n")
 	text.WriteString("/** The bound of a whole request body of a method that declares no larger one, frame header included. */\n")
@@ -198,6 +234,58 @@ func Render(table routes.WorkerTable) (string, error) {
 	}
 	text.WriteString("];\n")
 	return text.String(), nil
+}
+
+// pageTable writes the page routes and the rules of the Worker's page handler (PLT-1): the routes, the headers every reply must carry
+// and the Worker may copy, the statuses it lets through, the session cookie's name and the one form a redirect's Location may take.
+func pageTable(text *strings.Builder, table routes.WorkerTable) {
+	text.WriteString("/** The routes of the center's account pages; each is forwarded only while the surface of the pages is enabled. */\n")
+	text.WriteString("export const pageSurface: Surface = " + quote(routes.SurfacePages) + ";\n")
+	text.WriteString("export const pageRoutes: readonly PageRoute[] = [\n")
+	for _, row := range table.Pages {
+		text.WriteString("  {\n")
+		text.WriteString("    method: " + quote(row.Method) + ",\n")
+		text.WriteString("    path: " + quote(row.Path) + ",\n")
+		text.WriteString("    kind: " + quote(string(row.Kind)) + ",\n")
+		text.WriteString("    requestType: " + quote(row.RequestType) + ",\n")
+		if types := joinQuoted(row.ResponseTypes); len("    responseTypes: ["+types+"],") <= 100 {
+			text.WriteString("    responseTypes: [" + types + "],\n")
+		} else {
+			text.WriteString("    responseTypes:\n      [" + types + "],\n")
+		}
+		text.WriteString("    maxRequestBytes: " + strconv.Itoa(row.MaxRequestBytes) + ",\n")
+		text.WriteString("    maxResponseBytes: " + strconv.Itoa(row.MaxResponseBytes) + ",\n")
+		text.WriteString("    cookie: " + strconv.FormatBool(row.Cookie) + ",\n")
+		text.WriteString("    setCookie: " + quote(string(row.SetCookie)) + ",\n")
+		text.WriteString("    redirects: " + strconv.FormatBool(row.Redirects) + ",\n")
+		text.WriteString("  },\n")
+	}
+	text.WriteString("];\n")
+	text.WriteString("/**\n")
+	text.WriteString(" * The headers every reply of a page route must carry with exactly these values (the content security policy among them), in\n")
+	text.WriteString(" * lower case: the Worker answers 503 instead of a reply that lacks one or differs, and copies no header that is not listed here,\n")
+	text.WriteString(" * the media type, Set-Cookie (as its route allows) and Location (a 303 only).\n")
+	text.WriteString(" */\n")
+	text.WriteString("export const pageSecurityHeaders: Readonly<Record<string, string>> = {\n")
+	for _, header := range routes.PageSecurityHeaders() {
+		text.WriteString(property(quote(strings.ToLower(header.Name)), quote(header.Value)))
+	}
+	text.WriteString("};\n")
+	statuses := make([]string, len(routes.PageStatuses()))
+	for index, status := range routes.PageStatuses() {
+		statuses[index] = strconv.Itoa(status)
+	}
+	text.WriteString("/** The statuses a page reply may have; any other status becomes the Worker's 503. */\n")
+	text.WriteString("export const pageStatuses: readonly number[] = [" + strings.Join(statuses, ", ") + "];\n")
+	text.WriteString("/** The session cookie, the only cookie a page route receives or sets. */\n")
+	text.WriteString("export const pageCookieName = " + quote(routes.PageCookieName) + ";\n")
+	text.WriteString("/** A redirect's Location is a path below this prefix, without a query, and at most the sign-in page's return fragment. */\n")
+	text.WriteString("export const pageLocationPrefix = " + quote(routes.APIPrefix+routes.PageAccountPrefix+"/") + ";\n")
+	text.WriteString("export const pageReturnFragment = " + quote(routes.PageRedirectFragment) + ";\n")
+	text.WriteString("/** The Container instance that serves the pages, and the cap of one page call's duration. */\n")
+	text.WriteString("export const pageInstance = " + quote(routes.HealthInstance) + ";\n")
+	text.WriteString("export const pageDurationMs = " + strconv.Itoa(routes.PageDurationMilliseconds) + ";\n")
+	text.WriteString("\n")
 }
 
 func route(text *strings.Builder, row routes.Row, indent string) {
