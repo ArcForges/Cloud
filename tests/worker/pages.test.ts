@@ -354,6 +354,13 @@ test("the request side refuses what breaks the browser protocol before the limit
   );
   const withoutOrigin = bindings(() => jsonOk(), { ALLOWED_ORIGIN: undefined });
   assert.equal((await routeRequest(call(begin), withoutOrigin.env)).status, 403);
+  // A Worker configured with an empty origin accepts no request, not even one that states an empty Origin.
+  const emptyOrigin = bindings(() => jsonOk(), { ALLOWED_ORIGIN: "" });
+  assert.equal(
+    (await routeRequest(call(begin, { headers: { origin: "" } }), emptyOrigin.env)).status,
+    403,
+  );
+  assert.equal(emptyOrigin.seen.length, 0);
   assert.equal(seen.length, 0, "the Container is never called");
   // Only a body that has no declared length is read after the edge limit counted the call, and refused at its bound.
   assert.equal(
@@ -736,6 +743,11 @@ test("a Location is copied only on a 303 of a route that redirects, below the pa
     assert.equal(reply.headers.get("location"), good);
     assert.equal((await reply.arrayBuffer()).byteLength, 0);
     assert.equal(isPageLocation(good), true);
+    // A body the Container puts on a redirect never reaches the client.
+    const withBody = await redirect(good, sessionsPage, "<p>not for the client</p>");
+    assert.equal(withBody.status, 303, good);
+    assert.equal(withBody.body, null, `${good}: a redirect has no body`);
+    assert.equal((await withBody.arrayBuffer()).byteLength, 0);
   }
   for (const bad of [
     "https://proof.example.test/api/account/passkeys",

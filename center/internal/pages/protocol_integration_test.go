@@ -113,8 +113,14 @@ func TestEveryRouteRefusesAQueryAnAuthorizationHeaderAndABody(t *testing.T) {
 // TestEveryPostRouteHoldsTheExactOrigin (SEC-03): a POST needs exactly one Origin, equal to the configured origin byte for byte;
 // anything else is 403 before any session or body is read. A GET may carry no Origin (a browser sends none for a same-origin
 // read) but one it carries must be right.
+//
+// Every refused POST carries the credentials its route accepts (the signed-in browser's cookie and CSRF token, or on a sign-in
+// step the constant of the origin), and the same request with the right Origin is not refused: the Origin is the only thing that
+// can have made the 403.
 func TestEveryPostRouteHoldsTheExactOrigin(t *testing.T) {
-	h := newHarness(t, settings{})
+	h := newHarness(t, settings{policy: writePolicy})
+	who := h.seedAccount(1)
+	constant := session.PreSessionCSRF(origin)
 	for _, route := range routes.PageRoutes() {
 		if route.Method != http.MethodPost {
 			for _, wrong := range []string{"https://evil.example", "null", origin + "/", "http://center.example.test"} {
@@ -128,15 +134,34 @@ func TestEveryPostRouteHoldsTheExactOrigin(t *testing.T) {
 			}
 			continue
 		}
-		post := func(headers http.Header, noOrigin bool, wrong string) response {
-			return h.do(request{method: http.MethodPost, path: route.Path, contentType: route.RequestType, body: validBody(route), noOrigin: noOrigin, origin: wrong,
-				headers: headers})
+		row, _ := access.PageOperationOf(route.ID)
+		// A fresh browser per route, signed in when the route reads a session (the sign-out ends it).
+		b := h.newBrowser()
+		if row.Credential == access.PageSession {
+			b.mustSignIn(who)
+		}
+		post := func(headers http.Header, noOrigin bool, wrongOrigin string) response {
+			t.Helper()
+			r := request{method: http.MethodPost, path: route.Path, contentType: route.RequestType, noOrigin: noOrigin, origin: wrongOrigin, headers: headers}
+			token := constant
+			if row.Credential == access.PageSession {
+				r.cookie, token = b.cookie, b.csrf
+			}
+			switch {
+			case route.RequestType == routes.TypeForm:
+				r.body = []byte("csrf=" + url.QueryEscape(token))
+			case route.RequestType == routes.TypeJSON:
+				r.body, r.csrf = validBody(route), token
+			default:
+				r.csrf = token
+			}
+			return h.do(r)
 		}
 		if reply := post(nil, true, ""); reply.status != 403 {
 			t.Errorf("%s without an Origin: %d", route.ID, reply.status)
 		}
 		for _, wrong := range []string{"https://evil.example", "null", origin + "/", "http://center.example.test", "https://CENTER.example.test", "https://center.example.test:443",
-			strings.ToUpper(origin), origin + " ", "https://center.example.test.evil.example"} {
+			strings.ToUpper(origin), "https://center.example.test.evil.example", "https://center.example.test\\"} {
 			if reply := post(nil, false, wrong); reply.status != 403 {
 				t.Errorf("%s with the Origin %q: %d", route.ID, wrong, reply.status)
 			}
@@ -146,6 +171,10 @@ func TestEveryPostRouteHoldsTheExactOrigin(t *testing.T) {
 		}
 		if reply := post(http.Header{"Origin": {"https://evil.example", origin}}, true, ""); reply.status != 403 {
 			t.Errorf("%s with a right and a wrong Origin: %d", route.ID, reply.status)
+		}
+		// The control: the same credentials and the right Origin get past the Origin check (the empty body then fails on its own).
+		if reply := post(nil, false, ""); reply.status == 403 {
+			t.Errorf("%s with the right Origin and its credentials is still 403: %.160s", route.ID, reply.body)
 		}
 	}
 }

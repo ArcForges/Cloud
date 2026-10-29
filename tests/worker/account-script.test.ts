@@ -102,6 +102,9 @@ test("a return path is followed only when it is a path of this origin (DC-13, th
     "/\u0000",
     "/\u007f",
     "///evil.example",
+    "/.//evil.example",
+    "/a/..//evil.example",
+    "/%2e//evil.example",
     `/${"a".repeat(512)}`,
     "@evil.example",
     ":evil",
@@ -226,6 +229,16 @@ test("a credential becomes the document's assertion and creation, unpadded base6
     },
   });
   assert.equal("userHandle" in noHandle, false);
+  const emptyHandle = script.assertionBody({
+    rawId: bytes(1),
+    response: {
+      clientDataJSON: bytes(1),
+      authenticatorData: bytes(1),
+      signature: bytes(1),
+      userHandle: new Uint8Array(0),
+    },
+  });
+  assert.equal("userHandle" in emptyHandle, false, "an empty user handle is not sent");
   const creation = script.creationBody({
     rawId: bytes(1, 2, 3),
     response: {
@@ -693,6 +706,53 @@ test("the bootstrap page reads the token from the fragment and removes it from t
   assert.equal(bootstrapped.elements.get("error-summary")?.focused, true);
   assert.match(bootstrapped.elements.get("error-text")?.textContent ?? "", /not accepted/u);
   assert.equal(create.disabled, false, "the button is usable again");
+});
+
+test("the bootstrap page enrolls with the one-time token, clears the field and goes to the passkeys", async () => {
+  const seen: { url: string; body: unknown }[] = [];
+  const bootstrapped = page(
+    "bootstrap",
+    ["heading", "error-summary", "error-text", "status", "token", "display-name", "create"],
+    {
+      hash: "#token=afb1.one-time-token",
+      fetchImpl: async (url, init) => {
+        seen.push({
+          url,
+          body: init.body === undefined ? undefined : JSON.parse(String(init.body)),
+        });
+        if (url.endsWith("/bootstrap"))
+          return reply(200, { csrfToken: "T".repeat(43), authenticated: false });
+        if (url.endsWith("/authentication/begin"))
+          return reply(200, {
+            flowId: "11111111-1111-4111-8111-111111111111",
+            method: "passkey",
+            challenge: script.encodeBase64Url(new Uint8Array(32)),
+            rpId: "proof.example.test",
+            options: {
+              rpId: "proof.example.test",
+              userHandle: script.encodeBase64Url(new Uint8Array(32).fill(2)),
+              userVerification: "required",
+              algorithms: [-7],
+            },
+            purpose: "enroll",
+          });
+        return reply(200, {});
+      },
+    },
+  );
+  await script.start(bootstrapped.window);
+  const nameField = bootstrapped.elements.get("display-name");
+  assert(nameField);
+  nameField.value = "  Owner  ";
+  bootstrapped.elements.get("create")?.fire("click");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const completion = seen.find((call) => call.url.endsWith("/enrollment/complete"));
+  assert(completion);
+  const sent = completion.body as { proof: unknown; profile: unknown };
+  assert.deepEqual(sent.proof, { localCode: "afb1.one-time-token" });
+  assert.deepEqual(sent.profile, { displayName: "Owner" });
+  assert.equal(bootstrapped.elements.get("token")?.value, "", "the one-time token leaves the page");
+  assert.deepEqual(bootstrapped.assigned, ["/api/account/passkeys"]);
 });
 
 test("the sign-in page follows a return path of its own origin and no other", async () => {
