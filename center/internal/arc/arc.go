@@ -33,8 +33,17 @@ type Refusal struct {
 	Limit *Limit
 	// Revision is the RevisionConflict detail of a stale expected revision.
 	Revision *Revision
+	// Resource is state.resource: the object a not_found or already_exists names (F19).
+	Resource *Resource
 	// Effect is the effect certainty: DID_NOT_HAPPEN unless set.
 	Effect foundationv1.EffectCertainty
+}
+
+// Resource is a state.resource detail (an AggregateRef): the kind of the object and, when the caller named it by its ID, that ID
+// (16 bytes). Only an ID the caller sent is ever echoed back, so the detail tells the caller nothing it did not know.
+type Resource struct {
+	Kind string
+	ID   []byte
 }
 
 // Revision is a RevisionConflict detail: the revision the request expected and the current one.
@@ -101,13 +110,19 @@ func (r *Refusal) ArcError(call correlation.Context) *foundationv1.ArcError {
 			limit.RecoveryAt = Instant(r.Limit.RecoveryAt)
 		}
 		value.Details = &foundationv1.ErrorDetails{Detail: &foundationv1.ErrorDetails_Limit{Limit: limit}}
-	case r.Reason != "" || r.State != "":
+	case r.Reason != "" || r.State != "" || r.Resource != nil:
 		state := &foundationv1.StateFailure{}
 		if r.State != "" {
 			state.State = proto.String(r.State)
 		}
 		if r.Reason != "" {
 			state.Reason = proto.String(r.Reason)
+		}
+		if r.Resource != nil {
+			state.Resource = &foundationv1.AggregateRef{Kind: proto.String(r.Resource.Kind)}
+			if len(r.Resource.ID) > 0 {
+				state.Resource.Id = &foundationv1.Id{Value: append([]byte(nil), r.Resource.ID...)}
+			}
 		}
 		value.Details = &foundationv1.ErrorDetails{Detail: &foundationv1.ErrorDetails_State{State: state}}
 	}
@@ -154,9 +169,10 @@ func PermissionDenied(operation string) *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_AUTHORIZATION, Code: "permission_denied", Reason: operation}
 }
 
-// NotFound is STATE/not_found (the object does not exist or is not visible to the caller).
-func NotFound() *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_found"}
+// NotFound is STATE/not_found with state.resource: the object does not exist or is not visible to the caller. kind is the object's
+// kind and id the ID the caller named it by (nil when it named none, for example its own account).
+func NotFound(kind string, id []byte) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_found", Resource: &Resource{Kind: kind, ID: id}}
 }
 
 // InvalidState is STATE/invalid_state with its state and reason.
@@ -174,9 +190,10 @@ func CodeReused() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "code_reused"}
 }
 
-// AlreadyExists is CONFLICT/already_exists.
-func AlreadyExists() *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "already_exists"}
+// AlreadyExists is CONFLICT/already_exists with state.resource: the named object already exists. kind is the object's kind and id
+// the ID the caller named it by (nil when the caller named it otherwise, for example a passkey by its WebAuthn credential ID).
+func AlreadyExists(kind string, id []byte) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "already_exists", Resource: &Resource{Kind: kind, ID: id}}
 }
 
 // RevisionConflict is CONFLICT/revision_conflict: meta.expected_rev differs from the object's current revision (re-read, merge).

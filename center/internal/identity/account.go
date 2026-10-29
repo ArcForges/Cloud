@@ -55,7 +55,7 @@ func (s *Service) GetProfile(ctx context.Context, userID platform.ID) (Profile, 
      ORDER BY a.created_at, a.auth_identity_id LIMIT 1)
 FROM identity.user u WHERE u.user_id = $1`, userID).Scan(&profile.DisplayName, &profile.Locale, &profile.Timezone, &profile.Revision, &profile.PrimaryEmail)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return arc.NotFound()
+			return arc.NotFound("account", nil) // the caller's own account, which it names by no ID
 		}
 		return err
 	})

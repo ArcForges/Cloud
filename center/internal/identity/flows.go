@@ -123,7 +123,7 @@ func classify(ctx context.Context, q pgx.Tx, id platform.ID, channel Channel, ki
 	err := q.QueryRow(ctx, "SELECT channel, kind, purpose, attempts, max_attempts, outcome, expires_at FROM identity.auth_flow WHERE flow_id = $1", id).
 		Scan(&storedChannel, &storedKind, &storedPurpose, &attempts, &maxAttempts, &outcome, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return arc.NotFound()
+		return arc.NotFound("auth_flow", id[:])
 	}
 	if err != nil {
 		return err
@@ -134,7 +134,7 @@ func classify(ctx context.Context, q pgx.Tx, id platform.ID, channel Channel, ki
 	}
 	switch {
 	case !matches || Channel(storedChannel) != channel || Purpose(storedPurpose) != purpose:
-		return arc.NotFound()
+		return arc.NotFound("auth_flow", id[:])
 	case outcome != nil && *outcome == outcomeExhausted:
 		return arc.Expired()
 	case outcome != nil:

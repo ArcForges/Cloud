@@ -20,13 +20,13 @@ const liveAccountSession = `scope IN (1, 2) AND revoked_at IS NULL AND expires_a
 
 // RevokeOne revokes one live account session of an account in the caller's transaction (RevokeSession: the caller's own session is
 // a sign-out, reason RevokedSignedOut; any other is RevokedByAccount) and returns its new revision. A session of another account, a
-// node, push or automation session, and a revoked or expired one are all STATE/not_found.
+// node, push or automation session, and a revoked or expired one are all STATE/not_found (state.resource: the session).
 func RevokeOne(ctx context.Context, tx pgx.Tx, userID, sessionID platform.ID, reason int16, now time.Time) (int64, error) {
 	var revision int64
 	err := tx.QueryRow(ctx, `UPDATE identity.session SET revoked_at = $3, revoke_reason = $4, rev = rev + 1
 WHERE session_id = $1 AND user_id = $2 AND `+replaceNow(liveAccountSession, "$3")+` RETURNING rev`, sessionID, userID, now, reason).Scan(&revision)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, arc.NotFound()
+		return 0, arc.NotFound("session", sessionID[:])
 	}
 	return revision, err
 }

@@ -160,12 +160,13 @@ locks. Integration tests against a real PostgreSQL cover each one.
 - a bounded retry of serialization failures and deadlocks (5 attempts with jittered backoff);
 - a read-write transaction whose COMMIT was sent without a definite answer (a lost connection, a timeout, a cancellation, the
   pooler's `08P01`: anything but a class 40 or 23 refusal or a transaction that had failed) is never retried. When it carries the
-  call's effect (a sign-in, the owner bootstrap, a refresh rotation, a flow's creation or its code's send; every later write) it is
-  `ErrCommitUnknown`: it may have committed, and the identity surface answers `INTERNAL/internal` with effect `UNKNOWN` and retry
-  `NEVER`. A transaction that carries no effect of the call (`TxOptions.Auxiliary`: rate-limit counts, reservations and give-backs,
-  a flow attempt's count, end and give-back, refusal audits) runs before the effect or after its definite rollback, so its
-  unanswered COMMIT is `ErrUnavailable`, answered `RESOURCE/overloaded` with `AFTER_TIME` (D10). A later slice marks each new
-  transaction by the same rule;
+  call's effect (a sign-in, the owner bootstrap, a refresh rotation, a flow's creation or its code's send, a step-up's begin or
+  proof, and each effect write a later slice adds) it is `ErrCommitUnknown`: it may have committed, and the identity surface
+  answers `INTERNAL/internal` with effect `UNKNOWN` and retry `NEVER`. A transaction that carries no effect of the call
+  (`TxOptions.Auxiliary`: rate-limit counts, reservations and give-backs, an attempt's count, end and give-back, a step-up
+  challenge's denial, refusal audits) runs before the effect or after its definite rollback, so its unanswered COMMIT is
+  `ErrUnavailable`, answered `RESOURCE/overloaded` with `AFTER_TIME` and logged as one warning line with the call's correlation id
+  (D10). A later slice's own counts, reservations, attempt bookkeeping and refusal audits set `Auxiliary`;
 - a panic in a transaction's callback rolls the transaction back and gives its connection back before it continues (D1);
 - errors that keep the operation, the SQLSTATE and the constraint name but never the server's message or detail, which can quote
   row values.

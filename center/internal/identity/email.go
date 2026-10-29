@@ -117,11 +117,11 @@ func (s *Service) RequestEmailCode(ctx context.Context, request Request, flowID 
 WHERE flow_id = $1 AND channel = 1 AND kind = 4 AND purpose = $2 FOR UPDATE`, flowID, int16(purpose)).Scan(&emailHash, &sends, &expiresAt, &consumed)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			return arc.NotFound()
+			return arc.NotFound("auth_flow", flowID[:])
 		case err != nil:
 			return err
 		case subtle.ConstantTimeCompare(emailHash, EmailHash(normalized)) != 1:
-			return arc.NotFound()
+			return arc.NotFound("auth_flow", flowID[:])
 		case consumed:
 			return classify(ctx, tx, flowID, ChannelNative, []FlowKind{FlowEmailCode}, PurposeAuthenticate, now)
 		case !now.Before(expiresAt):

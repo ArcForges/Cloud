@@ -9,3 +9,6 @@ func WithoutUserVerification(rp *RelyingParty) *RelyingParty {
 	copied.requireUV = false
 	return &copied
 }
+
+// AttestationIsNone is the format peek that runs before the library parses a registration (G3).
+func AttestationIsNone(object []byte) bool { return attestationIsNone(object) }

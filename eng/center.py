@@ -44,6 +44,7 @@ FUZZ_TARGETS = (
     ("./internal/identity", "FuzzNormalizeEmail"),
     ("./internal/page", "FuzzParseCursor"),
     ("./internal/server", "FuzzClientAddressHeader"),
+    ("./internal/identity/passkey", "FuzzCeremonyPayloads"),
 )
 FUZZ_TIME = "10s"
 TEST_TIMEOUT = "10m"

@@ -112,6 +112,12 @@ func (s *Server) failure(ctx context.Context, call *ingress.Call, err error) *fo
 		refusal = arc.CommitUnknown()
 	case errors.Is(err, store.ErrUnavailable), errors.Is(err, store.ErrTimeout), errors.Is(err, store.ErrContention), errors.Is(err, store.ErrCanceled),
 		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		var storeErr *store.Error
+		if errors.As(err, &storeErr) && storeErr.Unanswered {
+			// An auxiliary commit went unanswered: the call's effect did not happen, but the count, attempt or audit may have.
+			s.logger.WarnContext(ctx, "an auxiliary commit went unanswered", "method", call.Policy.FullName, "correlationId",
+				call.Correlation.CorrelationID, "operation", storeErr.Operation)
+		}
 		refusal = arc.Unavailable()
 	default:
 		s.logger.ErrorContext(ctx, "identity call failed", "method", call.Policy.FullName, "correlationId", call.Correlation.CorrelationID, "error", err.Error())

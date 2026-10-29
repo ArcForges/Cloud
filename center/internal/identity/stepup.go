@@ -241,11 +241,11 @@ func classifyStepUp(ctx context.Context, tx pgx.Tx, id platform.ID, caller Calle
 		Scan(&sessionID, &userID, &storedMethod, &state, &expiresAt)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return arc.NotFound()
+		return arc.NotFound("step_up_challenge", id[:])
 	case err != nil:
 		return err
 	case sessionID != caller.SessionID || userID != caller.UserID:
-		return arc.NotFound()
+		return arc.NotFound("step_up_challenge", id[:])
 	case int32(storedMethod) != method:
 		return arc.InvalidArgument("proof", "not_offered")
 	case state == stepUpProved || state == stepUpConsumed:
