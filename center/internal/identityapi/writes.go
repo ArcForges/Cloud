@@ -215,14 +215,30 @@ func (s *Server) updateProfile(ctx context.Context, call *ingress.Call, request 
 		}
 		change := identity.ProfileChange{DisplayName: patch.DisplayName, Locale: patch.Locale, Timezone: patch.Timezone}
 		expected := expectedRevision(request.GetMeta())
-		return execute(ctx, s, receiptCommand, &publicapiv1.IdentityServiceUpdateProfileValue{},
+		// C1: the receipt keeps the profile without its primary e-mail address, which is stored in clear only as the subject of an
+		// e-mail identity. The first answer is the profile the transaction read; a replay states the account's current address.
+		var answer *publicapiv1.IdentityServiceUpdateProfileValue
+		stored, err := execute(ctx, s, receiptCommand, &publicapiv1.IdentityServiceUpdateProfileValue{},
 			func(ctx context.Context, tx pgx.Tx, _ time.Time) (*publicapiv1.IdentityServiceUpdateProfileValue, error) {
 				profile, err := s.identity.UpdateProfile(ctx, tx, caller, change, expected)
 				if err != nil {
 					return nil, err
 				}
-				return &publicapiv1.IdentityServiceUpdateProfileValue{Profile: accountProfile(profile)}, nil
+				answer = &publicapiv1.IdentityServiceUpdateProfileValue{Profile: accountProfile(profile)}
+				return withoutAddress(answer), nil
 			})
+		if err != nil {
+			return nil, err
+		}
+		if answer != nil && proto.Equal(withoutAddress(answer), stored) {
+			return answer, nil
+		}
+		current, err := s.identity.GetProfile(ctx, caller.UserID)
+		if err != nil {
+			return nil, err
+		}
+		stored.GetProfile().PrimaryEmail = current.PrimaryEmail
+		return stored, nil
 	}()
 	response := &publicapiv1.IdentityServiceUpdateProfileResponse{Meta: ingress.ResponseMeta(call.Correlation)}
 	if failure := s.failure(ctx, call, err); failure != nil {
@@ -231,6 +247,15 @@ func (s *Server) updateProfile(ctx context.Context, call *ingress.Call, request 
 	}
 	response.Outcome = &publicapiv1.IdentityServiceUpdateProfileResponse_Value{Value: value}
 	return response, nil
+}
+
+// withoutAddress is an UpdateProfile reply as its receipt keeps it: without the primary e-mail address (C1).
+func withoutAddress(value *publicapiv1.IdentityServiceUpdateProfileValue) *publicapiv1.IdentityServiceUpdateProfileValue {
+	kept := proto.CloneOf(value)
+	if kept.GetProfile() != nil {
+		kept.Profile.PrimaryEmail = nil
+	}
+	return kept
 }
 
 func (s *Server) beginPasskeyRegistration(ctx context.Context, call *ingress.Call, request *publicapiv1.IdentityServiceBeginPasskeyRegistrationRequest) (*publicapiv1.IdentityServiceBeginPasskeyRegistrationResponse, error) {

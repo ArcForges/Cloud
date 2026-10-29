@@ -19,6 +19,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/session"
 )
 
 // TestAPasskeyRegistersOnceWithItsLabel: BeginPasskeyRegistration needs the account's evidence and a display name of at most 64
@@ -291,4 +292,88 @@ func TestHealthStatesTheServedSurfaces(t *testing.T) {
 			t.Fatalf("surfaces %q: health states %q (%v)", surfaces, health.Center.Surfaces, err)
 		}
 	}
+}
+
+// TestNoReceiptHoldsAnAddress (C1): an e-mail address is stored in clear only as the subject of an e-mail identity, so no command
+// receipt's result holds one. UpdateProfile's first answer states the account's primary address and its replay the account's
+// current one, which is none once the e-mail identity is removed. Every receipt-guarded write runs once here, and every stored
+// result is scanned for the address.
+func TestNoReceiptHoldsAnAddress(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	address := "c1.person@example.org"
+	who := h.seedAccount(1, address)
+	h.remember(address)
+	native := h.signIn(who, newClaim(t), caller{})
+	from := bearer(native.GetAccessToken())
+	ids := h.credentialIDs(who.id)
+	passkey, email := ids[0], ids[1]
+
+	update := command()
+	profile := func() *publicapiv1.IdentityServiceUpdateProfileResponse {
+		return rpc(h, updateProfilePath, &publicapiv1.IdentityServiceUpdateProfileRequest{Meta: update, Patch: &publicapiv1.ProfileUpdate{
+			Locale: proto.String("en-GB")}}, from, &publicapiv1.IdentityServiceUpdateProfileResponse{})
+	}
+	for _, what := range []string{"the first answer", "the replay"} {
+		if answer := profile(); answer.GetError() != nil || answer.GetValue().GetProfile().GetPrimaryEmail() != address {
+			t.Fatalf("UpdateProfile, %s: %v", what, answer)
+		}
+	}
+	for credential, name := range map[platform.ID]string{passkey: "Laptop key", email: "Mail"} {
+		expect(t, "a credential rename", rpc(h, renameCredentialPath, &publicapiv1.IdentityServiceRenameAuthIdentityRequest{Meta: command(),
+			CredentialId: idOf(credential), Name: proto.String(name)}, from, &publicapiv1.IdentityServiceRenameAuthIdentityResponse{}).GetError(), "")
+	}
+	h.stepUp(who, from, identity.ClassBeginRegistration, who.id)
+	challenge := rpc(h, beginRegisterPath, &publicapiv1.IdentityServiceBeginPasskeyRegistrationRequest{Meta: meta(), DisplayName: proto.String("Phone key")},
+		from, &publicapiv1.IdentityServiceBeginPasskeyRegistrationResponse{}).GetValue().GetChallenge()
+	creation, _ := virtual.New(rpID, origin).Create(challenge.GetChallenge(), who.handle)
+	expect(t, "a registration", rpc(h, completeRegisterPath, &publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest{Meta: command(),
+		FlowId: challenge.GetFlowId(), Credential: creationOf(creation)}, from, &publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse{}).GetError(), "")
+	own := h.deviceOf(sessionIDOf(native))
+	expect(t, "a device rename", rpc(h, renameDevicePath, &publicapiv1.DeviceServiceRenameRequest{Meta: command(), DeviceId: idOf(own),
+		Name: proto.String("Pixel")}, from, &publicapiv1.DeviceServiceRenameResponse{}).GetError(), "")
+	other := h.issue(who.id, session.ScopeAccount, false)
+	h.stepUp(who, from, identity.ClassRevokeSession, other.sessionID)
+	expect(t, "a session revocation", h.revokeSession(from, command(), other.sessionID).GetError(), "")
+	h.stepUp(who, from, identity.ClassRevokeAllSessions, who.id)
+	expect(t, "a revocation of all sessions", rpc(h, revokeAllPath, &publicapiv1.IdentityServiceRevokeAllSessionsRequest{Meta: command()}, from,
+		&publicapiv1.IdentityServiceRevokeAllSessionsResponse{}).GetError(), "")
+	device := h.deviceOf(sessionIDOf(h.signIn(who, newClaim(t), caller{})))
+	h.stepUp(who, from, identity.ClassRevokeDevice, device)
+	expect(t, "a device revocation", rpc(h, revokeDevicePath, &publicapiv1.DeviceServiceRevokeRequest{Meta: command(), DeviceId: idOf(device)}, from,
+		&publicapiv1.DeviceServiceRevokeResponse{}).GetError(), "")
+	h.stepUp(who, from, identity.ClassRemoveCredential, email)
+	expect(t, "the e-mail identity's removal", rpc(h, removeCredentialPath, &publicapiv1.IdentityServiceRemoveAuthIdentityRequest{Meta: command(),
+		CredentialId: idOf(email)}, from, &publicapiv1.IdentityServiceRemoveAuthIdentityResponse{}).GetError(), "")
+	if answer := profile(); answer.GetError() != nil || answer.GetValue().GetProfile().PrimaryEmail != nil ||
+		answer.GetValue().GetProfile().GetLocale() != "en-GB" {
+		t.Fatalf("UpdateProfile's replay after the address was removed: %v", answer)
+	}
+
+	rows, err := h.migration.Query(context.Background(), "SELECT operation, result FROM platform.command_receipt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	operations := map[string]bool{}
+	for rows.Next() {
+		var operation string
+		var result []byte
+		if err = rows.Scan(&operation, &result); err != nil {
+			t.Fatal(err)
+		}
+		operations[operation] = true
+		if bytes.Contains(bytes.ToLower(result), []byte(address)) {
+			t.Errorf("the receipt of %s holds the address", operation)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{updateProfilePath, renameCredentialPath, completeRegisterPath, renameDevicePath, revokeSessionPath, revokeAllPath,
+		revokeDevicePath, removeCredentialPath} {
+		if !operations[strings.TrimPrefix(operation, "/")] && !operations[operation] {
+			t.Errorf("no receipt of %s was scanned", operation)
+		}
+	}
+	h.verifyAudit()
 }
