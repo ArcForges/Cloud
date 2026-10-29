@@ -321,8 +321,8 @@ CREATE TABLE identity.auth_flow (
     CONSTRAINT auth_flow_sends CHECK (sends BETWEEN 0 AND 3),
     CONSTRAINT auth_flow_attempts CHECK (attempts >= 0 AND attempts <= max_attempts AND max_attempts BETWEEN 1 AND 10),
     CONSTRAINT auth_flow_expiry CHECK (expires_at > created_at),
-    -- 1 succeeded, 2 attempts exhausted (identity.flow_outcome). A consumed flow is final (auth_flow_consumed_is_final): a proof
-    -- presented again is refused CONFLICT/code_reused and is not recorded here.
+    -- 1 succeeded, 2 attempts exhausted (identity.flow_outcome). A consumed flow is final (auth_flow_consumed_is_final): presented
+    -- again, a succeeded flow is refused CONFLICT/code_reused and an exhausted one STATE/expired; neither is recorded here.
     CONSTRAINT auth_flow_outcome CHECK ((outcome IS NULL) = (consumed_at IS NULL) AND (outcome IS NULL OR outcome IN (1, 2)))
 );
 CREATE INDEX auth_flow_expires_at ON identity.auth_flow (expires_at);
