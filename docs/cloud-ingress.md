@@ -87,8 +87,13 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   the Worker into the generated template: the refusal's time rounded up to the second plus the generated edge period (60 s, the
   limiter's `simple.period`). Both limiters key a client by its address, an IPv6 client by its /64 (`edgeClientKey`). A forwarded
   surface call carries `x-arcforges-client-ip` set from `cf-connecting-ip` (left out when Cloudflare sent none; a client's own value
-  is never copied). The generated replies are the center's own refusals without a correlation id or `ResponseMeta`, so a client reads
-  them exactly as the center's ([accounts, sessions and devices](center-identity.md#surface-switch)).
+  is never copied). The generated replies are the center's own refusals without a `ResponseMeta`, and each carries the call's
+  correlation id in its `ArcError` (Contracts requires `ArcError.correlation_id`, E4-1): the Worker creates one identity per call
+  before any refusal (`crypto.randomUUID`; the body is not read before a disabled-surface or edge-limit refusal, so these refusals
+  never carry a value the client stated) and writes its 16 bytes into the template's slot at the generated offset
+  (`notActivatedReplyCorrelationOffsets`, `rateLimitedReplyCorrelationOffset`, `replyCorrelationBytes`); an admitted call whose
+  `RequestMeta` states none continues with the same identity as its `traceparent`. A client reads the replies exactly as the
+  center's ([accounts, sessions and devices](center-identity.md#surface-switch)).
 - **Reply.** Only `content-type`, `grpc-status`, `grpc-message` and the Worker's own headers (`cache-control: no-store`,
   `x-content-type-options`, the revision and build headers) are returned; cookies and any other Container header are
   dropped. A Worker-generated domain reply (a disabled surface, the surface rate limit) carries the reply frame and the OK trailer

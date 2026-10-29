@@ -6,6 +6,7 @@
 // headers it builds itself. Unary replies are bounded and buffered; a server stream is passed through
 // frame by frame (see frames.ts) and never buffered.
 import {
+  correlationIdBytes,
   newCorrelationId,
   readRequestCorrelation,
   singleMessage,
@@ -33,6 +34,7 @@ import {
   findRoute,
   healthPath,
   notActivatedReplies,
+  notActivatedReplyCorrelationOffsets,
   productionTable,
   streamLifetimeMs,
   surfaceTable,
@@ -56,10 +58,13 @@ export interface IngressEnv {
 
 /**
  * A domain reply the Worker answers itself: one generated gRPC-Web reply frame (an ArcError outcome) and the OK status trailer,
- * so a client reads the refusal exactly as it reads the center's.
+ * so a client reads the refusal exactly as it reads the center's. The ArcError carries the call's correlation id, which the Worker
+ * writes into the template's 16-byte slot (Contracts requires it; E4-1).
  */
-function domainReply(base64: string): Response {
-  return domainReplyBody(Uint8Array.from(atob(base64), (character) => character.charCodeAt(0)));
+function domainReply(base64: string, slotOffset: number, correlationId: string): Response {
+  const body = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+  body.set(correlationIdBytes(correlationId), slotOffset);
+  return domainReplyBody(body);
 }
 
 function domainReplyBody(body: Uint8Array<ArrayBuffer>): Response {
@@ -123,9 +128,17 @@ export async function handleApiRequest(
       ![null, "identity"].includes(request.headers.get("grpc-encoding")))
   )
     return reject(415, "Compressed requests are not supported.");
+  // One correlation identity per call, created at the edge before any refusal (CR-01, E4-1): the refusals below that precede the
+  // body (a disabled surface, the edge limit) carry it in their ArcError, and an admitted call whose RequestMeta states none
+  // continues with it. The body is not read before those refusals, so they never carry a value the client stated.
+  const created = newCorrelationId();
   // A disabled surface is answered here, before any rate limit, credential, body or Container (DC-04).
   if (surfaceRoute && !enabledSurfaces(env.FLAGSHIP_SURFACES).has(surfaceRoute.surface))
-    return domainReply(notActivatedReplies[surfaceRoute.surface]);
+    return domainReply(
+      notActivatedReplies[surfaceRoute.surface],
+      notActivatedReplyCorrelationOffsets[surfaceRoute.surface],
+      created,
+    );
 
   const streaming = route.kind === "serverStream";
   const cap = streaming ? Math.min(route.maxDurationMs, streamLifetimeMs) : route.maxDurationMs;
@@ -160,7 +173,7 @@ export async function handleApiRequest(
       // domain refusal RESOURCE/rate_limited (PLT-11) with its retry instant (F17), and the Container never sees it.
       const limiter = env.IDENTITY_RATE_LIMITER;
       const underLimit = limiter ? (await bounded(limiter.limit({ key }), signal)).success : false;
-      if (!underLimit) return domainReplyBody(rateLimitedReplyAt(Date.now()));
+      if (!underLimit) return domainReplyBody(rateLimitedReplyAt(Date.now(), created));
     } else {
       const { success } = await bounded(env.HELLO_RATE_LIMITER.limit({ key }), signal);
       if (!success) return reject(429, "Hello rate limit exceeded.");
@@ -206,7 +219,7 @@ export async function handleApiRequest(
         return rpcError(grpcStatus.invalidArgument, invalidRequestKey);
       if (stated.kind === "valid") correlationId = stated.id;
     }
-    if (!health) headers.set("traceparent", traceparentFor(correlationId ?? newCorrelationId()));
+    if (!health) headers.set("traceparent", traceparentFor(correlationId ?? created));
     const remaining = Math.floor(budget - (performance.now() - started));
     if (remaining <= 0) throw deadlineError;
     if (!health) {

@@ -408,10 +408,13 @@ that names no instant (`RESOURCE/overloaded`, `INTERNAL/internal` with `AFTER_TI
 `ArcError`, one second after the refusal plus up to one second of jitter (`arc.Refusal.Dated`, E4). `TestEveryRefusalIsAnErrorsRow`
 checks every constructor's rendering against those rules, the integration tests check every refusal they decode against
 `retryAdvice`, and the Worker's generated replies meet it (`rate_limited` carries the instant the Worker writes, `not_activated` is
-`NEVER`). Two contract gaps predate this part (#118): `INTERNAL/internal` pairs `AFTER_TIME` with effect `UNKNOWN`, as Design
-errors.md prescribes but the Contracts `arcError` rule forbids (the test's one named exemption, routed to the AF-CTR-03 Design
-companion), and the Worker's generated replies carry no correlation id (routed to A2, which writes a correlation slot into
-them).
+`NEVER`). The Worker's generated replies carry the correlation id Contracts requires in `ArcError.correlation_id` (E4-1): each
+template holds a 16-byte slot, which the Worker fills with the call's identity before it answers, and `arctest.Violations` (the
+check every test applies to a refusal, now with no uncorrelated exemption) is applied to the templates as the Worker completes them
+(`TestTheSurfaceRepliesAreTheCentersRefusals`, `tests/worker/ingress-surfaces.test.ts`). One contract gap predates this part (#118):
+`INTERNAL/internal` pairs `AFTER_TIME` with effect `UNKNOWN`, as Design errors.md prescribes but the Contracts `arcError` rule
+forbids (the test's one named exemption, which needs both the category `INTERNAL` and the code `internal`; routed to the AF-CTR-03
+Design companion, E4-INTERNAL).
 
 The ingress adds two transport refusals for a known bearer (both gRPC 16 `UNAUTHENTICATED`): `auth.token_expired` and
 `auth.credential_revoked`. They need companion rows in errors.md's center ingress table (DC-14).

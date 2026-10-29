@@ -46,23 +46,32 @@ export interface SurfaceRoute extends ApiRoute {
 export const surfaceNames: readonly Surface[] = ["identity"];
 /** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */
 export const clientIpHeader = "x-arcforges-client-ip";
+/** The width of the correlation id slot of the reply templates below: an Id's 16 bytes (E4-1). */
+export const replyCorrelationBytes = 16;
 /**
  * The gRPC-Web body (one reply frame and the OK status trailer) answering a call of a disabled surface: the domain refusal
- * STATE/not_activated naming the surface, without a correlation id (the center's own reply carries one). Base64.
+ * STATE/not_activated naming the surface. A template: the Worker writes the call's correlation id into the 16-byte slot at the
+ * surface's offset (ArcError.correlation_id, which Contracts requires). Base64.
  */
 export const notActivatedReplies: Readonly<Record<Surface, string>> = {
   identity:
-    "AAAAAEsaSQoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBOhUiEwoHc3VyZmFjZRIIaWRlbnRpdHmAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "AAAAAF8aXQoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86FSITCgdzdXJmYWNlEghpZGVudGl0eYAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
+};
+/** The byte offset of the correlation id slot in each surface's not_activated template. */
+export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, number>> = {
+  identity: 61,
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
  * A template: the Worker writes the retry instant (the refusal's time rounded up to the second, plus the edge period) into
- * the instant seconds at each offset (retry.retry_at and limit.recovery_at). Base64.
+ * the instant seconds at each offset (retry.retry_at and limit.recovery_at) and the call's correlation id into the slot. Base64.
  */
 export const rateLimitedReply =
-  "AAAAAFMaUQoMcmF0ZV9saW1pdGVkEAcaG2Vycm9yLnJlc291cmNlLnJhdGVfbGltaXRlZCIMCAMSCAiAgICAQBAAKAE6EhIQCgRlZGdlIggIgICAgEAQAIAAAAAQZ3JwYy1zdGF0dXM6IDANCg==";
+  "AAAAAGcaZQoMcmF0ZV9saW1pdGVkEAcaG2Vycm9yLnJlc291cmNlLnJhdGVfbGltaXRlZCIMCAMSCAiAgICAQBAAKAEyEgoQASNFZ4mrze8BI0VniavN7zoSEhAKBGVkZ2UiCAiAgICAQBAAgAAAABBncnBjLXN0YXR1czogMA0K";
+/** The byte offset of the correlation id slot in the rate_limited template. */
+export const rateLimitedReplyCorrelationOffset = 72;
 /** The byte offsets of the template's instant seconds (zigzag varints of a fixed width). */
-export const rateLimitedReplyInstantOffsets: readonly number[] = [59, 81];
+export const rateLimitedReplyInstantOffsets: readonly number[] = [59, 101];
 /** The width of each instant's seconds: five varint bytes hold every instant from 1974 to 2514. */
 export const rateLimitedReplyInstantBytes = 5;
 /** The period of the surface rate limit in seconds (wrangler.json IDENTITY_RATE_LIMITER simple.period). */

@@ -33,6 +33,18 @@ export function newCorrelationId(): string {
   return crypto.randomUUID();
 }
 
+/**
+ * The 16 bytes of a correlation id (an Id message's value; wire registry 04), in the canonical order of its text. The Worker writes
+ * them into the correlation slot of a generated reply (ArcError.correlation_id, which Contracts requires).
+ */
+export function correlationIdBytes(correlationId: string): Uint8Array<ArrayBuffer> {
+  if (!isCorrelationId(correlationId)) throw new TypeError("Invalid correlation id.");
+  const hex = correlationId.replaceAll("-", "");
+  return Uint8Array.from({ length: idByteLength }, (_, index) =>
+    Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
+  );
+}
+
 /** Sixteen lowercase hex characters, never all zero: the span id of one hop. */
 export function newSpanId(): string {
   const bytes = new Uint8Array(spanIdByteLength);

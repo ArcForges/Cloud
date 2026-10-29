@@ -130,6 +130,8 @@
 !center/internal/identity/passkey/*.go
 !center/internal/identity/passkey/virtual/
 !center/internal/identity/passkey/virtual/*.go
+!center/internal/arc/arctest/
+!center/internal/arc/arctest/*.go
 !center/internal/schema/migrations/
 !center/internal/schema/migrations/*.sql
 center/tools/
