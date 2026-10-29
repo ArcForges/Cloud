@@ -193,6 +193,9 @@ func TestThePasskeyCounterIsRecheckedUnderTheRowLock(t *testing.T) {
 					done <- "transport " + answer.status
 					return
 				}
+				if refusal := response.GetError(); refusal != nil && !retryAdvice(refusal) {
+					t.Errorf("%s breaks the retryAdvice rule: %v", failure(refusal), refusal.GetRetry())
+				}
 				done <- failure(response.GetError())
 			}()
 			waited := false
@@ -372,6 +375,9 @@ func TestALostRaceForANewInstallationGivesTheAttemptBack(t *testing.T) {
 			if answer.status != "0" || proto.Unmarshal(answer.body, &response) != nil {
 				done <- result{index: index, transport: answer.status}
 				return
+			}
+			if refusal := response.GetError(); refusal != nil && !retryAdvice(refusal) {
+				t.Errorf("%s breaks the retryAdvice rule: %v", failure(refusal), refusal.GetRetry())
 			}
 			done <- result{index: index, response: &response}
 		}()
