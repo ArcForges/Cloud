@@ -136,7 +136,10 @@ Authentication time is never evidence.
   whatever its scope, and each registered participant's rows (the participants of AF-CTR-04's node enrolment and AF-CLD-02's
   pairing; the interface is `device.Participant`, `TestRevocationReachesEachCredentialKindOfItsTarget`). The next call of any of
   those credentials is the transport refusal `auth.credential_revoked`, and a refresh `AUTHENTICATION/credential_revoked`. The
-  caller's own device needs no evidence; its revocation signs the caller out.
+  caller's own device needs no evidence; its revocation signs the caller out. A sign-in that claims an installation of the revoked
+  device is refused with `AUTHENTICATION/credential_revoked` until AF-PLAT-01's sweep deletes the device and its installations,
+  30 days after the revocation ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)); the same client
+  installation ID is then accepted as new, so revoking an installation ID lasts 30 days (the ID is not a credential).
 
 A write whose `meta.expected_rev` is set changes only that revision of its object (`CONFLICT/revision_conflict` with both
 revisions otherwise): the account for UpdateProfile, the credential for RenameAuthIdentity, the device for DeviceService.Rename. An

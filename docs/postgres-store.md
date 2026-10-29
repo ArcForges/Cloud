@@ -80,14 +80,17 @@ referencing column of every foreign key leads an index (spent refresh tokens and
 by session and account where they name one), so a sweep's or a purge's deletes check each reference through an index; only the
 single bootstrap row has none.
 
-Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables identity in production only after them):
+Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables identity in production only after them). Each period is
+a maximum:
 
 - consumed or expired flows and step-up challenges after 7 days;
 - spent refresh tokens until their family's absolute expiry or with their session, whichever comes first;
 - revoked or expired sessions after 90 days;
 - rate-limit windows after one window has passed;
-- revoked devices 30 days after their revocation (Design 11 §5): the sweep deletes a revoked device's sessions and their
-  children, then its installations, then the device (children first, below); live devices with the account;
+- revoked devices 30 days after their revocation (Design 11 §5): the sweep deletes a revoked device's sessions (revoked with
+  it, so before their own 90 days) and their children, then its installations, then the device (children first, below). Until
+  then a revoked device's native installation ID is refused (`credential_revoked`); after the sweep the same client installation
+  ID is accepted as new, so revoking an installation ID lasts 30 days (it is not a credential). Live devices go with the account;
 - accounts (`identity.user`) and their credentials (`identity.auth_identity`, revoked credentials included) for the account's
   lifetime: they are removed with the account by AF-ID-02's account deletion;
 - the bootstrap row (`identity.bootstrap`) permanently: it is the record that the database's one bootstrap was used (it names the
