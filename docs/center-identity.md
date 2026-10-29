@@ -3,13 +3,12 @@
 AF-CTR-03 moves accounts, sessions and devices to the Go [center](center.md) (ArcForges-Design AD-0011, AD-0021 §3 to §7 and §10,
 data/cloud-store.md §2 and §6). It lands in parts, each deployable dark:
 
-- **A1a (this change):** the identity and device store (migration 0002, whole), the identity core, sign-in by passkey and e-mail
+- **A1a (merged):** the identity and device store (migration 0002, whole), the identity core, sign-in by passkey and e-mail
   code, the owner bootstrap, native sessions with rotating refresh tokens, the credential verifiers of the ingress, the account
   reads, rate limits, audit, the closed operation table and the `identity` surface switch in the center and the Worker.
-- **A1b:** step-up, sign-out and session revocation, passkey registration of a signed-in account, profile, credential and device
-  changes, device revocation and its cascade, command receipts for those writes and the incident command
-  `admin revoke-sessions`. Until it lands, an account cannot sign out over the API, revoke a session or device, or step up: a session
-  ends only at its expiry or by a refresh-token reuse.
+- **A1b (this change):** step-up, sign-out and session revocation, passkey registration of a signed-in account, profile,
+  credential and device changes, device revocation and its cascade, command receipts for those writes and the incident command
+  `admin revoke-sessions`. It adds no migration: migration 0002 already holds every table it writes.
 - **A2:** the account pages and the contract `/session/v1` browser routes (cookie sessions, CSRF, the bootstrap page), the
   real-browser acceptance script and the proof bootstrap inputs.
 - **B:** feature availability (AD-0021 §13a) and the operator commands.
@@ -25,44 +24,185 @@ those methods stay unregistered.
 | `center/internal/identity/passkey`           | The WebAuthn relying party over `github.com/go-webauthn/webauthn` with the center's fixed policy                               |
 | `center/internal/identity/passkey/virtual`   | A software authenticator for tests only (never linked into the executable)                                                     |
 | `center/internal/session`                    | Credential formats, native and browser sessions, refresh rotation and reuse detection, the ingress verifiers, the session list |
-| `center/internal/device`                     | Devices and installations: native claims, browser installations, the device list                                               |
+| `center/internal/device`                     | Devices and installations: native claims, browser installations, the device list, renames, the revocation cascade              |
 | `center/internal/access`                     | The closed operation table and the authorization of every identity call                                                        |
-| `center/internal/identityapi`                | The Connect handlers of the served IdentityService and DeviceService methods                                                   |
+| `center/internal/identityapi`                | The Connect handlers of the served IdentityService and DeviceService methods and the command receipts of the writes            |
 | `center/internal/ratelimit`, `internal/page` | Fixed-window rate limits on `platform.rate_limit`; bounded paging with opaque keyset cursors                                   |
 | `center/internal/mail`, `internal/arc`       | The e-mail sender (disabled, or the test fake); the domain refusals of errors.md and their `ArcError` rendering                |
 
 ## Served methods
 
-A1a serves exactly these methods (`routes.IdentityMethods`); every other IdentityService, DeviceService and WorkspaceService
-method stays unregistered, so the center answers `UNIMPLEMENTED` and the Worker table has no row for it
-(`TestTheServedMethodsAreExactlyA1asSet` compares the set with the contract's service descriptors). Every identity request
-carries a `RequestMeta`; a `RequestMeta.workspace_id` is refused with `VALIDATION/invalid_argument` (`meta.workspace_id:
-not_admitted`): identity and device methods are account-scoped.
+The center serves exactly these methods (`routes.IdentityMethods`: A1a's eleven and A1b's eleven); every other IdentityService,
+DeviceService and WorkspaceService method stays unregistered, so the center answers `UNIMPLEMENTED` and the Worker table has no row
+for it (`TestTheServedMethodsAreExactlyTheIdentitySet` compares the set with the contract's service descriptors). Every identity
+request carries a `RequestMeta`; a `RequestMeta.workspace_id` is refused with `VALIDATION/invalid_argument`
+(`meta.workspace_id: not_admitted`): identity and device methods are account-scoped.
 
-| Method                                 | Operation ID (con-07)             | Risk | Credential | mobile.limited | Restricted account |
-| -------------------------------------- | --------------------------------- | ---- | ---------- | -------------- | ------------------ |
-| IdentityService.BeginAuthentication    | `identity.beginAuthentication`    | R1   | anonymous  | —              | —                  |
-| IdentityService.CompleteAuthentication | `identity.completeAuthentication` | R1   | anonymous  | —              | —                  |
-| IdentityService.RequestEmailCode       | `identity.requestEmailCode`       | R1   | anonymous  | —              | —                  |
-| IdentityService.RedeemEmailCode        | `identity.redeemEmailCode`        | R1   | anonymous  | —              | —                  |
-| IdentityService.CompleteEnrollment     | `identity.completeEnrollment`     | R1   | anonymous  | —              | —                  |
-| IdentityService.ListAuthProviders      | `identity.listAuthProviders`      | R1   | anonymous  | —              | —                  |
-| IdentityService.RefreshSession         | `identity.refreshSession`         | R1   | anonymous  | —              | —                  |
-| IdentityService.GetProfile             | `identity.getProfile`             | R1   | session    | allowed        | refused            |
-| IdentityService.ListAuthIdentities     | `identity.listAuthIdentities`     | R1   | session    | allowed        | allowed            |
-| IdentityService.ListSessions           | `identity.listSessions`           | R1   | session    | allowed        | allowed            |
-| DeviceService.List                     | `device.list`                     | R1   | session    | allowed        | allowed            |
+| Method                                      | Operation ID (con-07)                  | Risk | Credential | mobile.limited               | Restricted account | Step-up evidence       | Receipt |
+| ------------------------------------------- | -------------------------------------- | ---- | ---------- | ---------------------------- | ------------------ | ---------------------- | ------- |
+| IdentityService.BeginAuthentication         | `identity.beginAuthentication`         | R1   | anonymous  | —                            | —                  | —                      | —       |
+| IdentityService.CompleteAuthentication      | `identity.completeAuthentication`      | R1   | anonymous  | —                            | —                  | —                      | —       |
+| IdentityService.RequestEmailCode            | `identity.requestEmailCode`            | R1   | anonymous  | —                            | —                  | —                      | —       |
+| IdentityService.RedeemEmailCode             | `identity.redeemEmailCode`             | R1   | anonymous  | —                            | —                  | —                      | —       |
+| IdentityService.CompleteEnrollment          | `identity.completeEnrollment`          | R1   | anonymous  | —                            | —                  | —                      | —       |
+| IdentityService.ListAuthProviders           | `identity.listAuthProviders`           | R1   | anonymous  | —                            | —                  | —                      | —       |
+| IdentityService.RefreshSession              | `identity.refreshSession`              | R1   | anonymous  | —                            | —                  | —                      | —       |
+| IdentityService.GetProfile                  | `identity.getProfile`                  | R1   | session    | allowed                      | refused            | —                      | —       |
+| IdentityService.ListAuthIdentities          | `identity.listAuthIdentities`          | R1   | session    | allowed                      | allowed            | —                      | —       |
+| IdentityService.ListSessions                | `identity.listSessions`                | R1   | session    | allowed                      | allowed            | —                      | —       |
+| DeviceService.List                          | `device.list`                          | R1   | session    | allowed                      | allowed            | —                      | —       |
+| IdentityService.BeginStepUp                 | `identity.beginStepUp`                 | R1   | session    | allowed                      | allowed            | —                      | —       |
+| IdentityService.CompleteStepUp              | `identity.completeStepUp`              | R1   | session    | allowed                      | allowed            | —                      | —       |
+| IdentityService.UpdateProfile               | `identity.updateProfile`               | R2   | session    | upgrade                      | refused            | —                      | yes     |
+| IdentityService.BeginPasskeyRegistration    | `identity.beginPasskeyRegistration`    | R2   | session    | upgrade                      | refused            | account                | —       |
+| IdentityService.CompletePasskeyRegistration | `identity.completePasskeyRegistration` | R2   | session    | upgrade                      | refused            | —                      | yes     |
+| IdentityService.RenameAuthIdentity          | `identity.renameAuthIdentity`          | R2   | session    | upgrade                      | allowed            | —                      | yes     |
+| IdentityService.RemoveAuthIdentity          | `identity.removeAuthIdentity`          | R3   | session    | upgrade                      | allowed            | credential             | yes     |
+| IdentityService.RevokeSession               | `identity.revokeSession`               | R2   | session    | own: allowed; other: upgrade | allowed            | own: —; other: session | yes     |
+| IdentityService.RevokeAllSessions           | `identity.revokeAllSessions`           | R3   | session    | upgrade                      | allowed            | account                | yes     |
+| DeviceService.Rename                        | `device.rename`                        | R1   | session    | upgrade                      | allowed            | —                      | yes     |
+| DeviceService.Revoke                        | `device.revoke`                        | R3   | session    | own: allowed; other: upgrade | allowed            | own: —; other: device  | yes     |
 
 The table is `access.Operations`, closed: the composition refuses to start when a served method has no row, a row has no served
 method or a row and the method's policy disagree about the session (`checkIdentityComposition`). A session method admits only the
 account-session scopes, `account` and `mobile.limited`: a `node`, `push` or `automation` credential is refused with
 `AUTHORIZATION/permission_denied` (state.reason = the operation ID) before the handler does anything, nothing is written, and the
-refusal is audited as `access.refused` (`TestOnlyAccountSessionsReachTheSessionMethods`). A restricted account reaches only its
-security operations. A1b adds its rows: the step-up rule for `mobile.limited` (`Upgrade`) and the step-up evidence of the risky
-writes.
+refusal is audited as `access.refused`; no production policy admits them (SEC-15). A restricted account reaches only its security
+operations, the rows marked restricted (`TestOnlyAccountSessionsReachTheSessionMethods` walks every session row of the table for
+each refused scope and for a restricted account, and fails for a row it has no request for). A `mobile.limited` session (a phone
+that signed in without verifying its user, android.md A-09) is refused an `upgrade` row with `AUTHENTICATION/step_up_required`
+(retry the same command) before the handler runs, and an `own: allowed` row on another session or device by the handler before
+anything is written; signing itself out and removing its own phone stay open to it (T-19, `TestMobileLimitedNeedsStepUp`, which
+walks the table and fails for a row it has no request for). Proving any step-up upgrades the session to `account`; the center's
+own class `identity.upgradeSession` exists for a phone that only wants to unlock everything.
 
-None of the A1a methods runs under a command receipt: the anonymous ones are one-use authentication steps, RefreshSession must never
-replay tokens, and the session methods are queries. A1b's session-authenticated writes run under `platform.Execute`.
+The anonymous methods and the queries run under no receipt: the anonymous ones are one-use authentication steps, RefreshSession
+must never replay tokens. The step-up methods and BeginPasskeyRegistration run under none either: each creates a new challenge or
+flow, so a lost reply is a new begin. Every other write runs under a command receipt ([command receipts](#command-receipts)).
+
+## Step-up
+
+Step-up evidence (DC-01, SEC-02) is one proved challenge of the caller's session for one operation class and one target object.
+Authentication time is never evidence.
+
+- **Begin.** `BeginStepUp(operation_class, method, target_hash)` names the operation ID of a row that needs evidence (the table's
+  step-up column), or `identity.upgradeSession` from a `mobile.limited` session for that session itself (otherwise the reason is
+  `target_hash: not_the_session`). The target hash is canonical (`identity.TargetHash`): the lowercase hexadecimal SHA-256 of three
+  lines, the class, the account ID and the target ID, the IDs in their canonical lowercase UUID text. The target is the account
+  (`identity.beginPasskeyRegistration`, `identity.revokeAllSessions`), the credential (`identity.removeAuthIdentity`), the session
+  (`identity.revokeSession`, the upgrade) or the device (`device.revoke`). The method is a passkey of the account (one assertion
+  per challenge) or, when mail is enabled, an e-mail code sent to the account's address (the policy's code attempts, at most five).
+  The account's `stepUpPerAccount` bucket counts each begin.
+- **Complete.** `CompleteStepUp(flow_id, proof)` checks the account's failed-proof bucket, counts the challenge's attempt, and
+  reserves one failure in that bucket under its limit (the reservation of a wrong e-mail code, E6), so concurrent proofs cannot
+  pass it. A wrong proof keeps the reservation as the counted failure, ends a challenge out of attempts and is audited once per
+  window (`identity.step_up.failed`); a passkey proof runs the F14 counter rule under the credential's row lock. A right proof
+  marks the challenge proved with an expiry of `stepUpEvidenceTtl` (at most five minutes) from now, keeps the session's
+  authentication epoch and recovery generation, gives the reservation back and upgrades a `mobile.limited` session; a challenge
+  whose session's epochs moved since it began (a credential removed meanwhile) is `STATE/expired` and upgrades nothing. A passkey
+  proof must be a passkey of the caller's own account. A right proof whose transaction failed in the store gets its reservation
+  and its attempt back (F9, D2), except after an unanswered commit, whose effect is unknown. A challenge of another session is
+  `STATE/not_found`; a proved one presented again `CONFLICT/code_reused`.
+- **Consume.** The sensitive call consumes the evidence in its own transaction (`identity.ConsumeEvidence`): same account,
+  session, class and target hash, unexpired, and the session's current authentication epoch and recovery generation. It first
+  locks the account's row, the lock a credential removal holds while it moves the authentication epoch, so the account lock orders
+  a consumption after a concurrent removal: the evidence is read only once the removal committed, and evidence proved before it is
+  spent (`TestARemovalSpendsTheEvidenceProvedBeforeIt`). It then locks the challenge, so two concurrent calls cannot use one proof,
+  and consumes it once; without evidence the call is `AUTHENTICATION/step_up_required` and rolls back, so the same command succeeds
+  after a step-up. Removing a credential moves the authentication epoch of the account's live sessions, which spends every evidence
+  proved before it (`TestStepUpEvidenceIsSingleUse` covers each case, including evidence of another class whose target hash names
+  the same target).
+
+## Account writes
+
+- **Passkey registration.** `BeginPasskeyRegistration(display_name)` consumes the account's `identity.beginPasskeyRegistration`
+  evidence in the transaction that creates a registration flow bound to the account, the session and its channel (a cookie
+  session's flow to the browser channel and the relying party's origin), and returns creation options that exclude the account's
+  passkeys; the account must be active. The display name becomes the credential's label and follows the credential label rule: 1
+  to 64 UTF-16 units of plain text that is not only white space. The contract allows up to 256 characters; a longer name is refused
+  with `VALIDATION/invalid_argument` (`display_name: length`), a blank one with `display_name: pattern`.
+  `CompletePasskeyRegistration(flow_id, credential)` answers a replay from its receipt first, then counts the flow's one attempt,
+  verifies the creation outside any transaction (attestation `none` with exactly the empty statement, read from the attestation
+  object before go-webauthn parses it, so no statement parser of another format runs, G3) and, under the receipt, consumes the flow
+  and stores the credential. A flow of another account or of another session of the account is `STATE/not_found`
+  (`TestARegistrationFlowIsItsBeginningSessions`). A creation that does not verify is `VALIDATION/invalid_argument`
+  (`credential: not_verified`) and ends the flow. Every refusal of this method decided before the receipt (`not_found`,
+  `expired`, `code_reused`, `invalid_argument` including a missing `meta.command_id`, `flow_id` or `credential`,
+  `permission_denied`) is not kept by a receipt, and its replay is decided afresh; `not_verified` is the one that ends the flow,
+  so its identical replay, like any later completion of that flow, answers `STATE/expired`. A credential ID registered
+  already, to this account or another, revoked ones included, is `CONFLICT/already_exists` (`state.state` `credential`); its
+  `state.resource` names the account's own live credential with that ID and is left out otherwise, so another account's credential
+  is never named. Two completions of one flow store one credential (`TestAPasskeyRegistersOnceWithItsLabel`); a duplicate of the
+  command sent while its first execution still runs is `RESOURCE/overloaded` (retry after a while) and its retry answers the
+  receipt (`TestADuplicateOfARunningRegistrationIsBusy`); a duplicate whose attempt comes just after the first execution committed
+  finds the flow consumed and answers that receipt too, from a second receipt lookup
+  (`TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt`). When that second lookup fails, the command may have
+  committed, so the duplicate answers the lookup's own failure (`RESOURCE/overloaded` with its `retry_at`), never the consumed
+  flow's final `code_reused`, and its retry replays the receipt (`TestADuplicateWhoseSecondLookupFailsIsRetryable`). An attempt
+  that is never settled answers `RESOURCE/overloaded` until the flow expires, then `STATE/expired`: the process stopped before the
+  attempt was settled, or the store failed when the attempt was to be given back or the flow ended (the flow's end after
+  `not_verified` or an abandoned registration).
+- **Profile.** `UpdateProfile(patch)` changes `display_name`, `locale` and `timezone` (the profile values above; field paths
+  `patch.*`); an avatar change is `VALIDATION/invalid_argument` (`patch.avatar: not_offered`) until avatars exist.
+- **Credential names and removal.** `RenameAuthIdentity` sets a credential's label by the label rule (field `name`).
+  `RemoveAuthIdentity` revokes a credential: it locks the account, so concurrent removals run one after the other, refuses the last
+  live credential with `STATE/invalid_state` (`state.reason = last_credential`; there is no recovery path yet,
+  `TestTheLastCredentialStays`) and moves the authentication epoch of the account's live sessions.
+- **Sessions.** `RevokeSession(session_id)` revokes an `account` or `mobile.limited` session of the account: the caller's own is a
+  sign-out without evidence, another needs the session's evidence. A node, push or automation session, another account's and an
+  ended one are `STATE/not_found`. `RevokeAllSessions` revokes every account session but the caller's; node and push credentials
+  stay (DC-03).
+- **Devices.** `DeviceService.Rename` names a live device by the label rule (field `name`: 1 to 64 UTF-16 units of plain text that
+  is not only white space; a longer name is `name: length`, a control character or a blank name `name: pattern`). Every name it
+  admits meets the contract's 256-character bound and the store's 64 code points. `DeviceService.Revoke` revokes a live
+  device in one transaction (DC-17): the device (trust level revoked, remote control off), its installations, every session on it
+  whatever its scope, and each registered participant's rows (DC-06, DC-17: AF-CTR-07's agent grants and AF-CLD-06's push
+  registrations register one; none is registered in AF-CTR-03, and the tests use a stand-in; the interface is
+  `device.Participant`, `TestRevocationReachesEachCredentialKindOfItsTarget`). The next call of any of
+  those credentials is the transport refusal `auth.credential_revoked`, and a refresh `AUTHENTICATION/credential_revoked`. The
+  caller's own device needs no evidence; its revocation signs the caller out. A sign-in that claims an installation of the revoked
+  device is refused with `AUTHENTICATION/credential_revoked` until AF-PLAT-01's sweep deletes the device and its installations,
+  30 days after the revocation ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)); the same client
+  installation ID is then accepted as new, so revoking an installation ID lasts 30 days (the ID is not a credential).
+
+A write whose `meta.expected_rev` is set changes only that revision of its object (`CONFLICT/revision_conflict` with both
+revisions otherwise): the account for UpdateProfile, the credential for RenameAuthIdentity, the device for DeviceService.Rename. An
+object of another account is `STATE/not_found` with the ID the caller sent, exactly as an unknown one
+(`TestAnAccountCannotReachAnotherAccountsObjects`).
+
+## Command receipts
+
+Every write with a receipt in the table requires `meta.command_id` (`VALIDATION/invalid_argument`, `meta.command_id: required`)
+and runs at most once per account and command ID under `platform.Execute` (AD-0021 §10): the receipt row, then the evidence's
+consumption, the change and its audit event, in one transaction. A success keeps the reply message (never a token, never an e-mail
+address) and a refusal whose retry advice is `NEVER` keeps its `ArcError`; a replay of the same request answers either again, with
+the replay's own correlation id, without new evidence or a second effect. Any other refusal (`step_up_required`, `rate_limited`,
+`overloaded`) or failure rolls the receipt back, so the same command can succeed after the step-up or the wait its advice names.
+A refusal decided before the receipt is not kept either, and a replay is decided afresh: the access check's
+(`permission_denied`, `step_up_required` on an `upgrade` row), the request's validation (a `RequestMeta` that names a workspace, a
+missing `meta.command_id`, a missing `patch`, `patch.avatar: not_offered`, a missing `credential` or a missing object ID:
+`flow_id`, `credential_id`, `session_id` or `device_id`) and CompletePasskeyRegistration's flow and creation checks; of these only CompletePasskeyRegistration's
+`credential: not_verified` changes what its replay meets: it ends the flow, so the replay answers `STATE/expired`
+([passkey registration](#account-writes)).
+
+The same request is decided by a digest of the request message as transmitted, without `RequestMeta.correlation_id`
+(`platform.RequestDigestInput`): the correlation is per attempt, so a retry under a new correlation id replays the receipt. The
+message is walked field by field on the wire and the kept bytes are copied, never re-encoded: every other field counts, the body,
+`meta.command_id` and `meta.expected_rev` included, so a request that differs in any of them is `CONFLICT/command_id_reused`
+(`TestARetryWithItsOwnCorrelationReplaysTheReceipt`). The node's payload digest leaves out the whole `RequestMeta`; the center
+keeps the rest of it because `expected_rev` changes what the command does. One whose first execution is still running is
+`RESOURCE/overloaded`. A receipt's reply states the command ID, the effect `HAPPENED` and, for a write of one object, the revision
+it produced (RevokeAllSessions changes many and states none).
+
+UpdateProfile's receipt keeps the profile without `primary_email`: the first answer and every replay take the address from the
+account's current live e-mail identity, so a replay never returns an address the account no longer holds
+(`TestNoReceiptHoldsAnAddress` scans every receipt-guarded write's stored result). Receipt results still hold personal data for the
+receipts' 90 days ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)): UpdateProfile's the profile (display
+name, locale, time zone, revision); CompletePasskeyRegistration's and RenameAuthIdentity's a credential summary (credential ID,
+kind, label, creation and last-use times); DeviceService.Rename's the full device view (device ID, name, platform, trust level,
+remote-control flag, revision, revocation time, and each installed product with its version and install time); the others only
+the receipt (command ID, effect and the revision it produced, except RevokeAllSessions, which states none); a kept refusal its
+`ArcError`, which can name the object the caller sent or, for `already_exists`, the account's own credential row ID.
 
 ## Sign-in
 
@@ -73,9 +213,12 @@ transaction, consumes the flow, advances the credential's counter, finds or crea
 claim and issues an `account` session. The policy is fixed: the RP ID is the host of the public base URL and the only origin its
 origin (no cross-origin, no top origins, no Android origins until the Android task); user verification is required on every
 ceremony; ES256 only; attestation `none` only; the assertion's user handle must be the credential owner's; a counter that does not
-advance is refused; every library error is one refusal. A credential ID may have up to 1023 bytes, the contract's and WebAuthn's
-bound (`TestThePasskeyCredentialIDBoundIsTheContracts`). A public base URL whose host is an IP address cannot be a relying party: a
-self-hosted center's default leaves identity off and logs why; an explicit surface list refuses to start.
+advance is refused; every library error is one refusal. The attestation object's `fmt` is read (CBOR) before go-webauthn parses
+it, so another format never reaches the library's attestation verifiers (G3, `TestOnlyANoneAttestationReachesTheLibrary`; the
+fuzz target `FuzzCeremonyPayloads` runs both ceremonies' payloads through the relying party). A credential ID may have up to 1023
+bytes, the contract's and WebAuthn's bound (`TestThePasskeyCredentialIDBoundIsTheContracts`). A public base URL whose host is an
+IP address cannot be a relying party: a self-hosted center's default leaves identity off and logs why; an explicit surface list
+refuses to start.
 
 **Profile values.** A display name is plain text of 1 to 128 UTF-16 units; a locale a BCP 47 shaped tag of at most 35 characters; a
 time zone an IANA name shape of at most 64 characters within the contract's timezone pattern, which has no `+` (so `Etc/GMT+5`
@@ -223,19 +366,38 @@ correlation id, in the reply with gRPC `OK`:
 
 | Refusal                             | When                                                                                                                                                                                    |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VALIDATION/invalid_argument`       | a field outside its rule (`state.reason` = field path and rule), a method or purpose not offered                                                                                        |
+| `VALIDATION/invalid_argument`       | a field outside its rule (`state.state` = the field path, `state.reason` = field path and rule), a method or purpose not offered                                                        |
 | `VALIDATION/invalid_cursor`         | a malformed page cursor, one of another listing or one whose instant is out of range                                                                                                    |
 | `AUTHENTICATION/unauthenticated`    | a wrong or unknown proof, an account that may not sign in, a refused bootstrap (all alike)                                                                                              |
 | `AUTHENTICATION/token_expired`      | an expired refresh token                                                                                                                                                                |
 | `AUTHENTICATION/credential_revoked` | a revoked session, device or installation; a reused refresh token                                                                                                                       |
-| `AUTHORIZATION/permission_denied`   | a scope or account state the operation does not admit; another account's installation                                                                                                   |
-| `CONFLICT/code_reused`              | a completed flow presented again, or a completion still in progress                                                                                                                     |
-| `STATE/not_found`                   | an unknown flow, or one of another channel, kind, purpose or address                                                                                                                    |
+| `AUTHENTICATION/step_up_required`   | a write without its evidence, or a `mobile.limited` session on an `upgrade` row (retry the same command after a step-up)                                                                |
+| `AUTHORIZATION/permission_denied`   | a scope or account state the operation does not admit (`state.state` `operation`, `state.reason` = the operation ID); another account's installation                                    |
+| `CONFLICT/code_reused`              | a completed flow or proved step-up presented again, or a sign-in completion still in progress (a passkey registration's is `RESOURCE/overloaded`)                                       |
+| `CONFLICT/already_exists`           | a passkey whose credential ID is registered already (`state.state` `credential`; `state.resource` only for the account's own live credential)                                           |
+| `CONFLICT/revision_conflict`        | a stale `meta.expected_rev` (`RevisionConflict` with the expected and the current revision)                                                                                             |
+| `CONFLICT/command_id_reused`        | a command ID used before with another request                                                                                                                                           |
+| `STATE/not_found`                   | an unknown or invisible flow, step-up challenge, session, credential, device or account (`state.state` = its kind; `state.resource` = the ID the caller sent, F19, or its own account)  |
+| `STATE/invalid_state`               | the last live credential (`last_credential`); an account whose state does not allow the change (`credentials_locked`)                                                                   |
 | `STATE/expired`                     | an expired flow, or one whose attempts are exhausted                                                                                                                                    |
-| `STATE/not_activated`               | a method of a disabled surface (`state.reason` = the surface)                                                                                                                           |
+| `STATE/not_activated`               | a method of a disabled surface (`state.state` `surface`, `state.reason` = the surface)                                                                                                  |
 | `RESOURCE/rate_limited`             | a rate-limit bucket over its limit, or a flow's sends exhausted (`email_code_sends`)                                                                                                    |
-| `RESOURCE/overloaded`               | the store is unreachable or contended (before any commit, or an unanswered commit of a transaction that carries no effect of the call: retry after a while)                             |
+| `RESOURCE/overloaded`               | the store is unreachable or contended (before any commit, or an unanswered commit of a transaction that carries no effect of the call), or a command still running: retry after a while |
 | `INTERNAL/internal`                 | the call's effect write whose commit went unanswered (effect `UNKNOWN`, retry `NEVER`); anything else (retry after a while); logged with the correlation id, never with request content |
+
+Every `StateFailure` detail is a valid foundation message (Contracts `foundation-baseline.json`): `state` and `reason` are always
+set, `state` matches `^[A-Za-z0-9._:/-]{1,128}$`, and a `state.resource` (`AggregateRef`) always carries a 16-byte, nonzero `id`;
+a refusal without such an ID carries no resource. For not_found and already_exists `state` is the object's kind and `reason` the
+code. Every `AFTER_TIME` advice carries `retry.retry_at` (rule `retryAdvice`): a rate-limit bucket's is the end of its window, a
+flow's exhausted e-mail code sends (`email_code_sends`) name the flow's expiry, after which a new flow is needed, and a refusal
+that names no instant (`RESOURCE/overloaded`, `INTERNAL/internal` with `AFTER_TIME`) is dated where it becomes the reply's
+`ArcError`, one second after the refusal plus up to one second of jitter (`arc.Refusal.Dated`, E4). `TestEveryRefusalIsAnErrorsRow`
+checks every constructor's rendering against those rules, the integration tests check every refusal they decode against
+`retryAdvice`, and the Worker's generated replies meet it (`rate_limited` carries the instant the Worker writes, `not_activated` is
+`NEVER`). Two contract gaps predate this part (#118): `INTERNAL/internal` pairs `AFTER_TIME` with effect `UNKNOWN`, as Design
+errors.md prescribes but the Contracts `arcError` rule forbids (the test's one named exemption, routed to the AF-CTR-03 Design
+companion), and the Worker's generated replies carry no correlation id (routed to A2, which writes a correlation slot into
+them).
 
 The ingress adds two transport refusals for a known bearer (both gRPC 16 `UNAUTHENTICATED`): `auth.token_expired` and
 `auth.credential_revoked`. They need companion rows in errors.md's center ingress table (DC-14).
@@ -246,9 +408,13 @@ Events are appended to the platform audit chain (`platform.AppendAudit`) as the 
 or in their own transaction for a refusal: `identity.sign_in.succeeded`, `identity.sign_in.failed` (the first failure of a window
 per account, or per client prefix for an anonymous failure), `identity.bootstrap.completed`, `identity.bootstrap.refused` (first per
 window, with the reason), `identity.session.refresh_reused` (when a reuse revoked a session), `identity.rate_limited` (first per
-window) and `access.refused`. Payloads are closed JSON:
-method, channel, scope, reasons and counts, never a token, code, e-mail address or IP address. A sign-in whose audit event cannot be
-written is refused and writes nothing (`TestARefusedAuditRefusesTheSignIn`).
+window) and `access.refused`; since A1b `identity.step_up.proved`, `identity.step_up.failed` (first per window),
+`identity.passkey.registered`, `identity.profile.updated`, `identity.credential.renamed`, `identity.credential.removed`,
+`identity.session.revoked`, `identity.sessions.revoked_all`, `device.renamed`, `device.revoked` (with the revoked installations,
+sessions per scope and participant rows) and the operator's `identity.sessions.revoked_by_operator`. Payloads are closed JSON:
+method, channel, scope, reasons and counts, never a token, code, e-mail address or IP address. A sign-in, a credential removal or a
+device revocation whose audit event cannot be written is refused and writes nothing (`TestARefusedAuditRefusesTheSignIn`,
+`TestARefusedAuditRefusesTheWrites`).
 
 ## Transactions per request
 
@@ -261,9 +427,17 @@ written is refused and writes nothing (`TestARefusedAuditRefusesTheSignIn`).
 | CompleteEnrollment               | 1 account check, 1 attempt, 1 creating transaction under the advisory lock (or 1 bucket count and 1 audit)                                                                                                 |
 | RefreshSession                   | 1 bucket count, 1 rotation that also reads the device                                                                                                                                                      |
 | Session reads                    | 1 read-only credential check (ingress), 1 read-only query (+1 audit on an access refusal)                                                                                                                  |
+| BeginStepUp                      | 1 bucket count, 1 challenge insert (PBKDF2 before it for an e-mail code, the mail after the response)                                                                                                      |
+| CompleteStepUp                   | 1 bucket check, 1 attempt, 1 failure reservation, then 1 proof transaction (or 1 denial and 1 failure marker count; 1 attempt release and 1 reservation give-back after a store failure)                   |
+| BeginPasskeyRegistration         | 1 transaction: the evidence's consumption and the flow                                                                                                                                                     |
+| CompletePasskeyRegistration      | 1 receipt lookup, 1 attempt (+1 receipt lookup after a refusal before the receipt), then 1 receipt transaction (or 1 flow end after a refusal; 1 attempt release after a store failure)                    |
+| Other writes                     | 1 receipt transaction: the receipt, the evidence's consumption, the change and its audit event                                                                                                             |
 
-No transaction is open while PBKDF2, WebAuthn or the mail provider runs. The runtime pool stays four connections
-([PostgreSQL store](postgres-store.md#connection-budgets)).
+No transaction is open while PBKDF2, WebAuthn or the mail provider runs. Each transaction is the call's effect or auxiliary
+bookkeeping (counts, reservations, denials, give-backs, refusal audits; D10), which decides what an unanswered commit answers
+([PostgreSQL store](postgres-store.md#guarantees)); `TestEveryTransactionOfTheSurfaceStatesItsRole` pins the role of each by
+name, and `TestALostCommitOfTheCallsEffectIsUnknown` and `TestALostCommitOfBookkeepingIsRetryable` lose a commit of each kind. The
+runtime pool stays four connections ([PostgreSQL store](postgres-store.md#connection-budgets)).
 
 ## Surface switch
 
@@ -294,14 +468,17 @@ after AF-PLAT-01's retention sweeps exist ([PostgreSQL store](postgres-store.md#
 - **The acceptance ceiling is reached** (every new proof sign-in answers `anonymous_flows`): it resets after its window. To change it,
   edit the acceptance environment's `ARCFORGES_CENTER_IDENTITY_POLICY` in `wrangler.json` through a reviewed PR; to reclaim the
   space, the owner may drop `arcforges_acceptance` (the next acceptance deployment recreates and migrates it).
-- **Mass session revocation** before A1b's `admin revoke-sessions`: as the migration role,
-  `UPDATE identity.session SET revoked_at = now(), revoke_reason = 6, rev = rev + 1 WHERE revoked_at IS NULL` (optionally
-  `AND user_id = '<account>'`); every credential is refused at its next call.
+- **Mass session revocation** (an incident): `arcforges-center admin revoke-sessions --account <uuid>` revokes every unrevoked
+  session of one account, `--all` of every account, whatever the scope. It reads the migration role's variables
+  (`ARCFORGES_CENTER_MODE`, `ARCFORGES_CENTER_MIGRATION_DATABASE_URL`), revokes and audits
+  `identity.sessions.revoked_by_operator` (actor `operator:cli`) in one transaction and prints the counts per scope as JSON;
+  every revoked credential is refused at its next call.
 - **Rollback**: an application rollback keeps migration 0002 and its `Schemas` and `RuntimeGrants` entries (the store never
   migrates down; [PostgreSQL store](postgres-store.md#recovery)).
 
 ## Native token documents
 
 The Go center does not serve the version-1 native token documents (`public/http/v1/native-auth.schema.json`): their
-`NativeTokenResponse` cannot list `arcforges-*` installations. Native sign-in is the IdentityService API above; the node and mobile
-native flows bring their own versioned document with AF-CTR-04 and AF-CLD-02.
+`NativeTokenResponse` cannot list `arcforges-*` installations. An `arcforges-mobile` installation signs in through the
+IdentityService API above. A node signs in through `fleet.v1.NodeEnrollmentService` (AF-CTR-04); AF-CLD-02 is QR pairing only. The
+document of the Android Custom Tab's native authorization is still open and owned by the Plan.

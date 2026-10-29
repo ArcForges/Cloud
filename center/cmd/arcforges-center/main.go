@@ -2,7 +2,8 @@
 
 // Command arcforges-center is the ArcForges center: one executable that serves the public routes (serve, the default),
 // applies the PostgreSQL migrations (migrate), creates the database, rotates the runtime credential and records its promotion
-// (admin) and reports its identity (version, --build-info).
+// (admin), revokes sessions as the operator's incident tool (admin revoke-sessions) and reports its identity (version,
+// --build-info).
 package main
 
 import (
@@ -23,10 +24,14 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/buildinfo"
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/observe"
+	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/provision"
 	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/ArcForges/Cloud/center/internal/server"
+	"github.com/ArcForges/Cloud/center/internal/session"
+	"github.com/ArcForges/Cloud/center/internal/store"
 	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
 
@@ -42,6 +47,9 @@ commands:
                                    promoted one) and write the runtime URL to ARCFORGES_CENTER_RUNTIME_SECRET_FILE
   admin confirm-runtime-credential --slot a|b
                                    record that the deployment carrying the slot's credential was promoted
+  admin revoke-sessions --account <uuid> | --all
+                                   revoke every unrevoked session of one account, or of every account, whatever its scope
+                                   (audited as identity.sessions.revoked_by_operator); prints the counts per scope
   version                          print the build identity as JSON (also --build-info)
   help                             print this help
 
@@ -74,7 +82,14 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 		sub = arguments[1]
 	}
 	slot := ""
+	var target revokeTarget
 	switch {
+	case command == "admin" && sub == "revoke-sessions":
+		var ok bool
+		if target, ok = revokeFlags(arguments[2:]); !ok {
+			_, _ = fmt.Fprint(stderr, usage)
+			return exitUsage
+		}
 	case command == "admin" && sub == "confirm-runtime-credential":
 		if slot = slotFlag(arguments[2:], "--slot"); slot != "a" && slot != "b" {
 			_, _ = fmt.Fprint(stderr, usage)
@@ -102,6 +117,9 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 		}
 		return migration(sub, lookup, stdout, stderr)
 	case "admin":
+		if sub == "revoke-sessions" {
+			return revokeSessions(target, lookup, stdout, stderr)
+		}
 		if sub != "ensure-database" && sub != "rotate-runtime-credential" && sub != "confirm-runtime-credential" {
 			_, _ = fmt.Fprint(stderr, usage)
 			return exitUsage
@@ -124,6 +142,86 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 		_, _ = fmt.Fprint(stderr, usage)
 		return exitUsage
 	}
+}
+
+// revokeTarget is what admin revoke-sessions revokes: one account's sessions, or every account's.
+type revokeTarget struct {
+	account *platform.ID
+	all     bool
+}
+
+// revokeFlags reads `--account <uuid>`, `--account=<uuid>` or `--all` as the only arguments.
+func revokeFlags(rest []string) (revokeTarget, bool) {
+	value := ""
+	switch {
+	case len(rest) == 1 && rest[0] == "--all":
+		return revokeTarget{all: true}, true
+	case len(rest) == 2 && rest[0] == "--account":
+		value = rest[1]
+	case len(rest) == 1 && strings.HasPrefix(rest[0], "--account="):
+		value = strings.TrimPrefix(rest[0], "--account=")
+	default:
+		return revokeTarget{}, false
+	}
+	var account platform.ID
+	raw := correlation.IDBytes(value)
+	if len(raw) != len(account) {
+		return revokeTarget{}, false
+	}
+	copy(account[:], raw)
+	if account.String() != value {
+		return revokeTarget{}, false
+	}
+	return revokeTarget{account: &account}, true
+}
+
+// revokeSessions is `admin revoke-sessions` (PLT-10), the operator's incident tool: with the migration role it revokes every
+// unrevoked session of one account or of every account, whatever its scope (reason: revoked by the operator), and appends the
+// audit event identity.sessions.revoked_by_operator (actor operator:cli) in the same transaction, then prints the counts per scope.
+// Every revoked credential is refused at its next call; a refresh answers credential_revoked.
+func revokeSessions(target revokeTarget, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
+	logger := observe.NewLogger(stderr, slog.LevelInfo).With("command", "admin revoke-sessions")
+	cfg, err := config.LoadMigration(lookup)
+	if err != nil {
+		logger.Error("the command refused to start", "error", err.Error())
+		return exitFailure
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	conn, err := connect(ctx, cfg.URL)
+	if err != nil {
+		logger.Error("the command could not connect", "error", err.Error())
+		return exitFailure
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	targetKind, targetID := "center", "all"
+	if target.account != nil {
+		targetKind, targetID = "account", target.account.String()
+	}
+	var counts map[string]int64
+	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		var err error
+		if counts, err = session.RevokeByOperator(ctx, tx, target.account, now); err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{"sessions": counts, "all": target.all})
+		if err != nil {
+			return err
+		}
+		_, err = platform.AppendAudit(ctx, tx, platform.Event{EventID: platform.NewID(), OccurredAt: now, ActorRef: "operator:cli",
+			EventType: "identity.sessions.revoked_by_operator", TargetKind: targetKind, TargetID: targetID, Payload: payload})
+		return err
+	})
+	if err != nil {
+		logger.Error("the sessions could not be revoked", "error", store.Sanitize("revoke sessions", err).Error())
+		return exitFailure
+	}
+	_ = json.NewEncoder(stdout).Encode(map[string]any{"target": targetKind, "account": targetID, "revoked": counts})
+	logger.Info("sessions revoked by the operator", "target", targetKind, "account", targetID)
+	return exitOK
 }
 
 // slotFlag reads `<flag> a|b` or `<flag>=a|b` as the only arguments; anything else is "".

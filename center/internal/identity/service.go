@@ -14,6 +14,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/platform"
@@ -50,6 +51,8 @@ type Service struct {
 	codeSlots chan struct{}
 	// background runs the deliveries that follow a response.
 	background func(func())
+	// participants revoke what each holds for a device in the device revocation's transaction (DC-06).
+	participants []device.Participant
 }
 
 // Options are the parts of a service.
@@ -64,13 +67,15 @@ type Options struct {
 	Logger    *slog.Logger
 	// Background runs a delivery after the response; nil runs it on a new goroutine.
 	Background func(func())
+	// Participants are the device revocation's cascade participants (none in AF-CTR-03; tests register a stand-in).
+	Participants []device.Participant
 }
 
 // New is the service of a configuration.
 func New(options Options) *Service {
 	service := &Service{db: options.DB, policy: options.Policy, rp: options.RP, mailer: options.Mail, limits: ratelimit.New(options.DB),
 		bootstrap: options.Bootstrap, clock: options.Clock, events: options.Events, logger: options.Logger, codeSlots: make(chan struct{}, 2),
-		background: options.Background}
+		background: options.Background, participants: options.Participants}
 	if service.mailer == nil {
 		service.mailer = mail.Disabled{}
 	}
@@ -193,6 +198,14 @@ func (s *Service) audit(ctx context.Context, tx pgx.Tx, request Request, actor, 
 	}
 	_, err = platform.AppendAudit(ctx, tx, item)
 	return err
+}
+
+// giveBack gives a failure reservation back after the transaction that would have given it back rolled back definitely (D2): best
+// effort, in its own short auxiliary transaction. A caller never calls it after an unknown commit, because the give-back is not
+// idempotent and that transaction may have committed.
+func (s *Service) giveBack(ctx context.Context, bucket ratelimit.Bucket, reservation ratelimit.Decision) {
+	_ = s.db.InTx(context.WithoutCancel(ctx), "give a failure reservation back", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true},
+		func(ctx context.Context, tx pgx.Tx) error { return ratelimit.Release(ctx, tx, bucket, reservation) })
 }
 
 // auditAlone appends an event in its own transaction (a refusal's), which is auxiliary: the refusal is the call's answer, and the

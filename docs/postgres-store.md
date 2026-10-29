@@ -18,17 +18,17 @@ One schema per module, owned by the migration role. The model follows data/cloud
 
 The first migration (`center/internal/schema/migrations/0001_platform_store.sql`) creates these tables:
 
-| Table                         | Purpose                                                                                                                                                                 | Runtime role             |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `platform.schema_migration`   | The applied migrations: version, name, SHA-256, time, role, duration and the build that applied them (created by the runner before the first migration)                 | `SELECT`                 |
-| `platform.command_receipt`    | One receipt per principal and command ID: operation, SHA-256 of the transmitted request bytes, status, stored result or error code, expiry                              | `SELECT, INSERT, UPDATE` |
-| `platform.inbox`              | One row per provider message (source, message ID): received, processed, outcome, expiry                                                                                 | `SELECT, INSERT, UPDATE` |
-| `platform.outbox`             | Events committed with their business change: unique dedup key, topic, aggregate, payload, correlation, state, attempts, availability                                    | `SELECT, INSERT, UPDATE` |
-| `platform.job_lease`          | Jobs with a holder, a lease expiry and a fence that increases with every claim                                                                                          | `SELECT, INSERT, UPDATE` |
-| `platform.runtime_credential` | The two login roles of the runtime credential rotation, when each was rotated and when its deployment was promoted                                                      | none                     |
-| `audit.audit_event`           | The append-only audit chain: each event's SHA-256 covers the previous event's hash and the event's fields                                                               | `SELECT, INSERT`         |
-| `audit.chain_head`            | The chain's single head row, locked by every append                                                                                                                     | `SELECT, UPDATE`         |
-| `fleet.signing_key`           | Signing-key metadata (key ID, purpose, algorithm, public key, the name of the platform secret that holds the private key, validity); private keys are never stored here | `SELECT`                 |
+| Table                         | Purpose                                                                                                                                                                         | Runtime role             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `platform.schema_migration`   | The applied migrations: version, name, SHA-256, time, role, duration and the build that applied them (created by the runner before the first migration)                         | `SELECT`                 |
+| `platform.command_receipt`    | One receipt per principal and command ID: operation, SHA-256 of the transmitted request bytes without `RequestMeta.correlation_id`, status, stored result or error code, expiry | `SELECT, INSERT, UPDATE` |
+| `platform.inbox`              | One row per provider message (source, message ID): received, processed, outcome, expiry                                                                                         | `SELECT, INSERT, UPDATE` |
+| `platform.outbox`             | Events committed with their business change: unique dedup key, topic, aggregate, payload, correlation, state, attempts, availability                                            | `SELECT, INSERT, UPDATE` |
+| `platform.job_lease`          | Jobs with a holder, a lease expiry and a fence that increases with every claim                                                                                                  | `SELECT, INSERT, UPDATE` |
+| `platform.runtime_credential` | The two login roles of the runtime credential rotation, when each was rotated and when its deployment was promoted                                                              | none                     |
+| `audit.audit_event`           | The append-only audit chain: each event's SHA-256 covers the previous event's hash and the event's fields                                                                       | `SELECT, INSERT`         |
+| `audit.chain_head`            | The chain's single head row, locked by every append                                                                                                                             | `SELECT, UPDATE`         |
+| `fleet.signing_key`           | Signing-key metadata (key ID, purpose, algorithm, public key, the name of the platform secret that holds the private key, validity); private keys are never stored here         | `SELECT`                 |
 
 Retention sweeps (receipts after 90 days, the inbox, dispatched outbox rows, audit partitions) are AF-PLAT-01's. They run with the
 migration role, because the runtime role can never delete.
@@ -37,9 +37,10 @@ migration role, because the runtime role can never delete.
 
 The second migration (`center/internal/schema/migrations/0002_identity_device.sql`) creates the `identity` and `device` schemas
 and the rate-limit table. The tables derive from the D1 manifests
-`src/ArcForges.Cloud.Storage.D1/Physical/manifest/{identity,device}.json` by the rules above. AF-CTR-03 lands it whole in its
-first part (A1a), including what its second part (A1b) writes first (`identity.step_up_challenge` and the registration label of
-`identity.auth_flow`); a later change is a new migration.
+`src/ArcForges.Cloud.Storage.D1/Physical/manifest/{identity,device}.json` by the rules above. AF-CTR-03 landed it whole in its
+first part (A1a), including what its second part (A1b) writes (`identity.step_up_challenge`, the registration label of
+`identity.auth_flow`, the device revocation's columns), so A1b adds no migration; a later change is a new migration. A1b's writes
+run under command receipts (`platform.command_receipt`, [model](#model)) in the same transaction as their change.
 
 | Table                        | Purpose                                                                                                                                                                                                                                    | Runtime role             |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
@@ -79,13 +80,17 @@ referencing column of every foreign key leads an index (spent refresh tokens and
 by session and account where they name one), so a sweep's or a purge's deletes check each reference through an index; only the
 single bootstrap row has none.
 
-Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables identity in production only after them):
+Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables identity in production only after them). Each period is
+a maximum:
 
 - consumed or expired flows and step-up challenges after 7 days;
 - spent refresh tokens until their family's absolute expiry or with their session, whichever comes first;
 - revoked or expired sessions after 90 days;
 - rate-limit windows after one window has passed;
-- revoked devices and installations with the account;
+- revoked devices 30 days after their revocation (Design 11 §5): the sweep deletes a revoked device's sessions (revoked with
+  it, so before their own 90 days) and their children, then its installations, then the device (children first, below). Until
+  then a revoked device's native installation ID is refused (`credential_revoked`); after the sweep the same client installation
+  ID is accepted as new, so revoking an installation ID lasts 30 days (it is not a credential). Live devices go with the account;
 - accounts (`identity.user`) and their credentials (`identity.auth_identity`, revoked credentials included) for the account's
   lifetime: they are removed with the account by AF-ID-02's account deletion;
 - the bootstrap row (`identity.bootstrap`) permanently: it is the record that the database's one bootstrap was used (it names the
@@ -108,6 +113,23 @@ flow (`identity.auth_flow.email_hash`) keeps the unsalted SHA-256 of the normali
 has it, and a rate-limit bucket key is the SHA-256 of a client IP prefix, an account or an e-mail address. Such a digest can be
 reversed by trying every value, so these rows are personal data, also of people without an account, under the retention above.
 
+Command receipts (`platform.command_receipt.result`) hold no e-mail address: UpdateProfile stores its profile without
+`primary_email` and fills it from the account's live e-mail identity when it answers ([center identity](center-identity.md#command-receipts)).
+Receipt results do hold personal data:
+
+- UpdateProfile's: the profile (display name, locale, time zone, revision);
+- CompletePasskeyRegistration's and RenameAuthIdentity's: a credential summary (credential ID, kind, label, creation and last-use
+  times);
+- DeviceService.Rename's: the full device view (device ID, name, platform, trust level, remote-control flag, revision, revocation
+  time, and each installed product with its version and install time);
+- RemoveAuthIdentity's, RevokeSession's, RevokeAllSessions' and DeviceService.Revoke's: only the receipt (command ID, effect and
+  the revision it produced, except RevokeAllSessions, which states none);
+- a kept refusal: its `ArcError`, which can name the object the caller sent or, for `already_exists`, the account's own
+  credential row ID.
+
+They are a second copy under the receipts' own 90-day retention (above), separate from the account's, and the runtime role cannot
+delete them, so AF-ID-02's account purge deletes `platform.command_receipt` rows by principal (the account) with the account.
+
 ## Guarantees
 
 `center/internal/platform` re-implements the guarantees of the D1 storage plans with native transactions, constraints and row
@@ -121,7 +143,10 @@ locks. Integration tests against a real PostgreSQL cover each one.
     execute once. This holds under read committed and under serializable isolation.
   - A domain refusal (`Refusal`) rolls back the command's changes and is stored, so a replay answers the same refusal.
   - Any other failure rolls back everything and stores nothing, so a retry runs the command again.
-  - The digest covers the request bytes as transmitted, never a re-encoding (AD-0021 §10).
+  - The digest covers the request bytes as transmitted without `RequestMeta.correlation_id`, which is per attempt
+    (`RequestDigestInput`): the message is walked on the wire and every kept byte is copied, never re-encoded (AD-0021 §10), so a
+    retry under a new correlation id replays the receipt and any other difference (`command_id`, `expected_rev`, the body) is
+    refused.
 - **Inbox** (`Receive`, `Processed`): the provider message is recorded in the transaction that applies it. A redelivery or a
   concurrent duplicate is recognized and not applied again.
 - **Outbox** (`Enqueue`, `Publisher`):
@@ -160,12 +185,15 @@ locks. Integration tests against a real PostgreSQL cover each one.
 - a bounded retry of serialization failures and deadlocks (5 attempts with jittered backoff);
 - a read-write transaction whose COMMIT was sent without a definite answer (a lost connection, a timeout, a cancellation, the
   pooler's `08P01`: anything but a class 40 or 23 refusal or a transaction that had failed) is never retried. When it carries the
-  call's effect (a sign-in, the owner bootstrap, a refresh rotation, a flow's creation or its code's send; every later write) it is
+  call's effect (a sign-in, the owner bootstrap, a refresh rotation, a flow's creation or its code's send, a step-up's begin or
+  proof, a passkey registration's begin, every write under a command receipt, and each effect write a later slice adds) it is
   `ErrCommitUnknown`: it may have committed, and the identity surface answers `INTERNAL/internal` with effect `UNKNOWN` and retry
-  `NEVER`. A transaction that carries no effect of the call (`TxOptions.Auxiliary`: rate-limit counts, reservations and give-backs,
-  a flow attempt's count, end and give-back, refusal audits) runs before the effect or after its definite rollback, so its
-  unanswered COMMIT is `ErrUnavailable`, answered `RESOURCE/overloaded` with `AFTER_TIME` (D10). A later slice marks each new
-  transaction by the same rule;
+  `NEVER`. A transaction that carries no effect of the call (`TxOptions.Auxiliary`: rate-limit counts, reservations and
+  give-backs, the attempt count, end and give-back of a flow, a step-up challenge or a registration, a step-up challenge's denial,
+  refusal audits) runs before the effect or after its definite rollback, so its unanswered COMMIT is `ErrUnavailable`, answered
+  `RESOURCE/overloaded` with `AFTER_TIME` and logged as one warning line with the call's correlation id (D10). A later slice's own
+  counts, reservations, attempt bookkeeping and refusal audits set `Auxiliary`; the identity surface's roles are pinned by name
+  (`TestEveryTransactionOfTheSurfaceStatesItsRole`);
 - a panic in a transaction's callback rolls the transaction back and gives its connection back before it continues (D1);
 - errors that keep the operation, the SQLSTATE and the constraint name but never the server's message or detail, which can quote
   row values.
@@ -590,8 +618,13 @@ These are exposed today:
 - **Migrations:** the deployment's gate record and the job log hold each migration's name, checksum and duration.
 - **Identity surface** (AF-CTR-03): `arcforges_center_identity_events_total{event,outcome}` counts sign-in stages
   (`sign_in_begin` by method, `sign_in_complete` succeeded or refused), refreshes (rotated, refused, reused), rate-limit refusals
-  by bucket kind (`rate_limited`), bootstrap outcomes and e-mail deliveries (`email_send` sent or failed); the periodic metrics log
-  line carries them.
+  by bucket kind (`rate_limited`), bootstrap outcomes, e-mail code requests (`email_request` accepted) and e-mail deliveries
+  (`email_send` sent or failed); since A1b also step-up stages (`step_up_begin` by method; `step_up_complete` proved, refused or
+  upgraded, where `upgraded` is counted in addition to `proved`) and passkey registration (`registration_begin`;
+  `registration_complete` succeeded or refused). The periodic metrics log line carries them.
+- **Unanswered auxiliary commits** (D10): a transaction of auxiliary bookkeeping (a count, an attempt, a reservation, a denial, a
+  give-back, a refusal audit) whose COMMIT went unanswered is answered `RESOURCE/overloaded` and logged as the WARN line
+  `an auxiliary commit went unanswered`, with the method, the correlation id and the transaction's name (`operation`).
 
 Alert conditions for AF-OPS-01:
 
@@ -603,7 +636,11 @@ Alert conditions for AF-OPS-01:
   metric of AF-PLAT-01's sweeps; until then it is a query.
 - identity: any `refresh` `reused` (a stolen or replayed refresh token), `rate_limited` growing for one bucket kind (an attack
   or a misconfigured client), `bootstrap` outcomes other than `completed` on a deployment that has an owner, `email_send` `failed`,
-  and `access.refused` audit events (a node, push or automation credential calling account methods).
+  and `access.refused` audit events (a node, push or automation credential calling account methods);
+- identity since A1b: `step_up_complete` `refused` growing without `rate_limited` for `sign_in_failures_account` following (a slow
+  guessing of step-up proofs against one session that stays under the limit; `identity.step_up.failed` is audited only once per
+  window), and `registration_complete` `refused` growing;
+- the WARN line `an auxiliary commit went unanswered` recurring (the pooler or the network losing commits).
 
 ## Recovery
 

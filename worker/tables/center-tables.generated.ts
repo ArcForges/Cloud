@@ -52,7 +52,7 @@ export const clientIpHeader = "x-arcforges-client-ip";
  */
 export const notActivatedReplies: Readonly<Record<Surface, string>> = {
   identity:
-    "AAAAAEIaQAoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBOgwiChIIaWRlbnRpdHmAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "AAAAAEsaSQoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBOhUiEwoHc3VyZmFjZRIIaWRlbnRpdHmAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
@@ -69,6 +69,15 @@ export const rateLimitedReplyInstantBytes = 5;
 export const edgeRateLimitPeriodSeconds = 60;
 /** The network that keys an IPv6 client at the edge rate limits; an IPv4 client is keyed by its whole address. */
 export const edgeIpv6PrefixBits = 64;
+/**
+ * How long the Container class waits for a center started under another Worker version's settings to stop on SIGTERM: the
+ * center's shutdown bound and a margin (AF-CTR-03).
+ */
+export const staleCenterStopMs = 6000;
+/** How long it then waits for the kill before it refuses the request as a start failure. */
+export const staleCenterKillMs = 4000;
+/** How often it looks whether the center stopped. */
+export const centerStopPollMs = 100;
 
 /** The methods of the switchable surfaces; each is forwarded only while its surface is enabled. */
 export const surfaceRoutes: readonly SurfaceRoute[] = [
@@ -194,6 +203,138 @@ export const surfaceRoutes: readonly SurfaceRoute[] = [
   },
   {
     path: "/arcforges.publicapi.v1.DeviceService/List",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.IdentityService/BeginStepUp",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.IdentityService/CompleteStepUp",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 16384,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.IdentityService/UpdateProfile",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.IdentityService/BeginPasskeyRegistration",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.IdentityService/CompletePasskeyRegistration",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 16384,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.IdentityService/RenameAuthIdentity",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.IdentityService/RemoveAuthIdentity",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.IdentityService/RevokeSession",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.IdentityService/RevokeAllSessions",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.DeviceService/Rename",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
+    path: "/arcforges.publicapi.v1.DeviceService/Revoke",
     kind: "unary",
     auth: "session",
     maxRequestBytes: 4096,

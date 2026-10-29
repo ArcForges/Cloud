@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
+
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
 )
@@ -292,4 +294,93 @@ func TestSignInsOutsideThePolicyAreRefused(t *testing.T) {
 			t.Errorf("%s was admitted", name)
 		}
 	}
+}
+
+// TestOnlyANoneAttestationReachesTheLibrary (G3): the format is read before the library parses a registration, so an attestation in
+// another format, a "none" format with a statement, a tagged, indefinite-length, duplicated-key or truncated object, and a value
+// that is not a map never reach the library's attestation statement parsers.
+func TestOnlyANoneAttestationReachesTheLibrary(t *testing.T) {
+	authData := bytes.Repeat([]byte{1}, 37)
+	encode := func(value any) []byte {
+		t.Helper()
+		data, err := webauthncbor.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	none := encode(map[string]any{"fmt": "none", "attStmt": map[string]any{}, "authData": authData})
+	if !passkey.AttestationIsNone(none) {
+		t.Fatal("a none attestation was refused")
+	}
+	refused := map[string][]byte{
+		"packed":                   encode(map[string]any{"fmt": "packed", "attStmt": map[string]any{"alg": -7, "sig": []byte{0}}, "authData": authData}),
+		"tpm":                      encode(map[string]any{"fmt": "tpm", "attStmt": map[string]any{"ver": "2.0"}, "authData": authData}),
+		"android-safetynet":        encode(map[string]any{"fmt": "android-safetynet", "attStmt": map[string]any{"ver": "1", "response": []byte("x")}, "authData": authData}),
+		"none with a statement":    encode(map[string]any{"fmt": "none", "attStmt": map[string]any{"alg": -7}, "authData": authData}),
+		"no format":                encode(map[string]any{"attStmt": map[string]any{}, "authData": authData}),
+		"an array":                 encode([]any{"none", map[string]any{}, authData}),
+		"a tag":                    append([]byte{0xc1}, none...),
+		"an indefinite-length map": append(append([]byte{0xbf}, none[1:]...), 0xff),
+		"a duplicated key":         append([]byte{0xa4}, append(none[1:], encode("fmt")[0:]...)...),
+		"a truncated object":       none[:len(none)-3],
+		"trailing bytes":           append(append([]byte{}, none...), 0x00),
+		"empty":                    {},
+	}
+	for name, object := range refused {
+		if passkey.AttestationIsNone(object) {
+			t.Errorf("%s reached the library", name)
+		}
+	}
+	// A whole registration in another format is refused; TestNoStatementParserRunsForAnotherFormat shows that the library never
+	// parses its statement.
+	authenticator := virtual.New(rpID, origin)
+	authenticator.Format = "packed"
+	handle, challenge := randomBytes(t, 32), randomBytes(t, 32)
+	creation, _ := authenticator.Create(challenge, handle)
+	if _, err := relyingParty(t, rpID, origin).VerifyCreation(challenge, handle, creation, time.Now().Add(time.Minute)); !errors.Is(err, passkey.ErrRefused) {
+		t.Fatal("a packed registration was admitted")
+	}
+}
+
+// FuzzCeremonyPayloads feeds arbitrary registration and sign-in payloads, within the contract's bounds, to the relying party's two
+// ceremonies (G3): neither panics, a registration is admitted only with a "none" attestation, and nothing is admitted against a
+// challenge it was not made for.
+func FuzzCeremonyPayloads(f *testing.F) {
+	authenticator := virtual.New(rpID, origin)
+	handle, challenge := bytes.Repeat([]byte{7}, 32), bytes.Repeat([]byte{9}, 32)
+	creation, key := authenticator.Create(challenge, handle)
+	assertion := authenticator.Assert(key, challenge)
+	f.Add(creation.AttestationObject, creation.ClientDataJSON, assertion.AuthenticatorData, assertion.Signature, assertion.ClientDataJSON)
+	f.Add([]byte{0xa0}, []byte("{}"), []byte{}, []byte{}, []byte("{}"))
+	rp, err := passkey.New(rpID, origin)
+	if err != nil {
+		f.Fatal(err)
+	}
+	expires := time.Now().Add(time.Hour)
+	stored := passkey.Stored{UserHandle: handle}
+	if verified, err := rp.VerifyCreation(challenge, handle, creation, expires); err == nil {
+		stored.Credential = verified
+	} else {
+		f.Fatal(err)
+	}
+	other := bytes.Repeat([]byte{3}, 32)
+	f.Fuzz(func(t *testing.T, object, clientData, authData, signature, assertionClientData []byte) {
+		if len(object) > 16384 || len(clientData) > 16384 || len(authData) > 16384 || len(signature) > 1024 || len(assertionClientData) > 16384 {
+			return
+		}
+		created := passkey.Creation{CredentialID: creation.CredentialID, ClientDataJSON: clientData, AttestationObject: object}
+		if _, err := rp.VerifyCreation(challenge, handle, created, expires); err == nil && !passkey.AttestationIsNone(object) {
+			t.Fatal("a registration that is not a none attestation was admitted")
+		}
+		if _, err := rp.VerifyCreation(other, handle, created, expires); err == nil {
+			t.Fatal("a registration was admitted against another challenge")
+		}
+		signed := passkey.Assertion{CredentialID: key.ID, ClientDataJSON: assertionClientData, AuthenticatorData: authData, Signature: signature,
+			UserHandle: handle}
+		_, _ = rp.VerifyAssertion(challenge, signed, stored, expires)
+		if _, err := rp.VerifyAssertion(other, signed, stored, expires); err == nil {
+			t.Fatal("a sign-in was admitted against another challenge")
+		}
+	})
 }

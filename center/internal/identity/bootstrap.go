@@ -44,21 +44,21 @@ const (
 	bootstrapPasskey       = "passkey_invalid"
 )
 
-// validCreation checks the contract's bounds of a WebAuthnCreation.
-func validCreation(creation passkey.Creation) *arc.Refusal {
+// validCreation checks the contract's bounds of a WebAuthnCreation at a field path.
+func validCreation(field string, creation passkey.Creation) *arc.Refusal {
 	switch {
 	case len(creation.CredentialID) < 1 || len(creation.CredentialID) > MaxCredentialIDBytes:
-		return arc.InvalidArgument("credential.passkey.credential_id", "length")
+		return arc.InvalidArgument(field+".credential_id", "length")
 	case len(creation.ClientDataJSON) < 1 || len(creation.ClientDataJSON) > 16384:
-		return arc.InvalidArgument("credential.passkey.client_data_json", "length")
+		return arc.InvalidArgument(field+".client_data_json", "length")
 	case len(creation.AttestationObject) < 1 || len(creation.AttestationObject) > 16384:
-		return arc.InvalidArgument("credential.passkey.attestation_object", "length")
+		return arc.InvalidArgument(field+".attestation_object", "length")
 	case len(creation.Transports) > 8:
-		return arc.InvalidArgument("credential.passkey.transports", "max_items")
+		return arc.InvalidArgument(field+".transports", "max_items")
 	}
 	for _, transport := range creation.Transports {
 		if len(transport) < 1 || len(transport) > 128 {
-			return arc.InvalidArgument("credential.passkey.transports", "pattern")
+			return arc.InvalidArgument(field+".transports", "pattern")
 		}
 	}
 	return nil
@@ -72,7 +72,7 @@ func validCreation(creation passkey.Creation) *arc.Refusal {
 // run one after the other and each sees the accounts its predecessors committed, and it inserts the singleton bootstrap row, whose
 // key refuses a second bootstrap whatever happens: concurrent attempts create one account.
 func (s *Service) Bootstrap(ctx context.Context, request Request, in Enrollment) (SignedIn, error) {
-	if refusal := validCreation(in.Creation); refusal != nil {
+	if refusal := validCreation("credential.passkey", in.Creation); refusal != nil {
 		return SignedIn{}, refusal
 	}
 	switch {

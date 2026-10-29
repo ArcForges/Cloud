@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { register } from "node:module";
 import test from "node:test";
+import { classifyStartFailureResponse } from "../../worker/readiness/container.ts";
 
 // `cloudflare:workers` only exists inside workerd; a minimal stand-in lets the real Worker module
 // and the real @cloudflare/containers registry run under Node.
@@ -50,6 +51,12 @@ const acceptance = (await import(acceptanceModule)) as unknown as {
 };
 const { CloudContainer } = worker;
 const { FoundationContainer } = proof;
+type Settings = { entrypoint?: string[]; envVars: Record<string, string>; enableInternet: boolean };
+const containerModule = "../../worker/foundation/cloud-container.ts";
+const { startDigest, startDigestKey } = (await import(containerModule)) as unknown as {
+  startDigest(revision: string, settings: Settings): Promise<string>;
+  startDigestKey: string;
+};
 
 // Only what the constructor touches; the deferred start-up callback is deliberately not run.
 const containerContext = {
@@ -311,4 +318,206 @@ test("the acceptance entry runs the Go center under the proof Container class an
     assert.equal((instance as { fetch?: unknown }).fetch, undefined, "no fetch handler");
     assert.equal(await instance.alarm(), undefined);
   }
+});
+
+// AF-CTR-03: a Container image rollout restarts a running center with the new image but its previous start environment. The
+// Container class restarts such a center with this Worker version's settings before it forwards any request.
+type Following = Record<string, unknown> & {
+  fetch(request: Request): Promise<Response>;
+  containerFetch(request: Request): Promise<Response>;
+  staleStopMs: number;
+  staleDestroyMs: number;
+  entrypoint?: string[];
+  envVars: Record<string, string>;
+  enableInternet: boolean;
+};
+
+/** A Container runtime stand-in: a center that exits on SIGTERM, only on SIGKILL or never, and the Durable Object's storage. */
+function runtime(
+  running: boolean,
+  recorded: string | undefined,
+  exitsOn: "SIGTERM" | "SIGKILL" | "never",
+) {
+  const events: string[] = [];
+  const stored = new Map<string, unknown>();
+  if (recorded !== undefined) stored.set(startDigestKey, recorded);
+  const container = {
+    running,
+    signal(signal: number) {
+      events.push(`signal ${signal}`);
+      if (exitsOn === "SIGTERM")
+        setTimeout(() => {
+          container.running = false;
+        }, 20);
+    },
+    async destroy() {
+      events.push("destroy");
+      if (exitsOn !== "never") container.running = false;
+    },
+    monitor: () => new Promise(() => {}),
+  };
+  const ctx = {
+    container,
+    storage: {
+      get: async (key: string) => stored.get(key),
+      put: async (key: string, value: unknown) => {
+        if (key === startDigestKey) events.push("record");
+        stored.set(key, value);
+      },
+      kv: { get: () => undefined, put: () => undefined },
+      sql: { exec: () => [] },
+    },
+    blockConcurrencyWhile: () => Promise.resolve(),
+  };
+  return { ctx, container, events, stored };
+}
+
+const versionEnvironment = {
+  ...centerEnvironment,
+  SOURCE_REVISION: "b".repeat(40),
+  FLAGSHIP_SURFACES: "identity",
+};
+
+/** A Container instance whose forwarding is recorded: the library would start a stopped center and forward the request. */
+function following(
+  Class: Constructable,
+  state: ReturnType<typeof runtime>,
+  environment: object = versionEnvironment,
+): Following {
+  const instance = new Class(state.ctx, environment) as unknown as Following;
+  instance.containerFetch = async (request: Request) => {
+    state.events.push(
+      `forward ${new URL(request.url).pathname} to a ${state.container.running ? "running" : "stopped"} center`,
+    );
+    state.container.running = true;
+    return new Response("answered");
+  };
+  return instance;
+}
+
+const settingsOf = (instance: Following): Settings => ({
+  entrypoint: instance.entrypoint,
+  enableInternet: instance.enableInternet,
+  envVars: instance.envVars,
+});
+
+const health = () => new Request("http://container/healthz");
+
+test("a center left running under another start environment is restarted with this version's settings before any request", async () => {
+  for (const Class of [CloudContainer, acceptance.FoundationContainer]) {
+    for (const recorded of ["digest-of-the-previous-version", undefined]) {
+      const state = runtime(true, recorded, "SIGTERM");
+      const instance = following(Class, state);
+      const response = await instance.fetch(health());
+      assert.equal(await response.text(), "answered");
+      assert.deepEqual(
+        state.events,
+        ["signal 15", "record", "forward /healthz to a stopped center"],
+        String(recorded),
+      );
+      assert.equal(
+        state.stored.get(startDigestKey),
+        await startDigest(versionEnvironment.SOURCE_REVISION, settingsOf(instance)),
+      );
+      // The restarted center is current: the next request (the Hello) is forwarded at once.
+      await instance.fetch(
+        new Request("http://container/arcforges.cloud.v1.HelloService/SayHello", {
+          method: "POST",
+        }),
+      );
+      assert.equal(state.events.length, 4);
+      assert.equal(
+        state.events[3],
+        "forward /arcforges.cloud.v1.HelloService/SayHello to a running center",
+      );
+    }
+  }
+});
+
+test("a center started with this version's settings is never restarted, and a stopped one is recorded before its start", async () => {
+  const probe = following(CloudContainer, runtime(false, undefined, "never"));
+  const current = await startDigest(versionEnvironment.SOURCE_REVISION, settingsOf(probe));
+  const running = runtime(true, current, "never");
+  await following(CloudContainer, running).fetch(health());
+  assert.deepEqual(running.events, ["forward /healthz to a running center"]);
+  const stopped = runtime(false, "digest-of-the-previous-version", "never");
+  await following(CloudContainer, stopped).fetch(health());
+  assert.deepEqual(stopped.events, ["record", "forward /healthz to a stopped center"]);
+  assert.equal(stopped.stored.get(startDigestKey), current);
+});
+
+test("requests that arrive during the restart share it and none reaches the previous center", async () => {
+  const state = runtime(true, "digest-of-the-previous-version", "SIGTERM");
+  const instance = following(CloudContainer, state);
+  const responses = await Promise.all([1, 2, 3].map(() => instance.fetch(health())));
+  for (const response of responses) assert.equal(await response.text(), "answered");
+  assert.deepEqual(state.events, [
+    "signal 15",
+    "record",
+    "forward /healthz to a stopped center",
+    "forward /healthz to a running center",
+    "forward /healthz to a running center",
+  ]);
+});
+
+test("a center that ignores SIGTERM is killed within the bound; one that survives is never forwarded to", async () => {
+  const killed = runtime(true, "digest-of-the-previous-version", "SIGKILL");
+  const instance = following(CloudContainer, killed);
+  instance.staleStopMs = 50;
+  assert.equal(await (await instance.fetch(health())).text(), "answered");
+  assert.deepEqual(killed.events, [
+    "signal 15",
+    "destroy",
+    "record",
+    "forward /healthz to a stopped center",
+  ]);
+
+  const stuck = runtime(true, "digest-of-the-previous-version", "never");
+  const refusing = following(CloudContainer, stuck);
+  refusing.staleStopMs = 50;
+  refusing.staleDestroyMs = 50;
+  const response = await refusing.fetch(health());
+  assert.equal(response.status, 500);
+  // The library's own start-failure text: the Worker answers it as a retryable start failure, since nothing was forwarded.
+  assert.equal(await classifyStartFailureResponse(response), "start_failed");
+  assert.deepEqual(stuck.events, ["signal 15", "destroy"]);
+  assert.equal(stuck.stored.get(startDigestKey), "digest-of-the-previous-version");
+});
+
+test("the start digest covers the revision, the entrypoint, the egress switch and every variable, in no particular order", async () => {
+  const base: Settings = {
+    entrypoint: ["/app/arcforges-center"],
+    enableInternet: true,
+    envVars: {
+      ARCFORGES_CENTER_SURFACES: "identity",
+      ARCFORGES_CENTER_DATABASE_URL: "synthetic-slot-1",
+    },
+  };
+  const digest = await startDigest("r1", base);
+  assert.match(digest, /^[0-9a-f]{64}$/u);
+  assert.equal(
+    await startDigest("r1", {
+      ...base,
+      envVars: {
+        ARCFORGES_CENTER_DATABASE_URL: "synthetic-slot-1",
+        ARCFORGES_CENTER_SURFACES: "identity",
+      },
+    }),
+    digest,
+  );
+  for (const changed of [
+    startDigest("r2", base),
+    startDigest("r1", { ...base, entrypoint: undefined }),
+    startDigest("r1", { ...base, enableInternet: false }),
+    startDigest("r1", { ...base, envVars: { ...base.envVars, ARCFORGES_CENTER_SURFACES: "none" } }),
+    startDigest("r1", {
+      ...base,
+      envVars: { ...base.envVars, ARCFORGES_CENTER_DATABASE_URL: "synthetic-slot-2" },
+    }),
+    startDigest("r1", {
+      ...base,
+      envVars: { ...base.envVars, ARCFORGES_CENTER_IDENTITY_POLICY: "{}" },
+    }),
+  ])
+    assert.notEqual(await changed, digest);
 });

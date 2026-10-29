@@ -9,6 +9,7 @@ import test from "node:test";
 import { edgeClientKey, rateLimitedReplyAt } from "../../worker/ingress/edge-limit.ts";
 import { trailerFrame } from "../../worker/ingress/io.ts";
 import {
+  centerSurfaces,
   clientIpHeader,
   enabledSurfaces,
   notActivatedReplies,
@@ -110,8 +111,12 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
     "identity,identity",
     "none",
     "identity,operations",
-  ])
+  ]) {
     assert.equal(enabledSurfaces(value).size, 0, String(value));
+    // The center is started with "none" for every such value, as its health then states.
+    assert.equal(centerSurfaces(value), "none", String(value));
+  }
+  assert.equal(centerSurfaces("identity"), "identity");
   assert.deepEqual([...surfaceNames], ["identity"]);
   assert.equal(surfaceTable.size, surfaceRoutes.length);
   for (const route of surfaceRoutes) {

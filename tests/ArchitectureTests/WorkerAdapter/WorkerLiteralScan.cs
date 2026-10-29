@@ -128,6 +128,8 @@ internal static partial class WorkerLiteralScan
         new("worker/storage/handler.ts", "handleExecutePlan", ["401", "404", "405", "413", "415", "503"], "HTTP status codes (RFC 9110)"),
         new("worker/storage/handler.ts", "reply", ["200"], "HTTP status code 200 (RFC 9110)"),
         new("worker/storage/scalars.ts", "encodeResult", ["255"], "octet range of a byte value (0 to 255, one unsigned byte)"),
+        new("worker/foundation/cloud-container.ts", "stillStopping", ["500"],
+            "HTTP status code 500 (RFC 9110): the Containers library's own start-failure reply, which worker/readiness classifies (AF-CTR-03)"),
         new("worker/foundation/cloud-container.ts", "defaultPort", ["8080"],
             "IANA-registered http-alt port: the container image exposes it (Dockerfile EXPOSE 8080) and the host listens on it"),
         new("worker/ai/internal/handler.ts", "handleAiInternal", ["200", "404", "405", "413", "415", "502", "503"], "HTTP status codes (RFC 9110)"),

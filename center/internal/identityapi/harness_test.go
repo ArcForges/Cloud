@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -105,6 +106,9 @@ type settings struct {
 	policy      string
 	noBootstrap bool
 	mailOff     bool
+	// participants are the device revocation's cascade participants (DC-06, DC-17: AF-CTR-07's agent grants and AF-CLD-06's push
+	// registrations).
+	participants []device.Participant
 }
 
 func newHarness(t *testing.T, options settings) *harness {
@@ -156,7 +160,7 @@ func newHarness(t *testing.T, options settings) *harness {
 		sender = mail.Disabled{}
 	}
 	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: sender, Clock: h.clock.Now,
-		Background: func(work func()) { work() }})
+		Background: func(work func()) { work() }, Participants: options.participants})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +275,16 @@ func rpc[Response proto.Message](h *harness, path string, request proto.Message,
 	if err := proto.Unmarshal(answer.body, response); err != nil {
 		h.t.Fatal(err)
 	}
+	domainError(h.t, answer) // checks the retry advice of a refusal
 	return response
+}
+
+// retryAdvice is the Contracts rule retryAdvice (foundation-baseline.json; E4): retry_at if and only if the advice is AFTER_TIME,
+// a reconciliation operation if and only if it is RECONCILE. domainError checks every refusal a test decodes against it.
+func retryAdvice(value *foundationv1.ArcError) bool {
+	retry := value.GetRetry()
+	return (retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_AFTER_TIME) == (retry.GetRetryAt() != nil) &&
+		(retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_RECONCILE) == (retry != nil && retry.ReconciliationOperation != nil)
 }
 
 // failure is the ArcError a reply carries, as CATEGORY/code.

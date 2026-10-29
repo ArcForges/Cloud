@@ -7,6 +7,9 @@
 package arc
 
 import (
+	"bytes"
+	"math/rand/v2"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,8 +34,25 @@ type Refusal struct {
 	State  string
 	// Limit is the LimitFailure detail of a rate limit or bound.
 	Limit *Limit
+	// Revision is the RevisionConflict detail of a stale expected revision.
+	Revision *Revision
+	// Resource is state.resource: the object a not_found or already_exists names (F19).
+	Resource *Resource
 	// Effect is the effect certainty: DID_NOT_HAPPEN unless set.
 	Effect foundationv1.EffectCertainty
+}
+
+// Resource is a state.resource detail (an AggregateRef): the kind of the object and the 16-byte ID the caller named it by (or, for
+// its own object, may know). A refusal without such an ID carries no resource (B6).
+type Resource struct {
+	Kind string
+	ID   []byte
+}
+
+// Revision is a RevisionConflict detail: the revision the request expected and the current one.
+type Revision struct {
+	Expected int64
+	Actual   int64
 }
 
 // Limit is a LimitFailure detail.
@@ -81,6 +101,9 @@ func (r *Refusal) ArcError(call correlation.Context) *foundationv1.ArcError {
 		value.Retry.RetryAt = Instant(r.RetryAt)
 	}
 	switch {
+	case r.Revision != nil:
+		value.Details = &foundationv1.ErrorDetails{Detail: &foundationv1.ErrorDetails_Revision{Revision: &foundationv1.RevisionConflict{
+			Expected: &foundationv1.Revision{Value: proto.Int64(r.Revision.Expected)}, Actual: &foundationv1.Revision{Value: proto.Int64(r.Revision.Actual)}}}}
 	case r.Limit != nil:
 		limit := &foundationv1.LimitFailure{LimitName: proto.String(r.Limit.Name)}
 		if r.Limit.Maximum > 0 {
@@ -90,13 +113,19 @@ func (r *Refusal) ArcError(call correlation.Context) *foundationv1.ArcError {
 			limit.RecoveryAt = Instant(r.Limit.RecoveryAt)
 		}
 		value.Details = &foundationv1.ErrorDetails{Detail: &foundationv1.ErrorDetails_Limit{Limit: limit}}
-	case r.Reason != "" || r.State != "":
+	case r.Reason != "" || r.State != "" || r.Resource != nil:
 		state := &foundationv1.StateFailure{}
 		if r.State != "" {
 			state.State = proto.String(r.State)
 		}
 		if r.Reason != "" {
 			state.Reason = proto.String(r.Reason)
+		}
+		if r.Resource != nil {
+			state.Resource = &foundationv1.AggregateRef{Kind: proto.String(r.Resource.Kind)}
+			if len(r.Resource.ID) > 0 {
+				state.Resource.Id = &foundationv1.Id{Value: append([]byte(nil), r.Resource.ID...)}
+			}
 		}
 		value.Details = &foundationv1.ErrorDetails{Detail: &foundationv1.ErrorDetails_State{State: state}}
 	}
@@ -105,9 +134,25 @@ func (r *Refusal) ArcError(call correlation.Context) *foundationv1.ArcError {
 
 // The refusals of the identity surface, each a row of errors.md.
 
-// InvalidArgument is VALIDATION/invalid_argument with state.reason = "<field path>: <rule>".
+// statePattern is the pattern of StateFailure.state and AggregateRef.kind (Contracts foundation-baseline.json).
+var statePattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]{1,128}$`)
+
+// stateOf is a value for StateFailure.state: the value itself when it matches the pattern, else the fallback.
+func stateOf(value, fallback string) string {
+	if statePattern.MatchString(value) {
+		return value
+	}
+	return fallback
+}
+
+// The details of a StateFailure are a valid foundation message (B6): Contracts foundation-baseline.json requires its state (matching
+// statePattern) and its reason, and an AggregateRef's kind and 16-byte nonzero id. Each constructor below states both, in the
+// pattern of InvalidState (state = the object or field the refusal is about, reason = why), and names a resource only by an ID.
+
+// InvalidArgument is VALIDATION/invalid_argument with state.state = the field path and state.reason = "<field path>: <rule>".
 func InvalidArgument(field, rule string) *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_VALIDATION, Code: "invalid_argument", Reason: field + ": " + rule}
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_VALIDATION, Code: "invalid_argument", State: stateOf(field, "request"),
+		Reason: field + ": " + rule}
 }
 
 // InvalidCursor is VALIDATION/invalid_cursor: a page cursor that is malformed or from another listing.
@@ -138,14 +183,25 @@ func StepUpRequired() *Refusal {
 		Retry: foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND}
 }
 
-// PermissionDenied is AUTHORIZATION/permission_denied with state.reason = the denied operation.
+// PermissionDenied is AUTHORIZATION/permission_denied with state.state = "operation" and state.reason = the denied operation.
 func PermissionDenied(operation string) *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_AUTHORIZATION, Code: "permission_denied", Reason: operation}
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_AUTHORIZATION, Code: "permission_denied", State: "operation",
+		Reason: operation}
 }
 
-// NotFound is STATE/not_found (the object does not exist or is not visible to the caller).
-func NotFound() *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_found"}
+// resource is the state.resource of an object a caller named by an ID: none unless the ID is a valid Id (16 bytes, not all zero).
+func resource(kind string, id []byte) *Resource {
+	if len(id) != 16 || bytes.Equal(id, make([]byte, 16)) {
+		return nil
+	}
+	return &Resource{Kind: kind, ID: id}
+}
+
+// NotFound is STATE/not_found with state.state = the object's kind, state.reason = "not_found" and state.resource = the object by
+// the ID the caller named it by (the caller's own account by its own ID). Without such an ID there is no resource.
+func NotFound(kind string, id []byte) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_found", State: stateOf(kind, "object"),
+		Reason: "not_found", Resource: resource(kind, id)}
 }
 
 // InvalidState is STATE/invalid_state with its state and reason.
@@ -163,9 +219,24 @@ func CodeReused() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "code_reused"}
 }
 
-// AlreadyExists is CONFLICT/already_exists.
-func AlreadyExists() *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "already_exists"}
+// AlreadyExists is CONFLICT/already_exists with state.state = the object's kind and state.reason = "already_exists"; it names the
+// existing object in state.resource only by an ID the caller may know (its own object), so another account's ID never leaks.
+func AlreadyExists(kind string, id []byte) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "already_exists", State: stateOf(kind, "object"),
+		Reason: "already_exists", Resource: resource(kind, id)}
+}
+
+// RevisionConflict is CONFLICT/revision_conflict: meta.expected_rev differs from the object's current revision (re-read, merge).
+func RevisionConflict(expected, actual int64) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "revision_conflict",
+		Revision: &Revision{Expected: expected, Actual: actual}}
+}
+
+// Final reports a refusal that the same command can never turn into a success (its retry advice is NEVER): a command receipt
+// keeps it and answers a replay with it. Any other refusal (step_up_required, token_expired, rate_limited, overloaded, internal)
+// rolls the receipt back, so the same command ID can succeed after the step-up, the refresh or the wait its advice names.
+func (r *Refusal) Final() bool {
+	return r.Retry == foundationv1.RetryMode_RETRY_MODE_UNSPECIFIED || r.Retry == foundationv1.RetryMode_RETRY_MODE_NEVER
 }
 
 // CommandIDReused is CONFLICT/command_id_reused.
@@ -173,9 +244,9 @@ func CommandIDReused() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "command_id_reused"}
 }
 
-// NotActivated is STATE/not_activated with state.reason = the surface.
+// NotActivated is STATE/not_activated with state.state = "surface" and state.reason = the surface.
 func NotActivated(surface string) *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_activated", Reason: surface}
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_activated", State: "surface", Reason: surface}
 }
 
 // RateLimited is RESOURCE/rate_limited: retry after retryAt (AFTER_TIME without an instant when it is zero); the limit names the
@@ -186,7 +257,27 @@ func RateLimited(bucket string, maximum int64, retryAt time.Time) *Refusal {
 		Limit: &Limit{Name: bucket, Maximum: maximum, RecoveryAt: retryAt}}
 }
 
-// Unavailable is a store that could not be reached: RESOURCE/overloaded, retry after a short time with jitter.
+// The retry instant Dated gives an AFTER_TIME refusal that names none: one second after the refusal, plus up to one second of
+// jitter, so the clients a store outage refused do not all come back at once.
+const (
+	retryDelay  = time.Second
+	retryJitter = time.Second
+)
+
+// Dated is the refusal as it goes on the wire at now (E4): an AFTER_TIME refusal that names no instant (Unavailable, Internal)
+// gets retry_at now plus retryDelay and the jitter, because the Contracts rule retryAdvice (foundation-baseline.json) pairs
+// AFTER_TIME with retry_at. A refusal that names its instant (RateLimited) and any other advice are returned as they are. It is
+// applied once, where a refusal becomes the reply's ArcError.
+func (r *Refusal) Dated(now time.Time) *Refusal {
+	if r.Retry != foundationv1.RetryMode_RETRY_MODE_AFTER_TIME || !r.RetryAt.IsZero() {
+		return r
+	}
+	dated := *r
+	dated.RetryAt = now.Add(retryDelay + rand.N(retryJitter))
+	return &dated
+}
+
+// Unavailable is a store that could not be reached: RESOURCE/overloaded, retry after a short time with jitter (Dated).
 func Unavailable() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE, Code: "overloaded",
 		Retry: foundationv1.RetryMode_RETRY_MODE_AFTER_TIME}

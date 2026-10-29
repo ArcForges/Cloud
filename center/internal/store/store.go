@@ -40,7 +40,8 @@ var (
 	ErrConflict = errors.New("a unique constraint refused the change")
 	// ErrConstraint: another integrity constraint refused the change.
 	ErrConstraint = errors.New("an integrity constraint refused the change")
-	// ErrContention: serialization failures or deadlocks outlasted the retries.
+	// ErrContention: serialization failures or deadlocks outlasted the retries, or a concurrent transaction won a race the caller
+	// resolves by a retry (the first sign-in of one new installation by two credentials loses on its primary key, D4).
 	ErrContention = errors.New("the transaction kept conflicting with concurrent transactions")
 	// ErrPermission: the runtime role lacks a privilege; this is a deployment defect.
 	ErrPermission = errors.New("the runtime role lacks a privilege")
@@ -59,6 +60,9 @@ type Error struct {
 	SQLState   string
 	Constraint string
 	Kind       error
+	// Unanswered marks the ErrUnavailable of an auxiliary transaction whose COMMIT went unanswered (it may have committed), so the
+	// caller can log it; the reply is that of an unavailable store.
+	Unanswered bool
 }
 
 func (e *Error) Error() string {
@@ -154,12 +158,14 @@ type TxOptions struct {
 	Timeout time.Duration
 	// Attempts bounds the retries of serialization failures and deadlocks (default 5).
 	Attempts int
-	// Auxiliary marks a transaction that carries no effect of the call it serves: a rate-limit count, reservation or give-back, a
-	// flow attempt's count, end or give-back, a refusal's audit. Such a transaction runs before the call's effect, or after a
-	// definite rollback of it, so a COMMIT of it without an answer leaves the call's effect undone: it is still never run again,
-	// but it is reported as ErrUnavailable (retry after a while) instead of ErrCommitUnknown (D10). A transaction that carries the
-	// call's effect (a sign-in, an owner bootstrap, a refresh rotation, a flow's creation or its code's send, and every write of a
-	// later slice) leaves it false.
+	// Auxiliary marks a transaction that carries no effect of the call it serves: a rate-limit count, reservation or give-back, an
+	// attempt's count, end or give-back (a flow's or a step-up challenge's, its denial included), a refusal's audit. Such a
+	// transaction runs before the call's effect, or after a definite rollback of it, so a COMMIT of it without an answer leaves the
+	// call's effect undone: it is still never run again, but it is reported as ErrUnavailable (retry after a while) instead of
+	// ErrCommitUnknown (D10), and the error says the commit went unanswered (Error.Unanswered). A transaction that carries the call's
+	// effect (a sign-in, an owner bootstrap, a refresh rotation, a flow's creation or its code's send, a step-up's begin or proof,
+	// and each effect write a later slice adds) leaves it false; a later slice's own counts, reservations, attempt bookkeeping and
+	// refusal audits set it.
 	Auxiliary bool
 }
 
@@ -194,7 +200,7 @@ func (db *DB) InTx(ctx context.Context, operation string, options TxOptions, fn 
 			if options.Auxiliary {
 				kind = ErrUnavailable
 			}
-			sanitized := &Error{Operation: operation, Kind: kind}
+			sanitized := &Error{Operation: operation, Kind: kind, Unanswered: options.Auxiliary}
 			var pgError *pgconn.PgError
 			if errors.As(unknown.err, &pgError) {
 				sanitized.SQLState, sanitized.Constraint = pgError.Code, pgError.ConstraintName

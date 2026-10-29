@@ -29,6 +29,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/buildinfo"
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/feature"
 	"github.com/ArcForges/Cloud/center/internal/hello"
 	"github.com/ArcForges/Cloud/center/internal/identity"
@@ -94,6 +95,9 @@ type Options struct {
 	Clock func() time.Time
 	// Background runs the identity surface's deliveries after a response; nil runs each on a new goroutine.
 	Background func(func())
+	// Participants are the device revocation's cascade participants (DC-06): none in AF-CTR-03 (agent grants arrive with
+	// AF-CTR-07 and push with AF-CLD-06); the tests register a stand-in.
+	Participants []device.Participant
 }
 
 // New composes a center from its configuration. Pools connect lazily, so a database that is down does not stop the start; it
@@ -138,7 +142,9 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	if options.Greeting != nil {
 		greeting = options.Greeting
 	}
-	health, err := buildinfo.Document(backend, buildinfo.Center{Mode: string(cfg.Mode), PublicBaseURL: cfg.PublicBaseURL})
+	health, err := buildinfo.Document(backend, buildinfo.Center{
+		Mode: string(cfg.Mode), PublicBaseURL: cfg.PublicBaseURL, Surfaces: surfaceList(cfg.Identity.Surfaces),
+	})
 	if err != nil {
 		center.Close()
 		return nil, err
@@ -207,7 +213,7 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 		return errors.New("the public base URL cannot be a WebAuthn relying party")
 	}
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: options.Mail, Bootstrap: c.Config.Identity.Bootstrap,
-		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background})
+		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: options.Participants})
 	dispatcher.Register(identityapi.New(service, access.NewAuthorizer(c.Store, clock), c.Store, clock, logger).Methods()...)
 	verifier := session.NewVerifier(c.Store, origin, clock)
 	pipeline.Bearer, pipeline.Browser = verifier, verifier
@@ -520,13 +526,25 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			result = errors.New("a center listener stopped unexpectedly")
 		}
 	}
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdown, cancel := context.WithTimeout(context.Background(), routes.ShutdownMilliseconds*time.Millisecond)
 	defer cancel()
 	for _, server := range servers {
 		_ = server.Shutdown(shutdown)
 	}
 	logger.Info("center stopped")
 	return result
+}
+
+// surfaceList is the health document's statement of the served surfaces: their names comma-separated, or "none".
+func surfaceList(surfaces []config.Surface) string {
+	if len(surfaces) == 0 {
+		return "none"
+	}
+	names := make([]string, 0, len(surfaces))
+	for _, surface := range surfaces {
+		names = append(names, string(surface))
+	}
+	return strings.Join(names, ",")
 }
 
 func planName(plan config.PlanConfiguration) string {

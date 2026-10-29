@@ -12,7 +12,7 @@ import (
 const commit = "0123456789abcdef0123456789abcdef01234567"
 
 func TestALocalBuildIdentifiesGoWithoutClaimingDotNetAOT(t *testing.T) {
-	health, err := Document("stateless", Center{Mode: "self-hosted", PublicBaseURL: "https://center.example"})
+	health, err := Document("stateless", Center{Mode: "self-hosted", PublicBaseURL: "https://center.example", Surfaces: "identity"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestALocalBuildIdentifiesGoWithoutClaimingDotNetAOT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{`"nativeAot":false`, `"runtime":"go"`, `"helloBackend":"stateless"`, `"runId":null`, `"center":{"binary":"arcforges-center","mode":"self-hosted","publicBaseUrl":"https://center.example"}`} {
+	for _, field := range []string{`"nativeAot":false`, `"runtime":"go"`, `"helloBackend":"stateless"`, `"runId":null`, `"center":{"binary":"arcforges-center","mode":"self-hosted","publicBaseUrl":"https://center.example","surfaces":"identity"}`} {
 		if !strings.Contains(string(data), field) {
 			t.Fatalf("missing %s in %s", field, data)
 		}

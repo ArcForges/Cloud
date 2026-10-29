@@ -128,8 +128,9 @@ the remaining C# code.
 - The runtime role's privileges are declared in `center/internal/schema` (`RuntimeGrants`, `MigrationOnly`); a new table needs
   a grant decision there (a test fails otherwise). The runtime role never runs DDL; only `arcforges-center migrate` (the
   migration role, direct connection) changes the schema.
-- Never print a database URL, password or server message: `migrate` and `admin` print versions, checksums and role names only,
-  and the deploy job's runtime password reaches only a private temporary file and the Worker secret. Store tests run against a
+- Never print a database URL, password or server message: `migrate` and `admin` print only non-secret results (versions,
+  checksums, role and database names, slots, timestamps, counts, and the target the operator named), and the deploy job's runtime
+  password reaches only a private temporary file and the Worker secret. Store tests run against a
   real PostgreSQL on Linux (`ARCFORGES_TEST_POSTGRES_URL`; the check starts a pinned container) and skip on Windows.
 - The C# executable stays the image's default entrypoint for the proof environment; `ARCFORGES_HELLO_RUNTIME=csharp` through a
   reviewed main push is the Hello rollback. Go is not .NET Native AOT; health reports `runtime=go` and `nativeAot=false`.

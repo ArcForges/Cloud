@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package identityapi serves the identity surface's methods of arcforges.publicapi.v1 IdentityService and DeviceService
-// (AF-CTR-03 A1a) over Connect: it registers exactly the served methods (every other method of the two services stays
+// (AF-CTR-03 A1a and A1b) over Connect: it registers exactly the served methods (every other method of the two services stays
 // unregistered, so the ingress answers UNIMPLEMENTED and the Worker table has no row for it), authorizes each session call with
 // the operation table before anything else, maps the contract messages to the account core and answers every refusal as the
 // reply's ArcError with the call's correlation id. Identity and device methods refuse a RequestMeta that names a workspace.
@@ -22,6 +22,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/arc"
+	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -93,6 +94,18 @@ func (s *Server) Methods() []connect.Method {
 		method("IdentityService", "ListAuthIdentities", publicapiv1connect.IdentityServiceListAuthIdentitiesProcedure, s.listAuthIdentities),
 		method("IdentityService", "ListSessions", publicapiv1connect.IdentityServiceListSessionsProcedure, s.listSessions),
 		method("DeviceService", "List", publicapiv1connect.DeviceServiceListProcedure, s.listDevices),
+		method("IdentityService", "BeginStepUp", publicapiv1connect.IdentityServiceBeginStepUpProcedure, s.beginStepUp),
+		method("IdentityService", "CompleteStepUp", publicapiv1connect.IdentityServiceCompleteStepUpProcedure, s.completeStepUp),
+		method("IdentityService", "UpdateProfile", publicapiv1connect.IdentityServiceUpdateProfileProcedure, s.updateProfile),
+		method("IdentityService", "BeginPasskeyRegistration", publicapiv1connect.IdentityServiceBeginPasskeyRegistrationProcedure, s.beginPasskeyRegistration),
+		method("IdentityService", "CompletePasskeyRegistration", publicapiv1connect.IdentityServiceCompletePasskeyRegistrationProcedure,
+			s.completePasskeyRegistration),
+		method("IdentityService", "RenameAuthIdentity", publicapiv1connect.IdentityServiceRenameAuthIdentityProcedure, s.renameAuthIdentity),
+		method("IdentityService", "RemoveAuthIdentity", publicapiv1connect.IdentityServiceRemoveAuthIdentityProcedure, s.removeAuthIdentity),
+		method("IdentityService", "RevokeSession", publicapiv1connect.IdentityServiceRevokeSessionProcedure, s.revokeSession),
+		method("IdentityService", "RevokeAllSessions", publicapiv1connect.IdentityServiceRevokeAllSessionsProcedure, s.revokeAllSessions),
+		method("DeviceService", "Rename", publicapiv1connect.DeviceServiceRenameProcedure, s.renameDevice),
+		method("DeviceService", "Revoke", publicapiv1connect.DeviceServiceRevokeProcedure, s.revokeDevice),
 	}
 }
 
@@ -105,19 +118,35 @@ func (s *Server) failure(ctx context.Context, call *ingress.Call, err error) *fo
 		return nil
 	}
 	var refusal *arc.Refusal
+	var stored *storedRefusal
 	switch {
+	case errors.As(err, &stored):
+		// A refusal a command receipt kept: the same ArcError for every replay, with this call's correlation id.
+		value := proto.Clone(stored.value).(*foundationv1.ArcError)
+		value.CorrelationId = nil
+		if call.Correlation.CorrelationID != "" {
+			value.CorrelationId = &foundationv1.Id{Value: correlation.IDBytes(call.Correlation.CorrelationID)}
+		}
+		return value
 	case errors.As(err, &refusal):
 	case errors.Is(err, store.ErrCommitUnknown):
 		s.logger.ErrorContext(ctx, "identity call failed", "method", call.Policy.FullName, "correlationId", call.Correlation.CorrelationID, "error", err.Error())
 		refusal = arc.CommitUnknown()
 	case errors.Is(err, store.ErrUnavailable), errors.Is(err, store.ErrTimeout), errors.Is(err, store.ErrContention), errors.Is(err, store.ErrCanceled),
 		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		var storeErr *store.Error
+		if errors.As(err, &storeErr) && storeErr.Unanswered {
+			// An auxiliary commit went unanswered: the call's effect did not happen, but the count, attempt or audit may have.
+			s.logger.WarnContext(ctx, "an auxiliary commit went unanswered", "method", call.Policy.FullName, "correlationId",
+				call.Correlation.CorrelationID, "operation", storeErr.Operation)
+		}
 		refusal = arc.Unavailable()
 	default:
 		s.logger.ErrorContext(ctx, "identity call failed", "method", call.Policy.FullName, "correlationId", call.Correlation.CorrelationID, "error", err.Error())
 		refusal = arc.Internal()
 	}
-	return refusal.ArcError(call.Correlation)
+	// The single point where a refusal becomes the reply's ArcError: an AFTER_TIME refusal gets its retry instant here (E4).
+	return refusal.Dated(s.clock()).ArcError(call.Correlation)
 }
 
 // checkMeta refuses a RequestMeta that names a workspace (DC-19): identity and device methods are account-scoped.

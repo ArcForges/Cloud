@@ -6,7 +6,7 @@ namespace ArcForges.Cloud.ArchitectureTests.AiHarness;
 
 /// <summary>
 /// One pass or refuse fixture of the ported AI policy suite (HAR.40 validation (d)). A pass fixture yields no finding for any rule; a refuse
-/// fixture yields a finding of its own rule. The fixture set is the AI policy's 84 fixtures (27 pass, 57 refuse) and two CLOUD.84 S38(1) wire-package fixtures (one pass, one refuse), each keeping the AI rule,
+/// fixture yields a finding of its own rule. The fixture set has 87 fixtures (28 pass, 59 refuse): the AI policy's 84 fixtures (27 pass, 57 refuse), two CLOUD.84 S38(1) wire-package fixtures (one pass, one refuse) and the AF-CTR-03 D7 radix-128 varint fixture (refuse), each keeping the AI rule,
 /// kind and name, applied to the Cloud layout: the Worker entry is worker/index.ts, the Workers AI adapter is worker/ai/internal, and the AI
 /// src/ files become worker/ files. <see cref="Name"/> is the AI fixture name.
 /// </summary>

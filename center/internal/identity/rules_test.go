@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ArcForges/Cloud/center/internal/device"
+	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
 // The rules below are ported from the C# IdentityDomainTests (tests/ArcForges.Cloud.Tests/Identity/IdentityDomainTests.cs) where
@@ -215,5 +216,24 @@ func TestTimeZonesFollowTheContractPattern(t *testing.T) {
 		if ValidTimezone(zone) {
 			t.Errorf("%q was admitted", zone)
 		}
+	}
+}
+
+// TestTheStepUpTargetHashIsCanonical pins the step-up target hash a client computes (DC-01): the lowercase hexadecimal SHA-256 of
+// the class, the account ID and the target ID, each on its own line, the IDs in their canonical lowercase UUID text. The expected
+// value was computed outside the center (Python's hashlib) from the three lines identity.revokeSession,
+// 0190a5f2-7c1e-7b3a-9d2e-3f4a5b6c7d8e and 0190a5f2-7c1e-7b3a-9d2e-000000000001, joined by a line feed.
+func TestTheStepUpTargetHashIsCanonical(t *testing.T) {
+	account := platform.ID{0x01, 0x90, 0xa5, 0xf2, 0x7c, 0x1e, 0x7b, 0x3a, 0x9d, 0x2e, 0x3f, 0x4a, 0x5b, 0x6c, 0x7d, 0x8e}
+	target := platform.ID{0x01, 0x90, 0xa5, 0xf2, 0x7c, 0x1e, 0x7b, 0x3a, 0x9d, 0x2e, 0, 0, 0, 0, 0, 1}
+	if account.String() != "0190a5f2-7c1e-7b3a-9d2e-3f4a5b6c7d8e" {
+		t.Fatalf("the account's text: %s", account)
+	}
+	const want = "ac063473de8a0e4dac291b7d1e1eaadb515deee81d7172dead710ef07bef6271"
+	if got := TargetHash(ClassRevokeSession, account, target); got != want {
+		t.Fatalf("TargetHash = %s, want %s", got, want)
+	}
+	if TargetHash(ClassRevokeSession, target, account) == want || TargetHash(ClassRevokeDevice, account, target) == want {
+		t.Fatal("the hash does not bind the order of its IDs or its class")
 	}
 }

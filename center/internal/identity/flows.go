@@ -60,6 +60,8 @@ type flow struct {
 	Kind        FlowKind
 	Purpose     Purpose
 	UserID      *platform.ID
+	SessionID   *platform.ID
+	Label       *string
 	Origin      *string
 	Challenge   []byte
 	UserHandle  []byte
@@ -80,26 +82,27 @@ func (s *Service) insertFlow(ctx context.Context, tx pgx.Tx, row flow) error {
 	if row.Claim != nil {
 		installation, product, platformText, version = &row.Claim.InstallationID, &row.Claim.Product, &row.Claim.Platform, &row.Claim.AppVersion
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO identity.auth_flow (flow_id, channel, kind, purpose, user_id, origin, challenge, webauthn_user_handle, email_hash,
-    code_hash, code_salt, sends, installation_id, installation_product, installation_platform, installation_version, attempts, max_attempts,
-    created_at, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, $18, $19)`,
-		row.ID, int16(row.Channel), int16(row.Kind), int16(row.Purpose), row.UserID, row.Origin, row.Challenge, row.UserHandle, row.EmailHash,
-		row.CodeHash, row.CodeSalt, row.Sends, installation, product, platformText, version, row.MaxAttempts, row.CreatedAt, row.ExpiresAt)
+	_, err := tx.Exec(ctx, `INSERT INTO identity.auth_flow (flow_id, channel, kind, purpose, user_id, session_id, label, origin, challenge,
+    webauthn_user_handle, email_hash, code_hash, code_salt, sends, installation_id, installation_product, installation_platform, installation_version,
+    attempts, max_attempts, created_at, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 0, $19, $20, $21)`,
+		row.ID, int16(row.Channel), int16(row.Kind), int16(row.Purpose), row.UserID, row.SessionID, row.Label, row.Origin, row.Challenge, row.UserHandle,
+		row.EmailHash, row.CodeHash, row.CodeSalt, row.Sends, installation, product, platformText, version, row.MaxAttempts, row.CreatedAt, row.ExpiresAt)
 	return err
 }
 
-const flowColumns = `flow_id, channel, kind, purpose, user_id, origin, challenge, webauthn_user_handle, email_hash, code_hash, code_salt, sends,
-    installation_id, installation_product, installation_platform, installation_version, attempts, max_attempts, created_at, expires_at`
+const flowColumns = `flow_id, channel, kind, purpose, user_id, session_id, label, origin, challenge, webauthn_user_handle, email_hash, code_hash,
+    code_salt, sends, installation_id, installation_product, installation_platform, installation_version, attempts, max_attempts, created_at,
+    expires_at`
 
 func scanFlow(row pgx.Row) (flow, error) {
 	var item flow
 	var channel, kind, purpose int16
 	var installation *platform.ID
 	var product, platformText, version *string
-	err := row.Scan(&item.ID, &channel, &kind, &purpose, &item.UserID, &item.Origin, &item.Challenge, &item.UserHandle, &item.EmailHash,
-		&item.CodeHash, &item.CodeSalt, &item.Sends, &installation, &product, &platformText, &version, &item.Attempts, &item.MaxAttempts,
-		&item.CreatedAt, &item.ExpiresAt)
+	err := row.Scan(&item.ID, &channel, &kind, &purpose, &item.UserID, &item.SessionID, &item.Label, &item.Origin, &item.Challenge, &item.UserHandle,
+		&item.EmailHash, &item.CodeHash, &item.CodeSalt, &item.Sends, &installation, &product, &platformText, &version, &item.Attempts,
+		&item.MaxAttempts, &item.CreatedAt, &item.ExpiresAt)
 	if err != nil {
 		return flow{}, err
 	}
@@ -120,7 +123,7 @@ func classify(ctx context.Context, q pgx.Tx, id platform.ID, channel Channel, ki
 	err := q.QueryRow(ctx, "SELECT channel, kind, purpose, attempts, max_attempts, outcome, expires_at FROM identity.auth_flow WHERE flow_id = $1", id).
 		Scan(&storedChannel, &storedKind, &storedPurpose, &attempts, &maxAttempts, &outcome, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return arc.NotFound()
+		return arc.NotFound("auth_flow", id[:])
 	}
 	if err != nil {
 		return err
@@ -131,7 +134,7 @@ func classify(ctx context.Context, q pgx.Tx, id platform.ID, channel Channel, ki
 	}
 	switch {
 	case !matches || Channel(storedChannel) != channel || Purpose(storedPurpose) != purpose:
-		return arc.NotFound()
+		return arc.NotFound("auth_flow", id[:])
 	case outcome != nil && *outcome == outcomeExhausted:
 		return arc.Expired()
 	case outcome != nil:

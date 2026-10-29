@@ -349,7 +349,7 @@ func TestHealthIdentifiesTheCenterAndTouchesNoDatabase(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusOK || response.Header.Get("Cache-Control") != "no-store" || health.NativeAOT ||
 		health.Runtime != "go" || health.HelloBackend != BackendStateless || health.Service != "arcforges-cloud" ||
-		health.Center != (buildinfo.Center{Binary: "arcforges-center", Mode: "official-hosted", PublicBaseURL: "https://center.example/api"}) {
+		health.Center != (buildinfo.Center{Binary: "arcforges-center", Mode: "official-hosted", PublicBaseURL: "https://center.example/api", Surfaces: "none"}) {
 		t.Fatalf("health: %d %+v", response.StatusCode, health)
 	}
 	post, err := http.Post(h.server.URL+"/healthz", "text/plain", nil)

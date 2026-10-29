@@ -44,6 +44,7 @@ FUZZ_TARGETS = (
     ("./internal/identity", "FuzzNormalizeEmail"),
     ("./internal/page", "FuzzParseCursor"),
     ("./internal/server", "FuzzClientAddressHeader"),
+    ("./internal/identity/passkey", "FuzzCeremonyPayloads"),
 )
 FUZZ_TIME = "10s"
 TEST_TIMEOUT = "10m"
@@ -351,8 +352,9 @@ def smoke(executable: Path, linux: bool) -> dict[str, object]:
             raise SystemExit("[center] the self-hosted center did not start; see " + str(log))
         with opener.open(f"http://{address}/healthz", timeout=10) as response:
             health = json.load(response)
+        # An IP address cannot be a WebAuthn relying party, so the self-hosted default leaves identity off and says so.
         if health["runtime"] != "go" or health["center"] != {"binary": "arcforges-center", "mode": "self-hosted",
-                                                              "publicBaseUrl": "http://127.0.0.1:8080"}:
+                                                              "publicBaseUrl": "http://127.0.0.1:8080", "surfaces": "none"}:
             raise SystemExit("[center] the self-hosted health document is wrong")
         request = urllib.request.Request(f"http://{address}/arcforges.hello.v1.HelloService/Unknown", data=b"\0\0\0\0\0",
                                          headers={"Content-Type": "application/grpc-web+proto"}, method="POST")

@@ -26,9 +26,10 @@ type IdentityMethod struct {
 	MaxRequestBytes int
 }
 
-// IdentityMethods are the IdentityService and DeviceService methods AF-CTR-03 A1a serves, in registration order. Every other
-// method of the two services (and every WorkspaceService method) stays unregistered: the center answers UNIMPLEMENTED and the
-// Worker table has no row for it. A1b extends this list (step-up, sign-out and revocation, credential and device management).
+// IdentityMethods are the IdentityService and DeviceService methods AF-CTR-03 serves, in registration order: A1a's sign-in, refresh
+// and reads, then A1b's step-up, profile, passkey registration, credential, sign-out and revocation, and device management. Every
+// other method of the two services (and every WorkspaceService method) stays unregistered: the center answers UNIMPLEMENTED and the
+// Worker table has no row for it (AF-ID-02's recovery, deletion, export and e-mail change among them).
 func IdentityMethods() []IdentityMethod {
 	return []IdentityMethod{
 		{publicapiv1connect.IdentityServiceBeginAuthenticationProcedure, false, identityRequestBytes},
@@ -42,6 +43,17 @@ func IdentityMethods() []IdentityMethod {
 		{publicapiv1connect.IdentityServiceListAuthIdentitiesProcedure, true, identityRequestBytes},
 		{publicapiv1connect.IdentityServiceListSessionsProcedure, true, identityRequestBytes},
 		{publicapiv1connect.DeviceServiceListProcedure, true, identityRequestBytes},
+		{publicapiv1connect.IdentityServiceBeginStepUpProcedure, true, identityRequestBytes},
+		{publicapiv1connect.IdentityServiceCompleteStepUpProcedure, true, identityCeremonyBytes},
+		{publicapiv1connect.IdentityServiceUpdateProfileProcedure, true, identityRequestBytes},
+		{publicapiv1connect.IdentityServiceBeginPasskeyRegistrationProcedure, true, identityRequestBytes},
+		{publicapiv1connect.IdentityServiceCompletePasskeyRegistrationProcedure, true, identityCeremonyBytes},
+		{publicapiv1connect.IdentityServiceRenameAuthIdentityProcedure, true, identityRequestBytes},
+		{publicapiv1connect.IdentityServiceRemoveAuthIdentityProcedure, true, identityRequestBytes},
+		{publicapiv1connect.IdentityServiceRevokeSessionProcedure, true, identityRequestBytes},
+		{publicapiv1connect.IdentityServiceRevokeAllSessionsProcedure, true, identityRequestBytes},
+		{publicapiv1connect.DeviceServiceRenameProcedure, true, identityRequestBytes},
+		{publicapiv1connect.DeviceServiceRevokeProcedure, true, identityRequestBytes},
 	}
 }
 

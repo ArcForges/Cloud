@@ -117,11 +117,11 @@ func (s *Service) RequestEmailCode(ctx context.Context, request Request, flowID 
 WHERE flow_id = $1 AND channel = 1 AND kind = 4 AND purpose = $2 FOR UPDATE`, flowID, int16(purpose)).Scan(&emailHash, &sends, &expiresAt, &consumed)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			return arc.NotFound()
+			return arc.NotFound("auth_flow", flowID[:])
 		case err != nil:
 			return err
 		case subtle.ConstantTimeCompare(emailHash, EmailHash(normalized)) != 1:
-			return arc.NotFound()
+			return arc.NotFound("auth_flow", flowID[:])
 		case consumed:
 			return classify(ctx, tx, flowID, ChannelNative, []FlowKind{FlowEmailCode}, PurposeAuthenticate, now)
 		case !now.Before(expiresAt):
@@ -267,8 +267,7 @@ WHERE user_id = $1 AND provider_id = 'email' AND revoked_at IS NULL AND sha256(c
 	if err != nil && refusalOf(err) == nil && !errors.Is(err, store.ErrCommitUnknown) {
 		// The success transaction rolled back with its give-back of the reservation (a definite rollback: an unknown commit is
 		// excluded, because the give-back is not idempotent).
-		_ = s.db.InTx(context.WithoutCancel(ctx), "give a failure reservation back", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true},
-			func(ctx context.Context, tx pgx.Tx) error { return ratelimit.Release(ctx, tx, failures, reservation) })
+		s.giveBack(ctx, failures, reservation)
 	}
 	return signedIn, err
 }

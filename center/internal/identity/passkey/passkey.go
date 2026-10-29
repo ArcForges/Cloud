@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
 	"github.com/go-webauthn/webauthn/protocol/webauthncose"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -65,6 +66,7 @@ func (rp *RelyingParty) Origin() string { return rp.origin }
 type Options struct {
 	RPID             string
 	UserHandle       []byte
+	Allowed          [][]byte
 	Excluded         [][]byte
 	UserVerification string
 	Algorithms       []int32
@@ -73,6 +75,12 @@ type Options struct {
 // LoginOptions are the options of a discoverable sign-in: no allowed credentials, user verification required.
 func (rp *RelyingParty) LoginOptions() Options {
 	return Options{RPID: rp.rpID, UserVerification: UserVerification, Algorithms: []int32{AlgorithmES256}}
+}
+
+// StepUpOptions are the options of a step-up of a known account: its passkeys are named as the allowed credentials, user
+// verification is required, and the assertion is verified like a discoverable sign-in (it must name the owner's user handle).
+func (rp *RelyingParty) StepUpOptions(allowed [][]byte) Options {
+	return Options{RPID: rp.rpID, Allowed: allowed, UserVerification: UserVerification, Algorithms: []int32{AlgorithmES256}}
 }
 
 // CreationOptions are the options of a registration for a user handle, excluding the user's existing credentials.
@@ -125,10 +133,30 @@ func (rp *RelyingParty) session(challenge, userHandle []byte, expires time.Time,
 	return session
 }
 
-// VerifyCreation verifies a registration against the challenge and user handle of its flow: the client data (type, challenge,
-// origin), the RP ID hash, user presence and verification, the algorithm, the attestation format "none" and the flags.
+// noneStatement is the CBOR encoding of the empty map, the only statement of the attestation format "none".
+var noneStatement = []byte{0xa0}
+
+// attestationIsNone peeks at an attestation object before the library parses it (G3): it decodes the top-level map with the
+// library's own bounded CTAP2 decoder (definite lengths, no tags, at most five levels, no duplicate keys), reads only "fmt" and
+// keeps "attStmt" as raw bytes, and admits exactly the format "none" with its empty statement. A registration in any other format
+// is refused before the library's attestation verification runs, so its tpm, android-safetynet, android-key, apple and packed
+// statement parsers are unreachable from the center's ceremonies.
+func attestationIsNone(object []byte) bool {
+	var peek struct {
+		Format    string                  `cbor:"fmt"`
+		Statement webauthncbor.RawMessage `cbor:"attStmt"`
+	}
+	if webauthncbor.Unmarshal(object, &peek) != nil {
+		return false
+	}
+	return peek.Format == AttestationNone && bytes.Equal(peek.Statement, noneStatement)
+}
+
+// VerifyCreation verifies a registration against the challenge and user handle of its flow: the attestation format "none" with
+// its empty statement first, before the library parses anything (G3), then the client data (type, challenge, origin), the RP ID
+// hash, user presence and verification, the algorithm and the flags.
 func (rp *RelyingParty) VerifyCreation(challenge, userHandle []byte, creation Creation, expires time.Time) (Credential, error) {
-	if len(challenge) != ChallengeBytes || len(userHandle) == 0 || len(creation.CredentialID) == 0 {
+	if len(challenge) != ChallengeBytes || len(userHandle) == 0 || len(creation.CredentialID) == 0 || !attestationIsNone(creation.AttestationObject) {
 		return Credential{}, ErrRefused
 	}
 	response := protocol.CredentialCreationResponse{

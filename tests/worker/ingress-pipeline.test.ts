@@ -238,8 +238,8 @@ test("no path outside the exact method table is ever forwarded", async () => {
     "//api/arcforges.hello.v1.HelloService/SayHello",
     "/api/%2e%2e/internal/storage/v1/execute-plan",
     "/api/arcforges.hello.v1.HelloService/SayHello%00",
-    // A contract method no surface serves (AF-CTR-03 A1a serves the identity reads, not credential removal).
-    "/api/arcforges.publicapi.v1.IdentityService/RemoveAuthIdentity",
+    // A contract method no surface serves (AF-CTR-03 serves sign-in, the account and its devices, not AF-ID-02's recovery).
+    "/api/arcforges.publicapi.v1.IdentityService/BeginRecovery",
     "/api/arcforges.publicapi.v1.IdentityService/GetProfile/",
     // Non-canonical variants of a registered method never match the exact table.
     "/api/arcforges.hello.v1.HelloService/SayHello/.",

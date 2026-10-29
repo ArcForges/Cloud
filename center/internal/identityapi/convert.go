@@ -69,7 +69,7 @@ func webAuthnOptions(options *passkey.Options) *publicapiv1.WebAuthnOptions {
 		return nil
 	}
 	result := &publicapiv1.WebAuthnOptions{RpId: proto.String(options.RPID), UserVerification: proto.String(options.UserVerification),
-		ExcludedCredentials: options.Excluded, Algorithms: options.Algorithms}
+		AllowedCredentials: options.Allowed, ExcludedCredentials: options.Excluded, Algorithms: options.Algorithms}
 	if len(options.UserHandle) > 0 {
 		result.UserHandle = options.UserHandle
 	}
