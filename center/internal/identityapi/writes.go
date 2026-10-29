@@ -27,11 +27,13 @@ import (
 // evidence it needs is consumed in its own transaction, a final refusal (retry NEVER) is kept by the receipt and answered to every
 // replay, and any other refusal (step_up_required, rate_limited, overloaded) or failure rolls the receipt back, so the same command
 // can succeed after the step-up or the wait its advice names. The receipt keeps the reply message without tokens and without an
-// e-mail address (C1). A refusal decided before the receipt (the access check's, a missing command ID, CompletePasskeyRegistration's
-// not_found, expired, code_reused and invalid_argument) is not kept, and a replay is decided afresh (E6); of these only
-// credential: not_verified ends the flow (B5), so its identical replay answers STATE/expired. A duplicate of a registration whose
-// first execution still runs answers RESOURCE/overloaded, and one refused just after that execution committed answers its receipt
-// from a second lookup (B4).
+// e-mail address (C1). A refusal decided before the receipt is not kept, and a replay is decided afresh (E6, F-4): the access
+// check's (permission_denied, step_up_required), the request's validation (a RequestMeta naming a workspace, a missing
+// meta.command_id, a missing patch, patch.avatar: not_offered, a missing credential, a missing flow_id, credential_id, session_id or
+// device_id) and CompletePasskeyRegistration's not_found, expired, code_reused and credential: not_verified; of these only
+// not_verified ends the flow (B5), so its identical replay answers STATE/expired. A duplicate of a registration whose first
+// execution still runs answers RESOURCE/overloaded, and one refused just after that execution committed answers its receipt from a
+// second lookup, or that lookup's own failure (B4, F-1).
 
 // storedRefusal is a refusal a command receipt answered: the ArcError of the command's one execution, without a correlation id.
 type storedRefusal struct{ value *foundationv1.ArcError }
@@ -311,9 +313,10 @@ func (s *Server) completePasskeyRegistration(ctx context.Context, call *ingress.
 		registration, err := s.identity.PrepareRegistration(ctx, caller, flowID, creation(request.GetCredential()))
 		if err != nil {
 			// B4: a duplicate refused because its first execution held the flow's attempt answers that execution's receipt when it
-			// committed meanwhile.
-			if outcome, found, lookupErr := platform.Lookup(ctx, s.db, receiptCommand); lookupErr == nil && found {
-				return decode(outcome, nil, &publicapiv1.IdentityServiceCompletePasskeyRegistrationValue{})
+			// committed meanwhile. The command may have committed, so a lookup that fails answers its own (retryable) failure, never
+			// the refusal (F-1).
+			if outcome, found, lookupErr := platform.Lookup(ctx, s.db, receiptCommand); lookupErr != nil || found {
+				return decode(outcome, lookupErr, &publicapiv1.IdentityServiceCompletePasskeyRegistrationValue{})
 			}
 			return nil, err
 		}

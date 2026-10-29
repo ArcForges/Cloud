@@ -551,12 +551,17 @@ func TestADuplicateOfARunningRegistrationIsBusy(t *testing.T) {
 	h.verifyAudit()
 }
 
-// TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt (B4, E1): a duplicate CompletePasskeyRegistration whose receipt
-// lookup runs before the first execution committed, and whose attempt runs after it, finds the flow consumed; its second receipt
-// lookup answers the first's receipt, never a final code_reused. The first execution parks on the account's row; a table lock queued
-// behind it on a second connection parks the duplicate's attempt until the first committed.
-func TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt(t *testing.T) {
-	h := newHarness(t, settings{policy: writePolicy})
+// registrationAnswer is a CompletePasskeyRegistration reply.
+type registrationAnswer = *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse
+
+// racedRegistration runs one CompletePasskeyRegistration command twice so that the duplicate's receipt lookup runs before the first
+// execution committed and its attempt after it: the first execution parks on the account's row, a table lock queued behind it on a
+// second connection parks the duplicate's attempt, and the account's row is then released. committed runs once the first execution
+// answered and the table lock is granted, before the duplicate's attempt goes on. It returns both answers, the command (to send it
+// again) and the new credential's subject.
+func racedRegistration(t *testing.T, h *harness, committed func(ctx context.Context)) (first, duplicate registrationAnswer, complete func() registrationAnswer,
+	subject string) {
+	t.Helper()
 	who := h.seedAccount(1, "")
 	from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
 	h.stepUp(who, from, identity.ClassBeginRegistration, who.id)
@@ -564,8 +569,8 @@ func TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt(t *testing.T) 
 		&publicapiv1.IdentityServiceBeginPasskeyRegistrationResponse{}).GetValue().GetChallenge()
 	creation, _ := virtual.New(rpID, origin).Create(challenge.GetChallenge(), who.handle)
 	request := &publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest{Meta: command(), FlowId: challenge.GetFlowId(), Credential: creationOf(creation)}
-	complete := func(into chan<- *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse) {
-		into <- rpc(h, completeRegisterPath, request, from, &publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse{})
+	complete = func() registrationAnswer {
+		return rpc(h, completeRegisterPath, request, from, &publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse{})
 	}
 	ctx := context.Background()
 	other, err := pgx.ConnectConfig(ctx, h.migration.Config())
@@ -574,8 +579,8 @@ func TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt(t *testing.T) 
 	}
 	t.Cleanup(func() { _ = other.Close(context.Background()) })
 	account := h.holding("SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", who.id)
-	first := make(chan *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse, 1)
-	go complete(first)
+	firsts := make(chan registrationAnswer, 1)
+	go func() { firsts <- complete() }()
 	if !account.waitFor(1) {
 		t.Fatal("the first completion never reached the account's row")
 	}
@@ -591,23 +596,70 @@ func TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt(t *testing.T) 
 	if !account.waitFor(2) {
 		t.Fatal("the table lock never queued behind the first completion")
 	}
-	duplicate := make(chan *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse, 1)
-	go complete(duplicate)
+	duplicates := make(chan registrationAnswer, 1)
+	go func() { duplicates <- complete() }()
 	if !account.waitFor(3) {
 		t.Fatal("the duplicate's attempt never queued behind the table lock")
 	}
 	account.release(false)
-	answer := <-first
+	first = <-firsts
 	if err = <-queued; err != nil {
 		t.Fatal(err)
+	}
+	if committed != nil {
+		committed(ctx)
 	}
 	if err = table.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	second := <-duplicate
+	return first, <-duplicates, complete, base64.RawURLEncoding.EncodeToString(creation.CredentialID)
+}
+
+// TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt (B4, E1): a duplicate CompletePasskeyRegistration whose receipt
+// lookup runs before the first execution committed, and whose attempt runs after it, finds the flow consumed; its second receipt
+// lookup answers the first's receipt, never a final code_reused.
+func TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	answer, second, _, subject := racedRegistration(t, h, nil)
 	if answer.GetError() != nil || second.GetError() != nil || !proto.Equal(second.GetValue(), answer.GetValue()) || h.receipts() != 1 ||
-		h.count("SELECT count(*) FROM identity.auth_identity WHERE subject = $1", base64.RawURLEncoding.EncodeToString(creation.CredentialID)) != 1 {
+		h.count("SELECT count(*) FROM identity.auth_identity WHERE subject = $1", subject) != 1 {
 		t.Fatalf("the first completion %v, the duplicate refused after it committed %v", answer, second)
+	}
+	h.verifyAudit()
+}
+
+// TestADuplicateWhoseSecondLookupFailsIsRetryable (B4, F-1): when that second receipt lookup fails, the duplicate's command may
+// have committed, so it answers the lookup's own failure, RESOURCE/overloaded with its retry instant, never the final code_reused
+// of the consumed flow; the same command then replays the receipt. A third connection holds the receipt table locked from the
+// first execution's commit until the duplicate answered, so its lookup runs into its timeout.
+func TestADuplicateWhoseSecondLookupFailsIsRetryable(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	receipts, err := pgx.ConnectConfig(context.Background(), h.migration.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = receipts.Close(context.Background()) })
+	var locked pgx.Tx
+	answer, second, complete, subject := racedRegistration(t, h, func(ctx context.Context) {
+		if locked, err = receipts.Begin(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = locked.Exec(ctx, "LOCK TABLE platform.command_receipt IN ACCESS EXCLUSIVE MODE"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err = locked.Rollback(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	refusal := second.GetError()
+	if answer.GetError() != nil || failure(refusal) != "RESOURCE/overloaded" || refusal.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_AFTER_TIME ||
+		refusal.GetRetry().GetRetryAt() == nil {
+		t.Fatalf("the first completion %v, the duplicate whose second lookup failed %v", answer, second)
+	}
+	replay := complete()
+	if replay.GetError() != nil || !proto.Equal(replay.GetValue(), answer.GetValue()) || h.receipts() != 1 ||
+		h.count("SELECT count(*) FROM identity.auth_identity WHERE subject = $1", subject) != 1 {
+		t.Fatalf("the same command after the lock: %v", replay)
 	}
 	h.verifyAudit()
 }
