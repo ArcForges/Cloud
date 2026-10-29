@@ -199,9 +199,10 @@ func Internal() *Refusal {
 		Retry: foundationv1.RetryMode_RETRY_MODE_AFTER_TIME, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN}
 }
 
-// CommitUnknown is INTERNAL/internal for a write whose COMMIT was sent without an answer: it may have happened (effect UNKNOWN), and
-// the same call is never retried as it was (retry NEVER), because a refresh token or a flow it presented may already be spent; the
-// client signs in again or reads the state it needs.
+// CommitUnknown is INTERNAL/internal for the write that carries a call's effect when its COMMIT was sent without an answer: it may
+// have happened (effect UNKNOWN), and the same call is never retried as it was (retry NEVER), because a refresh token or a flow it
+// presented may already be spent; the client signs in again or reads the state it needs. An auxiliary transaction's unanswered
+// COMMIT (a rate-limit count, a flow attempt, a refusal's audit) leaves the effect undone and is answered as Unavailable (D10).
 func CommitUnknown() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_INTERNAL, Code: "internal",
 		Retry: foundationv1.RetryMode_RETRY_MODE_NEVER, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN}

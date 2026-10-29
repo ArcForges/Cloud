@@ -142,7 +142,9 @@ func defaultName(platform Platform) string {
 
 // EnsureNative finds or creates the device and installation of a native claim in the caller's transaction. An installation of
 // another account, of another product or on a revoked device is refused; a known one is touched (version, platform text, last
-// activity). A concurrent first sign-in with the same new installation ID loses on the primary key and is answered overloaded.
+// activity). A concurrent first sign-in with the same new installation ID loses on the primary key: that is a store contention
+// (store.ErrContention, answered RESOURCE/overloaded with AFTER_TIME), not a refusal, so the caller gives the flow's attempt back
+// and the identical retry finds the installation (D4).
 func EnsureNative(ctx context.Context, tx pgx.Tx, userID platform.ID, claim Claim, now time.Time) (deviceID platform.ID, err error) {
 	devicePlatform, ok := MobilePlatform(claim.Platform)
 	if !ok {
@@ -165,7 +167,7 @@ WHERE i.installation_id = $1 FOR UPDATE OF i, d`, claim.InstallationID).Scan(&de
     last_active_at, rev) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, 1)`, claim.InstallationID, deviceID, userID, claim.Product, claim.AppVersion,
 			claim.Platform, now); err != nil {
 			if errors.Is(store.Sanitize("create an installation", err), store.ErrConflict) {
-				return platform.ID{}, arc.Unavailable()
+				return platform.ID{}, &store.Error{Operation: "create an installation", SQLState: "23505", Kind: store.ErrContention}
 			}
 			return platform.ID{}, store.Sanitize("create an installation", err)
 		}

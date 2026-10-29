@@ -335,7 +335,8 @@ func (s *Service) signIn(ctx context.Context, request Request, row flow, userID 
 	})
 	if err != nil {
 		if refusalOf(err) == nil {
-			// The proof verified and the store failed: the attempt is given back for the advised retry.
+			// The proof verified and the store failed (a lost race for a new installation included, D4): the attempt is given back
+			// for the advised retry.
 			s.release(ctx, row.ID)
 		} else if exhaustErr := s.exhaust(ctx, row.ID); exhaustErr != nil {
 			return SignedIn{}, exhaustErr

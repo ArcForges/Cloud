@@ -123,6 +123,27 @@ func TestAnonymousFailuresAreAuditedOncePerPrefix(t *testing.T) {
 	if failed() != 4 {
 		t.Fatalf("wrong codes of four addresses from one prefix: %d audits", failed())
 	}
+	// The reverse order on a fresh prefix (D3): a failure that names an account first, then unknown credentials from the same
+	// prefix. The account's failure counts its own class's marker, so the anonymous failures still get exactly one audit.
+	anonymous := func() int {
+		return h.count("SELECT count(*) FROM audit.audit_event WHERE event_type = 'identity.sign_in.failed' AND actor_ref = 'anonymous'")
+	}
+	named, unnamed := failed()-anonymous(), anonymous()
+	other := h.seedAccount(1, "")
+	challenge := h.beginPasskey(newClaim(t), caller{ip: "198.18.0.10"})
+	response := rpc(h, completePath, &publicapiv1.IdentityServiceCompleteAuthenticationRequest{Meta: meta(), FlowId: challenge.GetFlowId(),
+		Proof: &publicapiv1.AuthProof{Proof: &publicapiv1.AuthProof_Passkey{Passkey: assertionOf(other.authenticator.Assert(other.key, randomBytes(t, 32)))}}},
+		caller{ip: "198.18.0.10"}, &publicapiv1.IdentityServiceCompleteAuthenticationResponse{})
+	if failure(response.GetError()) != "AUTHENTICATION/unauthenticated" {
+		t.Fatalf("a wrong proof of another account: %s", failure(response.GetError()))
+	}
+	for range 3 {
+		unknown("198.18.0.77")
+	}
+	if failed()-anonymous() != named+1 || anonymous() != unnamed+1 {
+		t.Fatalf("an account's failure, then unknown credentials from its prefix: %d named and %d anonymous audits", failed()-anonymous()-named,
+			anonymous()-unnamed)
+	}
 	h.verifyAudit()
 }
 

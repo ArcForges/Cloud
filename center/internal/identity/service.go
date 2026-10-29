@@ -157,11 +157,16 @@ func (s *Service) fail(ctx context.Context, request Request, bucket ratelimit.Bu
 // audited audits a counted failure once per window (E10). A failure that names an account is audited as the first failure of its
 // bucket's window. An anonymous failure's bucket key is chosen by the client (an unknown credential, an address), so its audit
 // follows the client's prefix instead: a marker of the bucket's kind keyed by the prefix is counted, and only its first failure of
-// a window is audited; the rest are only counted. The marker is counted for every failure, whoever it names, so known and unknown
-// credentials run the same statements.
+// a window is audited; the rest are only counted. The marker is kept per class of failure (D3): "prefix:" for anonymous failures and
+// "prefix-account:" for failures that name an account, so an account's failure never takes the anonymous failures' first audit of
+// the prefix. Every failure counts exactly one marker, whoever it names, so known and unknown credentials run the same statements.
 func (s *Service) audited(ctx context.Context, request Request, bucket ratelimit.Bucket, decision ratelimit.Decision, actor, eventType, reason string,
 	payload map[string]any) error {
-	marker, err := s.limits.Fail(ctx, s.bucket(bucket.Kind, "prefix:"+ratelimit.Prefix(request.ClientIP)), s.now())
+	class := "prefix:"
+	if actor != Anonymous {
+		class = "prefix-account:"
+	}
+	marker, err := s.limits.Fail(ctx, s.bucket(bucket.Kind, class+ratelimit.Prefix(request.ClientIP)), s.now())
 	if err != nil {
 		return err
 	}
@@ -190,9 +195,10 @@ func (s *Service) audit(ctx context.Context, tx pgx.Tx, request Request, actor, 
 	return err
 }
 
-// auditAlone appends an event in its own transaction (a refusal's).
+// auditAlone appends an event in its own transaction (a refusal's), which is auxiliary: the refusal is the call's answer, and the
+// audit is no effect of it (D10).
 func (s *Service) auditAlone(ctx context.Context, request Request, actor, eventType, reason, targetKind, targetID string, payload map[string]any) error {
-	return s.db.InTx(ctx, "audit an identity refusal", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.InTx(ctx, "audit an identity refusal", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		return s.audit(ctx, tx, request, actor, eventType, reason, targetKind, targetID, payload)
 	})
 }

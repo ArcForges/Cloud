@@ -167,7 +167,8 @@ func (a *Authorizer) refuse(ctx context.Context, call *ingress.Call, operation O
 		copy(id[:], raw)
 		correlationID = &id
 	}
-	err = a.db.InTx(ctx, "audit an access refusal", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+	// The audit is no effect of the refused call, so its transaction is auxiliary (D10).
+	err = a.db.InTx(ctx, "audit an access refusal", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := platform.AppendAudit(ctx, tx, platform.Event{EventID: platform.NewID(), OccurredAt: a.clock(), ActorRef: "account:" + call.Caller.UserID,
 			EventType: "access.refused", Reason: reason, CorrelationID: correlationID, TargetKind: "operation", TargetID: operation.ID, Payload: payload})
 		return err

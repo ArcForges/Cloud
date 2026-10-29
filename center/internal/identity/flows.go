@@ -143,7 +143,9 @@ func classify(ctx context.Context, q pgx.Tx, id platform.ID, channel Channel, ki
 }
 
 // takeAttempt counts one completion attempt of a flow in its own transaction, before the proof is checked, so the attempt stays
-// counted whatever the proof's outcome; it returns the flow, or the refusal of a flow that cannot be used.
+// counted whatever the proof's outcome; it returns the flow, or the refusal of a flow that cannot be used. The count, the flow's end
+// (exhaust) and the attempt's give-back (release) are no effect of the call, so their transactions are auxiliary (D10): a COMMIT of
+// one without an answer is answered like an unavailable store, and nothing is given back after it.
 func (s *Service) takeAttempt(ctx context.Context, id platform.ID, channel Channel, kinds []FlowKind, purpose Purpose) (flow, error) {
 	now := s.now()
 	stored := make([]int16, len(kinds))
@@ -151,7 +153,7 @@ func (s *Service) takeAttempt(ctx context.Context, id platform.ID, channel Chann
 		stored[index] = int16(kind)
 	}
 	var item flow
-	err := s.db.InTx(ctx, "count a flow attempt", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.InTx(ctx, "count a flow attempt", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		item, err = scanFlow(tx.QueryRow(ctx, `UPDATE identity.auth_flow SET attempts = attempts + 1
 WHERE flow_id = $1 AND channel = $2 AND kind = ANY($3::smallint[]) AND purpose = $4 AND consumed_at IS NULL AND expires_at > $5 AND attempts < max_attempts
@@ -166,19 +168,20 @@ RETURNING `+flowColumns, id, int16(channel), stored, int16(purpose), now))
 
 // exhaust ends a flow whose last attempt failed, in its own transaction.
 func (s *Service) exhaust(ctx context.Context, id platform.ID) error {
-	return s.db.InTx(ctx, "end an exhausted flow", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.InTx(ctx, "end an exhausted flow", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE identity.auth_flow SET consumed_at = $2, outcome = $3
 WHERE flow_id = $1 AND consumed_at IS NULL AND attempts >= max_attempts`, id, s.now(), outcomeExhausted)
 		return err
 	})
 }
 
-// release gives back the attempt a completion took when its proof verified but its success transaction failed in the store (or
-// when no proof was checked at all), so the advised retry of the same request can succeed (F9). It is best effort, in its own short
+// release gives back the attempt a completion took when its proof verified but its success transaction failed in the store (a
+// lost race for a new installation included, which is a store contention, D4), or when no proof was checked at all, so the advised
+// retry of the same request can succeed (F9). It is best effort, in its own short
 // transaction: a store that is still down leaves the attempt spent. A flow consumed meanwhile (a success whose reply was lost) is
 // never changed, and a wrong proof never reaches it, so it grants no guess.
 func (s *Service) release(ctx context.Context, id platform.ID) {
-	_ = s.db.InTx(context.WithoutCancel(ctx), "release a flow attempt", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+	_ = s.db.InTx(context.WithoutCancel(ctx), "release a flow attempt", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "UPDATE identity.auth_flow SET attempts = attempts - 1 WHERE flow_id = $1 AND consumed_at IS NULL AND attempts > 0", id)
 		return err
 	})

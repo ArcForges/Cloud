@@ -143,7 +143,8 @@ var ErrBucket = errors.New("a rate-limit bucket needs a key, a positive limit an
 
 const maxCount = 2147483646
 
-// count adds one to the bucket in its own transaction, resetting a window that has passed.
+// count adds one to the bucket in its own transaction, resetting a window that has passed. A count is no effect of the call it
+// guards, so its transaction is auxiliary (store.TxOptions.Auxiliary), as Reserve's is.
 func (l *Limiter) count(ctx context.Context, bucket Bucket, now time.Time) (time.Time, int, error) {
 	if bucket.Key == "" || bucket.Window.Limit < 1 || bucket.Window.Window <= 0 {
 		return time.Time{}, 0, ErrBucket
@@ -151,7 +152,7 @@ func (l *Limiter) count(ctx context.Context, bucket Bucket, now time.Time) (time
 	hash := bucket.Hash()
 	var start time.Time
 	var count int
-	err := l.db.InTx(ctx, "count a rate-limit bucket", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+	err := l.db.InTx(ctx, "count a rate-limit bucket", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO platform.rate_limit AS r (bucket_hash, window_start, count) VALUES ($1, $2, 1)
 ON CONFLICT (bucket_hash) DO UPDATE SET
     window_start = CASE WHEN r.window_start + $3::interval <= $2 THEN $2 ELSE r.window_start END,
@@ -196,7 +197,7 @@ func (l *Limiter) Reserve(ctx context.Context, bucket Bucket, now time.Time) (De
 	var start time.Time
 	var count int
 	reserved := true
-	err := l.db.InTx(ctx, "reserve a rate-limit failure", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+	err := l.db.InTx(ctx, "reserve a rate-limit failure", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		reserved = true
 		err := tx.QueryRow(ctx, `INSERT INTO platform.rate_limit AS r (bucket_hash, window_start, count) VALUES ($1, $2, 1)
 ON CONFLICT (bucket_hash) DO UPDATE SET

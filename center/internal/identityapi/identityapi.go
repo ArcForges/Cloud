@@ -96,9 +96,10 @@ func (s *Server) Methods() []connect.Method {
 	}
 }
 
-// failure is the ArcError of an error: a refusal as it is, a write whose commit outcome is unknown as INTERNAL/internal with effect
-// UNKNOWN and retry NEVER (F6), a store that is down or contended as RESOURCE/overloaded, anything else as INTERNAL/internal
-// (logged with the correlation id; store errors never carry row values).
+// failure is the ArcError of an error: a refusal as it is, the call's effect write whose commit outcome is unknown as
+// INTERNAL/internal with effect UNKNOWN and retry NEVER (F6), a store that is down or contended as RESOURCE/overloaded (an
+// auxiliary transaction's unanswered commit included, D10), anything else as INTERNAL/internal (logged with the correlation id;
+// store errors never carry row values).
 func (s *Server) failure(ctx context.Context, call *ingress.Call, err error) *foundationv1.ArcError {
 	if err == nil {
 		return nil
