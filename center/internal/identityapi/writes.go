@@ -27,9 +27,11 @@ import (
 // evidence it needs is consumed in its own transaction, a final refusal (retry NEVER) is kept by the receipt and answered to every
 // replay, and any other refusal (step_up_required, rate_limited, overloaded) or failure rolls the receipt back, so the same command
 // can succeed after the step-up or the wait its advice names. The receipt keeps the reply message without tokens and without an
-// e-mail address (C1). The one final refusal no receipt keeps is CompletePasskeyRegistration's credential: not_verified (B5): the
-// creation is verified before the receipt, so that refusal ends the flow outside it, and the identical replay answers STATE/expired.
-// A duplicate of a registration whose first execution still runs answers RESOURCE/overloaded (B4).
+// e-mail address (C1). A refusal decided before the receipt (the access check's, a missing command ID, CompletePasskeyRegistration's
+// not_found, expired, code_reused and invalid_argument) is not kept, and a replay is decided afresh (E6); of these only
+// credential: not_verified ends the flow (B5), so its identical replay answers STATE/expired. A duplicate of a registration whose
+// first execution still runs answers RESOURCE/overloaded, and one refused just after that execution committed answers its receipt
+// from a second lookup (B4).
 
 // storedRefusal is a refusal a command receipt answered: the ArcError of the command's one execution, without a correlation id.
 type storedRefusal struct{ value *foundationv1.ArcError }

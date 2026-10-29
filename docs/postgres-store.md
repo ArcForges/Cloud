@@ -115,8 +115,18 @@ reversed by trying every value, so these rows are personal data, also of people 
 
 Command receipts (`platform.command_receipt.result`) hold no e-mail address: UpdateProfile stores its profile without
 `primary_email` and fills it from the account's live e-mail identity when it answers ([center identity](center-identity.md#command-receipts)).
-Receipt results do hold personal data: the profile's display name, locale and time zone, and credential and device labels. They
-are a second copy under the receipts' own 90-day retention (above), separate from the account's, and the runtime role cannot
+Receipt results do hold personal data:
+
+- UpdateProfile's: the profile (display name, locale, time zone, revision);
+- CompletePasskeyRegistration's and RenameAuthIdentity's: a credential summary (credential ID, kind, label, creation and last-use
+  times);
+- DeviceService.Rename's: the full device view (device ID, name, platform, trust level, remote-control flag, revision, revocation
+  time, and each installed product with its version and install time);
+- RemoveAuthIdentity's, RevokeSession's, RevokeAllSessions' and DeviceService.Revoke's: only the receipt (command ID, effect,
+  revision);
+- a kept refusal: its `ArcError`, with the ID the caller sent.
+
+They are a second copy under the receipts' own 90-day retention (above), separate from the account's, and the runtime role cannot
 delete them, so AF-ID-02's account purge deletes `platform.command_receipt` rows by principal (the account) with the account.
 
 ## Guarantees

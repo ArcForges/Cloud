@@ -126,14 +126,19 @@ Authentication time is never evidence.
   object before go-webauthn parses it, so no statement parser of another format runs, G3) and, under the receipt, consumes the flow
   and stores the credential. A flow of another account or of another session of the account is `STATE/not_found`
   (`TestARegistrationFlowIsItsBeginningSessions`). A creation that does not verify is `VALIDATION/invalid_argument`
-  (`credential: not_verified`) and ends the flow; this refusal comes before the receipt, so it is the one final refusal no receipt
-  keeps: the identical replay, like any later completion of that flow, answers `STATE/expired`. A credential ID registered
+  (`credential: not_verified`) and ends the flow. Every refusal of this method decided before the receipt (`not_found`,
+  `expired`, `code_reused`, `invalid_argument`, `permission_denied`) is not kept by a receipt, and its replay is decided afresh;
+  `not_verified` is the one that ends the flow, so its identical replay, like any later completion of that flow, answers
+  `STATE/expired`. A credential ID registered
   already, to this account or another, revoked ones included, is `CONFLICT/already_exists` (`state.state` `credential`); its
   `state.resource` names the account's own live credential with that ID and is left out otherwise, so another account's credential
   is never named. Two completions of one flow store one credential (`TestAPasskeyRegistersOnceWithItsLabel`); a duplicate of the
   command sent while its first execution still runs is `RESOURCE/overloaded` (retry after a while) and its retry answers the
-  receipt (`TestADuplicateOfARunningRegistrationIsBusy`). An attempt that a stopped process never settles answers so until the flow
-  expires (D10's residual: a process that dies between the attempt and the receipt).
+  receipt (`TestADuplicateOfARunningRegistrationIsBusy`); a duplicate whose attempt comes just after the first execution committed
+  finds the flow consumed and answers that receipt too, from a second receipt lookup
+  (`TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt`). An attempt that is never settled, because the process stopped
+  between the attempt and the receipt or because the best-effort give-back after a store failure failed during the outage,
+  answers `RESOURCE/overloaded` until the flow expires, then `STATE/expired`.
 - **Profile.** `UpdateProfile(patch)` changes `display_name`, `locale` and `timezone` (the profile values above; field paths
   `patch.*`); an avatar change is `VALIDATION/invalid_argument` (`patch.avatar: not_offered`) until avatars exist.
 - **Credential names and removal.** `RenameAuthIdentity` sets a credential's label by the label rule (field `name`).
@@ -170,8 +175,10 @@ consumption, the change and its audit event, in one transaction. A success keeps
 address) and a refusal whose retry advice is `NEVER` keeps its `ArcError`; a replay of the same request answers either again, with
 the replay's own correlation id, without new evidence or a second effect. Any other refusal (`step_up_required`, `rate_limited`,
 `overloaded`) or failure rolls the receipt back, so the same command can succeed after the step-up or the wait its advice names.
-The one exception is CompletePasskeyRegistration's `credential: not_verified`, refused before its receipt
-([passkey registration](#account-writes)): its replay answers `STATE/expired`.
+A refusal decided before the receipt (the access check's, a missing `meta.command_id`, CompletePasskeyRegistration's flow and
+creation checks) is not kept either, and a replay is decided afresh; of these only CompletePasskeyRegistration's
+`credential: not_verified` changes what its replay meets: it ends the flow, so the replay answers `STATE/expired`
+([passkey registration](#account-writes)).
 
 The same request is decided by a digest of the request message as transmitted, without `RequestMeta.correlation_id`
 (`platform.RequestDigestInput`): the correlation is per attempt, so a retry under a new correlation id replays the receipt. The
@@ -184,9 +191,12 @@ it produced (RevokeAllSessions changes many and states none).
 
 UpdateProfile's receipt keeps the profile without `primary_email`: the first answer and every replay take the address from the
 account's current live e-mail identity, so a replay never returns an address the account no longer holds
-(`TestNoReceiptHoldsAnAddress` scans every receipt-guarded write's stored result). Receipt results still hold personal data, the
-profile's display name, locale and time zone and the credential and device labels, for the receipts' 90 days
-([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)).
+(`TestNoReceiptHoldsAnAddress` scans every receipt-guarded write's stored result). Receipt results still hold personal data for the
+receipts' 90 days ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)): UpdateProfile's the profile (display
+name, locale, time zone, revision); CompletePasskeyRegistration's and RenameAuthIdentity's a credential summary (credential ID,
+kind, label, creation and last-use times); DeviceService.Rename's the full device view (device ID, name, platform, trust level,
+remote-control flag, revision, revocation time, and each installed product with its version and install time); the others only
+the receipt (command ID, effect, revision); a kept refusal its `ArcError`, with the ID the caller sent.
 
 ## Sign-in
 
@@ -372,7 +382,12 @@ correlation id, in the reply with gRPC `OK`:
 Every `StateFailure` detail is a valid foundation message (Contracts `foundation-baseline.json`): `state` and `reason` are always
 set, `state` matches `^[A-Za-z0-9._:/-]{1,128}$`, and a `state.resource` (`AggregateRef`) always carries a 16-byte, nonzero `id`;
 a refusal without such an ID carries no resource. For not_found and already_exists `state` is the object's kind and `reason` the
-code (`TestEveryRefusalIsAnErrorsRow` checks every constructor's details against those rules).
+code. Every `AFTER_TIME` advice carries `retry.retry_at` (rule `retryAdvice`): a rate limit's is the end of its window, and a
+refusal that names no instant (`RESOURCE/overloaded`, `INTERNAL/internal` with `AFTER_TIME`) is dated where it becomes the reply's
+`ArcError`, one second after the refusal plus up to one second of jitter (`arc.Refusal.Dated`, E4). `TestEveryRefusalIsAnErrorsRow`
+checks every constructor's rendering against those rules, the integration tests check every refusal they decode against
+`retryAdvice`, and the Worker's generated replies meet it (`rate_limited` carries the instant the Worker writes, `not_activated` is
+`NEVER`).
 
 The ingress adds two transport refusals for a known bearer (both gRPC 16 `UNAUTHENTICATED`): `auth.token_expired` and
 `auth.credential_revoked`. They need companion rows in errors.md's center ingress table (DC-14).
