@@ -38,21 +38,21 @@ migration role, because the runtime role can never delete.
 The second migration (`center/internal/schema/migrations/0002_identity_device.sql`) creates the `identity` and `device` schemas
 and the rate-limit table. The tables derive from the D1 manifests
 `src/ArcForges.Cloud.Storage.D1/Physical/manifest/{identity,device}.json` by the rules above. AF-CTR-03 lands it whole in its
-first part (A1a), including the tables its second part (A1b) writes first (`identity.step_up_challenge`); a later change is a new
-migration.
+first part (A1a), including what its second part (A1b) writes first (`identity.step_up_challenge` and the registration label of
+`identity.auth_flow`); a later change is a new migration.
 
-| Table                        | Purpose                                                                                                                                                                      | Runtime role             |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `identity.user`              | Accounts: display name, state (active, restricted, suspended, pending deletion, deleted), locale, timezone, the random 32-byte WebAuthn user handle, revision                | `SELECT, INSERT, UPDATE` |
-| `identity.auth_identity`     | Credentials: passkeys (COSE key, user handle, counter, BE/BS flags, transports, AAGUID, attestation `none`) and e-mail identities, unique by provider and subject            | `SELECT, INSERT, UPDATE` |
-| `identity.session`           | Native bearer sessions (access and refresh token digests, family, generation) and browser cookie sessions (cookie handle digest, origin, idle expiry); scope; device binding | `SELECT, INSERT, UPDATE` |
-| `identity.spent_refresh`     | The digest of every rotated refresh token, so a second presentation revokes the family                                                                                       | `SELECT, INSERT`         |
-| `identity.auth_flow`         | One row per passkey or e-mail ceremony: channel, kind, purpose, challenge or code verifier, installation claim, attempts, expiry, outcome; final once consumed (trigger)     | `SELECT, INSERT, UPDATE` |
-| `identity.step_up_challenge` | Step-up evidence: one operation ID and target digest of one session, proved and consumed at most once                                                                        | `SELECT, INSERT, UPDATE` |
-| `identity.bootstrap`         | The single owner bootstrap of the database (singleton key): the configured token's digest, the account it created, when                                                      | `SELECT, INSERT`         |
-| `device.device`              | One record per node, phone and browser installation: name, platform, trust (untrusted, trusted, revoked), remote control, seen, revocation                                   | `SELECT, INSERT, UPDATE` |
-| `device.installation`        | One per device and product (`arcscope`, `companion`, `arcforges-node`, `arcforges-mobile`, `arcforges-web`): version, platform, a browser's claimed ID, an optional key      | `SELECT, INSERT, UPDATE` |
-| `platform.rate_limit`        | Fixed-window counters keyed by the SHA-256 of a bucket kind and key, reset in place                                                                                          | `SELECT, INSERT, UPDATE` |
+| Table                        | Purpose                                                                                                                                                                                                                                    | Runtime role             |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| `identity.user`              | Accounts: display name, state (active, restricted, suspended, pending deletion, deleted), locale, timezone, the random 32-byte WebAuthn user handle, revision                                                                              | `SELECT, INSERT, UPDATE` |
+| `identity.auth_identity`     | Credentials: passkeys (COSE key, user handle, counter, BE/BS flags, transports, AAGUID, attestation `none`; subject: the credential ID's base64url) and e-mail identities (subject: the address, in clear), unique by provider and subject | `SELECT, INSERT, UPDATE` |
+| `identity.session`           | Native bearer sessions (access and refresh token digests, family, generation) and browser cookie sessions (cookie handle digest, origin, idle expiry); scope; device binding                                                               | `SELECT, INSERT, UPDATE` |
+| `identity.spent_refresh`     | The digest of every rotated refresh token, so a second presentation revokes the family                                                                                                                                                     | `SELECT, INSERT`         |
+| `identity.auth_flow`         | One row per passkey or e-mail ceremony: channel, kind, purpose, challenge or code verifier, an e-mail flow's address digest, a registration's label, installation claim, attempts, expiry, outcome; final once consumed (trigger)          | `SELECT, INSERT, UPDATE` |
+| `identity.step_up_challenge` | Step-up evidence: one operation ID and target digest of one session, proved and consumed at most once                                                                                                                                      | `SELECT, INSERT, UPDATE` |
+| `identity.bootstrap`         | The single owner bootstrap of the database (singleton key): the configured token's digest, the account it created, when                                                                                                                    | `SELECT, INSERT`         |
+| `device.device`              | One record per node, phone and browser installation: name, platform, trust (untrusted, trusted, revoked), remote control, seen, revocation                                                                                                 | `SELECT, INSERT, UPDATE` |
+| `device.installation`        | One per device and product (`arcscope`, `companion`, `arcforges-node`, `arcforges-mobile`, `arcforges-web`): version, platform, a browser's claimed ID, an optional key                                                                    | `SELECT, INSERT, UPDATE` |
+| `platform.rate_limit`        | Fixed-window counters keyed by the SHA-256 of a bucket kind and key, reset in place                                                                                                                                                        | `SELECT, INSERT, UPDATE` |
 
 Differences from the D1 model, for the data/cloud-store.md §6 companion list:
 
@@ -64,20 +64,41 @@ Differences from the D1 model, for the data/cloud-store.md §6 companion list:
   `csrf_hash`: a browser session's CSRF token is derived from its cookie handle. Every session names a device and an
   installation (`NOT NULL`, bound to the account by composite foreign keys);
 - `identity.auth_flow` replaces `identity_browser_auth_flow` and `identity_security_flow` for the passkey and e-mail ceremonies; an
-  e-mail flow stores the SHA-256 of the normalised address, never the address;
+  e-mail flow stores the unsalted SHA-256 of the normalised address, never the address, and a passkey registration flow the label
+  its credential gets (bounded like `identity.auth_identity.label`);
 - `device.installation.public_key` and `key_version` are nullable (node keys arrive with AF-CTR-04, phone keys with AF-CLD-02),
   and `client_installation_id` carries a browser's claimed installation ID, unique per account over live rows;
-- the device trust level gains 3 = revoked, set only by the revocation cascade together with `revoked_at`.
+- the device trust level gains 3 = revoked, set only by the revocation cascade together with `revoked_at`;
+- every identity and device foreign key is `NO ACTION`, as D1's restrict: the D1 cascades of `identity_session.user_id` and
+  `device_installation.device_id` are dropped, so a sweep or purge deletes the children first (below).
 
 Indexes: the three token digests are partial unique indexes; sessions are indexed by account (listing and mass revocation), device
 and installation (the revocation cascade), family and expiry; flows, step-up challenges, spent refresh tokens
-(`family_expires_at`) and rate-limit windows (`window_start`) are indexed by the instant their retention sweep reads.
+(`family_expires_at`) and rate-limit windows (`window_start`) are indexed by the instant their retention sweep reads. The
+referencing column of every foreign key leads an index (spent refresh tokens and step-up challenges by session and account, flows
+by session and account where they name one), so a sweep's or a purge's deletes check each reference through an index; only the
+single bootstrap row has none.
 
-Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables identity in production only after them): consumed or
-expired flows and step-up challenges after 7 days, spent refresh tokens after their family's absolute expiry, revoked or expired
-sessions after 90 days, rate-limit windows after one window has passed, revoked devices and installations with the account. Until
-the sweeps exist these tables only grow. A rate-limit bucket key is the SHA-256 of a client IP prefix, an account or an e-mail
-address; such a digest can be reversed by trying every value, so the rows are personal data under the same retention.
+Retention (AF-PLAT-01's sweeps with the migration role; AF-PROD-01 enables identity in production only after them):
+
+- consumed or expired flows and step-up challenges after 7 days;
+- spent refresh tokens until their family's absolute expiry or with their session, whichever comes first;
+- revoked or expired sessions after 90 days;
+- rate-limit windows after one window has passed;
+- revoked devices and installations with the account;
+- accounts (`identity.user`) and their credentials (`identity.auth_identity`, revoked credentials included) for the account's
+  lifetime: they are removed with the account by AF-ID-02's account deletion;
+- the bootstrap row (`identity.bootstrap`) permanently: it is the record that the database's one bootstrap was used (it names the
+  owner's account, so purging that account is AF-ID-02's decision).
+
+Every foreign key is `NO ACTION`, so a sweep or a purge deletes children before their parents: a session's spent refresh tokens,
+flows and step-up challenges, then the session; a device's sessions, then its installations, then the device; and for an account,
+those, then its credentials, then the account. Until the sweeps exist these tables only grow.
+
+Personal data: e-mail addresses are stored in clear only as the subject of an e-mail identity (`identity.auth_identity`). An e-mail
+flow (`identity.auth_flow.email_hash`) keeps the unsalted SHA-256 of the normalised address submitted, whether or not an account
+has it, and a rate-limit bucket key is the SHA-256 of a client IP prefix, an account or an e-mail address. Such a digest can be
+reversed by trying every value, so these rows are personal data, also of people without an account, under the retention above.
 
 ## Guarantees
 
@@ -164,6 +185,11 @@ executable:
   (`serverMajorMatchesTested`); a mismatch is logged as a warning, not refused. It records the logging settings too (`logging`: `pg_stat_statements.track`, `log_statement`,
   `log_min_duration_statement`). The repository records no Neon major; each
   deployment's gate record does.
+
+The integration tests run every migration as a migration role that is not a superuser and has only `CREATEROLE` and `CREATEDB`,
+as Neon's owner role. `TestMigration0002LandsWholeOverVersion1` rehearses the production step of 0002: over a database at version 1
+the runner applies it and reconciles the grants; when it fails at its last statement, the database stays at version 1 with
+nothing of it.
 
 A merged migration is never edited or removed: a change is a new migration, written as expand and contract (below). A migration
 that cannot run in a transaction (for example `CREATE INDEX CONCURRENTLY`) is not supported.

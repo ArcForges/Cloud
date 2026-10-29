@@ -48,6 +48,8 @@ type Authenticator struct {
 	// ClientRPID overrides the RP ID hashed into the authenticator data; ClientType overrides the client data type.
 	ClientRPID string
 	ClientType string
+	// CredentialIDBytes is the length of a created credential ID (32 when zero).
+	CredentialIDBytes int
 }
 
 // Key is one created credential.
@@ -113,7 +115,11 @@ func random(size int) []byte {
 
 // Create makes a new credential for a registration challenge and user handle.
 func (a *Authenticator) Create(challenge, userHandle []byte) (passkey.Creation, *Key) {
-	key := &Key{ID: random(32), UserHandle: append([]byte(nil), userHandle...)}
+	size := a.CredentialIDBytes
+	if size == 0 {
+		size = 32
+	}
+	key := &Key{ID: random(size), UserHandle: append([]byte(nil), userHandle...)}
 	var cose []byte
 	var err error
 	if a.RS256 {

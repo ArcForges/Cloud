@@ -20,8 +20,9 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
-// MaxCredentialIDBytes bounds a passkey's credential ID: its base64url form is the credential's subject, at most 512 characters.
-const MaxCredentialIDBytes = 384
+// MaxCredentialIDBytes bounds a passkey's credential ID as the contract and WebAuthn do; its unpadded base64url form, at most 1364
+// characters, is the credential's subject (migration 0002, auth_identity_subject).
+const MaxCredentialIDBytes = 1023
 
 // Enrollment is a CompleteEnrollment request of the owner bootstrap.
 type Enrollment struct {
@@ -43,7 +44,7 @@ const (
 	bootstrapPasskey       = "passkey_invalid"
 )
 
-// validCreation checks the contract's bounds of a WebAuthnCreation and the subject bound of its credential ID.
+// validCreation checks the contract's bounds of a WebAuthnCreation.
 func validCreation(creation passkey.Creation) *arc.Refusal {
 	switch {
 	case len(creation.CredentialID) < 1 || len(creation.CredentialID) > MaxCredentialIDBytes:

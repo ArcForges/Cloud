@@ -192,7 +192,7 @@ WHERE a.provider_id = 'passkey' AND a.subject = $1 AND a.revoked_at IS NULL`, ba
 // validAssertion checks the contract's bounds of a WebAuthnAssertion; a discoverable sign-in needs the user handle.
 func validAssertion(assertion passkey.Assertion) *arc.Refusal {
 	switch {
-	case len(assertion.CredentialID) < 1 || len(assertion.CredentialID) > 1023:
+	case len(assertion.CredentialID) < 1 || len(assertion.CredentialID) > MaxCredentialIDBytes:
 		return arc.InvalidArgument("proof.passkey.credential_id", "length")
 	case len(assertion.ClientDataJSON) < 1 || len(assertion.ClientDataJSON) > 16384:
 		return arc.InvalidArgument("proof.passkey.client_data_json", "length")

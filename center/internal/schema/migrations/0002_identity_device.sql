@@ -13,11 +13,16 @@
 --   * identity.auth_flow replaces identity_browser_auth_flow and identity_security_flow for the passkey and e-mail ceremonies;
 --   * device.installation.public_key and key_version are nullable (node keys arrive with AF-CTR-04, phone keys with AF-CLD-02), and
 --     client_installation_id carries a browser's claimed installation;
---   * the trust level gains 3 = revoked (set by the revocation cascade).
+--   * the trust level gains 3 = revoked (set by the revocation cascade);
+--   * every foreign key is NO ACTION: the D1 cascades of identity_session.user_id and device_installation.device_id are dropped, so a
+--     sweep or purge deletes the children first.
 --
--- Every credential is stored as a SHA-256 digest (tokens, cookie handles) or a salted PBKDF2 verifier (e-mail codes); no token, code or
--- e-mail address is stored in clear. The runtime role has no DELETE: flows, challenges, spent refresh tokens, rate-limit windows and
--- revoked rows are marked, never deleted; the retention sweeps that remove them run with the migration role (AF-PLAT-01).
+-- Every credential is stored as a SHA-256 digest (tokens, cookie handles) or a salted PBKDF2 verifier (e-mail codes); no token or code is
+-- stored in clear. E-mail addresses are stored in clear only as the subject of an e-mail identity (identity.auth_identity). Flows
+-- (identity.auth_flow.email_hash) and rate-limit buckets keep unsalted SHA-256 digests of addresses; such a digest can be reversed by
+-- trying addresses, so those rows are personal data, also of people without an account, under their retention. The runtime role has no
+-- DELETE: flows, challenges, spent refresh tokens, rate-limit windows and revoked rows are marked, never deleted; the retention sweeps
+-- that remove them run with the migration role (AF-PLAT-01).
 
 CREATE SCHEMA identity;
 CREATE SCHEMA device;
@@ -114,7 +119,9 @@ CREATE UNIQUE INDEX installation_live_web_claim ON device.installation (user_id,
 
 -- Credentials (authentication identities). Unique by provider and subject, revoked rows included, so a subject never moves from one
 -- user to another. Only passkeys (1) and e-mail codes (2) are admitted; the passkey columns are complete for a passkey and absent
--- otherwise. sign_count only ever increases (a regression is refused before any write).
+-- otherwise. A passkey's subject is the unpadded base64url of its credential ID (at most 1023 bytes, so 1364 characters); an e-mail
+-- identity's subject is its normalised address (at most 320 characters). sign_count only ever increases (a regression is refused
+-- before any write).
 CREATE TABLE identity.auth_identity (
     auth_identity_id   uuid        NOT NULL,
     user_id            uuid        NOT NULL,
@@ -140,7 +147,8 @@ CREATE TABLE identity.auth_identity (
     -- 1 passkey, 2 email code (identity.auth_method; password 3 and OIDC 4 are not admitted on the center)
     CONSTRAINT auth_identity_method CHECK (method IN (1, 2)),
     CONSTRAINT auth_identity_method_provider CHECK ((method = 1 AND provider_id = 'passkey') OR (method = 2 AND provider_id = 'email')),
-    CONSTRAINT auth_identity_subject CHECK (char_length(subject) BETWEEN 1 AND 512 AND subject !~ '[[:cntrl:]]'),
+    CONSTRAINT auth_identity_subject CHECK (subject !~ '[[:cntrl:]]' AND ((method = 1 AND char_length(subject) BETWEEN 1 AND 1364) OR
+        (method = 2 AND char_length(subject) BETWEEN 1 AND 320))),
     CONSTRAINT auth_identity_label CHECK (label IS NULL OR (char_length(label) BETWEEN 1 AND 64 AND label !~ '[[:cntrl:]]')),
     CONSTRAINT auth_identity_passkey_material_complete CHECK (method <> 1 OR (public_key IS NOT NULL AND user_handle IS NOT NULL AND
         sign_count IS NOT NULL AND backup_eligible IS NOT NULL AND backup_state IS NOT NULL AND transports IS NOT NULL AND aaguid IS NOT NULL AND
@@ -236,7 +244,7 @@ CREATE INDEX session_family ON identity.session (family_id) WHERE family_id IS N
 CREATE INDEX session_expires_at ON identity.session (expires_at);
 
 -- Spent refresh tokens: the digest of every rotated refresh token, so a second presentation is recognised as reuse and revokes the
--- family. Kept until the family's absolute expiry (retention sweep, AF-PLAT-01).
+-- family. Kept until the family's absolute expiry or with its session, whichever comes first (retention sweep, AF-PLAT-01).
 CREATE TABLE identity.spent_refresh (
     token_hash        bytea       NOT NULL,
     session_id        uuid        NOT NULL,
@@ -250,12 +258,15 @@ CREATE TABLE identity.spent_refresh (
     CONSTRAINT spent_refresh_token_hash CHECK (length(token_hash) = 32),
     CONSTRAINT spent_refresh_generation CHECK (generation >= 1)
 );
+CREATE INDEX spent_refresh_session ON identity.spent_refresh (session_id);
 CREATE INDEX spent_refresh_family_expires_at ON identity.spent_refresh (family_expires_at);
 
 -- Authentication flows: one row per ceremony (passkey sign-in, passkey registration of a signed-in account, enrollment, e-mail code).
 -- A flow is bound to its channel, its kind, its purpose and, for a native flow, its installation claim; a browser flow is bound by its
 -- channel, the exact Origin and the secrecy of its 122-bit flow ID. Attempts are counted in their own transaction before a proof is
--- checked, and a consumed flow is never changed again.
+-- checked, and a consumed flow is never changed again. A passkey registration flow carries the label its new credential gets. An e-mail
+-- flow keeps email_hash, the unsalted SHA-256 of the normalised address submitted, whether or not an account has it: it can be reversed
+-- by trying addresses, so e-mail flows are personal data, under the flows' retention.
 CREATE TABLE identity.auth_flow (
     flow_id                uuid        NOT NULL,
     channel                smallint    NOT NULL,
@@ -263,6 +274,7 @@ CREATE TABLE identity.auth_flow (
     purpose                smallint    NOT NULL,
     user_id                uuid,
     session_id             uuid,
+    label                  text,
     origin                 text,
     challenge              bytea,
     webauthn_user_handle   bytea,
@@ -293,8 +305,11 @@ CREATE TABLE identity.auth_flow (
     CONSTRAINT auth_flow_registration_handle CHECK ((kind IN (2, 3)) = (webauthn_user_handle IS NOT NULL) AND
         (webauthn_user_handle IS NULL OR length(webauthn_user_handle) = 32)),
     CONSTRAINT auth_flow_registration_session CHECK ((kind = 2) = (session_id IS NOT NULL) AND (kind <> 2 OR user_id IS NOT NULL)),
-    CONSTRAINT auth_flow_email CHECK ((kind = 4) = (email_hash IS NOT NULL AND code_hash IS NOT NULL AND code_salt IS NOT NULL) AND
-        (email_hash IS NULL OR length(email_hash) = 32) AND (code_hash IS NULL OR length(code_hash) = 32) AND
+    -- the label rule of identity.auth_identity.label, so a registration flow's label is always a valid credential label
+    CONSTRAINT auth_flow_label CHECK ((kind = 2) = (label IS NOT NULL) AND (label IS NULL OR (char_length(label) BETWEEN 1 AND 64 AND
+        label !~ '[[:cntrl:]]'))),
+    CONSTRAINT auth_flow_email CHECK ((kind = 4) = (email_hash IS NOT NULL) AND (kind = 4) = (code_hash IS NOT NULL) AND
+        (kind = 4) = (code_salt IS NOT NULL) AND (email_hash IS NULL OR length(email_hash) = 32) AND (code_hash IS NULL OR length(code_hash) = 32) AND
         (code_salt IS NULL OR length(code_salt) = 16)),
     CONSTRAINT auth_flow_browser_origin CHECK ((channel = 2) = (origin IS NOT NULL) AND (origin IS NULL OR length(origin) BETWEEN 1 AND 2048)),
     CONSTRAINT auth_flow_installation CHECK ((installation_id IS NULL) = (installation_product IS NULL) AND
@@ -306,10 +321,13 @@ CREATE TABLE identity.auth_flow (
     CONSTRAINT auth_flow_sends CHECK (sends BETWEEN 0 AND 3),
     CONSTRAINT auth_flow_attempts CHECK (attempts >= 0 AND attempts <= max_attempts AND max_attempts BETWEEN 1 AND 10),
     CONSTRAINT auth_flow_expiry CHECK (expires_at > created_at),
-    -- 1 succeeded, 2 attempts exhausted, 3 a consumed proof presented again (identity.flow_outcome)
-    CONSTRAINT auth_flow_outcome CHECK ((outcome IS NULL) = (consumed_at IS NULL) AND (outcome IS NULL OR outcome IN (1, 2, 3)))
+    -- 1 succeeded, 2 attempts exhausted (identity.flow_outcome). A consumed flow is final (auth_flow_consumed_is_final): a proof
+    -- presented again is refused CONFLICT/code_reused and is not recorded here.
+    CONSTRAINT auth_flow_outcome CHECK ((outcome IS NULL) = (consumed_at IS NULL) AND (outcome IS NULL OR outcome IN (1, 2)))
 );
 CREATE INDEX auth_flow_expires_at ON identity.auth_flow (expires_at);
+CREATE INDEX auth_flow_session ON identity.auth_flow (session_id) WHERE session_id IS NOT NULL;
+CREATE INDEX auth_flow_user ON identity.auth_flow (user_id) WHERE user_id IS NOT NULL;
 
 CREATE FUNCTION identity.refuse_consumed_flow_change() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -351,7 +369,8 @@ CREATE TABLE identity.step_up_challenge (
     -- 1 passkey, 2 email code (identity.auth_method)
     CONSTRAINT step_up_challenge_method CHECK (method IN (1, 2)),
     CONSTRAINT step_up_challenge_material CHECK ((method = 1 AND challenge IS NOT NULL AND length(challenge) = 32 AND code_hash IS NULL AND code_salt IS NULL) OR
-        (method = 2 AND challenge IS NULL AND length(code_hash) = 32 AND length(code_salt) = 16)),
+        (method = 2 AND challenge IS NULL AND code_hash IS NOT NULL AND code_salt IS NOT NULL AND length(code_hash) = 32 AND
+        length(code_salt) = 16)),
     -- 1 pending, 2 proved, 3 consumed, 4 expired, 5 denied (identity.step_up_state)
     CONSTRAINT step_up_challenge_state CHECK (state IN (1, 2, 3, 4, 5)),
     CONSTRAINT step_up_challenge_proved CHECK ((state IN (2, 3)) = (proved_at IS NOT NULL)),
@@ -362,6 +381,7 @@ CREATE TABLE identity.step_up_challenge (
     CONSTRAINT step_up_challenge_rev CHECK (rev >= 1)
 );
 CREATE INDEX step_up_challenge_session ON identity.step_up_challenge (session_id, expires_at);
+CREATE INDEX step_up_challenge_user ON identity.step_up_challenge (user_id);
 CREATE INDEX step_up_challenge_expires_at ON identity.step_up_challenge (expires_at);
 
 -- The owner bootstrap (AD-0021 section 6): at most one row ever, so at most one bootstrap per database, enforced by the singleton key.

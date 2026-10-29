@@ -33,13 +33,18 @@ const (
 // with the token.
 func (h *harness) enroll(token string, claim *publicapiv1.InstallationClaim, from caller) (*publicapiv1.IdentityServiceCompleteEnrollmentResponse, *virtual.Authenticator, *virtual.Key) {
 	h.t.Helper()
+	return h.enrollWith(virtual.New(rpID, origin), token, claim, from)
+}
+
+// enrollWith runs the owner bootstrap with a given authenticator.
+func (h *harness) enrollWith(authenticator *virtual.Authenticator, token string, claim *publicapiv1.InstallationClaim, from caller) (*publicapiv1.IdentityServiceCompleteEnrollmentResponse, *virtual.Authenticator, *virtual.Key) {
+	h.t.Helper()
 	begun := rpc(h, beginPath, &publicapiv1.IdentityServiceBeginAuthenticationRequest{Meta: meta(), Method: publicapiv1.AuthMethod_AUTH_METHOD_PASSKEY.Enum(),
 		Purpose: publicapiv1.AuthPurpose_AUTH_PURPOSE_ENROLL.Enum(), Installation: claim}, from, &publicapiv1.IdentityServiceBeginAuthenticationResponse{})
 	if begun.GetError() != nil {
 		h.t.Fatalf("begin enrollment: %s", failure(begun.GetError()))
 	}
 	challenge := begun.GetValue().GetChallenge()
-	authenticator := virtual.New(rpID, origin)
 	creation, key := authenticator.Create(challenge.GetChallenge(), challenge.GetOptions().GetUserHandle())
 	response := rpc(h, enrollPath, &publicapiv1.IdentityServiceCompleteEnrollmentRequest{Meta: meta(), FlowId: challenge.GetFlowId(),
 		Proof:      &publicapiv1.EnrollmentProof{Proof: &publicapiv1.EnrollmentProof_LocalCode{LocalCode: token}},
@@ -88,6 +93,31 @@ func TestTheOwnerBootstrapCreatesTheFirstAccountOnce(t *testing.T) {
 	if failure(again.GetError()) != "AUTHENTICATION/unauthenticated" || h.count("SELECT count(*) FROM identity.user") != 1 {
 		t.Fatalf("a second bootstrap: %s", failure(again.GetError()))
 	}
+	h.verifyAudit()
+}
+
+// TestThePasskeyCredentialIDBoundIsTheContracts holds the bootstrap and the passkey sign-in to the contract's credential ID bound (F1):
+// a 1023-byte credential ID is stored (its 1364-character subject fits migration 0002) and signs in; a 1024-byte one is refused as
+// invalid before anything is written.
+func TestThePasskeyCredentialIDBoundIsTheContracts(t *testing.T) {
+	h := newHarness(t, settings{})
+	tooLong := virtual.New(rpID, origin)
+	tooLong.CredentialIDBytes = 1024
+	response, _, _ := h.enrollWith(tooLong, h.bootstrap, newClaim(t), caller{})
+	if failure(response.GetError()) != "VALIDATION/invalid_argument" ||
+		response.GetError().GetDetails().GetState().GetReason() != "credential.passkey.credential_id: length" ||
+		h.count("SELECT count(*) FROM identity.user") != 0 {
+		t.Fatalf("a 1024-byte credential ID: %v", response.GetError())
+	}
+	longest := virtual.New(rpID, origin)
+	longest.CredentialIDBytes = 1023
+	claim := newClaim(t)
+	response, authenticator, key := h.enrollWith(longest, h.bootstrap, claim, caller{})
+	if response.GetError() != nil || len(key.ID) != 1023 ||
+		h.count("SELECT count(*) FROM identity.auth_identity WHERE provider_id = 'passkey' AND char_length(subject) = 1364") != 1 {
+		t.Fatalf("a 1023-byte credential ID: %s", failure(response.GetError()))
+	}
+	h.signIn(account{authenticator: authenticator, key: key}, claim, caller{})
 	h.verifyAudit()
 }
 
