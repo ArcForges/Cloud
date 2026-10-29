@@ -52,7 +52,7 @@ export const clientIpHeader = "x-arcforges-client-ip";
  */
 export const notActivatedReplies: Readonly<Record<Surface, string>> = {
   identity:
-    "AAAAAEIaQAoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBOgwiChIIaWRlbnRpdHmAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "AAAAAEsaSQoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBOhUiEwoHc3VyZmFjZRIIaWRlbnRpdHmAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.

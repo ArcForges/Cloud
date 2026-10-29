@@ -61,7 +61,7 @@ func (s *Service) UpdateProfile(ctx context.Context, tx pgx.Tx, caller Caller, c
 	var current int64
 	if err := tx.QueryRow(ctx, "SELECT rev FROM identity.user WHERE user_id = $1 FOR UPDATE", caller.UserID).Scan(&current); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Profile{}, arc.NotFound("account", nil)
+			return Profile{}, arc.NotFound("account", caller.UserID[:])
 		}
 		return Profile{}, err
 	}
@@ -147,7 +147,7 @@ func (s *Service) RemoveCredential(ctx context.Context, tx pgx.Tx, caller Caller
 	var state int16
 	if err := tx.QueryRow(ctx, "SELECT state FROM identity.user WHERE user_id = $1 FOR UPDATE", caller.UserID).Scan(&state); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, arc.NotFound("account", nil)
+			return 0, arc.NotFound("account", caller.UserID[:])
 		}
 		return 0, err
 	}
@@ -280,7 +280,7 @@ func (s *Service) BeginRegistration(ctx context.Context, caller Caller, label *s
 		// FOR UPDATE, the lock ConsumeEvidence takes next: two concurrent begins never upgrade a shared lock (B3).
 		if err := tx.QueryRow(ctx, "SELECT state, passkey_user_handle FROM identity.user WHERE user_id = $1 FOR UPDATE", userID).Scan(&state, &handle); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return arc.NotFound("account", nil)
+				return arc.NotFound("account", userID[:])
 			}
 			return err
 		}
@@ -391,7 +391,19 @@ VALUES ($1, $2, 1, 'passkey', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1)
 		return Credential{}, err
 	}
 	if tag.RowsAffected() != 1 {
-		return Credential{}, arc.AlreadyExists("credential", nil)
+		// The credential ID is registered already. Only the caller's own live credential is named by its ID (B6): another account's
+		// is never revealed.
+		var own platform.ID
+		err := tx.QueryRow(ctx, `SELECT auth_identity_id FROM identity.auth_identity
+WHERE provider_id = 'passkey' AND subject = $1 AND user_id = $2 AND revoked_at IS NULL`, base64.RawURLEncoding.EncodeToString(credential.ID),
+			caller.UserID).Scan(&own)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return Credential{}, arc.AlreadyExists("credential", nil)
+		case err != nil:
+			return Credential{}, err
+		}
+		return Credential{}, arc.AlreadyExists("credential", own[:])
 	}
 	item, err := readCredential(ctx, tx, identityID)
 	if err != nil {

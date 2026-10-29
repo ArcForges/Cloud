@@ -93,11 +93,28 @@ FROM identity.auth_identity WHERE user_id = $3 AND method = 1`, platform.NewID()
 	}
 	conflict := command()
 	refusal := complete(conflict, again.GetFlowId(), creationOf(taken)).GetError()
-	if kind, id := resourceOf(refusal); failure(refusal) != "CONFLICT/already_exists" || kind != "credential" || id != nil {
+	// Another account's credential is never named (B6): the details state the kind and the code only.
+	if state := refusal.GetDetails().GetState(); failure(refusal) != "CONFLICT/already_exists" || state.GetResource() != nil ||
+		state.GetState() != "credential" || state.GetReason() != "already_exists" {
 		t.Fatalf("a credential ID registered already: %v", refusal)
 	}
 	if replay := complete(conflict, again.GetFlowId(), creationOf(taken)).GetError(); failure(replay) != "CONFLICT/already_exists" {
 		t.Fatalf("the replay of the refused command: %v", replay)
+	}
+	// The caller's own live credential is named by its ID, which the caller lists itself.
+	h.stepUp(who, from, identity.ClassBeginRegistration, who.id)
+	third := begin(proto.String("Third")).GetValue().GetChallenge()
+	mine, _ := authenticator.Create(third.GetChallenge(), who.handle)
+	existing := platform.NewID()
+	if _, err := h.migration.Exec(context.Background(), `INSERT INTO identity.auth_identity (auth_identity_id, user_id, method, provider_id, subject, public_key,
+    user_handle, sign_count, backup_eligible, backup_state, transports, aaguid, attestation_format, created_at, rev)
+SELECT $1, user_id, 1, 'passkey', $2, public_key, user_handle, 0, false, false, '{}', aaguid, 'none', now(), 1
+FROM identity.auth_identity WHERE user_id = $3 AND method = 1 LIMIT 1`, existing, base64.RawURLEncoding.EncodeToString(mine.CredentialID), who.id); err != nil {
+		t.Fatal(err)
+	}
+	refusal = complete(command(), third.GetFlowId(), creationOf(mine)).GetError()
+	if kind, id := resourceOf(refusal); failure(refusal) != "CONFLICT/already_exists" || kind != "credential" || !bytes.Equal(id, existing[:]) {
+		t.Fatalf("the caller's own credential ID registered again: %v", refusal)
 	}
 	h.verifyAudit()
 }

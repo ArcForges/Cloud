@@ -7,6 +7,8 @@
 package arc
 
 import (
+	"bytes"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -39,8 +41,8 @@ type Refusal struct {
 	Effect foundationv1.EffectCertainty
 }
 
-// Resource is a state.resource detail (an AggregateRef): the kind of the object and, when the caller named it by its ID, that ID
-// (16 bytes). Only an ID the caller sent is ever echoed back, so the detail tells the caller nothing it did not know.
+// Resource is a state.resource detail (an AggregateRef): the kind of the object and the 16-byte ID the caller named it by (or, for
+// its own object, may know). A refusal without such an ID carries no resource (B6).
 type Resource struct {
 	Kind string
 	ID   []byte
@@ -131,9 +133,25 @@ func (r *Refusal) ArcError(call correlation.Context) *foundationv1.ArcError {
 
 // The refusals of the identity surface, each a row of errors.md.
 
-// InvalidArgument is VALIDATION/invalid_argument with state.reason = "<field path>: <rule>".
+// statePattern is the pattern of StateFailure.state and AggregateRef.kind (Contracts foundation-baseline.json).
+var statePattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]{1,128}$`)
+
+// stateOf is a value for StateFailure.state: the value itself when it matches the pattern, else the fallback.
+func stateOf(value, fallback string) string {
+	if statePattern.MatchString(value) {
+		return value
+	}
+	return fallback
+}
+
+// The details of a StateFailure are a valid foundation message (B6): Contracts foundation-baseline.json requires its state (matching
+// statePattern) and its reason, and an AggregateRef's kind and 16-byte nonzero id. Each constructor below states both, in the
+// pattern of InvalidState (state = the object or field the refusal is about, reason = why), and names a resource only by an ID.
+
+// InvalidArgument is VALIDATION/invalid_argument with state.state = the field path and state.reason = "<field path>: <rule>".
 func InvalidArgument(field, rule string) *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_VALIDATION, Code: "invalid_argument", Reason: field + ": " + rule}
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_VALIDATION, Code: "invalid_argument", State: stateOf(field, "request"),
+		Reason: field + ": " + rule}
 }
 
 // InvalidCursor is VALIDATION/invalid_cursor: a page cursor that is malformed or from another listing.
@@ -164,15 +182,25 @@ func StepUpRequired() *Refusal {
 		Retry: foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND}
 }
 
-// PermissionDenied is AUTHORIZATION/permission_denied with state.reason = the denied operation.
+// PermissionDenied is AUTHORIZATION/permission_denied with state.state = "operation" and state.reason = the denied operation.
 func PermissionDenied(operation string) *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_AUTHORIZATION, Code: "permission_denied", Reason: operation}
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_AUTHORIZATION, Code: "permission_denied", State: "operation",
+		Reason: operation}
 }
 
-// NotFound is STATE/not_found with state.resource: the object does not exist or is not visible to the caller. kind is the object's
-// kind and id the ID the caller named it by (nil when it named none, for example its own account).
+// resource is the state.resource of an object a caller named by an ID: none unless the ID is a valid Id (16 bytes, not all zero).
+func resource(kind string, id []byte) *Resource {
+	if len(id) != 16 || bytes.Equal(id, make([]byte, 16)) {
+		return nil
+	}
+	return &Resource{Kind: kind, ID: id}
+}
+
+// NotFound is STATE/not_found with state.state = the object's kind, state.reason = "not_found" and state.resource = the object by
+// the ID the caller named it by (the caller's own account by its own ID). Without such an ID there is no resource.
 func NotFound(kind string, id []byte) *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_found", Resource: &Resource{Kind: kind, ID: id}}
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_found", State: stateOf(kind, "object"),
+		Reason: "not_found", Resource: resource(kind, id)}
 }
 
 // InvalidState is STATE/invalid_state with its state and reason.
@@ -190,10 +218,11 @@ func CodeReused() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "code_reused"}
 }
 
-// AlreadyExists is CONFLICT/already_exists with state.resource: the named object already exists. kind is the object's kind and id
-// the ID the caller named it by (nil when the caller named it otherwise, for example a passkey by its WebAuthn credential ID).
+// AlreadyExists is CONFLICT/already_exists with state.state = the object's kind and state.reason = "already_exists"; it names the
+// existing object in state.resource only by an ID the caller may know (its own object), so another account's ID never leaks.
 func AlreadyExists(kind string, id []byte) *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "already_exists", Resource: &Resource{Kind: kind, ID: id}}
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "already_exists", State: stateOf(kind, "object"),
+		Reason: "already_exists", Resource: resource(kind, id)}
 }
 
 // RevisionConflict is CONFLICT/revision_conflict: meta.expected_rev differs from the object's current revision (re-read, merge).
@@ -214,9 +243,9 @@ func CommandIDReused() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "command_id_reused"}
 }
 
-// NotActivated is STATE/not_activated with state.reason = the surface.
+// NotActivated is STATE/not_activated with state.state = "surface" and state.reason = the surface.
 func NotActivated(surface string) *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_activated", Reason: surface}
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_activated", State: "surface", Reason: surface}
 }
 
 // RateLimited is RESOURCE/rate_limited: retry after retryAt (AFTER_TIME without an instant when it is zero); the limit names the
