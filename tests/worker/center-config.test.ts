@@ -5,6 +5,7 @@
 // rather than the deployment. Wrangler does not inherit `vars` into a named environment, so each environment is checked on
 // its own.
 import assert from "node:assert/strict";
+import { edgeRateLimitPeriodSeconds } from "../../worker/tables/center-tables.generated.ts";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -144,6 +145,16 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
 test("production enables no surface and the acceptance environment enables identity", () => {
   assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
   assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity");
+  // C1: only the acceptance environment overrides the identity policy, and only with its anonymous-flow ceiling; production keeps
+  // the defaults (no global bucket).
+  assert.equal(wrangler.vars?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
+  assert.deepEqual(
+    JSON.parse(String(wrangler.env?.proof?.vars?.ARCFORGES_CENTER_IDENTITY_POLICY)),
+    {
+      anonymousFlowsLimit: 600,
+      anonymousFlowsWindow: "1h",
+    },
+  );
   assert.equal(wrangler.env?.proof?.vars?.ALLOWED_ORIGIN, "https://proof.arcforges.com");
   for (const [name, environment] of environments) {
     assert.deepEqual(surfaceProblems(environment.vars), [], `wrangler.json environment ${name}`);
@@ -177,4 +188,21 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   ])
     assert.equal(surfaceProblems({ ...valid, ALLOWED_ORIGIN: origin }).length, 1, String(origin));
   assert.equal(surfaceProblems({ ...valid, ARCFORGES_HELLO_RUNTIME: "csharp" }).length, 1);
+});
+
+// AF-CTR-03 (F17): the Worker's rate_limited reply advises a retry after the generated edge period, which must be the surface
+// limiter's own period in every environment, so the advised instant is never inside the limiter's window.
+test("the surface limiter's period is the generated edge period in every environment", () => {
+  for (const [name, environment] of environments) {
+    const limiters =
+      (environment as { ratelimits?: { name?: string; simple?: { period?: unknown } }[] })
+        .ratelimits ?? [];
+    const identity = limiters.filter((limiter) => limiter.name === "IDENTITY_RATE_LIMITER");
+    assert.equal(identity.length, 1, `wrangler.json environment ${name}`);
+    assert.equal(
+      identity[0]?.simple?.period,
+      edgeRateLimitPeriodSeconds,
+      `wrangler.json environment ${name}`,
+    );
+  }
 });

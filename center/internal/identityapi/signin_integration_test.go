@@ -5,6 +5,7 @@ package identityapi_test
 import (
 	"bytes"
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
+	centerpage "github.com/ArcForges/Cloud/center/internal/page"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
@@ -33,13 +35,18 @@ const (
 // with the token.
 func (h *harness) enroll(token string, claim *publicapiv1.InstallationClaim, from caller) (*publicapiv1.IdentityServiceCompleteEnrollmentResponse, *virtual.Authenticator, *virtual.Key) {
 	h.t.Helper()
+	return h.enrollWith(virtual.New(rpID, origin), token, claim, from)
+}
+
+// enrollWith runs the owner bootstrap with a given authenticator.
+func (h *harness) enrollWith(authenticator *virtual.Authenticator, token string, claim *publicapiv1.InstallationClaim, from caller) (*publicapiv1.IdentityServiceCompleteEnrollmentResponse, *virtual.Authenticator, *virtual.Key) {
+	h.t.Helper()
 	begun := rpc(h, beginPath, &publicapiv1.IdentityServiceBeginAuthenticationRequest{Meta: meta(), Method: publicapiv1.AuthMethod_AUTH_METHOD_PASSKEY.Enum(),
 		Purpose: publicapiv1.AuthPurpose_AUTH_PURPOSE_ENROLL.Enum(), Installation: claim}, from, &publicapiv1.IdentityServiceBeginAuthenticationResponse{})
 	if begun.GetError() != nil {
 		h.t.Fatalf("begin enrollment: %s", failure(begun.GetError()))
 	}
 	challenge := begun.GetValue().GetChallenge()
-	authenticator := virtual.New(rpID, origin)
 	creation, key := authenticator.Create(challenge.GetChallenge(), challenge.GetOptions().GetUserHandle())
 	response := rpc(h, enrollPath, &publicapiv1.IdentityServiceCompleteEnrollmentRequest{Meta: meta(), FlowId: challenge.GetFlowId(),
 		Proof:      &publicapiv1.EnrollmentProof{Proof: &publicapiv1.EnrollmentProof_LocalCode{LocalCode: token}},
@@ -88,6 +95,31 @@ func TestTheOwnerBootstrapCreatesTheFirstAccountOnce(t *testing.T) {
 	if failure(again.GetError()) != "AUTHENTICATION/unauthenticated" || h.count("SELECT count(*) FROM identity.user") != 1 {
 		t.Fatalf("a second bootstrap: %s", failure(again.GetError()))
 	}
+	h.verifyAudit()
+}
+
+// TestThePasskeyCredentialIDBoundIsTheContracts holds the bootstrap and the passkey sign-in to the contract's credential ID bound (F1):
+// a 1023-byte credential ID is stored (its 1364-character subject fits migration 0002) and signs in; a 1024-byte one is refused as
+// invalid before anything is written.
+func TestThePasskeyCredentialIDBoundIsTheContracts(t *testing.T) {
+	h := newHarness(t, settings{})
+	tooLong := virtual.New(rpID, origin)
+	tooLong.CredentialIDBytes = 1024
+	response, _, _ := h.enrollWith(tooLong, h.bootstrap, newClaim(t), caller{})
+	if failure(response.GetError()) != "VALIDATION/invalid_argument" ||
+		response.GetError().GetDetails().GetState().GetReason() != "credential.passkey.credential_id: length" ||
+		h.count("SELECT count(*) FROM identity.user") != 0 {
+		t.Fatalf("a 1024-byte credential ID: %v", response.GetError())
+	}
+	longest := virtual.New(rpID, origin)
+	longest.CredentialIDBytes = 1023
+	claim := newClaim(t)
+	response, authenticator, key := h.enrollWith(longest, h.bootstrap, claim, caller{})
+	if response.GetError() != nil || len(key.ID) != 1023 ||
+		h.count("SELECT count(*) FROM identity.auth_identity WHERE provider_id = 'passkey' AND char_length(subject) = 1364") != 1 {
+		t.Fatalf("a 1023-byte credential ID: %s", failure(response.GetError()))
+	}
+	h.signIn(account{authenticator: authenticator, key: key}, claim, caller{})
 	h.verifyAudit()
 }
 
@@ -263,6 +295,26 @@ func TestAPasskeySignsInAndReadsItsAccount(t *testing.T) {
 	if failure(devicePage.GetError()) != "VALIDATION/invalid_cursor" {
 		t.Fatalf("a bogus cursor: %s", failure(devicePage.GetError()))
 	}
+	// A well-formed cursor whose instant PostgreSQL cannot hold is invalid_cursor too, and no call fails (F11).
+	for _, instant := range []int64{-1 << 62, 1 << 62} {
+		position := centerpage.Cursor{At: time.UnixMicro(instant)}
+		results := []string{
+			failure(rpc(h, sessionsPath, &publicapiv1.IdentityServiceListSessionsRequest{Meta: meta(), Page: &foundationv1.PageRequest{
+				Cursor: proto.String(centerpage.Encode(centerpage.Sessions, position))}}, bearer, &publicapiv1.IdentityServiceListSessionsResponse{}).GetError()),
+			failure(rpc(h, identities, &publicapiv1.IdentityServiceListAuthIdentitiesRequest{Meta: meta(), Page: &foundationv1.PageRequest{
+				Cursor: proto.String(centerpage.Encode(centerpage.Credentials, position))}}, bearer, &publicapiv1.IdentityServiceListAuthIdentitiesResponse{}).GetError()),
+			failure(rpc(h, devicesPath, &publicapiv1.DeviceServiceListRequest{Meta: meta(), Page: &foundationv1.PageRequest{
+				Cursor: proto.String(centerpage.Encode(centerpage.Devices, position))}}, bearer, &publicapiv1.DeviceServiceListResponse{}).GetError()),
+		}
+		for _, result := range results {
+			if result != "VALIDATION/invalid_cursor" {
+				t.Fatalf("a cursor at %d µs: %v", instant, results)
+			}
+		}
+	}
+	if strings.Contains(h.logs.String(), "identity call failed") {
+		t.Fatal("an out-of-range cursor failed a call")
+	}
 	if h.audits("identity.sign_in.succeeded") != 2 {
 		t.Fatal("sign-ins are audited")
 	}
@@ -431,6 +483,15 @@ func TestRefreshRotatesAndAReusedTokenRevokesTheFamily(t *testing.T) {
 	if result := failure(refresh(next.GetRefreshToken(), claim.GetInstallationId()).GetError()); result != "AUTHENTICATION/credential_revoked" {
 		t.Fatalf("the family's newest refresh token: %s", result)
 	}
+	// Replaying the spent token again revokes nothing more: it is refused alike and only counted, never audited again (E5).
+	for range 3 {
+		if result := failure(refresh(native.GetRefreshToken(), claim.GetInstallationId()).GetError()); result != "AUTHENTICATION/credential_revoked" {
+			t.Fatalf("a spent token replayed: %s", result)
+		}
+	}
+	if h.audits("identity.session.refresh_reused") != 1 {
+		t.Fatalf("replays of a revoked family were audited: %d", h.audits("identity.session.refresh_reused"))
+	}
 
 	// Two concurrent refreshes with one token: one rotates, the other is a reuse and revokes the family.
 	fresh := h.signIn(who, newClaim(t), caller{})
@@ -475,6 +536,66 @@ func TestRefreshRotatesAndAReusedTokenRevokesTheFamily(t *testing.T) {
 		t.Fatalf("a malformed token: %s", result)
 	}
 	h.verifyAudit()
+}
+
+// TestAFullDevicePageIsSent (F8): a DeviceService.List page of the maximum 100 devices at the bounds the store and A1b's rename can
+// hold (a 64-character name of three-byte characters, one installation with a 128-character version) is sent whole: the center's
+// reply bound admits the method's 64 KiB budget, not only its request bound.
+func TestAFullDevicePageIsSent(t *testing.T) {
+	h := newHarness(t, settings{})
+	who := h.seedAccount(1, "")
+	native := h.signIn(who, newClaim(t), caller{})
+	ctx := context.Background()
+	seen := h.clock.Now().Add(-time.Hour)
+	for index := range 100 {
+		deviceID := platform.NewID()
+		if _, err := h.migration.Exec(ctx, `INSERT INTO device.device (device_id, user_id, display_name, platform, trust_level, remote_enabled,
+    first_seen_at, last_seen_at, rev) VALUES ($1, $2, $3, 4, 1, false, $4, $4, 1)`, deviceID, who.id, strings.Repeat("\u20ac", 64),
+			seen.Add(time.Duration(index)*time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.migration.Exec(ctx, `INSERT INTO device.installation (installation_id, device_id, user_id, product_id, app_version, platform,
+    installed_at, last_active_at, rev) VALUES ($1, $2, $3, 'arcforges-mobile', $4, $5, $6, $6, 1)`, platform.NewID(), deviceID, who.id,
+			strings.Repeat("9", 128), strings.Repeat("p", 128), seen); err != nil {
+			t.Fatal(err)
+		}
+	}
+	answer := h.post(devicesPath, &publicapiv1.DeviceServiceListRequest{Meta: meta(), Page: page(100)}, caller{bearer: native.GetAccessToken()})
+	var listed publicapiv1.DeviceServiceListResponse
+	if answer.status != "0" || proto.Unmarshal(answer.body, &listed) != nil || len(listed.GetValue().GetItems()) != 100 ||
+		!listed.GetValue().GetPage().GetHasMore() || len(answer.body) <= 16_379 {
+		t.Fatalf("a full device page: grpc-status %q %q, %d bytes, %d items", answer.status, answer.message, len(answer.body), len(listed.GetValue().GetItems()))
+	}
+}
+
+// TestListSessionsLeavesOutLapsedNativeSessions (E4): a native session whose sliding refresh lifetime has passed is no longer
+// listed, although its absolute expiry has not passed.
+func TestListSessionsLeavesOutLapsedNativeSessions(t *testing.T) {
+	h := newHarness(t, settings{})
+	who := h.seedAccount(1, "")
+	h.signIn(who, newClaim(t), caller{})
+	claim := newClaim(t)
+	current := h.signIn(who, claim, caller{})
+	refresh := func() {
+		t.Helper()
+		response := rpc(h, refreshPath, &publicapiv1.IdentityServiceRefreshSessionRequest{Meta: meta(), RefreshToken: proto.String(current.GetRefreshToken()),
+			InstallationId: claim.GetInstallationId()}, caller{}, &publicapiv1.IdentityServiceRefreshSessionResponse{})
+		if response.GetError() != nil {
+			t.Fatalf("refresh: %s", failure(response.GetError()))
+		}
+		current = response.GetValue().GetSession()
+		h.remember(current.GetAccessToken(), current.GetRefreshToken())
+	}
+	// Only the second session is refreshed; the first lapses after its 30-day refresh lifetime, well before its 90-day expiry.
+	h.clock.Advance(29 * 24 * time.Hour)
+	refresh()
+	h.clock.Advance(2 * 24 * time.Hour)
+	refresh()
+	listed := rpc(h, sessionsPath, &publicapiv1.IdentityServiceListSessionsRequest{Meta: meta(), Page: page(10)}, caller{bearer: current.GetAccessToken()},
+		&publicapiv1.IdentityServiceListSessionsResponse{}).GetValue().GetSessions()
+	if len(listed) != 1 || !listed[0].GetCurrent() {
+		t.Fatalf("sessions %v", listed)
+	}
 }
 
 // claim2 is a fresh claim (a helper so a test can sign in again without naming the installation).

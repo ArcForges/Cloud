@@ -418,8 +418,10 @@ WHERE user_id = $1 AND provider_id = 'email' AND revoked_at IS NULL`, caller.Use
 	return evidence, nil
 }
 
-// advanceCounter records a verified passkey assertion on its credential: the counter must advance past the stored one (a
-// concurrent use that advanced it first refuses this one as a possible clone), and the credential's last use moves.
+// advanceCounter records a verified passkey assertion on its credential under the credential's row lock (sign-in and step-up). The
+// library's clone rule is checked again against the locked counter (F14): a counter that does not exceed the stored one is refused
+// unless both are zero (an authenticator without a counter), because a concurrent use may have advanced it since the library
+// checked. The credential's last use moves.
 func advanceCounter(ctx context.Context, tx pgx.Tx, identityID platform.ID, verified passkey.Verified, now time.Time) error {
 	var current int64
 	if err := tx.QueryRow(ctx, "SELECT sign_count FROM identity.auth_identity WHERE auth_identity_id = $1 AND revoked_at IS NULL FOR UPDATE",
@@ -429,8 +431,8 @@ func advanceCounter(ctx context.Context, tx pgx.Tx, identityID platform.ID, veri
 		}
 		return err
 	}
-	if verified.SignCount != 0 && int64(verified.SignCount) <= current {
-		return arc.Unauthenticated()
+	if int64(verified.SignCount) <= current && (verified.SignCount != 0 || current != 0) {
+		return arc.Unauthenticated() // a possible clone
 	}
 	_, err := tx.Exec(ctx, `UPDATE identity.auth_identity SET sign_count = $2, backup_state = $3, last_used_at = $4, rev = rev + 1
 WHERE auth_identity_id = $1`, identityID, int64(verified.SignCount), verified.BackupState, now)

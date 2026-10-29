@@ -18,7 +18,7 @@ const (
 	AccessPrefix = "afa1."
 	// RefreshPrefix marks a native refresh token (RefreshSession only).
 	RefreshPrefix = "afr1."
-	// BootstrapPrefix marks the owner bootstrap token, whose SHA-256 is deployment configuration.
+	// BootstrapPrefix marks the owner bootstrap token, whose SHA-256 (BootstrapDigest) is deployment configuration.
 	BootstrapPrefix = "afb1."
 	// EncodedLength is the length of the random part, and of a browser cookie handle (which has no prefix).
 	EncodedLength = 43
@@ -46,6 +46,11 @@ func (s Secret) Token(prefix string) string { return prefix + s.Text() }
 
 // Digest is the stored form: SHA-256 of the 32 raw bytes.
 func (s Secret) Digest() [32]byte { return sha256.Sum256(s[:]) }
+
+// BootstrapDigest is the configured form of the owner bootstrap token (ARCFORGES_CENTER_BOOTSTRAP_SHA256): the SHA-256 of the exact
+// token text, its prefix included, as `printf %s "$TOKEN" | sha256sum` prints it in lowercase hexadecimal. It is not the digest of
+// the token's decoded bytes, which the other credentials store.
+func BootstrapDigest(token string) [32]byte { return sha256.Sum256([]byte(token)) }
 
 // ParseToken reads a prefixed credential: the exact prefix and 43 canonical base64url characters; anything else is no
 // credential.

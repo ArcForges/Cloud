@@ -115,7 +115,8 @@ LIMIT $4`, userID, after, afterID, request.Limit+1)
 }
 
 // Refresh rotates a native session (RefreshSession) after the refresh bucket of the client's prefix, and reads the session's
-// device for the reply. A reuse revokes the family (session.Refresh) and is counted.
+// device for the reply in the rotating transaction, so a reply that cannot be built rolls the rotation back and the token stays
+// valid for the advised retry (E1). A reuse revokes the family (session.Refresh) and is counted.
 func (s *Service) Refresh(ctx context.Context, request Request, token string, installationID platform.ID) (SignedIn, error) {
 	if token == "" || len(token) > 8192 {
 		return SignedIn{}, arc.InvalidArgument("refresh_token", "length")
@@ -123,7 +124,15 @@ func (s *Service) Refresh(ctx context.Context, request Request, token string, in
 	if err := s.take(ctx, request, s.bucket(ratelimit.RefreshPrefix, ratelimit.Prefix(request.ClientIP)), Anonymous); err != nil {
 		return SignedIn{}, err
 	}
-	issued, reuse, err := session.Refresh(ctx, s.db, s.policy, token, installationID, s.now(), request.CorrelationID)
+	var view *device.View
+	issued, reuse, err := session.Refresh(ctx, s.db, s.policy, token, installationID, s.now(), request.CorrelationID,
+		func(ctx context.Context, tx pgx.Tx, issued session.Native) error {
+			var err error
+			if view, err = device.Get(ctx, tx, issued.UserID, issued.DeviceID); err == nil && view == nil {
+				return arc.CredentialRevoked()
+			}
+			return err
+		})
 	if reuse != nil {
 		s.events.ObserveIdentity("refresh", "reused")
 	}
@@ -132,18 +141,6 @@ func (s *Service) Refresh(ctx context.Context, request Request, token string, in
 			s.events.ObserveIdentity("refresh", "refused")
 		}
 		return SignedIn{}, err
-	}
-	var view *device.View
-	err = s.db.InTx(ctx, "read a session's device", store.TxOptions{ReadOnly: true}, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		view, err = device.Get(ctx, tx, issued.UserID, issued.DeviceID)
-		return err
-	})
-	if err != nil {
-		return SignedIn{}, err
-	}
-	if view == nil {
-		return SignedIn{}, arc.CredentialRevoked()
 	}
 	s.events.ObserveIdentity("refresh", "rotated")
 	return SignedIn{Session: issued, Device: *view}, nil

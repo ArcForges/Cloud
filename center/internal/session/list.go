@@ -26,7 +26,8 @@ type Summary struct {
 }
 
 // List is one page of an account's live account sessions (account and mobile.limited; DC-03), newest first: not revoked, within
-// their absolute and idle expiry. Node, push and automation sessions are never listed here.
+// their absolute expiry and their sliding one (a browser session's idle expiry, a native session's refresh expiry). Node, push and
+// automation sessions are never listed here.
 func List(ctx context.Context, db *store.DB, userID platform.ID, current string, request page.Request, now time.Time) ([]Summary, string, error) {
 	var items []Summary
 	next := ""
@@ -39,7 +40,7 @@ func List(ctx context.Context, db *store.DB, userID platform.ID, current string,
 		rows, err := tx.Query(ctx, `SELECT session_id, device_id, product_id, issued_at, last_activity_at, expires_at, rev
 FROM identity.session
 WHERE user_id = $1 AND scope IN (1, 2) AND revoked_at IS NULL AND expires_at > $2 AND (idle_expires_at IS NULL OR idle_expires_at > $2)
-    AND (issued_at, session_id) < ($3, $4)
+    AND (refresh_expires_at IS NULL OR refresh_expires_at > $2) AND (issued_at, session_id) < ($3, $4)
 ORDER BY issued_at DESC, session_id DESC
 LIMIT $5`, userID, now, after, afterID, request.Limit+1)
 		if err != nil {

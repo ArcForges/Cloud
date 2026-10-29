@@ -3,6 +3,7 @@
 package page
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,33 @@ func TestPageRequestsAreBoundedAndCursorsBelongToTheirListing(t *testing.T) {
 	}
 }
 
+// TestACursorInstantIsWithinTheContractRange (F11): a well-formed cursor whose instant PostgreSQL cannot hold, or the contract's
+// Timestamp cannot express, is VALIDATION/invalid_cursor, never a store error.
+func TestACursorInstantIsWithinTheContractRange(t *testing.T) {
+	for name, at := range map[string]time.Time{
+		"the first instant": time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC),
+		"the last instant":  time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC),
+		"the Unix epoch":    time.Unix(0, 0),
+	} {
+		if request, refusal := Parse(Sessions, Encode(Sessions, Cursor{At: at}), 0, false); refusal != nil || !request.After.At.Equal(at) {
+			t.Errorf("%s: %v", name, refusal)
+		}
+	}
+	for name, micros := range map[string]int64{
+		"a microsecond before year 1":   minInstant - 1,
+		"a microsecond after year 9999": maxInstant + 1,
+		"-2^62":                         -1 << 62,
+		"2^62":                          1 << 62,
+		"the smallest int64":            math.MinInt64,
+		"the largest int64":             math.MaxInt64,
+	} {
+		if _, refusal := Parse(Sessions, Encode(Sessions, Cursor{At: time.UnixMicro(micros)}), 0, false); refusal == nil ||
+			refusal.Key() != "VALIDATION/invalid_cursor" {
+			t.Errorf("%s was admitted", name)
+		}
+	}
+}
+
 func FuzzParseCursor(f *testing.F) {
 	f.Add(Encode(Sessions, Cursor{At: time.Unix(1, 0), ID: [16]byte{9}}))
 	f.Add("")
@@ -57,6 +85,9 @@ func FuzzParseCursor(f *testing.F) {
 		}
 		if request.After == nil || Encode(Sessions, *request.After) != text {
 			t.Fatalf("%q is admitted but not canonical", text)
+		}
+		if year := request.After.At.Year(); year < 1 || year > 9999 {
+			t.Fatalf("%q is admitted with the year %d", text, year)
 		}
 	})
 }

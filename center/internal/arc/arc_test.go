@@ -86,7 +86,7 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 	}
 	edge := RateLimited("edge", 0, time.Time{}).ArcError(correlation.Context{})
 	if edge.GetDetails().GetLimit().GetMaximum() != nil || edge.GetRetry().GetRetryAt() != nil || edge.GetCorrelationId() != nil {
-		t.Fatalf("the edge refusal states no maximum, instant or correlation %v", edge)
+		t.Fatalf("a zero instant and maximum and an empty correlation are not stated %v", edge)
 	}
 }
 

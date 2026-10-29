@@ -133,25 +133,42 @@ func TestTheEmailCodeClosedLoop(t *testing.T) {
 	}
 	h.remember(completed.GetValue().GetSession().GetAccessToken(), completed.GetValue().GetSession().GetRefreshToken())
 
-	// Sends are capped per flow and never reset the attempts.
+	// Sends are capped per flow and never reset the attempts (F15): four wrong codes, two resends that keep the four attempts, and the
+	// fifth wrong code exhausts the flow, so its newest code no longer signs in.
 	capped := h.beginEmail(address, caller{ip: "198.51.100.40"}).GetValue().GetChallenge()
-	for range 3 {
+	var cappedID [16]byte
+	copy(cappedID[:], capped.GetFlowId().GetValue())
+	wrong := func() {
+		t.Helper()
+		if result := failure(h.redeem(capped.GetFlowId(), "BBBB-BBBB", caller{ip: "198.51.100.40"}).GetError()); result != "AUTHENTICATION/unauthenticated" {
+			t.Fatalf("a wrong code: %s", result)
+		}
+	}
+	attempts := func() int { return h.count("SELECT attempts FROM identity.auth_flow WHERE flow_id = $1", cappedID) }
+	if h.requestCode(capped.GetFlowId(), address, caller{ip: "198.51.100.40"}).GetError() != nil {
+		t.Fatal("the first send")
+	}
+	for range 4 {
+		wrong()
+	}
+	if attempts() != 4 {
+		t.Fatalf("attempts after four wrong codes: %d", attempts())
+	}
+	for range 2 {
 		if h.requestCode(capped.GetFlowId(), address, caller{ip: "198.51.100.40"}).GetError() != nil {
-			t.Fatal("a send within the cap")
+			t.Fatal("a resend within the cap")
+		}
+		if attempts() != 4 {
+			t.Fatalf("a resend reset the attempts: %d", attempts())
 		}
 	}
 	if result := h.requestCode(capped.GetFlowId(), address, caller{ip: "198.51.100.40"}).GetError(); failure(result) != "RESOURCE/rate_limited" ||
 		result.GetDetails().GetLimit().GetLimitName() != "email_code_sends" {
 		t.Fatalf("a fourth send: %v", result)
 	}
-	// Wrong codes exhaust the flow after its attempts; the flow is then expired.
-	for range 5 {
-		if result := failure(h.redeem(capped.GetFlowId(), "BBBB-BBBB", caller{ip: "198.51.100.40"}).GetError()); result != "AUTHENTICATION/unauthenticated" {
-			t.Fatalf("a wrong code: %s", result)
-		}
-	}
+	wrong()
 	if result := failure(h.redeem(capped.GetFlowId(), h.lastCode(address), caller{ip: "198.51.100.40"}).GetError()); result != "STATE/expired" {
-		t.Fatalf("the right code after the attempts: %s", result)
+		t.Fatalf("the newest code after the fifth wrong one: %s", result)
 	}
 	// An expired flow.
 	late := h.beginEmail(address, caller{}).GetValue().GetChallenge()

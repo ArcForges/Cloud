@@ -36,7 +36,9 @@ func TestBucketsAreDistinctPerKindAndKey(t *testing.T) {
 	seen := map[[32]byte]bool{}
 	for _, kind := range Kinds() {
 		window := Window(policy, kind)
-		if window.Limit < 1 || window.Window < time.Minute {
+		// The anonymous-flow ceiling is the one opt-in kind (C1): by default its limit is 0, so no global bucket is counted.
+		if kind == AnonymousFlows && (window.Limit != 0 || window.Window < time.Minute) ||
+			kind != AnonymousFlows && (window.Limit < 1 || window.Window < time.Minute) {
 			t.Fatalf("%s has no window", kind)
 		}
 		for _, key := range []string{"a", "b"} {

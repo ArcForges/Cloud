@@ -202,3 +202,18 @@ func TestTheEnumNumbersAreTheStoredPositionsOfThePhysicalEnums(t *testing.T) {
 		t.Fatal("the revoked trust level is 3")
 	}
 }
+
+// TestTimeZonesFollowTheContractPattern (F20): a time zone is admitted only within the contract's timezone pattern, which has no
+// '+', so a profile never echoes a value the contract refuses.
+func TestTimeZonesFollowTheContractPattern(t *testing.T) {
+	for _, zone := range []string{"UTC", "Europe/Zurich", "America/Port-au-Prince", "America/Argentina/Buenos_Aires", "Etc/GMT-14"} {
+		if !ValidTimezone(zone) {
+			t.Errorf("%q was refused", zone)
+		}
+	}
+	for _, zone := range []string{"Etc/GMT+5", "GMT+0", "", "/UTC", "UTC/", "Europe//Zurich", "UTC:00", "Europe/Zürich", strings.Repeat("A", 65)} {
+		if ValidTimezone(zone) {
+			t.Errorf("%q was admitted", zone)
+		}
+	}
+}

@@ -68,7 +68,7 @@ func TestADisabledSurfaceIsNotActivatedBeforeAnyCredential(t *testing.T) {
 			correlation.FormatID(arcError.GetCorrelationId().GetValue()) != "4bf92f35-77b3-4da6-a3ce-929d0e0e4736" {
 			t.Fatalf("arc error %v", &arcError)
 		}
-		if len(r.outcomes) != 1 || r.outcomes[0].Domain != "not_activated" {
+		if len(r.outcomes) != 1 || r.outcomes[0].Domain != "not_activated" || r.outcomes[0].Correlation != "4bf92f35-77b3-4da6-a3ce-929d0e0e4736" {
 			t.Fatalf("outcome %+v", r.outcomes)
 		}
 	}

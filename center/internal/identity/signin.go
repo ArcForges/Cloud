@@ -116,6 +116,12 @@ func (s *Service) BeginAuthentication(ctx context.Context, request Request, in B
 	if err := s.take(ctx, request, s.bucket(ratelimit.SignInPrefix, ratelimit.Prefix(request.ClientIP)), Anonymous); err != nil {
 		return Challenge{}, err
 	}
+	// The opt-in global ceiling on the flows anonymous calls create (C1; set only in the acceptance environment).
+	if s.policy.AnonymousFlows.Limit > 0 {
+		if err := s.take(ctx, request, s.bucket(ratelimit.AnonymousFlows, "all"), Anonymous); err != nil {
+			return Challenge{}, err
+		}
+	}
 	now := s.now()
 	claim := in.Claim
 	row := flow{ID: platform.NewID(), Channel: ChannelNative, Purpose: Purpose(in.Purpose), Claim: &claim, CreatedAt: now}
@@ -192,7 +198,7 @@ WHERE a.provider_id = 'passkey' AND a.subject = $1 AND a.revoked_at IS NULL`, ba
 // validAssertion checks the contract's bounds of a WebAuthnAssertion; a discoverable sign-in needs the user handle.
 func validAssertion(assertion passkey.Assertion) *arc.Refusal {
 	switch {
-	case len(assertion.CredentialID) < 1 || len(assertion.CredentialID) > 1023:
+	case len(assertion.CredentialID) < 1 || len(assertion.CredentialID) > MaxCredentialIDBytes:
 		return arc.InvalidArgument("proof.passkey.credential_id", "length")
 	case len(assertion.ClientDataJSON) < 1 || len(assertion.ClientDataJSON) > 16384:
 		return arc.InvalidArgument("proof.passkey.client_data_json", "length")
@@ -314,10 +320,12 @@ func (s *Service) signIn(ctx context.Context, request Request, row flow, userID 
 			map[string]any{"method": methodName(method), "channel": "native", "scope": "account"})
 	})
 	if err != nil {
-		if refusalOf(err) != nil {
-			if exhaustErr := s.exhaust(ctx, row.ID); exhaustErr != nil {
-				return SignedIn{}, exhaustErr
-			}
+		if refusalOf(err) == nil {
+			// The proof verified and the store failed (a lost race for a new installation included, D4): the attempt is given back
+			// for the advised retry.
+			s.release(ctx, row.ID)
+		} else if exhaustErr := s.exhaust(ctx, row.ID); exhaustErr != nil {
+			return SignedIn{}, exhaustErr
 		}
 		return SignedIn{}, err
 	}

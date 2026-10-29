@@ -41,3 +41,25 @@ regexes = [
   '''(?s)^\s*"eng/provenance/records/go\-gowebauthn\-legal\-r1\.json":\s*"fecb236888c74fd6195890d16720689d5341b51bbe8ac3a3d942171a936e4d07",?\s*$''',
   '''(?s)^\s*"eng/provenance/records/go\-gowebauthnx\-legal\-r1\.json":\s*"f1680c3b153114ea4cc145264a716e4669e14212976d6584c1b3f41eda1202c4",?\s*$''',
 ]
+
+[[allowlists]]
+description = "AF-CTR-03: the same two reviewed record digests in the inputs map of the immutable dependency review receipt af-ctr-03-r2 (the A1a review fix round). Only these two exact key-and-digest lines of this exact file are exempt."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^eng/policy/dependency\-reviews/af\-ctr\-03\-r2\.json$''']
+regexTarget = "line"
+regexes = [
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthn\-legal\-r1\.json":\s*"fecb236888c74fd6195890d16720689d5341b51bbe8ac3a3d942171a936e4d07",?\s*$''',
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthnx\-legal\-r1\.json":\s*"f1680c3b153114ea4cc145264a716e4669e14212976d6584c1b3f41eda1202c4",?\s*$''',
+]
+
+[[allowlists]]
+description = "AF-CTR-03: the same two reviewed record digests in the inputs map of the immutable dependency review receipt af-ctr-03-r3 (the A1a review fix round 2). Only these two exact key-and-digest lines of this exact file are exempt."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^eng/policy/dependency\-reviews/af\-ctr\-03\-r3\.json$''']
+regexTarget = "line"
+regexes = [
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthn\-legal\-r1\.json":\s*"fecb236888c74fd6195890d16720689d5341b51bbe8ac3a3d942171a936e4d07",?\s*$''',
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthnx\-legal\-r1\.json":\s*"f1680c3b153114ea4cc145264a716e4669e14212976d6584c1b3f41eda1202c4",?\s*$''',
+]

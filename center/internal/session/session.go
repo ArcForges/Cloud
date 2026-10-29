@@ -173,12 +173,15 @@ type Reuse struct {
 
 // Refresh rotates a native session's tokens (RefreshSession): in one transaction it locks the session by the presented token's
 // digest, checks it and records the presented digest as spent before it issues the next generation. A digest that is already
-// spent is a reuse: every live session of its family is revoked, the reuse is audited and the call answers credential_revoked,
+// spent is a reuse: every live session of its family is revoked, the reuse is audited when it revoked one (a later presentation of
+// the family's spent tokens is only counted by the caller's metric) and the call answers credential_revoked,
 // also for a client that lost the response to its previous refresh (strict rotation, no grace window). Two concurrent refreshes
 // with one token serialize on the row: the second finds the token spent and revokes the family. The checks run in this order:
 // the digest, then revocation (session, device, installation) and expiry, then the installation, the scope and the account.
+// within runs in the rotating transaction after the rotation and before the commit (the caller's reads for its reply), so a
+// failure of it rolls the rotation back and the presented token stays valid; nil runs nothing.
 func Refresh(ctx context.Context, db *store.DB, policy config.IdentityPolicy, token string, installationID platform.ID, now time.Time,
-	correlationID *platform.ID) (Native, *Reuse, error) {
+	correlationID *platform.ID, within func(ctx context.Context, tx pgx.Tx, issued Native) error) (Native, *Reuse, error) {
 	now = now.UTC().Truncate(time.Microsecond)
 	secret, ok := ParseToken(RefreshPrefix, token)
 	if !ok {
@@ -245,7 +248,10 @@ VALUES ($1, $2, $3, $4, $5, $6)`, digest[:], row.sessionID, row.familyID, row.ge
 		_, err = tx.Exec(ctx, `UPDATE identity.session SET access_token_hash = $2, access_expires_at = $3, refresh_token_hash = $4,
     refresh_generation = refresh_generation + 1, refresh_expires_at = $5, last_activity_at = $6, rev = rev + 1
 WHERE session_id = $1`, row.sessionID, accessDigest[:], issued.AccessExpiresAt, refreshDigest[:], issued.RefreshExpiresAt, now)
-		return err
+		if err != nil || within == nil {
+			return err
+		}
+		return within(ctx, tx, issued)
 	})
 	if err != nil {
 		var refusal *arc.Refusal
@@ -260,8 +266,9 @@ WHERE session_id = $1`, row.sessionID, accessDigest[:], issued.AccessExpiresAt, 
 	return issued, nil, nil
 }
 
-// revokeReusedFamily revokes the live sessions of the family of a spent refresh digest and audits the reuse; nil when the digest
-// was never issued.
+// revokeReusedFamily revokes the live sessions of the family of a spent refresh digest and audits the reuse when it revoked a session;
+// nil when the digest was never issued. A family that is already revoked (by an earlier, audited reuse or by its own revocation)
+// appends nothing, so replaying a spent token cannot grow the audit chain (E5).
 func revokeReusedFamily(ctx context.Context, tx pgx.Tx, digest [32]byte, now time.Time, correlationID *platform.ID) (*Reuse, error) {
 	var reuse Reuse
 	var generation int64
@@ -279,6 +286,9 @@ WHERE family_id = $1 AND revoked_at IS NULL`, reuse.FamilyID, now, RevokedRefres
 		return nil, err
 	}
 	reuse.Revoked = tag.RowsAffected()
+	if reuse.Revoked == 0 {
+		return &reuse, nil
+	}
 	payload, err := json.Marshal(map[string]any{"generation": generation, "revokedSessions": reuse.Revoked})
 	if err != nil {
 		return nil, err

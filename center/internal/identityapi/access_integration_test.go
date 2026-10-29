@@ -5,6 +5,7 @@ package identityapi_test
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -496,7 +497,8 @@ func TestRateLimitsKeyByPrefixAndAccount(t *testing.T) {
 // e-mail code or bootstrap token is in any identity, device, platform or audit row, the statement statistics, the center's log or
 // the test server's statement log. E-mail addresses and login hints are only in the e-mail identities' subjects: no flow, bucket,
 // audit row, statistic or center log line holds one (the test server logs statement parameters, which hold the address an e-mail
-// lookup searches for, so its log is not scanned for addresses).
+// lookup searches for, so its log is not scanned for addresses). Every table is also scanned for the hex of each value and of each
+// credential's raw bytes, as row_to_json renders a bytea column, so a code or token stored in clear in a bytea column is found too.
 func TestNoSecretReachesTheStoreOrTheLogs(t *testing.T) {
 	h := newHarness(t, settings{policy: `{"emailPerAddressLimit": 100}`})
 	ctx := context.Background()
@@ -537,6 +539,20 @@ func TestNoSecretReachesTheStoreOrTheLogs(t *testing.T) {
 	for _, value := range addresses {
 		lowered = append(lowered, strings.ToLower(value))
 	}
+	// row_to_json renders bytea (digests, the code verifier, audit payloads) as lowercase hex (F13): scan for the hex of every value's
+	// text and of every credential's 32 raw bytes.
+	var hexed []string
+	for _, value := range append(append([]string{}, secrets...), addresses...) {
+		hexed = append(hexed, hex.EncodeToString([]byte(value)))
+		for _, prefix := range []string{session.AccessPrefix, session.RefreshPrefix, session.BootstrapPrefix, ""} {
+			if raw, ok := session.ParseToken(prefix, value); ok {
+				hexed = append(hexed, hex.EncodeToString(raw[:]))
+			}
+		}
+	}
+	for _, value := range lowered {
+		hexed = append(hexed, hex.EncodeToString([]byte(value)))
+	}
 	scan := func(where, text string, values []string) {
 		t.Helper()
 		for _, value := range values {
@@ -568,6 +584,7 @@ WHERE table_schema IN ('identity', 'device', 'platform', 'audit') AND table_type
 			t.Fatal(err)
 		}
 		scan(table, text, secrets)
+		scan(table+" (bytea)", text, hexed)
 		if table != "identity.auth_identity" {
 			scan(table, strings.ToLower(text), lowered)
 		}

@@ -20,8 +20,9 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
-// MaxCredentialIDBytes bounds a passkey's credential ID: its base64url form is the credential's subject, at most 512 characters.
-const MaxCredentialIDBytes = 384
+// MaxCredentialIDBytes bounds a passkey's credential ID as the contract and WebAuthn do; its unpadded base64url form, at most 1364
+// characters, is the credential's subject (migration 0002, auth_identity_subject).
+const MaxCredentialIDBytes = 1023
 
 // Enrollment is a CompleteEnrollment request of the owner bootstrap.
 type Enrollment struct {
@@ -43,7 +44,7 @@ const (
 	bootstrapPasskey       = "passkey_invalid"
 )
 
-// validCreation checks the contract's bounds of a WebAuthnCreation and the subject bound of its credential ID.
+// validCreation checks the contract's bounds of a WebAuthnCreation.
 func validCreation(creation passkey.Creation) *arc.Refusal {
 	switch {
 	case len(creation.CredentialID) < 1 || len(creation.CredentialID) > MaxCredentialIDBytes:
@@ -102,8 +103,8 @@ func (s *Service) Bootstrap(ctx context.Context, request Request, in Enrollment)
 		return SignedIn{}, arc.Unauthenticated()
 	}
 	now := s.now()
-	secret, ok := session.ParseToken(session.BootstrapPrefix, in.LocalCode)
-	digest := secret.Digest()
+	_, ok := session.ParseToken(session.BootstrapPrefix, in.LocalCode)
+	digest := session.BootstrapDigest(in.LocalCode)
 	switch {
 	case s.bootstrap == nil:
 		return refuse(bootstrapDisabled)
@@ -198,10 +199,11 @@ VALUES ($1, $2, 1, 'passkey', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)`, id
 		}
 		return refuse(bootstrapAccountExists)
 	case err != nil:
-		if refusalOf(err) != nil {
-			if exhaustErr := s.exhaust(ctx, row.ID); exhaustErr != nil {
-				return SignedIn{}, exhaustErr
-			}
+		if refusalOf(err) == nil {
+			// The token and the creation verified and the store failed: the attempt is given back for the advised retry.
+			s.release(ctx, row.ID)
+		} else if exhaustErr := s.exhaust(ctx, row.ID); exhaustErr != nil {
+			return SignedIn{}, exhaustErr
 		}
 		return SignedIn{}, err
 	}

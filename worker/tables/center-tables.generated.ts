@@ -54,9 +54,21 @@ export const notActivatedReplies: Readonly<Record<Surface, string>> = {
   identity:
     "AAAAAEIaQAoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBOgwiChIIaWRlbnRpdHmAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
 };
-/** The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited, retry after time. Base64. */
+/**
+ * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
+ * A template: the Worker writes the retry instant (the refusal's time rounded up to the second, plus the edge period) into
+ * the instant seconds at each offset (retry.retry_at and limit.recovery_at). Base64.
+ */
 export const rateLimitedReply =
-  "AAAAAD8aPQoMcmF0ZV9saW1pdGVkEAcaG2Vycm9yLnJlc291cmNlLnJhdGVfbGltaXRlZCICCAMoAToIEgYKBGVkZ2WAAAAAEGdycGMtc3RhdHVzOiAwDQo=";
+  "AAAAAFMaUQoMcmF0ZV9saW1pdGVkEAcaG2Vycm9yLnJlc291cmNlLnJhdGVfbGltaXRlZCIMCAMSCAiAgICAQBAAKAE6EhIQCgRlZGdlIggIgICAgEAQAIAAAAAQZ3JwYy1zdGF0dXM6IDANCg==";
+/** The byte offsets of the template's instant seconds (zigzag varints of a fixed width). */
+export const rateLimitedReplyInstantOffsets: readonly number[] = [59, 81];
+/** The width of each instant's seconds: five varint bytes hold every instant from 1974 to 2514. */
+export const rateLimitedReplyInstantBytes = 5;
+/** The period of the surface rate limit in seconds (wrangler.json IDENTITY_RATE_LIMITER simple.period). */
+export const edgeRateLimitPeriodSeconds = 60;
+/** The network that keys an IPv6 client at the edge rate limits; an IPv4 client is keyed by its whole address. */
+export const edgeIpv6PrefixBits = 64;
 
 /** The methods of the switchable surfaces; each is forwarded only while its surface is enabled. */
 export const surfaceRoutes: readonly SurfaceRoute[] = [

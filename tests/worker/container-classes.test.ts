@@ -252,6 +252,22 @@ test("the Go center gets the surfaces the Worker forwards and always the client-
   assert.equal(csharp?.ARCFORGES_CENTER_CLIENT_IP_HEADER, undefined);
 });
 
+test("the Go center gets the identity policy override only where an environment sets one", () => {
+  const policy = '{"anonymousFlowsLimit":600,"anonymousFlowsWindow":"1h"}';
+  const settings = (value: string | undefined) =>
+    new CloudContainer(containerContext, {
+      ...centerEnvironment,
+      ARCFORGES_CENTER_IDENTITY_POLICY: value,
+    }).envVars as Record<string, string>;
+  assert.equal(settings(policy).ARCFORGES_CENTER_IDENTITY_POLICY, policy);
+  assert.equal(settings(undefined).ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
+  const csharp = new CloudContainer(containerContext, {
+    ARCFORGES_HELLO_RUNTIME: "csharp",
+    ARCFORGES_CENTER_IDENTITY_POLICY: policy,
+  }).envVars as Record<string, string> | undefined;
+  assert.equal(csharp?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
+});
+
 test("the acceptance entry runs the Go center under the proof Container class and keeps the retired classes inert", async () => {
   const {
     FoundationContainer: AcceptanceContainer,

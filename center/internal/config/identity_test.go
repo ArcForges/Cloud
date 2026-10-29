@@ -128,7 +128,6 @@ func TestTheBootstrapIsADigestAndANearExpiry(t *testing.T) {
 		{EnvBootstrapSHA256: strings.ToUpper(digest), EnvBootstrapExpiresAt: expires},
 		{EnvBootstrapSHA256: digest[:63], EnvBootstrapExpiresAt: expires},
 		{EnvBootstrapSHA256: digest[:63] + "g", EnvBootstrapExpiresAt: expires},
-		{EnvBootstrapSHA256: digest, EnvBootstrapExpiresAt: now.Add(-time.Minute).Format(time.RFC3339)},
 		{EnvBootstrapSHA256: digest, EnvBootstrapExpiresAt: now.Add(MaxBootstrapLead + time.Hour).Format(time.RFC3339)},
 		{EnvBootstrapSHA256: digest, EnvBootstrapExpiresAt: now.Add(time.Hour).Format("2006-01-02T15:04:05+00:00")},
 		{EnvBootstrapSHA256: digest, EnvBootstrapExpiresAt: "tomorrow"},
@@ -138,6 +137,13 @@ func TestTheBootstrapIsADigestAndANearExpiry(t *testing.T) {
 		if !errors.Is(err, ErrInvalid) || strings.Contains(err.Error(), digest) {
 			t.Errorf("%v: %v", values, err)
 		}
+	}
+	// A past expiry (the variables left set after the bootstrap) still loads, so a restart starts the center; the bootstrap is
+	// refused at use as expired (E2).
+	past := now.Add(-30 * 24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
+	if cfg, err = Load(environment(withIdentity(SelfHosted, map[string]string{EnvBootstrapSHA256: digest, EnvBootstrapExpiresAt: past}))); err != nil ||
+		cfg.Identity.Bootstrap == nil || cfg.Identity.Bootstrap.ExpiresAt.After(now) {
+		t.Fatalf("a past expiry: %+v %v", cfg.Identity.Bootstrap, err)
 	}
 	// Both sides of the seven-day bound.
 	inside := now.Add(MaxBootstrapLead - time.Minute).Truncate(time.Second).Format(time.RFC3339)
@@ -150,6 +156,20 @@ func TestTheIdentityPolicyHasDocumentedDefaultsAndBoundedOverrides(t *testing.T)
 	defaults := DefaultIdentityPolicy()
 	if err := defaults.Validate(); err != nil {
 		t.Fatal(err)
+	}
+	// C1: the anonymous-flow ceiling is opt-in (0 sets none) and bounded.
+	if defaults.AnonymousFlows != (Window{Limit: 0, Window: time.Hour}) {
+		t.Fatalf("the anonymous-flow ceiling is set by default: %+v", defaults.AnonymousFlows)
+	}
+	if ceiling, err := ParseIdentityPolicy(`{"anonymousFlowsLimit":600,"anonymousFlowsWindow":"1h"}`); err != nil ||
+		ceiling.AnonymousFlows != (Window{Limit: 600, Window: time.Hour}) {
+		t.Fatalf("the proof ceiling: %+v %v", ceiling.AnonymousFlows, err)
+	}
+	for _, document := range []string{`{"anonymousFlowsLimit": -1}`, `{"anonymousFlowsLimit": 10001}`, `{"anonymousFlowsWindow": "30s"}`,
+		`{"anonymousFlowsWindow": "25h"}`, `{"anonymousFlowsLimit": "600"}`} {
+		if _, err := ParseIdentityPolicy(document); err == nil {
+			t.Errorf("%s was admitted", document)
+		}
 	}
 	if defaults.BrowserAbsolute != 12*time.Hour || defaults.BrowserIdle != 30*time.Minute || defaults.StepUpEvidenceTTL != 5*time.Minute ||
 		defaults.EmailCodeAttempts != 5 || defaults.EmailCodeSends != 3 || defaults.EmailCodeIterations != 20_000 || defaults.AccessTokenLifetime != 15*time.Minute {
