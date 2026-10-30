@@ -6,11 +6,13 @@ data/cloud-store.md §2 and §6). It lands in parts, each deployable dark:
 - **A1a (merged):** the identity and device store (migration 0002, whole), the identity core, sign-in by passkey and e-mail
   code, the owner bootstrap, native sessions with rotating refresh tokens, the credential verifiers of the ingress, the account
   reads, rate limits, audit, the closed operation table and the `identity` surface switch in the center and the Worker.
-- **A1b (this change):** step-up, sign-out and session revocation, passkey registration of a signed-in account, profile,
+- **A1b (merged):** step-up, sign-out and session revocation, passkey registration of a signed-in account, profile,
   credential and device changes, device revocation and its cascade, command receipts for those writes and the incident command
   `admin revoke-sessions`. It adds no migration: migration 0002 already holds every table it writes.
-- **A2:** the account pages and the contract `/session/v1` browser routes (cookie sessions, CSRF, the bootstrap page), the
-  real-browser acceptance script and the proof bootstrap inputs.
+- **A2 (this change):** the account pages and the contract `/session/v1/web` browser routes (cookie sessions, CSRF, the bootstrap
+  page) on the new `pages` surface, the Worker's page handler, the proof bootstrap script and dispatch inputs and the real-browser
+  acceptance script ([account pages](#account-pages-and-browser-sessions), [proof bootstrap and acceptance](#proof-bootstrap-and-acceptance)).
+  It adds no migration: the browser session, device and installation rows were migration 0002's.
 - **B:** feature availability (AD-0021 §13a) and the operator commands.
 
 Recovery, account deletion and export, e-mail change, recovery codes, API tokens and the security activity list are AF-ID-02's;
@@ -27,6 +29,7 @@ those methods stay unregistered.
 | `center/internal/device`                     | Devices and installations: native claims, browser installations, the device list, renames, the revocation cascade              |
 | `center/internal/access`                     | The closed operation table and the authorization of every identity call                                                        |
 | `center/internal/identityapi`                | The Connect handlers of the served IdentityService and DeviceService methods and the command receipts of the writes            |
+| `center/internal/pages`                      | The account pages (`html/template`), their one script and style sheet, the `/session/v1/web` routes and the forms (A2)         |
 | `center/internal/ratelimit`, `internal/page` | Fixed-window rate limits on `platform.rate_limit`; bounded paging with opaque keyset cursors                                   |
 | `center/internal/mail`, `internal/arc`       | The e-mail sender (disabled, or the test fake); the domain refusals of errors.md and their `ArcError` rendering                |
 
@@ -266,8 +269,10 @@ compared first, in constant time, before any WebAuthn verification or write; a d
 existing account all answer `AUTHENTICATION/unauthenticated`, the reason only in the audit event `identity.bootstrap.refused`. A
 wrong token counts in its client prefix's bucket; there is no global bucket, so nobody can lock the owner out. The creating
 transaction takes the bootstrap's advisory lock and inserts the singleton `identity.bootstrap` row, so concurrent attempts create
-one account (`TestConcurrentBootstrapsCreateOneAccount`). The token never appears in the repository, a log or a database row. A2
-adds the operator script that generates it and the proof environment's dispatch inputs.
+one account (`TestConcurrentBootstrapsCreateOneAccount`). The token never appears in the repository, a log or a database row. The
+operator script that generates it and the proof environment's dispatch inputs are described under
+[proof bootstrap and acceptance](#proof-bootstrap-and-acceptance); the bootstrap page of the browser is described under
+[account pages](#account-pages-and-browser-sessions).
 
 **A store failure after a verified proof** (F9). A flow's attempt is taken before its proof is checked. When the proof verified (a
 passkey assertion, an e-mail code, the bootstrap token and creation) but the success transaction failed in the store, the reply is
@@ -312,6 +317,148 @@ a live session, and a revoked device is not listed. ListAuthIdentities lists the
 (default 50); a cursor is opaque and bound to its listing, and a malformed one, or one whose instant is outside the contract's
 range (years 1 to 9999), is `VALIDATION/invalid_cursor`. A full page of 100 devices fits the method's 64 KiB reply budget, which the
 center's Connect writer admits (`TestAFullDevicePageIsSent`).
+
+## Account pages and browser sessions
+
+The `pages` surface (A2; PLT-1, AD-0021 §7) is the center's own account UI and the contract's browser session routes
+(`public/http/v1/web-browser.schema.json`, Contracts 62ccef1). A self-hosted center serves them without any Web deployment; the
+hosted Worker forwards the same exact paths through its [page handler](cloud-ingress.md#page-routes-plt-1). The pages decide nothing the
+API does not: every action calls the handler of the API method it stands for, in process, with the session of the browser's cookie
+(`identityapi.Direct`), so a page and the API share the operation table (`access.Authorize`), the step-up evidence, the command
+receipts, the rate-limit buckets and the audit events. A page never reads or writes a table.
+
+| Route                                                                                       | Kind | Credential       |
+| ------------------------------------------------------------------------------------------- | ---- | ---------------- |
+| `GET /account/sign-in`, `/account/bootstrap`, `/account/account.js`, `/account/account.css` | page | none             |
+| `GET /account/passkeys`, `/account/sessions`, `/account/devices`, `/account/sign-out`       | page | cookie session   |
+| `POST /account/passkeys/{add,complete,rename,remove}`                                       | form | cookie session   |
+| `POST /account/sessions/{revoke,revoke-all}`, `POST /account/devices/{rename,revoke}`       | form | cookie session   |
+| `GET /session/v1/web/bootstrap`                                                             | JSON | optional session |
+| `POST /session/v1/web/{authentication/begin,authentication/complete,enrollment/complete}`   | JSON | none (see CSRF)  |
+| `POST /session/v1/web/{step-up/begin,step-up/complete,logout}`                              | JSON | cookie session   |
+
+All paths are below the public base URL (`/api/...` on the hosted deployments). `/account` itself, profile editing (`UpdateProfile`
+stays an API method), recovery, e-mail change and the provider callback are not pages; recovery and the callback are AF-ID-02's.
+The browser channel offers the passkey method only: e-mail (and password and OIDC) is `not_offered` on it until the mail sender is
+live (the mail PR), exactly as the API's e-mail method is left out while the sender is disabled.
+
+**Cookie.** A sign-in (or the bootstrap) sets exactly one cookie in this byte form, and nothing else sets or reads another:
+`__Host-af_session=<43 base64url characters>; Path=/; Max-Age=<seconds>; Secure; HttpOnly; SameSite=Strict`; a sign-out removes it with
+`Max-Age=0`. There is no `Domain`. The session is idle for 30 minutes and absolute for 12 hours; it is renewed only by a page load
+or the bootstrap read (`session.Renew`, one auxiliary transaction, never beyond the absolute expiry), never by a POST. A browser's
+device and installation are created on its first sign-in: the installation claim (`WebBrowserInstallationClaim`, product
+`arcforges-web`, platform `web`) is a random UUID the script keeps in the browser's local storage; a claim that belongs to another
+account gets new rows. The device is named from the `User-Agent` by a closed set of families and systems ("Edge on Windows", a family alone,
+"Browser on Linux", else "Web browser"), never by the header's text.
+
+**Origin and CSRF.** Every POST needs exactly one `Origin` header equal, byte for byte, to the origin of the public base URL;
+anything else is 403 before the session or the body is read. A GET may carry no `Origin` (a browser sends none for a same-origin
+read) but one it carries must be exact. A route that needs a session also needs that session's CSRF token, derived (not stored) as
+`HMAC-SHA-256(handle, "af-csrf-v1")` in base64url: the `X-AF-CSRF` header on a JSON route, the `csrf` field on a form (both, when
+present, must agree). Before there is a session the three sign-in steps accept instead a public constant of the origin,
+`base64url(SHA-256("af-csrf-pre-v1\n" + origin))`: it keeps a cross-site page from submitting them blindly, and nothing more is
+claimed for it, because the steps are protected by the flow ID, the challenge, the WebAuthn origin binding and the rate limits as the
+API methods are. The bootstrap read returns the token for the session that is there, or the constant. There is no flow cookie: the
+flow ID travels in the JSON bodies, and a browser flow is bound to the origin it began on (`flow_origin`).
+
+**Request rules** (all refusals carry the security headers below). Any query string, even an empty one, and any `Authorization`
+header are 400; a body on a GET is 400; a POST has one `Content-Type` of the route's type (JSON routes `application/json`, forms
+`application/x-www-form-urlencoded`, with at most the UTF-8 charset) or is 415, no `Content-Encoding`, and a body within the route's
+bound (the contract's `x-arcforges-max-bytes`), declared or streamed, or is 413; JSON bodies are read strictly (unknown and repeated
+keys refused). A method a path does not have is 405, an unknown path 404, a disabled surface 404 with no body. The only statuses are
+200, 303, 400, 403, 404, 413, 415 and 429 (a rate limit: the Worker's own edge limit sets `Retry-After`, the center's carries the ArcError's retry advice in its body); the Worker turns any other status of
+the Container into its own 503. The contract defines no error body for these routes, so a refusal of a JSON route is the
+[ArcError](center.md#arcerror-and-grpc-status) as JSON, `{"error": {"category", "code", "messageKey", "retry", "effect",
+"correlationId", "details"}}`, and of a page an HTML page with a fixed text of its code (the center never sends text to show).
+This is a gap of the contract document, routed to the Contracts and Design owners.
+
+**Security headers.** Every reply of every page route, refusals included, carries exactly these seven, and the Worker rejects (503)
+a reply that lacks one or has another value:
+
+```
+Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; require-trusted-types-for 'script'; trusted-types 'none'
+X-Frame-Options: DENY
+Referrer-Policy: same-origin
+Cross-Origin-Opener-Policy: same-origin
+Permissions-Policy: publickey-credentials-get=(self), publickey-credentials-create=(self)
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+```
+
+The pages are rendered with `html/template` (templates are `*.gohtml` files, so the formatter leaves them alone) and carry no inline
+script, inline style, event handler or `style` attribute. The one script, `account.js` (an ES module), writes text only with
+`textContent`, builds no markup and loads nothing from another origin; under `require-trusted-types-for 'script'` with
+`trusted-types 'none'` a markup sink would fail in the browser. It runs the WebAuthn ceremonies and calls the JSON routes; every
+account change itself is a plain form (POST, then a 303 back to the page), and a form that needs a step-up
+(`data-step-up-class`) proves a passkey first and is then submitted as it is. The pages do not cache (`no-store`).
+
+**Return path.** A protected page without a session answers 303 to `<base>/account/sign-in#return=<percent-encoded path>`. The
+fragment never reaches a server. The sign-in script follows a return value only when it is a path of its own origin (one slash and
+then neither a slash nor a backslash, no control character or space, at most 512 characters, and still this origin and not `//` after
+the parser has normalised it); anything else goes to the passkeys page (`tests/worker/account-script.test.ts`). The Worker admits a
+`Location` only of the form `/api/account/<words>` with at most that fragment.
+
+**Accessibility.** The pages are one column of semantic HTML: a skip link, one `h1` that takes focus on load, labelled fields, a
+status line with `aria-live`, an error summary with `role="alert"` that takes focus, tables with captions and scoped headers, buttons
+named for their row, `lang` and the viewport meta, and a style sheet with visible focus rings and light and dark colours. Everything but the three WebAuthn ceremonies and the step-up works without script, and a page that
+needs script says so (`noscript`). The rendered HTML is checked by `TestEveryPageIsAccessibleHTMLWithNothingExternal` (no inline script, style or event
+handler and no reference to another origin either); the style sheet's focus rings and colours are not tested, and none of this is an
+accessibility audit with assistive technology.
+
+**Tests.** `center/internal/pages/*_integration_test.go` run the handler on real PostgreSQL: a success test for every route (a
+`TestMain` gate fails when a route has none), the owner's bootstrap and its refusals, cross-account isolation (another account's passkeys,
+sessions and devices are not found), Origin, CSRF, flow and media-type refusals, the rate limits shared with the API
+methods, the cookie's byte form and lifetime, renewal, and a scan of the database, every `Set-Cookie`, the logs and the audit rows
+for every generated token and handle. The Worker's page handler has byte-exact tests for its headers and its `Set-Cookie`
+(`tests/worker/pages.test.ts`).
+
+## Proof bootstrap and acceptance
+
+The acceptance environment (`proof.arcforges.com`) is created by the owner's bootstrap and exercised by a real browser.
+
+1. **Make the token** on the owner's own machine: `node eng/verification/proof-bootstrap.ts [--hours 24]`. It writes the token
+   (`afb1.` and 43 base64url characters) to `~/.arcforges/proof-bootstrap/owner-bootstrap.json`, a new file only the current user can
+   read (mode 0600 in a 0700 directory; on Windows one `icacls` entry for the user, set on the directory first, then verified), and
+   prints only two lines: `bootstrap_sha256:` (the SHA-256 of the token text) and `bootstrap_expires_at:` (to the second, at most
+   seven days ahead). An existing file is never replaced: the bootstrap is **one-shot**, and a second token needs the first file
+   deleted by hand.
+2. **Dispatch the deployment** with those two values as the inputs `bootstrap_sha256` and `bootstrap_expires_at` of the `CI`
+   workflow's `proof: deploy` run (main only). `buildProofConfig` checks them (both or neither; 64 lowercase hexadecimal characters;
+   an RFC 3339 UTC instant, in the future and at most seven days ahead; the messages never repeat a value, so a token pasted into the
+   wrong field is not copied into a log, although the run's inputs are visible to people who see the run, which is why the token
+   itself must never be pasted), sets them as the proof environment's `ARCFORGES_CENTER_BOOTSTRAP_SHA256` and `_EXPIRES_AT`, and
+   `artifacts/proof-deployment.json` records them (`center.bootstrap`, `null` when the dispatch carried none). No checked-in
+   `wrangler.json` environment carries either (`tests/worker/center-config.test.ts`, `tests/worker/proof-bootstrap.test.ts`). The
+   Worker passes them to the center, whose start digest changes with them, so the center restarts with the bootstrap.
+3. **Run the acceptance** on the Windows host: `npm ci` in `eng/verification/browser`, then
+   `node eng/verification/browser/acceptance.ts` from the repository root. The first run enrolls the owner through the bootstrap
+   page (the script types the token into the page's field from the file; it is in no address, log or report) and saves the owner's
+   credential; later runs sign in with it. Every run signs in, steps up, registers a second passkey, lists sessions and devices,
+   ends a session from a second browser, removes the second passkey and signs out, and writes `artifacts/browser-acceptance.json`
+   (steps, counts and flags; no secret). The authenticator is Chromium's virtual authenticator: **MOCKED hardware in a real
+   browser**. The browser is the Playwright Chromium revision 1243 that the pinned `playwright-core` 1.63.0 names, started by its
+   explicit path (`%LOCALAPPDATA%\ms-playwright\chromium-1243\chrome-win64\chrome.exe`, version 153.0.8010.12 on the owner's host);
+   nothing is downloaded, tracing and screenshots are never switched on, and the script drives only `proof.arcforges.com` (or a
+   local center), never production. A 429 voids the attempt and the script waits for the advised time.
+4. **Afterwards** dispatch without the two inputs: the Worker then starts the center without a bootstrap, and the spent or expired
+   values leave the configuration.
+
+**The credential file grants the owner's and the operator's rights.** `~/.arcforges/proof-acceptance/owner-credential.json` holds the
+virtual authenticator's private key, which signs in as the proof owner (the account that holds every right of the acceptance
+environment, step-up included). It is created exclusively and rewritten whole after every assertion (the F14 counter rule needs the
+counters to rise: a restored older copy is refused), it is never printed, logged or committed, and it must be treated as a
+credential: keep it on that machine, and delete it when the owner's rights are retired. Losing the
+file locks the script out of the account but not the account.
+
+**After a total loss** (the credential file is gone, or the owner account must be started again) the owner drops the database
+`arcforges_acceptance` in the Neon Console; the next `deploy` dispatch recreates and migrates it. Then repeat the steps from the token
+(delete the old bootstrap and credential files first, or the script refuses to overwrite them). Nothing else holds the owner's keys.
+This also reclaims the acceptance ceiling's space ([surface switch](#surface-switch)).
+
+**What stays pending.** AR-23 (a real Windows Hello authenticator) is the only acceptance item that needs a person; its procedure is
+[`ar-23-owner-procedure.md`](ar-23-owner-procedure.md). The browser acceptance of the pages against proof is post-merge evidence: the
+script and its tests exist and run against a stand-in for the center and a browser, but no run against a real Chromium and the real
+center has happened at the time of this change.
 
 ## Identity policy
 
@@ -458,21 +605,24 @@ runtime pool stays four connections ([PostgreSQL store](postgres-store.md#connec
 
 ## Surface switch
 
-The identity methods form the `identity` surface. The center and the generated Worker table tag them by surface
+The identity methods form the `identity` surface; the [account pages](#account-pages-and-browser-sessions) and the browser session
+routes form the `pages` surface, which needs `identity` (a list with `pages` and without `identity` refuses to start, and a
+self-hosted center whose base URL cannot be a relying party leaves both off). The center and the generated Worker table tag them by surface
 (`surfaceRoutes`, PLT-18: `productionRoutes` stay always on); `ARCFORGES_CENTER_SURFACES` (center) and `FLAGSHIP_SURFACES`
 (Worker) list the enabled surfaces as exact generated names, comma-separated. Official-hosted mode enables none unless listed;
 self-hosted mode enables every known surface unless listed (an explicit list pins the surfaces across upgrades; `none` enables
 none). A disabled surface's method is answered with the domain refusal `STATE/not_activated` (`state.reason = identity`): by the
 Worker from the generated reply, before any rate limit, credential, body or Container (`tests/worker/ingress-surfaces.test.ts`), and
-by the center with the call's correlation id (logged and counted as an OK reply with that id). An enabled one passes the Worker's own
+by the center with the call's correlation id (logged and counted as an OK reply with that id); a disabled `pages` surface answers every
+page route with 404 and no body, from the Worker's page handler before anything else is read. An enabled one passes the Worker's own
 edge limit `IDENTITY_RATE_LIMITER` (over it, the generated domain refusal `RESOURCE/rate_limited` with its `retry_at`: the refusal's
 time rounded up to the second plus the limiter's 60-second period) before it is forwarded. The Worker passes its parsed list to the Container as
 `ARCFORGES_CENTER_SURFACES` (`none` when the list enables nothing, so a mistyped list never stops the center) and always
 `ARCFORGES_CENTER_CLIENT_IP_HEADER`; surfaces take effect only with `ARCFORGES_HELLO_RUNTIME=go`.
 
-Production carries `"FLAGSHIP_SURFACES": ""` (pinned by `tests/worker/center-config.test.ts`); the acceptance environment
-(`proof`) carries `identity` and `ALLOWED_ORIGIN` = the origin of its public base URL. Only the `identity` surface exists yet;
-AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
+Production carries `"FLAGSHIP_SURFACES": ""` (pinned by `tests/worker/center-config.test.ts`: production stays dark, no page is
+served there); the acceptance environment (`proof`) carries `identity,pages` and `ALLOWED_ORIGIN` = the origin of its public base
+URL. The `identity` and `pages` surfaces exist; AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
 after AF-PLAT-01's retention sweeps exist ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)).
 
 ### Runbooks

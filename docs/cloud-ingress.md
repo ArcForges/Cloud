@@ -78,7 +78,7 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   characters), the exact configured `Origin` (`ALLOWED_ORIGIN`) and a well-formed `X-AF-CSRF` token, because every RPC is
   an unsafe request; the Worker forwards only that cookie, the Origin and the token. Both kinds together, a repeated or
   malformed cookie, or no configured origin is refused. The Worker cannot prove a session: the host validates it.
-- **Switchable surfaces (AF-CTR-03).** A method of a surface (`surfaceRoutes` of the generated center table; only `identity` exists)
+- **Switchable surfaces (AF-CTR-03).** A method of a surface (`surfaceRoutes` of the generated center table; only `identity` has gRPC-Web methods, the `pages` surface has [page routes](#page-routes-plt-1))
   is in no route table. It keeps every admission rule above, and then: while `FLAGSHIP_SURFACES` does not name its surface exactly
   (comma-separated generated names, no spaces or repetition; anything else enables none), it is answered with the surface's
   generated reply, the domain refusal `STATE/not_activated` as one reply frame and the OK status trailer, before any rate limit,
@@ -101,6 +101,43 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   platform could not start the Container (its own plain-text 503, 500 or 429, which proves the request never reached the
   host), the 503 carries `Retry-After: 2`; any other non-200 status and any thrown error carries none, because the call
   may have been forwarded ([cloud-readiness](cloud-readiness.md)).
+
+## Page routes (PLT-1)
+
+The center's account pages and its `/session/v1/web` routes ([account pages](center-identity.md#account-pages-and-browser-sessions)) are
+not gRPC-Web calls, so they have their own handler (`worker/ingress/pages.ts`) and their own generated table
+(`pageRoutes`, `pageSecurityHeaders`, `pageStatuses`, `pageCookieName`, `pageLocationPrefix`, `pageReturnFragment`, `pageInstance`,
+`pageDurationMs`, from `center/internal/routes/pages.go`). The pipeline hands a request to it only when the path (below `/api`) is
+in the table. It is deny by default in both directions and decides nothing the center does not:
+
+- **Disabled surface.** While `FLAGSHIP_SURFACES` does not name `pages` exactly, every page path is the Worker's 404 (the reply of
+  a path it does not know), before anything about the request is read and without waking the Container. A method the route does
+  not have is 405.
+- **Request side**, refused before the edge limit counts the call and before the Container wakes: any query string (an empty one
+  too) and any `Authorization` header (400); a body or a `Transfer-Encoding` on a GET (400); on a POST an `Origin` that is not
+  exactly `ALLOWED_ORIGIN`, or any when none is configured (403), a `Content-Encoding` or `Content-Range` (415), a media type other
+  than the route's (one type, at most the UTF-8 charset; 415) and a declared body over the route's bound (413); and a session cookie
+  that is not exactly one `__Host-af_session` of 43 base64url characters (400). A body without a declared length is read after the
+  edge limit counted the call, to the same bound (413).
+- **What reaches the Container.** Only a rebuilt `Cookie` (the session cookie, on a route that reads it), the `Origin`, the
+  well-formed CSRF token, `x-arcforges-client-ip` from `cf-connecting-ip` (a client's own value is never copied), a `traceparent`
+  the Worker builds from a fresh correlation id, the route's own `Content-Type` and a printable-ASCII `User-Agent` of at most 256
+  characters.
+- **Edge limit.** The call is counted by `IDENTITY_RATE_LIMITER` like a surface method, by client address (an IPv6 client by its
+  /64); over it, or without the binding, the Worker answers 429 with `Retry-After` (the limiter's period) and the Container never
+  sees it. The pages' assets count too: a page load is three requests.
+- **Response side.** A status outside `pageStatuses` is the Worker's 503. A reply must carry every generated security header with its
+  exact value, so an HTML reply without the content security policy is a 503 (decision 4.8); its media type must be one the route
+  allows; its body is read to the route's bound (over it is a 503). A `Set-Cookie` is copied only where the route allows one, only
+  on a 200 or a 303 of a redirecting route, as exactly one value, and only in the exact form of the session cookie of a new
+  session or of its removal; a `Location` is copied only on a 303 of a route that redirects, as `/api/account/<words>` with at
+  most the sign-in page's return fragment; a 303 has no body. No other Container header reaches the client, and a Container the
+  platform could not start (its own plain-text reply) is the retryable 503 of the other routes.
+- **Budget.** One page call has `pageDurationMs` (15 s) including the body read, aborted by the client's cancellation.
+
+`tests/worker/pages.test.ts` pins these byte for byte (the headers, the `Set-Cookie` forms, the `Location`s, the statuses and what
+the Container is sent); `tests/worker/account-script.test.ts` runs the page script's flows, including the open-redirect rule,
+against fakes.
 
 ## The frame guard
 

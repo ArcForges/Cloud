@@ -11,4 +11,6 @@ The accepted [Design policy](https://github.com/ArcForges/ArcForges-Design-Paral
 - Use retained worktrees/branches and reviewed PRs. Coordinate CPU-heavy local work. Each verification host runs the CI-equivalent verification once per pushed head and reports its commit status, which `main` requires (AD-0020, [AGENTS.md](../AGENTS.md) Verification after the push); the pre-commit hook checks only staged whitespace.
 - After merge, confirm the expected commit and required build/publication/deployment result, then fast-forward the clean primary checkout. Stop without another download/hash/install/runtime cycle.
 
+The real-browser acceptance of the account pages (`eng/verification/browser`, AF-CTR-03 A2) is such an explicit local opt-in: its own package is installed by hand on the Windows host, and it runs against the acceptance environment after a deployment, never in CI and never against production ([proof bootstrap and acceptance](center-identity.md#proof-bootstrap-and-acceptance), [AR-23](ar-23-owner-procedure.md)).
+
 Historical plans and evidence describe their original executions; they do not reinstate removed gates. Report untested runtime/platform coverage honestly. Deployment completion is not live acceptance evidence.
