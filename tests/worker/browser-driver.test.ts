@@ -48,11 +48,19 @@ function standIn() {
       return response("GET", url, 200);
     },
     url: () => "about:blank",
-    locator: () => {
-      throw new Error("not used");
-    },
+    locator: () =>
+      ({
+        first: () => ({
+          waitFor: async (options: { state: string }) => {
+            events.push(`wait ${options.state}`);
+          },
+        }),
+      }) as never,
     evaluate: async () => {},
     waitForURL: async () => {},
+    waitForLoadState: async (state) => {
+      events.push(`wait ${state}`);
+    },
     async route(_pattern, handler) {
       events.push("route");
       routeHandler = handler;
@@ -285,4 +293,11 @@ test("a tab that never had an authenticator can be switched back to the real one
   const tab = playwrightTab(world.context, world.page, undefined);
   await tab.disableVirtual();
   assert.deepEqual(world.sent, []);
+});
+
+test("an element is awaited until it is visible and the page has loaded, so its script has run", async () => {
+  const world = standIn();
+  const tab = playwrightTab(world.context, world.page, undefined);
+  await tab.waitForSelector("#create-passkey", 1000);
+  assert.deepEqual(world.events, ["wait visible", "wait load"]);
 });

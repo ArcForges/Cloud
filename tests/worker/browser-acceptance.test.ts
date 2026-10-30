@@ -799,7 +799,11 @@ test("every element and heading the script uses is in the center's templates", (
     assert(template(file).includes('<th scope="row">'), file);
     assert(template(file).includes("<tbody>"), file);
   }
-  assert(template("passkeys").includes('<td>{{if .LastUsedAt}}<time datetime="{{.LastUsedAt}}">'));
+  assert(
+    template("passkeys").includes(
+      '<td data-label="Last used">{{if .LastUsedAt}}<time datetime="{{.LastUsedAt}}">',
+    ),
+  );
   assert(
     template("sessions").includes("(this session)") &&
       template("devices").includes("(this browser)"),

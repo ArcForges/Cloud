@@ -299,6 +299,7 @@ export interface PwPage {
   locator(selector: string): PwLocator;
   evaluate<Arg>(fn: (arg: Arg) => void, arg: Arg): Promise<void>;
   waitForURL(predicate: (url: URL) => boolean, options: { timeout: number }): Promise<void>;
+  waitForLoadState(state: "load", options: { timeout: number }): Promise<void>;
   route(url: string, handler: (route: PwRoute) => Promise<void>): Promise<unknown>;
   on(event: "console", handler: (message: PwConsoleMessage) => void): void;
   on(event: "pageerror", handler: (error: Error) => void): void;
@@ -478,8 +479,13 @@ export function playwrightTab(
     count: (selector) => page.locator(selector).count(),
     waitForPath: (pathname, timeout) =>
       page.waitForURL((url) => url.pathname === pathname, { timeout }),
-    waitForSelector: (selector, timeout) =>
-      page.locator(selector).first().waitFor({ state: "visible", timeout }),
+    async waitForSelector(selector, timeout) {
+      await page.locator(selector).first().waitFor({ state: "visible", timeout });
+      // A page's script is a deferred module: it runs after the document is parsed and before the load event. An element is visible
+      // as soon as it is parsed, so a click right after would find a control the script has not wired yet (the real browser run
+      // lost the click on the passkey creation page that way).
+      await page.waitForLoadState("load", { timeout });
+    },
     async beforePost(paths, hook) {
       for (const pathname of paths) hooks.set(pathname, hook);
       await route();

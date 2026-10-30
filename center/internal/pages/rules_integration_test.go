@@ -344,6 +344,15 @@ func TestEveryPageIsAccessibleHTMLWithNothingExternal(t *testing.T) {
 		// off the page says what to do as well.
 		scriptNeeded := regexp.MustCompile(`<body data-page="(sign-in|bootstrap|sign-out|register)"`).MatchString(text)
 		hasLine := regexp.MustCompile(`<p id="needs-script"[^>]*>[^<]+</p>`).MatchString(text) && !regexp.MustCompile(`<p id="needs-script"[^>]*hidden`).MatchString(text)
+		// The button that starts a ceremony is disabled in the page and enabled by the script: a click before the module has run would
+		// be lost (the real browser run found it on the creation page).
+		if scriptNeeded {
+			for _, id := range []string{"sign-in", "create", "sign-out", "create-passkey"} {
+				if tag := regexp.MustCompile(`<button[^>]*id="` + id + `"[^>]*>`).FindString(text); tag != "" && !strings.Contains(tag, " disabled") {
+					t.Errorf("%s: the script's button is usable before the script runs: %s", name, tag)
+				}
+			}
+		}
 		if scriptNeeded && (!hasLine || !regexp.MustCompile(`<noscript><p>[^<]*needs JavaScript`).MatchString(text)) || !scriptNeeded && strings.Contains(text, `id="needs-script"`) {
 			t.Errorf("%s: script needed %v, the line %v", name, scriptNeeded, hasLine)
 		}

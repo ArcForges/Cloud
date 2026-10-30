@@ -627,6 +627,9 @@ function registerPage(page) {
       form.submit();
     }),
   );
+  // Like the other pages' buttons, this one is disabled in the page and usable only once the script has wired it: a click that comes
+  // while the module is still loading (a fast person, a fast driver) is held back instead of lost.
+  button.disabled = false;
 }
 
 /** Starts the script of the page the document is: pages name themselves in the body's data-page attribute. */

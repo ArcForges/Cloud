@@ -881,7 +881,12 @@ test("the creation page fills its hidden fields from the browser's credential an
     "create-passkey",
   ]);
   registered.elements.set("register", form);
+  // The page renders the button disabled; the script makes it usable once it has wired it.
+  const createButton = registered.elements.get("create-passkey");
+  assert(createButton);
+  createButton.disabled = true;
   await script.start(registered.window);
+  assert.equal(createButton.disabled, false, "the script enables the creation button");
   registered.elements.get("create-passkey")?.fire("click");
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(form.elements.credential_id?.value, "AQID");
