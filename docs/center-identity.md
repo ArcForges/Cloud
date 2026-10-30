@@ -392,16 +392,24 @@ X-Frame-Options: DENY
 Referrer-Policy: same-origin
 Cross-Origin-Opener-Policy: same-origin
 Permissions-Policy: publickey-credentials-get=(self), publickey-credentials-create=(self)
-Cache-Control: no-store
+Cache-Control: no-store, no-transform
 X-Content-Type-Options: nosniff
 ```
+
+`no-transform` is there for the edge, not for caches: Cloudflare's Web Analytics adds its beacon (a `<script>` from
+`static.cloudflareinsights.com` and a `data-cf-beacon` attribute) to the HTML of a zone that has the automatic setup on, and a
+`Cache-Control` header with `no-transform` stops it from touching the payload. The policy above blocks the script, but the browser
+reports the block as a console error (the acceptance script rightly fails on it), and an edge-injected third-party script contradicts
+"nothing external". Only a hosted run shows it, and plain `curl` does not (the edge injects into a browser's `Accept: text/html`
+requests); the value is the generated one in `pageSecurityHeaders`, which the Worker, the acceptance script and the Go tests all hold
+a reply to. The Worker's own plain-text refusals keep `no-store`: text/plain is never injected.
 
 The pages are rendered with `html/template` (templates are `*.gohtml` files, so the formatter leaves them alone) and carry no inline
 script, inline style, event handler or `style` attribute. The one script, `account.js` (an ES module), writes text only with
 `textContent`, builds no markup and loads nothing from another origin; under `require-trusted-types-for 'script'` with
 `trusted-types 'none'` a markup sink would fail in the browser. It runs the WebAuthn ceremonies and calls the JSON routes; every
 account change itself is a plain form (POST, then a 303 back to the page), and a form that needs a step-up
-(`data-step-up-class`) proves a passkey first and is then submitted as it is. The pages do not cache (`no-store`).
+(`data-step-up-class`) proves a passkey first and is then submitted as it is. The pages do not cache and are not transformed (`no-store, no-transform`).
 
 **Return path.** A protected page without a session answers 303 to `<base>/account/sign-in#return=<percent-encoded path>`. The
 fragment never reaches a server. The sign-in script follows a return value only when it is a path of its own origin (one slash and
@@ -516,6 +524,23 @@ in by hand with the Windows Hello passkey and remove the old one.
 This also reclaims the acceptance ceiling's space ([surface switch](#surface-switch)). The same applies when a first run saved its
 credential and the account never came to exist and the file could not be removed: delete `owner-credential.json` and run again while
 the token is valid.
+
+### Post-deploy checks that only the hosted path shows
+
+The first real-browser run on the proof environment found two defects that no local test, stand-in or review could show, because
+they live between the Worker, the platform's fetch and the Cloudflare edge (AF-CTR-03 A2 hotfix 1). After a deployment of the pages
+surface, check both from any machine:
+
+1. **A page without a session is the center's 303, not the Worker's 503.** `curl -si https://proof.arcforges.com/api/account/passkeys`
+   (also `/sessions`, `/devices`, `/sign-out`) must answer `303` with `Location: /api/account/sign-in#return=...`. The Worker's
+   Container request used the platform's default `redirect: "follow"`, so the Durable Object stub followed the 303 to a path the center
+   does not serve (`http://container/api/account/sign-in`), and the 404 it got lacked the security headers: every protected page
+   answered the Worker's plain-text 503 "Cloud container is temporarily unavailable." A POST without a session was fine (a 403 is not a
+   redirect), which is why only the 303s failed. Every Worker request to the Container now says `redirect: "manual"` and the stand-in
+   Container of the tests follows a redirect as the platform does (`tests/worker/support/platform-fetch.ts`).
+2. **The pages carry no injected beacon and say `no-transform`.** `curl -s -H 'User-Agent: Mozilla/5.0 Chrome/153.0.0.0' -H 'Accept:
+text/html' https://proof.arcforges.com/api/account/sign-in` must contain neither `cloudflareinsights` nor `data-cf-beacon`, and the
+   reply's `Cache-Control` is `no-store, no-transform`. If the beacon is back, turn off the zone's Web Analytics automatic setup.
 
 ### Running the acceptance against a center on this machine
 

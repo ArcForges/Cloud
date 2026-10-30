@@ -95,7 +95,12 @@ async function forwardSession(request: Request, env: FoundationEnv): Promise<Res
   let response: Response;
   try {
     response = await env.CLOUD_CONTAINER.getByName(foundationContainerName).fetch(
-      new Request(`http://container${url.pathname}`, { method: request.method, headers }),
+      // redirect "manual": the Container's answer is relayed as it is, a redirect included, never followed.
+      new Request(`http://container${url.pathname}`, {
+        method: request.method,
+        headers,
+        redirect: "manual",
+      }),
     );
   } catch {
     return refusal(503);

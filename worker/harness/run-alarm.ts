@@ -101,6 +101,8 @@ export class HarnessRunAlarm extends DurableObjectBase<RunAlarmEnv> {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: body as BodyInit,
+          // A redirect is a refused wake, never followed to the 200 of another address.
+          redirect: "manual",
         }),
       );
       await response.body?.cancel().catch(() => {});

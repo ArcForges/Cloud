@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import test, { mock } from "node:test";
+import { platformFetch } from "./support/platform-fetch.ts";
 
 const stub = [
   "export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
@@ -140,7 +141,10 @@ function storage(): FakeStorage {
   };
 }
 
-/** A container namespace whose stub answers with the given status (or throws) and records every request it receives. */
+/**
+ * A container namespace whose stub answers with the given status (or throws) and records every request it receives. A redirect is
+ * followed as the platform does unless the request says redirect "manual": the followed address answers 200.
+ */
 function container(status: number | "throw"): FakeContainer {
   const names: string[] = [];
   const requests: { request: Request; body: Uint8Array }[] = [];
@@ -153,7 +157,15 @@ function container(status: number | "throw"): FakeContainer {
         fetch: async (request: Request) => {
           requests.push({ request, body: new Uint8Array(await request.arrayBuffer()) });
           if (status === "throw") throw new Error("connection reset");
-          return new Response("{}", { status });
+          return platformFetch(
+            () =>
+              new Response("{}", {
+                status,
+                headers:
+                  status >= 300 && status < 400 ? { location: "http://container/elsewhere" } : {},
+              }),
+            () => new Response("{}", { status: 200 }),
+          )(request);
         },
       };
     },
@@ -371,6 +383,16 @@ test("an alarm sends one signed wake to the C# endpoint on the harness container
 
   assert.equal(store.map.has("wake"), false);
   assert.equal(store.alarmAt, null);
+});
+
+test("the wake says redirect manual, so a redirect is a refused wake and never the 200 of what it leads to (H-1)", async () => {
+  const store = storage();
+  const containerStub = container(303);
+  const adapter = adapterFor({ ...w2cEnv, CLOUD_CONTAINER: containerStub }, store);
+  await adapter.schedule({ ...schedule, wakeAtMs: Date.now() + 60_000 });
+  await fire(adapter, store);
+  assert.equal(containerStub.requests[0]?.request.redirect, "manual");
+  assert.equal(handleOf(store).attempts, 1, "the 303 is a failed wake, kept for a retry");
 });
 
 test("a refused wake is retried on the backoff schedule and dropped after the last attempt", async () => {

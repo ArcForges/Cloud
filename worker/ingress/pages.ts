@@ -238,11 +238,15 @@ export async function handlePageRequest(
     if (performance.now() - started >= pageDurationMs) throw deadlineError;
     const target = new URL(route.path, "http://container");
     const operation = env.CLOUD_CONTAINER.getByName(pageInstance).fetch(
+      // redirect "manual": the platform's fetch follows a redirect unless told not to, and the center's 303 (a page without a session
+      // to the sign-in page) would become the 404 of a path it does not serve. The handler must see the 303 itself; it admits its
+      // Location, and the browser follows it.
       new Request(target, {
         method: request.method,
         headers,
         body: body?.byteLength ? body : undefined,
         signal,
+        redirect: "manual",
       }),
     );
     // A late response from an uncooperative binding must not leave a body open.

@@ -49,6 +49,16 @@ func TestThePageRegistrationIsTheContractsRoutesAndThePages(t *testing.T) {
 	if len(headers) != 7 || headers[0].Name != "Content-Security-Policy" || !strings.HasSuffix(headers[0].Value, "require-trusted-types-for 'script'; trusted-types 'none'") {
 		t.Fatalf("security headers %v", headers)
 	}
+	// H-2: the Cloudflare edge injects its Web Analytics beacon into HTML that nothing forbids it to transform.
+	cache := ""
+	for _, header := range headers {
+		if header.Name == "Cache-Control" {
+			cache = header.Value
+		}
+	}
+	if cache != "no-store, no-transform" {
+		t.Fatalf("Cache-Control is %q, not \"no-store, no-transform\"", cache)
+	}
 	if got := PageStatuses(); len(got) != 8 || got[0] != 200 || got[1] != 303 || got[7] != 429 {
 		t.Fatalf("statuses %v", got)
 	}

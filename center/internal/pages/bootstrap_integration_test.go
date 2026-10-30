@@ -60,7 +60,7 @@ func TestTheOwnerEnrollsThroughThePages(t *testing.T) {
 	if len(completed.header.Values("Set-Cookie")) != 1 || !cookiePattern.MatchString(cookie) || !strings.Contains(cookie, "Max-Age=43") {
 		t.Fatalf("the session cookie: %q", completed.header.Values("Set-Cookie"))
 	}
-	if completed.header.Get("Content-Type") != routes.TypeJSON || completed.header.Get("Cache-Control") != "no-store" {
+	if completed.header.Get("Content-Type") != routes.TypeJSON || completed.header.Get("Cache-Control") != "no-store, no-transform" {
 		t.Fatalf("the enrollment reply's headers: %v", completed.header)
 	}
 	var view struct {

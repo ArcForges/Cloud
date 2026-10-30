@@ -26,6 +26,7 @@ import {
   type PageRoute,
 } from "../../worker/tables/center-tables.generated.ts";
 import { sessionTokenPattern } from "../../worker/tables/cloud-tables.generated.ts";
+import { platformFetch } from "./support/platform-fetch.ts";
 
 const origin = "https://proof.example.test";
 const handle = "A".repeat(43);
@@ -37,7 +38,7 @@ const exactHeaders: Record<string, string> = {
   "referrer-policy": "same-origin",
   "cross-origin-opener-policy": "same-origin",
   "permissions-policy": "publickey-credentials-get=(self), publickey-credentials-create=(self)",
-  "cache-control": "no-store",
+  "cache-control": "no-store, no-transform",
   "x-content-type-options": "nosniff",
 };
 const sessionCookie = `${pageCookieName}=${handle}; Path=/; Max-Age=43200; Secure; HttpOnly; SameSite=Strict`;
@@ -79,7 +80,8 @@ function bindings(
         return {
           async fetch(request: Request) {
             seen.push({ request, body: new Uint8Array(await request.clone().arrayBuffer()) });
-            return reply(request);
+            // The platform follows a redirect unless the request says redirect "manual" (see support/platform-fetch.ts).
+            return platformFetch(reply)(request);
           },
         };
       },
@@ -158,6 +160,37 @@ async function replyOf(row: PageRoute, centerAnswer: Response): Promise<Response
   const { env } = bindings(() => centerAnswer);
   return routeRequest(call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }), env);
 }
+
+test("the Container request says redirect manual, so the center's 303 reaches the browser instead of the page it leads to (H-1)", async () => {
+  // Every route, every method: the Request the Container stub receives is told not to follow a redirect.
+  for (const row of pageRoutes) {
+    const { env, seen } = bindings(() => jsonOk());
+    await (
+      await routeRequest(call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }), env)
+    ).arrayBuffer();
+    assert.equal(seen.length, 1, `${row.method} ${row.path} reached the Container`);
+    assert.equal(seen[0]?.request.redirect, "manual", `${row.method} ${row.path}`);
+  }
+  // The hosted finding: a page without a session is the center's 303 to the sign-in page. A stand-in that, like the platform, follows
+  // a redirect it was not forbidden to follow turns it into a 404 of a path the center does not serve, which the handler refuses.
+  for (const row of pageRoutes.filter((item) => item.redirects)) {
+    const location = "/api/account/sign-in#return=%2Fapi%2Faccount%2Fpasskeys";
+    const reply = await replyOf(row, centerReply(303, { headers: { location } }));
+    assert.equal(reply.status, 303, row.path);
+    assert.equal(reply.headers.get("location"), location, row.path);
+    assert.equal(reply.headers.get("cache-control"), exactHeaders["cache-control"], row.path);
+  }
+  // The stand-in follows when the option is missing: this is what made every protected page answer 503 on proof.
+  const platform = platformFetch(() =>
+    centerReply(303, { headers: { location: "/api/account/sign-in" } }),
+  );
+  assert.equal((await platform(new Request("http://container/api/account/passkeys"))).status, 404);
+  assert.equal(
+    (await platform(new Request("http://container/api/account/passkeys", { redirect: "manual" })))
+      .status,
+    303,
+  );
+});
 
 test("the generated page table is what the pages' contract names", () => {
   assert.deepEqual(Object.fromEntries(Object.entries(pageSecurityHeaders)), exactHeaders);
@@ -511,6 +544,48 @@ test("a reply that keeps every rule is copied with exactly the generated headers
   assert.equal(bare.status, 404);
   assert.equal(bare.headers.has("content-type"), false);
   assert.equal((await bare.arrayBuffer()).byteLength, 0);
+});
+
+test("a page reply that says no-store without no-transform is the Worker's 503: the edge would inject its beacon (H-2)", async () => {
+  // Cloudflare's Web Analytics adds a third-party script to HTML that nothing forbids it to transform. The center forbids it on every
+  // reply, and the Worker lets no reply through that does not say so, whatever its kind.
+  assert.match(pageSecurityHeaders["cache-control"] ?? "", /(?:^|, )no-transform(?:,|$)/u);
+  for (const row of pageRoutes) {
+    const type = row.responseTypes[0] ?? "text/html; charset=utf-8";
+    const old = await replyOf(
+      row,
+      centerReply(row.redirects ? 303 : 200, {
+        type: row.redirects ? undefined : type,
+        body: row.redirects ? undefined : "x",
+        headers: {
+          "cache-control": "no-store",
+          ...(row.redirects ? { location: "/api/account/sign-in" } : {}),
+        },
+      }),
+    );
+    // The reply the browser gets is the Worker's: it carries the generated value, so the edge sees no-transform on what it forwards.
+    const good = await replyOf(
+      row,
+      centerReply(row.redirects ? 303 : 200, {
+        type: row.redirects ? undefined : type,
+        body: row.redirects ? undefined : "x",
+        headers: row.redirects ? { location: "/api/account/sign-in" } : {},
+      }),
+    );
+    assert.equal(good.status, row.redirects ? 303 : 200, `${row.method} ${row.path}`);
+    assert.equal(
+      good.headers.get("cache-control"),
+      "no-store, no-transform",
+      `${row.method} ${row.path}`,
+    );
+    assert.equal(old.status, 503, `${row.method} ${row.path} with the old value`);
+    assert.equal(
+      old.headers.get("cache-control"),
+      "no-store",
+      "the Worker's own refusal is plain text",
+    );
+    assert.match(old.headers.get("content-type") ?? "", /^text\/plain/u);
+  }
 });
 
 test("a reply that lacks a security header or differs from it is the Worker's 503", async () => {
