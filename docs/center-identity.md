@@ -68,9 +68,10 @@ request carries a `RequestMeta`; a `RequestMeta.workspace_id` is refused with `V
 
 The table is `access.Operations`, closed: the composition refuses to start when a served method has no row, a row has no served
 method or a row and the method's policy disagree about the session (`checkIdentityComposition`). A session method admits only the
-account-session scopes, `account` and `mobile.limited`: a `node`, `push` or `automation` credential is refused with
-`AUTHORIZATION/permission_denied` (state.reason = the operation ID) before the handler does anything, nothing is written, and the
-refusal is audited as `access.refused`; no production policy admits them (SEC-15). A restricted account reaches only its security
+account-session scopes, `account` and `mobile.limited` (the HUMAN principal): a `node`, `push` or `automation` credential is
+refused with `AUTHORIZATION/permission_denied` (state.reason = the operation ID) before the handler does anything, nothing is
+written, and the refusal is audited as `access.refused` with the reason `principal` (a node or automation credential, the AGENT
+principal, on a HUMAN operation) or `scope` (a push or unknown scope); no production policy admits them (SEC-15). A restricted account reaches only its security
 operations, the rows marked restricted (`TestOnlyAccountSessionsReachTheSessionMethods` walks every session row of the table for
 each refused scope and for a restricted account, and fails for a row it has no request for). A `mobile.limited` session (a phone
 that signed in without verifying its user, android.md A-09) is refused an `upgrade` row with `AUTHENTICATION/step_up_required`
@@ -78,6 +79,15 @@ that signed in without verifying its user, android.md A-09) is refused an `upgra
 anything is written; signing itself out and removing its own phone stay open to it (T-19, `TestMobileLimitedNeedsStepUp`, which
 walks the table and fails for a row it has no request for). Proving any step-up upgrades the session to `account`; the center's
 own class `identity.upgradeSession` exists for a phone that only wants to unlock everything.
+
+Since AF-CTR-03 part B `Authorize` decides a session call in seven ordered stages, and a stage that refuses ends the decision:
+authentication, ownership of the object the call addresses (another account's object is `STATE/not_found`; a row names an `Object`
+and the handler hands `AuthorizeSubject` its owner), scope and risk (known scope, restricted account, session upgrade),
+AGENT/HUMAN separation, the resource controls (a hook for the quotas and budgets of AF-CTR-04, DC-07), the audit that comes before
+the call (`access.authorized`, a failed append refuses the call) and the feature gate (`ENTITLEMENT/feature_not_entitled`,
+`state.reason` = the feature key, audited as `access.gated`). A row carries the gate's key as `Feature`; every identity row is an
+essential operation with none, so nothing here is gated, and the R3 rows keep appending their audit event in the transaction of
+their effect (`AuditInTransaction`). The gate and its tests are described in [feature availability](center-entitlement.md#the-gate).
 
 The anonymous methods and the queries run under no receipt: the anonymous ones are one-use authentication steps, RefreshSession
 must never replay tokens. The step-up methods and BeginPasskeyRegistration run under none either: each creates a new challenge or
@@ -486,11 +496,14 @@ The acceptance environment (`proof.arcforges.com`) is created by the owner's boo
      advised time, at most three times, but only when no request of the attempt had changed anything (a sign-in, a registration, a
      removal, a sign-out): after a change the step fails and says so. The budget may be lifted (`0`, or above 40) only for a
      center on localhost, where the busiest minute is recorded and not held to 55.
-   - **A first run that stopped.** If the enrollment ended without the account (the request was refused or lost, and the center
-     accepted nothing), the credential file this run wrote is removed again, so that the next run enrolls with the same token while
-     it is valid. If the center accepted the enrollment and the tab did not arrive (a lost or slow redirect), the account may exist
-     and the file is the only copy of the owner's key: the file is kept, the run says "The account may exist; do not delete the
-     credential file", and the next run signs in with it as a returning run.
+   - **A first run that stopped.** If every reply to the enrollment request was a definite refusal (a 4xx, the edge limiter's 429
+     included), the center accepted nothing and the credential file this run wrote is removed again, so that the next run enrolls
+     with the same token while it is valid. If the center accepted the enrollment and the tab did not arrive (a lost or slow
+     redirect), or if the request has no definite answer (its reply was lost, the connection failed, or the Worker answered with a
+     server error), the account may exist and the file is the only copy of the owner's key: the file is kept, the run says "The
+     account may exist; do not delete the credential file", and the next run signs in with it as a returning run. A 429 that meets
+     the page after an accepted enrollment keeps that warning in its message too (`Tab.unsettled` in the driver counts the requests a
+     step cannot repeat that have no definite answer).
    - **A run that stopped after the second passkey was registered.** The new key is saved before the request that carries it leaves,
      so a run that fails afterwards leaves that passkey (`acceptance-<time>`) on the account and its key in the file; a key made for a
      passkey the center never accepted is in the file as well. The next run signs in with the owner's own credential (the one on the
@@ -538,9 +551,21 @@ surface, check both from any machine:
    answered the Worker's plain-text 503 "Cloud container is temporarily unavailable." A POST without a session was fine (a 403 is not a
    redirect), which is why only the 303s failed. Every Worker request to the Container now says `redirect: "manual"` and the stand-in
    Container of the tests follows a redirect as the platform does (`tests/worker/support/platform-fetch.ts`).
-2. **The pages carry no injected beacon and say `no-transform`.** `curl -s -H 'User-Agent: Mozilla/5.0 Chrome/153.0.0.0' -H 'Accept:
-text/html' https://proof.arcforges.com/api/account/sign-in` must contain neither `cloudflareinsights` nor `data-cf-beacon`, and the
-   reply's `Cache-Control` is `no-store, no-transform`. If the beacon is back, turn off the zone's Web Analytics automatic setup.
+2. **The pages carry no injected beacon and say `no-transform`.** The headers are part of the check, so the reply is read whole
+   (`curl -si`, not `curl -s`), and the beacon is counted, not looked for by eye:
+
+   ```sh
+   curl -si -H 'User-Agent: Mozilla/5.0 Chrome/153.0.0.0' -H 'Accept: text/html' \
+     https://proof.arcforges.com/api/account/sign-in > sign-in.txt
+   grep -ci 'cloudflareinsights\|data-cf-beacon' sign-in.txt   # must print 0
+   grep -i '^cache-control:' sign-in.txt                       # must be: cache-control: no-store, no-transform
+   ```
+
+   If the count is not `0`, turn off the zone's Web Analytics automatic setup.
+
+If check 1 fails (a protected page answers the Worker's plain-text 503 instead of the 303), capture `wrangler tail` of the proof
+Worker while repeating the request, confirm that the Container is up (`curl -si https://proof.arcforges.com/api/health` answers
+200 with the health document), and escalate to the coordinator with both; do not retry the deployment to see whether it goes away.
 
 ### Running the acceptance against a center on this machine
 
@@ -572,6 +597,24 @@ browser. This is how the flow was run for real before the proof environment is d
 [`ar-23-owner-procedure.md`](ar-23-owner-procedure.md). The browser acceptance of the pages against the proof environment is
 post-merge evidence. Against a center on this machine it has run for real: see the pull request's evidence (REAL browser, Chromium
 153.0.8010.12, MOCKED hardware).
+
+## Operator role
+
+An operator is an account that may issue [operator grants](center-entitlement.md#operator-grants) of features to accounts (decision
+n2). The role is a row of `identity.operator` (the account, when it was granted and when it ends, never longer than 400 days; who
+granted it; a reason of up to 512 characters) or the owner who bootstrapped the center (`identity.bootstrap`), which needs no row.
+Only the migration role writes the table, with two audited commands (the runtime role has no INSERT or UPDATE on it, so no request
+can make an operator):
+
+```sh
+arcforges-center admin grant-operator --account <uuid> --reason <text> [--days N]   # 1 to 90 days, default 30
+arcforges-center admin revoke-operator --account <uuid>
+```
+
+`grant-operator` refuses an account that does not exist, is not active or already holds a live row; both commands append
+`identity.operator.granted` or `.revoked` (actor `operator:cli`) in the transaction that writes the row, with the digest and length of
+the reason and never the reason. The owner's standing comes from the bootstrap and is not ended by `revoke-operator`. The operator
+grant checks the role again in its own transaction, so a revocation that committed in between is honoured.
 
 ## Identity policy
 
@@ -688,7 +731,9 @@ window, with the reason), `identity.session.refresh_reused` (when a reuse revoke
 window) and `access.refused`; since A1b `identity.step_up.proved`, `identity.step_up.failed` (first per window),
 `identity.passkey.registered`, `identity.profile.updated`, `identity.credential.renamed`, `identity.credential.removed`,
 `identity.session.revoked`, `identity.sessions.revoked_all`, `device.renamed`, `device.revoked` (with the revoked installations,
-sessions per scope and participant rows) and the operator's `identity.sessions.revoked_by_operator`. Payloads are closed JSON:
+sessions per scope and participant rows) and the operator's `identity.sessions.revoked_by_operator`; since part B `access.authorized` and `access.gated` (the stages of
+`Authorize`, nothing yet for an identity row), `entitlement.operator_grant.issued` and `.refused` (the operator grant) and the
+operator role's `identity.operator.granted` and `.revoked` ([operator role](#operator-role)). Payloads are closed JSON:
 method, channel, scope, reasons and counts, never a token, code, e-mail address or IP address. A sign-in, a credential removal or a
 device revocation whose audit event cannot be written is refused and writes nothing (`TestARefusedAuditRefusesTheSignIn`,
 `TestARefusedAuditRefusesTheWrites`).
@@ -737,6 +782,12 @@ Production carries `"FLAGSHIP_SURFACES": ""` (pinned by `tests/worker/center-con
 served there); the acceptance environment (`proof`) carries `identity,pages` and `ALLOWED_ORIGIN` = the origin of its public base
 URL. The `identity` and `pages` surfaces exist; AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
 after AF-PLAT-01's retention sweeps exist ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)).
+
+The operator grant has a third surface, `operations`: the interim page `/operations/grant` of the operator grant ([center
+entitlement](center-entitlement.md#the-operations-page)). It needs `identity` and `pages`, exists only in official-hosted mode, is
+never a default of either mode (a list that names it on a self-hosted center, or without the other two, refuses to start), and
+is in no checked-in environment: production carries none, and the acceptance environment (`proof`) keeps `identity,pages` until the
+coordinator enables `operations` for the hosted proof of the grant.
 
 ### Runbooks
 

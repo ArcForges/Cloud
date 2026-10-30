@@ -57,7 +57,8 @@ test("every source project of the image is admitted to the Docker context by exp
 
 /**
  * Every folder of the Go center that holds a non-test Go source or a file the executable embeds: a migration, a page template
- * (`*.gohtml`) or the account pages' script and style sheet (`static/*.js`, `static/*.css`).
+ * (`*.gohtml`), the account pages' script and style sheet (`static/*.js`, `static/*.css`) or the plan catalogue's development fixtures
+ * (`fixtures/*.json`).
  */
 function centerFolders(directory: string): { folder: string; files: string[] }[] {
   const entries = readdirSync(path.join(root, directory), { withFileTypes: true });
@@ -68,7 +69,8 @@ function centerFolders(directory: string): { folder: string; files: string[] }[]
         ((entry.name.endsWith(".go") && !entry.name.endsWith("_test.go")) ||
           entry.name.endsWith(".sql") ||
           entry.name.endsWith(".gohtml") ||
-          (directory.endsWith("/static") && /\.(?:js|css)$/u.test(entry.name))),
+          (directory.endsWith("/static") && /\.(?:js|css)$/u.test(entry.name)) ||
+          (directory.endsWith("/fixtures") && entry.name.endsWith(".json"))),
     )
     .map((entry) => entry.name);
   const folders = files.length > 0 ? [{ folder: directory, files }] : [];

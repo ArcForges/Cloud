@@ -5,6 +5,7 @@ package feature
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -128,6 +129,43 @@ func TestOperationKeysAreTheRoutedTaskControlTable(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Errorf("rows missing: %v", want)
+	}
+}
+
+// TestTheCenterDocumentPrintsTheRoutedTaskControlTable: docs/center.md carries the table of OperationKeys, row for row and in order.
+func TestTheCenterDocumentPrintsTheRoutedTaskControlTable(t *testing.T) {
+	document, err := os.ReadFile("../../../docs/center.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, after, found := strings.Cut(string(document), "### Routed task control\n")
+	if !found {
+		t.Fatal("docs/center.md has no routed task control table")
+	}
+	var printed [][2]string
+	for _, line := range strings.Split(after, "\n") {
+		if !strings.HasPrefix(line, "|") {
+			if len(printed) > 0 {
+				break
+			}
+			continue
+		}
+		cells := strings.Split(strings.Trim(line, "|"), "|")
+		if len(cells) != 2 {
+			t.Fatalf("a row of the table: %q", line)
+		}
+		key, gates := strings.TrimSpace(cells[0]), strings.TrimSpace(cells[1])
+		if key == "Key" || strings.HasPrefix(key, "-") {
+			continue
+		}
+		printed = append(printed, [2]string{strings.Trim(key, "`"), gates})
+	}
+	var want [][2]string
+	for _, row := range OperationKeys() {
+		want = append(want, [2]string{string(row.Key), row.Gates})
+	}
+	if !slices.Equal(printed, want) {
+		t.Fatalf("docs/center.md prints %v, the code has %v", printed, want)
 	}
 }
 

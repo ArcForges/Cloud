@@ -130,6 +130,40 @@ Receipt results do hold personal data:
 They are a second copy under the receipts' own 90-day retention (above), separate from the account's, and the runtime role cannot
 delete them, so AF-ID-02's account purge deletes `platform.command_receipt` rows by principal (the account) with the account.
 
+### Entitlement (AF-CTR-03 B)
+
+The third migration (`center/internal/schema/migrations/0003_entitlement.sql`, sha256
+`8eaca09b91e57abc9514c70ced246f965b31f9a2bf898fdb9dabadb2bd7c3f9d`) creates the `entitlement` schema and `identity.operator`; the
+logic is described in [center entitlement](center-entitlement.md). Its tables, the runtime role's privileges and who writes them:
+
+- `entitlement.grant`, `revocation`, `service_term`, `definitions_activation`: append-only. A trigger refuses UPDATE and DELETE, and
+  the runtime role has SELECT and INSERT only. The runtime writes grants, revocations and definitions activations (the entitlement
+  service) and service terms (the operator grant's compensation term). Enums are 1-based `smallint` values (the 0002 convention),
+  a grant's value is canonical JSON checked against its kind (`grant_value_shape`, with `COALESCE` so that a missing key cannot pass
+  as NULL), and `grant_source_ref_once` makes a source reference unique per account and source (the idempotency of an issue).
+- `entitlement.service_term_action`, `account_status_fact`, `feature_release`: append-only records the resolver reads. The runtime
+  role has SELECT only: their writers (commerce, trust and safety, configuration) are later tasks, and a term, a status fact or a
+  release must refresh the account's snapshot in the same unit when it is written.
+- `entitlement.revision` (one row per account, advancing by exactly one: a trigger refuses any other change) and
+  `entitlement.snapshot` (the derived snapshot, whose `content` is the canonical text the gate parses): rewritten in place by the
+  runtime role (SELECT, INSERT, UPDATE). They are rebuildable from the records and may be dropped at any time; the next read
+  recomputes the snapshot (`Service.VerifyRebuild` compares the two).
+- `identity.operator`: the operator role. The migration role writes it (`arcforges-center admin grant-operator`, `revoke-operator`);
+  a trigger lets a row change only by being revoked once; the runtime role reads it.
+
+Every foreign key has an index (`TestEveryEntitlementForeignKeyHasAnIndex`), and the migration is rehearsed whole over version 2
+with the production step (`TestMigration0003LandsWholeOverVersion2`). The hosted deployment applies it to `neondb` while production
+is dark: the tables exist and stay empty.
+
+Personal data: `account_id` ties every row to a person. `issued_by_actor` holds an actor reference (`account:<uuid>`,
+`operator:<uuid>`, `operator:cli`), `source_ref` an opaque reference (a ticket or incident), and a grant's `reason` and
+`identity.operator.reason` an operator's free text of up to 512 characters without control characters. The reason texts can name
+people, so AF-PLAT-01's and AF-ID-02's erasure of an account must decide them. No row holds an e-mail address, a credential or a
+token, and the audit events of the operator grant hold only the length and the SHA-256 of a reason. Retention: the records are the
+audit trail of what an account was entitled to and are kept; the append-only triggers refuse deletion until a retention decision
+(AF-PLAT-01, H-07) adds its own migration. The snapshot may be dropped at any time. Command receipts of the operator grant
+(`center.operatorGrant`) hold the granted keys, the ids and the expiry, under the receipts' own retention.
+
 ## Guarantees
 
 `center/internal/platform` re-implements the guarantees of the D1 storage plans with native transactions, constraints and row
@@ -512,7 +546,7 @@ environment of the Go center since AF-CTR-02.
 
 - **What it runs** (`worker/acceptance/entry.ts`): the production Worker and Container in official-hosted mode, with the
   development fixtures of the plan configuration (`ARCFORGES_CENTER_PLAN_CONFIGURATION=development-fixtures`, never set in
-  production). The feature stub still enables nothing until AF-CTR-03 delivers the catalogue. The public base URL is
+  production). Its catalogue is the embedded illustrative one (no price is approved), so a gated feature is available to an account only through an operator grant ([center entitlement](center-entitlement.md)). The public base URL is
   `https://proof.arcforges.com/api`.
 - **Its database:** its own database `arcforges_acceptance` in the same Neon project, created idempotently by
   `admin ensure-database` through the migration role's direct connection, with its own runtime role
