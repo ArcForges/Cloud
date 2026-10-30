@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { before, test } from "node:test";
@@ -68,6 +76,16 @@ test("reject new parsed source, emitted source, resource and runtime imports", (
   }
 });
 
+/** The files below a directory as sorted relative paths with forward slashes. */
+function filesUnder(directory: string, prefix = ""): string[] {
+  return readdirSync(path.join(directory, prefix), { withFileTypes: true })
+    .flatMap((entry) => {
+      const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      return entry.isDirectory() ? filesUnder(directory, relative) : [relative];
+    })
+    .sort();
+}
+
 function imageFixture() {
   const directory = mkdtempSync(path.join(os.tmpdir(), "cloud-image-provenance-"));
   cpSync(path.join(root, "artifacts/image-notices"), path.join(directory, "notices"), {
@@ -89,8 +107,15 @@ test("complete image legal fixture validates and binds source and concrete membe
   try {
     const result = verifyImageFiles(root, revision, f.directory);
     assert.equal(result.revision, revision);
-    assert.equal(Object.keys(result.baseLegal).length, 6);
-    assert.equal(Object.keys(result.members).length, 24);
+    // The members are the files of the staged image, and the base legal texts the receipt's own: both come from the active release
+    // profile through the staging, not from a count written here.
+    const staged = filesUnder(f.directory);
+    assert.deepEqual(Object.keys(result.members).sort(), staged);
+    const receipt = object(
+      parseDocument(readFileSync(path.join(f.directory, "notices/provenance.json"))),
+    );
+    assert.deepEqual(result.baseLegal, receipt.baseLegal);
+    assert(staged.length > 3 && Object.keys(result.baseLegal).length > 0);
   } finally {
     f.cleanup();
   }
