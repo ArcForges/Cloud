@@ -12,13 +12,13 @@ https://github.com/github/choosealicense.com @ 58267f8f2c5c0099810849cfd7677f52a
 AGPL-3.0-only
 GNU Affero General Public License version 3; Copyright Free Software Foundation, Inc. Complete original licence and its verbatim-copying permission are retained.
 
-center-runtime-r17
-https://github.com/ArcForges/Cloud @ 5ea55dcabb63d9a43fd22917c911529ffbdb0ea5
+center-runtime-r18
+https://github.com/ArcForges/Cloud @ 76df90e16caeed46e6036ad498d96bcdbf1e7c69
 AGPL-3.0-only
 ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped. Copyright (c) 2002-2025, Npgsql. Npgsql 10.0.3 is distributed under the PostgreSQL licence; its complete copyright and permission terms accompany the application. The Go center and its twenty-two locked runtime modules are included alongside the retained C# executable. Go, Go protobuf, the golang.org/x modules, google/uuid, go-webauthn and go-webauthn/x use BSD-3-Clause; Connect, the published Contracts Go bindings and go-tpm use Apache-2.0 (the Contracts NOTICE is retained under third-party/ContractsGo.NOTICE.txt); pgx and its helper modules, fxamacker/cbor, x448/float16, golang-jwt, go-viper/mapstructure, philhofer/fwd and tinylib/msgp use MIT (msgp's portions copyright The Go Authors are under the Go licence shipped as third-party/Go.LICENSE.txt). Complete original texts are shipped.
 
-center-worker-r17
-https://github.com/ArcForges/Cloud @ 5ea55dcabb63d9a43fd22917c911529ffbdb0ea5
+center-worker-r18
+https://github.com/ArcForges/Cloud @ 76df90e16caeed46e6036ad498d96bcdbf1e7c69
 AGPL-3.0-only
 Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. @arcforges/ai-internal generated validators: Copyright ArcForges contributors, Apache-2.0 (published Contracts NOTICE retained in third-party/Contracts.NOTICE.txt). Complete respective terms accompany the actual Worker bundle.
 
