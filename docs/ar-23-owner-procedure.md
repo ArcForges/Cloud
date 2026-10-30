@@ -20,21 +20,24 @@ browsers, other operating systems, a phone, or the passkey's synchronisation, an
   acceptance has run at least once, so `%USERPROFILE%\.arcforges\proof-acceptance\owner-credential.json` exists. (Without it
   the script refuses `--real-authenticator` and says so.)
 - Windows Hello is set up for your Windows account (Settings, Accounts, Sign-in options: a PIN, fingerprint or face).
-- Node 24.21 and the repository checked out at the merged `main`; the browser is the already installed Playwright `chromium-1243`:
-  `C:\Users\J7Rdm\AppData\Local\ms-playwright\chromium-1243\chrome-win64\chrome.exe` (version 153.0.8010.12 on this host; the script
-  finds it by itself). Do not install or download a browser.
+- A PowerShell with Node 24.21 on its path, and the repository checked out at the merged `main`; the browser is the already
+  installed Playwright `chromium-1243`:
+  `%LOCALAPPDATA%\ms-playwright\chromium-1243\chrome-win64\chrome.exe` (version 153.0.8010.12; the script finds it by itself). Do
+  not install or download a browser.
 - You can answer the Windows prompts at the keyboard for about five minutes. The script waits up to three minutes for each prompt.
 
 ## Commands (Windows, PowerShell)
 
 ```powershell
-. 'C:\MyFile\Projects\dev\env.ps1'
 cd <your checkout of ArcForges/Cloud>
 git switch main; git pull --ff-only
-cd eng\verification\browser; npm ci; cd ..\..\..        # installs only playwright-core 1.63.0, from the exact lockfile
-npx tsc -p eng/verification/browser/adapter-check/tsconfig.json   # optional: checks the script against the installed package
+cd eng\verification\browser; npm ci --engine-strict=false; cd ..\..\..   # installs only playwright-core 1.63.0, from the exact lockfile
 node eng/verification/browser/acceptance.ts --real-authenticator
 ```
+
+`--engine-strict=false` is there because the package states `npm >=11.19.0 <12` and a PowerShell that finds npm 12 first would
+otherwise stop with `EBADENGINE`; npm then only warns and installs the locked package. The run takes a few minutes: the script holds
+its requests to the edge limit of the proof environment.
 
 The address the script opens is `https://proof.arcforges.com/api/account/sign-in`. A Chromium window opens, because Windows Hello
 needs a window you can see; leave it alone except for the Windows prompts, and do not type into it.

@@ -14,6 +14,7 @@ import {
   validateHistoricalCoordinates,
   validateClosure,
   validateIsolated,
+  validateManifests,
   validateCsharpImports,
   validateImports,
   validatePolicy,
@@ -522,4 +523,37 @@ test("an isolated directory is named plainly and once", () => {
   const repeated = structuredClone(baseline);
   repeated.isolated = [isolatedDirectory, isolatedDirectory];
   assert.throws(() => validatePolicy(repeated), /Repeated isolated/u);
+});
+test("a package.json that the policy does not admit is refused, wherever it is, and an admitted isolated one is not", () => {
+  const policy = { manifests: ["package.json"], isolated: [isolatedDirectory] };
+  const repository = [
+    "package.json",
+    `${isolatedDirectory}/package.json`,
+    "README.md",
+    "tooling/dependency-policy.ts",
+  ];
+  validateManifests(repository, policy);
+  // A nested manifest the policy does not name, in the tree of an isolated package or beside it.
+  for (const stray of [
+    "eng/other/package.json",
+    `${isolatedDirectory}/sub/package.json`,
+    "tests/package.json",
+    "node-tools/package.json",
+  ])
+    assert.throws(
+      () => validateManifests([...repository, stray], policy),
+      /Unadmitted workspace manifest/u,
+      stray,
+    );
+  // An admitted manifest that is gone is as wrong as one that is new.
+  assert.throws(
+    () => validateManifests(["package.json"], policy),
+    /Unadmitted workspace manifest/u,
+  );
+  // Without the isolated list the nested manifest is not admitted.
+  assert.throws(
+    () => validateManifests(repository, { manifests: ["package.json"] }),
+    /Unadmitted workspace manifest/u,
+  );
+  validateManifests(["package.json"], { manifests: ["package.json"] });
 });

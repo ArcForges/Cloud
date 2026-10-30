@@ -119,6 +119,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm audit --audit-level=high
+      # The isolated browser-acceptance package has its own lock and is never installed here; its advisories are read from the lock.
+      - run: npm audit --audit-level=high --prefix eng/verification/browser
       - name: Check workflow syntax
         run: |
           curl --fail --silent --show-error --location https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz --output "$RUNNER_TEMP/actionlint.tar.gz"

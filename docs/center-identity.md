@@ -430,16 +430,38 @@ The acceptance environment (`proof.arcforges.com`) is created by the owner's boo
    `artifacts/proof-deployment.json` records them (`center.bootstrap`, `null` when the dispatch carried none). No checked-in
    `wrangler.json` environment carries either (`tests/worker/center-config.test.ts`, `tests/worker/proof-bootstrap.test.ts`). The
    Worker passes them to the center, whose start digest changes with them, so the center restarts with the bootstrap.
-3. **Run the acceptance** on the Windows host: `npm ci` in `eng/verification/browser`, then
-   `node eng/verification/browser/acceptance.ts` from the repository root. The first run enrolls the owner through the bootstrap
-   page (the script types the token into the page's field from the file; it is in no address, log or report) and saves the owner's
-   credential; later runs sign in with it. Every run signs in, steps up, registers a second passkey, lists sessions and devices,
-   ends a session from a second browser, removes the second passkey and signs out, and writes `artifacts/browser-acceptance.json`
-   (steps, counts and flags; no secret). The authenticator is Chromium's virtual authenticator: **MOCKED hardware in a real
-   browser**. The browser is the Playwright Chromium revision 1243 that the pinned `playwright-core` 1.63.0 names, started by its
-   explicit path (`%LOCALAPPDATA%\ms-playwright\chromium-1243\chrome-win64\chrome.exe`, version 153.0.8010.12 on the owner's host);
-   nothing is downloaded, tracing and screenshots are never switched on, and the script drives only `proof.arcforges.com` (or a
-   local center), never production. A 429 voids the attempt and the script waits for the advised time.
+3. **Run the acceptance** on the Windows host. In `eng/verification/browser` install the package with
+   `npm ci --engine-strict=false` (the owner's PowerShell has npm 12 first on its path, the package's `engines` say `<12` and its
+   `.npmrc` keeps `engine-strict`, so a plain `npm ci` stops; with the flag npm only warns and installs the locked
+   `playwright-core`), then run `node eng/verification/browser/acceptance.ts` from the repository root. The first run enrolls the
+   owner through the bootstrap page (the script types the token into the page's field from the file; it is in no address, log or
+   report) and saves the owner's credential; later runs sign in with it. Every run signs in, steps up, registers a second passkey,
+   lists sessions and devices, ends a session from a second browser, removes the second passkey and signs out, and writes
+   `artifacts/browser-acceptance.json` (steps, counts and flags; no secret). The authenticator is Chromium's virtual authenticator:
+   **MOCKED hardware in a real browser**. The browser is the Playwright Chromium revision 1243 that the pinned `playwright-core`
+   1.63.0 names, started by its explicit path (`%LOCALAPPDATA%\ms-playwright\chromium-1243\chrome-win64\chrome.exe`, version
+   153.0.8010.12); nothing is downloaded, tracing and screenshots are never switched on, and the script drives only
+   `proof.arcforges.com` (or a center on localhost), never production.
+   - **One virtual authenticator per credential.** All passkeys of an account share one user handle, and Chromium keeps one
+     discoverable credential of a relying party and user handle on an authenticator (a second replaces the first, and
+     `WebAuthn.addCredential` of it is refused). The page also lists every passkey of the account in `excludeCredentials`, so a
+     creation on an authenticator that holds one fails with `InvalidStateError` ("That passkey is already registered."). The owner's
+     credential therefore lives on the tab's one `internal` authenticator and every further one on an authenticator of its own with
+     another transport, recorded with it in the saved file; the registration runs on a fresh empty authenticator with the others
+     taken off (their counters read first), and afterwards each credential goes back on its own. Every write of the saved file is
+     the union over the tab's authenticators.
+   - **Requests.** The hosted Worker counts every request of the origin (a page load is three) against an edge limit of 60 per
+     minute, and one run sends about 80. The driver therefore holds every request to a budget (`--requests-per-minute`, 45 by
+     default, a burst of eight: never more than 53 in a minute), which makes a run take a few minutes. If a 429 arrives anyway, a
+     step starts again from its navigation after the advised time, at most three times, but only when no request of the attempt had
+     changed anything (a registration, a removal, a sign-out): after a change the step fails and says so. The budget may be lifted
+     (`0`, or above 45) only for a center on localhost.
+   - **A first run that stopped.** If the enrollment ended without the account (the request was refused or lost), the credential
+     file this run wrote is removed again, so that the next run enrolls with the same token while it is valid. A first run that did
+     create the account keeps its file.
+   - **Directories.** The bootstrap and credential directories are made private only when they are new, empty or hold nothing but
+     the tool's own files; a directory someone else filled (`--dir .` in a checkout, a profile folder) is refused untouched, because
+     the Windows grant would strip every other entry of it and of what it holds. Name a new directory.
 4. **Afterwards** dispatch without the two inputs: the Worker then starts the center without a bootstrap, and the spent or expired
    values leave the configuration.
 
@@ -447,18 +469,46 @@ The acceptance environment (`proof.arcforges.com`) is created by the owner's boo
 virtual authenticator's private key, which signs in as the proof owner (the account that holds every right of the acceptance
 environment, step-up included). It is created exclusively and rewritten whole after every assertion (the F14 counter rule needs the
 counters to rise: a restored older copy is refused), it is never printed, logged or committed, and it must be treated as a
-credential: keep it on that machine, and delete it when the owner's rights are retired. Losing the
-file locks the script out of the account but not the account.
+credential: keep it on that machine, and delete it when the owner's rights are retired. Losing the file locks the script out of the
+account: before AR-23 the virtual passkey is the account's only credential (the bootstrap is spent and the e-mail and recovery
+methods are not offered), so nobody can sign in and the total-loss path below is the only way back; after AR-23 the owner can sign
+in by hand with the Windows Hello passkey and remove the old one.
 
 **After a total loss** (the credential file is gone, or the owner account must be started again) the owner drops the database
 `arcforges_acceptance` in the Neon Console; the next `deploy` dispatch recreates and migrates it. Then repeat the steps from the token
 (delete the old bootstrap and credential files first, or the script refuses to overwrite them). Nothing else holds the owner's keys.
-This also reclaims the acceptance ceiling's space ([surface switch](#surface-switch)).
+This also reclaims the acceptance ceiling's space ([surface switch](#surface-switch)). The same applies when a first run saved its
+credential and the account never came to exist and the file could not be removed: delete `owner-credential.json` and run again while
+the token is valid.
+
+### Running the acceptance against a center on this machine
+
+The same script runs against a throwaway self-hosted center, in a real Chromium, with nothing to install but the pinned package's
+browser. This is how the flow was run for real before the proof environment is deployed (REAL browser, MOCKED hardware):
+
+1. **The browser.** In `eng/verification/browser`: `npm ci`, then `node node_modules/playwright-core/cli.js install chromium` (the
+   pinned `playwright-core` downloads the revision its manifest names, 1243, to `~/.cache/ms-playwright/chromium-1243`; on a bare
+   Linux host `... install-deps chromium`, as root, adds the shared libraries). Nothing else is downloaded.
+2. **PostgreSQL 18 and the center.** A throwaway container of the image `eng/center.py` pins (`POSTGRES_IMAGE`), published on a
+   loopback port; then, with `ARCFORGES_CENTER_MODE=self-hosted` and the container's direct URL as
+   `ARCFORGES_CENTER_MIGRATION_DATABASE_URL` and `ARCFORGES_CENTER_DATABASE_NAME=center`, the center built from this tree
+   (`cd center && go build -o /tmp/arcforges-center ./cmd/arcforges-center`) runs `admin ensure-database`, `migrate` and
+   `admin rotate-runtime-credential` (with `ARCFORGES_CENTER_RUNTIME_SECRET_FILE` and `ARCFORGES_CENTER_RUNTIME_POOLED_HOST` set to
+   the container's address; the file holds the runtime role's URL).
+3. **The bootstrap.** `node eng/verification/proof-bootstrap.ts --hours 2 --dir <new directory>` prints the digest and the expiry.
+4. **Serve.** `arcforges-center serve` with `ARCFORGES_CENTER_MODE=self-hosted`, `ARCFORGES_CENTER_PUBLIC_BASE_URL=http://localhost:18080`
+   (the host must be `localhost`: an IP literal cannot be a WebAuthn relying party), `ARCFORGES_CENTER_HTTP_ADDRESS=127.0.0.1:18080`,
+   `ARCFORGES_CENTER_GRPC_ADDRESS=off`, `ARCFORGES_CENTER_SURFACES=identity,pages`, `ARCFORGES_CENTER_DATABASE_URL` from the runtime
+   file and the digest and expiry as `ARCFORGES_CENTER_BOOTSTRAP_SHA256` and `_EXPIRES_AT`.
+5. **Run**, from the repository root, once as the first run and once more as a returning run (the bootstrap is one-shot, so a new
+   center and token for every first run):
+   `node eng/verification/browser/acceptance.ts --base-url http://localhost:18080 --chromium ~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome --state-dir <new directory> --bootstrap-file <directory of step 3>/owner-bootstrap.json --report <file> --requests-per-minute 0`.
+   Stop and remove the container afterwards.
 
 **What stays pending.** AR-23 (a real Windows Hello authenticator) is the only acceptance item that needs a person; its procedure is
-[`ar-23-owner-procedure.md`](ar-23-owner-procedure.md). The browser acceptance of the pages against proof is post-merge evidence: the
-script and its tests exist and run against a stand-in for the center and a browser, but no run against a real Chromium and the real
-center has happened at the time of this change.
+[`ar-23-owner-procedure.md`](ar-23-owner-procedure.md). The browser acceptance of the pages against the proof environment is
+post-merge evidence. Against a center on this machine it has run for real: see the pull request's evidence (REAL browser, Chromium
+153.0.8010.12, MOCKED hardware).
 
 ## Identity policy
 

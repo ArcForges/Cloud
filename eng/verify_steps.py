@@ -172,7 +172,7 @@ STEPS = [
         "git checkout -q -B arcforges-verify {sha}; git update-ref refs/remotes/origin/main {base}", 60),
     linux("fresh-intermediates", FRESH_INTERMEDIATES, 60),
     linux("npm-ci", "npm ci --ignore-scripts", 300),
-    linux("npm-audit", "npm audit --audit-level=high", 300),
+    linux("npm-audit", "npm audit --audit-level=high && npm audit --audit-level=high --prefix eng/verification/browser", 300),
     linux("check", "npm run check", 1200),
     linux("check-dotnet", "npm run check:dotnet", 1200),
     # The Go center (AF-CTR-02): the Windows controls plus the race detector, the fuzz targets and the image target.

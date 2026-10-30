@@ -4,10 +4,21 @@
 // configuration carries a bootstrap.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { grants, sid, whoami, windowsMachine } from "./support/windows-machine.ts";
 import {
   bootstrapFileName,
   createBootstrapFile,
@@ -32,6 +43,7 @@ import {
   parseIcaclsPrincipals,
   parseWhoami,
   readUserOnlyFile,
+  realMachine,
   replaceUserOnlyFile,
   windowsGrantArguments,
   writeUserOnlyFile,
@@ -104,8 +116,11 @@ test("the command prints the digest and the expiry and nothing else, and writes 
     "bootstrap_expires_at: 2026-11-02T10:00:00Z",
   ]);
   const file = path.join(directory, bootstrapFileName);
-  assert.equal(statSync(file).mode & 0o777, 0o600);
-  assert.equal(statSync(directory).mode & 0o777, 0o700);
+  // POSIX modes; on Windows the DACL tests below (a fake machine, and the real one in the other tests) hold the same promise.
+  if (process.platform !== "win32") {
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.equal(statSync(directory).mode & 0o777, 0o700);
+  }
   const record = readBootstrapFile(file);
   assert.equal(record.token, knownToken);
   assert.equal(record.sha256, knownDigest);
@@ -169,9 +184,7 @@ test("the command reads its arguments strictly and falls back to the directory o
 });
 
 function readdirNames(directory: string): string[] {
-  return spawnSync("ls", ["-A", directory], { encoding: "utf8" })
-    .stdout.split("\n")
-    .filter(Boolean);
+  return readdirSync(directory).sort();
 }
 
 test("run as a program it prints two lines to the standard output and no token anywhere", () => {
@@ -228,12 +241,10 @@ test("a bootstrap file is read back only when it is the file the command writes"
 // ---------------------------------------------------------------------------------------------------------------------------
 // User-only files
 
-test("a user-only file is created exclusively, private from its first byte, and checked on every read", () => {
+test("a user-only file is created exclusively, replaced whole and read back", () => {
   const directory = path.join(scratch(), "state");
   const file = path.join(directory, "credential.json");
   writeUserOnlyFile(file, "secret one\n");
-  assert.equal(statSync(directory).mode & 0o777, 0o700);
-  assert.equal(statSync(file).mode & 0o777, 0o600);
   assert.equal(readUserOnlyFile(file), "secret one\n");
   assert.throws(() => writeUserOnlyFile(file, "replaced"), /EEXIST/u);
   assert.equal(readUserOnlyFile(file), "secret one\n", "the existing file is not touched");
@@ -243,68 +254,68 @@ test("a user-only file is created exclusively, private from its first byte, and 
     ["credential.json"],
     "no temporary file is left behind",
   );
-  assert.equal(statSync(file).mode & 0o777, 0o600);
   assert.equal(readUserOnlyFile(file), "secret two\n");
-  // Anyone else's access is refused before the content is read or written, and the message names the path only.
-  for (const mode of [0o640, 0o604, 0o644, 0o660, 0o666, 0o607]) {
-    chmodSync(file, mode);
-    assert.throws(
-      () => readUserOnlyFile(file),
-      (error: Error) => error.message.includes(file) && !error.message.includes("secret"),
-      mode.toString(8),
-    );
-    assert.throws(() => replaceUserOnlyFile(file, "no"), /readable by more than its owner/u);
-    assert.throws(() => assertUserOnly(file), /readable/u);
-  }
-  chmodSync(file, 0o600);
-  chmodSync(directory, 0o750);
-  assert.throws(() => readUserOnlyFile(file), /readable/u, "a group-readable directory");
-  ensureUserOnlyDirectory(directory);
-  assert.equal(statSync(directory).mode & 0o777, 0o700, "an existing directory is tightened");
-  assert.equal(readUserOnlyFile(file), "secret two\n");
-  // A file of another owner is refused even at 0600.
-  const foreign: Machine = {
-    platform: "linux",
-    run: () => "",
-    uid: () => (process.getuid?.() ?? 0) + 1,
-  };
-  assert.throws(() => assertUserOnly(file, foreign), /readable/u);
   const created = createBootstrapFile(
     path.join(scratch(), "d"),
     generateBootstrap({ hours: 1, now }),
   );
-  assert.equal(statSync(created).mode & 0o777, 0o600);
+  assert(existsSync(created));
 });
 
-const sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
-const whoami = `"desktop-1\\sam","${sid}"\r\n`;
-
-/** A Windows machine that records its commands and answers `icacls <path>` with the listing the test chooses. */
-function windows(listing: (target: string) => string) {
-  const commands: string[][] = [];
-  const machine: Machine = {
-    platform: "win32",
-    run(command, args) {
-      commands.push([command, ...args]);
-      if (command === "whoami") return whoami;
-      if (command === "icacls" && args.length === 1) return listing(args[0] ?? "");
-      return "";
-    },
-    uid: () => undefined,
-  };
-  return { machine, commands };
-}
-
-const onlySam = (target: string) =>
-  `${target} DESKTOP-1\\sam:(OI)(CI)(F)\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`;
+// The POSIX half: modes and owners. On Windows the same promise is the DACL, which the tests with a Windows machine below hold.
+test(
+  "POSIX: a user-only file is private from its first byte and every read and write checks it",
+  { skip: process.platform === "win32" && "POSIX modes" },
+  () => {
+    const directory = path.join(scratch(), "state");
+    const file = path.join(directory, "credential.json");
+    writeUserOnlyFile(file, "secret one\n");
+    assert.equal(statSync(directory).mode & 0o777, 0o700);
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    replaceUserOnlyFile(file, "secret two\n");
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    // Anyone else's access is refused before the content is read or written, and the message names the path only.
+    for (const mode of [0o640, 0o604, 0o644, 0o660, 0o666, 0o607]) {
+      chmodSync(file, mode);
+      assert.throws(
+        () => readUserOnlyFile(file),
+        (error: Error) => error.message.includes(file) && !error.message.includes("secret"),
+        mode.toString(8),
+      );
+      assert.throws(() => replaceUserOnlyFile(file, "no"), /readable by more than its owner/u);
+      assert.throws(() => assertUserOnly(file), /readable/u);
+    }
+    chmodSync(file, 0o600);
+    chmodSync(directory, 0o750);
+    assert.throws(() => readUserOnlyFile(file), /readable/u, "a group-readable directory");
+    ensureUserOnlyDirectory(directory, realMachine(), (name) => name === "credential.json");
+    assert.equal(
+      statSync(directory).mode & 0o777,
+      0o700,
+      "a directory of the tool's own files is tightened",
+    );
+    assert.equal(readUserOnlyFile(file), "secret two\n");
+    // A file of another owner is refused even at 0600.
+    const foreign: Machine = {
+      platform: "linux",
+      run: () => "",
+      uid: () => (process.getuid?.() ?? 0) + 1,
+    };
+    assert.throws(() => assertUserOnly(file, foreign), /readable/u);
+    const created = createBootstrapFile(
+      path.join(scratch(), "d"),
+      generateBootstrap({ hours: 1, now }),
+    );
+    assert.equal(statSync(created).mode & 0o777, 0o600);
+  },
+);
 
 test("on Windows the directory then the file get one entry for the user and the result is verified", () => {
   const directory = path.join(scratch(), "state");
   const file = path.join(directory, "credential.json");
-  const { machine, commands } = windows(onlySam);
+  const { machine, commands } = windowsMachine();
   writeUserOnlyFile(file, "secret", machine);
-  const grants = commands.filter((entry) => entry[0] === "icacls" && entry.length > 2);
-  assert.deepEqual(grants, [
+  assert.deepEqual(grants(commands), [
     ["icacls", directory, "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`],
     ["icacls", file, "/inheritance:r", "/grant:r", `*${sid}:F`],
   ]);
@@ -324,17 +335,18 @@ test("on Windows the directory then the file get one entry for the user and the 
 });
 
 test("on Windows any other principal in the DACL refuses the file", () => {
-  const file = path.join(scratch(), "state", "credential.json");
+  const file = path.join(scratch(), "credential.json");
+  writeFileSync(file, "x");
   for (const extra of [
     "NT AUTHORITY\\SYSTEM",
     "BUILTIN\\Administrators",
     "BUILTIN\\Users",
     "Everyone",
-    "DESKTOP-1\\other",
+    "WORKSTATION-1\\other",
   ]) {
-    const { machine } = windows(
+    const { machine } = windowsMachine(
       (target) =>
-        `${target} DESKTOP-1\\sam:(F)\r\n${" ".repeat(target.length + 1)}${extra}:(R)\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`,
+        `${target} WORKSTATION-1\\tester:(F)\r\n${" ".repeat(target.length + 1)}${extra}:(R)\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`,
     );
     assert.throws(
       () => assertUserOnly(file, machine),
@@ -343,41 +355,46 @@ test("on Windows any other principal in the DACL refuses the file", () => {
     );
   }
   // The user may be named by SID, and a listing with no entry at all is no proof of privacy.
-  const bySid = windows((target) => `${target} ${sid}:(F)\r\n`);
+  const bySid = windowsMachine((target) => `${target} ${sid}:(F)\r\n`);
   assertUserOnly(file, bySid.machine);
-  const empty = windows(() => "Successfully processed 1 files; Failed processing 0 files\r\n");
+  const empty = windowsMachine(
+    () => "Successfully processed 1 files; Failed processing 0 files\r\n",
+  );
   assert.throws(() => assertUserOnly(file, empty.machine), /readable/u);
 });
 
 test("the Windows parsers read the commands' output and nothing more", () => {
-  assert.deepEqual(parseWhoami(whoami), { name: "desktop-1\\sam", sid });
+  assert.deepEqual(parseWhoami(whoami), { name: "workstation-1\\tester", sid });
   assert.throws(() => parseWhoami("ERROR: nothing"), /Cannot determine/u);
   assert.throws(() => parseWhoami('"a","not-a-sid"'));
   const target = "C:\\Users\\sam\\.arcforges\\proof";
   const listing = [
     `${target} NT AUTHORITY\\SYSTEM:(OI)(CI)(F)`,
-    `${" ".repeat(target.length)} DESKTOP-1\\sam:(OI)(CI)(F)`,
+    `${" ".repeat(target.length)} WORKSTATION-1\\tester:(OI)(CI)(F)`,
     "",
     "Successfully processed 1 files; Failed processing 0 files",
   ].join("\r\n");
   assert.deepEqual(parseIcaclsPrincipals(listing, target), [
     "NT AUTHORITY\\SYSTEM",
-    "DESKTOP-1\\sam",
+    "WORKSTATION-1\\tester",
   ]);
   assert.deepEqual(parseIcaclsPrincipals("Successfully processed 1 files", target), []);
   // The listings Windows 11 printed for this procedure's commands (a directory, an inheriting file, a file made private): the path
   // comes back in the file system's case, and a name with a space is one principal.
-  const real = "C:\\Users\\J7Rdm\\AppData\\Local\\Temp\\af-icacls-c10f394f";
+  const real = "C:\\Users\\tester\\AppData\\Local\\Temp\\af-icacls-c10f394f";
   assert.deepEqual(
     parseIcaclsPrincipals(
-      `${real} DEKU\\J7Rdm:(OI)(CI)(F)\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`,
+      `${real} WORKSTATION\\tester:(OI)(CI)(F)\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`,
       real,
     ),
-    ["DEKU\\J7Rdm"],
+    ["WORKSTATION\\tester"],
   );
   assert.deepEqual(
-    parseIcaclsPrincipals(`${real.toLowerCase()}\\x.json DEKU\\J7Rdm:(F)\r\n`, `${real}\\x.json`),
-    ["DEKU\\J7Rdm"],
+    parseIcaclsPrincipals(
+      `${real.toLowerCase()}\\x.json WORKSTATION\\tester:(F)\r\n`,
+      `${real}\\x.json`,
+    ),
+    ["WORKSTATION\\tester"],
   );
   assert.deepEqual(
     parseIcaclsPrincipals(`${real}\\x.json NT AUTHORITY\\SYSTEM:(I)(F)\r\n`, `${real}\\x.json`),
@@ -595,4 +612,88 @@ test("nothing in the repository holds a token of the shape afb1. followed by 43 
     { cwd: root, encoding: "utf8" },
   );
   assert.equal(found.stdout, "", "a bootstrap token was committed");
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Which directories the tool may restrict (the Windows grant strips every other entry of a directory and of what it holds)
+
+test("a directory that someone else filled is refused and left alone, whatever the machine", () => {
+  const filled = path.join(scratch(), "projects");
+  mkdirSync(filled);
+  writeFileSync(path.join(filled, "notes.txt"), "mine");
+  // Shared with others, as a folder of a checkout or a profile is.
+  if (process.platform !== "win32") chmodSync(filled, 0o755);
+  const before = readdirSync(filled);
+  // The bootstrap command, the user-only helpers and the credential store all refuse it.
+  assert.throws(
+    () => runBootstrap(["--dir", filled], { out: () => {} }, { now }),
+    /holds files that are not this tool's|readable by more than its owner/u,
+  );
+  assert.throws(() => ensureUserOnlyDirectory(filled), /holds files that are not this tool's/u);
+  assert.throws(
+    () => ensureUserOnlyDirectory(filled, realMachine(), (name) => name === "credential.json"),
+    /holds files that are not this tool's/u,
+  );
+  assert.deepEqual(readdirSync(filled), before);
+  if (process.platform !== "win32")
+    assert.equal(statSync(filled).mode & 0o777, 0o755, "its mode is not changed");
+  const { machine, commands } = windowsMachine(
+    (target) =>
+      `${target} WORKSTATION-1\\tester:(OI)(CI)(F)\r\n${" ".repeat(target.length + 1)}BUILTIN\\Users:(OI)(CI)(R)\r\n`,
+  );
+  assert.throws(
+    () => ensureUserOnlyDirectory(filled, machine),
+    /holds files that are not this tool's/u,
+  );
+  assert.throws(
+    () => writeUserOnlyFile(path.join(filled, "x.json"), "secret", machine),
+    /readable by more than its owner/u,
+    "a directory that exists is checked, not changed, by a write",
+  );
+  assert.deepEqual(
+    grants(commands),
+    [],
+    "no DACL of the directory or of what it holds was changed",
+  );
+  assert(!existsSync(path.join(filled, "x.json")));
+  // A file that is not a directory.
+  const file = path.join(scratch(), "a-file");
+  writeFileSync(file, "x");
+  assert.throws(() => ensureUserOnlyDirectory(file), /is not a directory/u);
+});
+
+test("an empty directory, one that holds only the tool's own files, and a new one under new parents are made private", () => {
+  const empty = path.join(scratch(), "empty");
+  mkdirSync(empty);
+  const first = windowsMachine();
+  ensureUserOnlyDirectory(empty, first.machine);
+  assert.deepEqual(grants(first.commands), [
+    ["icacls", empty, "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`],
+  ]);
+  const own = path.join(scratch(), "own");
+  mkdirSync(own);
+  writeFileSync(path.join(own, "owner-bootstrap.json"), "{}");
+  const second = windowsMachine();
+  ensureUserOnlyDirectory(own, second.machine, (name) => name === "owner-bootstrap.json");
+  assert.equal(grants(second.commands).length, 1);
+  const deep = path.join(scratch(), "a", "b", "c");
+  const third = windowsMachine();
+  ensureUserOnlyDirectory(deep, third.machine);
+  assert(existsSync(deep));
+  // Only the new directory itself is restricted, not the parents the call had to make.
+  assert.deepEqual(grants(third.commands), [
+    ["icacls", deep, "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`],
+  ]);
+});
+
+test("on Windows a directory whose DACL still shows another principal after the grant is refused", () => {
+  const fresh = path.join(scratch(), "new");
+  const { machine } = windowsMachine(
+    (target) =>
+      `${target} WORKSTATION-1\\tester:(OI)(CI)(F)\r\n${" ".repeat(target.length + 1)}BUILTIN\\Users:(OI)(CI)(R)\r\n`,
+  );
+  assert.throws(
+    () => ensureUserOnlyDirectory(fresh, machine),
+    (error: Error) => error.message.includes(fresh) && !error.message.includes("BUILTIN"),
+  );
 });

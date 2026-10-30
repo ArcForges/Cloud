@@ -218,6 +218,21 @@ export function validateIsolated(
   assert(Object.keys(packages).length > 0, `Isolated package locks nothing: ${directory}`);
   return packages;
 }
+/**
+ * Every package.json of the repository is admitted: the policy's workspace manifests, and the manifests of its isolated
+ * directories, nothing else (a manifest anywhere else would be a dependency input the policy never saw).
+ */
+export function validateManifests(
+  files: readonly string[],
+  policy: Pick<Policy, "manifests" | "isolated">,
+) {
+  const manifests = files.filter((file) => path.basename(file) === "package.json");
+  const admitted = [
+    ...policy.manifests,
+    ...(policy.isolated ?? []).map((directory) => `${directory}/package.json`),
+  ];
+  assert.deepEqual([...manifests].sort(), admitted.sort(), "Unadmitted workspace manifest");
+}
 export function validateClosure(policy: Policy, packages: Record<string, Entry>) {
   const actual = Object.fromEntries(
     Object.entries(packages)
@@ -461,13 +476,8 @@ export function auditDependencies(root: string) {
   )
     .split("\0")
     .filter(Boolean);
-  const manifests = files.filter((file) => path.basename(file) === "package.json");
+  validateManifests(files, policy);
   const isolated = policy.isolated ?? [];
-  assert.deepEqual(
-    manifests.sort(),
-    [...policy.manifests, ...isolated.map((directory) => `${directory}/package.json`)].sort(),
-    "Unadmitted workspace manifest",
-  );
   const inputNames = new Set([
     "package.json",
     "package-lock.json",
