@@ -1,0 +1,16 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Create your passkey</h1>
+<noscript><p>Creating a passkey needs JavaScript. Turn it on for this page and reload.</p></noscript>
+<p id="needs-script" class="help">This page needs its script. If this line stays, reload the page or allow scripts for it.</p>
+<p id="status" role="status" aria-live="polite">Your browser will ask you to confirm with your device.</p>
+<form method="post" action="{{.Base}}/account/passkeys/complete" id="register" data-flow-id="{{.Register.FlowID}}" data-challenge="{{.Register.Challenge}}" data-rp-id="{{.Register.RPID}}" data-user-handle="{{.Register.UserHandle}}" data-excluded="{{.Register.Excluded}}" data-account-name="{{.Register.AccountName}}">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="command_id" value="{{.Register.CommandID}}">
+<input type="hidden" name="flow_id" value="{{.Register.FlowID}}">
+<input type="hidden" name="credential_id" value="">
+<input type="hidden" name="client_data_json" value="">
+<input type="hidden" name="attestation_object" value="">
+<input type="hidden" name="transports" value="">
+<p><button type="button" id="create-passkey" class="primary" disabled>Create the passkey</button></p>
+</form>
+{{end}}

@@ -7,9 +7,11 @@ import {
   edgeIpv6PrefixBits,
   edgeRateLimitPeriodSeconds,
   rateLimitedReply,
+  rateLimitedReplyCorrelationOffset,
   rateLimitedReplyInstantBytes,
   rateLimitedReplyInstantOffsets,
 } from "../tables/center-tables.generated.ts";
+import { correlationIdBytes } from "./correlation.ts";
 
 /** RFC 4291 section 2.2: an IPv6 address is eight groups of sixteen bits. */
 const ipv6Groups = 8;
@@ -76,11 +78,15 @@ const varintRadix = 128;
 const zigzagFactor = 2;
 
 /**
- * The surface limit's reply at a time (F17): the generated RESOURCE/rate_limited template with its retry instant written into each
- * instant (retry.retry_at and limit.recovery_at): the time rounded up to the second, plus the edge limiter's period, an upper bound of
- * the limiter's window. The instant's seconds are a fixed-width zigzag varint, so no length of the template changes.
+ * The surface limit's reply at a time (F17) for a call: the generated RESOURCE/rate_limited template with its retry instant written
+ * into each instant (retry.retry_at and limit.recovery_at): the time rounded up to the second, plus the edge limiter's period, an
+ * upper bound of the limiter's window; and the call's correlation id written into its slot (ArcError.correlation_id, E4-1). The
+ * instant's seconds are a fixed-width zigzag varint and the slot is 16 bytes, so no length of the template changes.
  */
-export function rateLimitedReplyAt(nowMilliseconds: number): Uint8Array<ArrayBuffer> {
+export function rateLimitedReplyAt(
+  nowMilliseconds: number,
+  correlationId: string,
+): Uint8Array<ArrayBuffer> {
   const body = Uint8Array.from(atob(rateLimitedReply), (character) => character.charCodeAt(0));
   const seconds = Math.ceil(nowMilliseconds / millisecondsPerSecond) + edgeRateLimitPeriodSeconds;
   for (const offset of rateLimitedReplyInstantOffsets) {
@@ -91,5 +97,6 @@ export function rateLimitedReplyAt(nowMilliseconds: number): Uint8Array<ArrayBuf
       value = Math.floor(value / varintRadix);
     }
   }
+  body.set(correlationIdBytes(correlationId), rateLimitedReplyCorrelationOffset);
   return body;
 }

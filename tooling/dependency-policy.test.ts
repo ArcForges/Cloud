@@ -13,6 +13,8 @@ import {
   introducingCommit,
   validateHistoricalCoordinates,
   validateClosure,
+  validateIsolated,
+  validateManifests,
   validateCsharpImports,
   validateImports,
   validatePolicy,
@@ -22,7 +24,10 @@ import {
 const root = process.cwd();
 const baseline = JSON.parse(readFileSync("eng/policy/dependency-policy.json", "utf8")) as Policy;
 const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-const firstDependency = Object.keys(baseline.closure)[0];
+// A package of the root project's own lock (the isolated packages' entries are keyed under their directory and sort first).
+const firstDependency = Object.keys(baseline.closure).find((key) =>
+  key.startsWith("node_modules/"),
+);
 assert(firstDependency, "Fixture requires an admitted dependency");
 test("actual repository admission", () => {
   assert.equal(auditDependencies(root).result, "passed");
@@ -285,6 +290,324 @@ test("a receipt introduced inside a merge commit is found and bound to that merg
     assert.deepEqual(historicalReviews(dir), [receipt]);
     assert.equal(introducingCommit(dir, receipt), merge);
     assert.equal(git("show", `${merge}:${receipt}`), admitted.trim());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// An isolated package (AF-CTR-03 A2): its own manifest, lock and .npmrc, never installed by the root project, admitted by directory
+// and bound to the closure under that directory's prefix.
+const isolatedDirectory = "eng/verification/browser";
+const isolatedFiles = () => ({
+  manifest: JSON.parse(readFileSync(`${isolatedDirectory}/package.json`, "utf8")) as Record<
+    string,
+    unknown
+  >,
+  lock: JSON.parse(readFileSync(`${isolatedDirectory}/package-lock.json`, "utf8")) as {
+    packages: Record<string, Record<string, unknown>>;
+    lockfileVersion: number;
+  },
+  npmrc: readFileSync(`${isolatedDirectory}/.npmrc`, "utf8"),
+});
+const check = (
+  files: ReturnType<typeof isolatedFiles>,
+  manifest: unknown = files.manifest,
+  lockFile: unknown = files.lock,
+  npmrc: string = files.npmrc,
+) => validateIsolated(isolatedDirectory, JSON.stringify(manifest), JSON.stringify(lockFile), npmrc);
+test("an isolated package is admitted by directory and its locked packages join the closure under the directory's prefix", () => {
+  assert.deepEqual(baseline.isolated, [isolatedDirectory]);
+  const files = isolatedFiles();
+  const packages = check(files);
+  assert.deepEqual(Object.keys(packages), [`${isolatedDirectory}/node_modules/playwright-core`]);
+  // The root lock does not have it: the root project never installs it.
+  assert(!Object.keys(lock.packages).some((key) => key.includes("playwright")));
+  // The admitted closure holds it, with the bytes and the licence of the lock.
+  const entry = baseline.closure[`${isolatedDirectory}/node_modules/playwright-core`];
+  assert.equal(entry?.version, "1.63.0");
+  assert.equal(entry?.integrity, files.lock.packages["node_modules/playwright-core"]?.integrity);
+  assert.equal(entry?.license, "Apache-2.0");
+  validateClosure(baseline, { ...lock.packages, ...packages });
+  // A package that is locked but not admitted, or admitted but no longer locked, is refused.
+  const extra = structuredClone(files.lock);
+  extra.packages["node_modules/other"] = {
+    ...extra.packages["node_modules/playwright-core"],
+    version: "1.0.0",
+  };
+  assert.throws(
+    () => validateClosure(baseline, { ...lock.packages, ...check(files, files.manifest, extra) }),
+    /Unadmitted dependency/u,
+  );
+  assert.throws(() => validateClosure(baseline, lock.packages), /Unadmitted dependency/u);
+});
+test("an isolated package must be private, its own root, exact, hook-free and installed without scripts", () => {
+  const files = isolatedFiles();
+  const mutate = (change: (manifest: Record<string, unknown>) => void) => {
+    const manifest = structuredClone(files.manifest);
+    change(manifest);
+    return manifest;
+  };
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.private = false)),
+      ),
+    /not private/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.workspaces = ["x"])),
+      ),
+    /workspaces/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.overrides = { a: "1.0.0" })),
+      ),
+    /overrides/u,
+  );
+  for (const hook of ["preinstall", "install", "postinstall", "prepare"])
+    assert.throws(
+      () =>
+        check(
+          files,
+          mutate((m) => (m.scripts = { [hook]: "node x.js" })),
+        ),
+      /install hook/u,
+      hook,
+    );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.dependencies = { "playwright-core": "^1.63.0" })),
+      ),
+    /drift|Floating/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.dependencies = { "playwright-core": "1.63.1" })),
+      ),
+    /drift/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.devDependencies = { typescript: "7.0.2" })),
+      ),
+    /drift/u,
+  );
+  for (const npmrc of [
+    "save-exact=true\nengine-strict=true\n",
+    "ignore-scripts=false\nsave-exact=true\nengine-strict=true\n",
+    "ignore-scripts=true\n",
+  ])
+    assert.throws(() => check(files, files.manifest, files.lock, npmrc), /without scripts/u);
+  const lockWith = (
+    change: (packages: Record<string, Record<string, unknown>>) => void,
+    version = 3,
+  ) => {
+    const copy = structuredClone(files.lock);
+    copy.lockfileVersion = version;
+    change(copy.packages);
+    return copy;
+  };
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith(() => {}, 2),
+      ),
+    /version/u,
+  );
+  // A range that the lock's root states too is not a drift but is still floating.
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => {
+          m.dependencies = { "playwright-core": "^1.63.0" };
+        }),
+        lockWith((p) => {
+          const root = p[""];
+          if (root) root.dependencies = { "playwright-core": "^1.63.0" };
+        }),
+      ),
+    /Floating selector/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          const entry = p["node_modules/playwright-core"];
+          if (entry) entry.hasInstallScript = true;
+        }),
+      ),
+    /install script/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          const entry = p["node_modules/playwright-core"];
+          if (entry) entry.link = true;
+        }),
+      ),
+    /links a package/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          p["../outside/x"] = { version: "1.0.0" };
+        }),
+      ),
+    /outside node_modules/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          delete p["node_modules/playwright-core"];
+        }),
+      ),
+    /locks nothing/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          delete p[""];
+        }),
+      ),
+    /lock root/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          const root = p[""];
+          if (root) root.dependencies = { "playwright-core": "1.62.1" };
+        }),
+      ),
+    /drift/u,
+  );
+});
+test("an isolated directory is named plainly and once", () => {
+  for (const bad of ["", "/abs", "../x", "a/../b", "a//b", "a/./b", "a b", "a\\b"]) {
+    const policy = structuredClone(baseline);
+    policy.isolated = [bad];
+    assert.throws(() => validatePolicy(policy), /Malformed isolated/u, JSON.stringify(bad));
+  }
+  const repeated = structuredClone(baseline);
+  repeated.isolated = [isolatedDirectory, isolatedDirectory];
+  assert.throws(() => validatePolicy(repeated), /Repeated isolated/u);
+});
+test("a package.json that the policy does not admit is refused, wherever it is, and an admitted isolated one is not", () => {
+  const policy = { manifests: ["package.json"], isolated: [isolatedDirectory] };
+  const repository = [
+    "package.json",
+    `${isolatedDirectory}/package.json`,
+    "README.md",
+    "tooling/dependency-policy.ts",
+  ];
+  validateManifests(repository, policy);
+  // A nested manifest the policy does not name, in the tree of an isolated package or beside it.
+  for (const stray of [
+    "eng/other/package.json",
+    `${isolatedDirectory}/sub/package.json`,
+    "tests/package.json",
+    "node-tools/package.json",
+  ])
+    assert.throws(
+      () => validateManifests([...repository, stray], policy),
+      /Unadmitted workspace manifest/u,
+      stray,
+    );
+  // An admitted manifest that is gone is as wrong as one that is new.
+  assert.throws(
+    () => validateManifests(["package.json"], policy),
+    /Unadmitted workspace manifest/u,
+  );
+  // Without the isolated list the nested manifest is not admitted.
+  assert.throws(
+    () => validateManifests(repository, { manifests: ["package.json"] }),
+    /Unadmitted workspace manifest/u,
+  );
+  validateManifests(["package.json"], { manifests: ["package.json"] });
+});
+test("the repository audit refuses a package.json the policy does not admit (the call is pinned, not only the function)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "dependency-stray-manifest-"));
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith("GIT_")),
+  );
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.autocrlf=false",
+        ...args,
+      ],
+      { cwd: dir, encoding: "utf8", windowsHide: true, env },
+    ).trim();
+  const write = (file: string, text: string) => {
+    mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+    writeFileSync(path.join(dir, file), text);
+  };
+  try {
+    git("init", "-q", "-b", "main");
+    // The policy and its reviews as they are, and every manifest the policy admits (their content is not read before the check).
+    // (listed as the audit lists the repository: tracked and new files, so that the test does not depend on what is committed)
+    for (const file of execFileSync(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "eng/policy"],
+      { cwd: root, encoding: "utf8" },
+    )
+      .split("\n")
+      .filter(Boolean))
+      write(file, readFileSync(path.join(root, file), "utf8"));
+    for (const manifest of [
+      ...baseline.manifests,
+      ...(baseline.isolated ?? []).map((directory) => `${directory}/package.json`),
+    ])
+      write(manifest, "{}\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "policy and admitted manifests");
+    // Without a stray manifest the audit gets past the manifest check (and stops on something else in this bare repository).
+    assert.throws(
+      () => auditDependencies(dir),
+      (error: unknown) => !/Unadmitted workspace manifest/u.test(String(error)),
+    );
+    write("eng/other/package.json", "{}\n");
+    assert.throws(() => auditDependencies(dir), /Unadmitted workspace manifest/u);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

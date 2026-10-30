@@ -1,0 +1,31 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Sessions</h1>
+<noscript><p>Ending a session needs JavaScript. Turn it on for this page and reload.</p></noscript>
+<p id="needs-script" class="help">Ending a session needs this page's script. If this line stays, reload the page or allow scripts for it.</p>
+<p id="status" role="status" aria-live="polite"></p>
+<table>
+<caption>Browsers and phones signed in to this account</caption>
+<thead><tr><th scope="col">Where</th><th scope="col">Signed in</th><th scope="col">Last used</th><th scope="col">Ends</th><th scope="col">Action</th></tr></thead>
+<tbody>
+{{range .Sessions}}<tr>
+<th scope="row">{{.Where}}{{if .Current}} (this session){{end}}</th>
+<td data-label="Signed in"><time datetime="{{.IssuedAt}}">{{.IssuedText}}</time></td>
+<td data-label="Last used"><time datetime="{{.LastUsedAt}}">{{.LastUsedText}}</time></td>
+<td data-label="Ends"><time datetime="{{.ExpiresAt}}">{{.ExpiresText}}</time></td>
+<td data-label="Action">{{if .Current}}<a href="{{$.Base}}/account/sign-out">Sign out</a>{{else}}<form method="post" action="{{$.Base}}/account/sessions/revoke" class="inline" data-step-up-class="identity.revokeSession" data-step-up-target="{{.RevokeTarget}}">
+<input type="hidden" name="csrf" value="{{$.CSRF}}">
+<input type="hidden" name="command_id" value="{{.RevokeCommand}}">
+<input type="hidden" name="session_id" value="{{.ID}}">
+<button type="submit" aria-label="End session of {{.Where}}">End session</button>
+</form>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{if .HasMore}}<p class="help">Only the newest sessions are listed.</p>{{end}}
+<form method="post" action="{{.Base}}/account/sessions/revoke-all" data-step-up-class="identity.revokeAllSessions" data-step-up-target="{{.RevokeAllTarget}}">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="command_id" value="{{.RevokeAllCommand}}">
+<p><button type="submit">Sign out all other sessions</button></p>
+</form>
+{{end}}

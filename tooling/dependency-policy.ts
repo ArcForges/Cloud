@@ -31,6 +31,12 @@ export type Policy = {
   sourceCommit: string;
   reviewRecord: string;
   manifests: string[];
+  /**
+   * Directories of isolated packages: a package.json with its own package-lock.json and .npmrc that the root project never installs
+   * (no workspace, nothing in the root lock). Each is admitted by name here, its three files by digest in `inputs`, and its locked
+   * packages in `closure` under the directory's own prefix.
+   */
+  isolated?: string[];
   inputs: Record<string, string>;
   review: Review;
   closure: Record<string, Entry>;
@@ -97,6 +103,17 @@ export function validatePolicy(policy: Policy) {
     assert(policy.review[field]?.trim().length > 8, `Missing upgrade review ${field}`);
   for (const check of requiredChecks)
     assert(policy.review.checks.includes(check), `Missing upgrade gate: ${check}`);
+  for (const directory of policy.isolated ?? [])
+    assert(
+      /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/u.test(directory) &&
+        !directory.split("/").some((part) => part === "." || part === ".."),
+      `Malformed isolated package directory: ${directory}`,
+    );
+  assert.equal(
+    new Set(policy.isolated ?? []).size,
+    (policy.isolated ?? []).length,
+    "Repeated isolated package directory",
+  );
   assert(policy.artifactRecords.length > 0, "Missing shipped closure authority");
   assert.equal(
     policy.native.mode,
@@ -144,6 +161,77 @@ export function validateHistoricalCoordinates(
         integrity,
         `Immutable version changed despite successor review: ${coordinate}`,
       );
+}
+/**
+ * Checks one isolated package (its manifest, lock and .npmrc) and returns its locked packages under the directory's prefix, ready to
+ * join the root lock's packages in validateClosure. An isolated package must be private, a root of its own (no workspaces), pinned
+ * to exact versions that its own lock states, free of install hooks, and installed only with scripts off.
+ */
+export function validateIsolated(
+  directory: string,
+  manifestText: string,
+  lockText: string,
+  npmrcText: string,
+): Record<string, Entry> {
+  const manifest = JSON.parse(manifestText) as Record<string, unknown> & {
+    private?: boolean;
+    scripts?: Record<string, string>;
+  };
+  assert.equal(manifest.private, true, `Isolated package is not private: ${directory}`);
+  assert(manifest.workspaces === undefined, `Isolated package declares workspaces: ${directory}`);
+  assert(manifest.overrides === undefined, `Isolated package overrides a dependency: ${directory}`);
+  for (const hook of ["preinstall", "install", "postinstall", "prepare", "prepublish"])
+    assert(
+      manifest.scripts?.[hook] === undefined,
+      `Isolated package has an install hook: ${directory}`,
+    );
+  assert(
+    /^ignore-scripts=true$/mu.test(npmrcText) &&
+      /^save-exact=true$/mu.test(npmrcText) &&
+      /^engine-strict=true$/mu.test(npmrcText),
+    `Isolated package does not install exactly and without scripts: ${directory}`,
+  );
+  const lock = JSON.parse(lockText) as {
+    lockfileVersion: number;
+    packages: Record<string, Entry & Record<string, unknown>>;
+  };
+  assert.equal(lock.lockfileVersion, 3, `Isolated lockfile version: ${directory}`);
+  const entry = lock.packages[""];
+  assert(entry, `Missing isolated package lock root: ${directory}`);
+  for (const section of sections) {
+    const declared = (manifest[section] ?? {}) as Record<string, string>;
+    assert.deepEqual(declared, entry[section] ?? {}, `Manifest/lock drift: ${directory}`);
+    for (const [name, version] of Object.entries(declared))
+      assert(exact.test(version), `Floating selector: ${name}`);
+  }
+  const packages: Record<string, Entry> = {};
+  for (const [key, locked] of Object.entries(lock.packages)) {
+    if (key === "") continue;
+    assert(
+      key.startsWith("node_modules/"),
+      `Isolated lock names a path outside node_modules: ${directory}`,
+    );
+    assert(!locked.link, `Isolated lock links a package: ${directory}`);
+    assert(!locked.hasInstallScript, `Isolated package runs an install script: ${key}`);
+    packages[`${directory}/${key}`] = locked;
+  }
+  assert(Object.keys(packages).length > 0, `Isolated package locks nothing: ${directory}`);
+  return packages;
+}
+/**
+ * Every package.json of the repository is admitted: the policy's workspace manifests, and the manifests of its isolated
+ * directories, nothing else (a manifest anywhere else would be a dependency input the policy never saw).
+ */
+export function validateManifests(
+  files: readonly string[],
+  policy: Pick<Policy, "manifests" | "isolated">,
+) {
+  const manifests = files.filter((file) => path.basename(file) === "package.json");
+  const admitted = [
+    ...policy.manifests,
+    ...(policy.isolated ?? []).map((directory) => `${directory}/package.json`),
+  ];
+  assert.deepEqual([...manifests].sort(), admitted.sort(), "Unadmitted workspace manifest");
 }
 export function validateClosure(policy: Policy, packages: Record<string, Entry>) {
   const actual = Object.fromEntries(
@@ -388,8 +476,8 @@ export function auditDependencies(root: string) {
   )
     .split("\0")
     .filter(Boolean);
-  const manifests = files.filter((file) => path.basename(file) === "package.json");
-  assert.deepEqual(manifests.sort(), [...policy.manifests].sort(), "Unadmitted workspace manifest");
+  validateManifests(files, policy);
+  const isolated = policy.isolated ?? [];
   const inputNames = new Set([
     "package.json",
     "package-lock.json",
@@ -443,7 +531,22 @@ export function auditDependencies(root: string) {
         assert(exact.test(version), `Floating selector: ${name}`);
     }
   }
-  validateClosure(policy, lock.packages);
+  const isolatedPackages: Record<string, Entry> = {};
+  for (const directory of isolated)
+    Object.assign(
+      isolatedPackages,
+      validateIsolated(
+        directory,
+        read(`${directory}/package.json`),
+        read(`${directory}/package-lock.json`),
+        read(`${directory}/.npmrc`),
+      ),
+    );
+  assert(
+    Object.keys(isolatedPackages).every((key) => !(key in lock.packages)),
+    "An isolated package shares a path with the root lock",
+  );
+  validateClosure(policy, { ...lock.packages, ...isolatedPackages });
   for (const [file, expected] of Object.entries(policy.inputs))
     assert.equal(digest(read(file)), expected, `Dependency input changed without review: ${file}`);
   const inventory = JSON.parse(read("eng/provenance/files.json")) as { artifacts: string[] };

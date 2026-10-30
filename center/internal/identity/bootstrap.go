@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
-	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/ratelimit"
@@ -33,6 +32,9 @@ type Enrollment struct {
 	DisplayName string
 	Locale      *string
 	Timezone    *string
+	// Browser is the enrollment of a browser on the account pages: the flow is of the browser channel and the owner gets a cookie
+	// session on the browser's own web device.
+	Browser bool
 }
 
 // The reasons of a refused bootstrap; only the audit event carries them, every refusal looks the same.
@@ -42,6 +44,7 @@ const (
 	bootstrapTokenInvalid  = "token_invalid"
 	bootstrapAccountExists = "account_exists"
 	bootstrapPasskey       = "passkey_invalid"
+	bootstrapFlowOrigin    = "flow_origin"
 )
 
 // validCreation checks the contract's bounds of a WebAuthnCreation at a field path.
@@ -120,9 +123,20 @@ func (s *Service) Bootstrap(ctx context.Context, request Request, in Enrollment)
 	if exists {
 		return refuse(bootstrapAccountExists)
 	}
-	row, err := s.takeAttempt(ctx, in.FlowID, ChannelNative, []FlowKind{FlowEnrollment}, PurposeEnroll)
+	channel := ChannelNative
+	if in.Browser {
+		channel = ChannelBrowser
+	}
+	row, err := s.takeAttempt(ctx, in.FlowID, channel, []FlowKind{FlowEnrollment}, PurposeEnroll)
 	if err != nil {
 		return SignedIn{}, err
+	}
+	if channel == ChannelBrowser && (row.Origin == nil || *row.Origin != s.rp.Origin()) {
+		// A browser flow is bound to the relying party's origin it was begun for.
+		if err = s.exhaust(ctx, row.ID); err != nil {
+			return SignedIn{}, err
+		}
+		return refuse(bootstrapFlowOrigin)
 	}
 	credential, err := s.rp.VerifyCreation(row.Challenge, row.UserHandle, in.Creation, row.ExpiresAt)
 	if err != nil {
@@ -171,12 +185,7 @@ VALUES ($1, $2, 1, 'passkey', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)`, id
 			credential.BackupEligible, credential.BackupState, credential.Transports, credential.AAGUID, credential.AttestationFormat, now); err != nil {
 			return err
 		}
-		deviceID, err := device.EnsureNative(ctx, tx, userID, *row.Claim, now)
-		if err != nil {
-			return err
-		}
-		issued, err := session.IssueNative(ctx, tx, s.policy, session.Grant{UserID: userID, DeviceID: deviceID, InstallationID: row.Claim.InstallationID,
-			Scope: session.ScopeAccount, Product: row.Claim.Product, Purpose: session.PurposeEnroll, AuthMethod: int16(MethodPasskey), AuthenticatedAt: now}, now)
+		issued, err := s.issueSession(ctx, tx, userID, *row.Claim, row.Channel, session.PurposeEnroll, int16(MethodPasskey), request.DeviceName, now)
 		if err != nil {
 			return err
 		}
@@ -184,13 +193,9 @@ VALUES ($1, $2, 1, 'passkey', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)`, id
 			s.bootstrap.TokenSHA256[:], userID, now); err != nil {
 			return err
 		}
-		view, err := device.Get(ctx, tx, userID, deviceID)
-		if err != nil || view == nil {
-			return errors.Join(err, errors.New("the new device is not readable"))
-		}
-		result = SignedIn{Session: issued, Device: *view}
+		result = issued
 		return s.audit(ctx, tx, request, Actor(userID), "identity.bootstrap.completed", "", "account", userID.String(),
-			map[string]any{"method": "passkey", "channel": "native", "credential": identityID.String()})
+			map[string]any{"method": "passkey", "channel": channelName(row.Channel), "credential": identityID.String()})
 	})
 	switch {
 	case errors.Is(err, errAccountExists) || errors.Is(err, store.ErrConflict):

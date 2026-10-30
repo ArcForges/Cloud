@@ -26,11 +26,16 @@ const (
 // Surface is a switchable group of routes (AD-0021 section 13a; AF-PLAT-01 owns the activation variable and its other names).
 type Surface string
 
-// SurfaceIdentity is accounts, sessions and devices; it is the only surface that exists yet.
+// SurfaceIdentity is accounts, sessions and devices (the IdentityService and DeviceService methods).
 const SurfaceIdentity Surface = "identity"
 
+// SurfacePages is the center's own account pages and the WebBrowserSession routes under /session/v1/web (AF-CTR-03 A2): the
+// sign-in, bootstrap, account and passkeys, sessions, devices and sign-out pages and the JSON routes their script calls. It needs
+// the identity surface, whose domain functions it calls; it is off wherever FLAGSHIP_SURFACES does not name it.
+const SurfacePages Surface = "pages"
+
 // KnownSurfaces is every surface name, in generated order.
-func KnownSurfaces() []Surface { return []Surface{SurfaceIdentity} }
+func KnownSurfaces() []Surface { return []Surface{SurfaceIdentity, SurfacePages} }
 
 // ClientIPHeader is the one header the hosted Worker sets to the client's address (from cf-connecting-ip, overwriting any client
 // value); the generated Worker tables carry the same name.
@@ -315,13 +320,17 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 	if identity.Policy, err = ParseIdentityPolicy(get(EnvIdentityPolicy)); err != nil {
 		return Identity{}, invalid("%s: %v", EnvIdentityPolicy, err)
 	}
+	if identity.Enabled(SurfacePages) && !identity.Enabled(SurfaceIdentity) {
+		return Identity{}, invalid("the %s surface needs the %s surface: the pages call its domain functions", SurfacePages, SurfaceIdentity)
+	}
 	if identity.Enabled(SurfaceIdentity) {
 		if err = RequireRelyingParty(publicBaseURL); err != nil {
 			if get(EnvSurfaces) != "" {
 				return Identity{}, invalid("the identity surface is listed in %s: %v", EnvSurfaces, err)
 			}
-			// The self-hosted default never refuses to start: identity stays off and the start-up log says why (PLT-16).
-			identity.Surfaces = slices.DeleteFunc(identity.Surfaces, func(s Surface) bool { return s == SurfaceIdentity })
+			// The self-hosted default never refuses to start: identity stays off, and so do the pages that need it, and the start-up
+			// log says why (PLT-16).
+			identity.Surfaces = slices.DeleteFunc(identity.Surfaces, func(s Surface) bool { return s == SurfaceIdentity || s == SurfacePages })
 			identity.Disabled = err.Error()
 		}
 	}
@@ -432,4 +441,18 @@ func Origin(publicBaseURL string) string {
 	}
 	host, _, _ := strings.Cut(rest, "/")
 	return scheme + "://" + host
+}
+
+// BasePath is the path of the public base URL below its origin, without a trailing slash: "" for a center at the root of its host,
+// "/api" for the hosted center. The center's pages link and redirect below it.
+func BasePath(publicBaseURL string) string {
+	_, rest, ok := strings.Cut(publicBaseURL, "://")
+	if !ok {
+		return ""
+	}
+	_, path, found := strings.Cut(rest, "/")
+	if !found {
+		return ""
+	}
+	return strings.TrimRight("/"+path, "/")
 }

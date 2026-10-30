@@ -314,6 +314,13 @@ type Registration struct {
 	credential passkey.Credential
 }
 
+// RunningGrace is how long past a registration flow's expiry its attempt still counts as held by a running completion (A-1): the
+// completion took its attempt before the expiry (the library refuses a ceremony after it), and its success transaction is bounded by
+// store.DefaultTimeout, with a margin for the work between the attempt and that transaction. A duplicate that arrives in this
+// window is told the store is busy and replays the receipt on its retry; after it the commit is settled or will never come, and the
+// flow is expired.
+const RunningGrace = store.DefaultTimeout + 5*time.Second
+
 // takeRegistrationAttempt counts the attempt of a registration flow of the caller's account, session and channel in its own
 // auxiliary transaction, before the creation is verified; a flow of another account or session is STATE/not_found.
 func (s *Service) takeRegistrationAttempt(ctx context.Context, id platform.ID, caller Caller, channel Channel) (flow, error) {
@@ -338,14 +345,16 @@ RETURNING `+flowColumns, id, int16(channel), int16(FlowPasskeyRegistration), int
 		}
 		// B4: a flow of this caller whose only attempt is taken but which has no outcome is held by a completion that is still
 		// running (a duplicate of the same command, say): the duplicate is answered as a busy store, so it retries and then replays
-		// that completion's receipt, rather than a final code_reused although the command succeeds. An attempt that is never
-		// settled answers RESOURCE/overloaded until the flow expires, then STATE/expired: the process stopped before the attempt was
-		// settled, or the store failed when the attempt was to be given back or the flow ended (exhaust, after not_verified or from
-		// AbandonRegistration).
+		// that completion's receipt, rather than a final code_reused although the command succeeds. The completion is running past
+		// the flow's expiry too: it took its attempt before the expiry and its success transaction is bounded by RunningGrace, so
+		// the check holds until the expiry plus RunningGrace (A-1); an expired flow answered STATE/expired (final, DID_NOT_HAPPEN)
+		// to a duplicate whose command then committed. An attempt that is never settled answers RESOURCE/overloaded until the
+		// flow's expiry plus RunningGrace, then STATE/expired: the process stopped before the attempt was settled, or the store
+		// failed when the attempt was to be given back or the flow ended (exhaust, after not_verified or from AbandonRegistration).
 		var running bool
 		if err := tx.QueryRow(ctx, `SELECT count(*) = 1 FROM identity.auth_flow WHERE flow_id = $1 AND channel = $2 AND kind = $3 AND purpose = $4
     AND consumed_at IS NULL AND outcome IS NULL AND expires_at > $5 AND attempts >= max_attempts`, id, int16(channel), int16(FlowPasskeyRegistration),
-			int16(PurposeEnroll), now).Scan(&running); err != nil {
+			int16(PurposeEnroll), now.Add(-RunningGrace)).Scan(&running); err != nil {
 			return err
 		}
 		if running {

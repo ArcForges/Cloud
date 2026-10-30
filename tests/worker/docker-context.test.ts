@@ -55,7 +55,10 @@ test("every source project of the image is admitted to the Docker context by exp
   }
 });
 
-/** Every folder of the Go center that holds a non-test Go source or an embedded migration. */
+/**
+ * Every folder of the Go center that holds a non-test Go source or a file the executable embeds: a migration, a page template
+ * (`*.gohtml`) or the account pages' script and style sheet (`static/*.js`, `static/*.css`).
+ */
 function centerFolders(directory: string): { folder: string; files: string[] }[] {
   const entries = readdirSync(path.join(root, directory), { withFileTypes: true });
   const files = entries
@@ -63,7 +66,9 @@ function centerFolders(directory: string): { folder: string; files: string[] }[]
       (entry) =>
         entry.isFile() &&
         ((entry.name.endsWith(".go") && !entry.name.endsWith("_test.go")) ||
-          entry.name.endsWith(".sql")),
+          entry.name.endsWith(".sql") ||
+          entry.name.endsWith(".gohtml") ||
+          (directory.endsWith("/static") && /\.(?:js|css)$/u.test(entry.name))),
     )
     .map((entry) => entry.name);
   const folders = files.length > 0 ? [{ folder: directory, files }] : [];
@@ -83,6 +88,8 @@ test("every package of the Go center and its embedded migrations are admitted to
     "center/internal/store/migrate",
     "center/internal/schema/migrations",
     "center/cmd/arcforges-center",
+    "center/internal/pages/templates",
+    "center/internal/pages/static",
   ])
     assert(names.includes(expected), expected);
   for (const { folder, files } of folders) {
@@ -91,6 +98,10 @@ test("every package of the Go center and its embedded migrations are admitted to
       assert(admitted(`${folder}/${file}`), `Missing file rule for ${folder}/${file}`);
   }
   assert(!admitted("center/internal/schema/migrations/notes.md"));
+  // The embedded assets are admitted by name, and a stray file of those folders is not.
+  assert(!admitted("center/internal/pages/templates/notes.md"));
+  assert(!admitted("center/internal/pages/static/notes.md"));
+  assert(!admitted("center/internal/pages/static/account.map"));
   assert(
     rules.indexOf("center/**/*_test.go") > rules.indexOf("!center/internal/store/migrate/*.go"),
   );

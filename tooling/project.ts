@@ -9,7 +9,8 @@ import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
 import { probeProject, runProbe, waitForHealth } from "./protocol.ts";
 import { centerSurfaces } from "../worker/ingress/routes.ts";
-import { notActivatedReplies, surfaceRoutes } from "../worker/tables/center-tables.generated.ts";
+import { pageRoutes, surfaceRoutes } from "../worker/tables/center-tables.generated.ts";
+import { assertNotActivatedReply } from "./generated-replies.ts";
 import { sealedToolName } from "./sealed-tool.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
 import { auditProvenance } from "./provenance.ts";
@@ -374,7 +375,9 @@ async function probeDisabledSurfaces(base: string, flag: string | undefined) {
     "",
     "The local Worker test runs the production configuration, which enables no surface.",
   );
-  const expected = Buffer.from(notActivatedReplies.identity, "base64");
+  // Each reply is the surface's generated template with the call's own correlation id in its slot (E4-1), so no two replies are
+  // equal; assertNotActivatedReply compares everything but the slot and checks the slot.
+  const ids = new Set<string>();
   for (const route of surfaceRoutes) {
     const response = await fetch(`${base}${route.path}`, {
       method: "POST",
@@ -382,9 +385,22 @@ async function probeDisabledSurfaces(base: string, flag: string | undefined) {
       body: new Uint8Array([0, 0, 0, 0, 0]),
     });
     assert.equal(response.status, 200, route.path);
-    assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, route.path);
+    const id = assertNotActivatedReply(
+      route.surface,
+      new Uint8Array(await response.arrayBuffer()),
+      route.path,
+    );
+    assert(!ids.has(id), `${route.path}: each call has its own correlation id`);
+    ids.add(id);
   }
-  return { notActivated: surfaceRoutes.length };
+  // The pages surface is off too: a page route is a path the Worker does not know (404), whatever the method and before anything
+  // about the request is read, so the Container is never woken.
+  for (const route of pageRoutes) {
+    const response = await fetch(`${base}${route.path}`, { method: route.method });
+    assert.equal(response.status, 404, `${route.method} ${route.path}`);
+    await response.arrayBuffer();
+  }
+  return { notActivated: surfaceRoutes.length, pagesDisabled: pageRoutes.length };
 }
 
 async function testWorker(candidate: Candidate) {

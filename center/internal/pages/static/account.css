@@ -1,0 +1,280 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* The account pages' one style sheet: system fonts, no images, no external resources, light and dark. */
+:root {
+  color-scheme: light dark;
+  --text: #1b1f23;
+  --muted: #4a5568;
+  --background: #ffffff;
+  --surface: #f4f6f8;
+  --border: #c5ccd3;
+  --accent: #0b5cad;
+  --accent-text: #ffffff;
+  --danger: #a4262c;
+  --danger-surface: #fdecea;
+  --focus: #0b5cad;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #e6e9ec;
+    --muted: #b4bdc6;
+    --background: #14181c;
+    --surface: #1d2328;
+    --border: #3a444d;
+    --accent: #6cb2f2;
+    --accent-text: #0b1117;
+    --danger: #ff9ea2;
+    --danger-surface: #3b1d1f;
+    --focus: #6cb2f2;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font:
+    16px/1.5 system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  color: var(--text);
+  background: var(--background);
+}
+
+header,
+main,
+footer {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding-top: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  margin: 0;
+  font-weight: 700;
+}
+
+nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: var(--accent);
+}
+
+a[aria-current="page"] {
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--text);
+}
+
+main {
+  padding-top: 1rem;
+  padding-bottom: 2rem;
+}
+
+main:focus,
+h1:focus,
+.error-summary:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+footer {
+  padding-top: 1rem;
+  padding-bottom: 2rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  border-top: 1px solid var(--border);
+}
+
+.skip {
+  position: absolute;
+  left: -999px;
+}
+
+.skip:focus {
+  left: 1rem;
+  top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--background);
+  border: 2px solid var(--focus);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.error-summary {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  color: var(--danger);
+  background: var(--danger-surface);
+  border-left: 4px solid var(--danger);
+}
+
+.error-summary h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.125rem;
+}
+
+.error-summary p {
+  margin: 0;
+}
+
+[hidden] {
+  display: none;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+}
+
+input[type="text"],
+input[type="password"] {
+  width: 100%;
+  max-width: 28rem;
+  padding: 0.5rem;
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button.primary {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.help {
+  display: block;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+caption {
+  padding: 0.5rem 0;
+  text-align: left;
+  color: var(--muted);
+}
+
+th,
+td {
+  padding: 0.5rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+form.inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+
+dt {
+  font-weight: 600;
+}
+
+dd {
+  margin: 0;
+}
+
+@media (max-width: 40rem) {
+  table,
+  thead,
+  tbody,
+  tr,
+  th,
+  td {
+    display: block;
+  }
+
+  thead {
+    position: absolute;
+    left: -999px;
+  }
+
+  tr {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  th,
+  td {
+    border-bottom: 0;
+  }
+
+  /* The header row is off screen here, so each cell names its column itself. */
+  td[data-label]::before {
+    content: attr(data-label) ": ";
+    font-weight: 600;
+  }
+}

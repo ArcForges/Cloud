@@ -15,6 +15,7 @@ import {
   grpcFrameHeaderBytes,
   spanIdByteLength,
 } from "../tables/cloud-tables.generated.ts";
+import { hexDecode } from "../private/encoding.ts";
 
 const uuidPattern = new RegExp(correlationGuard.uuidPattern, "u");
 const nilUuid = correlationGuard.nilUuid;
@@ -31,6 +32,17 @@ export function isCorrelationId(value: unknown): value is string {
 /** A fresh correlation identity (a random version 4 UUID, never nil). */
 export function newCorrelationId(): string {
   return crypto.randomUUID();
+}
+
+/**
+ * The 16 bytes of a correlation id (an Id message's value; wire registry 04), in the canonical order of its text. The Worker writes
+ * them into the correlation slot of a generated reply (ArcError.correlation_id, which Contracts requires).
+ */
+export function correlationIdBytes(correlationId: string): Uint8Array<ArrayBuffer> {
+  if (!isCorrelationId(correlationId)) throw new TypeError("Invalid correlation id.");
+  const bytes = hexDecode(correlationId.replaceAll("-", ""));
+  if (bytes?.length !== idByteLength) throw new TypeError("Invalid correlation id.");
+  return Uint8Array.from(bytes);
 }
 
 /** Sixteen lowercase hex characters, never all zero: the span id of one hop. */

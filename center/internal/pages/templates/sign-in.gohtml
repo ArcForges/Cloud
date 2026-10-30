@@ -1,0 +1,8 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Sign in to ArcForges</h1>
+<noscript><p>Signing in with a passkey needs JavaScript. Turn it on for this page and reload.</p></noscript>
+<p id="needs-script" class="help">This page needs its script. If this line stays, reload the page or allow scripts for it.</p>
+<p id="status" role="status" aria-live="polite"></p>
+<p><button type="button" id="sign-in" class="primary" disabled>Sign in with a passkey</button></p>
+<p id="signed-in" hidden>You are signed in. <a href="{{.Base}}/account/passkeys">Open your account</a>.</p>
+{{end}}

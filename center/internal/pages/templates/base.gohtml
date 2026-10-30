@@ -1,0 +1,34 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} - ArcForges</title>
+<link rel="stylesheet" href="{{.Base}}/account/account.css">
+<script type="module" src="{{.Base}}/account/account.js"></script>
+</head>
+<body data-page="{{.Page}}" data-base="{{.Base}}">
+<a class="skip" href="#main">Skip to the main content</a>
+<header>
+<p class="brand">ArcForges</p>
+{{if .Signed}}<nav aria-label="Account">
+<ul>
+<li><a href="{{.Base}}/account/passkeys"{{if eq .Page "passkeys"}} aria-current="page"{{end}}>Account and passkeys</a></li>
+<li><a href="{{.Base}}/account/sessions"{{if eq .Page "sessions"}} aria-current="page"{{end}}>Sessions</a></li>
+<li><a href="{{.Base}}/account/devices"{{if eq .Page "devices"}} aria-current="page"{{end}}>Devices</a></li>
+<li><a href="{{.Base}}/account/sign-out"{{if eq .Page "sign-out"}} aria-current="page"{{end}}>Sign out</a></li>
+</ul>
+</nav>{{end}}
+</header>
+<main id="main" tabindex="-1">
+<div id="error-summary" class="error-summary" role="alert" aria-live="assertive" tabindex="-1"{{if not .Error}} hidden{{end}}>
+<h2>There is a problem</h2>
+<p id="error-text">{{if .Error}}{{.Error.Text}}{{end}}</p>
+</div>
+{{template "content" .}}
+</main>
+<footer>
+<p>This is your own ArcForges account page. It sets one cookie, to keep you signed in, and loads nothing from other sites.</p>
+</footer>
+</body>
+</html>{{end}}

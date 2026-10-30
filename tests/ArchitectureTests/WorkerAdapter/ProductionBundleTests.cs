@@ -12,29 +12,6 @@ namespace ArcForges.Cloud.ArchitectureTests.WorkerAdapter;
 /// </summary>
 public sealed class ProductionBundleTests
 {
-    /// <summary>Names that only the proof entry, its foundation, its harness alarm or its verification may contain.</summary>
-    private static readonly string[] ProofOnlyMarkers =
-    [
-        "FoundationContainer",
-        "FoundationJobCoordinator",
-        "HarnessRunAlarm",
-        "storage.internal",
-        "objects.internal",
-        "harness.internal",
-        "/proof/v1/",
-        "/session/v1/",
-        "/internal/foundation/v1/",
-        "arcforges.proof.v1",
-        "PipelineProbe",
-        "FOUNDATION_PROOF",
-        "PROOF_OPERATOR",
-        "cloud.readiness.v1",
-        "proofRouteTable",
-        "eng/verification",
-        "WAKE_QUEUE",
-        "JOB_COORDINATOR",
-    ];
-
     [Fact]
     public void TheProductionEntryImportsNoProofOnlyModule()
     {
@@ -73,8 +50,13 @@ public sealed class ProductionBundleTests
             Assert.True(process.ExitCode == 0, $"The production dry-run failed: {await stderr}{await stdout}");
 
             var bundle = File.ReadAllText(Path.Combine(directory, "index.js"));
-            foreach (var marker in ProofOnlyMarkers)
-                Assert.False(bundle.Contains(marker, StringComparison.Ordinal), $"The production bundle contains a proof-only marker: {marker}");
+            // The center's own account pages (AF-CTR-03 A2) ship the WebBrowserSession routes in the production bundle (dark: the pages surface
+            // is off in production): the strings below /session/v1/ are exactly the paths of the generated table. Every other one, the proof
+            // pipeline's /session/v1/bootstrap and /session/v1/logout and any other path below /session/v1/web/ among them, is proof-only.
+            var generated = CloudRepository.Read(root, "worker/tables/center-tables.generated.ts");
+            var pagePaths = ProductionBundleMarkers.GeneratedPagePathsOf(generated);
+            Assert.NotEmpty(pagePaths);
+            Assert.Empty(ProductionBundleMarkers.Violations(bundle, pagePaths));
 
             // The production exports are the Container class, the Container proxy and the fetch entry. No proof class is exported.
             var exports = Regex.Match(bundle, @"export\s*\{(?<names>[^}]*)\}").Groups["names"].Value;

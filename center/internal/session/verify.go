@@ -43,11 +43,12 @@ type verified struct {
 	origin                                      *string
 	authEpoch, recoveryGeneration               int64
 	revoked                                     bool
+	purpose                                     int16
 }
 
 const verifyColumns = `SELECT s.session_id, s.user_id, s.device_id, s.installation_id, s.credential_kind, s.scope, s.auth_method, u.state,
     s.product_id, s.authenticated_at, s.expires_at, s.access_expires_at, s.idle_expires_at, s.browser_origin, s.auth_epoch,
-    s.recovery_generation, s.revoked_at IS NOT NULL OR d.revoked_at IS NOT NULL OR i.revoked_at IS NOT NULL
+    s.recovery_generation, s.revoked_at IS NOT NULL OR d.revoked_at IS NOT NULL OR i.revoked_at IS NOT NULL, s.purpose
 FROM identity.session s
 JOIN identity.user u ON u.user_id = s.user_id
 JOIN device.device d ON d.device_id = s.device_id
@@ -60,7 +61,7 @@ func (v *Verifier) lookup(ctx context.Context, where string, digest [32]byte) (*
 	err := v.db.InTx(ctx, "verify a session", store.TxOptions{ReadOnly: true, Timeout: verifyTimeout}, func(ctx context.Context, tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, verifyColumns+where, digest[:]).Scan(&row.sessionID, &row.userID, &row.deviceID, &row.installationID, &row.kind,
 			&row.scope, &row.method, &row.state, &row.product, &row.authenticatedAt, &row.expiresAt, &row.accessExpiresAt, &row.idleExpiresAt,
-			&row.origin, &row.authEpoch, &row.recoveryGeneration, &row.revoked)
+			&row.origin, &row.authEpoch, &row.recoveryGeneration, &row.revoked, &row.purpose)
 		if errors.Is(err, pgx.ErrNoRows) {
 			found = false
 			return nil
@@ -116,23 +117,13 @@ func (v *Verifier) Verify(ctx context.Context, token string) (*ingress.Caller, e
 func (v *Verifier) AllowedOrigin() string { return v.origin }
 
 // Resolve checks a browser cookie handle: a live session of this origin within its absolute and idle expiry, whose device and
-// installation are live and whose account may sign in. The CSRF check accepts exactly the token derived from this handle.
+// installation are live and whose account may sign in. The CSRF check accepts exactly the token derived from this handle. It is
+// ResolveSession's answer without the page-only fields, so the API's cookie routes and the account pages never judge a cookie
+// differently.
 func (v *Verifier) Resolve(ctx context.Context, cookie string) (*ingress.BrowserCredential, error) {
-	handle, ok := ParseHandle(cookie)
-	if !ok {
-		return nil, nil
-	}
-	row, err := v.lookup(ctx, "WHERE s.browser_handle_hash = $1 AND s.credential_kind = 2", handle.Digest())
-	if err != nil || row == nil {
+	resolved, err := v.ResolveSession(ctx, cookie)
+	if err != nil || resolved == nil {
 		return nil, err
 	}
-	now := v.clock()
-	if row.revoked || !now.Before(row.expiresAt) || row.idleExpiresAt == nil || !now.Before(*row.idleExpiresAt) || row.origin == nil ||
-		*row.origin != v.origin || (row.state != 1 && row.state != 2) {
-		return nil, nil
-	}
-	return &ingress.BrowserCredential{
-		Caller:     *row.caller(ingress.CredentialBrowserSession),
-		VerifyCSRF: func(token string, present bool) bool { return present && CheckCSRF(handle, token) },
-	}, nil
+	return resolved.Credential, nil
 }

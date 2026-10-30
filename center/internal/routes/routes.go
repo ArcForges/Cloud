@@ -76,6 +76,8 @@ type Module struct {
 	Policies   []ingress.Policy
 	PlainPaths []string
 	Budgets    map[string]Budget
+	// Pages are the routes of the module's account pages (the pages surface only; PageRoutes).
+	Pages []PageRoute
 }
 
 // HelloMethod is the path of the anonymous Hello.
@@ -107,7 +109,11 @@ func Center() ([]Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Module{hello, identity}, nil
+	pages, err := Pages()
+	if err != nil {
+		return nil, err
+	}
+	return []Module{hello, identity, pages}, nil
 }
 
 // Surfaces are the switchable surfaces of the registrations, in registration order.
@@ -171,6 +177,9 @@ type WorkerTable struct {
 	Production  []Row
 	Surfaces    []string
 	SurfaceRows []Row
+	// Pages are the page routes of the pages surface (PLT-1): the Worker's page handler forwards them only while their surface is
+	// enabled.
+	Pages []PageRoute
 	// MaxBodyBytes is the bound of a request body of a method that declares no larger one: the Hello bound, which the C#
 	// rollback host generates too. Every row carries its own bound; the center's Connect reader takes MaxRequestBytes.
 	MaxBodyBytes               int
@@ -190,6 +199,13 @@ func Ingress(modules []Module) (*ingress.Routes, error) {
 	for _, module := range modules {
 		policies = append(policies, module.Policies...)
 		plain = append(plain, module.PlainPaths...)
+		// The pages are plain HTTP routes of the center: the pipeline lets their exact paths through to the page handler, which
+		// answers for its surface.
+		for _, row := range module.Pages {
+			if !slices.Contains(plain, row.Path) {
+				plain = append(plain, row.Path)
+			}
+		}
 	}
 	registry, err := ingress.NewRegistry(policies...)
 	if err != nil {
@@ -203,8 +219,18 @@ func Table(modules []Module) (WorkerTable, error) {
 	budgets := map[string]Budget{}
 	var rows, surfaceRows []Row
 	var plain []string
+	var pageRows []PageRoute
 	names := map[string]bool{}
 	for _, module := range modules {
+		if len(module.Pages) > 0 {
+			if module.Surface != SurfacePages {
+				return WorkerTable{}, fmt.Errorf("%w: the module %s declares pages outside the %s surface", ErrRegistration, module.Name, SurfacePages)
+			}
+			if err := CheckPages(module.Pages); err != nil {
+				return WorkerTable{}, err
+			}
+			pageRows = append(pageRows, module.Pages...)
+		}
 		for name, budget := range module.Budgets {
 			if _, duplicate := budgets[name]; duplicate {
 				return WorkerTable{}, fmt.Errorf("%w: the budget of %s is declared twice", ErrRegistration, name)
@@ -293,6 +319,7 @@ func Table(modules []Module) (WorkerTable, error) {
 		Production:                 rows,
 		Surfaces:                   Surfaces(modules),
 		SurfaceRows:                surfaceRows,
+		Pages:                      pageRows,
 		MaxBodyBytes:               HelloMaxBodyBytes,
 		ColdStartMilliseconds:      ColdStartMilliseconds,
 		StreamLifetimeMilliseconds: StreamLifetimeMilliseconds,

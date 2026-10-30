@@ -35,34 +35,73 @@ export interface ApiRoute {
 }
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
-export type Surface = "identity";
+export type Surface = "identity" | "pages";
 
 /** A method of a switchable surface. */
 export interface SurfaceRoute extends ApiRoute {
   readonly surface: Surface;
 }
 
+/** How a page route may set a cookie: never, the session cookie of a new session, or the removal of the session cookie. */
+export type PageSetCookie = "none" | "session" | "clear";
+
+/**
+ * A route of the center's account pages (AF-CTR-03 A2, PLT-1): an exact method and path below the owned /api prefix. The page handler
+ * admits a request only for such a row, whose surface is enabled, and answers only what the row allows.
+ */
+export interface PageRoute {
+  readonly method: "GET" | "POST";
+  /** The path without the owned /api prefix. */
+  readonly path: string;
+  readonly kind: "html" | "asset" | "json";
+  /** The exact media type of a POST's body, or empty for a route without a body. */
+  readonly requestType: string;
+  /** The media types of the route's replies. */
+  readonly responseTypes: readonly string[];
+  /** Bound of the request body. */
+  readonly maxRequestBytes: number;
+  /** Bound of the reply body. */
+  readonly maxResponseBytes: number;
+  /** Whether the session cookie reaches the center. */
+  readonly cookie: boolean;
+  readonly setCookie: PageSetCookie;
+  /** Whether the route may answer 303. */
+  readonly redirects: boolean;
+}
+
 /** The surface names, in registration order; FLAGSHIP_SURFACES lists them comma-separated and exactly. */
-export const surfaceNames: readonly Surface[] = ["identity"];
+export const surfaceNames: readonly Surface[] = ["identity", "pages"];
 /** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */
 export const clientIpHeader = "x-arcforges-client-ip";
+/** The width of the correlation id slot of the reply templates below: an Id's 16 bytes (E4-1). */
+export const replyCorrelationBytes = 16;
 /**
  * The gRPC-Web body (one reply frame and the OK status trailer) answering a call of a disabled surface: the domain refusal
- * STATE/not_activated naming the surface, without a correlation id (the center's own reply carries one). Base64.
+ * STATE/not_activated naming the surface. A template: the Worker writes the call's correlation id into the 16-byte slot at the
+ * surface's offset (ArcError.correlation_id, which Contracts requires). Base64.
  */
 export const notActivatedReplies: Readonly<Record<Surface, string>> = {
   identity:
-    "AAAAAEsaSQoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBOhUiEwoHc3VyZmFjZRIIaWRlbnRpdHmAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "AAAAAF8aXQoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86FSITCgdzdXJmYWNlEghpZGVudGl0eYAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
+  pages:
+    "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVwYWdlc4AAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
+};
+/** The byte offset of the correlation id slot in each surface's not_activated template. */
+export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, number>> = {
+  identity: 61,
+  pages: 61,
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
  * A template: the Worker writes the retry instant (the refusal's time rounded up to the second, plus the edge period) into
- * the instant seconds at each offset (retry.retry_at and limit.recovery_at). Base64.
+ * the instant seconds at each offset (retry.retry_at and limit.recovery_at) and the call's correlation id into the slot. Base64.
  */
 export const rateLimitedReply =
-  "AAAAAFMaUQoMcmF0ZV9saW1pdGVkEAcaG2Vycm9yLnJlc291cmNlLnJhdGVfbGltaXRlZCIMCAMSCAiAgICAQBAAKAE6EhIQCgRlZGdlIggIgICAgEAQAIAAAAAQZ3JwYy1zdGF0dXM6IDANCg==";
+  "AAAAAGcaZQoMcmF0ZV9saW1pdGVkEAcaG2Vycm9yLnJlc291cmNlLnJhdGVfbGltaXRlZCIMCAMSCAiAgICAQBAAKAEyEgoQASNFZ4mrze8BI0VniavN7zoSEhAKBGVkZ2UiCAiAgICAQBAAgAAAABBncnBjLXN0YXR1czogMA0K";
+/** The byte offset of the correlation id slot in the rate_limited template. */
+export const rateLimitedReplyCorrelationOffset = 72;
 /** The byte offsets of the template's instant seconds (zigzag varints of a fixed width). */
-export const rateLimitedReplyInstantOffsets: readonly number[] = [59, 81];
+export const rateLimitedReplyInstantOffsets: readonly number[] = [59, 101];
 /** The width of each instant's seconds: five varint bytes hold every instant from 1974 to 2514. */
 export const rateLimitedReplyInstantBytes = 5;
 /** The period of the surface rate limit in seconds (wrangler.json IDENTITY_RATE_LIMITER simple.period). */
@@ -346,6 +385,318 @@ export const surfaceRoutes: readonly SurfaceRoute[] = [
     surface: "identity",
   },
 ];
+
+/** The routes of the center's account pages; each is forwarded only while the surface of the pages is enabled. */
+export const pageSurface: Surface = "pages";
+export const pageRoutes: readonly PageRoute[] = [
+  {
+    method: "GET",
+    path: "/session/v1/web/bootstrap",
+    kind: "json",
+    requestType: "",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 16384,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    method: "POST",
+    path: "/session/v1/web/authentication/begin",
+    kind: "json",
+    requestType: "application/json",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 8192,
+    maxResponseBytes: 65536,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    method: "POST",
+    path: "/session/v1/web/authentication/complete",
+    kind: "json",
+    requestType: "application/json",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 131072,
+    maxResponseBytes: 16384,
+    cookie: true,
+    setCookie: "session",
+    redirects: false,
+  },
+  {
+    method: "POST",
+    path: "/session/v1/web/enrollment/complete",
+    kind: "json",
+    requestType: "application/json",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 262144,
+    maxResponseBytes: 16384,
+    cookie: true,
+    setCookie: "session",
+    redirects: false,
+  },
+  {
+    method: "POST",
+    path: "/session/v1/web/step-up/begin",
+    kind: "json",
+    requestType: "application/json",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 65536,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    method: "POST",
+    path: "/session/v1/web/step-up/complete",
+    kind: "json",
+    requestType: "application/json",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 131072,
+    maxResponseBytes: 4096,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    method: "POST",
+    path: "/session/v1/web/logout",
+    kind: "json",
+    requestType: "",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 4096,
+    cookie: true,
+    setCookie: "clear",
+    redirects: false,
+  },
+  {
+    method: "GET",
+    path: "/account/sign-in",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: false,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    method: "GET",
+    path: "/account/bootstrap",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: false,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    method: "GET",
+    path: "/account/passkeys",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "GET",
+    path: "/account/sessions",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "GET",
+    path: "/account/devices",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "GET",
+    path: "/account/sign-out",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "GET",
+    path: "/account/account.js",
+    kind: "asset",
+    requestType: "",
+    responseTypes: ["text/javascript; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: false,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    method: "GET",
+    path: "/account/account.css",
+    kind: "asset",
+    requestType: "",
+    responseTypes: ["text/css; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: false,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    method: "POST",
+    path: "/account/passkeys/add",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "POST",
+    path: "/account/passkeys/complete",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 98304,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "POST",
+    path: "/account/passkeys/rename",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "POST",
+    path: "/account/passkeys/remove",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "POST",
+    path: "/account/sessions/revoke",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "clear",
+    redirects: true,
+  },
+  {
+    method: "POST",
+    path: "/account/sessions/revoke-all",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "POST",
+    path: "/account/devices/rename",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    method: "POST",
+    path: "/account/devices/revoke",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "clear",
+    redirects: true,
+  },
+];
+/**
+ * The headers every reply of a page route must carry with exactly these values (the content security policy among them), in
+ * lower case: the Worker answers 503 instead of a reply that lacks one or differs, and copies no header that is not listed here,
+ * the media type, Set-Cookie (as its route allows) and Location (a 303 only).
+ */
+export const pageSecurityHeaders: Readonly<Record<string, string>> = {
+  "content-security-policy":
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; require-trusted-types-for 'script'; trusted-types 'none'",
+  "x-frame-options": "DENY",
+  "referrer-policy": "same-origin",
+  "cross-origin-opener-policy": "same-origin",
+  "permissions-policy": "publickey-credentials-get=(self), publickey-credentials-create=(self)",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+};
+/** The statuses a page reply may have; any other status becomes the Worker's 503. */
+export const pageStatuses: readonly number[] = [200, 303, 400, 403, 404, 413, 415, 429];
+/** The session cookie, the only cookie a page route receives or sets. */
+export const pageCookieName = "__Host-af_session";
+/** A redirect's Location is a path below this prefix, without a query, and at most the sign-in page's return fragment. */
+export const pageLocationPrefix = "/api/account/";
+export const pageReturnFragment = "#return=";
+/** The Container instance that serves the pages, and the cap of one page call's duration. */
+export const pageInstance = "hello";
+export const pageDurationMs = 15000;
+/** The longest User-Agent the Worker forwards to the center. */
+export const pageUserAgentBytes = 256;
+/** The most digits of the Max-Age of a new session's cookie. */
+export const pageCookieMaxAgeDigits = 6;
+/** The most characters of the percent-encoded return path in a redirect's fragment. */
+export const pageReturnPathBytes = 512;
 
 export const helloPath = "/api/arcforges.hello.v1.HelloService/SayHello";
 export const healthPath = "/api/healthz";

@@ -312,7 +312,7 @@ func Decimal(value int64) *foundationv1.Decimal {
 
 // ReplyMessage is the bytes of a reply message whose outcome is the ArcError: every reply of the identity and device services
 // carries its ArcError as field 3 of the outcome oneof, so one encoding serves each of them, and it is what the Worker returns for a
-// refusal it answers itself (generated per surface, without a correlation id).
+// refusal it answers itself (generated per surface; the Worker writes the call's correlation id into the id's place, E4-1).
 func ReplyMessage(value *foundationv1.ArcError) ([]byte, error) {
 	encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(value)
 	if err != nil {

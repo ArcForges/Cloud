@@ -1,0 +1,19 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Create the owner account</h1>
+<noscript><p>Creating the account needs JavaScript. Turn it on for this page and reload.</p></noscript>
+<p id="needs-script" class="help">This page needs its script. If this line stays, reload the page or allow scripts for it.</p>
+<p>This page is for the person who runs this ArcForges center. It works once, with the one-time token the operator generated, and creates the first account with its first passkey.</p>
+<p id="status" role="status" aria-live="polite"></p>
+<div class="fields">
+<p>
+<label for="token">One-time token</label>
+<input id="token" name="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required aria-describedby="token-help">
+<span id="token-help" class="help">The token is not kept in this page's address once it is read.</span>
+</p>
+<p>
+<label for="display-name">Display name</label>
+<input id="display-name" name="displayName" type="text" autocomplete="name" maxlength="128" required>
+</p>
+<p><button type="button" id="create" class="primary" disabled>Create the account with a passkey</button></p>
+</div>
+{{end}}

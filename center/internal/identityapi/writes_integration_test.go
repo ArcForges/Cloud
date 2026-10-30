@@ -559,8 +559,8 @@ type registrationAnswer = *publicapiv1.IdentityServiceCompletePasskeyRegistratio
 // second connection parks the duplicate's attempt, and the account's row is then released. committed runs once the first execution
 // answered and the table lock is granted, before the duplicate's attempt goes on. It returns both answers, the command (to send it
 // again) and the new credential's subject.
-func racedRegistration(t *testing.T, h *harness, committed func(ctx context.Context)) (first, duplicate registrationAnswer, complete func() registrationAnswer,
-	subject string) {
+func racedRegistration(t *testing.T, h *harness, committed func(ctx context.Context), alter ...func(*publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest)) (first,
+	duplicate registrationAnswer, complete func() registrationAnswer, subject string) {
 	t.Helper()
 	who := h.seedAccount(1, "")
 	from := bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken())
@@ -571,6 +571,15 @@ func racedRegistration(t *testing.T, h *harness, committed func(ctx context.Cont
 	request := &publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest{Meta: command(), FlowId: challenge.GetFlowId(), Credential: creationOf(creation)}
 	complete = func() registrationAnswer {
 		return rpc(h, completeRegisterPath, request, from, &publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse{})
+	}
+	// alter changes the request the duplicate sends: the same command ID with other bytes.
+	sendDuplicate := complete
+	if len(alter) > 0 {
+		sendDuplicate = func() registrationAnswer {
+			changed := proto.Clone(request).(*publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest)
+			alter[0](changed)
+			return rpc(h, completeRegisterPath, changed, from, &publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse{})
+		}
 	}
 	ctx := context.Background()
 	other, err := pgx.ConnectConfig(ctx, h.migration.Config())
@@ -597,7 +606,7 @@ func racedRegistration(t *testing.T, h *harness, committed func(ctx context.Cont
 		t.Fatal("the table lock never queued behind the first completion")
 	}
 	duplicates := make(chan registrationAnswer, 1)
-	go func() { duplicates <- complete() }()
+	go func() { duplicates <- sendDuplicate() }()
 	if !account.waitFor(3) {
 		t.Fatal("the duplicate's attempt never queued behind the table lock")
 	}

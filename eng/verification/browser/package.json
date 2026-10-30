@@ -1,0 +1,23 @@
+{
+  "name": "arcforges-cloud-browser-acceptance",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "Real-browser acceptance of the center's account pages (AF-CTR-03). Isolated from the root package: the root npm ci never installs it.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ArcForges/Cloud.git"
+  },
+  "engines": {
+    "node": ">=24.21.0 <25",
+    "npm": ">=11.19.0 <12"
+  },
+  "packageManager": "npm@11.19.0",
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  },
+  "arcforges": {
+    "licenceBoundary": "AGPL"
+  }
+}
