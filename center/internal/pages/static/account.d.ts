@@ -20,6 +20,14 @@ export class ApiError extends Error {
   code: string;
 }
 
+export class PageDataError extends TypeError {
+  constructor(message: string);
+}
+
+export class AlreadyRegisteredError extends Error {
+  constructor();
+}
+
 export function errorText(error: unknown): string;
 export function encodeBase64Url(input: ArrayBuffer | Uint8Array): string;
 export function decodeBase64Url(text: string): Uint8Array;

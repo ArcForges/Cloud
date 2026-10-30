@@ -7,14 +7,14 @@
 <tbody>
 {{range .Sessions}}<tr>
 <th scope="row">{{.Where}}{{if .Current}} (this session){{end}}</th>
-<td><time datetime="{{.IssuedAt}}">{{.IssuedText}}</time></td>
-<td><time datetime="{{.LastUsedAt}}">{{.LastUsedText}}</time></td>
-<td><time datetime="{{.ExpiresAt}}">{{.ExpiresText}}</time></td>
-<td>{{if .Current}}<a href="{{$.Base}}/account/sign-out">Sign out</a>{{else}}<form method="post" action="{{$.Base}}/account/sessions/revoke" class="inline" data-step-up-class="identity.revokeSession" data-step-up-target="{{.RevokeTarget}}">
+<td data-label="Signed in"><time datetime="{{.IssuedAt}}">{{.IssuedText}}</time></td>
+<td data-label="Last used"><time datetime="{{.LastUsedAt}}">{{.LastUsedText}}</time></td>
+<td data-label="Ends"><time datetime="{{.ExpiresAt}}">{{.ExpiresText}}</time></td>
+<td data-label="Action">{{if .Current}}<a href="{{$.Base}}/account/sign-out">Sign out</a>{{else}}<form method="post" action="{{$.Base}}/account/sessions/revoke" class="inline" data-step-up-class="identity.revokeSession" data-step-up-target="{{.RevokeTarget}}">
 <input type="hidden" name="csrf" value="{{$.CSRF}}">
 <input type="hidden" name="command_id" value="{{.RevokeCommand}}">
 <input type="hidden" name="session_id" value="{{.ID}}">
-<button type="submit" aria-label="End the session of {{.Where}}">End session</button>
+<button type="submit" aria-label="End session of {{.Where}}">End session</button>
 </form>{{end}}</td>
 </tr>
 {{end}}

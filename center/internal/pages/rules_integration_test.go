@@ -5,6 +5,7 @@ package pages_test
 import (
 	"context"
 	"encoding/hex"
+	"html"
 	"net/http"
 	"net/url"
 	"os"
@@ -280,6 +281,8 @@ func TestEveryPageIsAccessibleHTMLWithNothingExternal(t *testing.T) {
 	who := h.seedAccount(1)
 	b := h.newBrowser()
 	b.mustSignIn(who)
+	// A second session, so that the sessions page has the button that ends another.
+	h.newBrowser().mustSignIn(who)
 	pages := map[string]response{}
 	for _, route := range routes.PageRoutes() {
 		if route.Method == http.MethodGet && route.Kind == routes.PageHTMLKind {
@@ -324,6 +327,26 @@ func TestEveryPageIsAccessibleHTMLWithNothingExternal(t *testing.T) {
 				t.Errorf("%s: a button without a name: %s", name, match[1])
 			}
 		}
+		// A cell names its column itself (the header row is off screen on a narrow one), and a button's accessible name begins with the
+		// text it shows (WCAG 2.5.3, label in name).
+		for _, cell := range regexp.MustCompile(`<td([^>]*)>`).FindAllStringSubmatch(text, -1) {
+			if !regexp.MustCompile(`data-label="[^"]+"`).MatchString(cell[1]) {
+				t.Errorf("%s: a cell without a column name: <td%s>", name, cell[1])
+			}
+		}
+		for _, match := range buttonPattern.FindAllStringSubmatch(text, -1) {
+			label := regexp.MustCompile(`aria-label="([^"]*)"`).FindStringSubmatch(match[1])
+			if visible := strings.TrimSpace(match[2]); label != nil && visible != "" && !strings.HasPrefix(html.UnescapeString(label[1]), visible) {
+				t.Errorf("%s: the button %q is named %q", name, visible, label[1])
+			}
+		}
+		// A page that cannot work without its script says so, in text, until the script runs and removes the line; with scripting
+		// off the page says what to do as well.
+		scriptNeeded := regexp.MustCompile(`<body data-page="(sign-in|bootstrap|sign-out|register)"`).MatchString(text)
+		hasLine := regexp.MustCompile(`<p id="needs-script"[^>]*>[^<]+</p>`).MatchString(text) && !regexp.MustCompile(`<p id="needs-script"[^>]*hidden`).MatchString(text)
+		if scriptNeeded && (!hasLine || !regexp.MustCompile(`<noscript><p>[^<]*needs JavaScript`).MatchString(text)) || !scriptNeeded && strings.Contains(text, `id="needs-script"`) {
+			t.Errorf("%s: script needed %v, the line %v", name, scriptNeeded, hasLine)
+		}
 		if strings.Contains(text, "<table") && (!strings.Contains(text, "<caption>") || !strings.Contains(text, `<th scope="col">`) || !strings.Contains(text, `<th scope="row">`)) {
 			t.Errorf("%s: a table without a caption or header cells", name)
 		}
@@ -366,6 +389,11 @@ func TestEveryPageIsAccessibleHTMLWithNothingExternal(t *testing.T) {
 	}
 	if strings.Contains(string(css), "url(") || strings.Contains(string(css), "@import") || strings.Contains(string(css), "http") {
 		t.Error("the style sheet loads something")
+	}
+	// On a narrow screen the table's cells are blocks and the header row is off screen: each cell shows its column name.
+	narrow := strings.Index(string(css), "@media (max-width: 40rem)")
+	if narrow < 0 || !strings.Contains(string(css)[narrow:], "td[data-label]::before") || !strings.Contains(string(css)[narrow:], "attr(data-label)") {
+		t.Error("the narrow layout does not show the column name of a cell")
 	}
 	h.verifyAudit()
 }

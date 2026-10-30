@@ -7,9 +7,9 @@
 <tbody>
 {{range .Devices}}<tr>
 <th scope="row">{{.Name}}{{if .Current}} (this browser){{end}}</th>
-<td>{{.Platform}}</td>
-<td>{{range $index, $item := .Installed}}{{if $index}}, {{end}}{{$item}}{{else}}None{{end}}</td>
-<td class="actions">
+<td data-label="Kind">{{.Platform}}</td>
+<td data-label="Software">{{range $index, $item := .Installed}}{{if $index}}, {{end}}{{$item}}{{else}}None{{end}}</td>
+<td class="actions" data-label="Actions">
 <form method="post" action="{{$.Base}}/account/devices/rename" class="inline">
 <input type="hidden" name="csrf" value="{{$.CSRF}}">
 <input type="hidden" name="command_id" value="{{.RenameCommand}}">

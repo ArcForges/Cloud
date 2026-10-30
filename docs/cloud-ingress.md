@@ -107,7 +107,7 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
 The center's account pages and its `/session/v1/web` routes ([account pages](center-identity.md#account-pages-and-browser-sessions)) are
 not gRPC-Web calls, so they have their own handler (`worker/ingress/pages.ts`) and their own generated table
 (`pageRoutes`, `pageSecurityHeaders`, `pageStatuses`, `pageCookieName`, `pageLocationPrefix`, `pageReturnFragment`, `pageInstance`,
-`pageDurationMs`, from `center/internal/routes/pages.go`). The pipeline hands a request to it only when the path (below `/api`) is
+`pageDurationMs`, `pageUserAgentBytes`, `pageCookieMaxAgeDigits`, `pageReturnPathBytes`, from `center/internal/routes/pages.go`). The pipeline hands a request to it only when the path (below `/api`) is
 in the table. It is deny by default in both directions and decides nothing the center does not:
 
 - **Disabled surface.** While `FLAGSHIP_SURFACES` does not name `pages` exactly, every page path is the Worker's 404 (the reply of
@@ -133,7 +133,10 @@ in the table. It is deny by default in both directions and decides nothing the c
   session or of its removal; a `Location` is copied only on a 303 of a route that redirects, as `/api/account/<words>` with at
   most the sign-in page's return fragment; a 303 has no body. No other Container header reaches the client, and a Container the
   platform could not start (its own plain-text reply) is the retryable 503 of the other routes.
-- **Budget.** One page call has `pageDurationMs` (15 s) including the body read, aborted by the client's cancellation.
+- **Budget.** One page call has `pageDurationMs` (15 s) including the body read, aborted by the client's cancellation. A body that
+  is not read within the body budget is 408, a call that outlasts the page budget 504 and a client that went away 499
+  (`tests/worker/pages-limits.test.ts`); like every other refusal the Worker makes itself, they are plain text with
+  `Cache-Control: no-store`, not the center's security headers.
 
 `tests/worker/pages.test.ts` pins these byte for byte (the headers, the `Set-Cookie` forms, the `Location`s, the statuses and what
 the Container is sent); `tests/worker/account-script.test.ts` runs the page script's flows, including the open-redirect rule,

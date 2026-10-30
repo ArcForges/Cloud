@@ -271,4 +271,10 @@ dd {
   td {
     border-bottom: 0;
   }
+
+  /* The header row is off screen here, so each cell names its column itself. */
+  td[data-label]::before {
+    content: attr(data-label) ": ";
+    font-weight: 600;
+  }
 }

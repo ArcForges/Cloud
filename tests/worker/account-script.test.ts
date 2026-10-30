@@ -5,7 +5,7 @@
 // once). The script is an ES module that starts itself only in a document; here its functions are called with fakes.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import test from "node:test";
+import test, { mock } from "node:test";
 
 import * as script from "../../center/internal/pages/static/account.js";
 import type {
@@ -285,10 +285,32 @@ test("a failure is shown as the fixed text of its code, never as text the center
     /cannot use passkeys/u,
   );
   assert.match(
+    errorText(Object.assign(new Error("x"), { name: "SecurityError" })),
+    /cannot use passkeys/u,
+  );
+  // "Already registered" is true only of a create() that an authenticator refused (js-8): the same error name from get() is not it.
+  assert.match(errorText(new script.AlreadyRegisteredError()), /already registered/u);
+  assert.match(
     errorText(Object.assign(new Error("x"), { name: "InvalidStateError" })),
-    /already registered/u,
+    /could not be completed/u,
   );
   assert.match(errorText(new TypeError("Failed to fetch")), /could not be reached/u);
+  // The script's own failure to read what it was handed is neither the network nor a refusal.
+  assert.match(errorText(new script.PageDataError("bad")), /could not be completed/u);
+  // A code is a text only when the table names it (js-8): the names an object inherits are no codes.
+  for (const inherited of [
+    "constructor",
+    "toString",
+    "valueOf",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "__proto__",
+    "__defineGetter__",
+  ])
+    assert.match(errorText(new ApiError(400, inherited)), /could not be completed/u, inherited);
+  assert.match(errorText(new ApiError(400, 5 as unknown as string)), /could not be completed/u);
   assert.match(errorText("nothing"), /could not be completed/u);
   assert.match(errorText(undefined), /could not be completed/u);
 });
@@ -535,6 +557,7 @@ class Element {
   textContent = "";
   value = "";
   focused = false;
+  removed = false;
   submitted = false;
   attributes: Record<string, string> = {};
   elements: Record<string, Element> = {};
@@ -545,6 +568,9 @@ class Element {
   }
   focus() {
     this.focused = true;
+  }
+  remove() {
+    this.removed = true;
   }
   setAttribute(name: string, value: string) {
     this.attributes[name] = value;
@@ -575,6 +601,8 @@ function page(
     hash?: string;
     forms?: Element[];
     fetchImpl?: (url: string, init: RequestInit) => Promise<FakeResponse>;
+    /** "throws": reading window.localStorage itself throws, as a browser that blocks all site data does. */
+    storage?: "throws";
   } = {},
 ) {
   const elements = new Map<string, Element>(ids.map((id) => [id, new Element()]));
@@ -587,7 +615,10 @@ function page(
   const replaced: unknown[][] = [];
   const assigned: string[] = [];
   const stored = new Map<string, string>();
+  // Everything the script does to the outside, in order: the address, the storage and every request.
+  const events: string[] = [];
   const fakeFetch = async (url: string, init: RequestInit): Promise<FakeResponse> => {
+    events.push(`fetch ${init.method ?? "GET"} ${url}`);
     if (options.fetchImpl) return options.fetchImpl(url, init);
     if (url.endsWith("/bootstrap"))
       return reply(200, { csrfToken: "T".repeat(43), authenticated: false });
@@ -607,17 +638,31 @@ function page(
       hash: options.hash ?? "",
       assign: (path: string) => void assigned.push(path),
     },
-    history: { replaceState: (...args: unknown[]) => void replaced.push(args) },
+    history: {
+      replaceState: (...args: unknown[]) => {
+        events.push("replaceState");
+        replaced.push(args);
+      },
+    },
     localStorage: {
       getItem: (key: string) => stored.get(key) ?? null,
-      setItem: (key: string, value: string) => void stored.set(key, value),
+      setItem: (key: string, value: string) => {
+        events.push(`storage set ${key}`);
+        stored.set(key, value);
+      },
     },
     crypto: { randomUUID: () => "6c1d7f0e-3a52-4b9c-8e47-90a1b2c3d4e5" },
     navigator: { credentials: fakes_.credentials },
     PublicKeyCredential: function PublicKeyCredential() {},
     fetch: fakeFetch,
   };
-  return { window, elements, replaced, assigned, fakes: fakes_ };
+  if (options.storage === "throws")
+    Object.defineProperty(window, "localStorage", {
+      get() {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    });
+  return { window, elements, replaced, assigned, events, fakes: fakes_ };
 }
 
 test("the bootstrap page reads the token from the fragment and removes it from the address at once (SEC-09)", async () => {
@@ -871,4 +916,458 @@ test("the script writes text only with textContent and loads nothing", () => {
   assert.equal(/https?:\/\//u.test(source), false, "no absolute URL");
   assert.equal(/\bimport\s*\(|\bimport\s+.*from/u.test(source), false, "no import");
   assert.match(source, /textContent/u);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The fix round (js-1 to js-8): a blocked storage, the script-needed line, the order of the address and the requests, the
+// return path of a signed-in visitor, the guards of every ceremony, the wording of every code, and the create path's error.
+
+const never = () => new Promise<never>(() => {});
+const settle = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms));
+const common = ["heading", "error-summary", "error-text", "status"];
+const signedOut = () => reply(200, { csrfToken: "T".repeat(43), authenticated: false });
+
+function challengeBody(purpose: string, extra: Record<string, unknown> = {}) {
+  return {
+    flowId: "11111111-1111-4111-8111-111111111111",
+    method: "passkey",
+    challenge: script.encodeBase64Url(new Uint8Array(32)),
+    rpId: "proof.example.test",
+    options: {
+      rpId: "proof.example.test",
+      userHandle: script.encodeBase64Url(new Uint8Array(32).fill(2)),
+      userVerification: "required",
+      algorithms: [-7],
+      ...extra,
+    },
+    purpose,
+  };
+}
+
+/** A creation page: the form whose data attributes carry the options, and its hidden fields. */
+function creationForm(): Element {
+  const form = new Element();
+  Object.assign(form.dataset, {
+    flowId: "11111111-1111-4111-8111-111111111111",
+    challenge: script.encodeBase64Url(new Uint8Array(32).fill(3)),
+    rpId: "proof.example.test",
+    userHandle: script.encodeBase64Url(new Uint8Array(32).fill(4)),
+    excluded: "",
+    accountName: "Owner",
+  });
+  for (const name of ["credential_id", "client_data_json", "attestation_object", "transports"])
+    form.elements[name] = new Element();
+  return form;
+}
+
+test("a browser that blocks its storage does not stop the sign-in or the bootstrap page (js-1)", async () => {
+  for (const [name, ids] of [
+    ["sign-in", [...common, "sign-in", "signed-in"]],
+    ["bootstrap", [...common, "token", "display-name", "create"]],
+  ] as const) {
+    let begun: unknown;
+    const blocked = page(name, [...ids], {
+      storage: "throws",
+      fetchImpl: async (url, init) => {
+        if (url.endsWith("/authentication/begin")) begun = JSON.parse(String(init.body));
+        return url.endsWith("/bootstrap") ? signedOut() : never();
+      },
+    });
+    await script.start(blocked.window);
+    const button = blocked.elements.get(name === "sign-in" ? "sign-in" : "create");
+    assert.equal(button?.disabled, false, `${name}: the button is usable`);
+    assert.equal(button?.listeners.click?.length, 1, `${name}: the click is wired`);
+    // A claim is produced for the page load though nothing can be kept.
+    if (name === "bootstrap") {
+      for (const [id, value] of [
+        ["display-name", "Owner"],
+        ["token", "afb1.t"],
+      ] as const) {
+        const field = blocked.elements.get(id);
+        if (field) field.value = value;
+      }
+    }
+    button?.fire("click");
+    await settle();
+    const installation = (begun as { installation?: { installationId?: string } })?.installation;
+    assert.match(
+      installation?.installationId ?? "",
+      /^[0-9a-f-]{36}$/u,
+      `${name}: a claim is sent`,
+    );
+  }
+});
+
+test("a page that cannot work without its script says so until the script runs (js-3)", async () => {
+  for (const [name, ids] of [
+    ["sign-in", [...common, "sign-in", "signed-in"]],
+    ["bootstrap", [...common, "token", "display-name", "create"]],
+    ["sign-out", [...common, "sign-out"]],
+    ["register", [...common, "register", "create-passkey"]],
+    ["passkeys", common],
+  ] as const) {
+    const shown = page(name, [...ids, "needs-script"]);
+    if (name === "register") shown.elements.set("register", creationForm());
+    const line = shown.elements.get("needs-script");
+    assert.equal(line?.removed, false, `${name}: the line is there until the script runs`);
+    await script.start(shown.window);
+    assert.equal(line?.removed, true, `${name}: the script removed the line`);
+  }
+});
+
+test("the script reads the address first and writes only the installation claim, no log and no token anywhere (SEC-09)", async () => {
+  const logged: string[] = [];
+  const names = ["log", "info", "warn", "error", "debug", "trace", "dir", "table"] as const;
+  const spies = names.map((name) => mock.method(console, name, () => void logged.push(name)));
+  try {
+    const token = "afb1.one-time-token";
+    const ids = [...common, "token", "display-name", "create"];
+    const base = { hash: `#token=${token}&return=%2Fx` };
+    // The address is replaced before anything else, whatever fails after it: no passkeys, or a bootstrap read that fails.
+    const unsupported = page("bootstrap", ids, base);
+    delete (unsupported.window as { PublicKeyCredential?: unknown }).PublicKeyCredential;
+    await script.start(unsupported.window);
+    assert.equal(unsupported.events[0], "replaceState", "without passkeys");
+    assert.equal(unsupported.elements.get("token")?.value, token);
+    const failing = page("bootstrap", ids, {
+      ...base,
+      fetchImpl: async () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    await script.start(failing.window);
+    assert.equal(failing.events[0], "replaceState", "with a bootstrap read that fails");
+    assert.match(failing.elements.get("error-text")?.textContent ?? "", /could not be reached/u);
+
+    // A whole enrollment: the claim is the one write to the storage, and the token is in no address and in no request's address.
+    const working = page("bootstrap", ids, {
+      ...base,
+      fetchImpl: async (url) =>
+        url.endsWith("/authentication/begin")
+          ? reply(200, challengeBody("enroll"))
+          : url.endsWith("/bootstrap")
+            ? signedOut()
+            : reply(200, {}),
+    });
+    await script.start(working.window);
+    const name = working.elements.get("display-name");
+    if (name) name.value = "Owner";
+    working.elements.get("create")?.fire("click");
+    await settle();
+    assert.equal(working.events[0], "replaceState");
+    assert.equal(working.assigned.length, 1);
+    assert.deepEqual(
+      working.events.filter((event) => event.startsWith("storage")),
+      ["storage set af.installation"],
+    );
+    for (const event of [...working.events, ...working.assigned, ...working.replaced.map(String)])
+      assert.equal(event.includes(token), false, `the token is in: ${event}`);
+    assert.deepEqual(logged, [], "the script writes no log");
+  } finally {
+    for (const spy of spies) spy.mock.restore();
+  }
+});
+
+test("a signed-in visitor of the sign-in page is offered only a validated return path (js-6)", async () => {
+  for (const [hash, expected] of [
+    ["#return=%2Fconnect", "/connect"],
+    ["#return=%2Fapi%2Faccount%2Fsessions", "/api/account/sessions"],
+    ["#return=%2F%2Fevil.example", "/api/account/passkeys"],
+    ["#return=https%3A%2F%2Fevil.example%2F", "/api/account/passkeys"],
+    ["#return=javascript%3Aalert(1)", "/api/account/passkeys"],
+    ["#return=%2F%5Cevil.example", "/api/account/passkeys"],
+    ["#return=%2F%0A%2Fevil.example", "/api/account/passkeys"],
+    ["#return=data%3Atext%2Fhtml%2Cx", "/api/account/passkeys"],
+    ["#return=%2F%2F%2Fevil.example", "/api/account/passkeys"],
+    ["#return", "/api/account/passkeys"],
+    ["", "/api/account/passkeys"],
+  ] as const) {
+    const signIn = page("sign-in", [...common, "sign-in", "signed-in"], {
+      hash,
+      fetchImpl: async () => reply(200, { csrfToken: "T".repeat(43), authenticated: true }),
+    });
+    const link = new Element();
+    const line = signIn.elements.get("signed-in");
+    assert(line);
+    line.hidden = true;
+    line.children = [link];
+    await script.start(signIn.window);
+    assert.equal(line.hidden, false, hash);
+    assert.equal(link.attributes.href, expected, hash);
+  }
+});
+
+test("every ceremony disables its button while it runs, and a second click starts no second one (js-7)", async () => {
+  // The button of each page is disabled while the first call of its flow is unanswered.
+  const held = async (url: string) => (url.endsWith("/bootstrap") ? signedOut() : never());
+  const signIn = page("sign-in", [...common, "sign-in", "signed-in"], { fetchImpl: held });
+  await script.start(signIn.window);
+  const signInButton = signIn.elements.get("sign-in");
+  assert.equal(signInButton?.disabled, false);
+  signInButton?.fire("click");
+  await settle();
+  assert.equal(signInButton?.disabled, true, "sign-in");
+
+  const boot = page("bootstrap", [...common, "token", "display-name", "create"], {
+    hash: "#token=afb1.t",
+    fetchImpl: held,
+  });
+  await script.start(boot.window);
+  const nameField = boot.elements.get("display-name");
+  if (nameField) nameField.value = "Owner";
+  boot.elements.get("create")?.fire("click");
+  await settle();
+  assert.equal(boot.elements.get("create")?.disabled, true, "bootstrap");
+
+  const registered = page("register", [...common, "register", "create-passkey"]);
+  registered.elements.set("register", creationForm());
+  registered.fakes.credentials.create = never as never;
+  await script.start(registered.window);
+  registered.elements.get("create-passkey")?.fire("click");
+  await settle();
+  assert.equal(registered.elements.get("create-passkey")?.disabled, true, "register");
+
+  const out = page("sign-out", [...common, "sign-out"], { fetchImpl: () => never() });
+  await script.start(out.window);
+  out.elements.get("sign-out")?.fire("click");
+  await settle();
+  assert.equal(out.elements.get("sign-out")?.disabled, true, "sign-out");
+
+  // A browser drops a click on a disabled button: after the first, the second changes nothing.
+  let begins = 0;
+  const twice = page("sign-in", [...common, "sign-in", "signed-in"], {
+    fetchImpl: async (url) => {
+      if (url.endsWith("/authentication/begin")) begins += 1;
+      return held(url);
+    },
+  });
+  await script.start(twice.window);
+  const button = twice.elements.get("sign-in");
+  for (let click = 0; click < 2; click += 1) if (!button?.disabled) button?.fire("click");
+  await settle();
+  assert.equal(begins, 1);
+});
+
+test("Enter in the enrollment's fields starts it once, any other key nothing, and Enter while it runs nothing (js-7)", async () => {
+  let begins = 0;
+  const boot = page("bootstrap", [...common, "token", "display-name", "create"], {
+    hash: "#token=afb1.t",
+    fetchImpl: async (url) => {
+      if (url.endsWith("/authentication/begin")) {
+        begins += 1;
+        return never();
+      }
+      return signedOut();
+    },
+  });
+  await script.start(boot.window);
+  const token = boot.elements.get("token");
+  const name = boot.elements.get("display-name");
+  assert(token && name);
+  name.value = "Owner";
+  name.fire("keydown", { key: "a" });
+  token.fire("keydown", { key: "Tab" });
+  await settle();
+  assert.equal(begins, 0, "a key other than Enter starts nothing");
+  name.fire("keydown", { key: "Enter" });
+  await settle();
+  assert.equal(begins, 1, "Enter in the name field starts the enrollment");
+  token.fire("keydown", { key: "Enter" });
+  await settle();
+  assert.equal(begins, 1, "Enter while it runs starts no second one");
+});
+
+test("a step-up sends the class and the target of its form, each in its own place (js-7)", async () => {
+  const form = new Element();
+  form.dataset.stepUpClass = "identity.revokeAllSessions";
+  form.dataset.stepUpTarget = "b".repeat(64);
+  const csrf = new Element();
+  csrf.value = "C".repeat(43);
+  form.elements.csrf = csrf;
+  form.querySelectorAll = () => [new Element()];
+  const bodies: unknown[] = [];
+  const sessions = page("sessions", common, {
+    forms: [form],
+    fetchImpl: async (url, init) => {
+      if (url.endsWith("/step-up/begin")) {
+        bodies.push(JSON.parse(String(init.body)));
+        return reply(200, challengeBody("stepUp"));
+      }
+      return reply(200, {});
+    },
+  });
+  sessions.window.document.querySelectorAll = (() => [form]) as never;
+  await script.start(sessions.window);
+  form.fire("submit");
+  await settle();
+  assert.deepEqual(bodies, [
+    { operationClass: "identity.revokeAllSessions", method: "passkey", targetHash: "b".repeat(64) },
+  ]);
+});
+
+test("a page that arrives with an error puts the focus on the error summary, not the heading (js-7)", async () => {
+  const withError = page("passkeys", common);
+  const summary = withError.elements.get("error-summary");
+  assert(summary);
+  summary.hidden = false;
+  await script.start(withError.window);
+  assert.equal(summary.focused, true);
+  assert.equal(withError.elements.get("heading")?.focused, false);
+  const plain = page("passkeys", common);
+  await script.start(plain.window);
+  assert.equal(plain.elements.get("heading")?.focused, true);
+  assert.equal(plain.elements.get("error-summary")?.focused, false);
+});
+
+test("every code the center sends has a text of its own (js-7)", () => {
+  const source = readFileSync(new URL("../../center/internal/arc/arc.go", import.meta.url), "utf8");
+  const codes = [
+    ...new Set([...source.matchAll(/Code:\s*"([a-z_]+)"/gu)].map((found) => found[1])),
+  ];
+  assert(codes.length >= 15, `the codes of package arc were found: ${codes.join(", ")}`);
+  const generic = script.errorText(new script.ApiError(500, ""));
+  const seen = new Map<string, string>();
+  for (const code of codes as string[]) {
+    const text = script.errorText(new script.ApiError(400, code));
+    assert.notEqual(text, generic, `${code} has a text of its own`);
+    seen.set(code, text);
+  }
+  assert(seen.size === codes.length);
+});
+
+test("the sign-out page reads the CSRF token, posts the logout with it and goes to the sign-in (js-7)", async () => {
+  const seen: string[] = [];
+  const out = page("sign-out", [...common, "sign-out"], {
+    fetchImpl: async (url, init) => {
+      seen.push(
+        `${init.method} ${url} ${(init.headers as Record<string, string>)["X-AF-CSRF"] ?? ""}`,
+      );
+      return url.endsWith("/bootstrap")
+        ? reply(200, { csrfToken: "S".repeat(43), authenticated: true })
+        : reply(200, {});
+    },
+  });
+  await script.start(out.window);
+  const button = out.elements.get("sign-out");
+  assert.equal(button?.disabled, false);
+  button?.fire("click");
+  await settle();
+  assert.deepEqual(seen, [
+    "GET /api/session/v1/web/bootstrap ",
+    `POST /api/session/v1/web/logout ${"S".repeat(43)}`,
+  ]);
+  assert.deepEqual(out.assigned, ["/api/account/sign-in"]);
+});
+
+test("a browser without passkeys gets the text, no call and no usable button (js-7)", async () => {
+  const fetched: string[] = [];
+  const signIn = page("sign-in", [...common, "sign-in", "signed-in"], {
+    fetchImpl: async (url) => {
+      fetched.push(url);
+      return signedOut();
+    },
+  });
+  const button = signIn.elements.get("sign-in");
+  assert(button);
+  button.disabled = true; // the server renders it so
+  delete (signIn.window as { PublicKeyCredential?: unknown }).PublicKeyCredential;
+  await script.start(signIn.window);
+  assert.match(signIn.elements.get("error-text")?.textContent ?? "", /cannot use passkeys/u);
+  assert.equal(signIn.elements.get("error-summary")?.hidden, false);
+  assert.equal(button.disabled, true);
+  assert.deepEqual(fetched, []);
+
+  const registered = page("register", [...common, "register", "create-passkey"]);
+  registered.elements.set("register", creationForm());
+  delete (registered.window as { PublicKeyCredential?: unknown }).PublicKeyCredential;
+  await script.start(registered.window);
+  assert.match(registered.elements.get("error-text")?.textContent ?? "", /cannot use passkeys/u);
+  const create = registered.elements.get("create-passkey");
+  assert.equal(create?.disabled, true);
+  assert.equal((create?.listeners.click ?? []).length, 0);
+});
+
+test("the installation claim lives under one key of the storage (js-7)", () => {
+  const keys: string[] = [];
+  const stored = new Map([["af.installation", "6c1d7f0e-3a52-4b9c-8e47-90a1b2c3d4e5"]]);
+  const storage = {
+    getItem: (key: string) => {
+      keys.push(key);
+      return stored.get(key) ?? null;
+    },
+    setItem: (key: string, value: string) => {
+      keys.push(key);
+      stored.set(key, value);
+    },
+  };
+  const claim = script.installationClaim(storage, {
+    randomUUID: () => "ffffffff-ffff-4fff-8fff-ffffffffffff",
+  });
+  assert.equal(claim.installationId, "6c1d7f0e-3a52-4b9c-8e47-90a1b2c3d4e5");
+  assert.deepEqual(keys, ["af.installation"]);
+});
+
+test("'already registered' is said of a create() an authenticator refused, and of nothing else (js-8)", async () => {
+  const refused = Object.assign(new Error("excluded"), { name: "InvalidStateError" });
+  // Enrollment and the creation page: create() refused by an authenticator that holds an excluded passkey.
+  const enrolling = fakes();
+  enrolling.credentials.create = async () => {
+    throw refused;
+  };
+  await assert.rejects(
+    script.enroll({
+      api: enrolling.api,
+      credentials: enrolling.credentials,
+      claim,
+      token: "afb1.t",
+      displayName: "Owner",
+    }),
+    (error: unknown) =>
+      error instanceof script.AlreadyRegisteredError &&
+      /already registered/u.test(script.errorText(error)),
+  );
+  const registered = page("register", [...common, "register", "create-passkey"]);
+  registered.elements.set("register", creationForm());
+  registered.fakes.credentials.create = (async () => {
+    throw refused;
+  }) as never;
+  await script.start(registered.window);
+  registered.elements.get("create-passkey")?.fire("click");
+  await settle();
+  assert.match(registered.elements.get("error-text")?.textContent ?? "", /already registered/u);
+  // The same error from get() (a request already pending) is a failure to try again, not a registered passkey.
+  const signing = fakes();
+  signing.credentials.get = async () => {
+    throw refused;
+  };
+  await assert.rejects(
+    script.signIn({ api: signing.api, credentials: signing.credentials, claim }),
+    (error: unknown) => !/already registered/u.test(script.errorText(error)),
+  );
+  const stepping = fakes();
+  stepping.credentials.get = signing.credentials.get;
+  await assert.rejects(
+    script.stepUp({
+      api: stepping.api,
+      credentials: stepping.credentials,
+      operationClass: "identity.revokeSession",
+      targetHash: "a".repeat(64),
+    }),
+    (error: unknown) => !/already registered/u.test(script.errorText(error)),
+  );
+});
+
+test("a value the script cannot read is its own failure, not a network one (js-8)", () => {
+  for (const unreadable of [
+    () => script.decodeBase64Url("not base64url!"),
+    () => script.creationOptions({ challenge: "AAAA", rpId: "x", options: {} }, "name"),
+    () => script.requestOptions({ options: {} }),
+    () => script.requestOptions({ challenge: "AAAA", options: { allowedCredentials: ["*"] } }),
+  ])
+    assert.throws(unreadable, (error: unknown) => {
+      assert(error instanceof script.PageDataError && error instanceof TypeError);
+      assert.match(script.errorText(error), /could not be completed/u);
+      assert.doesNotMatch(script.errorText(error), /could not be reached/u);
+      return true;
+    });
 });

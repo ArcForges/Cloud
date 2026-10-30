@@ -57,13 +57,38 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The data the script was handed is not what it expects (a value that is not base64url, an option the page did not carry): the
+ * script's own failure, not the network's, and not a refusal of the center. Its name is its own, so errorText gives it the generic
+ * text, where a plain TypeError is the network's.
+ */
+export class PageDataError extends TypeError {
+  constructor(message) {
+    super(message);
+    this.name = "PageDataError";
+  }
+}
+
+/** The browser refused to create a passkey because an authenticator already holds one of the account's (excludeCredentials). */
+export class AlreadyRegisteredError extends Error {
+  constructor() {
+    super("An authenticator already holds a passkey of this account.");
+    this.name = "AlreadyRegisteredError";
+  }
+}
+
 /** The text to show for a failure of a flow: a refusal by its code, a cancelled prompt, a browser without passkeys. */
 export function errorText(error) {
-  if (error instanceof ApiError) return ERROR_TEXT[error.code] ?? GENERIC_TEXT;
+  if (error instanceof ApiError) {
+    // Only a code the table names: a code such as "constructor" or "__proto__" is no text.
+    return typeof error.code === "string" && Object.hasOwn(ERROR_TEXT, error.code)
+      ? ERROR_TEXT[error.code]
+      : GENERIC_TEXT;
+  }
+  if (error instanceof AlreadyRegisteredError) return ERROR_TEXT.already_exists;
   const name = error && typeof error === "object" ? error.name : "";
   if (name === "NotAllowedError" || name === "AbortError") return CANCELLED_TEXT;
   if (name === "NotSupportedError" || name === "SecurityError") return UNSUPPORTED_TEXT;
-  if (name === "InvalidStateError") return ERROR_TEXT.already_exists;
   if (name === "TypeError") return NETWORK_TEXT;
   return GENERIC_TEXT;
 }
@@ -86,11 +111,12 @@ export function encodeBase64Url(input) {
 }
 
 export function decodeBase64Url(text) {
-  if (typeof text !== "string" || text.length % 4 === 1) throw new TypeError("Not base64url text.");
+  if (typeof text !== "string" || text.length % 4 === 1)
+    throw new PageDataError("Not base64url text.");
   const values = [];
   for (const character of text) {
     const value = ALPHABET.indexOf(character);
-    if (value < 0) throw new TypeError("Not base64url text.");
+    if (value < 0) throw new PageDataError("Not base64url text.");
     values.push(value);
   }
   const bytes = new Uint8Array(Math.floor((values.length * 6) / 8));
@@ -212,6 +238,20 @@ export function assertionBody(credential) {
   if (response.userHandle && response.userHandle.byteLength > 0)
     body.userHandle = encodeBase64Url(response.userHandle);
   return body;
+}
+
+/**
+ * The browser's create(). Its InvalidStateError is the one place "already registered" is true: the creation options exclude the
+ * account's own passkeys, so an authenticator that holds one refuses. (get() raises the same error for a pending request.)
+ */
+async function createCredential(credentials, publicKey) {
+  try {
+    return await credentials.create({ publicKey });
+  } catch (error) {
+    if (error && typeof error === "object" && error.name === "InvalidStateError")
+      throw new AlreadyRegisteredError();
+    throw error;
+  }
 }
 
 /** The fields of a PublicKeyCredential obtained with create(), as the document names them. */
@@ -339,9 +379,7 @@ export async function enroll({ api, credentials, claim, token, displayName }) {
     purpose: "enroll",
     installation: claim,
   });
-  const credential = await credentials.create({
-    publicKey: creationOptions(challenge, displayName),
-  });
+  const credential = await createCredential(credentials, creationOptions(challenge, displayName));
   if (!credential) throw new DOMException("No credential.", "NotAllowedError");
   return api.post("/enrollment/complete", {
     flowId: challenge.flowId,
@@ -391,6 +429,15 @@ function clearError(document) {
 function setStatus(document, text) {
   const status = document.getElementById("status");
   if (status) status.textContent = text;
+}
+
+/** The window's local storage, or undefined when the browser refuses it (reading the property can throw, e.g. with all site data blocked). */
+function storageOf(window) {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 function passkeysSupported(window) {
@@ -445,7 +492,7 @@ async function signInPage(page) {
     showError(page.document, errorText(error));
     return;
   }
-  const claim = installationClaim(page.window.localStorage, page.window.crypto);
+  const claim = installationClaim(storageOf(page.window), page.window.crypto);
   button.disabled = false;
   button.addEventListener("click", () =>
     guarded(page, button, "Waiting for your passkey.", async () => {
@@ -481,7 +528,7 @@ async function bootstrapPage(page) {
     showError(page.document, errorText(error));
     return;
   }
-  const claim = installationClaim(page.window.localStorage, page.window.crypto);
+  const claim = installationClaim(storageOf(page.window), page.window.crypto);
   button.disabled = false;
   const run = () =>
     guarded(page, button, "Waiting for your passkey.", async () => {
@@ -567,9 +614,10 @@ function registerPage(page) {
   };
   button.addEventListener("click", () =>
     guarded(page, button, "Waiting for your passkey.", async () => {
-      const credential = await page.credentials.create({
-        publicKey: creationOptions(challenge, data.accountName || "ArcForges account"),
-      });
+      const credential = await createCredential(
+        page.credentials,
+        creationOptions(challenge, data.accountName || "ArcForges account"),
+      );
       if (!credential) throw new DOMException("No credential.", "NotAllowedError");
       const body = creationBody(credential);
       form.elements.credential_id.value = body.credentialId;
@@ -584,6 +632,8 @@ function registerPage(page) {
 /** Starts the script of the page the document is: pages name themselves in the body's data-page attribute. */
 export function start(window) {
   const page = context(window);
+  // The pages that cannot work without this script say so until it runs; if the module was refused or failed, the line stays.
+  page.document.getElementById("needs-script")?.remove();
   const name = page.document.body.dataset.page;
   const heading = page.document.getElementById("heading");
   const summary = page.document.getElementById("error-summary");

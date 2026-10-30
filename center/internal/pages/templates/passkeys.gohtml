@@ -17,9 +17,9 @@
 <tbody>
 {{range .Passkeys}}<tr>
 <th scope="row">{{.Name}}</th>
-<td><time datetime="{{.CreatedAt}}">{{.CreatedText}}</time></td>
-<td>{{if .LastUsedAt}}<time datetime="{{.LastUsedAt}}">{{.LastUsedText}}</time>{{else}}Never{{end}}</td>
-<td class="actions">
+<td data-label="Added"><time datetime="{{.CreatedAt}}">{{.CreatedText}}</time></td>
+<td data-label="Last used">{{if .LastUsedAt}}<time datetime="{{.LastUsedAt}}">{{.LastUsedText}}</time>{{else}}Never{{end}}</td>
+<td class="actions" data-label="Actions">
 <form method="post" action="{{$.Base}}/account/passkeys/rename" class="inline">
 <input type="hidden" name="csrf" value="{{$.CSRF}}">
 <input type="hidden" name="command_id" value="{{.RenameCommand}}">

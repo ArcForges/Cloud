@@ -364,19 +364,26 @@ claimed for it, because the steps are protected by the flow ID, the challenge, t
 API methods are. The bootstrap read returns the token for the session that is there, or the constant. There is no flow cookie: the
 flow ID travels in the JSON bodies, and a browser flow is bound to the origin it began on (`flow_origin`).
 
-**Request rules** (all refusals carry the security headers below). Any query string, even an empty one, and any `Authorization`
+**Request rules** (every refusal of the center carries the security headers below; the Worker's own refusals are plain text with
+`Cache-Control: no-store` and nothing else). Any query string, even an empty one, and any `Authorization`
 header are 400; a body on a GET is 400; a POST has one `Content-Type` of the route's type (JSON routes `application/json`, forms
 `application/x-www-form-urlencoded`, with at most the UTF-8 charset) or is 415, no `Content-Encoding`, and a body within the route's
 bound (the contract's `x-arcforges-max-bytes`), declared or streamed, or is 413; JSON bodies are read strictly (unknown and repeated
-keys refused). A method a path does not have is 405, an unknown path 404, a disabled surface 404 with no body. The only statuses are
-200, 303, 400, 403, 404, 413, 415 and 429 (a rate limit: the Worker's own edge limit sets `Retry-After`, the center's carries the ArcError's retry advice in its body); the Worker turns any other status of
-the Container into its own 503. The contract defines no error body for these routes, so a refusal of a JSON route is the
+keys refused). A method a path does not have is 405 and an unknown path 404. A disabled `pages` surface answers every page path 404: on the hosted
+center that is the Worker's reply of a path it does not know (plain text, before anything about the request is read), on a
+self-hosted center the handler's 404 with the security headers and no body. The statuses of a reply of the center that the Worker
+keeps are 200, 303, 400, 403, 404, 413, 415 and 429 (a rate limit: the center's carries the ArcError's retry advice in its body); the
+Worker turns any other status of the Container into its own 503. The statuses the Worker answers itself, without the Container, are
+the 400, 403, 413, 415 and 429 of the request rules above (its edge limit sets `Retry-After`), 405 for a method a path does not
+have, 408 for a body not read within the body budget, 499 for a client that went away and 504 for a call that outlasted
+`pageDurationMs`. The contract defines no error body for these routes, so a refusal of a JSON route is the
 [ArcError](center.md#arcerror-and-grpc-status) as JSON, `{"error": {"category", "code", "messageKey", "retry", "effect",
 "correlationId", "details"}}`, and of a page an HTML page with a fixed text of its code (the center never sends text to show).
 This is a gap of the contract document, routed to the Contracts and Design owners.
 
-**Security headers.** Every reply of every page route, refusals included, carries exactly these seven, and the Worker rejects (503)
-a reply that lacks one or has another value:
+**Security headers.** Every reply of the center to a page route, refusals included, carries exactly these seven, and the Worker
+rejects (503) a reply of the Container that lacks one or has another value. The Worker's own refusals (the request rules it applies
+before the Container, 405, 408, 499, 504 and its own 503) are plain text with `Cache-Control: no-store` only:
 
 ```
 Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; require-trusted-types-for 'script'; trusted-types 'none'
@@ -402,9 +409,13 @@ the parser has normalised it); anything else goes to the passkeys page (`tests/w
 `Location` only of the form `/api/account/<words>` with at most that fragment.
 
 **Accessibility.** The pages are one column of semantic HTML: a skip link, one `h1` that takes focus on load, labelled fields, a
-status line with `aria-live`, an error summary with `role="alert"` that takes focus, tables with captions and scoped headers, buttons
-named for their row, `lang` and the viewport meta, and a style sheet with visible focus rings and light and dark colours. Everything but the three WebAuthn ceremonies and the step-up works without script, and a page that
-needs script says so (`noscript`). The rendered HTML is checked by `TestEveryPageIsAccessibleHTMLWithNothingExternal` (no inline script, style or event
+status line with `aria-live`, an error summary with `role="alert"` that takes focus, tables with captions and scoped headers (on a
+narrow screen the header row is off screen and each cell shows the name of its column), buttons named for their row (the accessible
+name begins with the text the button shows), `lang` and the viewport meta, and a style sheet with visible focus rings and light and
+dark colours. A page lists at most 30 passkeys, sessions or devices and says when there are more, so that a full page stays within
+the reply bound the Worker enforces. Everything but the three WebAuthn ceremonies, the step-up and the sign-out button works without
+script. A page that needs its script says so in a `noscript` paragraph and, for a script that is refused, blocked or fails to load
+while scripting is on, in a line (`needs-script`) that the script removes when it starts. The rendered HTML is checked by `TestEveryPageIsAccessibleHTMLWithNothingExternal` (no inline script, style or event
 handler and no reference to another origin either); the style sheet's focus rings and colours are not tested, and none of this is an
 accessibility audit with assistive technology.
 
