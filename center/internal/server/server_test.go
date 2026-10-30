@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -410,7 +411,8 @@ func TestTheModeSelectsTheFeatureGate(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, key := range feature.Gated() {
-			if center.Features.Availability(t.Context(), key).Available != available {
+			// A self-hosted center enables every gated key but `push`, which needs a push sender nobody has built yet (DC-22).
+			if center.Features.Availability(t.Context(), key).Available != (available && key != feature.Push) {
 				t.Fatalf("%s %s", mode, key)
 			}
 		}
@@ -535,4 +537,35 @@ func TestANotActivatedReplyIsLoggedWithItsCorrelation(t *testing.T) {
 		strings.Contains(metrics.String(), `code="unknown"`) {
 		t.Fatalf("metrics %s", metrics.String())
 	}
+}
+
+// TestTheCatalogueOfARunningCenterComesOnlyFromItsPlanConfiguration (DC-12): the composition reads no catalogue from anywhere but the
+// embedded fixtures of the development plan configuration; the test-only injection is not wired to any variable, file or flag.
+func TestTheCatalogueOfARunningCenterComesOnlyFromItsPlanConfiguration(t *testing.T) {
+	for plan, state := range map[config.PlanConfiguration]feature.State{config.PlanNone: feature.StateMissing, config.PlanDevelopmentFixtures: feature.StateValid} {
+		cfg := testConfig(config.OfficialHosted)
+		cfg.Plan = plan
+		center, err := New(cfg, observe.NewLogger(io.Discard, slog.LevelInfo), Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if center.FeatureConfiguration.State != state {
+			t.Errorf("%q: state %d", plan, center.FeatureConfiguration.State)
+		}
+		center.Close()
+	}
+	main, err := os.ReadFile("../../cmd/arcforges-center/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(main), "Catalogue") {
+		t.Fatal("the executable's composition sets the test-only catalogue injection")
+	}
+	// An invalid injected catalogue starts the center and enables nothing; it says so in its log.
+	logs := &lockedBuffer{}
+	center, err := New(testConfig(config.OfficialHosted), observe.NewLogger(logs, slog.LevelInfo), Options{Catalogue: []byte("{"), CatalogueClass: feature.ClassProduction})
+	if err != nil || center.FeatureConfiguration.State != feature.StateInvalid {
+		t.Fatalf("%v %+v", err, center.FeatureConfiguration)
+	}
+	center.Close()
 }

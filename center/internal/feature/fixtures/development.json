@@ -1,0 +1,20 @@
+{
+  "version": "dev-2026-10-30",
+  "fixture": true,
+  "notice": "Illustrative development fixture. The plans and prices are illustrative, not approved prices; nothing is sold or charged.",
+  "capabilities": ["center.nodes", "center.execute", "remote.view", "remote.control", "center.mcp", "push"],
+  "plans": [
+    {
+      "id": "fixture-all",
+      "name": "Fixture all features (illustrative)",
+      "illustrativePriceUsd": 15,
+      "features": ["center.nodes", "center.execute", "remote.view", "remote.control", "center.mcp", "push"]
+    },
+    {
+      "id": "fixture-view",
+      "name": "Fixture view only (illustrative)",
+      "illustrativePriceUsd": 5,
+      "features": ["remote.view"]
+    }
+  ]
+}

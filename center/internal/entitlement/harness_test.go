@@ -12,12 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ArcForges/Cloud/center/internal/pgtest"
+	"github.com/ArcForges/Cloud/center/internal/dbtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
-	"github.com/ArcForges/Cloud/center/internal/provision"
-	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/ArcForges/Cloud/center/internal/store"
-	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
 
 // Day is a day in seconds, the unit the scenarios count in (the C# Fixtures.Day).
@@ -31,65 +28,25 @@ type database struct {
 	t         *testing.T
 	migration *pgx.Conn
 	runtime   *store.DB
-	url       string
-	name      string
+	d         *dbtest.Database
 }
 
 func newDatabase(t *testing.T) *database {
 	t.Helper()
-	url, name := pgtest.Database(t)
-	group := name + "_runtime"
-	build, err := migrate.Load(schema.Migrations())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	migration := pgtest.Connect(t, url)
-	if _, err = migrate.Apply(ctx, migration, build, migrate.Options{Runner: "test", RuntimeRole: group}); err != nil {
-		t.Fatal(err)
-	}
-	rotation, err := provision.Rotate(ctx, pgtest.Connect(t, url), provision.Options{Group: group, DirectURL: url, PooledHost: pgtest.Host(t), Runner: "test", ProbeTimeout: 10 * time.Second})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &database{t: t, migration: migration, runtime: store.New(pgtest.Pool(t, rotation.RuntimeURL, 8)), url: url, name: name}
+	d := dbtest.New(t)
+	return &database{t: t, migration: d.Migration, runtime: d.Runtime, d: d}
 }
 
 // exec runs statements as the migration role.
-func (d *database) exec(statements ...string) {
-	d.t.Helper()
-	for _, statement := range statements {
-		if _, err := d.migration.Exec(context.Background(), statement); err != nil {
-			d.t.Fatalf("%s: %v", statement, err)
-		}
-	}
-}
+func (d *database) exec(statements ...string) { d.t.Helper(); d.d.Exec(statements...) }
 
 func (d *database) count(query string, arguments ...any) int {
 	d.t.Helper()
-	var count int
-	if err := d.migration.QueryRow(context.Background(), query, arguments...).Scan(&count); err != nil {
-		d.t.Fatalf("%s: %v", query, err)
-	}
-	return count
+	return d.d.Count(query, arguments...)
 }
 
-var accounts atomic.Int64
-
-// account creates an account (a user row, as the bootstrap or an enrolment would) and returns its uuid text.
-func (d *database) account() string {
-	d.t.Helper()
-	id := platform.NewID()
-	handle := make([]byte, 32)
-	copy(handle, id[:])
-	handle[31] = byte(accounts.Add(1))
-	if _, err := d.migration.Exec(context.Background(), `INSERT INTO identity.user (user_id, display_name, state, passkey_user_handle, created_at, rev)
-VALUES ($1, 'Test', 1, $2, now(), 1)`, id, handle); err != nil {
-		d.t.Fatal(err)
-	}
-	return id.String()
-}
+// account creates an account and returns its uuid text.
+func (d *database) account() string { d.t.Helper(); return d.d.Account(1).String() }
 
 // testClock is the one settable clock of a scenario.
 type testClock struct {
