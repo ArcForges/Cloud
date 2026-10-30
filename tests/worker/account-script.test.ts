@@ -1292,6 +1292,47 @@ test("a browser without passkeys gets the text, no call and no usable button (js
   assert.equal((create?.listeners.click ?? []).length, 0);
 });
 
+test("the bootstrap page of a browser without passkeys, and the pages whose first read fails, keep their button disabled and unwired (worker-js-2)", async () => {
+  const pagesWithButton: [string, string[], string][] = [
+    ["bootstrap", ["create", "token", "display-name"], "create"],
+    ["sign-in", ["sign-in", "signed-in"], "sign-in"],
+  ];
+  for (const [name, extra, buttonId] of pagesWithButton) {
+    // No passkeys: the text, no call, the button as the server rendered it, and no click or Enter listener anywhere.
+    const fetched: string[] = [];
+    const bare = page(name, [...common, ...extra], {
+      fetchImpl: async (url) => {
+        fetched.push(url);
+        return signedOut();
+      },
+    });
+    const bareButton = bare.elements.get(buttonId);
+    assert(bareButton);
+    bareButton.disabled = true;
+    delete (bare.window as { PublicKeyCredential?: unknown }).PublicKeyCredential;
+    await script.start(bare.window);
+    assert.match(bare.elements.get("error-text")?.textContent ?? "", /cannot use passkeys/u, name);
+    assert.equal(bareButton.disabled, true, name);
+    assert.deepEqual(fetched, [], `${name}: no call`);
+    for (const element of bare.elements.values())
+      assert.deepEqual(element.listeners, {}, `${name}: no listener at all`);
+
+    // A first read that fails: the fixed text of the failure, the button disabled, nothing listening.
+    const broken = page(name, [...common, ...extra], {
+      fetchImpl: async () => reply(503, {}),
+    });
+    const brokenButton = broken.elements.get(buttonId);
+    assert(brokenButton);
+    brokenButton.disabled = true;
+    await script.start(broken.window);
+    assert.notEqual(broken.elements.get("error-text")?.textContent ?? "", "", name);
+    assert.equal(broken.elements.get("error-summary")?.hidden, false, name);
+    assert.equal(brokenButton.disabled, true, `${name}: the button stays disabled`);
+    for (const element of broken.elements.values())
+      assert.deepEqual(element.listeners, {}, `${name}: nothing is wired after a failed read`);
+  }
+});
+
 test("the installation claim lives under one key of the storage (js-7)", () => {
   const keys: string[] = [];
   const stored = new Map([["af.installation", "6c1d7f0e-3a52-4b9c-8e47-90a1b2c3d4e5"]]);

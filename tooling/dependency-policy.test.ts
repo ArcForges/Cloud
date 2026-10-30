@@ -557,3 +557,56 @@ test("a package.json that the policy does not admit is refused, wherever it is, 
   );
   validateManifests(["package.json"], { manifests: ["package.json"] });
 });
+test("the repository audit refuses a package.json the policy does not admit (the call is pinned, not only the function)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "dependency-stray-manifest-"));
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith("GIT_")),
+  );
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.autocrlf=false",
+        ...args,
+      ],
+      { cwd: dir, encoding: "utf8", windowsHide: true, env },
+    ).trim();
+  const write = (file: string, text: string) => {
+    mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+    writeFileSync(path.join(dir, file), text);
+  };
+  try {
+    git("init", "-q", "-b", "main");
+    // The policy and its reviews as they are, and every manifest the policy admits (their content is not read before the check).
+    for (const file of execFileSync("git", ["ls-files", "eng/policy"], {
+      cwd: root,
+      encoding: "utf8",
+    })
+      .split("\n")
+      .filter(Boolean))
+      write(file, readFileSync(path.join(root, file), "utf8"));
+    for (const manifest of [
+      ...baseline.manifests,
+      ...(baseline.isolated ?? []).map((directory) => `${directory}/package.json`),
+    ])
+      write(manifest, "{}\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "policy and admitted manifests");
+    // Without a stray manifest the audit gets past the manifest check (and stops on something else in this bare repository).
+    assert.throws(
+      () => auditDependencies(dir),
+      (error: unknown) => !/Unadmitted workspace manifest/u.test(String(error)),
+    );
+    write("eng/other/package.json", "{}\n");
+    assert.throws(() => auditDependencies(dir), /Unadmitted workspace manifest/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -12,29 +12,6 @@ namespace ArcForges.Cloud.ArchitectureTests.WorkerAdapter;
 /// </summary>
 public sealed class ProductionBundleTests
 {
-    /// <summary>Names that only the proof entry, its foundation, its harness alarm or its verification may contain.</summary>
-    private static readonly string[] ProofOnlyMarkers =
-    [
-        "FoundationContainer",
-        "FoundationJobCoordinator",
-        "HarnessRunAlarm",
-        "storage.internal",
-        "objects.internal",
-        "harness.internal",
-        "/proof/v1/",
-        "/session/v1/",
-        "/internal/foundation/v1/",
-        "arcforges.proof.v1",
-        "PipelineProbe",
-        "FOUNDATION_PROOF",
-        "PROOF_OPERATOR",
-        "cloud.readiness.v1",
-        "proofRouteTable",
-        "eng/verification",
-        "WAKE_QUEUE",
-        "JOB_COORDINATOR",
-    ];
-
     [Fact]
     public void TheProductionEntryImportsNoProofOnlyModule()
     {

@@ -29,9 +29,10 @@ const environments: [string, Environment][] = [
 const modes = new Set(["official-hosted", "self-hosted"]);
 
 // The https form of the center's public base URL rule (ParsePublicBaseURL in center/internal/config/urls.go): an absolute
-// https URL with a lowercase DNS host, an optional port from 1 to 65535 and an optional path of clean segments without a
-// trailing slash; no user information, query, fragment or percent-encoding. The center's own http exception (a loopback host
-// in self-hosted mode) never applies to a deployed Worker environment.
+// https URL with a lowercase DNS host, an optional port from 1 to 65535 that is not the scheme's default 443 (a browser's Origin
+// leaves the default port out, so a value that spells it could never equal an origin) and an optional path of clean segments
+// without a trailing slash; no user information, query, fragment or percent-encoding. The center's own http exception (a
+// loopback host in self-hosted mode) never applies to a deployed Worker environment.
 const baseUrl =
   /^https:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::([1-9][0-9]{0,4}))?((?:\/[A-Za-z0-9._~-]+)*)$/u;
 
@@ -41,6 +42,7 @@ function baseUrlProblem(value: unknown): string | undefined {
   const match = baseUrl.exec(value);
   if (!match) return "is not an https URL with a lowercase host and a clean path";
   if (match[2] !== undefined && Number(match[2]) > 65535) return "has a port above 65535";
+  if (match[2] === "443") return "spells the default port 443";
   const segments = (match[3] ?? "").split("/").slice(1);
   if (segments.some((segment) => segment === "." || segment === ".."))
     return "has a dot segment in its path";
@@ -103,6 +105,7 @@ test("the configuration rule refuses a missing or invalid mode or base URL", () 
     "https://arcforges.com/a/../b",
     "https://arcforges.com:0/api",
     "https://arcforges.com:65536/api",
+    "https://arcforges.com:443/api",
     "arcforges.com/api",
     " https://arcforges.com/api",
   ])
