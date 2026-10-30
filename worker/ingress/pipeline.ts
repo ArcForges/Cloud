@@ -238,8 +238,10 @@ export async function handleApiRequest(
       // Container wait that long.
       coldTimer = setTimeout(() => controller.abort(coldStartError), coldStartBudgetMs);
     }
+    // redirect "manual": the platform's fetch follows a redirect unless told not to. The center never redirects an API call, and
+    // one that did would be refused here as a reply that is not a message, not followed to a path the Worker never named.
     const operation = env.CLOUD_CONTAINER.getByName(route.instance).fetch(
-      new Request(target, { method: request.method, headers, body, signal }),
+      new Request(target, { method: request.method, headers, body, signal, redirect: "manual" }),
     );
     // A late response from an uncooperative binding must not leave a body open.
     void operation.then(

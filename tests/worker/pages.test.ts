@@ -26,6 +26,7 @@ import {
   type PageRoute,
 } from "../../worker/tables/center-tables.generated.ts";
 import { sessionTokenPattern } from "../../worker/tables/cloud-tables.generated.ts";
+import { platformFetch } from "./support/platform-fetch.ts";
 
 const origin = "https://proof.example.test";
 const handle = "A".repeat(43);
@@ -79,7 +80,8 @@ function bindings(
         return {
           async fetch(request: Request) {
             seen.push({ request, body: new Uint8Array(await request.clone().arrayBuffer()) });
-            return reply(request);
+            // The platform follows a redirect unless the request says redirect "manual" (see support/platform-fetch.ts).
+            return platformFetch(reply)(request);
           },
         };
       },
@@ -158,6 +160,37 @@ async function replyOf(row: PageRoute, centerAnswer: Response): Promise<Response
   const { env } = bindings(() => centerAnswer);
   return routeRequest(call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }), env);
 }
+
+test("the Container request says redirect manual, so the center's 303 reaches the browser instead of the page it leads to (H-1)", async () => {
+  // Every route, every method: the Request the Container stub receives is told not to follow a redirect.
+  for (const row of pageRoutes) {
+    const { env, seen } = bindings(() => jsonOk());
+    await (
+      await routeRequest(call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }), env)
+    ).arrayBuffer();
+    assert.equal(seen.length, 1, `${row.method} ${row.path} reached the Container`);
+    assert.equal(seen[0]?.request.redirect, "manual", `${row.method} ${row.path}`);
+  }
+  // The hosted finding: a page without a session is the center's 303 to the sign-in page. A stand-in that, like the platform, follows
+  // a redirect it was not forbidden to follow turns it into a 404 of a path the center does not serve, which the handler refuses.
+  for (const row of pageRoutes.filter((item) => item.redirects)) {
+    const location = "/api/account/sign-in#return=%2Fapi%2Faccount%2Fpasskeys";
+    const reply = await replyOf(row, centerReply(303, { headers: { location } }));
+    assert.equal(reply.status, 303, row.path);
+    assert.equal(reply.headers.get("location"), location, row.path);
+    assert.equal(reply.headers.get("cache-control"), exactHeaders["cache-control"], row.path);
+  }
+  // The stand-in follows when the option is missing: this is what made every protected page answer 503 on proof.
+  const platform = platformFetch(() =>
+    centerReply(303, { headers: { location: "/api/account/sign-in" } }),
+  );
+  assert.equal((await platform(new Request("http://container/api/account/passkeys"))).status, 404);
+  assert.equal(
+    (await platform(new Request("http://container/api/account/passkeys", { redirect: "manual" })))
+      .status,
+    303,
+  );
+});
 
 test("the generated page table is what the pages' contract names", () => {
   assert.deepEqual(Object.fromEntries(Object.entries(pageSecurityHeaders)), exactHeaders);

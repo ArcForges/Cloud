@@ -5,6 +5,7 @@ import { coldStartBudgetMs } from "../../worker/ingress/routes.ts";
 import { trailerFrame } from "../../worker/ingress/io.ts";
 import { proofRouteTable } from "../../worker/ingress/proof-table.ts";
 import { routeRequest as routeWith, type CloudBindings } from "../../worker/router.ts";
+import { platformFetch } from "./support/platform-fetch.ts";
 
 // The proof methods are routed by the proof entry's table, and only when the proof flag is set (CLOUD.84 D1).
 const routeRequest = (
@@ -289,6 +290,28 @@ test("only status headers and the Worker's own headers are returned from the Con
   assert.equal(response.headers.get("content-type"), "application/grpc-web");
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), okReply);
+});
+
+test("the Container request of an API call says redirect manual: a redirect is refused, never followed to what it leads to (H-1)", async () => {
+  // Hello is the unary route that needs no credential; the proof entry's table is not what is under test.
+  const followedReply = new Response(okReply, {
+    headers: { "content-type": "application/grpc-web" },
+  });
+  const platform = platformFetch(
+    () => new Response(null, { status: 303, headers: { location: "http://container/elsewhere" } }),
+    () => followedReply.clone(),
+  );
+  const { env, seen } = bindings(async (request) => platform(request));
+  const response = await routeRequest(call(hello), env);
+  assert.equal(seen.requests.length, 1);
+  assert.equal(seen.requests[0]?.redirect, "manual");
+  // The 303 is a non-200 reply of the Container: the call is refused. The 200 of the address it leads to never reaches the client.
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  assert.notDeepEqual(bytes, okReply);
+  // A health read (the same code path) says it as well.
+  const unary = bindings(async () => new Response(okReply));
+  await (await routeRequest(call(hello), unary.env)).arrayBuffer();
+  assert.equal(unary.seen.requests[0]?.redirect, "manual");
 });
 
 test("a unary reply that is not exactly one message and a status is never passed on", async () => {

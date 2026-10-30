@@ -20,6 +20,7 @@ import { loadKeys, verificationKeys } from "../../worker/private/hmac-settings.t
 import { verify } from "../../worker/private/signing.ts";
 import { manifestHash } from "../../worker/storage/plans.generated.ts";
 import { createFakeR2 } from "./support/fake-r2.ts";
+import { platformFetch } from "./support/platform-fetch.ts";
 
 const operatorToken = "t".repeat(40);
 const w2c = base64UrlEncode(new Uint8Array(32).fill(2));
@@ -39,10 +40,14 @@ function environment(
   const stub: ContainerStubLike = {
     async fetch(request) {
       recorded.push({ request, body: new Uint8Array(await request.clone().arrayBuffer()) });
-      return new Response(reply.body ?? "{}", {
-        status: reply.status ?? 200,
-        headers: reply.headers ?? { "content-type": "application/json" },
-      });
+      // The platform follows a redirect unless the request says redirect "manual" (support/platform-fetch.ts).
+      return platformFetch(
+        () =>
+          new Response(reply.body ?? "{}", {
+            status: reply.status ?? 200,
+            headers: reply.headers ?? { "content-type": "application/json" },
+          }),
+      )(request);
     },
     stop() {
       stopped++;
@@ -187,6 +192,30 @@ test("an operation is signed with the Worker-to-Container key over the exact pat
   assert.equal(verification.ok, true);
   // The operator token never travels to the Container.
   assert.equal(call.request.headers.get("authorization"), null);
+});
+
+test("every request toward the Container says redirect manual, so a redirect is relayed as the Container's answer and never followed (H-1)", async () => {
+  const redirect = { status: 303, headers: { location: "http://container/elsewhere" } };
+  // A signed operation (postSigned) and a session route (a plain forward): both name the option, both relay the 303.
+  const operation = environment(redirect);
+  const signed = await handleProof(operator("/proof/v1/guard", {}), operation.env);
+  assert.equal(signed.status, 303, "the redirect itself, not what it leads to (a 404)");
+  assert.equal((operation.recorded[0] as Recorded).request.redirect, "manual");
+  const session = environment(redirect);
+  const bootstrap = await handleProof(
+    new Request("https://proof.example/session/v1/bootstrap", {
+      headers: { cookie: "__Host-af_session=abc", origin: "https://account.proof.arcforges.test" },
+    }),
+    session.env,
+  );
+  assert.equal(bootstrap.status, 303);
+  assert.equal((session.recorded[0] as Recorded).request.redirect, "manual");
+  const logout = await handleProof(
+    new Request("https://proof.example/session/v1/logout", { method: "POST" }),
+    session.env,
+  );
+  assert.equal(logout.status, 303);
+  assert.equal((session.recorded[1] as Recorded).request.redirect, "manual");
 });
 
 test("the Container status and body are relayed, a Container failure is a 502 or 503", async () => {

@@ -64,6 +64,8 @@ export async function postSigned(
       headers: { ...headers, "content-type": "application/json" },
       body: body as BodyInit,
       signal: options.signal,
+      // A redirect is the Container's answer, never followed to another address.
+      redirect: "manual",
     }),
   );
   const reader = response.body?.getReader();
