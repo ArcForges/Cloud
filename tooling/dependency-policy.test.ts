@@ -585,10 +585,12 @@ test("the repository audit refuses a package.json the policy does not admit (the
   try {
     git("init", "-q", "-b", "main");
     // The policy and its reviews as they are, and every manifest the policy admits (their content is not read before the check).
-    for (const file of execFileSync("git", ["ls-files", "eng/policy"], {
-      cwd: root,
-      encoding: "utf8",
-    })
+    // (listed as the audit lists the repository: tracked and new files, so that the test does not depend on what is committed)
+    for (const file of execFileSync(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "eng/policy"],
+      { cwd: root, encoding: "utf8" },
+    )
       .split("\n")
       .filter(Boolean))
       write(file, readFileSync(path.join(root, file), "utf8"));
