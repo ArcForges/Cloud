@@ -14,7 +14,14 @@
 // run never loses the owner's key; nothing in a log, a report or an error message is a token, a key or a cookie value.
 import { pageSecurityHeaders } from "../../../worker/tables/center-tables.generated.ts";
 import type { BootstrapRecord } from "../proof-bootstrap.ts";
-import { type CredentialStore, credentialSecrets } from "./credentials.ts";
+import {
+  type CredentialStore,
+  type SavedCredential,
+  type Transport,
+  credentialSecrets,
+  nextTransport,
+  withoutTransport,
+} from "./credentials.ts";
 import type { Authenticator, Browser, CookieView, Navigation, Tab } from "./driver.ts";
 import { ids, pages, persistBefore, selectors, sessionCookie } from "./selectors.ts";
 
@@ -95,6 +102,8 @@ export interface World {
   problemsSeen: Map<Tab, number>;
   /** Credential IDs removed from the account (they leave the saved file with the next write). */
   dropped: Set<string>;
+  /** Whether this run wrote the credential file (the first run does, before the enrollment request leaves the browser). */
+  createdCredentialFile: boolean;
 }
 
 export function newWorld(
@@ -130,6 +139,7 @@ export function newWorld(
     tabs: [],
     problemsSeen: new Map(),
     dropped: new Set(),
+    createdCredentialFile: false,
   };
 }
 
@@ -206,6 +216,7 @@ async function step<T>(
   world.write(`  ${name} [${label}]`);
   for (;;) {
     record.attempts += 1;
+    const changesBefore = totalChanges(world);
     let outcome: { value: T } | { error: unknown };
     try {
       outcome = { value: await run() };
@@ -217,6 +228,15 @@ async function step<T>(
       .filter((seconds): seconds is number => seconds !== undefined);
     if (limited.length > 0) {
       newProblems(world);
+      // The edge limiter answers before the center sees a request, so a step may start again from its navigation, unless an
+      // earlier request of the attempt already changed something: a step that removes a passkey cannot find it a second time.
+      if (totalChanges(world) > changesBefore) {
+        record.note = "rate limited (429) after a change was made";
+        record.milliseconds = world.now().getTime() - started;
+        throw new AcceptanceError(
+          `Step "${name}" was rate limited (429) after a request of it had changed something; it is not repeated.`,
+        );
+      }
       if (record.attempts >= maxAttempts) {
         record.note = "rate limited (429) on every attempt";
         record.milliseconds = world.now().getTime() - started;
@@ -238,9 +258,31 @@ async function step<T>(
     if (problems.length > 0)
       reason = `the browser reported ${problems.length} problem(s): ${problems.join("; ")}`;
     else if ("error" in outcome && outcome.error instanceof Error) reason = outcome.error.message;
+    // What the pages say about the failure (fixed texts of the center's refusals) is worth more than a timeout.
+    reason += await pageReason(world);
     record.note = world.redactor.redact(reason);
     throw new AcceptanceError(`Step "${name}" failed: ${record.note}`);
   }
+}
+
+function totalChanges(world: World): number {
+  return world.tabs.reduce((sum, tab) => sum + tab.changes(), 0);
+}
+
+/** The path and the error summary of each tab that shows one: fixed texts of the pages, never a secret. */
+async function pageReason(world: World): Promise<string> {
+  const notes: string[] = [];
+  for (const tab of world.tabs) {
+    try {
+      const summary = (await tab.attributes(`#${ids.errorSummary}`, "hidden"))[0];
+      if (summary !== null) continue;
+      const text = await tab.text(selectors.errorText);
+      if (text) notes.push(`${new URL(tab.url()).pathname} says "${text.slice(0, 200)}"`);
+    } catch {
+      // A tab that cannot be read adds nothing.
+    }
+  }
+  return notes.length > 0 ? ` (page: ${notes.join("; ")})` : "";
 }
 
 /** Polls until the check holds; the wait is counted in polls so that a fake clock needs no support. */
@@ -261,29 +303,46 @@ async function until(
 // ---------------------------------------------------------------------------------------------------------------------------
 // One browser tab with its virtual authenticator
 
+/** A virtual authenticator of the tab, the transport it was added with and the transport its credential is saved under. */
+interface Slot {
+  authenticator: Authenticator;
+  saveAs: Transport;
+}
+
+/**
+ * One browser tab and its virtual authenticators: ONE PER CREDENTIAL. Chromium keeps one discoverable credential per relying party
+ * and user handle on an authenticator (a second replaces the first, and addCredential refuses it), and the account's passkeys all
+ * share one user handle. The first credential lives on the single `internal` authenticator, every further one on its own with
+ * another transport, which the saved file records.
+ */
 class Actor {
   readonly world: World;
   readonly tab: Tab;
-  authenticator: Authenticator | undefined;
+  slots: Slot[] = [];
+  /** Credentials taken off the tab for the registration ceremony (nothing the page excludes may be held then). */
+  parked: SavedCredential[] = [];
+  /** The virtual environment is gone (AR-23): the saved file is no longer this tab's to write. */
+  virtualGone = false;
 
-  constructor(world: World, tab: Tab, authenticator: Authenticator) {
+  constructor(world: World, tab: Tab) {
     this.world = world;
     this.tab = tab;
-    this.authenticator = authenticator;
   }
 
-  /** Opens a tab in a new browser context with a virtual authenticator that holds the saved credentials (if there are any). */
+  /**
+   * Opens a tab in a new browser context. It gets one virtual authenticator for each saved credential, or, with none saved, one empty
+   * `internal` authenticator for the enrollment.
+   */
   static async open(world: World): Promise<Actor> {
     const tab = await world.browser.newTab();
     world.tabs.push(tab);
-    const authenticator = await tab.addAuthenticator();
+    const actor = new Actor(world, tab);
     if (world.store.exists()) {
       const saved = world.store.load();
       world.redactor.add(...credentialSecrets(saved.credentials));
-      for (const credential of saved.credentials) await authenticator.addCredential(credential);
-    }
-    const actor = new Actor(world, tab, authenticator);
-    // Before a POST that carries a new credential or an assertion leaves the browser, the authenticator's credentials (with
+      for (const credential of saved.credentials) await actor.attach(credential);
+    } else await actor.attachEmpty();
+    // Before a POST that carries a new credential or an assertion leaves the browser, the credentials of the authenticators (with
     // their counters) are saved. If saving fails, the request is stopped.
     await tab.beforePost(
       Object.values(persistBefore).map((path) => `${basePath(world)}${path}`),
@@ -292,10 +351,54 @@ class Actor {
     return actor;
   }
 
+  /** Adds the credential on an authenticator of its own. */
+  async attach(credential: SavedCredential): Promise<void> {
+    const authenticator = await this.tab.addAuthenticator(credential.transport);
+    await authenticator.addCredential(withoutTransport(credential));
+    this.slots.push({ authenticator, saveAs: credential.transport });
+  }
+
+  /** Adds an empty authenticator that will hold a credential saved under `saveAs`. */
+  async attachEmpty(
+    saveAs: Transport = "internal",
+    transport: Transport = "internal",
+  ): Promise<Slot> {
+    const slot = { authenticator: await this.tab.addAuthenticator(transport), saveAs };
+    this.slots.push(slot);
+    return slot;
+  }
+
+  /** Removes every authenticator of the tab. */
+  async removeAll(): Promise<void> {
+    for (const slot of this.slots) await slot.authenticator.remove();
+    this.slots = [];
+  }
+
+  /** The credentials the authenticators hold, with the counters they have now. */
+  async held(): Promise<SavedCredential[]> {
+    const held: SavedCredential[] = [];
+    for (const slot of this.slots)
+      for (const credential of await slot.authenticator.credentials())
+        held.push({ ...credential, transport: slot.saveAs });
+    return held;
+  }
+
+  /** Every credential this tab knows: the held ones and those parked for a ceremony. */
+  async known(): Promise<SavedCredential[]> {
+    const held = await this.held();
+    return [
+      ...held,
+      ...this.parked.filter(
+        (p) => !held.some((credential) => credential.credentialId === p.credentialId),
+      ),
+    ];
+  }
+
+  /** Writes the credentials of this tab to the saved file: the union over its authenticators. */
   async persist(): Promise<void> {
-    const { authenticator, world } = this;
-    if (authenticator === undefined) return;
-    const exported = (await authenticator.credentials()).filter(
+    const { world } = this;
+    if (this.virtualGone) return;
+    const exported = (await this.known()).filter(
       (credential) => !world.dropped.has(credential.credentialId),
     );
     world.redactor.add(...credentialSecrets(exported));
@@ -311,9 +414,49 @@ class Actor {
         },
         world.now(),
       );
+      world.createdCredentialFile = true;
     }
     const persisted = world.report.facts.credentialWrites;
     world.report.facts.credentialWrites = (typeof persisted === "number" ? persisted : 0) + 1;
+  }
+
+  /**
+   * Runs the page's passkey creation on a fresh authenticator. The page sends every passkey of the account in excludeCredentials, so
+   * a held credential would refuse the ceremony (InvalidStateError), and a held credential of the same user handle would be replaced.
+   * Every authenticator is therefore taken off (their credentials parked, counters read first), the ceremony runs on one empty
+   * authenticator, and afterwards each credential, the new one included, goes back on an authenticator of its own.
+   */
+  async registerFresh(ceremony: () => Promise<void>): Promise<SavedCredential> {
+    this.parked = await this.held();
+    const saveAs = nextTransport(this.parked);
+    expect(
+      saveAs !== undefined,
+      "The saved file holds as many credentials as there are transports.",
+    );
+    await this.removeAll();
+    const fresh = await this.attachEmpty(saveAs, "internal");
+    let created: SavedCredential | undefined;
+    try {
+      await ceremony();
+      const made = await fresh.authenticator.credentials();
+      expect(made.length === 1, "The authenticator did not make exactly one new credential.");
+      created = { ...(made[0] as SavedCredential), transport: saveAs };
+    } finally {
+      // Whatever happened, every credential goes back on an authenticator of its own.
+      await this.removeAll();
+      const parked = this.parked;
+      this.parked = [];
+      for (const credential of [...parked, ...(created ? [created] : [])])
+        await this.attach(credential);
+    }
+    return created;
+  }
+
+  /** Takes the virtual environment away (AR-23): the browser then reaches the real authenticators. */
+  async goReal(): Promise<void> {
+    await this.removeAll();
+    await this.tab.disableVirtual();
+    this.virtualGone = true;
   }
 
   /** Opens a page, expects the center's headers and the page's heading. */
@@ -382,13 +525,6 @@ function passkeyName(world: World): string {
   return `acceptance-${world.now().toISOString().replace(/[-:T]/gu, "").slice(0, 14)}`;
 }
 
-/** The credential IDs the authenticator holds. */
-async function credentialIds(actor: Actor): Promise<string[]> {
-  return (
-    (await actor.authenticator?.credentials())?.map((credential) => credential.credentialId) ?? []
-  );
-}
-
 export async function runAcceptance(world: World): Promise<void> {
   const returning = world.store.exists();
   world.report.mode = returning ? "returning" : "enroll";
@@ -417,13 +553,26 @@ export async function runAcceptance(world: World): Promise<void> {
     await step(world, "enroll the owner with the bootstrap token", mockedLabel, async () => {
       const bootstrap = world.bootstrap;
       expect(bootstrap !== undefined, "There is no bootstrap.");
+      // A start from nothing: an attempt that was refused has left a credential on the authenticator and, maybe, in the file.
+      await a.removeAll();
+      await a.attachEmpty();
       await a.visit(pages.bootstrap, "Create the owner account");
       await a.enabled(selectors.create);
       // The token is typed into the page's field from this process; it is in no URL, no log and no report.
       await a.tab.setValue(selectors.token, bootstrap.token);
       await a.tab.setValue(selectors.displayName, world.displayName);
-      await a.tab.click(selectors.create);
-      await a.tab.waitForPath(pagePathname(world, pages.passkeys), world.timeoutMs);
+      try {
+        await a.tab.click(selectors.create);
+        await a.tab.waitForPath(pagePathname(world, pages.passkeys), world.timeoutMs);
+      } catch (error) {
+        // The enrollment ended without an account: the credential saved for it belongs to nothing, and a file left behind would
+        // make the next run "returning" and never use the bootstrap token.
+        if (world.createdCredentialFile) {
+          world.store.discard();
+          world.createdCredentialFile = false;
+        }
+        throw error;
+      }
       expect(
         !a.tab.url().includes("token") && !a.tab.url().includes(bootstrap.token),
         "The token reached the address.",
@@ -470,7 +619,6 @@ export async function runAcceptance(world: World): Promise<void> {
     async () => {
       await a.visit(pages.passkeys, "Account and passkeys");
       before = await a.rows();
-      const known = await credentialIds(a);
       await a.tab.setValue(selectors.newPasskeyName, name);
       await a.tab.click(selectors.addPasskey);
       await a.tab.waitForSelector(selectors.createPasskey, world.timeoutMs);
@@ -478,8 +626,20 @@ export async function runAcceptance(world: World): Promise<void> {
         (await a.tab.text(selectors.heading)) === "Create your passkey",
         "No registration page after the step-up.",
       );
-      await a.tab.click(selectors.createPasskey);
-      await a.tab.waitForPath(pagePathname(world, pages.passkeys), world.timeoutMs);
+      const created = await a.registerFresh(async () => {
+        await a.tab.click(selectors.createPasskey);
+        await a.tab.waitForPath(pagePathname(world, pages.passkeys), world.timeoutMs);
+      });
+      // Every credential is back on an authenticator of its own: what the tab holds is what the saved file holds.
+      const held = (await a.held()).map((credential) => credential.credentialId).sort();
+      const saved = world.store
+        .load()
+        .credentials.map((credential) => credential.credentialId)
+        .sort();
+      expect(
+        held.length === saved.length && held.every((id, index) => id === saved[index]),
+        "After the registration the tab does not hold the credentials of the saved file.",
+      );
       await until(
         world,
         "the new passkey in the list",
@@ -489,9 +649,7 @@ export async function runAcceptance(world: World): Promise<void> {
         (await a.tab.texts(selectors.rowHeaders)).includes(name),
         "The new passkey is not listed by its name.",
       );
-      const added = (await credentialIds(a)).filter((id) => !known.includes(id));
-      expect(added.length === 1, "The authenticator did not make exactly one new credential.");
-      extraId = added[0] ?? "";
+      extraId = created.credentialId;
       world.redactor.add(extraId);
       world.report.facts.passkeysAfterAdd = before + 1;
     },
@@ -642,10 +800,8 @@ export async function runRealAuthenticator(world: World): Promise<void> {
     realLabel,
     async () => {
       // From here on the browser reaches the real authenticators: the virtual one is removed and the virtual environment is off.
-      const virtual = actor.authenticator;
-      expect(virtual !== undefined, "There is no virtual authenticator to remove.");
-      await virtual.disable();
-      actor.authenticator = undefined;
+      expect(actor.slots.length > 0, "There is no virtual authenticator to remove.");
+      await actor.goReal();
       world.write(
         "    >>> Windows Hello asks you to confirm now (PIN, fingerprint or face). The script waits.",
       );

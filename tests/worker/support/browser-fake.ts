@@ -2,10 +2,21 @@
 // A stand-in for the center's account pages and a browser, for the tests of the acceptance flow (AF-CTR-03 A2). It is deliberately
 // strict about what matters to the flow: the bootstrap token works once, an assertion's counter must exceed the stored one (the
 // F14 counter rule), every session is its own cookie, a step-up is needed before the changes that need one, and the saved
-// credential must exist before the request that carries a new credential or an assertion reaches the "server". It is no evidence
-// about the real center or a real browser; it checks the script's logic.
+// credential must exist before the request that carries a new credential or an assertion reaches the "server".
+//
+// The virtual authenticators follow Chromium's rules, which the real pinned Chromium 153 showed (the first design of the script
+// ignored them and passed these tests while failing in the real browser):
+//   - the page excludes every passkey of the account in the creation options, and a creation refuses (InvalidStateError, which the
+//     page shows as "That passkey is already registered.") when ANY authenticator of the tab holds an excluded credential;
+//   - a discoverable credential of the same relying party and user handle REPLACES the one an authenticator holds (all passkeys of
+//     an account share one user handle), and WebAuthn.addCredential of such a second credential is refused;
+//   - a tab has at most one `internal` authenticator; the other transports may repeat.
+// It is no evidence about the real center or a real browser; it checks the script's logic.
 import { pageSecurityHeaders } from "../../../worker/tables/center-tables.generated.ts";
-import type { VirtualCredential } from "../../../eng/verification/browser/credentials.ts";
+import type {
+  Transport,
+  VirtualCredential,
+} from "../../../eng/verification/browser/credentials.ts";
 import type {
   Authenticator,
   Browser,
@@ -56,6 +67,14 @@ export interface FakeOptions {
   windowsHello?: boolean;
   /** Make the "real" create/get use the virtual authenticator even after it is removed (a broken disable). */
   brokenDisable?: boolean;
+  /** The center refuses the enrollment request itself (a lost or refused POST). */
+  refuseEnrollment?: boolean;
+  /** The edge limiter answers the first enrollment POST with a 429 (the center never sees it). */
+  limitEnrollmentOnce?: boolean;
+  /** The edge limiter answers 429 to the first navigation after a passkey was removed. */
+  limitAfterRemoval?: boolean;
+  /** The page's creation fails whatever the authenticators hold (the page shows its "already registered" text). */
+  pageRefusesCreation?: boolean;
 }
 
 export class FakeCenter {
@@ -66,8 +85,13 @@ export class FakeCenter {
   readonly sessions = new Map<string, { revoked: boolean; stepUps: number }>();
   tokenSpent = false;
   ownerExists = false;
+  /** Every passkey of an account has this user handle (the pages register them so). */
+  userHandle = b64("owner-user-handle");
+  enrollmentLimited = false;
   clockSeconds = 1_800_000_000;
   readonly options: FakeOptions;
+  /** The next navigation is answered 429 (set by a change when limitAfterRemoval is on). */
+  limitNext = false;
   /** Called when a POST leaves the browser (after the script's hook ran), before the "server" acts on it. */
   observe: (event: string, tab: FakeTab) => void = () => {};
 
@@ -94,37 +118,72 @@ export class FakeCenter {
   }
 }
 
-class FakeAuthenticator implements Authenticator {
+export class FakeAuthenticator implements Authenticator {
   readonly held: VirtualCredential[] = [];
-  removed = false;
+  readonly transport: Transport;
+  private readonly tab: FakeTab | undefined;
   exportNothing = false;
+
+  constructor(transport: Transport, tab?: FakeTab) {
+    this.transport = transport;
+    this.tab = tab;
+  }
 
   async credentials(): Promise<VirtualCredential[]> {
     if (this.exportNothing) return [];
     return this.held.map((credential) => ({ ...credential }));
   }
   async addCredential(credential: VirtualCredential): Promise<void> {
+    const stray = Object.keys(credential).filter(
+      (key) =>
+        ![
+          "credentialId",
+          "isResidentCredential",
+          "rpId",
+          "privateKey",
+          "userHandle",
+          "signCount",
+          "largeBlob",
+        ].includes(key),
+    );
+    if (stray.length > 0) throw new Error(`Invalid parameters: ${stray.join(", ")}`);
+    if (
+      this.held.some(
+        (item) => item.rpId === credential.rpId && item.userHandle === credential.userHandle,
+      )
+    )
+      throw new Error("An error occurred trying to create the credential");
     this.held.push({ ...credential });
   }
-  async disable(): Promise<void> {
-    this.removed = true;
+  async remove(): Promise<void> {
+    this.tab?.dropAuthenticator(this);
   }
-  create(rpId: string): VirtualCredential {
+  /** A creation: refused when this authenticator holds an excluded credential; a credential of the same user handle is replaced. */
+  create(rpId: string, userHandle: string, excluded: readonly string[]): VirtualCredential {
+    if (this.held.some((item) => excluded.includes(item.credentialId))) {
+      const error = new Error(
+        "The user attempted to register an authenticator that contains one of the credentials already registered with the relying party.",
+      );
+      error.name = "InvalidStateError";
+      throw error;
+    }
+    for (let index = this.held.length - 1; index >= 0; index -= 1)
+      if (this.held[index]?.rpId === rpId && this.held[index]?.userHandle === userHandle)
+        this.held.splice(index, 1);
     const credential: VirtualCredential = {
       credentialId: b64(next("cred-")),
       isResidentCredential: true,
       rpId,
       privateKey: b64(next("private-key-")),
-      userHandle: b64(next("user-")),
+      userHandle,
       signCount: 0,
     };
     this.held.push(credential);
     return credential;
   }
-  assert(preferred?: string): VirtualCredential {
-    const credential = this.held.find((item) => item.credentialId === preferred) ?? this.held[0];
-    if (!credential) throw new Error("no credential");
-    credential.signCount += 1;
+  assert(): VirtualCredential | undefined {
+    const credential = this.held[0];
+    if (credential) credential.signCount += 1;
     return credential;
   }
 }
@@ -138,9 +197,14 @@ type Page =
 export class FakeTab implements Tab {
   readonly center: FakeCenter;
   index = 0;
-  readonly authenticatorModel = new FakeAuthenticator();
+  /** The virtual authenticators of the tab now (Chromium's WebAuthn environment of the page). */
+  authenticators: FakeAuthenticator[] = [];
   /** Windows Hello: its own credentials, not exported. */
-  readonly hello = new FakeAuthenticator();
+  readonly hello = new FakeAuthenticator("internal");
+  /** The virtual environment is enabled (an authenticator was added) and not yet switched off. */
+  private virtualEnabled = false;
+  private errorText = "";
+  private changeCount = 0;
   private handle: string | undefined;
   private currentUrl = "about:blank";
   private page: Page = { kind: "none" };
@@ -149,7 +213,6 @@ export class FakeTab implements Tab {
   private pendingName = "";
   private readonly seenProblems: string[] = [];
   private retryAfter: number | undefined;
-  private authenticatorActive = false;
   readonly secretsSeen: string[] = [];
 
   constructor(center: FakeCenter) {
@@ -165,16 +228,37 @@ export class FakeTab implements Tab {
     return record && !record.revoked ? record : undefined;
   }
 
-  private virtualAvailable(): boolean {
-    return (
-      this.authenticatorActive &&
-      (!this.authenticatorModel.removed || this.center.options.brokenDisable === true)
-    );
+  dropAuthenticator(authenticator: FakeAuthenticator): void {
+    // A broken disable leaves the virtual authenticators answering after the script removed them.
+    if (this.center.options.brokenDisable === true) return;
+    this.authenticators = this.authenticators.filter((item) => item !== authenticator);
+  }
+
+  /** The credential an assertion uses: the first virtual authenticator that holds one, else Windows Hello when it is the only way. */
+  private assertWith(): { credential: VirtualCredential; real: boolean } {
+    for (const authenticator of this.authenticators) {
+      const credential = authenticator.assert();
+      if (credential) return { credential, real: false };
+    }
+    if (
+      this.authenticators.length === 0 &&
+      !this.virtualEnabled &&
+      this.center.options.windowsHello === true
+    ) {
+      const credential = this.hello.assert();
+      if (credential) return { credential, real: true };
+    }
+    throw new Error("no credential");
   }
 
   async goto(url: string): Promise<Navigation> {
     const target = new URL(url);
     const options = this.center.options;
+    if (this.center.limitNext) {
+      this.center.limitNext = false;
+      this.retryAfter = 5;
+      return { status: 429, headers: {} };
+    }
     if (options.rateLimit && options.rateLimit.remaining > 0) {
       options.rateLimit.remaining -= 1;
       this.retryAfter = options.rateLimit.retryAfter;
@@ -227,7 +311,7 @@ export class FakeTab implements Tab {
   private async stepUp(): Promise<void> {
     const record = this.session();
     if (!record) throw new Error("no session for a step-up");
-    const credential = this.authenticatorModel.assert();
+    const { credential } = this.assertWith();
     await this.post(persistBefore.stepUp);
     this.center.assertion(credential.credentialId, credential.signCount);
     record.stepUps += 1;
@@ -248,10 +332,26 @@ export class FakeTab implements Tab {
     const host = center.host;
     if (selector === selectors.create && this.page.kind === "bootstrap") {
       const token = this.values.get(selectors.token);
-      const credential = this.authenticatorModel.create(host.split(":")[0] ?? host);
+      const authenticator = this.authenticators[0];
+      if (!authenticator) throw new Error("no authenticator");
+      // Every enrollment ceremony gets a user handle of its own from the center; the account keeps the one of its creation.
+      const userHandle = b64(next("enrolled-user-"));
+      const credential = authenticator.create(host.split(":")[0] ?? host, userHandle, []);
       await this.post(persistBefore.enrollment);
-      if (token !== center.options.token || center.tokenSpent || center.ownerExists)
+      if (center.options.limitEnrollmentOnce && !center.enrollmentLimited) {
+        center.enrollmentLimited = true;
+        this.retryAfter = 5;
+        return;
+      }
+      if (
+        token !== center.options.token ||
+        center.tokenSpent ||
+        center.ownerExists ||
+        center.options.refuseEnrollment === true
+      )
         throw new Error("the bootstrap was refused");
+      this.changeCount += 1;
+      center.userHandle = userHandle;
       center.tokenSpent = true;
       center.ownerExists = true;
       center.passkeys.push({
@@ -268,9 +368,7 @@ export class FakeTab implements Tab {
       return;
     }
     if (selector === selectors.signIn && this.page.kind === "sign-in") {
-      const real = !this.virtualAvailable() && center.options.windowsHello === true;
-      const source = real ? this.hello : this.authenticatorModel;
-      const credential = source.assert();
+      const { credential, real } = this.assertWith();
       await this.post(persistBefore.signIn);
       const used = center.assertion(credential.credentialId, credential.signCount);
       if (real && center.options.helloNotMarked) used.lastUsed = null;
@@ -288,6 +386,7 @@ export class FakeTab implements Tab {
       const record = this.session();
       if (record && !keep) record.revoked = true;
       if (!keep) this.handle = undefined;
+      this.changeCount += 1;
       this.navigate(pages.signIn, "sign-in");
       return;
     }
@@ -298,12 +397,29 @@ export class FakeTab implements Tab {
       return;
     }
     if (selector === selectors.createPasskey && this.page.kind === "register") {
-      const real = !this.virtualAvailable() && center.options.windowsHello === true;
-      if (!real && !this.virtualAvailable()) throw new Error("no authenticator");
-      const credential = (real ? this.hello : this.authenticatorModel).create(
-        host.split(":")[0] ?? host,
-      );
+      const real =
+        this.authenticators.length === 0 &&
+        !this.virtualEnabled &&
+        center.options.windowsHello === true;
+      const target = real ? this.hello : this.authenticators[0];
+      if (!target) throw new Error("no authenticator");
+      if (center.options.pageRefusesCreation) {
+        this.errorText = "That passkey is already registered.";
+        return;
+      }
+      const excluded = center.passkeys.map((item) => item.id);
+      // The page asks for every passkey of the account to be excluded; an authenticator that holds one refuses the whole creation.
+      if (
+        !real &&
+        this.authenticators.some((a) => a.held.some((item) => excluded.includes(item.credentialId)))
+      ) {
+        this.errorText = "That passkey is already registered.";
+        return;
+      }
+      const credential = target.create(host.split(":")[0] ?? host, center.userHandle, excluded);
       await this.post(persistBefore.newPasskey);
+      this.changeCount += 1;
+      this.errorText = "";
       center.passkeys.push({
         id: credential.credentialId,
         name: this.pendingName,
@@ -322,6 +438,7 @@ export class FakeTab implements Tab {
       );
       if (!other) throw new Error("no other session");
       other[1].revoked = true;
+      this.changeCount += 1;
       return;
     }
     const removal =
@@ -333,6 +450,8 @@ export class FakeTab implements Tab {
       const index = center.passkeys.findIndex((item) => item.name === removal[1]);
       if (index < 0 || center.passkeys.length < 2) throw new Error("cannot remove");
       center.passkeys.splice(index, 1);
+      this.changeCount += 1;
+      if (center.options.limitAfterRemoval) center.limitNext = true;
       return;
     }
     throw new Error(`nothing to click for ${selector} on ${this.page.kind}`);
@@ -361,6 +480,7 @@ export class FakeTab implements Tab {
   }
 
   async text(selector: string): Promise<string | null> {
+    if (selector === selectors.errorText) return this.errorText;
     if (selector !== selectors.heading) return null;
     const headings: Record<string, string> = {
       "sign-in": "Sign in to ArcForges",
@@ -385,6 +505,8 @@ export class FakeTab implements Tab {
 
   async attributes(selector: string, name: string): Promise<(string | null)[]> {
     if (selector === "#signed-in" && name === "hidden") return this.session() ? [null] : [""];
+    if (selector === selectors.errorSummary && name === "hidden")
+      return [this.errorText ? null : ""];
     if (selector === `${selectors.passkeyLastUsed} time` && name === "datetime")
       return this.center.passkeys.flatMap((item) => (item.lastUsed ? [item.lastUsed] : []));
     return [];
@@ -428,10 +550,27 @@ export class FakeTab implements Tab {
     return seconds;
   }
 
-  async addAuthenticator(): Promise<Authenticator> {
-    this.authenticatorActive = true;
-    this.authenticatorModel.exportNothing = this.center.options.exportNothing === true;
-    return this.authenticatorModel;
+  async addAuthenticator(transport: Transport): Promise<Authenticator> {
+    if (
+      transport === "internal" &&
+      this.authenticators.some((item) => item.transport === "internal")
+    )
+      throw new Error("Chrome only supports one internal authenticator per environment");
+    const authenticator = new FakeAuthenticator(transport, this);
+    authenticator.exportNothing = this.center.options.exportNothing === true;
+    this.authenticators.push(authenticator);
+    this.virtualEnabled = true;
+    return authenticator;
+  }
+
+  async disableVirtual(): Promise<void> {
+    if (this.center.options.brokenDisable === true) return;
+    this.authenticators = [];
+    this.virtualEnabled = false;
+  }
+
+  changes(): number {
+    return this.changeCount;
   }
 
   async cookies(): Promise<CookieView[]> {

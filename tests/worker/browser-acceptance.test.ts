@@ -4,7 +4,16 @@
 // run against the real center and a real Chromium happens after the merge, on the Windows host; these tests check the script's
 // logic, never the center.
 import assert from "node:assert/strict";
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -18,13 +27,20 @@ import {
   CredentialStore,
   checkCredential,
   credentialFileName,
+  nextTransport,
   parseCredentialFile,
+  transports,
+  withoutTransport,
 } from "../../eng/verification/browser/credentials.ts";
 import {
   type Launcher,
+  RequestBudget,
+  acceptedChange,
   browsersDirectory,
   chromiumPathProblem,
+  consoleProblem,
   defaultChromiumPath,
+  defaultRequestsPerMinute,
   manifestProblem,
   preflight,
 } from "../../eng/verification/browser/driver.ts";
@@ -40,7 +56,14 @@ import { ids, pages, persistBefore, selectors } from "../../eng/verification/bro
 import { createBootstrapFile, generateBootstrap } from "../../eng/verification/proof-bootstrap.ts";
 import { realMachine } from "../../eng/verification/user-only.ts";
 import { pageRoutes, pageSecurityHeaders } from "../../worker/tables/center-tables.generated.ts";
-import { FakeBrowser, FakeCenter, type FakeOptions } from "./support/browser-fake.ts";
+import {
+  type FakeAuthenticator,
+  FakeBrowser,
+  FakeCenter,
+  type FakeOptions,
+  FakeTab,
+} from "./support/browser-fake.ts";
+import { grants, windowsMachine } from "./support/windows-machine.ts";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const browserDirectory = path.join(root, "eng/verification/browser");
@@ -105,7 +128,7 @@ function scenario(options: Partial<FakeOptions> = {}, tokenOverride?: string): S
       return main(["--pace-ms", "0", ...argv], {
         environment: { PROOF_ACCEPTANCE_DIR: stateDir, PROOF_BOOTSTRAP_DIR: bootstrapDir },
         platform: "win32",
-        home: "C:\\Users\\J7Rdm",
+        home: "C:\\Users\\tester",
         packageDirectory: "C:\\Cloud\\eng\\verification\\browser",
         launcher,
         machine: realMachine(),
@@ -132,11 +155,13 @@ const store = (s: Scenario) => new CredentialStore(s.stateDir);
 test("the first run enrolls the owner, a later run signs in with the saved credential and leaves the account as it was", async () => {
   const s = scenario();
   const saved: { event: string; matches: boolean }[] = [];
+  const registrationFiles: string[][] = [];
+  const shapes: { event: string; browser: number; transports: string[]; counts: number[] }[] = [];
   s.center.observe = (event, tab) => {
     if (!Object.values(persistBefore).includes(event as never)) return;
     // When a POST with a new credential or an assertion leaves the browser, the saved file holds the authenticator's credentials
     // with their counters.
-    const held = tab.authenticatorModel.held;
+    const held = tab.authenticators.flatMap((authenticator) => authenticator.held);
     const file = store(s).exists() ? store(s).load().credentials : [];
     const ok =
       held.length > 0 &&
@@ -149,6 +174,15 @@ test("the first run enrolls the owner, a later run signs in with the saved crede
         ),
       );
     saved.push({ event, matches: ok || s.center.passkeys.some((item) => item.real) });
+    shapes.push({
+      event,
+      browser: tab.index,
+      transports: tab.authenticators.map((authenticator) => authenticator.transport).sort(),
+      counts: tab.authenticators.map((authenticator) => authenticator.held.length),
+    });
+    // The file keeps every credential of the account the run knows, each on a transport of its own.
+    if (event === persistBefore.newPasskey)
+      registrationFiles.push(file.map((credential) => credential.transport).sort());
   };
   assert.equal(await s.run(), 0, s.stderr.join("\n"));
   assert.equal(s.stdout.at(-1), "PASSED");
@@ -174,9 +208,28 @@ test("the first run enrolls the owner, a later run signs in with the saved crede
     saved.some((item) => item.event === persistBefore.newPasskey),
     "new passkey",
   );
+  // At the registration the file holds the owner's credential (internal) and the new one (another transport).
+  assert.deepEqual(registrationFiles[0], ["internal", "usb"]);
+  // The creation runs on ONE empty authenticator (Chromium refuses it, as the page excludes every passkey of the account, when an
+  // authenticator holds one, and replaces a credential of the same user handle); a browser that signs in afterwards has one
+  // authenticator for each credential, holding exactly one.
+  const creation = shapes.find((shape) => shape.event === persistBefore.newPasskey);
+  assert.deepEqual(creation, {
+    event: persistBefore.newPasskey,
+    browser: 0,
+    transports: ["internal"],
+    counts: [1],
+  });
+  const second = shapes.find(
+    (shape) => shape.browser === 1 && shape.event === persistBefore.signIn,
+  );
+  assert.deepEqual(second?.transports, ["internal", "usb"]);
+  assert.deepEqual(second?.counts, [1, 1]);
   const file = path.join(s.stateDir, credentialFileName);
-  assert.equal(statSync(file).mode & 0o777, 0o600);
-  assert.equal(statSync(s.stateDir).mode & 0o777, 0o700);
+  if (process.platform !== "win32") {
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.equal(statSync(s.stateDir).mode & 0o777, 0o700);
+  }
   const report = JSON.parse(s.reports[0]?.text ?? "{}") as {
     mode: string;
     result: string;
@@ -240,7 +293,7 @@ test("no output, report or error holds the token, a key, a credential ID or a co
   }
   for (const tab of s.browser.tabs) for (const value of tab.secretsSeen) secrets.add(value);
   for (const tab of s.browser.tabs)
-    for (const credential of tab.authenticatorModel.held) {
+    for (const credential of tab.authenticators.flatMap((authenticator) => authenticator.held)) {
       secrets.add(credential.privateKey);
       secrets.add(credential.credentialId);
     }
@@ -463,14 +516,14 @@ test("AR-23 fails when the center does not show Windows Hello as the passkey tha
 // Arguments
 
 const parse = (argv: string[], environment: Record<string, string> = {}) =>
-  parseArguments(argv, environment, "win32", "C:\\Users\\J7Rdm");
+  parseArguments(argv, environment, "win32", "C:\\Users\\tester");
 
 test("the arguments have safe defaults and refuse what could drive the wrong place or leak", () => {
-  const options = parse([], { LOCALAPPDATA: "C:\\Users\\J7Rdm\\AppData\\Local" });
+  const options = parse([], { LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" });
   assert.equal(options.baseUrl, "https://proof.arcforges.com/api");
   assert.equal(
     options.chromium,
-    "C:\\Users\\J7Rdm\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome-win64\\chrome.exe",
+    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome-win64\\chrome.exe",
   );
   assert.equal(options.headed, false);
   assert.equal(options.realAuthenticator, false);
@@ -523,7 +576,7 @@ test("the arguments have safe defaults and refuse what could drive the wrong pla
 
 test("only Playwright's chromium-1243 is launched, by an explicit path", () => {
   const win =
-    "C:\\Users\\J7Rdm\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome-win64\\chrome.exe";
+    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome-win64\\chrome.exe";
   assert.equal(chromiumPathProblem(win), undefined);
   assert.equal(
     chromiumPathProblem("/home/u/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"),
@@ -531,28 +584,28 @@ test("only Playwright's chromium-1243 is launched, by an explicit path", () => {
   );
   for (const bad of [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "C:\\Users\\J7Rdm\\AppData\\Local\\ms-playwright\\chromium-1248\\chrome-win64\\chrome.exe",
-    "C:\\Users\\J7Rdm\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1243\\chrome-win64\\chrome.exe",
-    "C:\\Users\\J7Rdm\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome-win64\\msedge.exe",
+    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1248\\chrome-win64\\chrome.exe",
+    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1243\\chrome-win64\\chrome.exe",
+    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome-win64\\msedge.exe",
     "C:\\x\\chromium-12430\\chrome.exe",
     "",
   ])
     assert(chromiumPathProblem(bad) !== undefined, bad);
   assert.equal(
     defaultChromiumPath(
-      { LOCALAPPDATA: "C:\\Users\\J7Rdm\\AppData\\Local" },
+      { LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" },
       "win32",
-      "C:\\Users\\J7Rdm",
+      "C:\\Users\\tester",
     ),
     win,
   );
   assert.equal(
-    defaultChromiumPath({}, "win32", "C:\\Users\\J7Rdm"),
+    defaultChromiumPath({}, "win32", "C:\\Users\\tester"),
     win,
     "without LOCALAPPDATA the profile's AppData\\Local is used",
   );
   assert.equal(
-    browsersDirectory({ PLAYWRIGHT_BROWSERS_PATH: "D:\\browsers" }, "win32", "C:\\Users\\J7Rdm"),
+    browsersDirectory({ PLAYWRIGHT_BROWSERS_PATH: "D:\\browsers" }, "win32", "C:\\Users\\tester"),
     "D:\\browsers",
   );
   assert.equal(
@@ -595,6 +648,7 @@ const sample = {
   privateKey: "QUFBQUFBQUE=",
   userHandle: "dXNlcg==",
   signCount: 3,
+  transport: "internal" as const,
 };
 
 test("the saved credential is read strictly and written only whole, forward and for its owner", () => {
@@ -617,9 +671,15 @@ test("the saved credential is read strictly and written only whole, forward and 
     "a saved credential is never replaced by a create",
   );
   assert.deepEqual(saved.load().credentials, [sample]);
-  assert.equal(statSync(saved.file).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(statSync(saved.file).mode & 0o777, 0o600);
   // Forward only: a counter may rise and a credential may be added, not lowered or lost.
-  const second = { ...sample, credentialId: "BQYHCA==", signCount: 0 };
+  const second = {
+    ...sample,
+    credentialId: "BQYHCA==",
+    userHandle: "b3RoZXI=",
+    signCount: 0,
+    transport: "usb" as const,
+  };
   saved.save([{ ...sample, signCount: 4 }, second], new Date("2026-11-01T10:05:00Z"));
   assert.equal(saved.load().credentials[0]?.signCount, 4);
   assert.equal(saved.load().createdAt, "2026-11-01T10:00:00.000Z");
@@ -840,7 +900,19 @@ test("playwright-core lives in its own package with an exact lockfile that the r
     assert(npmrc.includes(line), line);
   // No workflow installs it or runs it: it is run by hand on the Windows host.
   const workflow = readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
-  assert(!workflow.includes("verification/browser") && !workflow.includes("playwright"));
+  // The only line of the workflow that names the package is its advisory audit (no install, no run), and the host leg does the same.
+  const audit = "npm audit --audit-level=high --prefix eng/verification/browser";
+  const named = workflow
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.includes("verification/browser"));
+  assert(named.includes(`- run: ${audit}`));
+  assert(
+    named.every((line) => line.startsWith("#") || line === `- run: ${audit}`),
+    "nothing installs or runs the package in a workflow",
+  );
+  assert(!workflow.includes("playwright"));
+  assert(readFileSync(path.join(root, "eng/verify_steps.py"), "utf8").includes(`&& ${audit}`));
   assert(!readFileSync(path.join(root, "Dockerfile"), "utf8").includes("playwright"));
 });
 
@@ -877,4 +949,359 @@ test("tracing, screenshots, videos, HAR files and downloads are never switched o
   }
   const driver = readFileSync(path.join(browserDirectory, "driver.ts"), "utf8");
   assert(driver.includes('serviceWorkers: "block"') && driver.includes("acceptDownloads: false"));
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// One virtual authenticator per credential (what the first design got wrong in the real Chromium)
+
+const owner = "proof.arcforges.com";
+const handle = Buffer.from("owner-user-handle").toString("base64");
+
+test("the stand-in authenticators follow the rules the pinned Chromium 153 showed", async () => {
+  const center = new FakeCenter(baseUrl, { token: "" });
+  const tab = new FakeTab(center);
+  // One internal authenticator per environment; the other transports may repeat.
+  const first = (await tab.addAuthenticator("internal")) as FakeAuthenticator;
+  await assert.rejects(tab.addAuthenticator("internal"), /one internal authenticator/u);
+  const second = (await tab.addAuthenticator("usb")) as FakeAuthenticator;
+  await tab.addAuthenticator("usb");
+  // A creation with the owner's credential in the exclude list on the authenticator that holds it is InvalidStateError.
+  const one = first.create(owner, handle, []);
+  assert.throws(() => first.create(owner, handle, [one.credentialId]), {
+    name: "InvalidStateError",
+  });
+  assert.equal(first.held.length, 1, "the refused creation made nothing");
+  // A credential of the same relying party and user handle replaces the held one.
+  const replacement = first.create(owner, handle, []);
+  assert.deepEqual(
+    first.held.map((credential) => credential.credentialId),
+    [replacement.credentialId],
+  );
+  assert.notEqual(replacement.credentialId, one.credentialId);
+  // addCredential refuses a second credential of the pair, and a field the DevTools protocol does not know.
+  await assert.rejects(first.addCredential(one), /error occurred trying to create the credential/u);
+  await second.addCredential(one);
+  await assert.rejects(
+    second.addCredential({ ...one, transport: "usb" } as never),
+    /Invalid parameters/u,
+  );
+  assert.deepEqual(
+    Object.keys(withoutTransport({ ...one, transport: "usb" } as never)).includes("transport"),
+    false,
+  );
+  // Removing the internal authenticator frees the internal transport; switching the environment off removes the rest.
+  await first.remove();
+  await tab.addAuthenticator("internal");
+  await tab.disableVirtual();
+  assert.equal(tab.authenticators.length, 0);
+});
+
+test("the registration page refused by the browser is reported with the page's own words, not a timeout", async () => {
+  const s = scenario({ pageRefusesCreation: true });
+  assert.equal(await s.run(), 1);
+  const message = s.stderr.join("\n");
+  assert.match(message, /That passkey is already registered\./u);
+  assert.match(message, /\/api\/account\/passkeys\/add/u, "and the path of the page that says it");
+  const report = JSON.parse(s.reports[0]?.text ?? "{}") as {
+    steps: { note?: string; ok: boolean }[];
+  };
+  assert.match(report.steps.find((step) => !step.ok)?.note ?? "", /already registered/u);
+  for (const secret of [s.token]) assert(!s.everything().includes(secret));
+});
+
+test("a first run that never created the account leaves no credential file, and the next run enrolls", async () => {
+  const s = scenario({ refuseEnrollment: true });
+  assert.equal(await s.run(), 1);
+  assert(
+    !existsSync(path.join(s.stateDir, credentialFileName)),
+    "the credential saved for the refused enrollment is removed",
+  );
+  assert(!s.center.ownerExists && !s.center.tokenSpent);
+  s.center.options.refuseEnrollment = false;
+  s.stderr.length = 0;
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  assert(s.center.ownerExists);
+  assert.equal(
+    JSON.parse(s.reports.at(-1)?.text ?? "{}").mode,
+    "enroll",
+    "it enrolled again; it did not run as returning",
+  );
+  assert.equal(store(s).load().credentials.length, 1);
+});
+
+test("after a change a 429 does not restart the step; before any change it does", async () => {
+  const s = scenario({ limitAfterRemoval: true });
+  assert.equal(await s.run(), 1);
+  assert.match(
+    s.stderr.join("\n"),
+    /rate limited \(429\) after a request of it had changed something; it is not repeated/u,
+  );
+  assert(!s.sleeps.includes(5000), "the step did not wait for the Retry-After and start again");
+  // The removal had happened and was saved: the file keeps the owner's credential only.
+  assert.equal(s.center.passkeys.length, 1);
+  assert.equal(store(s).load().credentials.length, 1);
+  // The earlier test of a 429 before any change (the first navigation) still starts the step again.
+  const early = scenario({ rateLimit: { remaining: 1, retryAfter: 5 } });
+  assert.equal(await early.run(), 0, early.stderr.join("\n"));
+  assert(early.sleeps.includes(5000));
+});
+
+test("the request budget lets a burst through, then one request per interval, and never more than the bound in a minute", async () => {
+  const sleeps: number[] = [];
+  let now = 0;
+  const budget = new RequestBudget(
+    45,
+    () => now,
+    async (milliseconds) => {
+      sleeps.push(milliseconds);
+      now += milliseconds;
+    },
+  );
+  const starts: number[] = [];
+  for (let request = 0; request < 120; request += 1) {
+    await budget.take();
+    starts.push(now);
+    if (request === 7) assert.deepEqual(sleeps, [], "the burst of eight goes out at once");
+  }
+  assert.equal(
+    starts.slice(0, 8).every((start) => start === 0),
+    true,
+  );
+  assert(starts[8] !== undefined && starts[8] > 0, "the ninth waits");
+  // In every window of 60 seconds at most burst + the per-minute rate requests start (53), far below the edge limit of 60.
+  let most = 0;
+  for (const [index, start] of starts.entries())
+    most = Math.max(
+      most,
+      starts.filter((other, otherIndex) => otherIndex >= index && other < start + 60_000).length,
+    );
+  assert(most <= 53 && most >= 45, String(most));
+  // An idle budget refills only to the burst.
+  now += 10 * 60_000;
+  const before = sleeps.length;
+  for (let request = 0; request < 8; request += 1) await budget.take();
+  assert.equal(sleeps.length, before, "eight go out at once again");
+  await budget.take();
+  assert.equal(sleeps.length, before + 1);
+  for (const bad of [0, -1, 1.5, Number.NaN])
+    assert.throws(() => new RequestBudget(bad), /whole number/u, String(bad));
+});
+
+test("the request bound is an argument that only a center on this machine may lift", () => {
+  assert.equal(parse([]).requestsPerMinute, defaultRequestsPerMinute);
+  assert.equal(defaultRequestsPerMinute, 45);
+  assert.equal(parse(["--requests-per-minute", "30"]).requestsPerMinute, 30);
+  assert.equal(
+    parse(["--base-url", "http://localhost:18080", "--requests-per-minute", "0"]).requestsPerMinute,
+    0,
+  );
+  assert.equal(
+    parse(["--base-url", "http://localhost:18080", "--requests-per-minute", "300"])
+      .requestsPerMinute,
+    300,
+  );
+  assert.throws(() => parse(["--requests-per-minute", "0"]), /localhost only/u);
+  assert.throws(() => parse(["--requests-per-minute", "46"]), /localhost only/u);
+  assert.throws(
+    () => parse(["--requests-per-minute", "601", "--base-url", "http://localhost:1"]),
+    /whole number/u,
+  );
+  assert.throws(() => parse(["--requests-per-minute", "x"]), /whole number/u);
+});
+
+test("a console error the browser makes about the favicon is not the page's, any other error and a policy violation are", () => {
+  assert.equal(
+    consoleProblem(
+      "error",
+      "Failed to load resource: the server responded with a status of 404 ()",
+      "https://proof.arcforges.com/favicon.ico",
+    ),
+    undefined,
+  );
+  assert.equal(
+    consoleProblem("error", "Failed to load resource", "http://localhost:18080/favicon.ico"),
+    undefined,
+  );
+  assert.match(
+    consoleProblem(
+      "error",
+      "Failed to load resource",
+      "https://proof.arcforges.com/api/account/account.js",
+    ) ?? "",
+    /^console error: /u,
+  );
+  assert.match(
+    consoleProblem(
+      "error",
+      "Failed to load resource",
+      "https://proof.arcforges.com/favicon.ico.js",
+    ) ?? "",
+    /^console error: /u,
+  );
+  assert.match(
+    consoleProblem(
+      "warning",
+      "Refused to apply inline style because it violates the Content Security Policy",
+      "",
+    ) ?? "",
+    /^console warning: /u,
+  );
+  assert.match(consoleProblem("log", "This requires a Trusted Type", "") ?? "", /^console log: /u);
+  assert.equal(consoleProblem("log", "hello", ""), undefined);
+  assert.equal(
+    consoleProblem("error", "x".repeat(500), "")?.length,
+    "console error: ".length + 300,
+  );
+});
+
+test("a change is a POST the center accepted that a step could not repeat: not a flow's begin, proof or sign-in", () => {
+  for (const pathname of [
+    "/api/session/v1/web/authentication/begin",
+    "/api/session/v1/web/authentication/complete",
+    "/api/session/v1/web/step-up/begin",
+    "/api/session/v1/web/step-up/complete",
+  ])
+    assert.equal(acceptedChange("POST", 200, pathname), false, pathname);
+  for (const pathname of [
+    "/api/session/v1/web/enrollment/complete",
+    "/api/session/v1/web/logout",
+    "/api/account/passkeys/add",
+    "/api/account/passkeys/complete",
+    "/api/account/passkeys/remove",
+    "/api/account/sessions/revoke",
+  ])
+    assert.equal(acceptedChange("POST", 303, pathname), true, pathname);
+  assert.equal(
+    acceptedChange("POST", 403, "/api/account/passkeys/remove"),
+    false,
+    "a refused change is no change",
+  );
+  assert.equal(acceptedChange("POST", 429, "/api/account/passkeys/remove"), false);
+  assert.equal(acceptedChange("GET", 200, "/api/account/passkeys"), false);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The saved file: transports, and a first run on Windows
+
+test("a credential is saved with the transport of its authenticator, once each, and an older file gets them in order", () => {
+  const file = (credentials: unknown[]) =>
+    JSON.stringify({
+      version: 1,
+      baseUrl,
+      rpId: owner,
+      displayName: "Proof owner",
+      createdAt: "2026-11-01T10:00:00.000Z",
+      updatedAt: "2026-11-01T10:00:00.000Z",
+      credentials,
+    });
+  const make = (id: string, extra: object = {}) => ({
+    credentialId: id,
+    isResidentCredential: true,
+    rpId: owner,
+    privateKey: "QUFBQUFBQUE=",
+    userHandle: handle,
+    signCount: 1,
+    ...extra,
+  });
+  assert.deepEqual(
+    parseCredentialFile(file([make("AQID"), make("BAUG"), make("BwgJ")])).credentials.map(
+      (credential) => credential.transport,
+    ),
+    ["internal", "usb", "nfc"],
+    "a file from before the transports were recorded",
+  );
+  assert.deepEqual(
+    parseCredentialFile(file([make("AQID", { transport: "usb" }), make("BAUG")])).credentials.map(
+      (credential) => credential.transport,
+    ),
+    ["usb", "internal"],
+    "a stated transport is kept and the others take the free ones",
+  );
+  assert.throws(
+    () =>
+      parseCredentialFile(
+        file([make("AQID", { transport: "usb" }), make("BAUG", { transport: "usb" })]),
+      ),
+    /share a transport/u,
+  );
+  assert.throws(
+    () => parseCredentialFile(file([make("AQID", { transport: "bluetooth" })])),
+    /unknown transport/u,
+  );
+  assert.throws(
+    () =>
+      parseCredentialFile(
+        file(transports.concat("x" as never).map((_, index) => make(`AQID${index}A`))),
+      ),
+    /more credentials than transports|repeats|unknown/u,
+  );
+  assert.equal(nextTransport([{ transport: "internal" }, { transport: "usb" }]), "nfc");
+  assert.equal(nextTransport(transports.map((transport) => ({ transport }))), undefined);
+});
+
+test("on Windows a first run (no file, even no directory) finds no credential instead of failing in icacls", () => {
+  const { machine, commands } = windowsMachine();
+  const base = scratch();
+  // No state directory at all, then the directory without the file: the real icacls exits non-zero for a path that is not there.
+  const absent = new CredentialStore(path.join(base, "never-made"), machine);
+  assert.equal(absent.exists(), false);
+  mkdirSync(path.join(base, "made"));
+  const empty = new CredentialStore(path.join(base, "made"), machine);
+  assert.equal(empty.exists(), false);
+  assert.deepEqual(grants(commands), [], "nothing was changed on the way");
+  assert(
+    commands.every((entry) => entry[0] !== "icacls"),
+    "and the file was not even asked about",
+  );
+  // After the file exists the check is the DACL's.
+  empty.prepare();
+  empty.create(
+    {
+      baseUrl,
+      rpId: owner,
+      displayName: "Proof owner",
+      credentials: [
+        {
+          ...withoutTransport({
+            credentialId: "AQID",
+            isResidentCredential: true,
+            rpId: owner,
+            privateKey: "QUFBQUFBQUE=",
+            userHandle: handle,
+            signCount: 0,
+          }),
+          transport: "internal",
+        },
+      ],
+    },
+    new Date("2026-11-01T10:00:00Z"),
+  );
+  assert.equal(empty.exists(), true);
+  assert(
+    commands.some(
+      (entry) =>
+        entry[0] === "icacls" && entry.length === 2 && entry[1]?.endsWith(credentialFileName),
+    ),
+  );
+});
+
+test("a first run on a Windows machine that is a strict icacls reaches the end of main() with the stand-in browser", async () => {
+  const s = scenario();
+  const { machine } = windowsMachine();
+  assert.equal(await s.run([], { machine }), 0, s.stderr.join("\n"));
+  assert(existsSync(path.join(s.stateDir, credentialFileName)));
+});
+
+test("a 429 on the enrollment request starts the step from nothing: one credential on the authenticator, one in the file", async () => {
+  const s = scenario({ limitEnrollmentOnce: true });
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  assert(s.sleeps.includes(5000), "it waited for the advised time and started the step again");
+  const report = JSON.parse(s.reports[0]?.text ?? "{}") as {
+    steps: { name: string; attempts: number }[];
+  };
+  assert.equal(report.steps.find((step) => step.name.startsWith("enroll"))?.attempts, 2);
+  // The first attempt's credential (made before the request was refused) is not the account's: the file holds the second only.
+  assert.equal(store(s).load().credentials.length, 1);
+  assert.equal(store(s).load().credentials[0]?.credentialId, s.center.passkeys[0]?.id);
+  assert.equal(s.center.passkeys.length, 1);
 });

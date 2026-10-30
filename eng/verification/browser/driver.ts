@@ -9,7 +9,7 @@
 // a script call that no log line quotes.
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { VirtualCredential } from "./credentials.ts";
+import { type Transport, type VirtualCredential, withoutTransport } from "./credentials.ts";
 
 /** The Playwright release's browser revision the proof environment's Windows host has installed (playwright-core 1.63.0). */
 export const requiredChromiumRevision = "1243";
@@ -34,12 +34,16 @@ export interface CookieView {
   expires: number;
 }
 
-/** A virtual authenticator of one tab (Chromium's DevTools WebAuthn domain). */
+/**
+ * A virtual authenticator of one tab (Chromium's DevTools WebAuthn domain). It holds at most one credential of a relying party and
+ * user handle: a second discoverable credential of the same pair replaces the first when it is created, and addCredential refuses it.
+ */
 export interface Authenticator {
+  readonly transport: Transport;
   credentials(): Promise<VirtualCredential[]>;
   addCredential(credential: VirtualCredential): Promise<void>;
-  /** Removes the virtual authenticator and switches the virtual environment off, so that the browser reaches real authenticators. */
-  disable(): Promise<void>;
+  /** Removes this virtual authenticator, and the credentials it holds, from the tab. */
+  remove(): Promise<void>;
 }
 
 /** One tab in its own browser context (its own cookies and storage). */
@@ -62,7 +66,12 @@ export interface Tab {
   problems(): string[];
   /** The Retry-After seconds of a 429 seen since the last call (cleared by it), or undefined. */
   rateLimited(): number | undefined;
-  addAuthenticator(): Promise<Authenticator>;
+  /** How many POST requests the tab has seen answered without an error (a change the center accepted). */
+  changes(): number;
+  /** Adds a virtual authenticator; Chromium allows one `internal` authenticator per tab and several of the other transports. */
+  addAuthenticator(transport: Transport): Promise<Authenticator>;
+  /** Switches the virtual environment off (every virtual authenticator goes), so that the browser reaches real authenticators. */
+  disableVirtual(): Promise<void>;
   cookies(): Promise<CookieView[]>;
   close(): Promise<void>;
 }
@@ -77,6 +86,71 @@ export interface LaunchOptions {
   executablePath: string;
   headless: boolean;
   timeoutMs: number;
+  /** The most requests per minute the tab sends (0: no bound, for a center on this machine). See RequestBudget. */
+  requestsPerMinute: number;
+}
+
+export const defaultRequestsPerMinute = 45;
+/**
+ * The problem a console message is, if it is one: an error, or a policy violation. The browser asks for /favicon.ico on its own,
+ * outside the page's requests, and reports a 404 of it as a console error; that one is not the page's.
+ */
+export function consoleProblem(
+  type: string,
+  text: string,
+  locationUrl: string,
+): string | undefined {
+  if (type === "error" && locationUrl.endsWith("/favicon.ico")) return undefined;
+  if (type === "error" || /content security policy|trusted type/iu.test(text))
+    return `console ${type}: ${text.slice(0, 300)}`;
+  return undefined;
+}
+
+/** Whether a response is a change the center accepted: a POST that succeeded and that a step could not repeat harmlessly. */
+export function acceptedChange(method: string, status: number, pathname: string): boolean {
+  return method === "POST" && status < 400 && !harmless.test(pathname);
+}
+
+/** The POSTs that a step may repeat after a 429: they start a flow, prove something or add a session; nothing is changed that a repeat would trip over. */
+const harmless = /\/(?:authentication\/(?:begin|complete)|step-up\/(?:begin|complete))$/u;
+const requestBurst = 8;
+
+/**
+ * A bound on the requests the browser sends (every request of the origin, assets included), because the hosted Worker counts them
+ * all against an edge limit of 60 per minute and one page load is three requests. It is a generic cell rate: `requestBurst`
+ * requests may go at once, then one every 60 / perMinute seconds, so that in any minute at most burst + perMinute (53) requests
+ * leave. A request waits for its slot (the wait is short, about 1.3 s at most, so no wait of the flow times out on it).
+ */
+export class RequestBudget {
+  private readonly interval: number;
+  private readonly tolerance: number;
+  private next = 0;
+  private readonly clock: () => number;
+  private readonly pause: (milliseconds: number) => Promise<void>;
+
+  constructor(
+    perMinute: number,
+    clock: () => number = Date.now,
+    pause: (milliseconds: number) => Promise<void> = (milliseconds) =>
+      new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  ) {
+    if (!Number.isInteger(perMinute) || perMinute < 1)
+      throw new Error("A request budget is a whole number per minute.");
+    this.interval = 60_000 / perMinute;
+    this.tolerance = (requestBurst - 1) * this.interval;
+    this.clock = clock;
+    this.pause = pause;
+  }
+
+  /** Reserves the next slot and waits for it. */
+  async take(): Promise<void> {
+    const now = this.clock();
+    const slot = Math.max(this.next, now);
+    this.next = slot + this.interval;
+    const wait = slot - this.tolerance - now;
+    // Less than half a millisecond is the rounding of the interval, not a wait.
+    if (wait > 0.5) await this.pause(Math.ceil(wait));
+  }
 }
 
 export type Launcher = (options: LaunchOptions) => Promise<Browser>;
@@ -97,8 +171,11 @@ export function browsersDirectory(
       environment.LOCALAPPDATA || path.win32.join(home, "AppData", "Local"),
       "ms-playwright",
     );
-  if (platform === "darwin") return path.join(home, "Library", "Caches", "ms-playwright");
-  return path.join(environment.XDG_CACHE_HOME || path.join(home, ".cache"), "ms-playwright");
+  if (platform === "darwin") return path.posix.join(home, "Library", "Caches", "ms-playwright");
+  return path.posix.join(
+    environment.XDG_CACHE_HOME || path.posix.join(home, ".cache"),
+    "ms-playwright",
+  );
 }
 
 /** The default executable of Chromium revision 1243 in that directory. */
@@ -116,7 +193,7 @@ export function defaultChromiumPath(
       "chrome.exe",
     );
   if (platform === "darwin")
-    return path.join(
+    return path.posix.join(
       root,
       `chromium-${requiredChromiumRevision}`,
       "chrome-mac-arm64",
@@ -125,7 +202,7 @@ export function defaultChromiumPath(
       "MacOS",
       "Google Chrome for Testing",
     );
-  return path.join(root, `chromium-${requiredChromiumRevision}`, "chrome-linux64", "chrome");
+  return path.posix.join(root, `chromium-${requiredChromiumRevision}`, "chrome-linux64", "chrome");
 }
 
 /** Why a path is not the pinned Chromium (undefined when it is). Only the pinned revision is launched, never a system browser. */
@@ -185,20 +262,21 @@ export function preflight(
 // ---------------------------------------------------------------------------------------------------------------------------
 // The playwright-core adapter. The shapes are the subset of playwright-core 1.63.0 this file uses.
 
-interface PwResponse {
+export interface PwResponse {
   status(): number;
   headers(): Record<string, string>;
+  request(): PwRequest;
 }
-interface PwRequest {
+export interface PwRequest {
   method(): string;
   url(): string;
 }
-interface PwRoute {
+export interface PwRoute {
   request(): PwRequest;
   continue(): Promise<void>;
   abort(errorCode?: string): Promise<void>;
 }
-interface PwLocator {
+export interface PwLocator {
   click(): Promise<void>;
   first(): PwLocator;
   textContent(): Promise<string | null>;
@@ -210,11 +288,12 @@ interface PwLocator {
   count(): Promise<number>;
   waitFor(options: { state: "attached" | "visible"; timeout: number }): Promise<void>;
 }
-interface PwConsoleMessage {
+export interface PwConsoleMessage {
   type(): string;
   text(): string;
+  location(): { url: string };
 }
-interface PwPage {
+export interface PwPage {
   goto(url: string, options: { waitUntil: "load" }): Promise<PwResponse | null>;
   url(): string;
   locator(selector: string): PwLocator;
@@ -226,10 +305,10 @@ interface PwPage {
   on(event: "response", handler: (response: PwResponse) => void): void;
   setDefaultTimeout(timeout: number): void;
 }
-interface PwCdpSession {
+export interface PwCdpSession {
   send(method: string, params?: Record<string, unknown>): Promise<unknown>;
 }
-interface PwContext {
+export interface PwContext {
   newPage(): Promise<PwPage>;
   // playwright-core types the page parameter as its full Page; `never` accepts that (the argument is cast at the one call).
   newCDPSession: (page: never) => Promise<PwCdpSession>;
@@ -252,11 +331,10 @@ export interface PwModule {
   };
 }
 
-/** The options of the virtual authenticator: a CTAP2 internal (platform-like) authenticator with discoverable credentials and UV. */
+/** The options of a virtual authenticator: CTAP2 with discoverable credentials and user verification (the transport is added). */
 export const virtualAuthenticatorOptions = {
   protocol: "ctap2",
   ctap2Version: "ctap2_1",
-  transport: "internal",
   hasResidentKey: true,
   hasUserVerification: true,
   isUserVerified: true,
@@ -292,33 +370,80 @@ export async function launchPlaywright(options: LaunchOptions): Promise<Browser>
       });
       const page = await context.newPage();
       page.setDefaultTimeout(options.timeoutMs);
-      return playwrightTab(context, page);
+      const budget =
+        options.requestsPerMinute > 0 ? new RequestBudget(options.requestsPerMinute) : undefined;
+      return playwrightTab(context, page, budget);
     },
   };
 }
 
-function playwrightTab(context: PwContext, page: PwPage): Tab {
+/** The tab over a playwright-core page: exported for the tests, which give it a stand-in page and context. */
+export function playwrightTab(
+  context: PwContext,
+  page: PwPage,
+  budget: RequestBudget | undefined,
+): Tab {
   const problems: string[] = [];
   let retryAfter: number | undefined;
+  let changes = 0;
   const hooks = new Map<string, (pathname: string) => Promise<void>>();
-  let routing = false;
+  let routing: Promise<unknown> | undefined;
+  // One DevTools session per tab: the WebAuthn environment (and its single internal authenticator) belongs to it.
+  let session: PwCdpSession | undefined;
+  let enabled = false;
+  const webauthn = async (): Promise<PwCdpSession> => {
+    session ??= await context.newCDPSession(page as never);
+    if (!enabled) {
+      await session.send("WebAuthn.enable", { enableUI: false });
+      enabled = true;
+    }
+    return session;
+  };
   page.on("console", (message) => {
-    const type = message.type();
-    if (type === "error" || /content security policy|trusted type/iu.test(message.text()))
-      problems.push(`console ${type}: ${message.text().slice(0, 300)}`);
+    const problem = consoleProblem(message.type(), message.text(), message.location().url);
+    if (problem !== undefined) problems.push(problem);
   });
   page.on("pageerror", (error) => problems.push(`page error: ${error.message.slice(0, 300)}`));
   page.on("response", (response) => {
-    if (response.status() === 429) {
+    const status = response.status();
+    if (status === 429) {
       const seconds = Number(response.headers()["retry-after"] ?? "60");
       retryAfter = Math.max(
         retryAfter ?? 0,
         Number.isFinite(seconds) && seconds > 0 ? seconds : 60,
       );
+    } else {
+      // The begin steps, the proofs and the sign-in only start flows or add a session: a step that started again from its
+      // navigation would repeat them harmlessly, which it cannot do with a removal or a registration.
+      const request = response.request();
+      if (acceptedChange(request.method(), status, new URL(request.url()).pathname)) changes += 1;
     }
   });
+  // Every request of the tab goes through one route: the request budget first, then the hook of a POST that carries a credential.
+  const route = (): Promise<unknown> => {
+    routing ??= page.route("**/*", async (intercepted) => {
+      const outgoing = intercepted.request();
+      await budget?.take();
+      const hooked =
+        outgoing.method() === "POST" ? hooks.get(new URL(outgoing.url()).pathname) : undefined;
+      if (hooked) {
+        try {
+          await hooked(new URL(outgoing.url()).pathname);
+        } catch (error) {
+          problems.push(
+            `a request was stopped before it left the browser: ${error instanceof Error ? error.message.slice(0, 200) : "the hook failed"}`,
+          );
+          await intercepted.abort("failed");
+          return;
+        }
+      }
+      await intercepted.continue();
+    });
+    return routing;
+  };
   return {
     async goto(url) {
+      await route();
       const response = await page.goto(url, { waitUntil: "load" });
       if (response === null) throw new Error("The navigation gave no response.");
       return { status: response.status(), headers: response.headers() };
@@ -357,25 +482,7 @@ function playwrightTab(context: PwContext, page: PwPage): Tab {
       page.locator(selector).first().waitFor({ state: "visible", timeout }),
     async beforePost(paths, hook) {
       for (const pathname of paths) hooks.set(pathname, hook);
-      if (routing) return;
-      routing = true;
-      await page.route("**/*", async (route) => {
-        const request = route.request();
-        const hooked =
-          request.method() === "POST" ? hooks.get(new URL(request.url()).pathname) : undefined;
-        if (hooked) {
-          try {
-            await hooked(new URL(request.url()).pathname);
-          } catch (error) {
-            problems.push(
-              `a request was stopped before it left the browser: ${error instanceof Error ? error.message.slice(0, 200) : "the hook failed"}`,
-            );
-            await route.abort("failed");
-            return;
-          }
-        }
-        await route.continue();
-      });
+      await route();
     },
     problems: () => [...problems],
     rateLimited() {
@@ -383,28 +490,37 @@ function playwrightTab(context: PwContext, page: PwPage): Tab {
       retryAfter = undefined;
       return seconds;
     },
-    async addAuthenticator() {
-      const session = await context.newCDPSession(page as never);
-      await session.send("WebAuthn.enable", { enableUI: false });
-      const added = (await session.send("WebAuthn.addVirtualAuthenticator", {
-        options: virtualAuthenticatorOptions,
+    changes: () => changes,
+    async addAuthenticator(transport) {
+      const cdp = await webauthn();
+      const added = (await cdp.send("WebAuthn.addVirtualAuthenticator", {
+        options: { ...virtualAuthenticatorOptions, transport },
       })) as { authenticatorId: string };
       const authenticatorId = added.authenticatorId;
       return {
+        transport,
         async credentials() {
-          const reply = (await session.send("WebAuthn.getCredentials", { authenticatorId })) as {
+          const reply = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })) as {
             credentials: VirtualCredential[];
           };
           return reply.credentials;
         },
         async addCredential(credential) {
-          await session.send("WebAuthn.addCredential", { authenticatorId, credential });
+          // Only the fields of the DevTools credential: the transport of a saved credential is ours.
+          await cdp.send("WebAuthn.addCredential", {
+            authenticatorId,
+            credential: withoutTransport(credential),
+          });
         },
-        async disable() {
-          await session.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
-          await session.send("WebAuthn.disable");
+        async remove() {
+          await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
         },
       };
+    },
+    async disableVirtual() {
+      if (session === undefined || !enabled) return;
+      await session.send("WebAuthn.disable");
+      enabled = false;
     },
     cookies: () => context.cookies(),
     close: () => context.close(),

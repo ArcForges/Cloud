@@ -9,9 +9,11 @@ import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   closeSync,
+  existsSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -82,9 +84,28 @@ function assertWindowsOnlyUser(machine: Machine, target: string): void {
     throw new Error(`${target} is readable by more than its owner.`);
 }
 
-/** Creates the directory (and its parents) for its owner alone; an existing one is tightened and verified. */
-export function ensureUserOnlyDirectory(directory: string, machine: Machine = realMachine()): void {
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+/**
+ * Makes the directory private to its owner and verifies it. Only a directory this call creates, or one that holds nothing but the
+ * tool's own files (`own` names them), is restricted: a directory someone else filled (`--dir .` in a checkout, a profile folder) is
+ * refused untouched, because the Windows grant removes every other entry of the directory and of what it holds. Parents of a new
+ * directory are created with their ordinary permissions.
+ */
+export function ensureUserOnlyDirectory(
+  directory: string,
+  machine: Machine = realMachine(),
+  own: (name: string) => boolean = () => false,
+): void {
+  if (existsSync(directory)) {
+    if (!statSync(directory).isDirectory()) throw new Error(`${directory} is not a directory.`);
+    if (readdirSync(directory).some((name) => !own(name)))
+      throw new Error(
+        `${directory} exists and holds files that are not this tool's; name a new or an empty directory.`,
+      );
+  } else {
+    mkdirSync(path.dirname(directory), { recursive: true });
+    // Not recursive: if the directory appears meanwhile, this fails instead of restricting someone else's.
+    mkdirSync(directory, { mode: 0o700 });
+  }
   if (machine.platform === "win32") restrictWindows(machine, directory, true);
   else chmodSync(directory, 0o700);
   assertUserOnly(directory, machine);
@@ -99,7 +120,10 @@ export function writeUserOnlyFile(
   data: string | Uint8Array,
   machine: Machine = realMachine(),
 ): void {
-  ensureUserOnlyDirectory(path.dirname(file), machine);
+  const directory = path.dirname(file);
+  // A directory that exists is checked, never changed here; a new one is made private before the file is created in it.
+  if (existsSync(directory)) assertUserOnly(directory, machine);
+  else ensureUserOnlyDirectory(directory, machine);
   const descriptor = openSync(file, "wx", 0o600);
   try {
     writeFileSync(descriptor, data);

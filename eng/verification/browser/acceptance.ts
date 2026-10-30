@@ -24,6 +24,7 @@ import { CredentialStore, defaultStateDirectory } from "./credentials.ts";
 import {
   type Launcher,
   defaultChromiumPath,
+  defaultRequestsPerMinute,
   launchPlaywright,
   preflight,
   requiredChromiumRevision,
@@ -61,6 +62,7 @@ export interface Options {
   paceMs: number;
   timeoutMs: number;
   realTimeoutMs: number;
+  requestsPerMinute: number;
 }
 
 /** Why a base URL is refused (undefined when it is the acceptance environment's, or a local center's). */
@@ -94,7 +96,7 @@ export function baseUrlProblem(value: string): string | undefined {
 
 const usage = `Usage: node eng/verification/browser/acceptance.ts [--base-url <url>] [--chromium <path>] [--state-dir <dir>]
   [--bootstrap-file <file>] [--display-name <text>] [--headed] [--real-authenticator] [--report <file>]
-  [--pace-ms <n>] [--timeout-ms <n>] [--real-timeout-ms <n>]`;
+  [--pace-ms <n>] [--timeout-ms <n>] [--real-timeout-ms <n>] [--requests-per-minute <n>]`;
 
 function whole(value: string | undefined, flag: string, min: number, max: number): number {
   if (value === undefined || !/^\d+$/u.test(value) || Number(value) < min || Number(value) > max)
@@ -120,6 +122,7 @@ export function parseArguments(
     paceMs: 750,
     timeoutMs: 30_000,
     realTimeoutMs: 180_000,
+    requestsPerMinute: defaultRequestsPerMinute,
   };
   let headless = false;
   for (let index = 0; index < argv.length; index += 1) {
@@ -171,6 +174,10 @@ export function parseArguments(
         options.realTimeoutMs = whole(value, flag, 10_000, 900_000);
         index += 1;
         break;
+      case "--requests-per-minute":
+        options.requestsPerMinute = whole(value, flag, 0, 600);
+        index += 1;
+        break;
       default:
         throw new UsageError(`Unknown argument.\n${usage}`);
     }
@@ -185,6 +192,16 @@ export function parseArguments(
     throw new UsageError("--display-name is 1 to 128 characters.");
   const problem = baseUrlProblem(options.baseUrl);
   if (problem) throw new UsageError(problem);
+  // The hosted Worker counts every request of a page load against an edge limit; only a center on this machine may be sent more.
+  if (options.requestsPerMinute === 0 && new URL(options.baseUrl).hostname !== "localhost")
+    throw new UsageError("--requests-per-minute 0 (no bound) is for a center on localhost only.");
+  if (
+    options.requestsPerMinute > defaultRequestsPerMinute &&
+    new URL(options.baseUrl).hostname !== "localhost"
+  )
+    throw new UsageError(
+      `--requests-per-minute above ${defaultRequestsPerMinute} is for a center on localhost only.`,
+    );
   options.baseUrl = options.baseUrl.replace(/\/+$/u, "");
   return options;
 }
@@ -279,6 +296,7 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
     executablePath: options.chromium,
     headless: !options.headed,
     timeoutMs: options.timeoutMs,
+    requestsPerMinute: options.requestsPerMinute,
   });
   const world = newWorld({
     browser,
