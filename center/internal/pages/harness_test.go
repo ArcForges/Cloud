@@ -16,7 +16,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -598,8 +597,6 @@ func (h *harness) live(sessionID platform.ID) bool {
 }
 
 var cookiePattern = regexp.MustCompile(`^__Host-af_session=[A-Za-z0-9_-]{43}; Path=/; Max-Age=[1-9][0-9]*; Secure; HttpOnly; SameSite=Strict$`)
-
-func itoa(value int) string { return strconv.Itoa(value) }
 
 // hashOf is the step-up target hash of a class, an account and a target object.
 func hashOf(class string, accountID, target platform.ID) string {

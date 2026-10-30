@@ -115,30 +115,6 @@ func passkeyAccount(who account, authenticator *virtual.Authenticator, key *virt
 	return account{id: who.id, handle: who.handle, authenticator: authenticator, key: key}
 }
 
-// registerPasskey adds a passkey through the pages (the step-up with the account's current passkey, the add form, the browser's
-// creation and the completion form) and returns the new passkey as an account that can sign in and step up.
-func (b *browser) registerPasskey(who account, name string) account {
-	b.h.t.Helper()
-	t := b.h.t
-	passkeys := b.page("/account/passkeys")
-	add := formsTo(t, passkeys, "/account/passkeys/add")[0]
-	b.mustStepUp(who, identity.ClassBeginRegistration, who.id)
-	begun := b.submit(add, url.Values{"display_name": {name}})
-	if begun.status != 200 {
-		t.Fatalf("the registration page: %d %s", begun.status, begun.text())
-	}
-	register := parseRegister(t, begun)
-	authenticator := virtual.New(rpID, origin)
-	creation, key := authenticator.Create(unb64(t, register["data-challenge"]), unb64(t, register["data-user-handle"]))
-	complete := formsTo(t, begun, "/account/passkeys/complete")[0]
-	reply := b.submit(complete, url.Values{"credential_id": {b64(creation.CredentialID)}, "client_data_json": {b64(creation.ClientDataJSON)},
-		"attestation_object": {b64(creation.AttestationObject)}, "transports": {""}})
-	if reply.status != 303 {
-		t.Fatalf("the registration's completion: %d %s", reply.status, reply.text())
-	}
-	return passkeyAccount(who, authenticator, key)
-}
-
 // TestPasskeysThroughTheForms (F2): the passkeys page, the step-up the script proves, the registration of a passkey (the creation
 // page and its completion), a form submitted twice (one receipt), the rename of a passkey and the removal of another with its
 // evidence; and the removed passkey no longer signs in while the registered one does.

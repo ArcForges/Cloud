@@ -13,3 +13,15 @@ Existing exact prerelease Contracts versions are named foundation candidate inpu
 Policy edits require normal complete PR review; refreshing a hash alone is not admission. The offline gate proves matching evidence and refusal behavior, not independent authorship, legal approval or commercial acceptance.
 
 Each admission has an immutable `eng/policy/dependency-reviews/` receipt. A successor names the retained predecessor. The checker compares every historical receipt with its original committed bytes and rejects changed integrity for any previously admitted name/version even when the new policy, lock and review all agree. Missing or edited historical receipts fail.
+
+An **isolated package** is a `package.json` with its own `package-lock.json` and `.npmrc` that the root project never installs: no
+workspace names it and the root lock does not hold it (AF-CTR-03 A2: `eng/verification/browser`, the real-browser acceptance with
+`playwright-core` 1.63.0, run by hand on the Windows host). The policy admits it by directory (`isolated`); the three files are named
+inputs with a digest like every other dependency input; its locked packages are part of the admitted `closure` under the directory's
+prefix (`eng/verification/browser/node_modules/playwright-core`), so the receipt binds their coordinates and integrity, the licence,
+registry and exact-version rules apply to them, and a changed byte needs a successor receipt. The checker (`validateIsolated`)
+requires the package to be private, not a workspace, free of overrides and install hooks, pinned to exact versions that its own lock
+states (lockfile version 3, no linked package, no package that runs an install script), and installed with `ignore-scripts=true`,
+`save-exact=true` and `engine-strict=true`. No workflow installs it, and Dependabot is not configured for it, so it is updated only by a
+reviewed change. The release whose browser manifest names the installed Chromium revision is the reason for its exact version
+(`tests/worker/browser-acceptance.test.ts`).
