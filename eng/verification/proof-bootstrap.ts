@@ -18,7 +18,13 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { maxBootstrapLeadMs } from "./proof-deploy.ts";
-import { type Machine, readUserOnlyFile, realMachine, writeUserOnlyFile } from "./user-only.ts";
+import {
+  type Machine,
+  ensureUserOnlyDirectory,
+  readUserOnlyFile,
+  realMachine,
+  writeUserOnlyFile,
+} from "./user-only.ts";
 
 export const tokenPrefix = "afb1.";
 export const bootstrapFileName = "owner-bootstrap.json";
@@ -108,6 +114,10 @@ export function createBootstrapFile(
     throw new Error(
       `${file} exists. A bootstrap is one-shot: delete the file to start over (its token is spent or no longer wanted).`,
     );
+  // A directory given by hand is made private when it is new or empty and refused, untouched, when it holds anything else (the
+  // same rule as the acceptance's state directory): the token is private from its first byte, on Windows too, where a directory
+  // under the profile or the temporary folder inherits entries of other principals.
+  ensureUserOnlyDirectory(directory, machine);
   writeUserOnlyFile(file, `${JSON.stringify(record)}\n`, machine);
   return file;
 }

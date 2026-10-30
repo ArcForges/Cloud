@@ -686,6 +686,39 @@ test("an empty directory, one that holds only the tool's own files, and a new on
   ]);
 });
 
+test("the bootstrap's directory, given by hand, is made private when it is empty and refused untouched when it holds anything else", () => {
+  const record = generateBootstrap({ hours: 1, now, random: zeros });
+  // An empty directory that exists (a folder of the profile or the temporary folder, with inherited entries on Windows) gets the
+  // directory's grant before the file is created in it, then the file's.
+  const empty = path.join(scratch(), "given");
+  mkdirSync(empty);
+  const first = windowsMachine();
+  const file = createBootstrapFile(empty, record, first.machine);
+  assert.deepEqual(grants(first.commands), [
+    ["icacls", empty, "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`],
+    ["icacls", file, "/inheritance:r", "/grant:r", `*${sid}:F`],
+  ]);
+  if (process.platform !== "win32") {
+    const shared = path.join(scratch(), "shared");
+    mkdirSync(shared);
+    chmodSync(shared, 0o755);
+    createBootstrapFile(shared, record);
+    assert.equal(statSync(shared).mode & 0o777, 0o700, "a shared empty directory becomes private");
+  }
+  // A directory someone else filled is refused before anything is written or granted.
+  const filled = path.join(scratch(), "filled");
+  mkdirSync(filled);
+  writeFileSync(path.join(filled, "notes.txt"), "mine");
+  const second = windowsMachine();
+  assert.throws(
+    () => createBootstrapFile(filled, record, second.machine),
+    /holds files that are not this tool's/u,
+  );
+  assert.deepEqual(grants(second.commands), []);
+  assert(!existsSync(path.join(filled, bootstrapFileName)));
+  assert.deepEqual(readdirSync(filled), ["notes.txt"]);
+});
+
 test("on Windows a directory whose DACL still shows another principal after the grant is refused", () => {
   const fresh = path.join(scratch(), "new");
   const { machine } = windowsMachine(
