@@ -928,7 +928,8 @@ test("playwright-core lives in its own package with an exact lockfile that the r
     assert(npmrc.includes(line), line);
   // No workflow installs it or runs it: it is run by hand on the Windows host.
   const workflow = readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
-  // The only line of the workflow that names the package is its advisory audit (no install, no run), and the host leg does the same.
+  // The only line of the workflow that names the package is a second, blocking audit step at the same level (no install, no run), and
+  // the host leg does the same.
   const audit = "npm audit --audit-level=high --prefix eng/verification/browser";
   const named = workflow
     .split("\n")
