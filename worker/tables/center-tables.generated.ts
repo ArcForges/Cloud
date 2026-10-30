@@ -694,7 +694,7 @@ export const pageDurationMs = 15000;
 /** The longest User-Agent the Worker forwards to the center. */
 export const pageUserAgentBytes = 256;
 /** The most digits of the Max-Age of a new session's cookie. */
-export const pageCookieMaxAgeDigits = 7;
+export const pageCookieMaxAgeDigits = 6;
 /** The most characters of the percent-encoded return path in a redirect's fragment. */
 export const pageReturnPathBytes = 512;
 

@@ -6,15 +6,16 @@
 // authentication, enrollment, step-up and logout) and the forms that carry the account's writes. A self-hosted center needs no Web
 // deployment for them, and the hosted Worker forwards the same routes through its page handler (PLT-1).
 //
-// The pages decide nothing the API does not. The forms, the bootstrap read's profile and the two step-up routes call the handler of
-// the API method they stand for, in process, with the session of the browser's cookie (identityapi.Direct); the sign-in and
-// enrollment routes and the logout call the identity core after the same operation-table decision (access.Authorize). So a page and
-// the API share the operation table, the step-up evidence, the rate-limit buckets and the audit events, and the forms share the
-// command receipts as well. The logout receipt is a reply shape only: the contract's logout has no command ID, so its reply
-// carries a new one, nothing is stored and nothing replays. What the pages add is the browser's own
-// protocol: the exact Origin of every POST, the session's derived CSRF token (a public constant derived from the origin before
-// there is a session), no query string, a cookie only of the one name, a content type and a size for every request, a security
-// header set on every reply, and a session renewed only by a page load or the bootstrap read.
+// The pages decide nothing the API does not. The three list pages (passkeys, sessions, devices) and the profile the account page
+// shows, the forms, the bootstrap read's profile and the two step-up routes call the handler of the API method they stand for, in
+// process, with the session of the browser's cookie (identityapi.Direct); the sign-in and enrollment routes and the logout call the
+// identity core after the same operation-table decision (access.Authorize). So a page and the API share the operation table, the
+// step-up evidence, the rate-limit buckets and the audit events, and the forms share the command receipts as well. The logout
+// receipt is a reply shape only: the contract's logout has no command ID, so its reply carries a new one, nothing is stored and
+// nothing replays. What the pages add is the browser's own protocol: the exact Origin of every POST, the session's derived CSRF
+// token (a public constant derived from the origin before there is a session), no query string, a cookie only of the one name, a
+// content type and a size for every request, a security header set on every reply, and a session renewed only by a page load or
+// the bootstrap read.
 package pages
 
 import (

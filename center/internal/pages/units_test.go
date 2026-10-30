@@ -162,7 +162,7 @@ func TestWhatThePagesWriteStaysWithinTheBoundsTheWorkerIsGenerated(t *testing.T)
 	longest := int((7 * 24 * time.Hour).Seconds())
 	cookie := sessionCookie(strings.Repeat("A", session.EncodedLength), longest)
 	maxAge := strings.TrimPrefix(strings.Split(cookie, "; ")[2], "Max-Age=")
-	if maxAge != strconv.Itoa(longest) || len(maxAge) > routes.PageCookieMaxAgeDigits || maxAge[0] == '0' {
+	if maxAge != strconv.Itoa(longest) || len(maxAge) != routes.PageCookieMaxAgeDigits || maxAge[0] == '0' {
 		t.Fatalf("the longest session's cookie %q against %d digits", cookie, routes.PageCookieMaxAgeDigits)
 	}
 	// The sign-in redirect of every protected page carries its path, percent-encoded, below the hosted /api prefix.
