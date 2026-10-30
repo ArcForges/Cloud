@@ -40,6 +40,7 @@ Differences from the hosted jobs:
   globally installed newer npm earlier on PATH fails the repository's engine-strict pin.
 - The secret scan covers the commits since the merge base, not the full history: history before it is main, scanned
   when its own PRs were verified.
+- Added to the hosted jobs: `worker-provenance` (`npm run test:artifact`: the real locked Wrangler output against the release profile's approved Worker closure, which no hosted job runs).
 - Not reproduced: GitHub dependency review (a GitHub service; external PRs keep it; the locked restores with NuGet audit
   and `npm audit` cover vulnerable packages locally) and CodeQL (external PRs, dispatch and the weekly schedule).
 Every change runs the full profile: the forbidden-term scan, Prettier and the provenance inventory read Markdown too.
@@ -175,6 +176,9 @@ STEPS = [
     linux("npm-audit", "npm audit --audit-level=high && npm audit --audit-level=high --prefix eng/verification/browser", 300),
     linux("check", "npm run check", 1200),
     linux("check-dotnet", "npm run check:dotnet", 1200),
+    # The real locked Wrangler output against the approved Worker closure of the release profile (`npm run test:artifact`), which no
+    # hosted job runs: a profile that no longer names the bundle the source builds fails here, before the candidate is built.
+    linux("worker-provenance", "npm run test:artifact", 600),
     # The Go center (AF-CTR-02): the Windows controls plus the race detector, the fuzz targets and the image target.
     linux("linux-center", "python eng/center.py check", 900),
     linux("licence-evaluated", "node tooling/project.ts licence-evaluated", 300),

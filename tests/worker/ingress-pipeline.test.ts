@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
-import { coldStartBudgetMs } from "../../worker/ingress/routes.ts";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { coldStartBudgetMs, healthPath } from "../../worker/ingress/routes.ts";
 import { trailerFrame } from "../../worker/ingress/io.ts";
 import { proofRouteTable } from "../../worker/ingress/proof-table.ts";
 import { routeRequest as routeWith, type CloudBindings } from "../../worker/router.ts";
@@ -308,10 +310,69 @@ test("the Container request of an API call says redirect manual: a redirect is r
   // The 303 is a non-200 reply of the Container: the call is refused. The 200 of the address it leads to never reaches the client.
   const bytes = new Uint8Array(await response.arrayBuffer());
   assert.notDeepEqual(bytes, okReply);
-  // A health read (the same code path) says it as well.
+  // A health read (the same code path) says it as well, and a redirect answered to it is refused like any other non-200 reply, never
+  // followed to the 200 of the address it names.
+  const health = bindings(async (request) =>
+    platformFetch(
+      () =>
+        new Response(null, { status: 302, headers: { location: "http://container/elsewhere" } }),
+      () => new Response("{}", { headers: { "content-type": "application/json" } }),
+    )(request),
+  );
+  const healthReply = await routeRequest(
+    new Request(`${origin}${healthPath}`, { headers: { "cf-connecting-ip": "203.0.113.7" } }),
+    health.env,
+  );
+  assert.equal(health.seen.requests.length, 1);
+  assert.equal(health.seen.requests[0]?.redirect, "manual");
+  assert.equal(
+    new URL(health.seen.requests[0]?.url ?? "").pathname,
+    healthPath.replace(/^\/api/u, ""),
+  );
+  assert.equal(healthReply.status, 503);
+  assert.equal(await healthReply.text(), "Cloud container is temporarily unavailable.");
   const unary = bindings(async () => new Response(okReply));
   await (await routeRequest(call(hello), unary.env)).arrayBuffer();
   assert.equal(unary.seen.requests[0]?.redirect, "manual");
+});
+
+test("every request the Worker makes to the Container says redirect manual (H-1): a new request site must say it too", () => {
+  const root = new URL("../../", import.meta.url).pathname;
+  const sources: string[] = [];
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory)) {
+      const file = path.join(directory, entry);
+      if (statSync(file).isDirectory()) walk(file);
+      else if (file.endsWith(".ts") && !file.endsWith(".generated.ts")) sources.push(file);
+    }
+  };
+  walk(path.join(root, "worker"));
+  assert(sources.length > 20, "the Worker sources were found");
+  // The Container is reached at its private virtual host only; each place that names the host builds one request, and each such
+  // request says redirect "manual". The list is the sites of this task: a sixth must be added here on purpose.
+  const sites = new Map<string, number>();
+  for (const file of sources) {
+    const text = readFileSync(file, "utf8");
+    const hosts = text.split("http://container").length - 1;
+    if (hosts === 0) continue;
+    const manual = text.split('redirect: "manual"').length - 1;
+    assert.equal(
+      manual,
+      hosts,
+      `${path.relative(root, file)} builds ${hosts} Container requests and says redirect manual ${manual} times`,
+    );
+    sites.set(path.relative(root, file), hosts);
+  }
+  assert.deepEqual(
+    [...sites.entries()].sort(([a], [b]) => a.localeCompare(b)),
+    [
+      ["worker/foundation/container-client.ts", 1],
+      ["worker/foundation/proof-routes.ts", 1],
+      ["worker/harness/run-alarm.ts", 1],
+      ["worker/ingress/pages.ts", 1],
+      ["worker/ingress/pipeline.ts", 1],
+    ],
+  );
 });
 
 test("a unary reply that is not exactly one message and a status is never passed on", async () => {

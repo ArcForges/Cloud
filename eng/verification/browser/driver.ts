@@ -68,6 +68,12 @@ export interface Tab {
   rateLimited(): number | undefined;
   /** How many POST requests the tab has seen answered without an error (a change the center accepted). */
   changes(): number;
+  /**
+   * How many POST requests of a kind a step cannot repeat the tab sent without seeing a definite answer: no reply (the connection
+   * was lost, the request failed, the reply is still on its way) or a server error. The center may have accepted such a request,
+   * so a step that ends with one of them cannot tell that nothing was changed; only a 4xx reply is a definite refusal.
+   */
+  unsettled(): number;
   /** Adds a virtual authenticator; Chromium allows one `internal` authenticator per tab and several of the other transports. */
   addAuthenticator(transport: Transport): Promise<Authenticator>;
   /** Switches the virtual environment off (every virtual authenticator goes), so that the browser reaches real authenticators. */
@@ -130,7 +136,8 @@ export function acceptedChange(method: string, status: number, pathname: string)
  * navigation finds the browser signed in already.
  */
 const harmless = /\/(?:authentication\/begin|step-up\/(?:begin|complete))$/u;
-const requestBurst = 4;
+/** The requests the budget lets out at once. */
+export const requestBurst = 4;
 
 /**
  * A bound on the requests the BROWSER sends, all its tabs together (every request of the origin, assets included, and every
@@ -472,6 +479,8 @@ export function playwrightTab(
   const problems: string[] = [];
   let retryAfter: number | undefined;
   let changes = 0;
+  // The POSTs of a kind a step cannot repeat that have no definite answer yet (see Tab.unsettled).
+  const unsettled = new Set<unknown>();
   const hooks = new Map<string, (pathname: string) => Promise<void>>();
   let routing: Promise<unknown> | undefined;
   // One DevTools session per tab: the WebAuthn environment (and its single internal authenticator) belongs to it.
@@ -504,11 +513,18 @@ export function playwrightTab(
       const request = response.request();
       if (acceptedChange(request.method(), status, new URL(request.url()).pathname)) changes += 1;
     }
+    // A reply of 4xx (the 429 included) is a definite refusal; every other reply is settled by the change it is or is not counted as,
+    // except a server error, which does not say whether the center had acted.
+    if (status < 500) unsettled.delete(response.request());
   });
   // The route never sees the request a redirect leads to (the GET after a form POST's 303): the browser follows it by itself. It is
   // still a request of the origin, so it is charged to the budget and counted, after it left.
   page.on("request", (request) => {
-    if (request.redirectedFrom() === null) return;
+    if (request.redirectedFrom() === null) {
+      if (request.method() === "POST" && !harmless.test(new URL(request.url()).pathname))
+        unsettled.add(request);
+      return;
+    }
     budget?.charge();
     meter.record();
   });
@@ -590,6 +606,7 @@ export function playwrightTab(
       return seconds;
     },
     changes: () => changes,
+    unsettled: () => unsettled.size,
     async addAuthenticator(transport) {
       const cdp = await webauthn();
       const added = (await cdp.send("WebAuthn.addVirtualAuthenticator", {

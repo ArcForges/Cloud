@@ -36,6 +36,9 @@ import {
 import {
   type Launcher,
   RequestBudget,
+  edgeLimitPerMinute,
+  maxRequestsPerWindow,
+  requestBurst,
   acceptedChange,
   browsersDirectory,
   chromiumPathProblem,
@@ -1358,6 +1361,46 @@ test("a first run whose enrollment the center accepted keeps the credential file
   assert.equal(JSON.parse(s.reports.at(-1)?.text ?? "{}").mode, "returning");
 });
 
+for (const [name, option] of [
+  ["its reply is lost", "enrollmentReplyLost"],
+  ["the Worker answers it with a server error", "enrollmentServerError"],
+] as const)
+  test(`a first run keeps the credential file when the center may have accepted the enrollment: ${name}`, async () => {
+    const s = scenario({ [option]: true });
+    assert.equal(await s.run(), 1);
+    assert(
+      s.center.ownerExists && s.center.tokenSpent,
+      "the account exists and the token is spent",
+    );
+    assert(
+      existsSync(path.join(s.stateDir, credentialFileName)),
+      "so the only copy of the owner's key stays, though the browser counted no accepted change",
+    );
+    assert.equal(store(s).load().credentials[0]?.credentialId, s.center.passkeys[0]?.id);
+    assert.match(s.stderr.join("\n"), /The account may exist; do not delete the credential file/u);
+    // The next run is a returning run with that key, and it passes.
+    s.center.options[option] = false;
+    s.stderr.length = 0;
+    assert.equal(await s.run(), 0, s.stderr.join("\n"));
+    assert.equal(JSON.parse(s.reports.at(-1)?.text ?? "{}").mode, "returning");
+  });
+
+test("a 429 on the page after an accepted enrollment keeps the file and the warning that the account may exist", async () => {
+  const s = scenario({ limitAfterEnrollment: true });
+  assert.equal(await s.run(), 1);
+  assert(s.center.ownerExists && s.center.tokenSpent, "the account exists and the token is spent");
+  assert(
+    existsSync(path.join(s.stateDir, credentialFileName)),
+    "the only copy of the owner's key stays",
+  );
+  const stderr = s.stderr.join("\n");
+  assert.match(stderr, /rate limited \(429\) after a request of it had changed something/u);
+  assert.match(stderr, /The account may exist; do not delete the credential file/u);
+  s.center.options.limitAfterEnrollment = false;
+  s.stderr.length = 0;
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+});
+
 test("a 429 on the page a sign-in leads to fails the step instead of repeating it: a sign-in is a change", async () => {
   const s = scenario();
   assert.equal(await s.run(), 0, s.stderr.join("\n"));
@@ -1562,4 +1605,93 @@ test("the report says what the browser sent, and a run seen to send more than 55
   const held = scenario({}, undefined, local);
   held.browser.requestCounts = { total: 100, busiest: 60 };
   assert.equal(await held.run(["--base-url", local]), 1);
+});
+
+test("a saved credential made for the same host but another base URL is refused: the base URL is compared on its own, not only the relying party", async () => {
+  const s = scenario();
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  const steps = () => (JSON.parse(s.reports.at(-1)?.text ?? "{}") as { steps: unknown[] }).steps;
+  const other = "https://proof.arcforges.com/other";
+  assert.equal(
+    baseUrlProblem(other),
+    undefined,
+    "the address is a plain base URL of the same host",
+  );
+  for (const argv of [[], ["--real-authenticator"]]) {
+    s.stderr.length = 0;
+    assert.equal(await s.run([...argv, "--base-url", other]), 1, argv.join(" "));
+    assert.match(
+      s.stderr.join("\n"),
+      /proof\.arcforges\.com\/api[\s\S]*--state-dir/u,
+      argv.join(" "),
+    );
+    assert.equal(steps().length, 0, "no step ran");
+  }
+});
+
+test("several passkeys of earlier runs on the account at once are all removed by the next returning run", async () => {
+  const s = scenario();
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  const original = s.center.passkeys.map((passkey) => passkey.id);
+  const owner = store(s).load().credentials[0];
+  assert(owner);
+  // Three earlier runs stopped after they registered their passkey and before they removed it: three keys in the file, one on each
+  // free transport, and three passkeys on the account.
+  const strays = ["usb", "nfc", "ble"].map((transport, index) => ({
+    ...owner,
+    credentialId: `c3RyYXk${index}AAAA`,
+    privateKey: `UFJJVkFURS${index}AAA=`,
+    transport: transport as typeof owner.transport,
+  }));
+  store(s).save([owner, ...strays], new Date("2026-11-02T10:00:00Z"));
+  for (const [index, stray] of strays.entries())
+    s.center.passkeys.push({
+      id: stray.credentialId,
+      name: `acceptance-2026103010${index}${index}${index}${index}`,
+      signCount: 0,
+      lastUsed: null,
+      real: false,
+    });
+  s.stderr.length = 0;
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  assert.deepEqual(
+    s.center.passkeys.map((passkey) => passkey.id),
+    original,
+    "all three strays are gone and nothing else",
+  );
+  assert.deepEqual(
+    store(s)
+      .load()
+      .credentials.map((credential) => credential.credentialId),
+    [owner.credentialId],
+    "and so are their keys",
+  );
+  const report = JSON.parse(s.reports.at(-1)?.text ?? "{}") as { facts: Record<string, unknown> };
+  assert.equal(report.facts.strayPasskeysRemoved, 3);
+});
+
+test("the request budget numbers are tied to the edge limit of wrangler.json, in every environment", () => {
+  const wrangler = JSON.parse(
+    readFileSync(new URL("../../wrangler.json", import.meta.url), "utf8"),
+  ) as {
+    ratelimits?: { name: string; simple: { limit: number; period: number } }[];
+    unsafe?: { bindings?: { name: string; simple?: { limit: number; period: number } }[] };
+    env?: Record<
+      string,
+      { ratelimits?: { name: string; simple: { limit: number; period: number } }[] }
+    >;
+  };
+  const limiters = [
+    ...(wrangler.ratelimits ?? []),
+    ...Object.values(wrangler.env ?? {}).flatMap((environment) => environment.ratelimits ?? []),
+  ].filter((limiter) => limiter.name === "IDENTITY_RATE_LIMITER");
+  assert(limiters.length >= 2, "the production and the proof environment declare the limiter");
+  for (const limiter of limiters) {
+    assert.equal(limiter.simple.limit, edgeLimitPerMinute);
+    assert.equal(limiter.simple.period, 60);
+  }
+  // The budget leaves at most burst + the rate in any minute, the run is failed above maxRequestsPerWindow, and that stays under the limit.
+  assert(defaultRequestsPerMinute + requestBurst <= maxRequestsPerWindow);
+  assert(maxRequestsPerWindow < edgeLimitPerMinute);
+  assert.equal(defaultRequestsPerMinute + requestBurst, 44);
 });

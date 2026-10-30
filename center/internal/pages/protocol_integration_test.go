@@ -55,7 +55,7 @@ func requireSecurityHeaders(t *testing.T, what string, reply response) {
 // pagePath reports whether a path is one of the registered page paths.
 func pagePath(path string) bool {
 	path, _, _ = strings.Cut(path, "?")
-	for _, route := range routes.PageRoutes() {
+	for _, route := range routes.AllPageRoutes() {
 		if route.Path == path {
 			return true
 		}
@@ -344,9 +344,6 @@ func TestCSRFOfTheSignInRoutes(t *testing.T) {
 	}
 }
 
-// TestADisabledSurfaceAnswers404 (PLT-1, PLT-12): where the pages surface is off every page route is 404 with the security headers
-// and no body, whatever the method and credential; the identity surface is unaffected. A center cannot enable the pages without the
-// identity surface they call.
 // TestEveryPageReplyForbidsTransformation (H-2, found by the first hosted run): the Cloudflare edge adds its Web Analytics beacon (a
 // third-party script and a data-cf-beacon attribute) to HTML that nothing forbids it to transform, which contradicts "no external
 // asset" and makes the browser report a policy violation. Every reply of the page handler, whatever its status, kind or route (HTML,
@@ -378,6 +375,9 @@ func TestEveryPageReplyForbidsTransformation(t *testing.T) {
 	}
 }
 
+// TestADisabledSurfaceAnswers404 (PLT-1, PLT-12): where the pages surface is off every page route is 404 with the security headers
+// and no body, whatever the method and credential; the identity surface is unaffected. A center cannot enable the pages without the
+// identity surface they call.
 func TestADisabledSurfaceAnswers404(t *testing.T) {
 	h := newHarness(t, settings{surfaces: "identity"})
 	for _, route := range routes.PageRoutes() {

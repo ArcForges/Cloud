@@ -30,10 +30,19 @@ before(() => {
 
 test("real locked Wrangler output matches the approved exact Worker closure", () => {
   const result = verifyWorker(root, worker, metadata);
-  assert.equal(result.sha256, "26b238ad1e81724f9cf5716aaed50edda2a8d1ffc0e0085ae25bdb66d5c5f645");
-  assert.equal(result.bytes, 93399);
-  assert.equal(Object.keys(result.inputs).length, 19);
-  assert.equal(result.outputInputs.length, 18);
+  // The approved closure is the active release profile's: verifyWorker has already compared the bundle, its inputs and its emitted
+  // inputs with it, so the expectation here is derived from the real build and not copied from an earlier one.
+  const outputs = object(metadata.outputs);
+  const script = Object.keys(outputs).find((name) => name.endsWith("/index.js"));
+  assert(script);
+  assert.equal(result.sha256, hash(worker));
+  assert.equal(result.bytes, worker.length);
+  assert.deepEqual(Object.keys(result.inputs).sort(), Object.keys(object(metadata.inputs)).sort());
+  assert.deepEqual(
+    [...result.outputInputs].sort(),
+    Object.keys(object(object(outputs[script]).inputs)).sort(),
+  );
+  assert(result.outputInputs.length > 0 && Object.keys(result.inputs).length > 0);
 });
 test("reject changed Worker bytes independently of any supplied outer hash", () => {
   const changed = Buffer.concat([worker, Buffer.from("\nexport const injected = true;\n")]);

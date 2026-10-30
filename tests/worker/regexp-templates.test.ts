@@ -5,7 +5,10 @@
 // text. This test reads the WHOLE first argument of every such call in worker/ (a concatenation, an array joined, a template whose
 // substitution holds a literal too) and refuses a quantifier whose bounds are literal numbers other than 0 and 1 in any piece of it;
 // an argument that holds no literal at all must come from an identifier imported from a generated module, so that a pattern held in
-// a variable of the file cannot carry a hand-written count past the scan.
+// a variable of the file cannot carry a hand-written count past the scan. A substitution that sits where a quantifier's bound is
+// (`{0,${n - 1}}`) is a bound too: it may hold only the numbers 0 and 1 and identifiers imported from a generated module, so a
+// literal number (`{${43}}`), a number held in a variable of the file (`{0,${held}}`) or one added to the argument outside any
+// quotes (`"x{" + 43 + "}"`) cannot carry a count past the scan either.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -29,12 +32,18 @@ const quotes = new Set(['"', "'", "`"]);
  * hide. Every string or template piece it meets is added to `pieces` (a template's substitution is `\u0000` in its piece, and the
  * pieces inside the substitution are added as well). The result is the index of the character that ended the expression.
  */
-function scan(source: string, start: number, stopAtComma: boolean, pieces: string[]): number {
+function scan(
+  source: string,
+  start: number,
+  stopAtComma: boolean,
+  pieces: string[],
+  counted: string[],
+): number {
   let depth = 0;
   for (let index = start; index < source.length; index += 1) {
     const character = source[index] as string;
     if (quotes.has(character)) {
-      index = quoted(source, index, pieces);
+      index = quoted(source, index, pieces, counted);
     } else if (character === "(" || character === "[" || character === "{") {
       depth += 1;
     } else if (character === ")" || character === "]" || character === "}") {
@@ -48,7 +57,7 @@ function scan(source: string, start: number, stopAtComma: boolean, pieces: strin
 }
 
 /** Reads the string or template that opens at `start`; the result is the index of its closing quote. */
-function quoted(source: string, start: number, pieces: string[]): number {
+function quoted(source: string, start: number, pieces: string[], counted: string[]): number {
   const quote = source[start] as string;
   let text = "";
   let index = start + 1;
@@ -60,7 +69,10 @@ function quoted(source: string, start: number, pieces: string[]): number {
     } else if (character === quote) {
       break;
     } else if (quote === "`" && character === "$" && source[index + 1] === "{") {
-      index = scan(source, index + 2, false, pieces);
+      const from = index + 2;
+      index = scan(source, from, false, pieces, counted);
+      // A substitution right after `{`, `{3,` or another substitution and a comma is a quantifier's bound.
+      if (/\{(?:\d+|\u0000)?,?$/u.test(text)) counted.push(source.slice(from, index));
       text += "\u0000";
     } else {
       text += character;
@@ -70,16 +82,45 @@ function quoted(source: string, start: number, pieces: string[]): number {
   return index;
 }
 
-/** The first argument of each `new RegExp(` in a source: its text, and every string or template piece in it. */
-function regExpArguments(source: string): { expression: string; pieces: string[] }[] {
-  const found: { expression: string; pieces: string[] }[] = [];
+/** What one `new RegExp(` argument holds: its text, every string or template piece, and the expressions that stand where a bound is. */
+interface Argument {
+  expression: string;
+  pieces: string[];
+  counted: string[];
+}
+
+/** The first argument of each `new RegExp(` in a source. */
+function regExpArguments(source: string): Argument[] {
+  const found: Argument[] = [];
   for (const call of source.matchAll(/new\s+RegExp\s*\(\s*/gu)) {
     const start = call.index + call[0].length;
     const pieces: string[] = [];
-    const end = scan(source, start, true, pieces);
-    found.push({ expression: source.slice(start, end).trim(), pieces });
+    const counted: string[] = [];
+    const end = scan(source, start, true, pieces, counted);
+    found.push({ expression: source.slice(start, end).trim(), pieces, counted });
   }
   return found;
+}
+
+/** The literal numbers above 1 in an expression's code (what quotes hide is a piece, read on its own). */
+function literalNumbers(code: string): string[] {
+  return [...code.matchAll(/(?<![\w$.])\d+(?![\w$])/gu)]
+    .map((found) => found[0])
+    .filter((value) => Number(value) > 1);
+}
+
+/** The text of an argument with every string and template literal cut out (a template's substitutions stay). */
+function withoutQuotes(expression: string): string {
+  const pieces: string[] = [];
+  let code = "";
+  for (let index = 0; index < expression.length; index += 1) {
+    const character = expression[index] as string;
+    if (quotes.has(character)) {
+      index = quoted(expression, index, pieces, []);
+      code += " ";
+    } else code += character;
+  }
+  return code;
 }
 
 /** The quantifiers of a pattern's text that state a count: `{n}`, `{n,}` or `{n,m}` with a literal number other than 0 and 1. */
@@ -114,11 +155,25 @@ function generatedNames(source: string): Set<string> {
 function violations(source: string): string[] {
   const generated = generatedNames(source);
   const problems: string[] = [];
-  for (const { expression, pieces } of regExpArguments(source)) {
+  for (const { expression, pieces, counted } of regExpArguments(source)) {
     for (const piece of pieces) {
       const counts = literalCounts(piece);
       if (counts.length > 0) problems.push(`${JSON.stringify(piece)} states ${counts.join(" ")}`);
     }
+    for (const bound of counted) {
+      const numbers = literalNumbers(withoutQuotes(bound));
+      if (numbers.length > 0)
+        problems.push(`the bound ${JSON.stringify(bound)} holds the literal ${numbers.join(" ")}`);
+      const names = [...withoutQuotes(bound).matchAll(/(?<![\w$.])[A-Za-z_$][\w$]*/gu)].map(
+        (found) => found[0],
+      );
+      for (const name of names)
+        if (!generated.has(name))
+          problems.push(`the bound ${JSON.stringify(bound)} uses ${name}, not a generated value`);
+    }
+    const outside = literalNumbers(withoutQuotes(expression));
+    if (outside.length > 0)
+      problems.push(`${JSON.stringify(expression)} adds the literal ${outside.join(" ")}`);
     if (pieces.length === 0) {
       const root = /^[A-Za-z_$][\w$]*/u.exec(expression)?.[0];
       if (root === undefined || !generated.has(root))
@@ -183,6 +238,12 @@ test("a hand-written count is found in a template, a string, a concatenation, a 
   const generated = 'import { limit, pattern as shape } from "../tables/x.generated.ts";\n';
   assert.deepEqual(violations(`${generated}new RegExp(\`^[0-9]{0,\${limit - 1}}$\`, "u")`), []);
   assert.deepEqual(violations(`${generated}new RegExp(shape.source, "u")`), []);
+  assert.deepEqual(violations(`${generated}new RegExp(\`^x{\${limit}}$\`, "u")`), []);
+  assert.deepEqual(violations(`${generated}new RegExp(\`^x{1,\${limit - 1}}$\`, "u")`), []);
+  assert.deepEqual(
+    violations(`${generated}new RegExp(\`^\${shape.source}x{0,\${limit}}$\`, "u")`),
+    [],
+  );
   assert.deepEqual(violations(`${generated}new RegExp(shape, "u")`), []);
   for (const bad of [
     'new RegExp(`^x{43}$`, "u")',
@@ -194,6 +255,14 @@ test("a hand-written count is found in a template, a string, a concatenation, a 
     'const held = "x{43}"; new RegExp(held, "u")',
     `const held = \`x{\${"43"}}\`; new RegExp(held, "u")`,
     'new RegExp(local.pattern, "u")',
+    'new RegExp(`^x{${43}}$`, "u")',
+    'new RegExp(`^x{0,${43}}$`, "u")',
+    'new RegExp(`^x{${3},${43}}$`, "u")',
+    'const held = 43; new RegExp(`^x{0,${held}}$`, "u")',
+    'new RegExp(`^x{0,${limit - 2}}$`, "u")',
+    'new RegExp(`^x{0,${hold(limit)}}$`, "u")',
+    'new RegExp("^x{" + 43 + "}$", "u")',
+    'new RegExp(["^x{", 43, "}$"].join(""), "u")',
   ]) {
     assert(violations(`${generated}${bad}`).length > 0, bad);
   }
