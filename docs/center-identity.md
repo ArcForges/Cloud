@@ -323,8 +323,9 @@ center's Connect writer admits (`TestAFullDevicePageIsSent`).
 The `pages` surface (A2; PLT-1, AD-0021 §7) is the center's own account UI and the contract's browser session routes
 (`public/http/v1/web-browser.schema.json`, Contracts 62ccef1). A self-hosted center serves them without any Web deployment; the
 hosted Worker forwards the same exact paths through its [page handler](cloud-ingress.md#page-routes-plt-1). The pages decide nothing the
-API does not. The forms, the bootstrap read's profile and the two step-up routes call the handler of the API method they stand for,
-in process, with the session of the browser's cookie (`identityapi.Direct`); the sign-in and enrollment routes and the logout call
+API does not. The three list pages (passkeys, sessions, devices) and the profile the account page shows, the forms, the bootstrap
+read's profile and the two step-up routes call the handler of the API method they stand for, in process, with the session of the
+browser's cookie (`identityapi.Direct`); the sign-in and enrollment routes and the logout call
 the identity core after the same operation-table decision (`access.Authorize`). So a page and the API share the operation table,
 the step-up evidence, the rate-limit buckets and the audit events, and the forms share the command receipts as well. The logout
 receipt is a reply shape only: the contract's logout has no command ID, so its reply carries a new one, nothing is stored and
@@ -414,8 +415,9 @@ narrow screen the header row is off screen and each cell shows the name of its c
 name begins with the text the button shows), `lang` and the viewport meta, and a style sheet with visible focus rings and light and
 dark colours. A page lists at most 30 passkeys, sessions or devices and says when there are more, so that a full page stays within
 the reply bound the Worker enforces. Everything but the three WebAuthn ceremonies, the step-up and the sign-out button works without
-script. A page that needs its script says so in a `noscript` paragraph and, for a script that is refused, blocked or fails to load
-while scripting is on, in a line (`needs-script`) that the script removes when it starts. The rendered HTML is checked by `TestEveryPageIsAccessibleHTMLWithNothingExternal` (no inline script, style or event
+script. A page that needs its script says so in a `noscript` paragraph (the sign-in, bootstrap, creation and sign-out pages, and the
+passkeys, sessions and devices pages for the changes that ask for a passkey first) and, for a script that is refused, blocked or fails
+to load while scripting is on, in a line (`needs-script`) that the script removes when it starts. The rendered HTML is checked by `TestEveryPageIsAccessibleHTMLWithNothingExternal` (no inline script, style or event
 handler and no reference to another origin either); the style sheet's focus rings and colours are not tested, and none of this is an
 accessibility audit with assistive technology.
 
@@ -454,7 +456,7 @@ The acceptance environment (`proof.arcforges.com`) is created by the owner's boo
    `artifacts/browser-acceptance.json` (steps, counts and flags; no secret). The authenticator is Chromium's virtual authenticator:
    **MOCKED hardware in a real browser**. The browser is the Playwright Chromium revision 1243 that the pinned `playwright-core`
    1.63.0 names, started by its explicit path (`%LOCALAPPDATA%\ms-playwright\chromium-1243\chrome-win64\chrome.exe`, version
-   153.0.8010.12); nothing is downloaded, tracing and screenshots are never switched on, and the script drives only
+   153.0.8010.12); the script downloads nothing, tracing and screenshots are never switched on, and the script drives only
    `proof.arcforges.com` (or a center on localhost), never production.
    - **One virtual authenticator per credential.** All passkeys of an account share one user handle, and Chromium keeps one
      discoverable credential of a relying party and user handle on an authenticator (a second replaces the first, and
@@ -464,15 +466,35 @@ The acceptance environment (`proof.arcforges.com`) is created by the owner's boo
      another transport, recorded with it in the saved file; the registration runs on a fresh empty authenticator with the others
      taken off (their counters read first), and afterwards each credential goes back on its own. Every write of the saved file is
      the union over the tab's authenticators.
-   - **Requests.** The hosted Worker counts every request of the origin (a page load is three) against an edge limit of 60 per
-     minute, and one run sends about 80. The driver therefore holds every request to a budget (`--requests-per-minute`, 45 by
-     default, a burst of eight: never more than 53 in a minute), which makes a run take a few minutes. If a 429 arrives anyway, a
-     step starts again from its navigation after the advised time, at most three times, but only when no request of the attempt had
-     changed anything (a registration, a removal, a sign-out): after a change the step fails and says so. The budget may be lifted
-     (`0`, or above 45) only for a center on localhost.
-   - **A first run that stopped.** If the enrollment ended without the account (the request was refused or lost), the credential
-     file this run wrote is removed again, so that the next run enrolls with the same token while it is valid. A first run that did
-     create the account keeps its file.
+   - **Requests.** The hosted Worker counts every request that comes from this machine against one edge limit of 60 per minute,
+     however many tabs there are: a page load is three requests, the assets included, and the redirect after a form POST is one
+     more that the browser follows by itself (the script's route never sees it). One run sends about a hundred (95 when it enrolls
+     and 81 when it returns, against a local center). The driver therefore holds the whole browser, all its tabs together, to ONE
+     budget (`--requests-per-minute`, 40 by default, a burst of four) and charges every redirect hop to it after the hop left, so
+     that the requests behind it wait. The run also counts what the browser really sent: the report's facts `requestsSent` and
+     `requestsBusiest60s` (the most requests inside any rolling 60 seconds, hops included) say it, and a run is failed, with the
+     429 it would meet, when that number is above 55; in the real-browser runs against a local center it was 43 (44 counted at the
+     center itself). A run takes about two minutes. If a 429 arrives anyway, a step starts again from its navigation after the
+     advised time, at most three times, but only when no request of the attempt had changed anything (a sign-in, a registration, a
+     removal, a sign-out): after a change the step fails and says so. The budget may be lifted (`0`, or above 40) only for a
+     center on localhost, where the busiest minute is recorded and not held to 55.
+   - **A first run that stopped.** If the enrollment ended without the account (the request was refused or lost, and the center
+     accepted nothing), the credential file this run wrote is removed again, so that the next run enrolls with the same token while
+     it is valid. If the center accepted the enrollment and the tab did not arrive (a lost or slow redirect), the account may exist
+     and the file is the only copy of the owner's key: the file is kept, the run says "The account may exist; do not delete the
+     credential file", and the next run signs in with it as a returning run.
+   - **A run that stopped after the second passkey was registered.** The new key is saved before the request that carries it leaves,
+     so a run that fails afterwards leaves that passkey (`acceptance-<time>`) on the account and its key in the file; a key made for a
+     passkey the center never accepted is in the file as well. The next run signs in with the owner's own credential (the one on the
+     `internal` authenticator; the others are not put on an authenticator, so that a key the center does not know cannot answer
+     the sign-in) and, in the step "remove the passkeys an earlier run left behind", removes every passkey named `acceptance-*` from
+     the account (the step-up and the remove form, as the last step does) and forgets every saved key but the owner's. The owner's
+     first passkey and the Windows Hello passkey of AR-23 (`Windows Hello AR-23 <date>`) have other names and are never touched. A
+     registration that finds no free transport in the file names the passkeys of earlier runs in its error; that cannot happen with
+     the cleanup working, and the total-loss path below is then the way back.
+   - **One center per directory.** A saved credential belongs to the center it was made for. A run against another base URL than the
+     one in the file is refused before anything is driven, with a message that names `--state-dir` (or `PROOF_ACCEPTANCE_DIR`): use
+     a directory of its own for each center.
    - **Directories.** The bootstrap and credential directories are made private only when they are new, empty or hold nothing but
      the tool's own files; a directory someone else filled (`--dir .` in a checkout, a profile folder) is refused untouched, because
      the Windows grant would strip every other entry of it and of what it holds. Name a new directory.
@@ -502,7 +524,9 @@ browser. This is how the flow was run for real before the proof environment is d
 
 1. **The browser.** In `eng/verification/browser`: `npm ci`, then `node node_modules/playwright-core/cli.js install chromium` (the
    pinned `playwright-core` downloads the revision its manifest names, 1243, to `~/.cache/ms-playwright/chromium-1243`; on a bare
-   Linux host `... install-deps chromium`, as root, adds the shared libraries). Nothing else is downloaded.
+   Linux host `... install-deps chromium`, as root, adds the shared libraries). That install fetches three things: Chromium 1243
+   (Chrome for Testing 153.0.8010.12), FFmpeg 1011 and, unless `--no-shell` is given, the Chromium headless shell of the same
+   release. The script launches only the first, by its explicit path; the other two are never started.
 2. **PostgreSQL 18 and the center.** A throwaway container of the image `eng/center.py` pins (`POSTGRES_IMAGE`), published on a
    loopback port; then, with `ARCFORGES_CENTER_MODE=self-hosted` and the container's direct URL as
    `ARCFORGES_CENTER_MIGRATION_DATABASE_URL` and `ARCFORGES_CENTER_DATABASE_NAME=center`, the center built from this tree
@@ -678,7 +702,7 @@ self-hosted mode enables every known surface unless listed (an explicit list pin
 none). A disabled surface's method is answered with the domain refusal `STATE/not_activated` (`state.reason = identity`): by the
 Worker from the generated reply, before any rate limit, credential, body or Container (`tests/worker/ingress-surfaces.test.ts`), and
 by the center with the call's correlation id (logged and counted as an OK reply with that id); a disabled `pages` surface answers every
-page route with 404 and no body, from the Worker's page handler before anything else is read. An enabled one passes the Worker's own
+page route with 404, the Worker's reply of a path it does not know (plain text), from the Worker's page handler before anything else is read. An enabled one passes the Worker's own
 edge limit `IDENTITY_RATE_LIMITER` (over it, the generated domain refusal `RESOURCE/rate_limited` with its `retry_at`: the refusal's
 time rounded up to the second plus the limiter's 60-second period) before it is forwarded. The Worker passes its parsed list to the Container as
 `ARCFORGES_CENTER_SURFACES` (`none` when the list enables nothing, so a mistyped list never stops the center) and always

@@ -57,9 +57,15 @@ confirm`. **Windows lists the passkey(s) for `proof.arcforges.com`; choose yours
    virtual passkey's time must not have changed, which is what shows that Windows Hello, and not the virtual credential, signed in.
 5. The script signs out and prints `PASSED`.
 
-If you close a dialog, or a prompt times out, the page shows "The passkey prompt was closed. Try again when you are ready." and the
-script reports `FAILED` naming the step. Run the command again; it starts from the saved virtual credential each time. If no
-Windows dialog appears at all in `chromium-1243`, stop and report that; do not switch browsers.
+If you close the dialog of step 3 (the creation), or its prompt times out, the page shows "The passkey prompt was closed. Try again
+when you are ready." and the script reports `FAILED` naming the step. No passkey was created, so run the command again; it starts
+from the saved virtual credential each time.
+
+If the script fails after the Windows Hello passkey was created (the passkeys page lists it, or you closed the sign-in prompt of step 4),
+that passkey is on the account and in Windows, and the next run's creation page lists it among the passkeys to exclude: Windows Hello
+then refuses the creation, and the script fails at step 3 with "That passkey is already registered." Do not run the command again
+yet. Either sign in by hand on the proof site with that passkey, or remove it as the paragraph "Afterwards" describes, and only then
+run the command. If no Windows dialog appears at all in `chromium-1243`, stop and report that; do not switch browsers.
 
 ## Evidence to hand back
 
