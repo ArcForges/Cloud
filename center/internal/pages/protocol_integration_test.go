@@ -35,7 +35,7 @@ var securityHeaders = map[string]string{
 	"Referrer-Policy":            "same-origin",
 	"Cross-Origin-Opener-Policy": "same-origin",
 	"Permissions-Policy":         "publickey-credentials-get=(self), publickey-credentials-create=(self)",
-	"Cache-Control":              "no-store",
+	"Cache-Control":              "no-store, no-transform",
 	"X-Content-Type-Options":     "nosniff",
 }
 
@@ -347,6 +347,37 @@ func TestCSRFOfTheSignInRoutes(t *testing.T) {
 // TestADisabledSurfaceAnswers404 (PLT-1, PLT-12): where the pages surface is off every page route is 404 with the security headers
 // and no body, whatever the method and credential; the identity surface is unaffected. A center cannot enable the pages without the
 // identity surface they call.
+// TestEveryPageReplyForbidsTransformation (H-2, found by the first hosted run): the Cloudflare edge adds its Web Analytics beacon (a
+// third-party script and a data-cf-beacon attribute) to HTML that nothing forbids it to transform, which contradicts "no external
+// asset" and makes the browser report a policy violation. Every reply of the page handler, whatever its status, kind or route (HTML,
+// asset, JSON, form, the 404 of a disabled surface), says `no-transform` besides `no-store`, and nothing else.
+func TestEveryPageReplyForbidsTransformation(t *testing.T) {
+	check := func(what string, reply response) {
+		t.Helper()
+		values := reply.header.Values("Cache-Control")
+		if len(values) != 1 {
+			t.Errorf("%s (%d): Cache-Control is %q", what, reply.status, values)
+			return
+		}
+		directives := map[string]bool{}
+		for _, item := range strings.Split(values[0], ",") {
+			directives[strings.TrimSpace(item)] = true
+		}
+		if len(directives) != 2 || !directives["no-store"] || !directives["no-transform"] {
+			t.Errorf("%s (%d): Cache-Control is %q, not no-store and no-transform", what, reply.status, values[0])
+		}
+	}
+	h := newHarness(t, settings{})
+	for _, route := range routes.PageRoutes() {
+		check(route.Method+" "+route.Path, h.do(request{method: route.Method, path: route.Path, contentType: route.RequestType, body: validBody(route), cookie: strings.Repeat("A", 43)}))
+		check(route.Method+" "+route.Path+" without a cookie", h.do(request{method: route.Method, path: route.Path, contentType: route.RequestType, body: validBody(route)}))
+	}
+	disabled := newHarness(t, settings{surfaces: "identity"})
+	for _, route := range routes.PageRoutes() {
+		check("disabled "+route.Method+" "+route.Path, disabled.do(request{method: route.Method, path: route.Path, contentType: route.RequestType, body: validBody(route)}))
+	}
+}
+
 func TestADisabledSurfaceAnswers404(t *testing.T) {
 	h := newHarness(t, settings{surfaces: "identity"})
 	for _, route := range routes.PageRoutes() {

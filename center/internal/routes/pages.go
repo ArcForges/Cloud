@@ -118,8 +118,13 @@ const pageCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-sr
 
 // PageSecurityHeaders are the headers every reply of the page handler carries, whatever its status and content (SEC-16): the
 // security policy of the pages, the same-origin referrer policy that makes a browser's form POSTs carry an Origin, the opener
-// policy, the permission for WebAuthn on the page's own origin, and no caching and no sniffing. The Worker's generated allow-list is
-// this list.
+// policy, the permission for WebAuthn on the page's own origin, no caching, no transformation and no sniffing. The Worker's
+// generated allow-list is this list.
+//
+// `no-transform` is there for the edge: Cloudflare's Web Analytics adds its beacon (a third-party script and a data-cf-beacon
+// attribute) to the HTML of a zone that has the automatic setup on, unless the reply forbids any transformation of its payload.
+// The policy blocks the script, but the browser reports the block as a console error, and an injected third-party script
+// contradicts "nothing external". The first hosted run found it; a center on this machine has no edge to show it.
 func PageSecurityHeaders() []PageSecurityHeader {
 	return []PageSecurityHeader{
 		{"Content-Security-Policy", pageCSP},
@@ -127,7 +132,7 @@ func PageSecurityHeaders() []PageSecurityHeader {
 		{"Referrer-Policy", "same-origin"},
 		{"Cross-Origin-Opener-Policy", "same-origin"},
 		{"Permissions-Policy", "publickey-credentials-get=(self), publickey-credentials-create=(self)"},
-		{"Cache-Control", "no-store"},
+		{"Cache-Control", "no-store, no-transform"},
 		{"X-Content-Type-Options", "nosniff"},
 	}
 }

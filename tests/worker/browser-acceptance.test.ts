@@ -750,6 +750,9 @@ test("the saved credential is read strictly and written only whole, forward and 
 test("the security headers are the generated set, exactly", () => {
   const good = { ...pageSecurityHeaders };
   assert.deepEqual(headerProblems(good), []);
+  // H-2: the script holds a page to the generated value, so the old value without no-transform is a problem of its own.
+  assert.equal(good["cache-control"], "no-store, no-transform");
+  assert.deepEqual(headerProblems({ ...good, "cache-control": "no-store" }), ["cache-control"]);
   assert.equal(Object.keys(good).length, 7);
   for (const name of Object.keys(good)) {
     assert.deepEqual(headerProblems({ ...good, [name]: `${good[name]};` }), [name]);

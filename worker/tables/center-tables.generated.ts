@@ -678,7 +678,7 @@ export const pageSecurityHeaders: Readonly<Record<string, string>> = {
   "referrer-policy": "same-origin",
   "cross-origin-opener-policy": "same-origin",
   "permissions-policy": "publickey-credentials-get=(self), publickey-credentials-create=(self)",
-  "cache-control": "no-store",
+  "cache-control": "no-store, no-transform",
   "x-content-type-options": "nosniff",
 };
 /** The statuses a page reply may have; any other status becomes the Worker's 503. */

@@ -38,7 +38,7 @@ const exactHeaders: Record<string, string> = {
   "referrer-policy": "same-origin",
   "cross-origin-opener-policy": "same-origin",
   "permissions-policy": "publickey-credentials-get=(self), publickey-credentials-create=(self)",
-  "cache-control": "no-store",
+  "cache-control": "no-store, no-transform",
   "x-content-type-options": "nosniff",
 };
 const sessionCookie = `${pageCookieName}=${handle}; Path=/; Max-Age=43200; Secure; HttpOnly; SameSite=Strict`;
@@ -544,6 +544,48 @@ test("a reply that keeps every rule is copied with exactly the generated headers
   assert.equal(bare.status, 404);
   assert.equal(bare.headers.has("content-type"), false);
   assert.equal((await bare.arrayBuffer()).byteLength, 0);
+});
+
+test("a page reply that says no-store without no-transform is the Worker's 503: the edge would inject its beacon (H-2)", async () => {
+  // Cloudflare's Web Analytics adds a third-party script to HTML that nothing forbids it to transform. The center forbids it on every
+  // reply, and the Worker lets no reply through that does not say so, whatever its kind.
+  assert.match(pageSecurityHeaders["cache-control"] ?? "", /(?:^|, )no-transform(?:,|$)/u);
+  for (const row of pageRoutes) {
+    const type = row.responseTypes[0] ?? "text/html; charset=utf-8";
+    const old = await replyOf(
+      row,
+      centerReply(row.redirects ? 303 : 200, {
+        type: row.redirects ? undefined : type,
+        body: row.redirects ? undefined : "x",
+        headers: {
+          "cache-control": "no-store",
+          ...(row.redirects ? { location: "/api/account/sign-in" } : {}),
+        },
+      }),
+    );
+    // The reply the browser gets is the Worker's: it carries the generated value, so the edge sees no-transform on what it forwards.
+    const good = await replyOf(
+      row,
+      centerReply(row.redirects ? 303 : 200, {
+        type: row.redirects ? undefined : type,
+        body: row.redirects ? undefined : "x",
+        headers: row.redirects ? { location: "/api/account/sign-in" } : {},
+      }),
+    );
+    assert.equal(good.status, row.redirects ? 303 : 200, `${row.method} ${row.path}`);
+    assert.equal(
+      good.headers.get("cache-control"),
+      "no-store, no-transform",
+      `${row.method} ${row.path}`,
+    );
+    assert.equal(old.status, 503, `${row.method} ${row.path} with the old value`);
+    assert.equal(
+      old.headers.get("cache-control"),
+      "no-store",
+      "the Worker's own refusal is plain text",
+    );
+    assert.match(old.headers.get("content-type") ?? "", /^text\/plain/u);
+  }
 });
 
 test("a reply that lacks a security header or differs from it is the Worker's 503", async () => {
