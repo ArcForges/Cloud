@@ -9,13 +9,27 @@
 // refusal is audited as access.refused. A restricted account reaches only its security operations. A mobile.limited session
 // (a QR-paired phone before its first step-up; AD-0011 section 3, T-19) reaches the reads, the step-up and its own sign-out and
 // device removal; everything else answers AUTHENTICATION/step_up_required until a step-up upgrades the session to account.
+//
+// Authorize decides in a fixed order (AF-CTR-03 part B, plan section (g)); an earlier stage that refuses ends the decision, so a
+// later stage is never reached by a call an earlier one refused:
+//
+//  1. authentication: the call has a validated credential;
+//  2. ownership: the object the call addresses belongs to the caller's account, else STATE/not_found (rows that name an Object);
+//  3. scope and risk: a credential scope the center knows, an account whose state admits the operation, the session upgrade;
+//  4. AGENT/HUMAN separation: the credential's principal is the one the operation serves (account sessions are HUMAN, node and
+//     automation credentials are AGENT);
+//  5. resource controls: the registered controls (rate limits now; quotas and budgets arrive with AF-CTR-04, DC-07);
+//  6. audit: an operation whose Audit is AuditBeforeCall appends access.authorized, and a failed append refuses the call;
+//  7. the gate: an operation with a Feature key is refused with ENTITLEMENT/feature_not_entitled unless the feature is available to
+//     the caller's account, and the refusal is audited as access.gated.
+//
+// Essential operations (sign-in, account, billing, security and recovery) carry no Feature and are never gated.
 package access
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,6 +39,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/entitlement"
+	"github.com/ArcForges/Cloud/center/internal/feature"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/store"
@@ -59,6 +74,21 @@ const (
 	EvidenceUnlessOwn
 )
 
+// Audit is who appends the audit event of an operation whose effect or disclosure matters (R3 and above, and every gated one).
+type Audit int
+
+// The audit rules.
+const (
+	// NoAudit: the operation is audited only by the events its own work produces (reads and low-risk writes).
+	NoAudit Audit = iota
+	// AuditInTransaction: the operation's handler appends its event in the transaction of the effect, so a failed append undoes the
+	// effect (the high-risk identity rows).
+	AuditInTransaction
+	// AuditBeforeCall: Authorize appends access.authorized before the handler runs and before the gate, and a failed append refuses
+	// the call (every gated operation).
+	AuditBeforeCall
+)
+
 // The targets of the step-up classes: the object the target hash names (TargetHash).
 const (
 	TargetAccount    = "account"
@@ -89,6 +119,17 @@ type Operation struct {
 	Target string
 	// Receipt is true for a write that runs under a command receipt (RequestMeta.command_id; con-07 idempotency IW, DE or CC).
 	Receipt bool
+	// Feature is the gated feature key of the operation (AD-0021 section 13a), or empty for an essential operation, which is never
+	// gated. A gated operation is a session operation audited before the call (AuditBeforeCall).
+	Feature feature.Key
+	// Agent is true for an operation served to AGENT credentials (node and automation scopes) instead of HUMAN account sessions
+	// (account and mobile.limited). No identity row is an agent operation.
+	Agent bool
+	// Object is the kind of the object the call addresses (device, task, ...), or empty. Authorize then needs the object's owner (a
+	// Subject) and answers STATE/not_found for an object of another account before it decides anything else.
+	Object string
+	// Audit says who appends the operation's audit event; every R3 or higher row and every gated row has one.
+	Audit Audit
 }
 
 // Operations is the closed table of the served identity and device methods. Risks and evidence follow con-07, with the stricter
@@ -117,15 +158,15 @@ func Operations() []Operation {
 			Session: true, MobileLimited: Upgrade, Receipt: true},
 		{Path: publicapiv1connect.IdentityServiceRenameAuthIdentityProcedure, ID: "identity.renameAuthIdentity", Risk: "R2", Session: true,
 			Restricted: true, MobileLimited: Upgrade, Receipt: true},
-		{Path: publicapiv1connect.IdentityServiceRemoveAuthIdentityProcedure, ID: "identity.removeAuthIdentity", Risk: "R3", Session: true,
+		{Path: publicapiv1connect.IdentityServiceRemoveAuthIdentityProcedure, ID: "identity.removeAuthIdentity", Risk: "R3", Audit: AuditInTransaction, Session: true,
 			Restricted: true, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetCredential, Receipt: true},
 		{Path: publicapiv1connect.IdentityServiceRevokeSessionProcedure, ID: "identity.revokeSession", Risk: "R2", Session: true, Restricted: true,
 			MobileLimited: UpgradeUnlessOwn, StepUp: EvidenceUnlessOwn, Target: TargetSession, Receipt: true},
-		{Path: publicapiv1connect.IdentityServiceRevokeAllSessionsProcedure, ID: "identity.revokeAllSessions", Risk: "R3", Session: true,
+		{Path: publicapiv1connect.IdentityServiceRevokeAllSessionsProcedure, ID: "identity.revokeAllSessions", Risk: "R3", Audit: AuditInTransaction, Session: true,
 			Restricted: true, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetAccount, Receipt: true},
 		{Path: publicapiv1connect.DeviceServiceRenameProcedure, ID: "device.rename", Risk: "R1", Session: true, Restricted: true, MobileLimited: Upgrade,
 			Receipt: true},
-		{Path: publicapiv1connect.DeviceServiceRevokeProcedure, ID: "device.revoke", Risk: "R3", Session: true, Restricted: true,
+		{Path: publicapiv1connect.DeviceServiceRevokeProcedure, ID: "device.revoke", Risk: "R3", Audit: AuditInTransaction, Session: true, Restricted: true,
 			MobileLimited: UpgradeUnlessOwn, StepUp: EvidenceUnlessOwn, Target: TargetDevice, Receipt: true},
 	}
 }
@@ -196,9 +237,8 @@ func Check(served []ingress.Policy) error {
 		if operation.Session != (policy.Authentication == ingress.Session) {
 			return fmt.Errorf("the operation table and the policy of %s disagree about its session", policy.FullName)
 		}
-		if (operation.StepUp != NoEvidence) != (operation.Target != "") || (!operation.Session && (operation.StepUp != NoEvidence || operation.Receipt ||
-			operation.MobileLimited != Allowed || operation.Restricted)) {
-			return fmt.Errorf("the operation row of %s is inconsistent", policy.FullName)
+		if err := CheckRow(operation); err != nil {
+			return err
 		}
 		seen[policy.FullName] = true
 	}
@@ -210,32 +250,126 @@ func Check(served []ingress.Policy) error {
 	return nil
 }
 
-// accountScopes are the scopes a session method admits (DC-03).
-var accountScopes = []string{"account", "mobile.limited"}
+// CheckRow refuses a row that contradicts itself: evidence and its target go together; an anonymous row carries nothing that needs
+// a caller; a Feature is a gated key, is audited before the call and belongs to a session operation; an R3 or higher row is audited;
+// an agent operation is no mobile.limited, restricted or step-up row, because those rules are about a person's session.
+func CheckRow(operation Operation) error {
+	inconsistent := func(why string) error {
+		return fmt.Errorf("the operation row of %s is inconsistent: %s", operation.Path, why)
+	}
+	switch {
+	case (operation.StepUp != NoEvidence) != (operation.Target != ""):
+		return inconsistent("evidence and its target go together")
+	case !operation.Session && (operation.StepUp != NoEvidence || operation.Receipt || operation.MobileLimited != Allowed || operation.Restricted ||
+		operation.Agent || operation.Object != "" || operation.Audit != NoAudit):
+		// A gated row is audited before the call, so it is caught here as well.
+		return inconsistent("an anonymous row needs no caller")
+	case operation.Feature != "" && !feature.IsGated(operation.Feature):
+		return inconsistent("the feature is not a gated key")
+	case operation.Feature != "" && operation.Audit != AuditBeforeCall:
+		return inconsistent("a gated row is audited before the call")
+	case operation.Audit == AuditBeforeCall && operation.Feature == "" && operation.Risk != "R3" && operation.Risk != "R4":
+		return inconsistent("only a gated or high-risk row is audited before the call")
+	case (operation.Risk == "R3" || operation.Risk == "R4") && operation.Audit == NoAudit:
+		return inconsistent("a high-risk row is audited")
+	case operation.Agent && (operation.MobileLimited != Allowed || operation.Restricted || operation.StepUp != NoEvidence):
+		return inconsistent("an agent row follows no person's session rule")
+	}
+	return nil
+}
+
+// A Principal is who a credential acts for: an account session acts for a person (HUMAN), a node or automation credential for a
+// machine (AGENT). A credential of another scope (push) is neither and is admitted to no session operation.
+type Principal int
+
+// The principals.
+const (
+	Human Principal = iota + 1
+	Agent
+)
+
+// PrincipalOf is the principal of a credential scope, and false for a scope that acts for none.
+func PrincipalOf(scope string) (Principal, bool) {
+	switch scope {
+	case "account", "mobile.limited":
+		return Human, true
+	case "node", "automation":
+		return Agent, true
+	}
+	return 0, false
+}
+
+func (o Operation) principal() Principal {
+	if o.Agent {
+		return Agent
+	}
+	return Human
+}
 
 // restrictedState is identity.user_state restricted.
 const restrictedState = 2
 
+// Subject is the object a call addresses, as the handler that has read the request knows it. Authorize asks for its owner when the
+// operation names an Object, so another account's object is STATE/not_found whatever the later stages would say.
+type Subject struct {
+	// Kind is the kind of the object; it must be the operation's Object.
+	Kind string
+	// ID is the object's identifier as the not_found refusal names it.
+	ID []byte
+	// Owner reads the account that owns the object (as the text of its identifier); found is false when there is no such object.
+	Owner func(ctx context.Context) (account string, found bool, err error)
+}
+
+// Control is a resource control (DC-07): it returns nil to admit the call, or the refusal (an *arc.Refusal, for example a rate
+// limit) or the store failure that stops it. It runs after the call's scope and principal are decided and before the audit and the
+// gate, so a call that exhausted a resource is refused before it reaches either.
+type Control func(ctx context.Context, call *ingress.Call, operation Operation) error
+
 // Authorizer decides a session call and audits its refusals.
 type Authorizer struct {
-	db    *store.DB
-	clock func() time.Time
+	db       *store.DB
+	clock    func() time.Time
+	gate     feature.Gate
+	controls []Control
+	lookup   func(path string) (Operation, bool)
+}
+
+// Option configures an Authorizer.
+type Option func(*Authorizer)
+
+// WithGate sets the feature gate that decides the operations with a Feature. Without one a gated operation is refused as if its
+// feature were unavailable (fail closed).
+func WithGate(gate feature.Gate) Option { return func(a *Authorizer) { a.gate = gate } }
+
+// WithControls sets the resource controls Authorize runs, in order, before the audit and the gate.
+func WithControls(controls ...Control) Option {
+	return func(a *Authorizer) { a.controls = append([]Control(nil), controls...) }
 }
 
 // NewAuthorizer is the authorizer of a store.
-func NewAuthorizer(db *store.DB, clock func() time.Time) *Authorizer {
+func NewAuthorizer(db *store.DB, clock func() time.Time, options ...Option) *Authorizer {
 	if clock == nil {
 		clock = time.Now
 	}
-	return &Authorizer{db: db, clock: clock}
+	authorizer := &Authorizer{db: db, clock: clock, lookup: Lookup}
+	for _, option := range options {
+		option(authorizer)
+	}
+	return authorizer
 }
 
-// Authorize decides an admitted call of the identity surface before its handler does anything: an unknown method is refused
-// (fail closed); an anonymous method needs nothing more; a session method needs an account-session scope, an account whose state
-// admits the operation and, for mobile.limited, an operation open to it. A refusal is returned as *arc.Refusal after its audit
-// event committed; any other error is a store failure.
+// Authorize decides an admitted call of the identity surface before its handler does anything, for an operation that addresses no
+// object (AuthorizeSubject with none). An unknown method is refused (fail closed); an anonymous method needs nothing more; a session
+// method goes through the stages listed in the package comment. A refusal is returned as *arc.Refusal after its audit event
+// committed; any other error is a store failure.
 func (a *Authorizer) Authorize(ctx context.Context, call *ingress.Call) (Operation, error) {
-	operation, ok := Lookup(call.Policy.FullName)
+	return a.AuthorizeSubject(ctx, call, nil)
+}
+
+// AuthorizeSubject is Authorize for a call that addresses an object: a row that names an Object needs the matching Subject, and a
+// call without one is refused (fail closed).
+func (a *Authorizer) AuthorizeSubject(ctx context.Context, call *ingress.Call, subject *Subject) (Operation, error) {
+	operation, ok := a.lookup(call.Policy.FullName)
 	if !ok {
 		return Operation{}, arc.PermissionDenied("unknown")
 	}
@@ -243,21 +377,109 @@ func (a *Authorizer) Authorize(ctx context.Context, call *ingress.Call) (Operati
 		return operation, nil
 	}
 	caller := call.Caller
-	switch {
-	case !caller.IsAuthenticated():
+	// 1. Authentication.
+	if !caller.IsAuthenticated() {
 		return operation, arc.Unauthenticated()
-	case !slices.Contains(accountScopes, caller.Scope):
+	}
+	// 2. Ownership of the addressed object.
+	if operation.Object != "" {
+		if err := a.owned(ctx, call, operation, subject); err != nil {
+			return operation, err
+		}
+	}
+	// 3. Scope and risk.
+	principal, known := PrincipalOf(caller.Scope)
+	switch {
+	case !known:
 		return operation, a.refuse(ctx, call, operation, "scope")
 	case caller.AccountState == restrictedState && !operation.Restricted:
 		return operation, a.refuse(ctx, call, operation, "restricted")
 	case operation.MobileLimited == Upgrade && operation.NeedsUpgrade(caller, false):
 		return operation, arc.StepUpRequired()
 	}
+	// 4. AGENT/HUMAN separation.
+	if principal != operation.principal() {
+		return operation, a.refuse(ctx, call, operation, "principal")
+	}
+	// 5. Resource controls.
+	for _, control := range a.controls {
+		if err := control(ctx, call, operation); err != nil {
+			return operation, err
+		}
+	}
+	// 6. The audit that comes before the call; a failed append refuses it.
+	if operation.Audit == AuditBeforeCall {
+		if err := a.audit(ctx, call, operation, AuditAuthorized, "", map[string]any{"operation": operation.ID, "risk": operation.Risk, "feature": string(operation.Feature),
+			"scope": caller.Scope}); err != nil {
+			return operation, err
+		}
+	}
+	// 7. The gate.
+	if operation.Feature != "" {
+		if err := a.gated(ctx, call, operation); err != nil {
+			return operation, err
+		}
+	}
 	return operation, nil
 }
 
+// The audit events Authorize appends.
+const (
+	// AuditRefused is a refusal of scope, principal or account state.
+	AuditRefused = "access.refused"
+	// AuditAuthorized is the audit that comes before a gated or high-risk call.
+	AuditAuthorized = "access.authorized"
+	// AuditGated is a gated call the gate refused; its reason is the gate's.
+	AuditGated = "access.gated"
+)
+
+// owned is stage 2: the addressed object exists and belongs to the caller's account, else STATE/not_found. A row that names an
+// Object and a call without the matching Subject is a defect of the handler and is refused, never admitted.
+func (a *Authorizer) owned(ctx context.Context, call *ingress.Call, operation Operation, subject *Subject) error {
+	if subject == nil || subject.Kind != operation.Object || subject.Owner == nil {
+		return a.refuse(ctx, call, operation, "subject")
+	}
+	owner, found, err := subject.Owner(ctx)
+	switch {
+	case err != nil:
+		return err
+	case !found || owner != call.Caller.UserID:
+		return arc.NotFound(subject.Kind, subject.ID)
+	}
+	return nil
+}
+
+// gated is stage 7: ENTITLEMENT/feature_not_entitled unless the gate says the feature is available to the caller's account. A gate
+// that could not read the entitlement is a failure of the store and is returned as one, not as a missing entitlement.
+func (a *Authorizer) gated(ctx context.Context, call *ingress.Call, operation Operation) error {
+	decision := feature.Decision{Reason: feature.ReasonModeInvalid}
+	if a.gate != nil {
+		decision = a.gate.Availability(feature.WithAccount(ctx, call.Caller.UserID), operation.Feature)
+	}
+	switch {
+	case decision.Available:
+		return nil
+	case decision.Err != nil:
+		return decision.Err
+	}
+	if err := a.audit(ctx, call, operation, AuditGated, string(decision.Reason), map[string]any{"operation": operation.ID, "feature": string(operation.Feature),
+		"reason": string(decision.Reason)}); err != nil {
+		return err
+	}
+	return arc.FeatureNotEntitled(string(operation.Feature))
+}
+
 func (a *Authorizer) refuse(ctx context.Context, call *ingress.Call, operation Operation, reason string) error {
-	payload, err := json.Marshal(map[string]any{"operation": operation.ID, "scope": call.Caller.Scope, "reason": reason})
+	if err := a.audit(ctx, call, operation, AuditRefused, reason, map[string]any{"operation": operation.ID, "scope": call.Caller.Scope, "reason": reason}); err != nil {
+		return err
+	}
+	return arc.PermissionDenied(operation.ID)
+}
+
+// audit appends one event about the call in a transaction of its own: it is no effect of the call it is about (D10). An error is
+// the store failure, which refuses the call.
+func (a *Authorizer) audit(ctx context.Context, call *ingress.Call, operation Operation, eventType, reason string, details map[string]any) error {
+	payload, err := json.Marshal(details)
 	if err != nil {
 		return err
 	}
@@ -267,14 +489,9 @@ func (a *Authorizer) refuse(ctx context.Context, call *ingress.Call, operation O
 		copy(id[:], raw)
 		correlationID = &id
 	}
-	// The audit is no effect of the refused call, so its transaction is auxiliary (D10).
-	err = a.db.InTx(ctx, "audit an access refusal", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
+	return a.db.InTx(ctx, "audit an access decision", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := platform.AppendAudit(ctx, tx, platform.Event{EventID: platform.NewID(), OccurredAt: a.clock(), ActorRef: "account:" + call.Caller.UserID,
-			EventType: "access.refused", Reason: reason, CorrelationID: correlationID, TargetKind: "operation", TargetID: operation.ID, Payload: payload})
+			EventType: eventType, Reason: reason, CorrelationID: correlationID, TargetKind: "operation", TargetID: operation.ID, Payload: payload})
 		return err
 	})
-	if err != nil {
-		return err
-	}
-	return arc.PermissionDenied(operation.ID)
 }

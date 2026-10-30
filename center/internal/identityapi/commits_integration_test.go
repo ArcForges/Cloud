@@ -243,7 +243,7 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		"list sessions": read, "verify a session": read, "check a rate-limit bucket": read, "list devices": read,
 		// Bookkeeping: counts, reservations, denials and give-backs around an effect, and the audits of refusals.
 		"count a rate-limit bucket": auxiliary, "reserve a rate-limit failure": auxiliary, "give a failure reservation back": auxiliary,
-		"audit an identity refusal": auxiliary, "audit an access refusal": auxiliary, "count a flow attempt": auxiliary,
+		"audit an identity refusal": auxiliary, "audit an access decision": auxiliary, "count a flow attempt": auxiliary,
 		"end an exhausted flow": auxiliary, "release a flow attempt": auxiliary, "count a step-up attempt": auxiliary, "deny a step-up": auxiliary,
 		"release a step-up attempt": auxiliary, "count a registration attempt": auxiliary,
 		// A2: a browser session's renewal on a page load or the bootstrap read.

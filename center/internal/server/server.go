@@ -259,7 +259,7 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	}
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: options.Mail, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: options.Participants})
-	authorizer := access.NewAuthorizer(c.Store, clock)
+	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
 	dispatcher.Register(server.Methods()...)
 	verifier := session.NewVerifier(c.Store, origin, clock)
