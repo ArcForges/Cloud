@@ -56,6 +56,14 @@ function scan(
   throw new Error("an expression is not closed");
 }
 
+/** Whether template text ends where a quantifier's bound can start: `{`, `{3,` or `{` and a substitution and a comma. */
+function opensABound(text: string): boolean {
+  const brace = text.lastIndexOf("{");
+  if (brace < 0) return false;
+  // A substitution is the character U+0000 in the piece; it stands for a number here.
+  return /^(?:\d+|@)?,?$/u.test(text.slice(brace + 1).replaceAll("\u0000", "@"));
+}
+
 /** Reads the string or template that opens at `start`; the result is the index of its closing quote. */
 function quoted(source: string, start: number, pieces: string[], counted: string[]): number {
   const quote = source[start] as string;
@@ -72,7 +80,7 @@ function quoted(source: string, start: number, pieces: string[], counted: string
       const from = index + 2;
       index = scan(source, from, false, pieces, counted);
       // A substitution right after `{`, `{3,` or another substitution and a comma is a quantifier's bound.
-      if (/\{(?:\d+|\u0000)?,?$/u.test(text)) counted.push(source.slice(from, index));
+      if (opensABound(text)) counted.push(source.slice(from, index));
       text += "\u0000";
     } else {
       text += character;
@@ -234,6 +242,11 @@ test("the reader finds every piece of the argument, a substituted expression's l
   assert.deepEqual(literalCounts("[0-9]{0,\u0000}x{1}y{0}z{0,1}"), []);
 });
 
+/** A template-literal substitution, spelled so that this test file holds no template-looking string of its own. */
+const sub = (expression: string) => ["$", "{", expression, "}"].join("");
+/** The source of `new RegExp(<template>, "u")` for a template body. */
+const template = (body: string) => `new RegExp(\`${body}\`, "u")`;
+
 test("a hand-written count is found in a template, a string, a concatenation, a joined array, a substitution and a variable", () => {
   const generated = 'import { limit, pattern as shape } from "../tables/x.generated.ts";\n';
   assert.deepEqual(violations(`${generated}new RegExp(\`^[0-9]{0,\${limit - 1}}$\`, "u")`), []);
@@ -255,12 +268,12 @@ test("a hand-written count is found in a template, a string, a concatenation, a 
     'const held = "x{43}"; new RegExp(held, "u")',
     `const held = \`x{\${"43"}}\`; new RegExp(held, "u")`,
     'new RegExp(local.pattern, "u")',
-    'new RegExp(`^x{${43}}$`, "u")',
-    'new RegExp(`^x{0,${43}}$`, "u")',
-    'new RegExp(`^x{${3},${43}}$`, "u")',
-    'const held = 43; new RegExp(`^x{0,${held}}$`, "u")',
-    'new RegExp(`^x{0,${limit - 2}}$`, "u")',
-    'new RegExp(`^x{0,${hold(limit)}}$`, "u")',
+    template(`^x{${sub("43")}}$`),
+    template(`^x{0,${sub("43")}}$`),
+    template(`^x{${sub("3")},${sub("43")}}$`),
+    `const held = 43; ${template(`^x{0,${sub("held")}}$`)}`,
+    template(`^x{0,${sub("limit - 2")}}$`),
+    template(`^x{0,${sub("hold(limit)")}}$`),
     'new RegExp("^x{" + 43 + "}$", "u")',
     'new RegExp(["^x{", 43, "}$"].join(""), "u")',
   ]) {
