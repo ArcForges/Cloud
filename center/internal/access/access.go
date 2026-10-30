@@ -171,21 +171,43 @@ func Operations() []Operation {
 	}
 }
 
-// OperatorGrantClass is the step-up class of the operator grant, a center-defined operation (the contract has no row for it): its
-// target is the request itself, named by the SHA-256 of its canonical text (SEC-10). Package entitlement owns the operation.
+// OperatorGrantClass is the operation ID and step-up class of the operator grant, a center-defined operation (the contract has no row
+// for it): its target is the request itself, named by the SHA-256 of its canonical text (SEC-10). Package entitlement owns the
+// operation.
 const OperatorGrantClass = entitlement.OperatorGrantClass
 
 // TargetRequest is the target of a center-defined operation: the canonical request.
 const TargetRequest = "request"
 
+// CenterOperation is an operation the center defines itself, outside the contract's operation table: the page of the operations
+// surface performs it, and its authority is the operator role and the step-up evidence it consumes, not a session method's row.
+type CenterOperation struct {
+	// ID is the operation ID, the command receipt's operation and the step-up class.
+	ID string
+	// Risk is the risk class; StepUp and Target are its evidence rule, Receipt whether it runs under a command receipt.
+	Risk    string
+	StepUp  StepUp
+	Target  string
+	Receipt bool
+	// Audit says who appends its audit event.
+	Audit Audit
+}
+
+// CenterOperations is the closed list of the center-defined operations.
+func CenterOperations() []CenterOperation {
+	return []CenterOperation{{ID: OperatorGrantClass, Risk: "R4", StepUp: Evidence, Target: TargetRequest, Receipt: true, Audit: AuditInTransaction}}
+}
+
 // StepUpClass is a step-up class BeginStepUp admits and the target its hash names: the operation ID of a row that needs
-// evidence, the upgrade class, or the center-defined operator grant.
+// evidence, the upgrade class, or a center-defined operation that needs evidence.
 func StepUpClass(class string) (target string, ok bool) {
 	if class == UpgradeClass {
 		return TargetSession, true
 	}
-	if class == OperatorGrantClass {
-		return TargetRequest, true
+	for _, operation := range CenterOperations() {
+		if operation.ID == class && operation.StepUp != NoEvidence {
+			return operation.Target, true
+		}
 	}
 	for _, operation := range Operations() {
 		if operation.ID == class && operation.StepUp != NoEvidence {

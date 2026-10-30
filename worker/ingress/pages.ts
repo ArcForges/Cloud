@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Worker's page handler (AF-CTR-03 A2, PLT-1): the center's account pages and its WebBrowserSession routes, forwarded to the
-// Container only for an exact method and path of the generated page table, while the pages surface is enabled. It is deny by default
+// Container only for an exact method and path of the generated page table, while the surface of the route (pages, or operations) is enabled. It is deny by default
 // in both directions and holds no business rule:
 //   - Request side: any query string, an Authorization header, a body on a GET, an Origin that is not exactly ALLOWED_ORIGIN on a
 //     POST, a media type or an encoding the route does not take, a body over the route's bound, and a session cookie that is not
@@ -31,7 +31,6 @@ import {
   pageRoutes,
   pageSecurityHeaders,
   pageStatuses,
-  pageSurface,
   pageUserAgentBytes,
 } from "../tables/center-tables.generated.ts";
 import { bodyReadMilliseconds, sessionTokenPattern } from "../tables/cloud-tables.generated.ts";
@@ -53,7 +52,11 @@ export const pageTable: ReadonlyMap<string, readonly PageRoute[]> = (() => {
   const table = new Map<string, PageRoute[]>();
   for (const route of pageRoutes) {
     const path = `/api${route.path}`;
-    table.set(path, [...(table.get(path) ?? []), route]);
+    const methods = table.get(path) ?? [];
+    // The surface check answers for a whole path, so the methods of one path belong to one surface (fail closed).
+    if (methods.some((other) => other.surface !== route.surface))
+      throw new TypeError("The methods of one page path belong to one surface.");
+    table.set(path, [...methods, route]);
   }
   return table;
 })();
@@ -161,8 +164,10 @@ export async function handlePageRequest(
   candidates: readonly PageRoute[],
 ): Promise<Response> {
   const route = candidates.find((row) => row.method === request.method);
-  // A disabled surface is a path the Worker does not know (the same reply), before anything about the request is read.
-  if (!enabledSurfaces(env.FLAGSHIP_SURFACES).has(pageSurface))
+  // A disabled surface is a path the Worker does not know (the same reply), before anything about the request is read. A path's
+  // methods belong to one surface (the generated table is built that way), so the first candidate names it.
+  const surface = candidates[0]?.surface;
+  if (surface === undefined || !enabledSurfaces(env.FLAGSHIP_SURFACES).has(surface))
     return reject(404, "Unknown API method.");
   if (!route) return reject(405, "Method not allowed.");
   if (request.url.includes("?")) return reject(400, "Query parameters are not supported.");

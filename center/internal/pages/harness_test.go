@@ -167,6 +167,9 @@ type settings struct {
 	surfaces    string
 	policy      string
 	noBootstrap bool
+	// hosted is the official hosted center on the development fixtures with the operations surface on: the only configuration
+	// the operator grant page exists in.
+	hosted bool
 }
 
 const writePolicy = `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000}`
@@ -210,6 +213,15 @@ func newHarness(t *testing.T, options settings) *harness {
 	cfg, err := config.Load(func(key string) (string, bool) { value, ok := values[key]; return value, ok })
 	if err != nil {
 		t.Fatal(err)
+	}
+	if options.hosted {
+		// The official hosted center requires a verified TLS connection to its database, which the test server does not offer: the
+		// configuration is loaded as a self-hosted one and then made the hosted center's (the mode, the development fixtures and, unless
+		// the list is given, the operations surface), so everything the hosted mode changes in the composition is under test.
+		cfg.Mode, cfg.Plan = config.OfficialHosted, config.PlanDevelopmentFixtures
+		if options.surfaces == "" {
+			cfg.Identity.Surfaces = append(cfg.Identity.Surfaces, config.SurfaceOperations)
+		}
 	}
 	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: h.mail, Clock: h.clock.Now, Background: func(work func()) { work() }})
 	if err != nil {

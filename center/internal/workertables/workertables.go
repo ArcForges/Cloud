@@ -90,6 +90,8 @@ export type PageSetCookie = "none" | "session" | "clear";
  * admits a request only for such a row, whose surface is enabled, and answers only what the row allows.
  */
 export interface PageRoute {
+  /** The switchable surface of the route: the page handler forwards it only while FLAGSHIP_SURFACES enables that surface. */
+  readonly surface: Surface;
   readonly method: "GET" | "POST";
   /** The path without the owned /api prefix. */
   readonly path: string;
@@ -239,11 +241,11 @@ func Render(table routes.WorkerTable) (string, error) {
 // pageTable writes the page routes and the rules of the Worker's page handler (PLT-1): the routes, the headers every reply must carry
 // and the Worker may copy, the statuses it lets through, the session cookie's name and the one form a redirect's Location may take.
 func pageTable(text *strings.Builder, table routes.WorkerTable) {
-	text.WriteString("/** The routes of the center's account pages; each is forwarded only while the surface of the pages is enabled. */\n")
-	text.WriteString("export const pageSurface: Surface = " + quote(routes.SurfacePages) + ";\n")
+	text.WriteString("/** The routes of the center's pages (the account pages and the operations page); each is forwarded only while its surface is enabled. */\n")
 	text.WriteString("export const pageRoutes: readonly PageRoute[] = [\n")
 	for _, row := range table.Pages {
 		text.WriteString("  {\n")
+		text.WriteString("    surface: " + quote(row.Surface) + ",\n")
 		text.WriteString("    method: " + quote(row.Method) + ",\n")
 		text.WriteString("    path: " + quote(row.Path) + ",\n")
 		text.WriteString("    kind: " + quote(string(row.Kind)) + ",\n")

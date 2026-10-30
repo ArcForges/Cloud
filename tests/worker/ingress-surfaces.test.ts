@@ -110,6 +110,10 @@ const templateId = "6c1d7f0e-3a52-4b9c-8e47-90a1b2c3d4e5";
 test("FLAGSHIP_SURFACES enables exact generated names only", () => {
   assert.deepEqual([...enabledSurfaces("identity")], ["identity"]);
   assert.deepEqual([...enabledSurfaces("identity,pages")], ["identity", "pages"]);
+  assert.deepEqual(
+    [...enabledSurfaces("identity,pages,operations")],
+    ["identity", "pages", "operations"],
+  );
   assert.deepEqual([...enabledSurfaces("pages,identity")], ["pages", "identity"]);
   for (const value of [
     undefined,
@@ -121,7 +125,7 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
     "identity ",
     "identity,identity",
     "none",
-    "identity,operations",
+    "identity,billing",
     "identity,pages,",
     "identity, pages",
     "identity,pages,identity",
@@ -132,7 +136,8 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
   }
   assert.equal(centerSurfaces("identity"), "identity");
   assert.equal(centerSurfaces("identity,pages"), "identity,pages");
-  assert.deepEqual([...surfaceNames], ["identity", "pages"]);
+  assert.equal(centerSurfaces("identity,pages,operations"), "identity,pages,operations");
+  assert.deepEqual([...surfaceNames], ["identity", "pages", "operations"]);
   assert.equal(surfaceTable.size, surfaceRoutes.length);
   for (const route of surfaceRoutes) {
     assert.equal(route.instance, "hello");

@@ -204,7 +204,6 @@ type termSpec struct {
 }
 
 func withGrace(seconds int64) func(*termSpec)   { return func(t *termSpec) { t.grace = seconds } }
-func withKind(kind int) func(*termSpec)         { return func(t *termSpec) { t.kind = kind } }
 func withCreated(seconds int64) func(*termSpec) { return func(t *termSpec) { t.created = seconds } }
 func withAuthorized(seconds int64) func(*termSpec) {
 	return func(t *termSpec) { t.authorized = seconds }

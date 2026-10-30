@@ -272,10 +272,19 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 func (c *Center) composePages(composed composedIdentity, registry *ingress.Registry, pipeline ingress.Options, logger *slog.Logger) (http.Handler, error) {
 	return pages.New(pages.Options{
 		Origin: config.Origin(c.Config.PublicBaseURL), BasePath: config.BasePath(c.Config.PublicBaseURL),
-		Enabled: func() bool { return c.Config.Identity.Enabled(config.SurfacePages) },
-		Policy:  c.Config.Identity.Policy, Identity: composed.service, Direct: composed.server.Direct(), Access: composed.authorizer, Verifier: composed.verifier,
+		Enabled: func(surface string) bool { return c.Config.Identity.Enabled(config.Surface(surface)) },
+		Policy:  c.Config.Identity.Policy, Operator: c.operator(composed.clock), Identity: composed.service, Direct: composed.server.Direct(), Access: composed.authorizer, Verifier: composed.verifier,
 		DB: c.Store, Registry: registry, ClientIP: pipeline.ClientIP, RequireClientIP: pipeline.RequireClientIP, Clock: composed.clock, Logger: logger,
 	})
+}
+
+// operator is the operator grant of the operations surface, or nil where that surface is not enabled (every route of it then does not
+// exist). The configuration admits the surface only on the official hosted center together with the identity and pages surfaces.
+func (c *Center) operator(clock func() time.Time) *entitlement.Operator {
+	if !c.Config.Identity.Enabled(config.SurfaceOperations) || c.Entitlements == nil {
+		return nil
+	}
+	return entitlement.NewOperator(c.Store, c.Entitlements, c.FeatureConfiguration.OperatorGrants, clock)
 }
 
 // checkIdentityComposition fails closed when the identity surface's registrations, its served Connect methods and the operation

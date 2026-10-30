@@ -137,6 +137,10 @@ func NewOperator(db *store.DB, service *Service, policy func() (OperatorPolicy, 
 	return &Operator{db: db, service: service, policy: policy, clock: clock}
 }
 
+// Policy is the policy the operator grants run under now, or the reason they are refused (ErrGrantsSelfHosted, ErrGrantsNoCatalogue):
+// the keys that may be granted, the longest expiry and whether a catalogue-wide grant is allowed. The operations page shows it.
+func (o *Operator) Policy() (OperatorPolicy, error) { return o.policy() }
+
 // IsOperator reports whether an account is an operator now: a live operator row, or the owner who bootstrapped this center.
 func IsOperator(ctx context.Context, tx pgx.Tx, user platform.ID, now time.Time) (bool, error) {
 	var operator bool
