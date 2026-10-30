@@ -5,6 +5,10 @@
   "licenceBoundary": "AGPL",
   "projects": [
     {
+      "path": "eng/verification/browser/package.json",
+      "kind": "npm"
+    },
+    {
       "path": "package.json",
       "kind": "npm"
     },

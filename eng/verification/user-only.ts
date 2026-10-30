@@ -5,12 +5,15 @@
 // Every first write is exclusive (a file is never replaced by it) and the permission is verified after the write. Nothing in this
 // module prints a file's content, and a failure names the path only.
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   closeSync,
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -51,7 +54,9 @@ export function parseIcaclsPrincipals(output: string, target: string): string[] 
   const principals: string[] = [];
   for (const raw of output.split(/\r?\n/u)) {
     let line = raw.trim();
-    if (line.startsWith(target)) line = line.slice(target.length).trim();
+    // icacls prints the path as the file system knows it (its case, backslashes), which may differ from the argument's.
+    if (line.toLowerCase().startsWith(target.toLowerCase()))
+      line = line.slice(target.length).trim();
     const at = line.indexOf(":(");
     if (at > 0) principals.push(line.slice(0, at).trim());
   }
@@ -65,12 +70,13 @@ export function windowsGrantArguments(target: string, sid: string, directory: bo
 
 function restrictWindows(machine: Machine, target: string, directory: boolean): void {
   const user = parseWhoami(machine.run("whoami", ["/user", "/fo", "csv", "/nh"]));
-  machine.run("icacls", windowsGrantArguments(target, user.sid, directory));
+  machine.run("icacls", windowsGrantArguments(path.resolve(target), user.sid, directory));
 }
 
 function assertWindowsOnlyUser(machine: Machine, target: string): void {
   const user = parseWhoami(machine.run("whoami", ["/user", "/fo", "csv", "/nh"]));
-  const principals = parseIcaclsPrincipals(machine.run("icacls", [target]), target);
+  const full = path.resolve(target);
+  const principals = parseIcaclsPrincipals(machine.run("icacls", [full]), full);
   const own = [user.name.toLowerCase(), user.sid.toLowerCase()];
   if (principals.length === 0 || principals.some((entry) => !own.includes(entry.toLowerCase())))
     throw new Error(`${target} is readable by more than its owner.`);
@@ -105,18 +111,24 @@ export function writeUserOnlyFile(
   assertUserOnly(file, machine);
 }
 
-/** Replaces a user-only file's content in place (the saved credential after each assertion); the file must already be private. */
-export function rewriteUserOnlyFile(
+/**
+ * Replaces the content of an existing user-only file (the saved credential after each assertion) all at once: the new content is
+ * written to a new private file in the same private directory and renamed over the old one, so a failure leaves the old content
+ * whole. The old file must already be private.
+ */
+export function replaceUserOnlyFile(
   file: string,
   data: string | Uint8Array,
   machine: Machine = realMachine(),
 ): void {
   assertUserOnly(file, machine);
-  const descriptor = openSync(file, "w");
+  const temporary = `${file}.${randomBytes(6).toString("hex")}.tmp`;
+  writeUserOnlyFile(temporary, data, machine);
   try {
-    writeFileSync(descriptor, data);
-  } finally {
-    closeSync(descriptor);
+    renameSync(temporary, file);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
   }
   assertUserOnly(file, machine);
 }

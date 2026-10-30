@@ -13,6 +13,7 @@ import {
   introducingCommit,
   validateHistoricalCoordinates,
   validateClosure,
+  validateIsolated,
   validateCsharpImports,
   validateImports,
   validatePolicy,
@@ -288,4 +289,219 @@ test("a receipt introduced inside a merge commit is found and bound to that merg
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// An isolated package (AF-CTR-03 A2): its own manifest, lock and .npmrc, never installed by the root project, admitted by directory
+// and bound to the closure under that directory's prefix.
+const isolatedDirectory = "eng/verification/browser";
+const isolatedFiles = () => ({
+  manifest: JSON.parse(readFileSync(`${isolatedDirectory}/package.json`, "utf8")) as Record<
+    string,
+    unknown
+  >,
+  lock: JSON.parse(readFileSync(`${isolatedDirectory}/package-lock.json`, "utf8")) as {
+    packages: Record<string, Record<string, unknown>>;
+    lockfileVersion: number;
+  },
+  npmrc: readFileSync(`${isolatedDirectory}/.npmrc`, "utf8"),
+});
+const check = (
+  files: ReturnType<typeof isolatedFiles>,
+  manifest: unknown = files.manifest,
+  lockFile: unknown = files.lock,
+  npmrc: string = files.npmrc,
+) => validateIsolated(isolatedDirectory, JSON.stringify(manifest), JSON.stringify(lockFile), npmrc);
+test("an isolated package is admitted by directory and its locked packages join the closure under the directory's prefix", () => {
+  assert.deepEqual(baseline.isolated, [isolatedDirectory]);
+  const files = isolatedFiles();
+  const packages = check(files);
+  assert.deepEqual(Object.keys(packages), [`${isolatedDirectory}/node_modules/playwright-core`]);
+  // The root lock does not have it: the root project never installs it.
+  assert(!Object.keys(lock.packages).some((key) => key.includes("playwright")));
+  // The admitted closure holds it, with the bytes and the licence of the lock.
+  const entry = baseline.closure[`${isolatedDirectory}/node_modules/playwright-core`];
+  assert.equal(entry?.version, "1.63.0");
+  assert.equal(entry?.integrity, files.lock.packages["node_modules/playwright-core"]?.integrity);
+  assert.equal(entry?.license, "Apache-2.0");
+  validateClosure(baseline, { ...lock.packages, ...packages });
+  // A package that is locked but not admitted, or admitted but no longer locked, is refused.
+  const extra = structuredClone(files.lock);
+  extra.packages["node_modules/other"] = {
+    ...extra.packages["node_modules/playwright-core"],
+    version: "1.0.0",
+  };
+  assert.throws(
+    () => validateClosure(baseline, { ...lock.packages, ...check(files, files.manifest, extra) }),
+    /Unadmitted dependency/u,
+  );
+  assert.throws(() => validateClosure(baseline, lock.packages), /Unadmitted dependency/u);
+});
+test("an isolated package must be private, its own root, exact, hook-free and installed without scripts", () => {
+  const files = isolatedFiles();
+  const mutate = (change: (manifest: Record<string, unknown>) => void) => {
+    const manifest = structuredClone(files.manifest);
+    change(manifest);
+    return manifest;
+  };
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.private = false)),
+      ),
+    /not private/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.workspaces = ["x"])),
+      ),
+    /workspaces/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.overrides = { a: "1.0.0" })),
+      ),
+    /overrides/u,
+  );
+  for (const hook of ["preinstall", "install", "postinstall", "prepare"])
+    assert.throws(
+      () =>
+        check(
+          files,
+          mutate((m) => (m.scripts = { [hook]: "node x.js" })),
+        ),
+      /install hook/u,
+      hook,
+    );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.dependencies = { "playwright-core": "^1.63.0" })),
+      ),
+    /drift|Floating/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.dependencies = { "playwright-core": "1.63.1" })),
+      ),
+    /drift/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => (m.devDependencies = { typescript: "7.0.2" })),
+      ),
+    /drift/u,
+  );
+  for (const npmrc of [
+    "save-exact=true\nengine-strict=true\n",
+    "ignore-scripts=false\nsave-exact=true\nengine-strict=true\n",
+    "ignore-scripts=true\n",
+  ])
+    assert.throws(() => check(files, files.manifest, files.lock, npmrc), /without scripts/u);
+  const lockWith = (
+    change: (packages: Record<string, Record<string, unknown>>) => void,
+    version = 3,
+  ) => {
+    const copy = structuredClone(files.lock);
+    copy.lockfileVersion = version;
+    change(copy.packages);
+    return copy;
+  };
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith(() => {}, 2),
+      ),
+    /version/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          const entry = p["node_modules/playwright-core"];
+          if (entry) entry.hasInstallScript = true;
+        }),
+      ),
+    /install script/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          const entry = p["node_modules/playwright-core"];
+          if (entry) entry.link = true;
+        }),
+      ),
+    /links a package/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          p["../outside/x"] = { version: "1.0.0" };
+        }),
+      ),
+    /outside node_modules/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          delete p["node_modules/playwright-core"];
+        }),
+      ),
+    /locks nothing/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          delete p[""];
+        }),
+      ),
+    /lock root/u,
+  );
+  assert.throws(
+    () =>
+      check(
+        files,
+        files.manifest,
+        lockWith((p) => {
+          const root = p[""];
+          if (root) root.dependencies = { "playwright-core": "1.62.1" };
+        }),
+      ),
+    /drift/u,
+  );
+});
+test("an isolated directory is named plainly and once", () => {
+  for (const bad of ["", "/abs", "../x", "a/../b", "a//b", "a/./b", "a b", "a\\b"]) {
+    const policy = structuredClone(baseline);
+    policy.isolated = [bad];
+    assert.throws(() => validatePolicy(policy), /Malformed isolated/u, JSON.stringify(bad));
+  }
+  const repeated = structuredClone(baseline);
+  repeated.isolated = [isolatedDirectory, isolatedDirectory];
+  assert.throws(() => validatePolicy(repeated), /Repeated isolated/u);
 });

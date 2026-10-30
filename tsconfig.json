@@ -18,6 +18,8 @@
     "tooling/**/*.ts",
     "eng/migrations/**/*.ts",
     "eng/verification/physical-schema.ts",
+    "eng/verification/proof-bootstrap.ts",
+    "eng/verification/browser/*.ts",
     "tests/worker/**/*.ts"
   ]
 }

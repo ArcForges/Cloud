@@ -32,7 +32,7 @@ import {
   parseIcaclsPrincipals,
   parseWhoami,
   readUserOnlyFile,
-  rewriteUserOnlyFile,
+  replaceUserOnlyFile,
   windowsGrantArguments,
   writeUserOnlyFile,
 } from "../../eng/verification/user-only.ts";
@@ -237,7 +237,13 @@ test("a user-only file is created exclusively, private from its first byte, and 
   assert.equal(readUserOnlyFile(file), "secret one\n");
   assert.throws(() => writeUserOnlyFile(file, "replaced"), /EEXIST/u);
   assert.equal(readUserOnlyFile(file), "secret one\n", "the existing file is not touched");
-  rewriteUserOnlyFile(file, "secret two\n");
+  replaceUserOnlyFile(file, "secret two\n");
+  assert.deepEqual(
+    readdirNames(directory),
+    ["credential.json"],
+    "no temporary file is left behind",
+  );
+  assert.equal(statSync(file).mode & 0o777, 0o600);
   assert.equal(readUserOnlyFile(file), "secret two\n");
   // Anyone else's access is refused before the content is read or written, and the message names the path only.
   for (const mode of [0o640, 0o604, 0o644, 0o660, 0o666, 0o607]) {
@@ -247,7 +253,7 @@ test("a user-only file is created exclusively, private from its first byte, and 
       (error: Error) => error.message.includes(file) && !error.message.includes("secret"),
       mode.toString(8),
     );
-    assert.throws(() => rewriteUserOnlyFile(file, "no"), /readable by more than its owner/u);
+    assert.throws(() => replaceUserOnlyFile(file, "no"), /readable by more than its owner/u);
     assert.throws(() => assertUserOnly(file), /readable/u);
   }
   chmodSync(file, 0o600);
@@ -359,6 +365,24 @@ test("the Windows parsers read the commands' output and nothing more", () => {
     "DESKTOP-1\\sam",
   ]);
   assert.deepEqual(parseIcaclsPrincipals("Successfully processed 1 files", target), []);
+  // The listings Windows 11 printed for this procedure's commands (a directory, an inheriting file, a file made private): the path
+  // comes back in the file system's case, and a name with a space is one principal.
+  const real = "C:\\Users\\J7Rdm\\AppData\\Local\\Temp\\af-icacls-c10f394f";
+  assert.deepEqual(
+    parseIcaclsPrincipals(
+      `${real} DEKU\\J7Rdm:(OI)(CI)(F)\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`,
+      real,
+    ),
+    ["DEKU\\J7Rdm"],
+  );
+  assert.deepEqual(
+    parseIcaclsPrincipals(`${real.toLowerCase()}\\x.json DEKU\\J7Rdm:(F)\r\n`, `${real}\\x.json`),
+    ["DEKU\\J7Rdm"],
+  );
+  assert.deepEqual(
+    parseIcaclsPrincipals(`${real}\\x.json NT AUTHORITY\\SYSTEM:(I)(F)\r\n`, `${real}\\x.json`),
+    ["NT AUTHORITY\\SYSTEM"],
+  );
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------
