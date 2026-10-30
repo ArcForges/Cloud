@@ -53,6 +53,15 @@ const PageDurationMilliseconds = 15_000
 // the center names a browser's device from a closed set of families and systems, never from the header's text.
 const PageUserAgentBytes = 256
 
+// PageCookieMaxAgeDigits bounds the digits of the session cookie's Max-Age (whole seconds, never zero for a new session): the longest
+// session a policy admits is seven days, 604800 seconds, six digits. The Worker accepts a Set-Cookie of a new session only with a
+// Max-Age of at most this many digits.
+const PageCookieMaxAgeDigits = 7
+
+// PageReturnPathBytes bounds the percent-encoded return path in the fragment of the sign-in redirect (the page the browser asked for,
+// below the hosted /api prefix); the longest page path is far below it. The Worker accepts a Location with a longer fragment never.
+const PageReturnPathBytes = 512
+
 // PageKind is the kind of a page route.
 type PageKind string
 

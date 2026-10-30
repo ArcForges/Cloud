@@ -21,11 +21,13 @@ import {
   clientIpHeader,
   edgeRateLimitPeriodSeconds,
   type PageRoute,
+  pageCookieMaxAgeDigits,
   pageCookieName,
   pageDurationMs,
   pageInstance,
   pageLocationPrefix,
   pageReturnFragment,
+  pageReturnPathBytes,
   pageRoutes,
   pageSecurityHeaders,
   pageStatuses,
@@ -62,8 +64,21 @@ export const pageTable: ReadonlyMap<string, readonly PageRoute[]> = (() => {
  */
 const sessionHandle = sessionTokenPattern;
 const csrfToken = sessionTokenPattern;
+
+/** The text of an anchored pattern without its anchors: the shape a larger pattern embeds (fail closed if it is not anchored). */
+function unanchored(pattern: RegExp): string {
+  const { source } = pattern;
+  if (!source.startsWith("^") || !source.endsWith("$"))
+    throw new TypeError("An anchored pattern is expected.");
+  return source.slice(1, -1);
+}
+
+/**
+ * The Set-Cookie of a new session: the cookie of a session handle (the generated shape, not a copy of it), a Max-Age of a positive
+ * number of at most the generated count of digits, and the fixed attributes the center writes.
+ */
 const sessionSetCookie = new RegExp(
-  `^${pageCookieName}=[A-Za-z0-9_-]{43}; Path=/; Max-Age=[1-9][0-9]{0,6}; Secure; HttpOnly; SameSite=Strict$`,
+  `^${escapeRegExp(pageCookieName)}=${unanchored(sessionTokenPattern)}; Path=/; Max-Age=[1-9][0-9]{0,${pageCookieMaxAgeDigits - 1}}; Secure; HttpOnly; SameSite=Strict$`,
   "u",
 );
 const clearSetCookie = `${pageCookieName}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict`;
@@ -77,7 +92,7 @@ function escapeRegExp(text: string): string {
  * and at most the sign-in page's return fragment (a percent-encoded path).
  */
 const redirectLocation = new RegExp(
-  `^${escapeRegExp(pageLocationPrefix)}[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*(?:${escapeRegExp(pageReturnFragment)}[A-Za-z0-9%._~-]{1,512})?$`,
+  `^${escapeRegExp(pageLocationPrefix)}[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*(?:${escapeRegExp(pageReturnFragment)}[A-Za-z0-9%._~-]{1,${pageReturnPathBytes}})?$`,
   "u",
 );
 

@@ -53,8 +53,8 @@ func TestThePageRegistrationIsTheContractsRoutesAndThePages(t *testing.T) {
 		t.Fatalf("statuses %v", got)
 	}
 	// The Worker's bounds come from here: a page call's budget and the longest User-Agent it forwards.
-	if PageDurationMilliseconds != 15_000 || PageUserAgentBytes != 256 {
-		t.Fatalf("budgets %d, %d", PageDurationMilliseconds, PageUserAgentBytes)
+	if PageDurationMilliseconds != 15_000 || PageUserAgentBytes != 256 || PageCookieMaxAgeDigits != 7 || PageReturnPathBytes != 512 {
+		t.Fatalf("budgets %d, %d, %d, %d", PageDurationMilliseconds, PageUserAgentBytes, PageCookieMaxAgeDigits, PageReturnPathBytes)
 	}
 }
 

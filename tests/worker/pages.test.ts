@@ -15,13 +15,17 @@ import {
 } from "../../worker/ingress/pages.ts";
 import { routeRequest, type CloudBindings } from "../../worker/router.ts";
 import {
+  pageCookieMaxAgeDigits,
   pageCookieName,
   pageLocationPrefix,
+  pageReturnFragment,
+  pageReturnPathBytes,
   pageRoutes,
   pageSecurityHeaders,
   pageStatuses,
   type PageRoute,
 } from "../../worker/tables/center-tables.generated.ts";
+import { sessionTokenPattern } from "../../worker/tables/cloud-tables.generated.ts";
 
 const origin = "https://proof.example.test";
 const handle = "A".repeat(43);
@@ -724,6 +728,36 @@ test("a Set-Cookie is copied only in the exact form of the session cookie and on
     503,
   );
   assert.equal(isAllowedSetCookie(sessionCookie, "none"), false);
+});
+
+test("the shapes a cookie and a Location are held to follow the generated values (worker-2)", () => {
+  // The handle: the generated session-token shape, whatever its length (the pattern's own quantifier decides).
+  const shape = sessionTokenPattern.source.slice(1, -1);
+  const length = Number(/\{(\d+)\}$/u.exec(shape)?.[1]);
+  assert(Number.isInteger(length) && length > 0, "the session token shape has a fixed length");
+  const cookieOf = (handleText: string, maxAge: string) =>
+    `${pageCookieName}=${handleText}; Path=/; Max-Age=${maxAge}; Secure; HttpOnly; SameSite=Strict`;
+  assert.equal(isAllowedSetCookie(cookieOf("A".repeat(length), "1"), "session"), true);
+  assert.equal(isAllowedSetCookie(cookieOf("A".repeat(length - 1), "1"), "session"), false);
+  assert.equal(isAllowedSetCookie(cookieOf("A".repeat(length + 1), "1"), "session"), false);
+  assert.equal(isAllowedSetCookie(cookieOf(`${"A".repeat(length - 1)}=`, "1"), "session"), false);
+  // Max-Age: a positive number of at most the generated digits, without a leading zero.
+  assert.equal(
+    isAllowedSetCookie(cookieOf(handle, "9".repeat(pageCookieMaxAgeDigits)), "session"),
+    true,
+  );
+  assert.equal(
+    isAllowedSetCookie(cookieOf(handle, "9".repeat(pageCookieMaxAgeDigits + 1)), "session"),
+    false,
+  );
+  for (const bad of ["", "0", "01", "-1", "1.5", "1e3", " 1"])
+    assert.equal(isAllowedSetCookie(cookieOf(handle, bad), "session"), false, bad);
+  // The return path in the sign-in redirect's fragment: one to the generated count of characters.
+  const location = (path: string) => `${pageLocationPrefix}sign-in${pageReturnFragment}${path}`;
+  assert.equal(isPageLocation(location("a")), true);
+  assert.equal(isPageLocation(location("a".repeat(pageReturnPathBytes))), true);
+  assert.equal(isPageLocation(location("a".repeat(pageReturnPathBytes + 1))), false);
+  assert.equal(isPageLocation(location("")), false);
 });
 
 test("a Location is copied only on a 303 of a route that redirects, below the pages' prefix", async () => {

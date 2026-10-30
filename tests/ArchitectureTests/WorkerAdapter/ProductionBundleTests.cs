@@ -73,12 +73,13 @@ public sealed class ProductionBundleTests
             Assert.True(process.ExitCode == 0, $"The production dry-run failed: {await stderr}{await stdout}");
 
             var bundle = File.ReadAllText(Path.Combine(directory, "index.js"));
-            // The center's own account pages (AF-CTR-03 A2) ship the WebBrowserSession routes below /session/v1/web/ in the production bundle
-            // (dark: the pages surface is off in production). Every other path below /session/v1/ stays proof-only: the proof pipeline's
-            // /session/v1/bootstrap and /session/v1/logout among them.
-            var withoutPages = bundle.Replace("/session/v1/web/", string.Empty, StringComparison.Ordinal);
-            foreach (var marker in ProofOnlyMarkers)
-                Assert.False((marker == "/session/v1/" ? withoutPages : bundle).Contains(marker, StringComparison.Ordinal), $"The production bundle contains a proof-only marker: {marker}");
+            // The center's own account pages (AF-CTR-03 A2) ship the WebBrowserSession routes in the production bundle (dark: the pages surface
+            // is off in production): the strings below /session/v1/ are exactly the paths of the generated table. Every other one, the proof
+            // pipeline's /session/v1/bootstrap and /session/v1/logout and any other path below /session/v1/web/ among them, is proof-only.
+            var generated = CloudRepository.Read(root, "worker/tables/center-tables.generated.ts");
+            var pagePaths = ProductionBundleMarkers.GeneratedPagePathsOf(generated);
+            Assert.NotEmpty(pagePaths);
+            Assert.Empty(ProductionBundleMarkers.Violations(bundle, pagePaths));
 
             // The production exports are the Container class, the Container proxy and the fetch entry. No proof class is exported.
             var exports = Regex.Match(bundle, @"export\s*\{(?<names>[^}]*)\}").Groups["names"].Value;

@@ -4,14 +4,18 @@ package pages
 
 import (
 	"encoding/json"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/arc/arctest"
+	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/routes"
+	"github.com/ArcForges/Cloud/center/internal/session"
 )
 
 // everyRefusal is every refusal a page can show: each constructor of package arc the identity surface uses.
@@ -137,5 +141,37 @@ func TestTheSessionCookieIsWrittenByteForByte(t *testing.T) {
 	}
 	if routes.PageCookieName != "__Host-af_session" {
 		t.Fatal("the cookie name")
+	}
+}
+
+// TestWhatThePagesWriteStaysWithinTheBoundsTheWorkerIsGenerated (worker-2): the Worker accepts a Set-Cookie of a new session and a
+// redirect's Location only within the shapes it is generated from this package's registrations (routes.PageCookieMaxAgeDigits and
+// routes.PageReturnPathBytes, and the session token's length): the longest session a policy admits, written as the cookie of a new
+// session, and the sign-in redirect that returns to each page, are inside them.
+func TestWhatThePagesWriteStaysWithinTheBoundsTheWorkerIsGenerated(t *testing.T) {
+	// The longest browser session a policy admits is seven days (config's bound of browserAbsolute).
+	policy := config.DefaultIdentityPolicy()
+	policy.BrowserAbsolute = 7 * 24 * time.Hour
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("seven days is no longer the longest session: %v", err)
+	}
+	policy.BrowserAbsolute += time.Second
+	if policy.Validate() == nil {
+		t.Fatal("a session longer than seven days is admitted; the Max-Age bound of the Worker must follow")
+	}
+	longest := int((7 * 24 * time.Hour).Seconds())
+	cookie := sessionCookie(strings.Repeat("A", session.EncodedLength), longest)
+	maxAge := strings.TrimPrefix(strings.Split(cookie, "; ")[2], "Max-Age=")
+	if maxAge != strconv.Itoa(longest) || len(maxAge) > routes.PageCookieMaxAgeDigits || maxAge[0] == '0' {
+		t.Fatalf("the longest session's cookie %q against %d digits", cookie, routes.PageCookieMaxAgeDigits)
+	}
+	// The sign-in redirect of every protected page carries its path, percent-encoded, below the hosted /api prefix.
+	for _, route := range routes.PageRoutes() {
+		if route.Kind != routes.PageHTMLKind || !route.Cookie {
+			continue
+		}
+		if fragment := url.QueryEscape(routes.APIPrefix + route.Path); len(fragment) < 1 || len(fragment) > routes.PageReturnPathBytes {
+			t.Errorf("%s: a return path of %d characters against %d", route.Path, len(fragment), routes.PageReturnPathBytes)
+		}
 	}
 }

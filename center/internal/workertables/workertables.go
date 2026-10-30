@@ -287,6 +287,10 @@ func pageTable(text *strings.Builder, table routes.WorkerTable) {
 	text.WriteString("export const pageDurationMs = " + strconv.Itoa(routes.PageDurationMilliseconds) + ";\n")
 	text.WriteString("/** The longest User-Agent the Worker forwards to the center. */\n")
 	text.WriteString("export const pageUserAgentBytes = " + strconv.Itoa(routes.PageUserAgentBytes) + ";\n")
+	text.WriteString("/** The most digits of the Max-Age of a new session's cookie. */\n")
+	text.WriteString("export const pageCookieMaxAgeDigits = " + strconv.Itoa(routes.PageCookieMaxAgeDigits) + ";\n")
+	text.WriteString("/** The most characters of the percent-encoded return path in a redirect's fragment. */\n")
+	text.WriteString("export const pageReturnPathBytes = " + strconv.Itoa(routes.PageReturnPathBytes) + ";\n")
 	text.WriteString("\n")
 }
 
