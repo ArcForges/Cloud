@@ -18,6 +18,7 @@ import {
   type CredentialStore,
   type SavedCredential,
   type Transport,
+  type VirtualCredential,
   credentialSecrets,
   nextTransport,
   withoutTransport,
@@ -321,6 +322,12 @@ class Actor {
   slots: Slot[] = [];
   /** Credentials taken off the tab for the registration ceremony (nothing the page excludes may be held then). */
   parked: SavedCredential[] = [];
+  /**
+   * Saved credentials this tab never put on an authenticator: those of passkeys that earlier runs left behind. A key whose passkey
+   * the center never accepted would answer a sign-in and fail it, so only the owner's own credential is attached for the sign-in.
+   * They stay in the saved file, until the cleanup of the run forgets them.
+   */
+  deferred: SavedCredential[] = [];
   /** The virtual environment is gone (AR-23): the saved file is no longer this tab's to write. */
   virtualGone = false;
 
@@ -330,17 +337,26 @@ class Actor {
   }
 
   /**
-   * Opens a tab in a new browser context. It gets one virtual authenticator for each saved credential, or, with none saved, one empty
-   * `internal` authenticator for the enrollment.
+   * Opens a tab in a new browser context. It gets one virtual authenticator for each saved credential (with `owner`: for the
+   * owner's own credential, the one on the `internal` transport, and no other), or, with none saved, one empty `internal`
+   * authenticator for the enrollment.
    */
-  static async open(world: World): Promise<Actor> {
+  static async open(world: World, attach: "all" | "owner" = "all"): Promise<Actor> {
     const tab = await world.browser.newTab();
     world.tabs.push(tab);
     const actor = new Actor(world, tab);
     if (world.store.exists()) {
       const saved = world.store.load();
       world.redactor.add(...credentialSecrets(saved.credentials));
-      for (const credential of saved.credentials) await actor.attach(credential);
+      const owners = saved.credentials.filter((credential) => credential.transport === "internal");
+      expect(
+        attach === "all" || owners.length === 1,
+        "The saved file holds no credential of the owner's own.",
+      );
+      for (const credential of saved.credentials) {
+        if (attach === "all" || credential.transport === "internal") await actor.attach(credential);
+        else actor.deferred.push(credential);
+      }
     } else await actor.attachEmpty();
     // Before a POST that carries a new credential or an assertion leaves the browser, the credentials of the authenticators (with
     // their counters) are saved. If saving fails, the request is stopped.
@@ -388,7 +404,7 @@ class Actor {
     const held = await this.held();
     return [
       ...held,
-      ...this.parked.filter(
+      ...[...this.parked, ...this.deferred].filter(
         (p) => !held.some((credential) => credential.credentialId === p.credentialId),
       ),
     ];
@@ -426,30 +442,57 @@ class Actor {
    * Every authenticator is therefore taken off (their credentials parked, counters read first), the ceremony runs on one empty
    * authenticator, and afterwards each credential, the new one included, goes back on an authenticator of its own.
    */
-  async registerFresh(ceremony: () => Promise<void>): Promise<SavedCredential> {
+  async registerFresh(
+    ceremony: () => Promise<void>,
+    strays: readonly string[] = [],
+  ): Promise<SavedCredential> {
     this.parked = await this.held();
     const saveAs = nextTransport(this.parked);
-    expect(
-      saveAs !== undefined,
-      "The saved file holds as many credentials as there are transports.",
-    );
+    expect(saveAs !== undefined, noFreeTransport(strays));
     await this.removeAll();
     const fresh = await this.attachEmpty(saveAs, "internal");
     let created: SavedCredential | undefined;
+    let failure: unknown;
+    let failed = false;
     try {
       await ceremony();
-      const made = await fresh.authenticator.credentials();
-      expect(made.length === 1, "The authenticator did not make exactly one new credential.");
-      created = { ...(made[0] as SavedCredential), transport: saveAs };
+    } catch (error) {
+      failure = error;
+      failed = true;
+    }
+    try {
+      // Whatever the ceremony did, the authenticator holds what it made, and the saved file may hold it already (it is written
+      // before the request that carries it leaves): the credential goes back with the others, so that the tab and the file agree.
+      let made: VirtualCredential[] = [];
+      try {
+        made = await fresh.authenticator.credentials();
+      } catch (error) {
+        if (!failed) throw error;
+      }
+      if (made.length === 1) created = { ...(made[0] as VirtualCredential), transport: saveAs };
+      if (!failed)
+        expect(made.length === 1, "The authenticator did not make exactly one new credential.");
     } finally {
-      // Whatever happened, every credential goes back on an authenticator of its own.
       await this.removeAll();
       const parked = this.parked;
       this.parked = [];
       for (const credential of [...parked, ...(created ? [created] : [])])
         await this.attach(credential);
     }
-    return created;
+    if (failed) throw failure;
+    return created as SavedCredential;
+  }
+
+  /**
+   * Forgets the credentials this tab left deferred, that is every credential but the owner's own: each was made by a run of this
+   * script for a passkey named `acceptance-*`, and is of no use once that passkey is off the account (or when the center never
+   * accepted it). The saved file is written without them.
+   */
+  async forgetDeferred(): Promise<number> {
+    // `persist` leaves out every credential `world.dropped` names, so this is all the forgetting there is.
+    for (const credential of this.deferred) this.world.dropped.add(credential.credentialId);
+    await this.persist();
+    return this.deferred.length;
   }
 
   /** Takes the virtual environment away (AR-23): the browser then reaches the real authenticators. */
@@ -520,9 +563,26 @@ class Actor {
 // ---------------------------------------------------------------------------------------------------------------------------
 // The virtual-authenticator acceptance
 
+/** The name every passkey this script registers starts with (the owner's own passkeys, AR-23's included, never do). */
+const strayPrefix = "acceptance-";
+
 /** The unique name of the passkey this run registers and removes again. */
 function passkeyName(world: World): string {
-  return `acceptance-${world.now().toISOString().replace(/[-:T]/gu, "").slice(0, 14)}`;
+  return `${strayPrefix}${world.now().toISOString().replace(/[-:T]/gu, "").slice(0, 14)}`;
+}
+
+/** What a registration says when the saved file has no transport left, with the passkeys of earlier runs that may be the cause. */
+export function noFreeTransport(strays: readonly string[]): string {
+  return `The saved file holds as many credentials as there are transports. Passkeys of earlier runs that may still be on the account: ${strays.length > 0 ? strays.join(", ") : "none listed"}. See the runbook, "A run that stopped".`;
+}
+
+/** The saved credential must be the one of this center: a file made for another center would only fail at the sign-in. */
+function expectSavedCenter(world: World): void {
+  const saved = world.store.load();
+  expect(
+    saved.baseUrl === world.baseUrl && saved.rpId === new URL(world.baseUrl).hostname,
+    `The saved credential was made for ${saved.baseUrl} (relying party ${saved.rpId}), not for ${world.baseUrl}; name another directory for this center with --state-dir (or PROOF_ACCEPTANCE_DIR).`,
+  );
 }
 
 export async function runAcceptance(world: World): Promise<void> {
@@ -533,6 +593,7 @@ export async function runAcceptance(world: World): Promise<void> {
   );
   if (!returning)
     expect(world.bootstrap !== undefined, "There is no saved credential and no bootstrap file.");
+  else expectSavedCenter(world);
   world.store.prepare();
 
   const a = await step(
@@ -540,7 +601,8 @@ export async function runAcceptance(world: World): Promise<void> {
     "open a browser with a virtual authenticator",
     mockedLabel,
     async () => {
-      const actor = await Actor.open(world);
+      // A returning run signs in with the owner's own credential; what earlier runs left in the file waits until it is forgotten.
+      const actor = await Actor.open(world, "owner");
       const signIn = await actor.visit(pages.signIn, "Sign in to ArcForges");
       world.report.facts.securityHeaders = Object.keys(pageSecurityHeaders).length;
       expect(signIn.status === 200, "The sign-in page is not served.");
@@ -561,12 +623,21 @@ export async function runAcceptance(world: World): Promise<void> {
       // The token is typed into the page's field from this process; it is in no URL, no log and no report.
       await a.tab.setValue(selectors.token, bootstrap.token);
       await a.tab.setValue(selectors.displayName, world.displayName);
+      const acceptedBefore = a.tab.changes();
       try {
         await a.tab.click(selectors.create);
         await a.tab.waitForPath(pagePathname(world, pages.passkeys), world.timeoutMs);
       } catch (error) {
-        // The enrollment ended without an account: the credential saved for it belongs to nothing, and a file left behind would
-        // make the next run "returning" and never use the bootstrap token.
+        if (a.tab.changes() > acceptedBefore) {
+          // The center accepted the enrollment (the account is created, the token is spent) and the tab did not arrive: the file
+          // holds the only copy of the owner's key, so it stays.
+          const reason = error instanceof Error ? error.message : "the step failed";
+          throw new AcceptanceError(
+            `The account may exist; do not delete the credential file. Cause: ${reason}`,
+          );
+        }
+        // Nothing was accepted: the credential saved for the enrollment belongs to nothing, and a file left behind would make the
+        // next run "returning" and never use the bootstrap token.
         if (world.createdCredentialFile) {
           world.store.discard();
           world.createdCredentialFile = false;
@@ -609,6 +680,32 @@ export async function runAcceptance(world: World): Promise<void> {
     },
   );
 
+  // A run that stopped after it had registered its passkey leaves that passkey on the account and its key in the saved file; the
+  // owner's file would run out of transports after three such runs. The returning run removes what an earlier run left.
+  if (returning && a.deferred.length > 0) {
+    await step(world, "remove the passkeys an earlier run left behind", mockedLabel, async () => {
+      await a.visit(pages.passkeys, "Account and passkeys");
+      const strays = (await a.tab.texts(selectors.rowHeaders)).filter((text) =>
+        text.startsWith(strayPrefix),
+      );
+      for (const stray of strays) {
+        const rows = await a.rows();
+        await a.tab.click(`${selectors.removePasskey}[aria-label="Remove passkey ${stray}"]`);
+        await until(
+          world,
+          "the stray passkey to leave the list",
+          async () => (await a.rows()) === rows - 1,
+        );
+      }
+      const left = (await a.tab.texts(selectors.rowHeaders)).filter((text) =>
+        text.startsWith(strayPrefix),
+      );
+      expect(left.length === 0, "A passkey of an earlier run is still on the account.");
+      await a.forgetDeferred();
+      world.report.facts.strayPasskeysRemoved = strays.length;
+    });
+  }
+
   const name = passkeyName(world);
   let before = 0;
   let extraId = "";
@@ -619,6 +716,9 @@ export async function runAcceptance(world: World): Promise<void> {
     async () => {
       await a.visit(pages.passkeys, "Account and passkeys");
       before = await a.rows();
+      const strays = (await a.tab.texts(selectors.rowHeaders)).filter((text) =>
+        text.startsWith(strayPrefix),
+      );
       await a.tab.setValue(selectors.newPasskeyName, name);
       await a.tab.click(selectors.addPasskey);
       await a.tab.waitForSelector(selectors.createPasskey, world.timeoutMs);
@@ -629,7 +729,7 @@ export async function runAcceptance(world: World): Promise<void> {
       const created = await a.registerFresh(async () => {
         await a.tab.click(selectors.createPasskey);
         await a.tab.waitForPath(pagePathname(world, pages.passkeys), world.timeoutMs);
-      });
+      }, strays);
       // Every credential is back on an authenticator of its own: what the tab holds is what the saved file holds.
       const held = (await a.held()).map((credential) => credential.credentialId).sort();
       const saved = world.store
@@ -763,6 +863,7 @@ export async function runRealAuthenticator(world: World): Promise<void> {
     `AR-23 on ${world.baseUrl}: the saved virtual credential signs in, Windows Hello creates the new passkey`,
   );
   expect(world.store.exists(), "There is no saved owner credential; run the acceptance first.");
+  expectSavedCenter(world);
   const name = `Windows Hello AR-23 ${world.now().toISOString().slice(0, 10)}`;
   let virtualUsed: string | null = null;
 
@@ -771,7 +872,7 @@ export async function runRealAuthenticator(world: World): Promise<void> {
     "sign in with the saved virtual credential",
     mockedLabel,
     async () => {
-      const opened = await Actor.open(world);
+      const opened = await Actor.open(world, "owner");
       await opened.visit(pages.signIn, "Sign in to ArcForges");
       await opened.signInHere();
       return opened;

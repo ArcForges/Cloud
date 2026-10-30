@@ -17,12 +17,14 @@ import type {
   Transport,
   VirtualCredential,
 } from "../../../eng/verification/browser/credentials.ts";
-import type {
-  Authenticator,
-  Browser,
-  CookieView,
-  Navigation,
-  Tab,
+import {
+  type Authenticator,
+  type Browser,
+  type CookieView,
+  type Navigation,
+  type RequestCounts,
+  type Tab,
+  acceptedChange,
 } from "../../../eng/verification/browser/driver.ts";
 import { pages, persistBefore, selectors } from "../../../eng/verification/browser/selectors.ts";
 
@@ -75,6 +77,16 @@ export interface FakeOptions {
   limitAfterRemoval?: boolean;
   /** The page's creation fails whatever the authenticators hold (the page shows its "already registered" text). */
   pageRefusesCreation?: boolean;
+  /** The center accepts the enrollment (the account exists) but the tab never reaches the passkeys page. */
+  enrollmentStays?: boolean;
+  /** The edge limiter answers 429 to the page the next N sign-ins lead to (after the center accepted the sign-in). */
+  limitAfterSignIn?: number;
+  /** The devices page cannot be reached (a connection reset): any failure after the second passkey was registered. */
+  devicesPageFails?: boolean;
+  /** The center refuses the request that completes a new passkey (the key was made and saved, the passkey never existed). */
+  refuseNewPasskey?: boolean;
+  /** The edge limiter answers the first request that completes a new passkey with a 429 (the center never sees it). */
+  limitNewPasskeyOnce?: boolean;
 }
 
 export class FakeCenter {
@@ -88,6 +100,7 @@ export class FakeCenter {
   /** Every passkey of an account has this user handle (the pages register them so). */
   userHandle = b64("owner-user-handle");
   enrollmentLimited = false;
+  newPasskeyLimited = false;
   clockSeconds = 1_800_000_000;
   readonly options: FakeOptions;
   /** The next navigation is answered 429 (set by a change when limitAfterRemoval is on). */
@@ -254,6 +267,8 @@ export class FakeTab implements Tab {
   async goto(url: string): Promise<Navigation> {
     const target = new URL(url);
     const options = this.center.options;
+    if (options.devicesPageFails && target.pathname === this.path(pages.devices))
+      throw new Error("net::ERR_CONNECTION_RESET");
     if (this.center.limitNext) {
       this.center.limitNext = false;
       this.retryAfter = 5;
@@ -295,6 +310,11 @@ export class FakeTab implements Tab {
     return this.currentUrl;
   }
 
+  /** A POST the center accepted: counted by the rule the driver counts by, so that a rule changed there changes the stand-in too. */
+  private accepted(suffix: string): void {
+    if (acceptedChange("POST", 200, this.path(suffix))) this.changeCount += 1;
+  }
+
   private async post(suffix: string): Promise<void> {
     const pathname = this.path(suffix);
     const hook = this.hooks.get(pathname);
@@ -315,6 +335,7 @@ export class FakeTab implements Tab {
     await this.post(persistBefore.stepUp);
     this.center.assertion(credential.credentialId, credential.signCount);
     record.stepUps += 1;
+    this.accepted(persistBefore.stepUp);
   }
 
   async click(selector: string): Promise<void> {
@@ -350,7 +371,7 @@ export class FakeTab implements Tab {
         center.options.refuseEnrollment === true
       )
         throw new Error("the bootstrap was refused");
-      this.changeCount += 1;
+      this.accepted(persistBefore.enrollment);
       center.userHandle = userHandle;
       center.tokenSpent = true;
       center.ownerExists = true;
@@ -363,6 +384,7 @@ export class FakeTab implements Tab {
       });
       this.handle = next("session-");
       center.sessions.set(this.handle, { revoked: false, stepUps: 0 });
+      if (center.options.enrollmentStays === true) return;
       this.navigate(pages.passkeys, "passkeys");
       if (center.options.tokenInUrl) this.currentUrl += `#token=${token}`;
       return;
@@ -371,6 +393,12 @@ export class FakeTab implements Tab {
       const { credential, real } = this.assertWith();
       await this.post(persistBefore.signIn);
       const used = center.assertion(credential.credentialId, credential.signCount);
+      this.accepted(persistBefore.signIn);
+      if ((center.options.limitAfterSignIn ?? 0) > 0) {
+        // The sign-in is accepted; the redirect GET that follows it meets the edge limiter.
+        center.options.limitAfterSignIn = (center.options.limitAfterSignIn ?? 0) - 1;
+        this.retryAfter = 5;
+      }
       if (real && center.options.helloNotMarked) used.lastUsed = null;
       if (real && center.options.alsoMarksVirtual)
         for (const other of center.passkeys) if (!other.real) other.lastUsed = center.instant();
@@ -386,7 +414,7 @@ export class FakeTab implements Tab {
       const record = this.session();
       if (record && !keep) record.revoked = true;
       if (!keep) this.handle = undefined;
-      this.changeCount += 1;
+      this.accepted("/session/v1/web/logout");
       this.navigate(pages.signIn, "sign-in");
       return;
     }
@@ -418,7 +446,16 @@ export class FakeTab implements Tab {
       }
       const credential = target.create(host.split(":")[0] ?? host, center.userHandle, excluded);
       await this.post(persistBefore.newPasskey);
-      this.changeCount += 1;
+      if (center.options.refuseNewPasskey === true) {
+        this.errorText = "The passkey could not be saved.";
+        return;
+      }
+      if (center.options.limitNewPasskeyOnce === true && !center.newPasskeyLimited) {
+        center.newPasskeyLimited = true;
+        this.retryAfter = 5;
+        return;
+      }
+      this.accepted(persistBefore.newPasskey);
       this.errorText = "";
       center.passkeys.push({
         id: credential.credentialId,
@@ -438,7 +475,7 @@ export class FakeTab implements Tab {
       );
       if (!other) throw new Error("no other session");
       other[1].revoked = true;
-      this.changeCount += 1;
+      this.accepted("/account/sessions/revoke");
       return;
     }
     const removal =
@@ -450,7 +487,7 @@ export class FakeTab implements Tab {
       const index = center.passkeys.findIndex((item) => item.name === removal[1]);
       if (index < 0 || center.passkeys.length < 2) throw new Error("cannot remove");
       center.passkeys.splice(index, 1);
-      this.changeCount += 1;
+      this.accepted("/account/passkeys/remove");
       if (center.options.limitAfterRemoval) center.limitNext = true;
       return;
     }
@@ -601,6 +638,8 @@ export class FakeBrowser implements Browser {
   readonly tabs: FakeTab[] = [];
   closed = false;
   readonly center: FakeCenter;
+  /** What the browser says it sent (a test sets it to see how the run treats a busy minute). */
+  requestCounts: RequestCounts = { total: 0, busiest: 0 };
 
   constructor(center: FakeCenter) {
     this.center = center;
@@ -615,6 +654,10 @@ export class FakeBrowser implements Browser {
     tab.index = this.tabs.length;
     this.tabs.push(tab);
     return tab;
+  }
+
+  requests(): RequestCounts {
+    return { ...this.requestCounts };
   }
 
   async close(): Promise<void> {

@@ -25,7 +25,9 @@ import {
   type Launcher,
   defaultChromiumPath,
   defaultRequestsPerMinute,
+  edgeLimitPerMinute,
   launchPlaywright,
+  maxRequestsPerWindow,
   preflight,
   requiredChromiumRevision,
   requiredPlaywrightCore,
@@ -193,6 +195,7 @@ export function parseArguments(
   const problem = baseUrlProblem(options.baseUrl);
   if (problem) throw new UsageError(problem);
   // The hosted Worker counts every request of a page load against an edge limit; only a center on this machine may be sent more.
+  // (The bound is the browser's, all its tabs together.)
   if (options.requestsPerMinute === 0 && new URL(options.baseUrl).hostname !== "localhost")
     throw new UsageError("--requests-per-minute 0 (no bound) is for a center on localhost only.");
   if (
@@ -334,6 +337,20 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
     world.report.finishedAt = deps.now().toISOString();
     for (const tab of world.tabs) await tab.close().catch(() => undefined);
     await browser.close().catch(() => undefined);
+  }
+  // What the browser really sent to the origin, redirect hops included: a run that kept to a bound meant for the hosted edge limit
+  // and was still seen to send more than the margin allows would be answered with 429 there, so it does not pass.
+  const sent = browser.requests();
+  world.report.facts.requestsSent = sent.total;
+  world.report.facts.requestsBusiest60s = sent.busiest;
+  const bounded =
+    options.requestsPerMinute >= 1 && options.requestsPerMinute <= defaultRequestsPerMinute;
+  if (exitCode === 0 && bounded && sent.busiest > maxRequestsPerWindow) {
+    world.report.result = "failed";
+    exitCode = 1;
+    deps.writeError(
+      `The browser sent ${sent.busiest} requests inside one minute, more than the ${maxRequestsPerWindow} a run may send (the edge limit of the proof environment is ${edgeLimitPerMinute} per minute): it would be answered with 429. The run is failed.`,
+    );
   }
   // The report holds steps, counts and flags; if anything secret is in it, it is not written.
   const text = `${JSON.stringify(world.report, null, 2)}\n`;

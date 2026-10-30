@@ -76,9 +76,18 @@ export interface Tab {
   close(): Promise<void>;
 }
 
+/** What a browser sent to the origin: every request that left it, and the most of them inside any one minute. */
+export interface RequestCounts {
+  total: number;
+  /** The largest number of requests that left inside any rolling 60 seconds (routed requests and redirect hops). */
+  busiest: number;
+}
+
 export interface Browser {
   version(): string;
   newTab(): Promise<Tab>;
+  /** The requests every tab of this browser has sent so far. */
+  requests(): RequestCounts;
   close(): Promise<void>;
 }
 
@@ -86,11 +95,15 @@ export interface LaunchOptions {
   executablePath: string;
   headless: boolean;
   timeoutMs: number;
-  /** The most requests per minute the tab sends (0: no bound, for a center on this machine). See RequestBudget. */
+  /** The most requests per minute the browser sends, all tabs together (0: no bound, for a center on this machine). See RequestBudget. */
   requestsPerMinute: number;
 }
 
-export const defaultRequestsPerMinute = 45;
+/** The hosted Worker's edge limit (IDENTITY_RATE_LIMITER in wrangler.json): requests per 60 seconds per client. */
+export const edgeLimitPerMinute = 60;
+/** The most requests a run may be seen to send inside one minute: the edge limit with a margin for the limiter's own window. */
+export const maxRequestsPerWindow = 55;
+export const defaultRequestsPerMinute = 40;
 /**
  * The problem a console message is, if it is one: an error, or a policy violation. The browser asks for /favicon.ico on its own,
  * outside the page's requests, and reports a 404 of it as a console error; that one is not the page's.
@@ -111,15 +124,21 @@ export function acceptedChange(method: string, status: number, pathname: string)
   return method === "POST" && status < 400 && !harmless.test(pathname);
 }
 
-/** The POSTs that a step may repeat after a 429: they start a flow, prove something or add a session; nothing is changed that a repeat would trip over. */
-const harmless = /\/(?:authentication\/(?:begin|complete)|step-up\/(?:begin|complete))$/u;
-const requestBurst = 8;
+/**
+ * The POSTs that a step may repeat after a 429: they start a flow or prove something; nothing is changed that a repeat would trip
+ * over. A completed sign-in is not one of them: it adds a session, and a step of a returning run that starts again from its
+ * navigation finds the browser signed in already.
+ */
+const harmless = /\/(?:authentication\/begin|step-up\/(?:begin|complete))$/u;
+const requestBurst = 4;
 
 /**
- * A bound on the requests the browser sends (every request of the origin, assets included), because the hosted Worker counts them
- * all against an edge limit of 60 per minute and one page load is three requests. It is a generic cell rate: `requestBurst`
- * requests may go at once, then one every 60 / perMinute seconds, so that in any minute at most burst + perMinute (53) requests
- * leave. A request waits for its slot (the wait is short, about 1.3 s at most, so no wait of the flow times out on it).
+ * A bound on the requests the BROWSER sends, all its tabs together (every request of the origin, assets included, and every
+ * redirect hop), because the hosted Worker counts them all against one edge limit of 60 per minute per client, however many tabs
+ * there are, and one page load is three requests. It is a generic cell rate: `requestBurst` requests may go at once, then one
+ * every 60 / perMinute seconds, so that in any minute at most burst + perMinute (44) requests leave. A request waits for its slot
+ * (the wait is short, a few seconds at most, so no wait of the flow times out on it). A redirect hop never meets the route, so
+ * it is `charge`d after it left: it takes the next slot and the requests behind it wait for it.
  */
 export class RequestBudget {
   private readonly interval: number;
@@ -142,14 +161,51 @@ export class RequestBudget {
     this.pause = pause;
   }
 
-  /** Reserves the next slot and waits for it. */
-  async take(): Promise<void> {
+  /** Reserves the next slot; the result is how long a request has to wait for it. */
+  private reserve(): number {
     const now = this.clock();
     const slot = Math.max(this.next, now);
     this.next = slot + this.interval;
-    const wait = slot - this.tolerance - now;
+    return slot - this.tolerance - now;
+  }
+
+  /** Reserves the next slot and waits for it. */
+  async take(): Promise<void> {
+    const wait = this.reserve();
     // Less than half a millisecond is the rounding of the interval, not a wait.
     if (wait > 0.5) await this.pause(Math.ceil(wait));
+  }
+
+  /** Takes the next slot for a request that has already left (a redirect hop): nothing waits for it, the ones behind it do. */
+  charge(): void {
+    this.reserve();
+  }
+}
+
+/** The times the requests of one browser left, so that a run can show the most it sent inside any minute. */
+export class RequestMeter {
+  private readonly times: number[] = [];
+  private readonly clock: () => number;
+
+  constructor(clock: () => number = Date.now) {
+    this.clock = clock;
+  }
+
+  /** A request leaves the browser now. */
+  record(): void {
+    this.times.push(this.clock());
+  }
+
+  counts(windowMs: number = 60_000): RequestCounts {
+    const times = [...this.times].sort((a, b) => a - b);
+    let busiest = 0;
+    let first = 0;
+    for (let last = 0; last < times.length; last += 1) {
+      // A window is [start, start + windowMs): a request exactly one window after another is outside it.
+      while ((times[last] ?? 0) - (times[first] ?? 0) >= windowMs) first += 1;
+      busiest = Math.max(busiest, last - first + 1);
+    }
+    return { total: times.length, busiest };
   }
 }
 
@@ -270,6 +326,8 @@ export interface PwResponse {
 export interface PwRequest {
   method(): string;
   url(): string;
+  /** The request that was answered by a redirect to this one (null for a request that is not a redirect hop). */
+  redirectedFrom(): PwRequest | null;
 }
 export interface PwRoute {
   request(): PwRequest;
@@ -304,6 +362,7 @@ export interface PwPage {
   on(event: "console", handler: (message: PwConsoleMessage) => void): void;
   on(event: "pageerror", handler: (error: Error) => void): void;
   on(event: "response", handler: (response: PwResponse) => void): void;
+  on(event: "request", handler: (request: PwRequest) => void): void;
   setDefaultTimeout(timeout: number): void;
 }
 export interface PwCdpSession {
@@ -316,7 +375,7 @@ export interface PwContext {
   cookies(): Promise<CookieView[]>;
   close(): Promise<void>;
 }
-interface PwBrowser {
+export interface PwBrowser {
   version(): string;
   newContext(options: Record<string, unknown>): Promise<PwContext>;
   close(): Promise<void>;
@@ -358,9 +417,33 @@ export async function launchPlaywright(options: LaunchOptions): Promise<Browser>
     args: [],
     timeout: options.timeoutMs,
   });
+  return playwrightBrowser(browser, options);
+}
+
+/** The time the budget and the meter keep: the clock, and the wait for a slot. Tests give them a virtual one. */
+export interface Timing {
+  clock(): number;
+  pause(milliseconds: number): Promise<void>;
+}
+
+/**
+ * The browser over a launched playwright-core browser: exported for the tests, which give it a stand-in. The edge limiter counts
+ * the requests of the client, not of a tab, so ONE budget and ONE meter serve every tab this browser opens.
+ */
+export function playwrightBrowser(
+  browser: PwBrowser,
+  options: Pick<LaunchOptions, "requestsPerMinute" | "timeoutMs">,
+  timing?: Timing,
+): Browser {
+  const budget =
+    options.requestsPerMinute > 0
+      ? new RequestBudget(options.requestsPerMinute, timing?.clock, timing?.pause)
+      : undefined;
+  const meter = new RequestMeter(timing?.clock);
   return {
     version: () => browser.version(),
     close: () => browser.close(),
+    requests: () => meter.counts(),
     async newTab(): Promise<Tab> {
       // No service worker, download, video, HAR, trace or screenshot: nothing that could keep a copy of a page or a token.
       const context = await browser.newContext({
@@ -371,18 +454,20 @@ export async function launchPlaywright(options: LaunchOptions): Promise<Browser>
       });
       const page = await context.newPage();
       page.setDefaultTimeout(options.timeoutMs);
-      const budget =
-        options.requestsPerMinute > 0 ? new RequestBudget(options.requestsPerMinute) : undefined;
-      return playwrightTab(context, page, budget);
+      return playwrightTab(context, page, budget, meter);
     },
   };
 }
 
-/** The tab over a playwright-core page: exported for the tests, which give it a stand-in page and context. */
+/**
+ * The tab over a playwright-core page: exported for the tests, which give it a stand-in page and context. The budget and the meter
+ * are the BROWSER's, shared by every tab it opens.
+ */
 export function playwrightTab(
   context: PwContext,
   page: PwPage,
   budget: RequestBudget | undefined,
+  meter: RequestMeter = new RequestMeter(),
 ): Tab {
   const problems: string[] = [];
   let retryAfter: number | undefined;
@@ -420,6 +505,13 @@ export function playwrightTab(
       if (acceptedChange(request.method(), status, new URL(request.url()).pathname)) changes += 1;
     }
   });
+  // The route never sees the request a redirect leads to (the GET after a form POST's 303): the browser follows it by itself. It is
+  // still a request of the origin, so it is charged to the budget and counted, after it left.
+  page.on("request", (request) => {
+    if (request.redirectedFrom() === null) return;
+    budget?.charge();
+    meter.record();
+  });
   // Every request of the tab goes through one route: the request budget first, then the hook of a POST that carries a credential.
   const route = (): Promise<unknown> => {
     routing ??= page.route("**/*", async (intercepted) => {
@@ -438,6 +530,7 @@ export function playwrightTab(
           return;
         }
       }
+      meter.record();
       await intercepted.continue();
     });
     return routing;

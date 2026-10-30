@@ -6,12 +6,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  type PwBrowser,
   type PwConsoleMessage,
   type PwContext,
   type PwPage,
+  type PwRequest,
   type PwResponse,
   type PwRoute,
   RequestBudget,
+  RequestMeter,
+  defaultRequestsPerMinute,
+  playwrightBrowser,
   playwrightTab,
 } from "../../eng/verification/browser/driver.ts";
 
@@ -28,9 +33,15 @@ function standIn() {
     console?: (m: PwConsoleMessage) => void;
     pageerror?: (e: Error) => void;
     response?: (r: PwResponse) => void;
+    request?: (r: PwRequest) => void;
   } = {};
   let routeHandler: ((route: PwRoute) => Promise<void>) | undefined;
   let routed = 0;
+  const requestOf = (method: string, url: string, from: PwRequest | null = null): PwRequest => ({
+    method: () => method,
+    url: () => url,
+    redirectedFrom: () => from,
+  });
   const response = (
     method: string,
     url: string,
@@ -39,7 +50,7 @@ function standIn() {
   ): PwResponse => ({
     status: () => status,
     headers: () => headers,
-    request: () => ({ method: () => method, url: () => url }),
+    request: () => requestOf(method, url),
   });
   const page: PwPage = {
     async goto(url) {
@@ -88,8 +99,10 @@ function standIn() {
   /** A request the page makes: it passes the route, and the test sees whether it was continued or aborted. */
   const request = async (method: string, url: string): Promise<"continued" | "aborted"> => {
     let outcome: "continued" | "aborted" = "continued";
+    // The browser announces every request of the page, the routed ones too; only the route can hold one back.
+    handlers.request?.(requestOf(method, url));
     const route: PwRoute = {
-      request: () => ({ method: () => method, url: () => url }),
+      request: () => requestOf(method, url),
       continue: async () => {
         events.push(`continue ${method} ${new URL(url).pathname}`);
       },
@@ -114,6 +127,9 @@ function standIn() {
     console: (type: string, text: string, url = "") =>
       handlers.console?.({ type: () => type, text: () => text, location: () => ({ url }) }),
     pageError: (message: string) => handlers.pageerror?.(new Error(message)),
+    /** The request a redirect leads to: announced to the page, never routed (the browser follows the redirect by itself). */
+    hop: (method: string, from: string, to: string) =>
+      handlers.request?.(requestOf(method, to, requestOf("POST", from))),
   };
 }
 
@@ -200,7 +216,7 @@ test("a 429 is remembered with its Retry-After until it is read, and only a chan
   for (const [method, pathname, status, counted] of [
     ["POST", "/api/session/v1/web/authentication/begin", 200, false],
     ["POST", "/api/session/v1/web/step-up/complete", 200, false],
-    ["POST", "/api/session/v1/web/authentication/complete", 200, false],
+    ["POST", "/api/session/v1/web/authentication/complete", 200, true],
     ["POST", "/api/account/passkeys/remove", 303, true],
     ["POST", "/api/session/v1/web/logout", 200, true],
     ["POST", "/api/account/passkeys/remove", 403, false],
@@ -300,4 +316,123 @@ test("an element is awaited until it is visible and the page has loaded, so its 
   const tab = playwrightTab(world.context, world.page, undefined);
   await tab.waitForSelector("#create-passkey", 1000);
   assert.deepEqual(world.events, ["wait visible", "wait load"]);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// One budget for the whole browser, and the redirect hops the route never sees
+
+/** A browser over stand-in tabs, on a virtual clock that only the budget's waits advance. */
+function standInBrowser(tabCount: number, requestsPerMinute: number = defaultRequestsPerMinute) {
+  const clock = { now: 0 };
+  const waits: number[] = [];
+  const worlds = Array.from({ length: tabCount }, () => standIn());
+  let opened = 0;
+  const pw: PwBrowser = {
+    version: () => "153.0.8010.12",
+    newContext: async () => (worlds[opened++] as ReturnType<typeof standIn>).context,
+    close: async () => {},
+  };
+  const browser = playwrightBrowser(
+    pw,
+    { requestsPerMinute, timeoutMs: 1000 },
+    {
+      clock: () => clock.now,
+      pause: async (milliseconds) => {
+        waits.push(milliseconds);
+        clock.now += milliseconds;
+      },
+    },
+  );
+  return { browser, worlds, clock, waits };
+}
+
+test("the tabs of a browser share one budget, and the redirect hops the route never sees are charged to it", async () => {
+  const { browser, worlds, clock } = standInBrowser(2);
+  const tabs = [await browser.newTab(), await browser.newTab()];
+  for (const [index, tab] of tabs.entries())
+    await tab.goto(`${origin}/api/account/sign-in?${index}`);
+  // The two tabs ask in turn, as fast as the budget lets them; every third request is a form POST that a 303 follows, and an idle
+  // minute comes now and then (an idle budget refills only to the burst).
+  let sent = 0;
+  for (let request = 0; request < 300; request += 1) {
+    const world = worlds[request % 2] as ReturnType<typeof standIn>;
+    const post = request % 3 === 2;
+    await world.request(post ? "POST" : "GET", `${origin}/api/account/page-${request}`);
+    sent += 1;
+    if (post) {
+      world.hop(
+        "POST",
+        `${origin}/api/account/page-${request}`,
+        `${origin}/api/account/after-${request}`,
+      );
+      sent += 1;
+    }
+    if (request % 97 === 96) clock.now += 70_000;
+  }
+  const counts = browser.requests();
+  assert.equal(counts.total, sent, "every routed request and every hop was counted once");
+  // One budget of four at once and forty a minute, hops included: never more than 45 inside any minute (the edge limit is 60).
+  assert(counts.busiest <= 45, `the busiest minute held ${counts.busiest}`);
+  assert(counts.busiest >= 40, `the demand filled the budget (${counts.busiest})`);
+});
+
+test("a redirect hop takes a slot of the budget, so the request behind it waits", async () => {
+  const { browser, worlds, waits } = standInBrowser(1);
+  const tab = await browser.newTab();
+  await tab.goto(`${origin}/api/account/sign-in`);
+  const world = worlds[0] as ReturnType<typeof standIn>;
+  await world.request("GET", `${origin}/api/a`);
+  await world.request("POST", `${origin}/api/b`);
+  world.hop("POST", `${origin}/api/b`, `${origin}/api/after-b`);
+  await world.request("GET", `${origin}/api/c`);
+  assert.deepEqual(waits, [], "three requests and a hop are the burst of four");
+  await world.request("GET", `${origin}/api/d`);
+  assert.equal(waits.length, 1, "the fifth waits for its slot: the hop used one");
+  assert.deepEqual(browser.requests(), { total: 5, busiest: 5 });
+});
+
+test("a request that is not a redirect hop is counted once, by the route, and an aborted one not at all", async () => {
+  const { browser, worlds } = standInBrowser(1, 0);
+  const tab = await browser.newTab();
+  await tab.beforePost(["/api/x"], async () => {
+    throw new Error("the save failed");
+  });
+  const world = worlds[0] as ReturnType<typeof standIn>;
+  await world.request("GET", `${origin}/api/a`);
+  assert.equal(await world.request("POST", `${origin}/api/x`), "aborted");
+  assert.equal(browser.requests().total, 1, "no budget (0), and the aborted request never left");
+});
+
+test("the meter counts the most requests inside any window, a request exactly one window later being outside it", () => {
+  let now = 0;
+  const meter = new RequestMeter(() => now);
+  assert.deepEqual(meter.counts(), { total: 0, busiest: 0 });
+  for (const at of [0, 59_999, 60_000, 60_001]) {
+    now = at;
+    meter.record();
+  }
+  assert.deepEqual(meter.counts(), { total: 4, busiest: 3 });
+  const edge = new RequestMeter(() => now);
+  for (const at of [0, 60_000]) {
+    now = at;
+    edge.record();
+  }
+  assert.deepEqual(edge.counts(), { total: 2, busiest: 1 });
+  assert.deepEqual(edge.counts(60_001), { total: 2, busiest: 2 });
+});
+
+test("a budget charged for a hop that left in the past still spaces the requests that follow", async () => {
+  let now = 0;
+  const waits: number[] = [];
+  const budget = new RequestBudget(
+    60,
+    () => now,
+    async (milliseconds) => {
+      waits.push(milliseconds);
+      now += milliseconds;
+    },
+  );
+  for (let hop = 0; hop < 4; hop += 1) budget.charge();
+  await budget.take();
+  assert.deepEqual(waits, [1000], "four hops used the burst; the next request waits one interval");
 });

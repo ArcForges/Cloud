@@ -13,6 +13,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -50,6 +51,7 @@ import {
   headerProblems,
   mockedLabel,
   newWorld,
+  noFreeTransport,
   realLabel,
 } from "../../eng/verification/browser/flow.ts";
 import { ids, pages, persistBefore, selectors } from "../../eng/verification/browser/selectors.ts";
@@ -96,10 +98,14 @@ interface Scenario {
   everything(): string;
 }
 
-function scenario(options: Partial<FakeOptions> = {}, tokenOverride?: string): Scenario {
+function scenario(
+  options: Partial<FakeOptions> = {},
+  tokenOverride?: string,
+  centerUrl: string = baseUrl,
+): Scenario {
   const stateDir = path.join(scratch(), "proof-acceptance");
   const bootstrapDir = path.join(scratch(), "proof-bootstrap");
-  const center = new FakeCenter(baseUrl, { token: "", ...options });
+  const center = new FakeCenter(centerUrl, { token: "", ...options });
   const record = generateBootstrap({ hours: 24, now: new Date(center.clockSeconds * 1000) });
   createBootstrapFile(bootstrapDir, record);
   center.options.token = tokenOverride ?? record.token;
@@ -264,7 +270,9 @@ test("the first run enrolls the owner, a later run signs in with the saved crede
     counter(),
     "the file follows the server's counter",
   );
-  for (const session of s.center.sessions.values()) assert(session.revoked || true);
+  // Every run ends signed out: none of the sessions of the three runs is left alive.
+  assert(s.center.sessions.size >= 3);
+  for (const session of s.center.sessions.values()) assert.equal(session.revoked, true);
 });
 
 test("a run that restores an older saved credential is refused by the counter rule, which is why every assertion is saved", async () => {
@@ -485,6 +493,22 @@ test("AR-23: the virtual credential signs in and steps up, Windows Hello creates
     .credentials.map((item) => item.credentialId);
   assert(!saved.includes(helloPasskey?.id ?? ""));
   assert(s.stdout.some((line) => line.includes("Windows Hello asks you to confirm")));
+});
+
+test("AR-23 signs in with the owner's credential only, so that a key an earlier run left in the file cannot answer", async () => {
+  const s = scenario({ windowsHello: true });
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  s.center.options.refuseNewPasskey = true;
+  assert.equal(await s.run(), 1);
+  s.center.options.refuseNewPasskey = false;
+  assert.equal(
+    store(s).load().credentials.length,
+    2,
+    "the file holds the owner's key and the orphan",
+  );
+  s.stderr.length = 0;
+  assert.equal(await s.run(["--real-authenticator"]), 0, s.stderr.join("\n"));
+  assert.equal(store(s).load().credentials.length, 2, "AR-23 does not drop what it did not use");
 });
 
 test("AR-23 fails when the virtual authenticator is still the one answering", async () => {
@@ -1050,11 +1074,11 @@ test("after a change a 429 does not restart the step; before any change it does"
   assert(early.sleeps.includes(5000));
 });
 
-test("the request budget lets a burst through, then one request per interval, and never more than the bound in a minute", async () => {
+test("the request budget lets a burst of four through, then one request per interval, and never more than the bound in a minute", async () => {
   const sleeps: number[] = [];
   let now = 0;
   const budget = new RequestBudget(
-    45,
+    defaultRequestsPerMinute,
     () => now,
     async (milliseconds) => {
       sleeps.push(milliseconds);
@@ -1065,26 +1089,26 @@ test("the request budget lets a burst through, then one request per interval, an
   for (let request = 0; request < 120; request += 1) {
     await budget.take();
     starts.push(now);
-    if (request === 7) assert.deepEqual(sleeps, [], "the burst of eight goes out at once");
+    if (request === 3) assert.deepEqual(sleeps, [], "the burst of four goes out at once");
   }
   assert.equal(
-    starts.slice(0, 8).every((start) => start === 0),
+    starts.slice(0, 4).every((start) => start === 0),
     true,
   );
-  assert(starts[8] !== undefined && starts[8] > 0, "the ninth waits");
-  // In every window of 60 seconds at most burst + the per-minute rate requests start (53), far below the edge limit of 60.
+  assert(starts[4] !== undefined && starts[4] > 0, "the fifth waits");
+  // In every window of 60 seconds at most burst + the per-minute rate requests start (44), well below the edge limit of 60.
   let most = 0;
   for (const [index, start] of starts.entries())
     most = Math.max(
       most,
       starts.filter((other, otherIndex) => otherIndex >= index && other < start + 60_000).length,
     );
-  assert(most <= 53 && most >= 45, String(most));
+  assert(most <= 44 && most >= 40, String(most));
   // An idle budget refills only to the burst.
   now += 10 * 60_000;
   const before = sleeps.length;
-  for (let request = 0; request < 8; request += 1) await budget.take();
-  assert.equal(sleeps.length, before, "eight go out at once again");
+  for (let request = 0; request < 4; request += 1) await budget.take();
+  assert.equal(sleeps.length, before, "four go out at once again");
   await budget.take();
   assert.equal(sleeps.length, before + 1);
   for (const bad of [0, -1, 1.5, Number.NaN])
@@ -1093,7 +1117,7 @@ test("the request budget lets a burst through, then one request per interval, an
 
 test("the request bound is an argument that only a center on this machine may lift", () => {
   assert.equal(parse([]).requestsPerMinute, defaultRequestsPerMinute);
-  assert.equal(defaultRequestsPerMinute, 45);
+  assert.equal(defaultRequestsPerMinute, 40);
   assert.equal(parse(["--requests-per-minute", "30"]).requestsPerMinute, 30);
   assert.equal(
     parse(["--base-url", "http://localhost:18080", "--requests-per-minute", "0"]).requestsPerMinute,
@@ -1105,7 +1129,7 @@ test("the request bound is an argument that only a center on this machine may li
     300,
   );
   assert.throws(() => parse(["--requests-per-minute", "0"]), /localhost only/u);
-  assert.throws(() => parse(["--requests-per-minute", "46"]), /localhost only/u);
+  assert.throws(() => parse(["--requests-per-minute", "41"]), /localhost only/u);
   assert.throws(
     () => parse(["--requests-per-minute", "601", "--base-url", "http://localhost:1"]),
     /whole number/u,
@@ -1158,15 +1182,15 @@ test("a console error the browser makes about the favicon is not the page's, any
   );
 });
 
-test("a change is a POST the center accepted that a step could not repeat: not a flow's begin, proof or sign-in", () => {
+test("a change is a POST the center accepted that a step could not repeat: a sign-in is one, a flow's begin and a proof are not", () => {
   for (const pathname of [
     "/api/session/v1/web/authentication/begin",
-    "/api/session/v1/web/authentication/complete",
     "/api/session/v1/web/step-up/begin",
     "/api/session/v1/web/step-up/complete",
   ])
     assert.equal(acceptedChange("POST", 200, pathname), false, pathname);
   for (const pathname of [
+    "/api/session/v1/web/authentication/complete",
     "/api/session/v1/web/enrollment/complete",
     "/api/session/v1/web/logout",
     "/api/account/passkeys/add",
@@ -1308,4 +1332,230 @@ test("a 429 on the enrollment request starts the step from nothing: one credenti
   assert.equal(store(s).load().credentials.length, 1);
   assert.equal(store(s).load().credentials[0]?.credentialId, s.center.passkeys[0]?.id);
   assert.equal(s.center.passkeys.length, 1);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Fix round 2: what a run leaves behind, and what it sends
+
+test("a first run whose enrollment the center accepted keeps the credential file even though the tab never arrived", async () => {
+  const s = scenario({ enrollmentStays: true });
+  assert.equal(await s.run(), 1);
+  assert(s.center.ownerExists && s.center.tokenSpent, "the account exists and the token is spent");
+  assert(
+    existsSync(path.join(s.stateDir, credentialFileName)),
+    "so the only copy of the owner's key stays",
+  );
+  assert.equal(store(s).load().credentials[0]?.credentialId, s.center.passkeys[0]?.id);
+  assert.match(s.stderr.join("\n"), /The account may exist; do not delete the credential file/u);
+  // The next run is a returning run with that key, and it passes.
+  s.center.options.enrollmentStays = false;
+  s.stderr.length = 0;
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  assert.equal(JSON.parse(s.reports.at(-1)?.text ?? "{}").mode, "returning");
+});
+
+test("a 429 on the page a sign-in leads to fails the step instead of repeating it: a sign-in is a change", async () => {
+  const s = scenario();
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  s.center.options.limitAfterSignIn = 1;
+  s.stderr.length = 0;
+  s.sleeps.length = 0;
+  assert.equal(await s.run(), 1);
+  assert.match(
+    s.stderr.join("\n"),
+    /rate limited \(429\) after a request of it had changed something; it is not repeated/u,
+  );
+  assert(!s.sleeps.includes(5000), "the step did not wait and start again");
+  const report = JSON.parse(s.reports.at(-1)?.text ?? "{}") as {
+    mode: string;
+    steps: { name: string; attempts: number; ok: boolean }[];
+  };
+  assert.equal(report.mode, "returning");
+  const signIn = report.steps.find((entry) => entry.name.startsWith("sign out, find"));
+  assert.equal(signIn?.attempts, 1);
+  assert.equal(signIn?.ok, false);
+});
+
+test("runs that fail after the second passkey was registered do not wedge the script: the next returning run removes the strays", async () => {
+  const s = scenario();
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  const original = s.center.passkeys.map((passkey) => passkey.id);
+  const originalCredential = store(s).load().credentials[0]?.credentialId;
+  s.center.options.devicesPageFails = true;
+  for (let run = 1; run <= 4; run += 1) {
+    assert.equal(await s.run(), 1, `run ${run}`);
+    // Each failing run leaves its own passkey on the account and its key in the file, and no more than that.
+    assert.equal(s.center.passkeys.length, 2, `run ${run}: the account`);
+    assert.equal(store(s).load().credentials.length, 2, `run ${run}: the file`);
+    assert.match(
+      s.stderr.join("\n"),
+      /list the sessions and the devices/u,
+      `run ${run} failed where the fake made it fail`,
+    );
+  }
+  // The owner's AR-23 passkey is on the account too; the cleanup must not touch it.
+  s.center.passkeys.push({
+    id: "hello-passkey",
+    name: "Windows Hello AR-23 2026-10-30",
+    signCount: 0,
+    lastUsed: null,
+    real: true,
+  });
+  s.center.options.devicesPageFails = false;
+  s.stderr.length = 0;
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  assert.deepEqual(
+    s.center.passkeys.map((passkey) => passkey.id),
+    [...original, "hello-passkey"],
+    "the account has the passkeys it had before: the owner's first and the Windows Hello one",
+  );
+  const saved = store(s).load().credentials;
+  assert.deepEqual(
+    saved.map((credential) => [credential.credentialId, credential.transport]),
+    [[originalCredential, "internal"]],
+  );
+  const report = JSON.parse(s.reports.at(-1)?.text ?? "{}") as {
+    steps: { name: string; ok: boolean }[];
+    facts: Record<string, unknown>;
+  };
+  assert(
+    report.steps.some((entry) => entry.name === "remove the passkeys an earlier run left behind"),
+  );
+  assert.equal(report.facts.strayPasskeysRemoved, 1);
+  // A run with nothing left behind does not carry the step.
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  const clean = JSON.parse(s.reports.at(-1)?.text ?? "{}") as { steps: { name: string }[] };
+  assert(!clean.steps.some((entry) => entry.name.startsWith("remove the passkeys an earlier")));
+});
+
+test("a key made for a passkey the center never accepted is forgotten by the next returning run", async () => {
+  const s = scenario();
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  s.center.options.refuseNewPasskey = true;
+  assert.equal(await s.run(), 1);
+  assert.equal(s.center.passkeys.length, 1, "the center never had the passkey");
+  assert.equal(
+    store(s).load().credentials.length,
+    2,
+    "the key made for it was saved before the request",
+  );
+  s.center.options.refuseNewPasskey = false;
+  s.stderr.length = 0;
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  assert.equal(store(s).load().credentials.length, 1);
+  assert.equal(s.center.passkeys.length, 1);
+  const report = JSON.parse(s.reports.at(-1)?.text ?? "{}") as { facts: Record<string, unknown> };
+  assert.equal(report.facts.strayPasskeysRemoved, 0);
+});
+
+test("a 429 on the request that completes a passkey starts the step again with the key of the first attempt kept, and the next run forgets it", async () => {
+  const s = scenario({ limitNewPasskeyOnce: true });
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  s.center.options.limitNewPasskeyOnce = false;
+  const first = JSON.parse(s.reports[0]?.text ?? "{}") as {
+    steps: { name: string; attempts: number }[];
+  };
+  assert.equal(
+    first.steps.find((entry) => entry.name.includes("register a second passkey"))?.attempts,
+    2,
+    "the step waited for the advice and started again",
+  );
+  assert(s.sleeps.includes(5000));
+  assert.equal(s.center.passkeys.length, 1);
+  // The key made for the passkey the center never saw is in the file next to the owner's.
+  assert.equal(store(s).load().credentials.length, 2);
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  assert.equal(store(s).load().credentials.length, 1, "the next returning run forgets it");
+});
+
+test("a saved file with no credential on the owner's own authenticator is refused instead of signing in with a stray", async () => {
+  const s = scenario();
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  const file = path.join(s.stateDir, credentialFileName);
+  const text = readFileSync(file, "utf8");
+  assert(text.includes('"transport":"internal"'));
+  writeFileSync(file, text.replace('"transport":"internal"', '"transport":"usb"'));
+  s.stderr.length = 0;
+  assert.equal(await s.run(), 1);
+  assert.match(s.stderr.join("\n"), /no credential of the owner's own/u);
+});
+
+test("a registration with no free transport names the passkeys of earlier runs and points to the runbook", () => {
+  const message = noFreeTransport(["acceptance-20261030101010", "acceptance-20261030111111"]);
+  assert.match(message, /as many credentials as there are transports/u);
+  assert.match(message, /acceptance-20261030101010, acceptance-20261030111111/u);
+  assert.match(message, /runbook/u);
+  assert.match(noFreeTransport([]), /none listed/u);
+});
+
+test("a saved credential made for another center is refused before anything is driven, and the message names --state-dir", async () => {
+  const s = scenario();
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  const steps = () => (JSON.parse(s.reports.at(-1)?.text ?? "{}") as { steps: unknown[] }).steps;
+  s.stderr.length = 0;
+  assert.equal(await s.run(["--base-url", "http://localhost:18080"]), 1);
+  assert.match(s.stderr.join("\n"), /--state-dir/u);
+  assert.match(
+    s.stderr.join("\n"),
+    /proof\.arcforges\.com/u,
+    "it names the center the file belongs to",
+  );
+  assert.equal(steps().length, 0, "no step ran");
+  // AR-23 refuses it too.
+  s.stderr.length = 0;
+  assert.equal(await s.run(["--real-authenticator", "--base-url", "http://localhost:18080"]), 1);
+  assert.match(s.stderr.join("\n"), /--state-dir/u);
+  assert.equal(steps().length, 0);
+  // The same address with another relying party (an edited file) is refused as well.
+  const file = path.join(s.stateDir, credentialFileName);
+  const edited = readFileSync(file, "utf8").replace(
+    '"rpId":"proof.arcforges.com"',
+    '"rpId":"other.example"',
+  );
+  assert.notEqual(edited, readFileSync(file, "utf8"), "the file names the relying party");
+  writeFileSync(file, edited);
+  s.stderr.length = 0;
+  assert.equal(await s.run(), 1);
+  assert.match(s.stderr.join("\n"), /other\.example[\s\S]*--state-dir/u);
+});
+
+test("the report says what the browser sent, and a run seen to send more than 55 requests inside a minute is failed", async () => {
+  const quiet = scenario();
+  quiet.browser.requestCounts = { total: 120, busiest: 55 };
+  assert.equal(await quiet.run(), 0, quiet.stderr.join("\n"));
+  const facts = (JSON.parse(quiet.reports[0]?.text ?? "{}") as { facts: Record<string, unknown> })
+    .facts;
+  assert.equal(facts.requestsSent, 120);
+  assert.equal(facts.requestsBusiest60s, 55);
+
+  const busy = scenario();
+  busy.browser.requestCounts = { total: 120, busiest: 56 };
+  assert.equal(await busy.run(), 1);
+  assert.match(busy.stderr.join("\n"), /56 requests inside one minute[\s\S]*55[\s\S]*429/u);
+  assert.equal(busy.stdout.at(-1), "FAILED");
+  const failed = JSON.parse(busy.reports[0]?.text ?? "{}") as {
+    result: string;
+    facts: Record<string, unknown>;
+  };
+  assert.equal(failed.result, "failed");
+  assert.equal(failed.facts.requestsBusiest60s, 56);
+
+  // The bound is meant for the hosted limit: a center on this machine may lift the budget, and what it is sent is then recorded only.
+  const local = "http://localhost:18080";
+  const lifted = scenario({}, undefined, local);
+  lifted.browser.requestCounts = { total: 300, busiest: 120 };
+  assert.equal(
+    await lifted.run(["--base-url", local, "--requests-per-minute", "0"]),
+    0,
+    lifted.stderr.join("\n"),
+  );
+  assert.equal(
+    (JSON.parse(lifted.reports[0]?.text ?? "{}") as { facts: Record<string, unknown> }).facts
+      .requestsBusiest60s,
+    120,
+  );
+  // A local center with the budget on (the wrapper's configuration) is held to it.
+  const held = scenario({}, undefined, local);
+  held.browser.requestCounts = { total: 100, busiest: 60 };
+  assert.equal(await held.run(["--base-url", local]), 1);
 });
