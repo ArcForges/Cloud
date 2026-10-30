@@ -39,6 +39,7 @@
 {{end}}
 </tbody>
 </table>
+{{if .HasMore}}<p class="help">Only the first passkeys are listed.</p>{{end}}
 {{if not .CanRemove}}<p class="help">This is your only way to sign in, so it cannot be removed. Add another passkey first.</p>{{end}}
 </section>
 <section aria-labelledby="add-heading">

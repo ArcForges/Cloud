@@ -3,8 +3,10 @@
 package pages_test
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,6 +108,87 @@ func TestTheFlowsOfTheBrowserHaveTheirOwnChannelAndLifetime(t *testing.T) {
 		"credential": map[string]any{"passkey": creationJSON(made)}, "profile": map[string]any{"displayName": "Mallory"}})
 	if hijack.status != 404 || hijack.refusal(t) != "state/not_found" || fresh.count("SELECT count(*) FROM identity.bootstrap") != 0 || fresh.count("SELECT count(*) FROM identity.user") != 0 {
 		t.Fatalf("a sign-in flow used to enroll: %d %s", hijack.status, hijack.text())
+	}
+	h.verifyAudit()
+}
+
+// TestALostRaceForANewBrowserInstallationGivesTheAttemptBack (pages-1, as D4 for a native installation): two first sign-ins of one
+// new browser installation with two passkeys of one account race; the loser meets the winner's installation on the unique index of
+// the live web claim, which is a store contention (RESOURCE/overloaded, did not happen), not an internal failure: nothing is logged
+// as a failed call, and the identical retry signs in on the winner's installation. The audit chain's head is held until both
+// completions wait (one on it, one on the other's installation), so the race is deterministic.
+func TestALostRaceForANewBrowserInstallationGivesTheAttemptBack(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	ctx := context.Background()
+	first := h.seedAccount(1)
+	accounts := [2]account{first, h.addPasskey(first)}
+	installation := uuid(platform.NewID())
+	browsers := [2]*browser{h.newBrowser(), h.newBrowser()}
+	var bodies [2]map[string]any
+	for i, b := range browsers {
+		b.installation = installation
+		challenge := b.beginSignIn()
+		bodies[i] = map[string]any{"flowId": challenge.FlowID,
+			"proof": map[string]any{"passkey": assertionJSON(accounts[i].authenticator.Assert(accounts[i].key, unb64(t, challenge.Challenge)))}}
+	}
+	tx, err := h.migration.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err = tx.Exec(ctx, "SELECT 1 FROM audit.chain_head WHERE singleton FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	var replies [2]response
+	for i := range browsers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			replies[i] = browsers[i].postJSON("/session/v1/web/authentication/complete", bodies[i])
+		}()
+	}
+	waiting := 0
+	for deadline := time.Now().Add(10 * time.Second); waiting < 2 && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if err = tx.QueryRow(ctx, `WITH RECURSIVE blocked(pid) AS (
+    SELECT l.pid FROM pg_locks l WHERE NOT l.granted AND pg_backend_pid() = ANY(pg_blocking_pids(l.pid))
+    UNION SELECT l.pid FROM pg_locks l JOIN blocked b ON b.pid = ANY(pg_blocking_pids(l.pid)) WHERE NOT l.granted)
+SELECT count(DISTINCT pid) FROM blocked`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	if waiting < 2 {
+		t.Fatalf("the sign-ins never both waited (%d)", waiting)
+	}
+	loser, won := -1, 0
+	for i, reply := range replies {
+		if reply.status == 200 {
+			won++
+			continue
+		}
+		if reply.status != 503 || reply.refusal(t) != "resource/overloaded" || loser != -1 {
+			t.Fatalf("completion %d: %d %s", i, reply.status, reply.text())
+		}
+		loser = i
+	}
+	if won != 1 || loser == -1 {
+		t.Fatalf("%d of the first sign-ins of one installation succeeded, the other one was refused with %d", won, loser)
+	}
+	if text := replies[loser].text(); !strings.Contains(text, `"effect":"didNotHappen"`) || !strings.Contains(text, `"mode":"afterTime"`) {
+		t.Fatalf("the loser's refusal does not give the attempt back: %s", replies[loser].text())
+	}
+	if lines := strings.Count(h.logs.String(), "identity call failed"); lines != 0 {
+		t.Fatalf("the lost race was logged as %d failed identity calls", lines)
+	}
+	if retried := browsers[loser].postJSON("/session/v1/web/authentication/complete", bodies[loser]); retried.status != 200 {
+		t.Fatalf("the identical retry of the loser: %d %s", retried.status, retried.text())
+	}
+	if rows := h.count("SELECT count(*) FROM device.installation WHERE client_installation_id = $1", installation); rows != 1 {
+		t.Fatalf("%d installations for one claim", rows)
 	}
 	h.verifyAudit()
 }

@@ -3,15 +3,20 @@
 package pages_test
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/access"
+	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/session"
 )
@@ -354,5 +359,83 @@ func TestADisabledSurfaceAnswers404(t *testing.T) {
 	}
 	if reply := h.do(request{method: http.MethodGet, path: "/healthz"}); reply.status != 200 {
 		t.Fatalf("health: %d", reply.status)
+	}
+}
+
+// TestEveryDocumentedRequestRuleOfAFormHoldsOnItsOwn (pages-6): each rule of "Request rules" and "Origin and CSRF" that a form can
+// break is refused by itself, with the status the document gives and without the form's effect (a rename that is committed is the
+// effect): a repeated field, an unknown field, a doubled Content-Type, a CSRF field and header that disagree and a repeated CSRF
+// header. The controls (one valid csrf field; the header and the field agreeing) are accepted, so a refusal is the rule's own.
+func TestEveryDocumentedRequestRuleOfAFormHoldsOnItsOwn(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	who := h.seedAccount(1)
+	b := h.newBrowser()
+	b.mustSignIn(who)
+	deviceID := b.bootstrapState().Session.DeviceID
+	valid, junk := "csrf="+url.QueryEscape(b.csrf)+"&", strings.Repeat("A", 43)
+	const formType = "application/x-www-form-urlencoded"
+	header := func(values ...string) http.Header { return http.Header{"X-Af-Csrf": values} }
+	for _, probe := range []struct {
+		what          string
+		name          string // the device's new name, which tells whether the form had its effect
+		before, after string // the fields around the rename's
+		headers       http.Header
+		status        int
+		effect        bool
+	}{
+		{"a control: one valid csrf field", "RuleA", valid, "", nil, 303, true},
+		{"a control: the header and the field agree", "RuleB", valid, "", header(b.csrf), 303, true},
+		{"an unknown field", "RuleC", valid, "&evil=1", nil, 400, false},
+		{"a repeated csrf field, the valid one first", "RuleD", valid + "csrf=" + junk + "&", "", nil, 400, false},
+		{"a repeated csrf field, the valid one last", "RuleE", "csrf=" + junk + "&" + valid, "", nil, 400, false},
+		{"a repeated field", "RuleF", valid, "&name=RuleG", nil, 400, false},
+		{"the header is valid and the field is not", "RuleH", "csrf=" + junk + "&", "", header(b.csrf), 403, false},
+		{"the field is valid and the header is not", "RuleI", valid, "", header(junk), 403, false},
+		{"the header twice with the valid field", "RuleJ", valid, "", header(b.csrf, b.csrf), 403, false},
+		{"the header twice, one of them wrong", "RuleK", valid, "", header(b.csrf, junk), 403, false},
+		{"a Content-Type that is the form's, then another", "RuleL", valid, "", http.Header{"Content-Type": {formType, "text/plain"}}, 415, false},
+		{"a Content-Type that is the form's, twice", "RuleM", valid, "", http.Header{"Content-Type": {formType, formType}}, 415, false},
+		{"a Content-Type that is another, then the form's", "RuleN", valid, "", http.Header{"Content-Type": {"text/plain", formType}}, 415, false},
+	} {
+		body := probe.before + "command_id=" + uuid(platform.NewID()) + "&device_id=" + deviceID + "&name=" + probe.name + probe.after
+		reply := h.do(request{method: http.MethodPost, path: "/account/devices/rename", contentType: formType, body: []byte(body), cookie: b.cookie, headers: probe.headers, ip: b.ip})
+		done := h.count("SELECT count(*) FROM device.device WHERE display_name = $1 AND user_id = $2", probe.name, who.id) > 0
+		if reply.status != probe.status || done != probe.effect {
+			t.Errorf("%s: %d (want %d), renamed %v (want %v)", probe.what, reply.status, probe.status, done, probe.effect)
+		}
+	}
+}
+
+// TestAGetWithABodyIsRefusedHoweverTheBodyIsFramed (pages-6): a GET that carries a body is 400 whether the length is declared or
+// the body is chunked (even an empty chunked body), and a plain GET is served.
+func TestAGetWithABodyIsRefusedHoweverTheBodyIsFramed(t *testing.T) {
+	h := newHarness(t, settings{})
+	head := "GET /account/sign-in HTTP/1.1\r\nHost: center.example.test\r\n" + config.ClientIPHeader + ": 203.0.113.10\r\nConnection: close\r\n"
+	for _, probe := range []struct {
+		name, text string
+		status     int
+	}{
+		{"a plain GET", head + "\r\n", 200},
+		{"a declared length", head + "Content-Length: 1\r\n\r\nx", 400},
+		{"a chunked body", head + "Transfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n", 400},
+		{"an empty chunked body", head + "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n", 400},
+	} {
+		conn, err := net.Dial("tcp", strings.TrimPrefix(h.url, "http://"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+		if _, err = conn.Write([]byte(probe.text)); err != nil {
+			t.Fatal(err)
+		}
+		reply, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = reply.Body.Close()
+		_ = conn.Close()
+		if reply.StatusCode != probe.status {
+			t.Errorf("%s: %d (want %d)", probe.name, reply.StatusCode, probe.status)
+		}
 	}
 }

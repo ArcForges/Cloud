@@ -19,9 +19,9 @@ const MaxPublicBaseURLLength = 2048
 
 // ParsePublicBaseURL validates the public base URL and returns its canonical form. It is an absolute https URL (or, in
 // self-hosted mode only, an http URL of a loopback host, for a center behind a local TLS-terminating proxy or under test) with a
-// lowercase host, an optional port and an optional clean path without a trailing slash; it has no user information, query or
-// fragment and no percent-encoding. The canonical form is the input itself: a value is accepted only as it would be written
-// back.
+// lowercase host, an optional port (never the scheme's default, which an origin leaves out) and an optional clean path without a
+// trailing slash; it has no user information, query or fragment and no percent-encoding. The canonical form is the input itself: a
+// value is accepted only as it would be written back.
 func ParsePublicBaseURL(value string, mode Mode) (string, error) {
 	if value == "" {
 		return "", errors.New("required: the absolute URL under which clients reach this center")
@@ -50,6 +50,11 @@ func ParsePublicBaseURL(value string, mode Mode) (string, error) {
 		}
 	} else if strings.HasSuffix(uri.Host, ":") {
 		return "", errors.New("the port is empty")
+	}
+	// A port that is the scheme's default is not how an origin is written (a browser's Origin header and WebAuthn's origin leave it
+	// out), so a value that spells it could never equal the origin the pages and the relying party compare it with.
+	if port := uri.Port(); (uri.Scheme == "https" && port == "443") || (uri.Scheme == "http" && port == "80") {
+		return "", errors.New("the port is the scheme's default and is left out")
 	}
 	switch uri.Scheme {
 	case "https":

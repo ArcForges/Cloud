@@ -323,9 +323,12 @@ center's Connect writer admits (`TestAFullDevicePageIsSent`).
 The `pages` surface (A2; PLT-1, AD-0021 §7) is the center's own account UI and the contract's browser session routes
 (`public/http/v1/web-browser.schema.json`, Contracts 62ccef1). A self-hosted center serves them without any Web deployment; the
 hosted Worker forwards the same exact paths through its [page handler](cloud-ingress.md#page-routes-plt-1). The pages decide nothing the
-API does not: every action calls the handler of the API method it stands for, in process, with the session of the browser's cookie
-(`identityapi.Direct`), so a page and the API share the operation table (`access.Authorize`), the step-up evidence, the command
-receipts, the rate-limit buckets and the audit events. A page never reads or writes a table.
+API does not. The forms, the bootstrap read's profile and the two step-up routes call the handler of the API method they stand for,
+in process, with the session of the browser's cookie (`identityapi.Direct`); the sign-in and enrollment routes and the logout call
+the identity core after the same operation-table decision (`access.Authorize`). So a page and the API share the operation table,
+the step-up evidence, the rate-limit buckets and the audit events, and the forms share the command receipts as well. The logout
+receipt is a reply shape only: the contract's logout has no command ID, so its reply carries a new one, nothing is stored and
+nothing replays. A page never reads or writes a table.
 
 | Route                                                                                       | Kind | Credential       |
 | ------------------------------------------------------------------------------------------- | ---- | ---------------- |

@@ -60,13 +60,13 @@ func TestTheCenterRefusesToStartWithoutAnExplicitValidMode(t *testing.T) {
 func TestThePublicBaseURLIsRequiredAndCanonical(t *testing.T) {
 	for _, valid := range []string{
 		"https://center.example", "https://center.example/api", "https://center.example:8443/a/b-c_d.e~f", "https://[2001:db8::1]/api",
-		"https://127.0.0.1:9443",
+		"https://127.0.0.1:9443", "https://center.example:80", "https://center.example:8443/api",
 	} {
 		if got, err := ParsePublicBaseURL(valid, OfficialHosted); err != nil || got != valid {
 			t.Fatalf("refused %q: %v", valid, err)
 		}
 	}
-	for _, valid := range []string{"http://localhost:8080", "http://127.0.0.1:8080/api", "http://[::1]:8080"} {
+	for _, valid := range []string{"http://localhost:8080", "http://127.0.0.1:8080/api", "http://[::1]:8080", "http://localhost:443"} {
 		if _, err := ParsePublicBaseURL(valid, SelfHosted); err != nil {
 			t.Fatalf("self-hosted refused %q: %v", valid, err)
 		}
@@ -80,6 +80,8 @@ func TestThePublicBaseURLIsRequiredAndCanonical(t *testing.T) {
 		"https://center.example/a/../b", "https://center.example/a%2fb", "https://center.example/a b", "https://center.example?x=1",
 		"https://center.example#x", "https://user@center.example", "https://user:pass@center.example", "https://center.example:0",
 		"https://center.example:65536", "https://center.example:", "https://center.example:080", "http://center.example",
+		// The scheme's default port, spelled out, is not the origin a browser sends (pages and WebAuthn compare it byte for byte).
+		"https://center.example:443", "https://center.example:443/api", "https://[2001:db8::1]:443/api", "http://localhost:80", "http://127.0.0.1:80/api",
 		"http://10.0.0.1:8080", "ftp://center.example", "https://center.example.", "https://center.example/\u00e9",
 		" https://center.example", "https://center.example\n", "https://center.example/a\\b", "mailto:x@center.example",
 		"https://center.example/" + strings.Repeat("a", MaxPublicBaseURLLength),

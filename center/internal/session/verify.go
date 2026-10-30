@@ -117,23 +117,13 @@ func (v *Verifier) Verify(ctx context.Context, token string) (*ingress.Caller, e
 func (v *Verifier) AllowedOrigin() string { return v.origin }
 
 // Resolve checks a browser cookie handle: a live session of this origin within its absolute and idle expiry, whose device and
-// installation are live and whose account may sign in. The CSRF check accepts exactly the token derived from this handle.
+// installation are live and whose account may sign in. The CSRF check accepts exactly the token derived from this handle. It is
+// ResolveSession's answer without the page-only fields, so the API's cookie routes and the account pages never judge a cookie
+// differently.
 func (v *Verifier) Resolve(ctx context.Context, cookie string) (*ingress.BrowserCredential, error) {
-	handle, ok := ParseHandle(cookie)
-	if !ok {
-		return nil, nil
-	}
-	row, err := v.lookup(ctx, "WHERE s.browser_handle_hash = $1 AND s.credential_kind = 2", handle.Digest())
-	if err != nil || row == nil {
+	resolved, err := v.ResolveSession(ctx, cookie)
+	if err != nil || resolved == nil {
 		return nil, err
 	}
-	now := v.clock()
-	if row.revoked || !now.Before(row.expiresAt) || row.idleExpiresAt == nil || !now.Before(*row.idleExpiresAt) || row.origin == nil ||
-		*row.origin != v.origin || (row.state != 1 && row.state != 2) {
-		return nil, nil
-	}
-	return &ingress.BrowserCredential{
-		Caller:     *row.caller(ingress.CredentialBrowserSession),
-		VerifyCSRF: func(token string, present bool) bool { return present && CheckCSRF(handle, token) },
-	}, nil
+	return resolved.Credential, nil
 }

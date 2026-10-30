@@ -73,7 +73,7 @@ variable and never repeats its value.
 | Variable                                | Default  | Rule                                                                                                                                                                                                                                                                |
 | --------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ARCFORGES_CENTER_MODE`                 | none     | Required: `official-hosted` or `self-hosted` exactly                                                                                                                                                                                                                |
-| `ARCFORGES_CENTER_PUBLIC_BASE_URL`      | none     | Required: canonical absolute `https` URL (lowercase host, optional port and path, no trailing slash, query, fragment or user); `http` only for a loopback host in self-hosted mode                                                                                  |
+| `ARCFORGES_CENTER_PUBLIC_BASE_URL`      | none     | Required: canonical absolute `https` URL (lowercase host, optional non-default port and path, no trailing slash, query, fragment or user); `http` only for a loopback host in self-hosted mode                                                                      |
 | `ARCFORGES_CENTER_HTTP_ADDRESS`         | `:8080`  | HTTP/1.1 and h2c listener; `host:port` with an IP literal, `localhost` or no host                                                                                                                                                                                   |
 | `ARCFORGES_CENTER_GRPC_ADDRESS`         | `:8081`  | h2c-only listener; `off` disables it                                                                                                                                                                                                                                |
 | `ARCFORGES_CENTER_ADMIN_ADDRESS`        | disabled | Readiness (`/readyz`) and metrics (`/metrics`); must be a loopback address in official-hosted mode                                                                                                                                                                  |
@@ -257,7 +257,7 @@ hand-written Worker sources.
     "binary": "arcforges-center",
     "mode": "official-hosted",
     "publicBaseUrl": "https://…",
-    "surfaces": "none | identity"
+    "surfaces": "none | identity | identity,pages"
   }
 }
 ```

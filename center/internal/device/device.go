@@ -280,6 +280,11 @@ WHERE i.user_id = $1 AND i.client_installation_id = $2 AND i.revoked_at IS NULL 
 		if _, err = tx.Exec(ctx, `INSERT INTO device.installation (installation_id, device_id, user_id, product_id, app_version, platform,
     client_installation_id, installed_at, last_active_at, rev) VALUES ($1, $2, $3, 'arcforges-web', $4, 'web', $5, $6, $6, 1)`,
 			installationID, deviceID, userID, appVersion, claimed, now); err != nil {
+			// A concurrent first sign-in of the same claim committed its installation first: the unique index on the live claim
+			// refuses this one. That is a store contention (the attempt is given back and retried), as for a native installation.
+			if errors.Is(store.Sanitize("create a web installation", err), store.ErrConflict) {
+				return platform.ID{}, platform.ID{}, &store.Error{Operation: "create a web installation", SQLState: "23505", Kind: store.ErrContention}
+			}
 			return platform.ID{}, platform.ID{}, store.Sanitize("create a web installation", err)
 		}
 		return deviceID, installationID, nil

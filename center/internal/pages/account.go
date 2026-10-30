@@ -25,8 +25,10 @@ import (
 // operation table has already decided who may see it. Its script only runs the WebAuthn ceremonies and the step-up before a form
 // that needs evidence is submitted.
 
-// pageLimit is the number of items a page lists: the API's largest page.
-const pageLimit = 100
+// pageLimit is the number of items a page lists. It is smaller than the API's largest page (100) so that a full page of rows with
+// the longest names that escape to the most bytes still fits the page reply bound the Worker enforces (reviewer-4, pinned by
+// TestAFullPageOfTheWorstCaseRowsFitsItsReplyBound); the pages say when there are more.
+const pageLimit = 30
 
 func pageRequest() *foundationv1.PageRequest {
 	return &foundationv1.PageRequest{Limit: proto.Int32(pageLimit)}
@@ -158,6 +160,7 @@ func (e *exchange) passkeysPage() {
 		}
 	}
 	data.CanRemove = len(list.GetValue().GetItems()) > 1
+	data.HasMore = list.GetValue().GetPage().GetHasMore()
 	data.AddTarget = identity.TargetHash(identity.ClassBeginRegistration, resolved.UserID, resolved.UserID)
 	e.serve("passkeys", data)
 }
@@ -319,14 +322,19 @@ func message(request proto.Message) []byte {
 }
 
 // done lands a form that succeeded: back on the page it came from, or, when the action ended the session itself (revoking the
-// session or the device of this browser), on the sign-in page with the cookie removed.
+// session or the device of this browser), on the sign-in page with the cookie removed. The cookie is removed only by a route whose
+// registered rule removes it (SetCookieClear: the two revoke forms) and only when a second look positively finds that session no
+// longer live; a look that fails, and every route whose rule keeps the cookie, land on the page like any other success (a page
+// that needs a session sends the browser to the sign-in itself).
 func (e *exchange) done(landing string, resolved *session.BrowserSession) {
-	after, problem := e.h.options.Verifier.ResolveSession(e.r.Context(), e.cookie)
-	if problem == nil && after != nil && after.SessionID == resolved.SessionID {
-		e.redirect(e.h.options.BasePath+routes.PageAccountPrefix+landing, "")
-		return
+	if e.route.SetCookie == routes.SetCookieClear {
+		after, problem := e.h.options.Verifier.ResolveSession(e.r.Context(), e.cookie)
+		if problem == nil && (after == nil || after.SessionID != resolved.SessionID) {
+			e.redirect(e.h.options.BasePath+routes.PageAccountPrefix+"/sign-in", clearCookie())
+			return
+		}
 	}
-	e.redirect(e.h.options.BasePath+routes.PageAccountPrefix+"/sign-in", clearCookie())
+	e.redirect(e.h.options.BasePath+routes.PageAccountPrefix+landing, "")
 }
 
 // addPasskey is POST /account/passkeys/add: BeginPasskeyRegistration (the step-up evidence the script proved is consumed), then the

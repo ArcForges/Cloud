@@ -20,6 +20,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
+	"github.com/ArcForges/Cloud/center/internal/pages"
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
@@ -486,5 +487,35 @@ WHERE table_schema IN ('identity', 'device', 'platform', 'audit') AND table_type
 	}
 	if !strings.Contains(strings.Join(h.setCookies, "\n"), "Max-Age=") {
 		t.Error("no cookie was seen")
+	}
+}
+
+// TestAPageListsNoMoreRowsThanItsLimitAndSaysThereAreMore (reviewer-4): an account with more sessions, devices and passkeys than a page lists
+// gets pageLimit rows and the notice that more exist, and the reply stays within the bound the Worker enforces for the route.
+func TestAPageListsNoMoreRowsThanItsLimitAndSaysThereAreMore(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	who := h.seedAccount(1)
+	browsers := make([]*browser, pages.PageLimit+1)
+	for index := range browsers {
+		browsers[index] = h.newBrowser()
+		browsers[index].mustSignIn(who)
+	}
+	bound := map[string]int{}
+	for _, route := range routes.PageRoutes() {
+		bound[route.Path] = route.MaxResponseBytes
+	}
+	for range pages.PageLimit {
+		h.addPasskey(who)
+	}
+	for path, notice := range map[string]string{"/account/sessions": "Only the newest sessions are listed.", "/account/devices": "Only the first devices are listed.",
+		"/account/passkeys": "Only the first passkeys are listed."} {
+		reply := browsers[len(browsers)-1].page(path)
+		// A table row is a <tr>; the header row is the first.
+		if rows := strings.Count(reply.text(), "<tr>") - 1; rows != pages.PageLimit {
+			t.Errorf("%s lists %d rows for a limit of %d", path, rows, pages.PageLimit)
+		}
+		if !strings.Contains(reply.text(), notice) || len(reply.body) > bound[path] {
+			t.Errorf("%s: the notice %q is missing or the reply is over its bound (%d of %d)", path, notice, len(reply.body), bound[path])
+		}
 	}
 }

@@ -59,12 +59,44 @@ const (
 type clock struct {
 	mu  sync.Mutex
 	now time.Time
+	// tick, when set, runs before each reading of the time, outside the clock's lock: a test uses it to move the time or to break the
+	// store at a chosen moment inside one request.
+	tick func()
 }
 
 func (c *clock) Now() time.Time {
 	c.mu.Lock()
+	tick := c.tick
+	c.mu.Unlock()
+	if tick != nil {
+		tick()
+	}
+	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.now
+}
+
+// whenThen arms the clock's tick: the first reading of the time after done() holds runs then once. done is polled on every reading
+// and may query the store; the tick is disarmed by disarm.
+func (c *clock) whenThen(done func() bool, then func()) {
+	var polling sync.Mutex
+	fired := false
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tick = func() {
+		polling.Lock()
+		defer polling.Unlock()
+		if !fired && done() {
+			fired = true
+			then()
+		}
+	}
+}
+
+func (c *clock) disarm() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tick = nil
 }
 
 func (c *clock) Advance(by time.Duration) {
@@ -109,15 +141,22 @@ type harness struct {
 	bodies   [][]byte
 }
 
-// proved records the routes the package's tests have proved to succeed (a 2xx or 3xx reply to a POST of the route); TestMain fails a
-// full run in which one POST route of the registration was never proved.
+// proved records the routes the package's tests have proved to succeed (recordProved says what counts); TestMain fails a full run in
+// which a route of the registration was never proved.
 var (
 	provedMu sync.Mutex
 	proved   = map[string]bool{}
 )
 
-func recordProved(method, path string, status int) {
-	if status >= 200 && status < 400 {
+func recordProved(method, path string, status int, location string) {
+	// A page counts when it is served (200), not when it redirects to the sign-in; a form counts when it lands on the page it came
+	// from or on its next step, not when its refusal sends the browser to the sign-in page.
+	signIn := basePath + routes.PageAccountPrefix + "/sign-in"
+	succeeded := status >= 200 && status < 300 || status == http.StatusSeeOther && !strings.HasPrefix(location, signIn)
+	if method == http.MethodGet {
+		succeeded = status == http.StatusOK
+	}
+	if succeeded {
 		provedMu.Lock()
 		proved[method+" "+path] = true
 		provedMu.Unlock()
@@ -295,7 +334,7 @@ func (h *harness) do(r request) response {
 		h.t.Fatal(err)
 	}
 	result := response{status: reply.StatusCode, header: reply.Header, body: body}
-	recordProved(r.method, r.path, reply.StatusCode)
+	recordProved(r.method, r.path, reply.StatusCode, reply.Header.Get("Location"))
 	if pagePath(r.path) {
 		requireSecurityHeaders(h.t, r.method+" "+r.path, result)
 	}
@@ -491,6 +530,30 @@ VALUES ($1, $2, 1, 'passkey', $3, 'Seeded key', $4, $5, 0, false, false, '{}', $
 		h.t.Fatal(err)
 	}
 	return result
+}
+
+// addPasskey gives an account a second passkey, made by a second virtual authenticator, and returns the account as that
+// authenticator holds it.
+func (h *harness) addPasskey(who account) account {
+	h.t.Helper()
+	rp, err := passkey.New(rpID, origin)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	authenticator := virtual.New(rpID, origin)
+	challenge := randomBytes(h.t, 32)
+	creation, key := authenticator.Create(challenge, who.handle)
+	credential, err := rp.VerifyCreation(challenge, who.handle, creation, time.Now().Add(time.Minute))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err = h.migration.Exec(context.Background(), `INSERT INTO identity.auth_identity (auth_identity_id, user_id, method, provider_id, subject, label, public_key, user_handle,
+    sign_count, backup_eligible, backup_state, transports, aaguid, attestation_format, created_at, rev)
+VALUES ($1, $2, 1, 'passkey', $3, 'Second key', $4, $5, 0, false, false, '{}', $6, 'none', $7, 1)`, platform.NewID(), who.id,
+		base64.RawURLEncoding.EncodeToString(credential.ID), credential.PublicKey, who.handle, credential.AAGUID, h.clock.Now().Add(-time.Second)); err != nil {
+		h.t.Fatal(err)
+	}
+	return account{id: who.id, handle: who.handle, authenticator: authenticator, key: key}
 }
 
 func randomBytes(t *testing.T, size int) []byte {
