@@ -49,8 +49,8 @@ public sealed partial class ClockAndStructureTests
         var grant = new Grant("g1", "ws1", GrantKind.Capability, "cloud.sync", new CapabilityValue(), GrantSource.Subscription, "s1", T(0), null, "commerce", T(0));
         var term = new ServiceTermFact("t1", ServiceTermKind.Subscription, T(0), T(100), null, T(0), T(0));
         var records = EntitlementRecordSet.Empty("ws1") with { Grants = [grant], Terms = [term] };
-        Assert.True(EntitlementResolver.Resolve(records, definitions, new UtcMicros(100 * 1_000_000 - 1)).Content.Capabilities.Single(c => c.Key == "cloud.sync").Granted);
-        Assert.False(EntitlementResolver.Resolve(records, definitions, new UtcMicros(100 * 1_000_000)).Content.Capabilities.Single(c => c.Key == "cloud.sync").Granted);
+        Assert.True(ResolverVectors.Resolve(records, definitions, new UtcMicros(100 * 1_000_000 - 1)).Content.Capabilities.Single(c => c.Key == "cloud.sync").Granted);
+        Assert.False(ResolverVectors.Resolve(records, definitions, new UtcMicros(100 * 1_000_000)).Content.Capabilities.Single(c => c.Key == "cloud.sync").Granted);
     }
 
     [Fact]

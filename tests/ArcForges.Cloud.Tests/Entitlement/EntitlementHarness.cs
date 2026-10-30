@@ -126,7 +126,7 @@ internal sealed class FixedDefinitions(EntitlementDefinitions definitions) : IEn
 /// </summary>
 internal interface IScenario
 {
-    EntitlementService Service { get; }
+    EntitlementServiceFacade Service { get; }
 
     FixedDefinitions Definitions { get; }
 
@@ -163,7 +163,10 @@ internal sealed class EntitlementHarness : IScenario
         Definitions = new FixedDefinitions(Fixtures.Definitions(selfHostRealm));
         Clock = new SettableTimeProvider(DateTimeOffset.UnixEpoch);
         Store = new InMemoryEntitlementStore();
-        Service = new EntitlementService(Store, Definitions, new SequentialIds(), Clock);
+        // The service runs over recording ports and answers through the vector-recording facade (ResolverVectors); both are inert while
+        // no row is being recorded, which is every ordinary run of a suite.
+        Service = new EntitlementServiceFacade(
+            new EntitlementService(new RecordingStore(Store, Definitions), Definitions, new RecordingIds(new SequentialIds()), new RecordingTimeProvider(Clock)), Definitions);
     }
 
     public FixedDefinitions Definitions { get; }
@@ -172,7 +175,7 @@ internal sealed class EntitlementHarness : IScenario
 
     public InMemoryEntitlementStore Store { get; }
 
-    public EntitlementService Service { get; }
+    public EntitlementServiceFacade Service { get; }
 
     public string WorkspaceId => Workspace;
 
