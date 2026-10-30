@@ -73,8 +73,12 @@ public sealed class ProductionBundleTests
             Assert.True(process.ExitCode == 0, $"The production dry-run failed: {await stderr}{await stdout}");
 
             var bundle = File.ReadAllText(Path.Combine(directory, "index.js"));
+            // The center's own account pages (AF-CTR-03 A2) ship the WebBrowserSession routes below /session/v1/web/ in the production bundle
+            // (dark: the pages surface is off in production). Every other path below /session/v1/ stays proof-only: the proof pipeline's
+            // /session/v1/bootstrap and /session/v1/logout among them.
+            var withoutPages = bundle.Replace("/session/v1/web/", string.Empty, StringComparison.Ordinal);
             foreach (var marker in ProofOnlyMarkers)
-                Assert.False(bundle.Contains(marker, StringComparison.Ordinal), $"The production bundle contains a proof-only marker: {marker}");
+                Assert.False((marker == "/session/v1/" ? withoutPages : bundle).Contains(marker, StringComparison.Ordinal), $"The production bundle contains a proof-only marker: {marker}");
 
             // The production exports are the Container class, the Container proxy and the fetch entry. No proof class is exported.
             var exports = Regex.Match(bundle, @"export\s*\{(?<names>[^}]*)\}").Groups["names"].Value;

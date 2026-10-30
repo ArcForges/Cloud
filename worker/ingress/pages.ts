@@ -30,8 +30,9 @@ import {
   pageSecurityHeaders,
   pageStatuses,
   pageSurface,
+  pageUserAgentBytes,
 } from "../tables/center-tables.generated.ts";
-import { bodyReadMilliseconds } from "../tables/cloud-tables.generated.ts";
+import { bodyReadMilliseconds, sessionTokenPattern } from "../tables/cloud-tables.generated.ts";
 import { csrfHeader } from "./edge-caller.ts";
 import { enabledSurfaces } from "./routes.ts";
 
@@ -55,16 +56,17 @@ export const pageTable: ReadonlyMap<string, readonly PageRoute[]> = (() => {
   return table;
 })();
 
-/** The session cookie value: 43 base64url characters (a 32-byte handle). */
-const sessionHandle = /^[A-Za-z0-9_-]{43}$/u;
-/** The CSRF token: 43 base64url characters (an HMAC-SHA-256 or a SHA-256, unpadded). */
-const csrfToken = /^[A-Za-z0-9_-]{43}$/u;
+/**
+ * The session cookie value (a 32-byte handle) and the CSRF token (an HMAC-SHA-256 or a SHA-256) are both 43 unpadded base64url
+ * characters: the generated session-token shape, which the gRPC-Web edge guard uses for the same two values.
+ */
+const sessionHandle = sessionTokenPattern;
+const csrfToken = sessionTokenPattern;
 const sessionSetCookie = new RegExp(
   `^${pageCookieName}=[A-Za-z0-9_-]{43}; Path=/; Max-Age=[1-9][0-9]{0,6}; Secure; HttpOnly; SameSite=Strict$`,
   "u",
 );
 const clearSetCookie = `${pageCookieName}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict`;
-const userAgentLimit = 256;
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -124,9 +126,9 @@ export function isPageLocation(value: string): boolean {
   return redirectLocation.test(value);
 }
 
-/** The User-Agent the Container may see: printable ASCII of at most 256 characters, else none. */
+/** The User-Agent the Container may see: printable ASCII of at most the generated bound, else none. */
 export function boundedUserAgent(value: string | null): string | null {
-  if (value === null || value.length === 0 || value.length > userAgentLimit) return null;
+  if (value === null || value.length === 0 || value.length > pageUserAgentBytes) return null;
   return /^[\x20-\x7e]+$/u.test(value) ? value : null;
 }
 

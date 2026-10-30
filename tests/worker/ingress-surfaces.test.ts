@@ -185,17 +185,17 @@ test("a disabled surface is answered with the generated not_activated reply and 
 });
 
 test("the correlation id of a refusal is written into the template's slot and nowhere else", () => {
-  const id = "6c1d7f0e-3a52-4b9c-8e47-90a1b2c3d4e5";
+  const id = "6c1d7a0e-3a52-4b9c-8e47-90a1b2c3d4e5";
   assert.deepEqual(
     [...correlationIdBytes(id)],
     [
-      0x6c, 0x1d, 0x7f, 0x0e, 0x3a, 0x52, 0x4b, 0x9c, 0x8e, 0x47, 0x90, 0xa1, 0xb2, 0xc3, 0xd4,
+      0x6c, 0x1d, 0x7a, 0x0e, 0x3a, 0x52, 0x4b, 0x9c, 0x8e, 0x47, 0x90, 0xa1, 0xb2, 0xc3, 0xd4,
       0xe5,
     ],
   );
   for (const invalid of [
     "",
-    "6C1D7F0E-3A52-4B9C-8E47-90A1B2C3D4E5",
+    "6C1D7A0E-3A52-4B9C-8E47-90A1B2C3D4E5",
     "00000000-0000-0000-0000-000000000000",
     id.slice(1),
   ])

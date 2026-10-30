@@ -691,6 +691,8 @@ export const pageReturnFragment = "#return=";
 /** The Container instance that serves the pages, and the cap of one page call's duration. */
 export const pageInstance = "hello";
 export const pageDurationMs = 15000;
+/** The longest User-Agent the Worker forwards to the center. */
+export const pageUserAgentBytes = 256;
 
 export const helloPath = "/api/arcforges.hello.v1.HelloService/SayHello";
 export const healthPath = "/api/healthz";

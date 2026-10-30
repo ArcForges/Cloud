@@ -49,6 +49,10 @@ const (
 // PageDurationMilliseconds caps the Worker's budget for one page call (a PBKDF2-free passkey ceremony and a few short transactions).
 const PageDurationMilliseconds = 15_000
 
+// PageUserAgentBytes bounds the User-Agent the Worker forwards to the center (printable ASCII; a longer or other value is left out);
+// the center names a browser's device from a closed set of families and systems, never from the header's text.
+const PageUserAgentBytes = 256
+
 // PageKind is the kind of a page route.
 type PageKind string
 

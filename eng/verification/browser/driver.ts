@@ -263,14 +263,13 @@ export const virtualAuthenticatorOptions = {
   automaticPresenceSimulation: true,
 } as const;
 
-// The module is imported by a name held in a variable so that the root project's type check does not look for a package it never
-// installs, and so that a missing install gives a clear message here instead of a resolution error at load time.
-const playwrightSpecifier = "playwright-core";
-
+// playwright-core is imported by its name where it is needed, and a missing install gives a clear message here instead of a
+// resolution error at load time. The root project never installs the package, so playwright-core.d.ts declares the module without
+// types for the root type check; the adapter's own shapes are the subset above, which adapter-check/ proves against the package.
 export async function launchPlaywright(options: LaunchOptions): Promise<Browser> {
   let playwright: PwModule;
   try {
-    playwright = (await import(playwrightSpecifier)) as PwModule;
+    playwright = (await import("playwright-core")) as PwModule;
   } catch {
     throw new Error("playwright-core is not installed; run `npm ci` in this package's directory.");
   }

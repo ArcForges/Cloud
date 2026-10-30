@@ -23,7 +23,10 @@ import {
 const root = process.cwd();
 const baseline = JSON.parse(readFileSync("eng/policy/dependency-policy.json", "utf8")) as Policy;
 const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-const firstDependency = Object.keys(baseline.closure)[0];
+// A package of the root project's own lock (the isolated packages' entries are keyed under their directory and sort first).
+const firstDependency = Object.keys(baseline.closure).find((key) =>
+  key.startsWith("node_modules/"),
+);
 assert(firstDependency, "Fixture requires an admitted dependency");
 test("actual repository admission", () => {
   assert.equal(auditDependencies(root).result, "passed");
@@ -424,6 +427,21 @@ test("an isolated package must be private, its own root, exact, hook-free and in
         lockWith(() => {}, 2),
       ),
     /version/u,
+  );
+  // A range that the lock's root states too is not a drift but is still floating.
+  assert.throws(
+    () =>
+      check(
+        files,
+        mutate((m) => {
+          m.dependencies = { "playwright-core": "^1.63.0" };
+        }),
+        lockWith((p) => {
+          const root = p[""];
+          if (root) root.dependencies = { "playwright-core": "^1.63.0" };
+        }),
+      ),
+    /Floating selector/u,
   );
   assert.throws(
     () =>

@@ -7,57 +7,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-interface FakeResponse {
-  ok: boolean;
-  status: number;
-  json(): Promise<unknown>;
-}
-
-interface Api {
-  bootstrap(): Promise<{ csrfToken: string; authenticated: boolean }>;
-  useToken(token: string): void;
-  post(path: string, body?: unknown): Promise<unknown>;
-}
-
-interface Script {
-  ApiError: new (status: number, code: string) => Error & { status: number; code: string };
-  errorText(error: unknown): string;
-  encodeBase64Url(input: ArrayBuffer | Uint8Array): string;
-  decodeBase64Url(text: string): Uint8Array;
-  safeReturnPath(value: unknown, origin: string): string | null;
-  parseFragment(hash: string): Record<string, string>;
-  requestOptions(challenge: unknown): Record<string, unknown>;
-  creationOptions(challenge: unknown, name: string): Record<string, unknown>;
-  assertionBody(credential: unknown): Record<string, unknown>;
-  creationBody(credential: unknown): Record<string, unknown>;
-  installationClaim(
-    storage: unknown,
-    random: { randomUUID(): string },
-  ): { installationId: string; product: string; platform: string; appVersion: string };
-  createApi(
-    base: string,
-    fetchImpl: (url: string, init: RequestInit) => Promise<FakeResponse>,
-  ): Api;
-  signIn(options: { api: Api; credentials: unknown; claim: unknown }): Promise<unknown>;
-  enroll(options: {
-    api: Api;
-    credentials: unknown;
-    claim: unknown;
-    token: string;
-    displayName: string;
-  }): Promise<unknown>;
-  stepUp(options: {
-    api: Api;
-    credentials: unknown;
-    operationClass: string;
-    targetHash: string;
-  }): Promise<unknown>;
-  signOut(options: { api: Api }): Promise<unknown>;
-  start(window: unknown): Promise<unknown> | undefined;
-}
+import * as script from "../../center/internal/pages/static/account.js";
+import type {
+  Api,
+  ApiResponse as FakeResponse,
+} from "../../center/internal/pages/static/account.js";
 
 const location = "../../center/internal/pages/static/account.js";
-const script = (await import(location)) as unknown as Script;
 const origin = "https://proof.example.test";
 
 test("a return path is followed only when it is a path of this origin (DC-13, the open-redirect rule)", () => {

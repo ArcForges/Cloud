@@ -15,6 +15,7 @@ import {
   grpcFrameHeaderBytes,
   spanIdByteLength,
 } from "../tables/cloud-tables.generated.ts";
+import { hexDecode } from "../private/encoding.ts";
 
 const uuidPattern = new RegExp(correlationGuard.uuidPattern, "u");
 const nilUuid = correlationGuard.nilUuid;
@@ -39,10 +40,9 @@ export function newCorrelationId(): string {
  */
 export function correlationIdBytes(correlationId: string): Uint8Array<ArrayBuffer> {
   if (!isCorrelationId(correlationId)) throw new TypeError("Invalid correlation id.");
-  const hex = correlationId.replaceAll("-", "");
-  return Uint8Array.from({ length: idByteLength }, (_, index) =>
-    Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
-  );
+  const bytes = hexDecode(correlationId.replaceAll("-", ""));
+  if (bytes?.length !== idByteLength) throw new TypeError("Invalid correlation id.");
+  return Uint8Array.from(bytes);
 }
 
 /** Sixteen lowercase hex characters, never all zero: the span id of one hop. */
