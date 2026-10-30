@@ -267,12 +267,12 @@ func TestTheConfigurationStatesAndTheirOperatorGrantPolicy(t *testing.T) {
 		expiry        time.Duration
 		wide          bool
 	}{
-		{"production configuration without a catalogue", Configure(Settings{Mode: config.OfficialHosted}), StateMissing, ClassProduction, ErrOperatorGrantsNoCatalogue, 0, false},
+		{"production configuration without a catalogue", Configure(Settings{Mode: config.OfficialHosted}), StateMissing, ClassProduction, entitlement.ErrGrantsNoCatalogue, 0, false},
 		{"the development fixtures", hosted(config.PlanDevelopmentFixtures), StateValid, ClassDevelopment, nil, 400 * 24 * time.Hour, true},
 		{"a production-classified test catalogue", production, StateValid, ClassProduction, nil, 90 * 24 * time.Hour, false},
-		{"an invalid catalogue", Configure(Settings{Mode: config.OfficialHosted, Injected: []byte("{"), InjectedClass: ClassProduction}), StateInvalid, ClassProduction, ErrOperatorGrantsNoCatalogue, 0, false},
-		{"a self-hosted center", Configure(Settings{Mode: config.SelfHosted}), StateMissing, ClassProduction, ErrOperatorGrantsSelfHosted, 0, false},
-		{"a self-hosted center with an injected catalogue", Configure(Settings{Mode: config.SelfHosted, Injected: []byte(validProduction), InjectedClass: ClassProduction}), StateMissing, ClassProduction, ErrOperatorGrantsSelfHosted, 0, false},
+		{"an invalid catalogue", Configure(Settings{Mode: config.OfficialHosted, Injected: []byte("{"), InjectedClass: ClassProduction}), StateInvalid, ClassProduction, entitlement.ErrGrantsNoCatalogue, 0, false},
+		{"a self-hosted center", Configure(Settings{Mode: config.SelfHosted}), StateMissing, ClassProduction, entitlement.ErrGrantsSelfHosted, 0, false},
+		{"a self-hosted center with an injected catalogue", Configure(Settings{Mode: config.SelfHosted, Injected: []byte(validProduction), InjectedClass: ClassProduction}), StateMissing, ClassProduction, entitlement.ErrGrantsSelfHosted, 0, false},
 	}
 	for _, item := range cases {
 		t.Run(item.name, func(t *testing.T) {

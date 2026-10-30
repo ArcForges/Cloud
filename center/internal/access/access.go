@@ -24,6 +24,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
+	"github.com/ArcForges/Cloud/center/internal/entitlement"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/store"
@@ -129,11 +130,21 @@ func Operations() []Operation {
 	}
 }
 
+// OperatorGrantClass is the step-up class of the operator grant, a center-defined operation (the contract has no row for it): its
+// target is the request itself, named by the SHA-256 of its canonical text (SEC-10). Package entitlement owns the operation.
+const OperatorGrantClass = entitlement.OperatorGrantClass
+
+// TargetRequest is the target of a center-defined operation: the canonical request.
+const TargetRequest = "request"
+
 // StepUpClass is a step-up class BeginStepUp admits and the target its hash names: the operation ID of a row that needs
-// evidence, or UpgradeClass.
+// evidence, the upgrade class, or the center-defined operator grant.
 func StepUpClass(class string) (target string, ok bool) {
 	if class == UpgradeClass {
 		return TargetSession, true
+	}
+	if class == OperatorGrantClass {
+		return TargetRequest, true
 	}
 	for _, operation := range Operations() {
 		if operation.ID == class && operation.StepUp != NoEvidence {

@@ -94,32 +94,25 @@ func (c Configuration) Definitions() entitlement.Definitions {
 // Current makes a Configuration the entitlement service's definition source.
 func (c Configuration) Current() entitlement.Definitions { return c.Definitions() }
 
-// OperatorGrantPolicy is what operator grants may do under a configuration.
-type OperatorGrantPolicy struct {
-	// MaxExpiry is the longest expiry from now an operator grant may have: 90 days in a production configuration, 400 otherwise.
-	MaxExpiry time.Duration
-	// AllowCatalogueWide is false in a production configuration: it refuses a grant of every key of the catalogue.
-	AllowCatalogueWide bool
-}
-
-// The reasons operator grants are not available.
-var (
-	ErrOperatorGrantsSelfHosted  = errors.New("operator grants exist only on the official hosted center")
-	ErrOperatorGrantsNoCatalogue = errors.New("operator grants need a valid plan catalogue")
-)
-
-// OperatorGrants is the policy of operator grants, or the reason they are refused: in self-hosted mode (there the built-in default
-// and the operator's own limits decide), and in a configuration without a valid catalogue (the production configuration until H-07).
-func (c Configuration) OperatorGrants() (OperatorGrantPolicy, error) {
+// OperatorGrants is the policy of operator grants, or the reason they are refused (entitlement.ErrGrantsSelfHosted,
+// entitlement.ErrGrantsNoCatalogue): in self-hosted mode (there the built-in default and the operator's own limits decide), and in a
+// configuration without a valid catalogue (the production configuration until H-07). A production-classified catalogue allows at most
+// 90 days and no catalogue-wide grant; any other allows at most 400 days.
+func (c Configuration) OperatorGrants() (entitlement.OperatorPolicy, error) {
 	switch {
 	case c.Mode != config.OfficialHosted:
-		return OperatorGrantPolicy{}, ErrOperatorGrantsSelfHosted
+		return entitlement.OperatorPolicy{}, entitlement.ErrGrantsSelfHosted
 	case c.State != StateValid:
-		return OperatorGrantPolicy{}, ErrOperatorGrantsNoCatalogue
-	case c.Class == ClassProduction:
-		return OperatorGrantPolicy{MaxExpiry: 90 * 24 * time.Hour}, nil
+		return entitlement.OperatorPolicy{}, entitlement.ErrGrantsNoCatalogue
 	}
-	return OperatorGrantPolicy{MaxExpiry: 400 * 24 * time.Hour, AllowCatalogueWide: true}, nil
+	keys := make([]string, len(c.Catalogue.Capabilities))
+	for index, key := range c.Catalogue.Capabilities {
+		keys[index] = string(key)
+	}
+	if c.Class == ClassProduction {
+		return entitlement.OperatorPolicy{MaxExpiry: 90 * 24 * time.Hour, Keys: keys}, nil
+	}
+	return entitlement.OperatorPolicy{MaxExpiry: 400 * 24 * time.Hour, AllowCatalogueWide: true, Keys: keys}, nil
 }
 
 var errNoStore = errors.New("no entitlement store is configured")
