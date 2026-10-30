@@ -116,6 +116,71 @@ func TestAnAttemptNeverSettledTurnsExpiredAfterTheGrace(t *testing.T) {
 	h.verifyAudit()
 }
 
+// TestAnAttemptNeverTakenIsExpiredAtOnceAfterTheFlowsExpiry (a1b-1): a registration that is begun, never completed and completed
+// after the flow's expiry is STATE/expired with RETRY_MODE_NEVER from the first second on, inside the running grace as well as after
+// it: no attempt was ever taken, so no running completion could hold it, and it is not RESOURCE/overloaded for the grace's 15
+// seconds. Nothing is stored.
+func TestAnAttemptNeverTakenIsExpiredAtOnceAfterTheFlowsExpiry(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	fixture := beginRegistration(t, h)
+	h.clock.Advance(config.DefaultIdentityPolicy().PasskeyFlowLifetime)
+	for _, step := range []time.Duration{time.Second, 4 * time.Second, identity.RunningGrace - 6*time.Second, 2 * time.Second} {
+		h.clock.Advance(step)
+		refusal := fixture.complete(nil).GetError()
+		if failure(refusal) != "STATE/expired" || refusal.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_NEVER {
+			t.Fatalf("a flow never attempted, past its expiry by %s: %v, want STATE/expired with RETRY_MODE_NEVER", step, refusal)
+		}
+	}
+	if h.receipts() != 0 || h.count("SELECT attempts FROM identity.auth_flow WHERE flow_id = $1", fixture.flowID) != 0 {
+		t.Fatal("a refusal after the expiry stored a receipt or took an attempt")
+	}
+	h.verifyAudit()
+}
+
+// TestADuplicateMeetingTheFlowExhaustedByARefusalAnswersTheReceipt (a1b-2): a registration whose first execution commits a final
+// stored refusal (CONFLICT/already_exists: the credential ID belongs to another account) and then exhausts the flow leaves the flow
+// answering STATE/expired. A duplicate whose first receipt lookup ran before that receipt committed and whose attempt runs after the
+// exhaust meets exactly that; it looks again and answers the refusal the receipt holds, never its own final STATE/expired. The
+// duplicate is parked at its attempt by a statement trigger on identity.auth_flow that blocks its first updating statement on an
+// advisory lock the test holds.
+func TestADuplicateMeetingTheFlowExhaustedByARefusalAnswersTheReceipt(t *testing.T) {
+	h := newHarness(t, settings{policy: writePolicy})
+	fixture := beginRegistration(t, h)
+	other := h.seedAccount(1, "")
+	if _, err := h.migration.Exec(context.Background(), `INSERT INTO identity.auth_identity (auth_identity_id, user_id, method, provider_id, subject, public_key,
+    user_handle, sign_count, backup_eligible, backup_state, transports, aaguid, attestation_format, created_at, rev)
+SELECT $1, user_id, 1, 'passkey', $2, public_key, user_handle, 0, false, false, '{}', aaguid, 'none', now(), 1
+FROM identity.auth_identity WHERE user_id = $3 AND method = 1`, platform.NewID(), fixture.subject, other.id); err != nil {
+		t.Fatal(err)
+	}
+	h.exec(
+		"CREATE SCHEMA testfault",
+		`CREATE FUNCTION testfault.park() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+  IF pg_try_advisory_xact_lock(7001) THEN PERFORM pg_advisory_xact_lock(7002); END IF;
+  RETURN NULL; END; $$`,
+		"CREATE TRIGGER test_park BEFORE UPDATE ON identity.auth_flow FOR EACH STATEMENT EXECUTE FUNCTION testfault.park()")
+	gate := h.holding("SELECT pg_advisory_xact_lock(7002)")
+	duplicates := make(chan registrationAnswer, 1)
+	go func() { duplicates <- fixture.complete(nil) }()
+	if !gate.waitFor(1) {
+		t.Fatal("the duplicate never reached its attempt")
+	}
+	first := fixture.complete(nil)
+	gate.release(false)
+	second := <-duplicates
+	expect(t, "the first execution", first.GetError(), "CONFLICT/already_exists")
+	if h.refusalsKept("CONFLICT/already_exists") != 1 || h.count("SELECT count(*) FROM identity.auth_flow WHERE flow_id = $1 AND outcome IS NOT NULL", fixture.flowID) != 1 {
+		t.Fatal("the first execution did not keep its refusal and end the flow")
+	}
+	if failure(second.GetError()) != "CONFLICT/already_exists" {
+		t.Fatalf("the duplicate parked before the receipt and running after the exhaust: %q (%v), want CONFLICT/already_exists", failure(second.GetError()), second.GetError())
+	}
+	if replay := fixture.complete(nil); !proto.Equal(replay.GetError().GetDetails(), first.GetError().GetDetails()) || failure(replay.GetError()) != "CONFLICT/already_exists" {
+		t.Fatalf("the replay: %v", replay)
+	}
+	h.verifyAudit()
+}
+
 // TestAVerificationFailureIsAnsweredWhenTheSecondLookupWouldFail (the double fault of not_verified): a creation that does not verify
 // is a refusal no committed first execution causes (a duplicate never verifies: the first execution took the flow's only attempt),
 // so it runs no second receipt lookup and a failing lookup cannot replace it with RESOURCE/overloaded, after which the retry
