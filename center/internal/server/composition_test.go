@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -313,9 +314,69 @@ func callsOf(t *testing.T, function string) map[string]bool {
 // TestTheCompositionCallsWhatItMustCall: the start composes the checks and the logging of the plan configuration (the functions are
 // tested on their own; this pins that the start calls them).
 func TestTheCompositionCallsWhatItMustCall(t *testing.T) {
-	for function, callee := range map[string]string{"New": "checkIdentityComposition", "checkIdentityComposition": "Check", "Run": "logPlanConfiguration", "composePages": "operator"} {
+	for function, callee := range map[string]string{"New": "checkIdentityComposition", "checkIdentityComposition": "Check", "composePages": "operator"} {
 		if !callsOf(t, function)[callee] {
 			t.Errorf("%s does not call %s", function, callee)
+		}
+	}
+}
+
+// runLogsThePlanConfiguration reports that the body of Run holds, as a statement of its own (not inside a condition, a literal function,
+// a go or a defer statement), the call center.logPlanConfiguration(logger) with Run's own logger: a dead call or a call with another
+// logger is no call (C-3: a name-only pin let a call inside `if false` pass).
+func runLogsThePlanConfiguration(source string) bool {
+	file, err := parser.ParseFile(token.NewFileSet(), "server.go", source, 0)
+	if err != nil {
+		return false
+	}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Recv != nil || function.Name.Name != "Run" {
+			continue
+		}
+		for _, statement := range function.Body.List {
+			expression, isExpression := statement.(*ast.ExprStmt)
+			if !isExpression {
+				continue
+			}
+			call, isCall := expression.X.(*ast.CallExpr)
+			if !isCall || len(call.Args) != 1 || !isIdent(call.Args[0], "logger") {
+				continue
+			}
+			if selector, isSelectorCall := call.Fun.(*ast.SelectorExpr); isSelectorCall && isIdent(selector.X, "center") && selector.Sel.Name == "logPlanConfiguration" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestRunReallyLogsThePlanConfiguration(t *testing.T) {
+	data, err := os.ReadFile("server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	if !runLogsThePlanConfiguration(source) {
+		t.Fatal("Run does not call center.logPlanConfiguration(logger) as a statement of its own")
+	}
+	const call = "\tcenter.logPlanConfiguration(logger)\n"
+	if strings.Count(source, call) != 1 {
+		t.Fatal("the call is spelled another way than this test expects")
+	}
+	for name, replacement := range map[string]string{
+		"the call is removed":               "",
+		"a dead call":                       "\tif false {\n\t\tcenter.logPlanConfiguration(logger)\n\t}\n",
+		"a call under a condition":          "\tif cfg.Mode == \"never\" {\n\t\tcenter.logPlanConfiguration(logger)\n\t}\n",
+		"a call in a literal function":      "\t_ = func() { center.logPlanConfiguration(logger) }\n",
+		"a call in a go statement":          "\tgo center.logPlanConfiguration(logger)\n",
+		"a deferred call":                   "\tdefer center.logPlanConfiguration(logger)\n",
+		"a call with another logger":        "\tcenter.logPlanConfiguration(slog.Default())\n",
+		"a call on another receiver":        "\t(&Center{}).logPlanConfiguration(logger)\n",
+		"a method value that is not called": "\t_ = center.logPlanConfiguration\n",
+	} {
+		if runLogsThePlanConfiguration(strings.Replace(source, call, replacement, 1)) {
+			t.Errorf("%s: the pin does not see it", name)
 		}
 	}
 }

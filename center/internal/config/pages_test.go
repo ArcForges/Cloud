@@ -34,7 +34,7 @@ func TestThePagesSurfaceNeedsTheIdentitySurface(t *testing.T) {
 	if loaded, err = Load(environment(hosted("none"))); err != nil || loaded.Identity.Enabled(SurfacePages) || loaded.Identity.Enabled(SurfaceIdentity) {
 		t.Fatalf("none: %v %v", loaded.Identity.Surfaces, err)
 	}
-	// Self-hosted defaults to every surface; an IP-literal public base URL cannot be a relying party, so it leaves identity and the
+	// Self-hosted defaults to the identity and pages surfaces (operations is never a default); an IP-literal public base URL cannot be a relying party, so it leaves identity and the
 	// pages off and says why.
 	self := withIdentity(SelfHosted, map[string]string{})
 	if loaded, err = Load(environment(self)); err != nil || !loaded.Identity.Enabled(SurfaceIdentity) || !loaded.Identity.Enabled(SurfacePages) {

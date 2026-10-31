@@ -109,9 +109,10 @@ type Options struct {
 	Participants []device.Participant
 	// catalogue replaces the plan catalogue with a document under a classification: TESTS ONLY (DC-12). It is unexported, so no other
 	// package (the executable included) can set it, and no environment variable, file or configuration reaches it: a running center
-	// has the catalogue of its plan configuration or none. Inside this package, TestTheCatalogueOfARunningCenterComesOnlyFromItsPlan
-	// Configuration parses the non-test files and fails when anything but New reads these two fields or a literal sets them (server.Run
-	// composes the center with Options{}). It exists to prove the production bounds with a production-classified catalogue.
+	// has the catalogue of its plan configuration or none. TestNoCodeOfTheRunningCenterInjectsACatalogue parses the non-test sources of the
+	// module and fails when anything but the two values of the Settings literal in New mentions these fields, when Injected or
+	// InjectedClass of feature.Settings is named anywhere else, or when server.Run composes the center with anything but Options{}. It
+	// exists to prove the production bounds with a production-classified catalogue.
 	catalogue      []byte
 	catalogueClass feature.Classification
 }

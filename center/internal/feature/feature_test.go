@@ -263,6 +263,8 @@ func TestEveryInvalidCatalogueIsRefusedByItsOwnRuleWithoutEchoingItsValues(t *te
 		"a fixture price of seven":                {fixture(`"illustrativePriceUsd":5`, `"illustrativePriceUsd":7`), ClassDevelopment, "illustrative price is USD 5 or USD 15"},
 		"a fixture price of zero":                 {fixture(`,"illustrativePriceUsd":5`, ``), ClassDevelopment, "illustrative price is USD 5 or USD 15"},
 		"a fixture plan not named Fixture":        {fixture(`Fixture plan`, `Plan`), ClassDevelopment, "a fixture plan's name starts with Fixture"},
+		"a fixture plan named Fixture and a word": {fixture(`Fixture plan`, `FixtureX plan`), ClassDevelopment, "a fixture plan's name starts with Fixture"},
+		"a fixture plan named fixture in lower":   {fixture(`Fixture plan`, `fixture plan`), ClassDevelopment, "a fixture plan's name starts with Fixture"},
 		"a missing capability":                    {strings.Replace(replace(`,"push"],`, `],`), `"features":["remote.view","push"]`, `"features":["remote.view"]`, 1), ClassDevelopment, "defines exactly the"},
 		"an unknown capability":                   {replace(`"push"],`, `"push.extra"],`), ClassDevelopment, "a capability is not a gated key or is repeated"},
 		"a repeated capability":                   {replace(`"center.mcp","push"],`, `"center.mcp","center.mcp"],`), ClassDevelopment, "a capability is not a gated key or is repeated"},
@@ -288,6 +290,30 @@ func TestEveryInvalidCatalogueIsRefusedByItsOwnRuleWithoutEchoingItsValues(t *te
 				t.Fatalf("the error repeats the document: %v", err)
 			}
 		})
+	}
+}
+
+// TestAPlanIDAndAPlanNameAreBoundedAtSixtyFour (gate-6): the boundary of each, from both sides.
+func TestAPlanIDAndAPlanNameAreBoundedAtSixtyFour(t *testing.T) {
+	replace := func(old, new string) string { return strings.Replace(validProduction, old, new, 1) }
+	for _, item := range []struct {
+		name     string
+		document string
+		want     string
+	}{
+		{"an ID of 64", replace(`"plan-test"`, `"`+strings.Repeat("a", 64)+`"`), ""},
+		{"an ID of 65", replace(`"plan-test"`, `"`+strings.Repeat("a", 65)+`"`), "a plan ID is malformed or repeated"},
+		{"a name of 64", replace(`"Plan under test"`, `"`+strings.Repeat("n", 64)+`"`), ""},
+		{"a name of 65", replace(`"Plan under test"`, `"`+strings.Repeat("n", 65)+`"`), "a plan name is blank, long or holds a control character"},
+		{"a name of 64 characters that are 128 bytes", replace(`"Plan under test"`, `"`+strings.Repeat("\u00e9", 64)+`"`), ""},
+	} {
+		_, err := ParseCatalogue([]byte(item.document), ClassDevelopment)
+		switch {
+		case item.want == "" && err != nil:
+			t.Errorf("%s: %v", item.name, err)
+		case item.want != "" && (err == nil || !strings.Contains(err.Error(), item.want)):
+			t.Errorf("%s: %v, want %q", item.name, err, item.want)
+		}
 	}
 }
 

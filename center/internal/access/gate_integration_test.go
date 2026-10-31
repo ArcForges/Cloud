@@ -280,8 +280,10 @@ func (r *rig) grant(account platform.ID, days int, keys ...string) {
 const productionCatalogue = `{"version":"2026-q4","fixture":false,"capabilities":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"],
 "plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]}`
 
-var fixtureCatalogue = `{"version":"dev-test","fixture":true,"capabilities":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"],
-"plans":[{"id":"fixture-all","name":"Fixture","illustrativePriceUsd":15,"features":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"]}]}`
+// fixtureCatalogue is a VALID development fixture (a notice, the "Fixture " name, a price of USD 15): under the production
+// classification it is refused by that rule alone, which is what its row of TestEachCatalogueStateDecidesEveryGatedKey isolates.
+var fixtureCatalogue = `{"version":"dev-test","fixture":true,"notice":"Illustrative.","capabilities":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"],
+"plans":[{"id":"fixture-all","name":"Fixture all","illustrativePriceUsd":15,"features":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"]}]}`
 
 func gatedKeys() []string {
 	var keys []string
@@ -585,5 +587,16 @@ func TestEveryGatedKeyHasARoutedOperationGroup(t *testing.T) {
 	}
 	if len(seen) != len(feature.Gated()) {
 		t.Errorf("%d keys in the routed table, %d gated keys", len(seen), len(feature.Gated()))
+	}
+}
+
+// TestTheFixtureOfTheClassificationRowIsValidUnderDevelopment: the row that injects fixtureCatalogue as a production catalogue must
+// fail on the classification rule alone, so the document is accepted where a fixture is allowed.
+func TestTheFixtureOfTheClassificationRowIsValidUnderDevelopment(t *testing.T) {
+	if _, err := feature.ParseCatalogue([]byte(fixtureCatalogue), feature.ClassDevelopment); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := feature.ParseCatalogue([]byte(fixtureCatalogue), feature.ClassProduction); err == nil || !strings.Contains(err.Error(), "under the production classification") {
+		t.Fatalf("%v", err)
 	}
 }
