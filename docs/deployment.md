@@ -88,7 +88,7 @@ The Worker passes no other variable of this part: in particular `ARCFORGES_CENTE
 that the hosted center refuses, is never handed over (`tests/worker/container-classes.test.ts`, PLT-18). The `operations` surface is in
 no checked-in environment: production keeps `FLAGSHIP_SURFACES` empty and the acceptance environment `identity,pages`; enabling
 `operations` for the hosted proof of the operator grant, and giving the proving account the operator role with
-`arcforges-center admin grant-operator` (the migration role's path, like `admin revoke-sessions`), are the coordinator's steps after
+`arcforges-center admin grant-operator` (the migration role's path, like `admin revoke-sessions`; it works on the database of the migration URL unless `ARCFORGES_CENTER_DATABASE_NAME=arcforges_acceptance` names the acceptance one, which the checklist's commands do), are the coordinator's steps after
 the deployment ([post-deploy checklist](center-entitlement.md#post-deploy-checklist)). The deployment's migration gate applies
 migration `0003` to the production database while production is dark, and to the acceptance database.
 

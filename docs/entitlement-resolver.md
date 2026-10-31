@@ -93,13 +93,21 @@ What differs, and why:
 `center/internal/entitlement/testdata/csharp-resolver-vectors.json` holds the corpus: 284 resolver vectors (records, definitions and
 instant in, canonical snapshot or input error out) and 61 admission vectors, recorded from the C# suites by a test-side recorder
 (`ResolverVectors`, a facade over recording ports; REAL logic, recorded data). `TestResolverParityWithEveryCSharpVector` and
-`TestGrantAdmissionParityWithEveryCSharpVector` replay every vector through the Go port; `TestEveryCorpusRowHasAVectorOrAReason`
-fails for a covered suite row with neither.
+`TestGrantAdmissionParityWithEveryCSharpVector` replay every vector through the Go port, and fail on any other number of vectors
+than 284 and 61 (a truncated or padded corpus is a change of the corpus, made on purpose with these two numbers).
+`TestEveryCorpusRowHasAVectorOrAReason` pins the corpus' own accounting: the vectors that name a row are at most the row's count of
+calls (equal calls share a vector) and at least one when the count is positive, a row without a vector has a stated reason, and
+every vector names a row of the corpus. That every row of the covered suites is in the corpus, and that a count is the number of
+calls the suite makes, is the job of the C# drift test below, not of this one.
 
 The corpus cannot drift from the C# suites unnoticed: `ResolverVectorsTests.TheCommittedVectorsAreWhatTheSuitesProduce` runs every
 `[Fact]` and `[Theory]` row of the six covered classes (found by reflection) under the recorder and compares what they produce with
-the committed file as data, and a source scan fails a covered class that reaches the resolver without the recorder. A suite row that
-is not a vector has a written reason in the file (`excluded`). To rewrite the corpus after a change of the resolver or a covered suite:
+the committed file as data, and a source scan fails a covered class that calls the resolver or the admission directly (with any
+spacing), builds a service of its own (the harness hands them out, recording: `Replica`, `ServiceOver`), and a file of the folder
+that calls the resolver and is neither covered nor listed with a reason (the persistence suites of the durable D1 store). The scan
+reads text: it is a guard against an honest mistake and not against a determined bypass, which a call through a helper outside the
+folder or through reflection would be; the drift test still notices a covered row whose vectors change. A suite row that is not a
+vector has a written reason in the file (`excluded`). To rewrite the corpus after a change of the resolver or a covered suite:
 
 ```sh
 ARCFORGES_UPDATE_RESOLVER_VECTORS=1 dotnet test --project tests/ArcForges.Cloud.Tests -c Release --filter-class ArcForges.Cloud.Tests.Entitlement.ResolverVectorsTests
@@ -107,3 +115,12 @@ npx prettier --write center/internal/entitlement/testdata/csharp-resolver-vector
 ```
 
 then replay the Go side (`go test ./internal/entitlement/`); a vector the Go port disagrees with is a defect of one of the two.
+
+The corpus pins what the C# suites reach, and no more. What they do not reach (the 30 refusal texts of the validator at their
+boundaries, the order of the checks, the evaluation branches that a mutation survived: a Max quota, an allowance tie, a pending
+purchase, a restricted allowance, a lapsed quota, the knowledge-time filter of the next boundary, a term action of another term, the
+kind of a grant, the sort of the unrecognized grants, the canonical names of the sources) is pinned by Go tests of their own
+(`resolver_branches_test.go`, with `TestAReplayIsTheSameIssuanceOnlyWhenEveryComparedFieldIsTheSame` for the admission's replay and
+`service_hardening_integration_test.go` for the rebuild's columns). A deterministic differential generator for the C# project was
+not committed: the C# resolver is retired by AF-CTR-09, a generator whose vectors both sides must record, review and replay would
+add a second corpus for a port that has one life left, and the Go tests state the same expectations directly.

@@ -564,7 +564,7 @@ surface, check both from any machine:
    If the count is not `0`, turn off the zone's Web Analytics automatic setup.
 
 If check 1 fails (a protected page answers the Worker's plain-text 503 instead of the 303), capture `wrangler tail` of the proof
-Worker while repeating the request, confirm that the Container is up (`curl -si https://proof.arcforges.com/api/health` answers
+Worker while repeating the request, confirm that the Container is up (`curl -si https://proof.arcforges.com/api/healthz` answers
 200 with the health document), and escalate to the coordinator with both; do not retry the deployment to see whether it goes away.
 
 ### Running the acceptance against a center on this machine

@@ -101,9 +101,12 @@ AF-OPS-01's OperatorService can call it; the interim interface is [the operation
   sent again. The same command running twice at once answers the same way (`ErrCommandInProgress`).
 
 The records of a grant are the records the resolver reads (a grant is a fact; the snapshot is derived). A term, a status fact or a
-feature release written by its owner admission must refresh the snapshot in the same unit (`Service.Refresh`), because only grants
-and revocations are validity boundaries the snapshot's expiry covers; the owners of those records (commerce, trust and safety,
-configuration) are later tasks and have no INSERT privilege on them yet.
+feature release written by its owner admission must refresh the snapshot in the same unit (`Service.Refresh`), as the grant writers
+do, because any record appended after a snapshot was computed is unknown to it until a refresh. The instants that the known records
+set are already boundaries of the snapshot's validity (a grant's start and end, a revocation, a term's start, end, grace and term
+actions, a feature release), so the snapshot expires by itself when something known changes meaning; what no boundary can cover is a
+record the snapshot has not seen, and that holds for a grant as much as for a term. The owners of those records (commerce, trust and
+safety, configuration) are later tasks and have no INSERT privilege on them yet.
 
 ## The operations page
 
@@ -186,27 +189,60 @@ The hosted run on the proof environment is done by the coordinator after the mer
 author of this change (no hosted environment was touched).
 
 1. **Production stays dark.** `center.surfaces` is still `none`; `ARCFORGES_CENTER_PLAN_CONFIGURATION` is unset in production; the
-   migration gate applied `0003` to `neondb` (the tables exist and are empty; `identity.operator` has no row); no gated feature is
-   reachable.
+   migration gate applied `0003` to the production database (the tables exist and are empty; `identity.operator` has no row, which
+   is also what the next two commands must not change); no gated feature is reachable.
 2. **The acceptance database** (`arcforges_acceptance`) is migrated to version 3 with the pinned checksum above.
 3. **Enable the surface** on the proof environment by a reviewed change of `FLAGSHIP_SURFACES` to `identity,pages,operations` (it is
-   not part of this change), then give the proving account the role with the deployment's migration-role path:
-   `arcforges-center admin grant-operator --account <uuid> --reason "hosted proof of the operator grant" --days 7`.
+   not part of this change). The change must update the pins that guard against enabling it by accident: the proof environment's
+   `FLAGSHIP_SURFACES` in `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts` (both fail on the bare
+   change, which is intended), and the sentences of this checklist and of `docs/deployment.md`. Then give the proving account the role
+   with the deployment's migration-role path, **selecting the acceptance database explicitly**, because the command works on the
+   database of the migration URL unless `ARCFORGES_CENTER_DATABASE_NAME` names another, and its output (`account`, `operatorId`,
+   `grantedAt`, `expiresAt`) does not say which one it wrote:
+
+   ```sh
+   ARCFORGES_CENTER_MODE=official-hosted \
+   ARCFORGES_CENTER_MIGRATION_DATABASE_URL=<the direct migration-role URL> \
+   ARCFORGES_CENTER_DATABASE_NAME=arcforges_acceptance \
+   arcforges-center admin grant-operator --account <uuid> --reason "hosted proof of the operator grant" --days 7
+   ```
+
+   Afterwards check that the row is in the acceptance database and not in the production one.
+
 4. **The page**, checked with `curl -si` and a browser: an unauthenticated `GET /api/operations/grant` is `303` to the sign-in
    page; the operator's session gets `200` with the seven security headers and `Cache-Control: no-store, no-transform`; any other
    account gets `403`.
 5. **The grant** at API level with the fixture catalogue: review, confirm with the passkey, the done page names the term and the
    entitlement version; the same form again says it was already issued; a wrong or reused step-up is refused. No gated operation is
    served, so the hosted run shows the grant and the snapshot, not a gated call.
-6. **Clean up:** `arcforges-center admin revoke-operator --account <uuid>`, and let the grants end at their expiry.
+6. **Clean up:** `arcforges-center admin revoke-operator --account <uuid>` with the same three variables as in step 3 (the acceptance
+   database), and let the grants end at their expiry.
 
 ## What waits for later tasks
 
 - **AF-CTR-09** (commerce, Paddle): a purchase becomes a service term, a plan's grants and the status facts; the writers of
   `service_term_action`, `account_status_fact` and `feature_release`; the offer and realm columns of the term; the refresh of the
   snapshot by the owner admission.
-- **AF-OPS-01**: the OperatorService that replaces the interim page and calls `entitlement.Operator`.
+- **AF-OPS-01**: the OperatorService that replaces the interim page and calls `entitlement.Operator`. The interim page's review does
+  not check what the confirmation will refuse (an unknown account, a source reference already used, a justification filled in for a
+  grant to another account), so the passkey ceremony can be spent on a confirmation that refuses afterwards, and four honest-use
+  refusals share one generic text; the replacement reads the target account and the live references before the ceremony and gives
+  each refusal its own text (deferred in fix round 1, `page-3`: unreachable in production, where the surface is off and the catalogue
+  is empty).
 - **H-07**: the approved prices, limits and the Neon plan and retention; until then the production catalogue is empty.
+- **Before the first gated operation (an AF-CTR-04 prerequisite) and before H-07**: the activation of definitions is per account and
+  keyed by the version of the replica that reads. Two revisions with different definitions versions running side by side (a rolling
+  deploy) each recompute and append an activation at every read of an account whose last activation is the other's, so the snapshot
+  version climbs by one per read and the 2000-record bound (activations count) wedges the account for good. Unreachable today
+  (production is dark, its catalogue empty, and no gated operation reads a snapshot); the fix is a deploy-level fact, a single row
+  of the current definitions version written once by the revision that starts with it, which a replica whose version differs
+  neither recomputes against nor writes (deferred in fix round 1, `store-1`).
+- **The clock floor lives only in the snapshot.** A computation never goes back past the stored one, but that floor is the stored
+  snapshot's `computed_at`; the records carry their own creation instants and the revision its `updated_at`, and the service does not
+  floor against them. A snapshot dropped while a replica's clock is behind the newest record is recomputed in the past. Follow-up
+  (before the snapshot is ever dropped by an operation): floor every instant at the newest record creation or activation instant,
+  and correct the comment of migration `0003` ("may be dropped at any time"), which is older than this statement and cannot be
+  edited without a new checksum.
 - **AF-CTR-04 and later**: the gated operations (task control, nodes, MCP), their quotas and budgets through the resource-control
   stage, and the rows of the operation table that carry a `Feature`. The production `Authorizer` is composed with **no resource
   control** today, so a gated call is not rate limited: AF-CTR-04 must register a per-account control before it serves a gated row,
