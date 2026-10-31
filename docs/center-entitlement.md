@@ -14,10 +14,10 @@ what this document does not describe because it does not exist yet.
 
 Every test and every piece of evidence of this part is one of the two:
 
-| Label      | What it is                                                                                                                                                                                                                                                                                                                                                                                        |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **REAL**   | The Go resolver replayed against every row the C# suites produce (recorded data, real logic); the store, the migration and the grants on a real PostgreSQL; the step-up evidence consumed by the real identity code; the audit chain; the real ingress pipeline and bearer verifier in front of the gate; the passkey ceremony of the page tests (a virtual authenticator, a real relying party). |
-| **MOCKED** | The plan catalogue (the illustrative development fixture, or a document injected by a test), its prices (USD 5 and USD 15, illustrative and not approved); the test-only operations that stand for the gated operations no task serves yet; the step-up evidence stubbed in the rig that proves the gate after a grant.                                                                           |
+| Label      | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **REAL**   | The Go resolver replayed against every vector the six covered classes of the C# suites produce (recorded data, real logic; the C# persistence suites are not recorded, the Go tests pin the branches they reach); the store, the migration and the grants on a real PostgreSQL; the step-up evidence consumed by the real identity code; the audit chain; the real ingress pipeline and bearer verifier in front of the gate; the passkey ceremony of the page tests (a virtual authenticator, a real relying party). |
+| **MOCKED** | The plan catalogue (the illustrative development fixture, or a document injected by a test), its prices (USD 5 and USD 15, illustrative and not approved); the test-only operations that stand for the gated operations no task serves yet; the step-up evidence stubbed in the rig that proves the gate after a grant.                                                                                                                                                                                               |
 
 ## The catalogue
 
@@ -42,9 +42,11 @@ unexported, so no other package can set them, and `TestNoCodeOfTheRunningCenterI
 the whole center module and fails if `Run` composes the center with anything but the literal `Options{}`, if anything but the two
 values of the one `feature.Settings` literal in `New` mentions the fields, if `Injected` or `InjectedClass` is named anywhere else
 outside package `feature`, or if `feature.Configure` or `feature.ParseCatalogue` is called beside `New`;
-`TestThePinOnTheCatalogueInjectionFindsEachWayAroundIt` proves the pin on the real sources changed in each way. It does not see a
-call through an import alias of package `feature`, reflection, or the inside of package `feature` itself, whose behaviour its own
-tests pin). The plans are configuration for AF-CTR-09, which turns a purchase of a plan into
+`TestThePinOnTheCatalogueInjectionFindsEachWayAroundIt` proves the pin on the real sources changed in each way. It is a scan of
+the source text for those forms, not a proof; it does not see a call through an import alias of package `feature`, reflection, a
+`feature.Configuration` literal or a write to its exported fields (`State`, `Catalogue`, `Class`) inside `New` or after it, a direct
+`feature.DevelopmentFixtures()` call, or the inside of package `feature` itself, whose behaviour its own tests pin; the composed test
+of the operator policy catches the first writes for a hosted center without a plan, and nothing catches a late write after `New`). The plans are configuration for AF-CTR-09, which turns a purchase of a plan into
 grants of its features; this task issues grants of features, never of plans.
 
 A change of the definitions version is a `definitions_activation` row and raises the entitlement version of an account once, at its
@@ -106,9 +108,11 @@ AF-OPS-01's OperatorService can call it; the interim interface is [the operation
   at **four attempts** (the service's `attempts`), immediately and without backoff, and when all of them lose nothing is written and
   the answer is `RESOURCE/overloaded` (the store's contention), after which the same command ID may be sent again. Because the grant
   holds the revision row's lock, a second attempt can only follow the race of two first commits of one account (the loser finds the
-  row and writes nothing), so the bound of four is a ceiling the code does not reach in practice; the number is not pinned by a
-  test, the behaviour is (`TestManyOperatorsGrantingToOneAccountAtOnceAllSucceed`). The same command running twice at once answers
-  the same way (`ErrCommandInProgress`).
+  row and writes nothing) or a deadlock victim (below), so in practice one more attempt is all that is ever needed. The bound
+  itself is pinned: `TestAGrantStopsAfterFourAttemptsOfADeadlockVictim` makes every attempt a victim and counts exactly four calls
+  (the answer is the contention, nothing is written or spent), and the behaviour is pinned by
+  `TestManyOperatorsGrantingToOneAccountAtOnceAllSucceed`. The same command running twice at once answers the same way
+  (`ErrCommandInProgress`).
 - **Two operators granting to each other.** Each grant holds its operator's `identity.user` row and takes a share of the target's
   through the foreign keys of the rows it writes, so operator A granting to B while B grants to A (or to B's own account) deadlock:
   PostgreSQL ends one of them as the victim after its deadlock timeout (1 s, SQLSTATE 40P01). The grant's statements are sanitized
@@ -116,8 +120,11 @@ AF-OPS-01's OperatorService can call it; the interim interface is [the operation
   serialization failure, 40001) itself and runs the command again, at most within the same four attempts: both grants are made, the
   victim after about a second (`TestTwoOperatorsGrantingToEachOtherAreBothServed`). The evidence is spent only by the attempt that commits.
 - **The writers of the service are optimistic.** `Service.IssueGrant`, `RevokeGrant` and `Refresh` take no revision lock: they
-  derive from the history they read and commit under the revision fence, four attempts, no backoff. Ten concurrent
-  `IssueGrant` calls for one account lose grants to `ConcurrentUpdate`. Nothing calls them yet; see "What waits" (AF-CTR-09).
+  derive from the history they read and commit under the revision fence, four attempts, no backoff (the same constant as the
+  grant's; `TestAWriterThatNeverWinsTheRaceFailsClosedWithATypedError` counts the four attempts of `IssueGrant`). Ten concurrent
+  `IssueGrant` calls for one account lose grants to `ConcurrentUpdate`. Nothing served calls `IssueGrant` or `RevokeGrant` yet;
+  `Refresh` is called by the gate's reader (`Service.Read`), which no served operation reaches until AF-CTR-04, where two first gated
+  calls of one account race through it and the loser is answered `RESOURCE/overloaded`. See "What waits" (AF-CTR-09).
 
 The records of a grant are the records the resolver reads (a grant is a fact; the snapshot is derived). A term, a status fact or a
 feature release written by its owner admission must refresh the snapshot in the same unit (`Service.Refresh`), as the grant writers
@@ -200,9 +207,11 @@ schema and `identity.operator`: `grant`, `revocation`, `service_term`, `service_
 privilege), `revision` and `snapshot` (derived, rewritten in place, the revision only advancing by one), and the operator role
 (written by the migration role only). The runtime role may insert grants, revocations, definitions activations and service terms
 and reads the rest; term actions, status facts and feature releases have no runtime writer until their tasks exist. The service answers
-an account that is no canonical uuid, an account that does not exist, a reason on an ordinary source and text that is not valid UTF-8
-(in an actor, a reason, a source reference or a subject) as the typed refusal `InvalidRequest`, before or as the database refuses it,
-never as an internal error. The details,
+an account that is no canonical uuid (the nil uuid and the upper-case and un-hyphenated spellings of a real one included), a reason on
+an ordinary source and text that is not valid UTF-8 (in an actor, a reason, a source reference or a subject) as the typed refusal
+`InvalidRequest`, before or as the database refuses it, never as an internal error. For a well-formed account that does not exist,
+`Read`, `Refresh` and `IssueGrant` answer `InvalidRequest` ("The account does not exist."), `RevokeGrant` answers `UnknownGrant`
+(it finds no grant) and `VerifyRebuild` reports an account without history (no snapshot). The details,
 the personal data and the retention are in [PostgreSQL store](postgres-store.md#entitlement-af-ctr-03-b).
 
 ## Post-deploy checklist
@@ -227,9 +236,12 @@ author of this change (no hosted environment was touched).
    - `eng/policy/dependency-policy.json`: `wrangler.json` is an input of the dependency policy ("Dependency input changed without
      review: wrangler.json"), so the change needs a re-bound policy and a successor receipt (the next `eng/policy/dependency-reviews/af-ctr-03-rNN.json`), and
      that receipt, which carries the two legal-record digests every receipt carries, needs its own exact-row block in `.gitleaks.toml`
-     and its pin in `tests/worker/provenance.test.ts`, as the receipts of this task have;
-   - the sentences of this checklist and of `docs/deployment.md` and `docs/center-identity.md` that say the proof environment keeps
-     `identity,pages`.
+     and its pin in `tests/worker/provenance.test.ts`, as the receipts of this task have, and its entry in the source inventory
+     `eng/provenance/files.json` (`firstParty`; without it `node tooling/project.ts provenance`, which `npm run check` and the leg
+     run, fails with "Source inventory drift", checked in a scratch copy with and without the entry);
+   - the sentences that say the proof environment keeps `identity,pages` or list the values of `center.surfaces`: this checklist, the
+     operations-page section of this document, `docs/deployment.md`, `docs/center-identity.md` and `docs/center.md` (the health
+     example).
 
    Then give the proving account the role with the deployment's migration-role path, **selecting the acceptance database explicitly**, because the command works on the
    database of the migration URL unless `ARCFORGES_CENTER_DATABASE_NAME` names another, and its output (`account`, `operatorId`,
