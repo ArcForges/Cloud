@@ -87,7 +87,8 @@ AF-OPS-01's OperatorService can call it; the interim interface is [the operation
   `CONFLICT/command_id_reused`; the same source reference again is `CONFLICT/already_exists`.
 - **Refusals** are audited as `entitlement.operator_grant.refused` in a transaction of their own, with a closed reason
   (`not_operator`, `step_up_required`, `invalid_argument`, `account_not_found`, `already_granted`, and for a state refusal its
-  reason: `no_catalogue`, `self_hosted`, `catalogue_wide`, `self_approval_required`, `account_state`, `clock`, `history`); a refusal
+  reason: `no_catalogue`, `self_hosted`, `catalogue_wide`, `self_approval_required`, `account_state`, `clock`, `history`, `invalid_state` for a state refusal without a reason, and `refused` for any other refusal, for
+  example `CONFLICT/command_id_reused`); a refusal
   whose audit cannot be written surfaces the store failure instead of staying silent. The payload never holds the operator's raw
   text: the feature keys are the normalized keys of the catalogue (a name it does not know is only counted), with their count and the
   SHA-256 of the submitted list, so a refused request cannot put free text, control characters or a megabyte into the audit chain.
@@ -124,7 +125,8 @@ AF-OPS-01's OperatorService can call it; the interim interface is [the operation
   grant's; `TestAWriterThatNeverWinsTheRaceFailsClosedWithATypedError` counts the four attempts of `IssueGrant`). Ten concurrent
   `IssueGrant` calls for one account lose grants to `ConcurrentUpdate`. Nothing served calls `IssueGrant` or `RevokeGrant` yet;
   `Refresh` is called by the gate's reader (`Service.Read`), which no served operation reaches until AF-CTR-04, where two first gated
-  calls of one account race through it and the loser is answered `RESOURCE/overloaded`. See "What waits" (AF-CTR-09).
+  calls of one account race through it: the loser reloads and returns the winner's snapshot, and only a call that loses on all four
+  attempts is answered `RESOURCE/overloaded`. See "What waits" (AF-CTR-09).
 
 The records of a grant are the records the resolver reads (a grant is a fact; the snapshot is derived). A term, a status fact or a
 feature release written by its owner admission must refresh the snapshot in the same unit (`Service.Refresh`), as the grant writers
@@ -236,12 +238,14 @@ author of this change (no hosted environment was touched).
    - `eng/policy/dependency-policy.json`: `wrangler.json` is an input of the dependency policy ("Dependency input changed without
      review: wrangler.json"), so the change needs a re-bound policy and a successor receipt (the next `eng/policy/dependency-reviews/af-ctr-03-rNN.json`), and
      that receipt, which carries the two legal-record digests every receipt carries, needs its own exact-row block in `.gitleaks.toml`
-     and its pin in `tests/worker/provenance.test.ts`, as the receipts of this task have, and its entry in the source inventory
+     and its pin in `tests/worker/provenance.test.ts` (which also holds the next-unreviewed-receipt negative control, the literal
+     `eng/policy/dependency-reviews/af-ctr-03-r16.json` in its `for (const other of [...])` list: move it to the name after the new receipt, or the
+     test fails), as the receipts of this task have, and its entry in the source inventory
      `eng/provenance/files.json` (`firstParty`; without it `node tooling/project.ts provenance`, which `npm run check` and the leg
      run, fails with "Source inventory drift", checked in a scratch copy with and without the entry);
    - the sentences that say the proof environment keeps `identity,pages` or list the values of `center.surfaces`: this checklist, the
-     operations-page section of this document, `docs/deployment.md`, `docs/center-identity.md` and `docs/center.md` (the health
-     example).
+     operations-page section of this document, `docs/deployment.md` and `docs/center-identity.md` (`docs/center.md` already lists
+     `operations` among the values of `center.surfaces`).
 
    Then give the proving account the role with the deployment's migration-role path, **selecting the acceptance database explicitly**, because the command works on the
    database of the migration URL unless `ARCFORGES_CENTER_DATABASE_NAME` names another, and its output (`account`, `operatorId`,
