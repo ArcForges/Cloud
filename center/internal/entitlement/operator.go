@@ -9,13 +9,17 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
+	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/ratelimit"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
@@ -76,7 +80,8 @@ type OperatorRequest struct {
 const MaxSourceRef = 96
 
 // canonicalRequest is the document the step-up target hash covers; its field order is fixed and its strings are JSON-escaped, so
-// two requests that differ in any field, in any byte of the reason included, have different hashes.
+// two requests that differ in any field have different hashes. Every string of a normalized request is valid UTF-8 (Normalize
+// refuses the rest), because JSON would write an invalid byte as U+FFFD and requests that differ in such a byte would share a hash.
 type canonicalRequest struct {
 	Version      int      `json:"v"`
 	Operation    string   `json:"operation"`
@@ -126,6 +131,7 @@ type Operator struct {
 	service *Service
 	policy  func() (OperatorPolicy, error)
 	clock   func() time.Time
+	limits  *ratelimit.Limiter
 }
 
 // NewOperator is the operator grant service. The policy comes from the plan configuration (feature.Configuration.OperatorGrants);
@@ -134,18 +140,21 @@ func NewOperator(db *store.DB, service *Service, policy func() (OperatorPolicy, 
 	if clock == nil {
 		clock = time.Now
 	}
-	return &Operator{db: db, service: service, policy: policy, clock: clock}
+	return &Operator{db: db, service: service, policy: policy, clock: clock, limits: ratelimit.New(db)}
 }
 
 // Policy is the policy the operator grants run under now, or the reason they are refused (ErrGrantsSelfHosted, ErrGrantsNoCatalogue):
 // the keys that may be granted, the longest expiry and whether a catalogue-wide grant is allowed. The operations page shows it.
 func (o *Operator) Policy() (OperatorPolicy, error) { return o.policy() }
 
-// IsOperator reports whether an account is an operator now: a live operator row, or the owner who bootstrapped this center.
+// IsOperator reports whether an account is an operator now: an active account (a restricted, suspended, pending-deletion or deleted
+// account reaches only what its state allows, and the operator grant is no security operation) with a live operator row, or the
+// owner who bootstrapped this center.
 func IsOperator(ctx context.Context, tx pgx.Tx, user platform.ID, now time.Time) (bool, error) {
 	var operator bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity.operator WHERE user_id = $1 AND revoked_at IS NULL AND granted_at <= $2 AND expires_at > $2)
-    OR EXISTS (SELECT 1 FROM identity.bootstrap WHERE user_id = $1)`, user, now).Scan(&operator)
+	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity.user u WHERE u.user_id = $1 AND u.state = 1 AND (
+    EXISTS (SELECT 1 FROM identity.operator o WHERE o.user_id = u.user_id AND o.revoked_at IS NULL AND o.granted_at <= $2 AND o.expires_at > $2)
+    OR EXISTS (SELECT 1 FROM identity.bootstrap b WHERE b.user_id = u.user_id)))`, user, now).Scan(&operator)
 	return operator, store.Sanitize("read the operator role", err)
 }
 
@@ -226,6 +235,14 @@ func (o *Operator) check(ctx context.Context, caller OperatorCaller, request Ope
 func Normalize(request OperatorRequest, policy OperatorPolicy, operator platform.ID, now Micros) (OperatorRequest, *arc.Refusal) {
 	if correlation.IDBytes(request.Account) == nil {
 		return OperatorRequest{}, arc.InvalidArgument("account", "format")
+	}
+	if request.All && len(request.Features) > 0 {
+		return OperatorRequest{}, arc.InvalidArgument("features", "conflicts_with_all")
+	}
+	for _, field := range []struct{ name, text string }{{"reason", request.Reason}, {"self_approval", request.SelfApproval}, {"source_ref", request.SourceRef}} {
+		if !utf8.ValidString(field.text) {
+			return OperatorRequest{}, arc.InvalidArgument(field.name, "encoding")
+		}
 	}
 	features := request.Features
 	if request.All {
@@ -362,6 +379,12 @@ func (o *Operator) Grant(ctx context.Context, call GrantCall) (GrantResult, erro
 // write is the grant's effect, in the caller's transaction.
 func (o *Operator) write(ctx context.Context, tx pgx.Tx, call GrantCall, request OperatorRequest, target [32]byte) (GrantResult, error) {
 	now := o.clock()
+	// The operator's account row is locked first. The role commands lock the same row before they change the operator's rows, so a
+	// revocation either committed before this point (the read below sees it and the grant is refused) or waits for this transaction
+	// and follows the grant; the evidence's consumption takes the same lock, so the order of locks is the same everywhere.
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", call.Caller.UserID); err != nil {
+		return GrantResult{}, store.Sanitize("lock the operator's account", err)
+	}
 	// The role is read again under the grant's own transaction: a revocation that committed since the check is honoured.
 	operator, err := IsOperator(ctx, tx, call.Caller.UserID, now)
 	if err != nil {
@@ -480,12 +503,38 @@ func (o *Operator) refused(ctx context.Context, call GrantCall, err error) error
 	if !errors.As(err, &refusal) {
 		return err
 	}
-	payload := map[string]any{"reason": reasonOf(refusal), "code": refusal.Key()}
+	reason := reasonOf(refusal)
+	// A stranger's refused request is audited once per window, so that an authenticated account that is no operator cannot grow the
+	// audit chain by repeating it.
+	if reason == "not_operator" {
+		first, limitErr := o.firstRefusal(ctx, call.Caller.UserID)
+		if limitErr != nil {
+			return limitErr
+		}
+		if !first {
+			return refusal
+		}
+	}
+	payload := map[string]any{"reason": reason, "code": refusal.Key()}
 	if call.Request.Account != "" && correlation.IDBytes(call.Request.Account) != nil {
 		payload["account"] = call.Request.Account
 	}
-	if len(call.Request.Features) > 0 && len(call.Request.Features) <= maxAuditFeatures {
-		payload["features"] = call.Request.Features
+	// The raw feature strings are the caller's text: the audit keeps their number and digest, and the keys of the catalogue among them.
+	if count := len(call.Request.Features); count > 0 {
+		payload["featureCount"] = count
+		payload["featuresSha256"] = digestOf(strings.Join(call.Request.Features, "\x00"))
+		if policy, policyErr := o.policy(); policyErr == nil {
+			var known []string
+			for _, key := range call.Request.Features {
+				if slices.Contains(policy.Keys, key) && !slices.Contains(known, key) {
+					known = append(known, key)
+				}
+			}
+			slices.Sort(known)
+			if len(known) > 0 {
+				payload["features"] = known
+			}
+		}
 	}
 	data, marshalErr := json.Marshal(payload)
 	if marshalErr != nil {
@@ -504,5 +553,39 @@ func (o *Operator) refused(ctx context.Context, call GrantCall, err error) error
 	return refusal
 }
 
-// maxAuditFeatures bounds the feature list an audit payload repeats (the six gated keys).
-const maxAuditFeatures = 6
+// refusalWindow is how often one account's refused access is audited: the first refusal of each window, the rest are counted
+// (the pattern of identity.audited, E10: the first failure of a window per bucket).
+const refusalWindow = time.Hour
+
+// operatorRefusals is the bucket kind of the once-per-window audit of a stranger's refused request. It is a marker of this package, not
+// a limit of the identity surface, so it has no place in ratelimit.Kinds.
+const operatorRefusals ratelimit.Kind = "operator_refusals"
+
+// firstRefusal counts a refusal of an account's access to the operator grant and reports whether it is the first of its window.
+func (o *Operator) firstRefusal(ctx context.Context, user platform.ID) (bool, error) {
+	decision, err := o.limits.Fail(ctx, ratelimit.Bucket{Kind: operatorRefusals, Key: user.String(), Window: config.Window{Limit: 1, Window: refusalWindow}}, o.clock())
+	if err != nil {
+		return false, err
+	}
+	return decision.First, nil
+}
+
+// RefuseAccess audits the refusal of an account that is no operator when it asks for the operator grant's page or form: the event
+// entitlement.operator_grant.refused with the reason not_operator and the action asked for, in a transaction of its own, once per
+// window and account. The caller answers the refusal itself.
+func (o *Operator) RefuseAccess(ctx context.Context, caller OperatorCaller, action string) error {
+	first, err := o.firstRefusal(ctx, caller.UserID)
+	if err != nil || !first {
+		return err
+	}
+	data, err := json.Marshal(map[string]any{"reason": "not_operator", "code": arc.PermissionDenied(OperatorOperation).Key(), "action": action})
+	if err != nil {
+		return err
+	}
+	id := caller.UserID.String()
+	return o.db.InTx(ctx, "audit an operator grant refusal", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := platform.AppendAudit(ctx, tx, platform.Event{EventID: platform.NewID(), OccurredAt: o.clock(), ActorRef: "account:" + id, EventType: AuditOperatorGrantRefused,
+			Reason: "not_operator", TargetKind: "account", TargetID: id, Payload: data})
+		return err
+	})
+}

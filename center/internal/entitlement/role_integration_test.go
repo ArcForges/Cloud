@@ -13,6 +13,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/dbtest"
 	"github.com/ArcForges/Cloud/center/internal/entitlement"
+	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
@@ -172,5 +173,60 @@ func TestTheRuntimeRoleCannotWriteTheOperatorRole(t *testing.T) {
 	db.Exec("INSERT INTO identity.operator (operator_id, user_id, granted_at, expires_at, granted_by, reason) VALUES (gen_random_uuid(), '" + account.String() + "', now() - interval '1 day', now() + interval '1 day', 'operator:cli', 'x')")
 	if _, err = db.Runtime.Pool().Exec(context.Background(), "UPDATE identity.operator SET revoked_at = now() WHERE user_id = $1", account); err == nil {
 		t.Fatal("the runtime role revoked an operator row")
+	}
+}
+
+// TestTwoConcurrentRoleGrantsMakeOneLiveRow: the second command waits at the account's lock and then finds the first one's row, so
+// an account never holds two live operator rows (a share lock admits both commands and the check is a read before the insert).
+func TestTwoConcurrentRoleGrantsMakeOneLiveRow(t *testing.T) {
+	db := dbtest.New(t)
+	account := db.Account(1)
+	ctx := context.Background()
+	// The first command runs on a connection of its own: one connection runs one transaction at a time.
+	first, err := pgtest.Connect(t, db.URL).Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = entitlement.GrantOperatorRole(ctx, first, account, 10, "first command", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	second := make(chan error, 1)
+	go func() {
+		second <- inMigrationTx(t, db, func(tx pgx.Tx) error {
+			_, err := entitlement.GrantOperatorRole(ctx, tx, account, 10, "second command", time.Now())
+			return err
+		})
+	}()
+	select {
+	case err := <-second:
+		_ = first.Rollback(ctx)
+		t.Fatalf("the second command did not wait for the first: %v", err)
+	case <-time.After(400 * time.Millisecond):
+	}
+	if err = first.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-second:
+		if !errors.Is(err, entitlement.ErrRoleAlreadyLive) {
+			t.Fatalf("the second command: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second command never finished")
+	}
+	if db.Count("SELECT count(*) FROM identity.operator WHERE user_id = $1 AND revoked_at IS NULL", account) != 1 {
+		t.Fatal("two live operator rows")
+	}
+}
+
+func TestAReasonThatIsNotValidUTF8IsRefusedForTheRole(t *testing.T) {
+	db := dbtest.New(t)
+	account := db.Account(1)
+	err := inMigrationTx(t, db, func(tx pgx.Tx) error {
+		_, err := entitlement.GrantOperatorRole(context.Background(), tx, account, 5, "bad \xff byte", time.Now())
+		return err
+	})
+	if !errors.Is(err, entitlement.ErrRoleReason) || db.Count("SELECT count(*) FROM identity.operator") != 0 {
+		t.Fatalf("%v", err)
 	}
 }

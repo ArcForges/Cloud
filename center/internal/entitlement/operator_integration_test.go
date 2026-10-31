@@ -209,7 +209,9 @@ func TestOnlyALiveOperatorOnAnAccountSessionMayGrant(t *testing.T) {
 			}
 		})
 	}
-	if f.audits(entitlement.AuditOperatorGrantRefused, "not_operator") != len(cases) || f.consumed() != 0 {
+	// A stranger's refusal is audited once per window and account: the live operator's mobile and node credentials share one account, so
+	// the five refused calls of four accounts leave four events (and none of the refusals spent evidence).
+	if f.audits(entitlement.AuditOperatorGrantRefused, "not_operator") != len(cases)-1 || f.consumed() != 0 {
 		t.Fatalf("audited %d of %d, evidence consumed %d", f.audits(entitlement.AuditOperatorGrantRefused, "not_operator"), len(cases), f.consumed())
 	}
 }
@@ -272,6 +274,9 @@ func TestTheBoundsOfAnOperatorGrantRequest(t *testing.T) {
 		reason string
 	}{
 		{"no features", func(r *entitlement.OperatorRequest) { r.Features = nil }, "VALIDATION/invalid_argument", "invalid_argument"},
+		{"every key and named keys", func(r *entitlement.OperatorRequest) { r.All = true }, "VALIDATION/invalid_argument", "invalid_argument"},
+		{"a reason that is not valid UTF-8", func(r *entitlement.OperatorRequest) { r.Reason = "bad \xff byte" }, "VALIDATION/invalid_argument", "invalid_argument"},
+		{"a source reference that is not valid UTF-8", func(r *entitlement.OperatorRequest) { r.SourceRef = "ticket-\xfe" }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"an unknown feature", func(r *entitlement.OperatorRequest) { r.Features = []string{"remote.nothing"} }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a repeated feature", func(r *entitlement.OperatorRequest) { r.Features = []string{"push", "push"} }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a blank reason", func(r *entitlement.OperatorRequest) { r.Reason = "   " }, "VALIDATION/invalid_argument", "invalid_argument"},

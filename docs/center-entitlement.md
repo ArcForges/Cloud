@@ -49,12 +49,19 @@ An operator gives an account features for a bounded time, with a recorded reason
 AF-OPS-01's OperatorService can call it; the interim interface is [the operations page](#the-operations-page).
 
 - **Who.** A HUMAN account session (scope `account`) whose user is a live operator: an `identity.operator` row that is neither revoked
-  nor ended, or the owner who bootstrapped the center ([operator role](center-identity.md#operator-role)). The role is read when the
-  request is checked and again in the grant's own transaction. Only the official hosted center has operator grants: a self-hosted
+  nor ended, or the owner who bootstrapped the center ([operator role](center-identity.md#operator-role)), **and whose account is
+  active**: a restricted, suspended or deleted account reaches only security operations, so it is no operator here (it is audited as
+  any other stranger below). The role is read when the request is checked and again in the grant's own transaction, after that
+  transaction has locked the operator's `identity.user` row (`FOR UPDATE`). `grant-operator` and `revoke-operator` and the
+  consumption of step-up evidence lock the same row, always first, so a revocation either committed before the grant's read (the grant
+  is refused) or waits for the grant's transaction and follows it, and two `grant-operator` runs for one account leave one live row.
+  Only the official hosted center has operator grants: a self-hosted
   center refuses them (`self_hosted`, its availability is the built-in default), and so does a center without a valid catalogue
   (`no_catalogue`).
-- **The request.** The account (a uuid), the feature keys of the catalogue (or the shorthand for every key), a reason of 1 to 512
-  characters without control characters, an expiry, and a source reference of 1 to 96 characters (a ticket or incident). The expiry
+- **The request.** The account (a uuid), the feature keys of the catalogue or the shorthand for every key (not both: `all` together
+  with named keys is refused, `features: conflicts_with_all`, because one would silently replace the other), a reason of 1 to 512
+  characters that is valid UTF-8 and has no control characters (an invalid byte sequence is refused, `reason: encoding`, like the
+  justification and the source reference), an expiry, and a source reference of 1 to 96 characters (a ticket or incident). The expiry
   is required, lies in the future and is at most 90 days ahead under a production-classified configuration and 400 days otherwise.
   Under a production-classified configuration a grant of every key of the catalogue is refused (`catalogue_wide`). A grant to the
   operator's own account needs a justification of its own; it is stored with the reason (`<reason> | self-approval: <justification>`,
@@ -72,9 +79,23 @@ AF-OPS-01's OperatorService can call it; the interim interface is [the operation
 - **Refusals** are audited as `entitlement.operator_grant.refused` in a transaction of their own, with a closed reason
   (`not_operator`, `step_up_required`, `invalid_argument`, `account_not_found`, `already_granted`, and for a state refusal its
   reason: `no_catalogue`, `self_hosted`, `catalogue_wide`, `self_approval_required`, `account_state`, `clock`, `history`); a refusal
-  whose audit cannot be written surfaces the store failure instead of staying silent.
-- **Concurrency.** Two operators granting to one account at once both succeed: the account's revision row is locked, the history is
-  loaded under the lock and the commit is fenced by the revision, with a bounded retry.
+  whose audit cannot be written surfaces the store failure instead of staying silent. The payload never holds the operator's raw
+  text: the feature keys are the normalized keys of the catalogue (a name it does not know is only counted), with their count and the
+  SHA-256 of the submitted list, so a refused request cannot put free text, control characters or a megabyte into the audit chain.
+- **A stranger's request.** An account that is no operator and asks for the page (`GET` or `POST`, any of the three routes), or whose
+  grant is refused because it stopped being an operator after the page loaded, is answered 403 and its refusal is audited as
+  `entitlement.operator_grant.refused` (reason `not_operator`, with the route asked for on the page) in a transaction of its own and
+  **once per hour and account**: the first refusal of the window is audited, the others are counted and answered without a row, so
+  an authenticated stranger cannot flood the audit chain. This is the pattern of the sign-in failures ([audit](center-identity.md#audit):
+  the first failure of a window per bucket): `ratelimit.Limiter.Fail` reports the first failure of a window. The other refusals of an
+  operator (a bad request, a missing step-up) are audited every time: they take a signed-in live operator, and each of
+  them is a decision the owner may need to read.
+- **Concurrency.** Two operators granting to one account at once both succeed: the account's revision row is locked
+  (`SELECT ... FOR UPDATE`, pinned by `TestManyOperatorsGrantingToOneAccountAtOnceAllSucceed`), the history is loaded under the lock
+  and the commit is fenced by the revision. A command that finds the revision changed re-derives and tries again, at most **four
+  attempts**, immediately and without backoff (the lock makes the second attempt find the other writer's commit); when all four
+  lose, nothing is written and the answer is `RESOURCE/overloaded` (the store's contention), after which the same command ID may be
+  sent again. The same command running twice at once answers the same way (`ErrCommandInProgress`).
 
 The records of a grant are the records the resolver reads (a grant is a fact; the snapshot is derived). A term, a status fact or a
 feature release written by its owner admission must refresh the snapshot in the same unit (`Service.Refresh`), because only grants
@@ -89,7 +110,7 @@ checked and normalized exactly as a grant would, nothing written, with the step-
 The surface needs `identity` and `pages`, exists only in official-hosted mode and is never a default; it is in no checked-in
 environment (production carries none; the acceptance environment keeps `identity,pages` until the coordinator enables `operations`
 for the hosted proof). Where it is off, every route answers 404 as the pages surface does, with the security headers; a signed-in
-account that is no operator gets 403. Every reply carries the seven page security headers byte for byte, `Cache-Control: no-store,
+account that is no operator (or whose account is not active) gets 403, audited as above. Every reply carries the seven page security headers byte for byte, `Cache-Control: no-store,
 no-transform` included, and the Worker's page handler checks the surface of each route before anything else.
 
 ## The gate

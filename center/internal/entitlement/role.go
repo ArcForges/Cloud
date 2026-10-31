@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -52,14 +53,16 @@ type OperatorRole struct {
 // one. An account that already holds a live row is refused: the end of a role is changed by revoking and granting it again.
 func GrantOperatorRole(ctx context.Context, tx pgx.Tx, account platform.ID, days int, reason string, now time.Time) (OperatorRole, error) {
 	switch {
-	case !IsReason(reason):
+	case !IsReason(reason) || !utf8.ValidString(reason):
 		return OperatorRole{}, ErrRoleReason
 	case days < 1 || days > MaxOperatorDays:
 		return OperatorRole{}, ErrRoleDays
 	}
 	now = now.UTC().Truncate(time.Microsecond)
 	var state int16
-	switch err := tx.QueryRow(ctx, "SELECT state FROM identity.user WHERE user_id = $1 FOR SHARE", account).Scan(&state); {
+	// The account row is locked for update, not for share: two grants for one account serialize here (a share lock admits both), and a
+	// grant of the operator grant waits on the same lock (Operator.write), so the second command sees the first one's row.
+	switch err := tx.QueryRow(ctx, "SELECT state FROM identity.user WHERE user_id = $1 FOR UPDATE", account).Scan(&state); {
 	case errors.Is(err, pgx.ErrNoRows):
 		return OperatorRole{}, ErrRoleNoAccount
 	case err != nil:
@@ -94,6 +97,11 @@ func GrantOperatorRole(ctx context.Context, tx pgx.Tx, account platform.ID, days
 // identity.bootstrap and not from a row; the count says so when it is zero.
 func RevokeOperatorRole(ctx context.Context, tx pgx.Tx, account platform.ID, now time.Time) (int64, error) {
 	now = now.UTC().Truncate(time.Microsecond)
+	// The same lock as the grant of the operator grant takes first: a grant in flight either finishes before the revocation starts to
+	// change rows, or finds the role revoked.
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", account); err != nil {
+		return 0, store.Sanitize("lock the operator's account", err)
+	}
 	tag, err := tx.Exec(ctx, "UPDATE identity.operator SET revoked_at = GREATEST($2, granted_at) WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > $2", account, now)
 	if err != nil {
 		return 0, store.Sanitize("revoke the operator role", err)

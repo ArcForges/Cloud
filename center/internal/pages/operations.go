@@ -97,6 +97,11 @@ func (e *exchange) operatorSession(post bool) (*session.BrowserSession, url.Valu
 		e.fail(err)
 		return nil, nil, false
 	case !operator:
+		// The refusal is audited (once per window and account), then answered.
+		if err = e.h.options.Operator.RefuseAccess(e.r.Context(), e.operatorCaller(resolved), e.route.ID); err != nil {
+			e.fail(err)
+			return nil, nil, false
+		}
 		e.refuse(refuse(arc.PermissionDenied(access.OperatorGrantClass), http.StatusForbidden))
 		return nil, nil, false
 	}

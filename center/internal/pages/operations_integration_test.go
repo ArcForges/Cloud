@@ -291,7 +291,9 @@ func TestACatalogueWideGrantIsConfirmedAsReviewed(t *testing.T) {
 // every route, with the grant's records untouched.
 func TestOnlyAnOperatorReachesTheOperationsPage(t *testing.T) {
 	h := newHarness(t, settings{hosted: true, policy: writePolicy})
-	plain, expired, revoked := h.seedAccount(1), h.seedAccount(1), h.seedAccount(1)
+	plain, expired, revoked, restricted := h.seedAccount(1), h.seedAccount(1), h.seedAccount(1), h.seedAccount(2)
+	// A restricted account holds a live operator row and reaches only its security operations: it is no operator now.
+	h.makeOperator(restricted)
 	for _, row := range []struct {
 		who     account
 		from    string
@@ -304,7 +306,9 @@ VALUES (gen_random_uuid(), $1, `+row.from+`, `+row.until+`, `+row.revoked+`, 'op
 		}
 	}
 	target := h.seedAccount(1)
-	for name, who := range map[string]account{"an account that is no operator": plain, "an operator that expired": expired, "an operator that was revoked": revoked} {
+	accounts := map[string]account{"an account that is no operator": plain, "an operator that expired": expired, "an operator that was revoked": revoked,
+		"an operator whose account is restricted": restricted}
+	for name, who := range accounts {
 		b := h.newBrowser()
 		b.mustSignIn(who)
 		if reply := b.get("/operations/grant"); reply.status != 403 || strings.Contains(reply.text(), "feature-") {
@@ -322,6 +326,24 @@ VALUES (gen_random_uuid(), $1, `+row.from+`, `+row.until+`, `+row.revoked+`, 'op
 	if h.count("SELECT count(*) FROM entitlement.grant") != 0 || h.count("SELECT count(*) FROM entitlement.service_term") != 0 {
 		t.Fatal("a refused operator wrote")
 	}
+	// Each refused account left one audit event for its three requests (once per window and account, so that a stranger cannot grow
+	// the chain), with the actor, the reason and the first action asked for.
+	for name, who := range accounts {
+		var actor string
+		var payload []byte
+		if err := h.migration.QueryRow(context.Background(), "SELECT actor_ref, payload FROM audit.audit_event WHERE event_type = $1 AND target_id = $2 AND reason = 'not_operator'",
+			entitlement.AuditOperatorGrantRefused, who.id.String()).Scan(&actor, &payload); err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if actor != "account:"+who.id.String() || string(payload) != `{"action":"operations.grant","code":"AUTHORIZATION/permission_denied","reason":"not_operator"}` {
+			t.Errorf("%s: %s %s", name, actor, payload)
+		}
+	}
+	if h.audits(entitlement.AuditOperatorGrantRefused) != len(accounts) {
+		t.Errorf("%d refusals audited for %d accounts", h.audits(entitlement.AuditOperatorGrantRefused), len(accounts))
+	}
+	h.verifyAudit()
 }
 
 // TestTheReviewRefusesWhatAGrantRefuses: the bounds of the request come back as the page's text, with nothing written and the form to
@@ -342,14 +364,17 @@ func TestTheReviewRefusesWhatAGrantRefuses(t *testing.T) {
 		status int
 		text   string
 	}{
-		"no feature":                 {func(f url.Values) { f.Del("feature-remote.view") }, 400, "Choose at least one feature."},
-		"a blank reason":             {func(f url.Values) { f.Set("reason", "   ") }, 400, "The reason needs 1 to 512 characters"},
-		"a source with a slash":      {func(f url.Values) { f.Set("source_ref", "a/b") }, 400, "The source reference needs"},
-		"days that are no number":    {func(f url.Values) { f.Set("expires_days", "ten") }, 400, "whole number from 1 to 400"},
-		"zero days":                  {func(f url.Values) { f.Set("expires_days", "0") }, 400, "whole number from 1 to 400"},
-		"days with a leading zero":   {func(f url.Values) { f.Set("expires_days", "030") }, 400, "whole number from 1 to 400"},
-		"401 days":                   {func(f url.Values) { f.Set("expires_days", "401") }, 400, "whole number from 1 to 400"},
-		"an account that is no uuid": {func(f url.Values) { f.Set("account", "nobody") }, 400, "not a valid account identifier"},
+		"no feature":                                 {func(f url.Values) { f.Del("feature-remote.view") }, 400, "Choose at least one feature."},
+		"every feature and one named":                {func(f url.Values) { f.Set("all", "on") }, 400, "Choose every feature or some of them, not both."},
+		"a reason that is not valid text":            {func(f url.Values) { f.Set("reason", "bad \xff byte") }, 400, "The reason is not valid text."},
+		"a source reference that is not valid text":  {func(f url.Values) { f.Set("source_ref", "ticket-\xfe") }, 400, "The source reference is not valid text."},
+		"a blank reason":                             {func(f url.Values) { f.Set("reason", "   ") }, 400, "The reason needs 1 to 512 characters"},
+		"a source with a slash":                      {func(f url.Values) { f.Set("source_ref", "a/b") }, 400, "The source reference needs"},
+		"days that are no number":                    {func(f url.Values) { f.Set("expires_days", "ten") }, 400, "whole number from 1 to 400"},
+		"zero days":                                  {func(f url.Values) { f.Set("expires_days", "0") }, 400, "whole number from 1 to 400"},
+		"days with a leading zero":                   {func(f url.Values) { f.Set("expires_days", "030") }, 400, "whole number from 1 to 400"},
+		"401 days":                                   {func(f url.Values) { f.Set("expires_days", "401") }, 400, "whole number from 1 to 400"},
+		"an account that is no uuid":                 {func(f url.Values) { f.Set("account", "nobody") }, 400, "not a valid account identifier"},
 		"a grant to oneself without a justification": {func(f url.Values) { f.Set("account", uuid(operator.id)) }, 400, "needs a justification"},
 	} {
 		if reply := with(test.change); reply.status != test.status || !strings.Contains(reply.text(), test.text) || !strings.Contains(reply.text(), `href="/api/operations/grant"`) {

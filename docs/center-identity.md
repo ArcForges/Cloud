@@ -611,10 +611,15 @@ arcforges-center admin grant-operator --account <uuid> --reason <text> [--days N
 arcforges-center admin revoke-operator --account <uuid>
 ```
 
-`grant-operator` refuses an account that does not exist, is not active or already holds a live row; both commands append
+`grant-operator` refuses an account that does not exist, is not active, has a reason that is not valid UTF-8 or already holds a live
+row. Both commands lock the account's `identity.user` row (`FOR UPDATE`) before they read or change the operator's rows, so two
+`grant-operator` runs for one account leave one live row (the second finds it and is refused) and a `revoke-operator` is ordered
+against an operator grant in flight (the grant takes the same lock before it reads the role). Both commands append
 `identity.operator.granted` or `.revoked` (actor `operator:cli`) in the transaction that writes the row, with the digest and length of
 the reason and never the reason. The owner's standing comes from the bootstrap and is not ended by `revoke-operator`. The operator
-grant checks the role again in its own transaction, so a revocation that committed in between is honoured.
+grant checks the role again in its own transaction, after taking that lock, so a revocation that committed in between is honoured
+and one that is still open is waited for. An account that is restricted, suspended or deleted is no operator while it is (the row is
+untouched; the role is live again with the account), like any other account it reaches only security operations.
 
 ## Identity policy
 
