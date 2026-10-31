@@ -26,14 +26,18 @@ import (
 //     build a second configuration from a document);
 //   - Run composes the center with the literal Options{} and calls New once.
 //
-// What is not pinned: the inside of package feature (a test pins its behaviour), a catalogue obtained by reflection, a call through
-// an import alias of package feature (the scan looks for the name feature), and non-Go files.
+// This is a scan of the source text for the named forms, not a proof that no catalogue can enter. What is NOT pinned here: the inside
+// of package feature (its tests pin its behaviour), a catalogue obtained by reflection, a call through an import alias of package
+// feature (the scan looks for the name feature), a feature.Configuration literal or a write to the exported fields State, Catalogue
+// and Class of the center's FeatureConfiguration (inside New or after it), a direct feature.DevelopmentFixtures() call, and
+// non-Go files. The composed tests catch the first writes for the hosted state without a plan
+// (TestTheOperatorGrantIsComposedWithThePolicyOfThePlanConfiguration); a late write after New is caught by nothing.
 // A mutant that makes Run inject a catalogue, lets New read the fields in a condition, or builds a configuration beside New is found
 // by the same code that reads the real files.
 
 const serverFile = "internal/server/server.go"
 
-// injectionProblems lists every way the given sources (path relative to center/ to text) could hand a running center a catalogue that
+// injectionProblems lists every form of the list above that the given sources (path relative to center/ to text) could hand a running center a catalogue that
 // its plan configuration did not.
 func injectionProblems(sources map[string]string) []string {
 	var problems []string

@@ -115,7 +115,7 @@ function regExpArguments(source: string): Argument[] {
  * (`4_3`) and the BigInt suffix (`43n`), so that no spelling of a count slips past a matcher that reads only plain digits.
  */
 const numericLiteral =
-  /(?:(?<![\w$.])(?:0[xX][\da-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?)n?|(?<![\w$)\].])\.\d[\d_]*(?:[eE][+-]?\d+)?)(?![\w$])/gu;
+  /(?:(?<![\w$.])(?:0[xX][\da-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d[\d_]*)?)n?|(?<![\w$)\].])\.\d[\d_]*(?:[eE][+-]?\d[\d_]*)?)(?![\w$])/gu;
 
 /** The numeric literals with a value other than 0 and 1 in an expression's code (what quotes hide is a piece, read on its own). */
 function literalNumbers(code: string): string[] {
@@ -296,6 +296,11 @@ test("a hand-written count is found in a template, a string, a concatenation, a 
     template(`^x{0,${sub("4.3e1")}}$`),
     template(`^x{0,${sub(".43e2")}}$`),
     template(`^x{0,${sub(".5e2")}}$`),
+    // Digit separators inside a fraction or an exponent.
+    template(`^x{0,${sub("1e1_0")}}$`),
+    template(`^x{0,${sub(".5e1_0")}}$`),
+    template(`^x{0,${sub("1.0_0e2")}}$`),
+    template(`^x{0,${sub("4_3.0_0")}}$`),
     template(`^x{0,${sub("0.43e2")}}$`),
     template(`^x{0,${sub("1 + .5e2")}}$`),
     'new RegExp("^x{" + 0x2b + "}$", "u")',
@@ -308,6 +313,12 @@ test("a hand-written count is found in a template, a string, a concatenation, a 
   assert.throws(() => regExpArguments('new RegExp("never closed'), /not closed/u);
   // 0 and 1 are the only numbers a bound may state, in whatever spelling.
   assert.deepEqual(literalNumbers("0 + 1 + 0x0 + 0x1 + 0b1 + 1n + 0n + 1e0 + 0_0"), []);
+  assert.deepEqual(literalNumbers("1e1_0 .5e1_0 1.0_0e2 4_3.0_0"), [
+    "1e1_0",
+    ".5e1_0",
+    "1.0_0e2",
+    "4_3.0_0",
+  ]);
   assert.deepEqual(literalNumbers("0x2b 0o53 0b101011 4_3 43n 1e2 4.3e1 .43e2 .5e2 2 10"), [
     "0x2b",
     "0o53",

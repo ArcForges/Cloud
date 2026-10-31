@@ -323,7 +323,9 @@ func TestTheCompositionCallsWhatItMustCall(t *testing.T) {
 
 // runLogsThePlanConfiguration reports that the body of Run holds, as a statement of its own (not inside a condition, a literal function,
 // a go or a defer statement), the call center.logPlanConfiguration(logger) with Run's own logger: a dead call or a call with another
-// logger is no call (C-3: a name-only pin let a call inside `if false` pass).
+// logger is no call (C-3: a name-only pin let a call inside `if false` pass), and the call comes before the select that waits for the
+// end of the center, so the line is logged at the start and not when the center stops. It reads the source: it pins where the call
+// stands, not that the line is written (TestThePlanConfigurationIsLoggedWithoutTheDocument pins the line).
 func runLogsThePlanConfiguration(source string) bool {
 	file, err := parser.ParseFile(token.NewFileSet(), "server.go", source, 0)
 	if err != nil {
@@ -335,6 +337,9 @@ func runLogsThePlanConfiguration(source string) bool {
 			continue
 		}
 		for _, statement := range function.Body.List {
+			if _, waits := statement.(*ast.SelectStmt); waits {
+				return false // the call, if any, stands after the wait: it is not at the start
+			}
 			expression, isExpression := statement.(*ast.ExprStmt)
 			if !isExpression {
 				continue
@@ -378,5 +383,11 @@ func TestRunReallyLogsThePlanConfiguration(t *testing.T) {
 		if runLogsThePlanConfiguration(strings.Replace(source, call, replacement, 1)) {
 			t.Errorf("%s: the pin does not see it", name)
 		}
+	}
+	// The call moved to the end of the center's life (before "center stopped"): the line would be logged on shutdown only.
+	const stopped = "\tlogger.Info(\"center stopped\")\n"
+	moved := strings.Replace(strings.Replace(source, call, "", 1), stopped, call+stopped, 1)
+	if strings.Count(source, stopped) != 1 || moved == source || runLogsThePlanConfiguration(moved) {
+		t.Error("the call moved after the wait: the pin does not see it")
 	}
 }

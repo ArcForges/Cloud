@@ -317,6 +317,37 @@ func TestAPlanIDAndAPlanNameAreBoundedAtSixtyFour(t *testing.T) {
 	}
 }
 
+// TestTheOtherBoundsOfTheCatalogueAreExact (tests-5): the notice (256), the document (65536 bytes), the version of a fixture (120
+// characters after dev-) and the groups of a plan ID (8), each from both sides.
+func TestTheOtherBoundsOfTheCatalogueAreExact(t *testing.T) {
+	fixtureJSON := strings.Replace(strings.Replace(strings.Replace(validProduction, `"fixture":false`, `"fixture":true,"notice":"Illustrative."`, 1), `"2026-q4"`, `"dev-2026-q4"`, 1),
+		`"Plan under test"`, `"Fixture plan (illustrative)","illustrativePriceUsd":5`, 1)
+	fixture := func(old, new string) string { return strings.Replace(fixtureJSON, old, new, 1) }
+	plain := func(old, new string) string { return strings.Replace(validProduction, old, new, 1) }
+	for _, item := range []struct {
+		name     string
+		document string
+		want     string
+	}{
+		{"a notice of 256", fixture(`"Illustrative."`, `"`+strings.Repeat("n", 256)+`"`), ""},
+		{"a notice of 257", fixture(`"Illustrative."`, `"`+strings.Repeat("n", 257)+`"`), "a fixture carries its illustrative notice"},
+		{"a document of exactly the bound", validProduction + strings.Repeat(" ", MaxCatalogueBytes-len(validProduction)), ""},
+		{"a document one byte over the bound", validProduction + strings.Repeat(" ", MaxCatalogueBytes+1-len(validProduction)), "empty or longer than"},
+		{"a fixture version of 120 after dev-", fixture(`"dev-2026-q4"`, `"dev-`+strings.Repeat("v", 120)+`"`), ""},
+		{"a fixture version of 121 after dev-", fixture(`"dev-2026-q4"`, `"dev-`+strings.Repeat("v", 121)+`"`), "a fixture's version starts with dev-"},
+		{"a plan ID of 8 groups", plain(`"plan-test"`, `"a-b-c-d-e-f-g-h"`), ""},
+		{"a plan ID of 9 groups", plain(`"plan-test"`, `"a-b-c-d-e-f-g-h-i"`), "a plan ID is malformed or repeated"},
+	} {
+		_, err := ParseCatalogue([]byte(item.document), ClassDevelopment)
+		switch {
+		case item.want == "" && err != nil:
+			t.Errorf("%s: %v", item.name, err)
+		case item.want != "" && (err == nil || !strings.Contains(err.Error(), item.want)):
+			t.Errorf("%s: %v, want %q", item.name, err, item.want)
+		}
+	}
+}
+
 // TestSixteenPlansAreAcceptedAndSeventeenAreTooMany: the bound of the plans, from both sides.
 func TestSixteenPlansAreAcceptedAndSeventeenAreTooMany(t *testing.T) {
 	withPlans := func(count int) string {
