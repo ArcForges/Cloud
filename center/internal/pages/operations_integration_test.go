@@ -188,6 +188,13 @@ func TestAnOperatorGrantsThroughThePageWithAFreshPasskey(t *testing.T) {
 	if review.status != 200 {
 		t.Fatalf("the review: %d %s", review.status, review.text())
 	}
+	// The review page cannot work without its script: it says so until the script runs (js-3), and with scripting off it says what to do.
+	if !regexp.MustCompile(`<p id="needs-script"[^>]*>[^<]+</p>`).MatchString(review.text()) || !strings.Contains(review.text(), "<noscript><p>Confirming the grant needs JavaScript.") {
+		t.Fatalf("the review page does not say that it needs its script: %s", review.text())
+	}
+	if strings.Contains(form.text(), `id="needs-script"`) {
+		t.Fatalf("the request form needs no script but says it does: %s", form.text())
+	}
 	fields := hiddenFields(t, review.text())
 	targetHash := regexp.MustCompile(`data-step-up-target="([0-9a-f]{64})"`).FindStringSubmatch(review.text())
 	if targetHash == nil || !strings.Contains(review.text(), `data-step-up-class="center.operatorGrant"`) || fields.Get("features") != "push,remote.view" ||

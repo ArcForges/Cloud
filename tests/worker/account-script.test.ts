@@ -1010,6 +1010,7 @@ test("a page that cannot work without its script says so until the script runs (
     ["sign-out", [...common, "sign-out"]],
     ["register", [...common, "register", "create-passkey"]],
     ["passkeys", common],
+    ["operations-review", common],
   ] as const) {
     const shown = page(name, [...ids, "needs-script"]);
     if (name === "register") shown.elements.set("register", creationForm());

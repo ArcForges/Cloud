@@ -110,11 +110,21 @@ function regExpArguments(source: string): Argument[] {
   return found;
 }
 
-/** The literal numbers above 1 in an expression's code (what quotes hide is a piece, read on its own). */
+/**
+ * A numeric literal as one token: hexadecimal, octal and binary integers, a decimal with a fraction or an exponent, digit separators
+ * (`4_3`) and the BigInt suffix (`43n`), so that no spelling of a count slips past a matcher that reads only plain digits.
+ */
+const numericLiteral =
+  /(?<![\w$.])(?:0[xX][\da-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?)n?(?![\w$])/gu;
+
+/** The numeric literals with a value other than 0 and 1 in an expression's code (what quotes hide is a piece, read on its own). */
 function literalNumbers(code: string): string[] {
-  return [...code.matchAll(/(?<![\w$.])\d+(?![\w$])/gu)]
+  return [...code.matchAll(numericLiteral)]
     .map((found) => found[0])
-    .filter((value) => Number(value) > 1);
+    .filter((value) => {
+      const number = Number(value.replaceAll("_", "").replace(/n$/u, ""));
+      return !(number === 0 || number === 1);
+    });
 }
 
 /** The text of an argument with every string and template literal cut out (a template's substitutions stay). */
@@ -276,8 +286,35 @@ test("a hand-written count is found in a template, a string, a concatenation, a 
     template(`^x{0,${sub("hold(limit)")}}$`),
     'new RegExp("^x{" + 43 + "}$", "u")',
     'new RegExp(["^x{", 43, "}$"].join(""), "u")',
+    // The same count in the other spellings of a number.
+    template(`^x{0,${sub("0x2b")}}$`),
+    template(`^x{0,${sub("0o53")}}$`),
+    template(`^x{0,${sub("0b101011")}}$`),
+    template(`^x{0,${sub("4_3")}}$`),
+    template(`^x{0,${sub("43n")}}$`),
+    template(`^x{0,${sub("1e2")}}$`),
+    template(`^x{0,${sub("4.3e1")}}$`),
+    'new RegExp("^x{" + 0x2b + "}$", "u")',
+    'new RegExp("^x{" + 4_3 + "}$", "u")',
+    'new RegExp("^x{" + 43n + "}$", "u")',
+    'new RegExp("^x{" + 1e2 + "}$", "u")',
   ]) {
     assert(violations(`${generated}${bad}`).length > 0, bad);
   }
   assert.throws(() => regExpArguments('new RegExp("never closed'), /not closed/u);
+  // 0 and 1 are the only numbers a bound may state, in whatever spelling.
+  assert.deepEqual(literalNumbers("0 + 1 + 0x0 + 0x1 + 0b1 + 1n + 0n + 1e0 + 0_0"), []);
+  assert.deepEqual(literalNumbers("0x2b 0o53 0b101011 4_3 43n 1e2 4.3e1 2 10"), [
+    "0x2b",
+    "0o53",
+    "0b101011",
+    "4_3",
+    "43n",
+    "1e2",
+    "4.3e1",
+    "2",
+    "10",
+  ]);
+  // A name that ends in a digit, a member and a longer token are no numbers of their own.
+  assert.deepEqual(literalNumbers("limit2 + a.9 + x_43"), []);
 });

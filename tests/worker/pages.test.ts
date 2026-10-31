@@ -281,7 +281,16 @@ test("a route belongs to its own surface: the operations page is not the pages' 
         env,
       );
       assert.equal(reply.status, 404, `${flag} ${row.path}`);
-      assert.equal(await reply.text(), await unknown.text());
+      const unknownText = await unknown.text();
+      assert.equal(await reply.text(), unknownText);
+      // A method the route lacks is not told apart either: a disabled surface is answered 404 before the method is looked at, never
+      // 405 (a path the Worker knows).
+      const lacking = await routeRequest(
+        new Request(`https://proof.example.test/api${row.path}`, { method: "DELETE" }),
+        env,
+      );
+      assert.equal(lacking.status, 404, `${flag} DELETE ${row.path}`);
+      assert.equal(await lacking.text(), unknownText, `${flag} DELETE ${row.path}`);
     }
     assert.equal(seen.length, 0, flag);
     assert.equal(keys.length, 0, flag);

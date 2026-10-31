@@ -5,7 +5,10 @@
 // rather than the deployment. Wrangler does not inherit `vars` into a named environment, so each environment is checked on
 // its own.
 import assert from "node:assert/strict";
-import { edgeRateLimitPeriodSeconds } from "../../worker/tables/center-tables.generated.ts";
+import {
+  edgeRateLimitPeriodSeconds,
+  surfaceNames,
+} from "../../worker/tables/center-tables.generated.ts";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -123,7 +126,8 @@ test("the configuration rule refuses a missing or invalid mode or base URL", () 
 // the identity surface they call; wherever identity is on, the Worker's ALLOWED_ORIGIN is the origin of the center's public base
 // URL (the one origin browser sessions are bound to); and no environment carries a bootstrap value (the proof bootstrap's digest and
 // expiry are protected-dispatch inputs, never committed).
-const surfaces = new Set(["identity", "pages"]);
+// The known names are the generated table's, so a surface the center admits is admitted here and a new one is a decision of this test.
+const surfaces = new Set<string>(surfaceNames);
 
 function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
   const value = vars?.FLAGSHIP_SURFACES;
@@ -134,6 +138,8 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
     return ["FLAGSHIP_SURFACES is not a comma-separated list of known surface names"];
   if (names.includes("pages") && !names.includes("identity"))
     return ["the pages surface needs the identity surface"];
+  if (names.includes("operations") && !(names.includes("identity") && names.includes("pages")))
+    return ["the operations surface needs the identity and pages surfaces"];
   if (names.includes("identity")) {
     const base = vars?.ARCFORGES_CENTER_PUBLIC_BASE_URL;
     const origin =
@@ -183,6 +189,9 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
     "identity,identity",
     " identity",
     "operations",
+    "operations,identity",
+    "operations,pages",
+    "operations,x",
     "none",
   ])
     assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: value }).length, 1, value);
@@ -198,6 +207,24 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages" }), []);
   assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "pages,identity" }), []);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "pages" }).length, 1);
+  // The operations surface (the operator grant's page) needs both; it is accepted with them, in any order, and is the only name that
+  // is not enabled in a checked-in environment (production carries none, the acceptance environment keeps identity,pages).
+  assert.deepEqual(
+    surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,operations" }),
+    [],
+  );
+  assert.deepEqual(
+    surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "operations,pages,identity" }),
+    [],
+  );
+  assert.deepEqual([...surfaces].sort(), ["identity", "operations", "pages"]);
+  for (const [name, environment] of environments)
+    assert(
+      !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+        .split(",")
+        .includes("operations"),
+      `wrangler.json environment ${name} enables the operations surface`,
+    );
 });
 
 // AF-CTR-03 (F17): the Worker's rate_limited reply advises a retry after the generated edge period, which must be the surface
