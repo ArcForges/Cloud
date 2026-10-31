@@ -4,16 +4,20 @@ package entitlement_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/dbtest"
 	"github.com/ArcForges/Cloud/center/internal/entitlement"
 	"github.com/ArcForges/Cloud/center/internal/feature"
+	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
 // Fix round 2 of the operator grant: the window of the stranger audit, the raw account text, the deadlock of two grants, and a
@@ -173,5 +177,40 @@ func TestAStrangerIsBoundedWhateverThePolicyIs(t *testing.T) {
 				t.Fatalf("the operator's refusal: %q, want %q", refusal.Reason, item.reason)
 			}
 		})
+	}
+}
+
+// TestAGrantStopsAfterFourAttemptsOfADeadlockVictim pins the documented bound of four (tests-1): the evidence's consumption, which the
+// test injects, ends every attempt as a deadlock victim, so no race is needed to reach the bound. Four attempts are made, none
+// more and none fewer, the answer is the store's contention (RESOURCE/overloaded; the same command may be sent again), and
+// nothing is written or spent. The Service writers share the constant; TestAWriterThatNeverWinsTheRaceFailsClosedWithATypedError
+// counts their attempts.
+func TestAGrantStopsAfterFourAttemptsOfADeadlockVictim(t *testing.T) {
+	f := newGrantFixture(t, development)
+	user, session := f.operatorAccount()
+	call := f.call(user, session, f.request(f.db.Account(1), "remote.view"), true)
+	calls := 0
+	call.Consume = func(context.Context, pgx.Tx, [32]byte, time.Time) error {
+		calls++
+		return &store.Error{Operation: "consume the evidence", Kind: store.ErrContention, SQLState: "40P01"}
+	}
+	_, err := f.operator.Grant(context.Background(), call)
+	if calls != 4 {
+		t.Fatalf("%d attempts, the documented bound is four", calls)
+	}
+	if !errors.Is(err, store.ErrContention) {
+		t.Fatalf("the answer after the last attempt: %v", err)
+	}
+	if f.written() != 0 || f.consumed() != 0 {
+		t.Fatal("a grant that never got through wrote or spent evidence")
+	}
+	// A failure that is not a deadlock victim is not retried at all.
+	calls = 0
+	call.Consume = func(context.Context, pgx.Tx, [32]byte, time.Time) error {
+		calls++
+		return &store.Error{Operation: "consume the evidence", Kind: store.ErrUnavailable, SQLState: "57P01"}
+	}
+	if _, err = f.operator.Grant(context.Background(), call); err == nil || calls != 1 {
+		t.Fatalf("an unavailable store: %d attempts, %v", calls, err)
 	}
 }

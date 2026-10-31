@@ -505,17 +505,20 @@ func TestTwoTermsEndingTogetherKeepTheLaterGrace(t *testing.T) {
 // TestTheLastActivationOfOneInstantIsTheGreaterVersion (resolver-2, R09): activations of one instant are ordered by version.
 func TestTheLastActivationOfOneInstantIsTheGreaterVersion(t *testing.T) {
 	records, definitions := baseRecords(), baseDefinitions()
-	records.Activations = []DefinitionsActivation{{Version: "bundle-a", ActivatedAt: 0}, {Version: "bundle-b", ActivatedAt: 0}}
-	definitions.Version = "bundle-b"
-	if err := Validate(records, definitions); err != nil {
-		t.Fatal(err)
-	}
-	definitions.Version = "bundle-a"
-	if err := Validate(records, definitions); err == nil {
-		t.Fatal("the earlier version of a tie is no last activation")
-	}
-	if got := LastActivation(records).Version; got != "bundle-b" {
-		t.Fatalf("%q", got)
+	// Both orders of the two records: the version decides the tie, not the order the store returned them in.
+	for _, order := range [][]DefinitionsActivation{{{Version: "bundle-a", ActivatedAt: 0}, {Version: "bundle-b", ActivatedAt: 0}}, {{Version: "bundle-b", ActivatedAt: 0}, {Version: "bundle-a", ActivatedAt: 0}}} {
+		records.Activations = order
+		definitions.Version = "bundle-b"
+		if err := Validate(records, definitions); err != nil {
+			t.Fatalf("%v: %v", order, err)
+		}
+		definitions.Version = "bundle-a"
+		if err := Validate(records, definitions); err == nil {
+			t.Fatalf("%v: the earlier version of a tie is no last activation", order)
+		}
+		if got := LastActivation(records).Version; got != "bundle-b" {
+			t.Fatalf("%v: %q", order, got)
+		}
 	}
 }
 
@@ -611,5 +614,85 @@ func TestEveryAdmissionRefusalIsReachedByItsOwnDefectInItsOrder(t *testing.T) {
 		if got := ValidateIssue(request); !strings.HasPrefix(got, pair.want) {
 			t.Errorf("two defects: %q, want %q", got, pair.want)
 		}
+	}
+}
+
+// ---- fix round 3: the merge and truncation of the terms, and the ends of the token ranges --------------------------------------------
+
+// TestAMergedRunKeepsTheGraceOfTheTermThatHasOne: of two terms that end together, the one without a grace does not take the grace
+// away from the one that has it, whatever the order (resolve.go latest(): the nil cases).
+func TestAMergedRunKeepsTheGraceOfTheTermThatHasOne(t *testing.T) {
+	withGrace := ServiceTermFact{TermID: "t1", Kind: TermSubscription, StartsAt: 0, EndsAt: 100, GraceEndsAt: microsPtr(150)}
+	without := ServiceTermFact{TermID: "t2", Kind: TermSubscription, StartsAt: 50, EndsAt: 100}
+	for name, terms := range map[string][]ServiceTermFact{"the grace first": {withGrace, without}, "the grace second": {without, withGrace}} {
+		if got := line(evaluate(t, RecordSet{Terms: terms}, 130), "service="); got != "service=Grace|100|150|0" {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+}
+
+// TestTheLaterGraceWinsWhateverTermStartsFirst: the maximum of the graces, not the one of the term that starts first.
+func TestTheLaterGraceWinsWhateverTermStartsFirst(t *testing.T) {
+	records := RecordSet{Terms: []ServiceTermFact{
+		{TermID: "t1", Kind: TermSubscription, StartsAt: 0, EndsAt: 100, GraceEndsAt: microsPtr(120)},
+		{TermID: "t2", Kind: TermSubscription, StartsAt: 50, EndsAt: 100, GraceEndsAt: microsPtr(150)}}}
+	if got := line(evaluate(t, records, 130), "service="); got != "service=Grace|100|150|0" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// TestTheEarliestActionOfATermDecides: of two actions on one term the earliest effective instant decides, wherever it stands in the list.
+func TestTheEarliestActionOfATermDecides(t *testing.T) {
+	term := []ServiceTermFact{{TermID: "t1", Kind: TermSubscription, StartsAt: 0, EndsAt: 100}}
+	actions := []TermActionFact{{TermID: "t1", Kind: ActionRevoke, EffectiveAt: 20, RecordedAt: 1}, {TermID: "t1", Kind: ActionSupersede, EffectiveAt: 60, RecordedAt: 2}}
+	for name, order := range map[string][]TermActionFact{"the earlier first": actions, "the earlier last": {actions[1], actions[0]}} {
+		if got := line(evaluate(t, RecordSet{Terms: term, TermActions: order}, 40), "service="); got != "service=Ended|20|-|0" {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+}
+
+// TestAnActionAfterTheEndOfTheTermDoesNotExtendIt.
+func TestAnActionAfterTheEndOfTheTermDoesNotExtendIt(t *testing.T) {
+	records := RecordSet{Terms: []ServiceTermFact{{TermID: "t1", Kind: TermSubscription, StartsAt: 0, EndsAt: 30}}, TermActions: []TermActionFact{{TermID: "t1", Kind: ActionRevoke, EffectiveAt: 50, RecordedAt: 0}}}
+	if got := line(evaluate(t, records, 40), "service="); got != "service=Ended|30|-|0" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// TestAGraceOfATermThatEndsEarlierIsNotTheGraceOfTheRun: only a term that ends where the run ends contributes its grace.
+func TestAGraceOfATermThatEndsEarlierIsNotTheGraceOfTheRun(t *testing.T) {
+	earlier := ServiceTermFact{TermID: "t1", Kind: TermSubscription, StartsAt: 0, EndsAt: 50, GraceEndsAt: microsPtr(60)}
+	longer := ServiceTermFact{TermID: "t2", Kind: TermSubscription, StartsAt: 40, EndsAt: 100}
+	if got := line(evaluate(t, RecordSet{Terms: []ServiceTermFact{earlier, longer}}, 120), "service="); got != "service=Ended|100|-|0" {
+		t.Fatalf("the earlier term first: %q", got)
+	}
+	outer := ServiceTermFact{TermID: "t3", Kind: TermSubscription, StartsAt: 0, EndsAt: 100}
+	inner := ServiceTermFact{TermID: "t4", Kind: TermSubscription, StartsAt: 40, EndsAt: 70, GraceEndsAt: microsPtr(80)}
+	if got := line(evaluate(t, RecordSet{Terms: []ServiceTermFact{outer, inner}}, 120), "service="); got != "service=Ended|100|-|0" {
+		t.Fatalf("the shorter term inside: %q", got)
+	}
+}
+
+// TestTheEndsOfTheTokenRangesAndTheFirstAstralCharacterAreCounted: the last letter of each ASCII range of the token rules and the
+// first code point outside the basic plane (two UTF-16 units).
+func TestTheEndsOfTheTokenRangesAndTheFirstAstralCharacterAreCounted(t *testing.T) {
+	for name, ok := range map[string]bool{
+		"IsKey z":              IsKey("cloud.zip.max"),
+		"IsKey a":              IsKey("a"),
+		"IsKey 9":              IsKey("9"),
+		"IsIdentifier Z":       IsIdentifier("Zone:Z"),
+		"IsOpaqueReference Z":  IsOpaqueReference("TICKET-Z"),
+		"IsActor 64 x U+10000": IsActor(strings.Repeat("\U00010000", 64)),
+	} {
+		if !ok {
+			t.Errorf("%s is refused", name)
+		}
+	}
+	if IsActor(strings.Repeat("\U00010000", 65)) {
+		t.Error("65 characters of U+10000 are 130 UTF-16 units")
+	}
+	if IsKey("Z") || IsKey("cloud.{") || IsIdentifier("a[") || IsIdentifier("a@") {
+		t.Error("a character just outside a range is accepted")
 	}
 }

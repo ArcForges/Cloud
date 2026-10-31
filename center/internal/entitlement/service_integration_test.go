@@ -233,6 +233,10 @@ func TestAWriterThatNeverWinsTheRaceFailsClosedWithATypedError(t *testing.T) {
 	request.AccountID = s.account
 	_, _, err := s.service.IssueGrant(context.Background(), request)
 	wantRefusal(t, err, RefusedConcurrentUpdate)
+	// The documented bound: four attempts, each of which the rival beat (the hook runs once before every commit decision).
+	if bump != 4 {
+		t.Fatalf("%d attempts, the documented bound is four", bump)
+	}
 	if rows := s.db.count("SELECT count(*) FROM entitlement.grant WHERE source_ref = 'mine'"); rows != 0 {
 		t.Fatalf("a writer that never won wrote its grant")
 	}

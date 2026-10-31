@@ -296,7 +296,9 @@ func TestTheBoundsOfAnOperatorGrantRequest(t *testing.T) {
 		{"a suspended account", func(r *entitlement.OperatorRequest) { r.Account = suspended.String() }, "STATE/invalid_state", "account_state"},
 		{"a deleted account", func(r *entitlement.OperatorRequest) { r.Account = deleted.String() }, "STATE/invalid_state", "account_state"},
 	}
+	wantReasons := map[string]int{}
 	for _, item := range cases {
+		wantReasons[item.reason]++
 		t.Run(item.name, func(t *testing.T) {
 			request := f.request(target, "remote.view")
 			item.mutate(&request)
@@ -313,9 +315,14 @@ func TestTheBoundsOfAnOperatorGrantRequest(t *testing.T) {
 			}
 		})
 	}
-	// Every refusal is audited, with a closed reason.
+	// Every refusal is audited, with the closed reason of its kind (the column of the table).
 	if got := f.audits(entitlement.AuditOperatorGrantRefused, ""); got != len(cases) {
 		t.Fatalf("%d refusals audited of %d", got, len(cases))
+	}
+	for reason, want := range wantReasons {
+		if got := f.audits(entitlement.AuditOperatorGrantRefused, reason); got != want {
+			t.Errorf("%d refusals audited with the reason %s, want %d", got, reason, want)
+		}
 	}
 	// 400 days exactly is the bound of a non-production configuration.
 	atBound := f.request(target, "remote.view")
@@ -434,6 +441,10 @@ func TestAReusedSourceReferenceIsRefusedAndWritesNothing(t *testing.T) {
 	wantArc(t, err, "CONFLICT/already_exists")
 	if f.written() != before {
 		t.Fatal("a refused grant wrote")
+	}
+	// The refusal is audited with its closed reason.
+	if got := f.audits(entitlement.AuditOperatorGrantRefused, "already_granted"); got != 1 {
+		t.Fatalf("%d refusals audited as already_granted", got)
 	}
 }
 
