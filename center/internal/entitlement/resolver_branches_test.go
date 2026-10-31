@@ -467,3 +467,149 @@ func TestAReplayIsTheSameIssuanceOnlyWhenEveryComparedFieldIsTheSame(t *testing.
 		}
 	}
 }
+
+// ---- fix round 2: the branches the first table left open ------------------------------------------------------------------------
+
+// TestAMaxQuotaTakesTheLargestEvenWhenItIsNotTheLastGrant (resolver-1, M30): the largest grant is the first by identifier, so a
+// combination that kept the last one would answer 3.
+func TestAMaxQuotaTakesTheLargestEvenWhenItIsNotTheLastGrant(t *testing.T) {
+	content := evaluate(t, RecordSet{Grants: []Grant{quotaGrant("g1", "cloud.devices.max", 7, 0, SourceSubscription, 0, nil), quotaGrant("g2", "cloud.devices.max", 3, 0, SourceStorageAddOn, 0, nil)}}, 1)
+	if got := line(content, "quota=cloud.devices.max|"); got != "quota=cloud.devices.max|7|Available|g1:Subscription:7,g2:StorageAddOn:3" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// TestATermRevokedAtItsOwnStartIsNoServiceAtAll (resolver-1, M20): an interval that ends where it starts is no interval, so the
+// account has no service, not an ended one.
+func TestATermRevokedAtItsOwnStartIsNoServiceAtAll(t *testing.T) {
+	records := RecordSet{Terms: []ServiceTermFact{{TermID: "t1", Kind: TermSubscription, StartsAt: 10, EndsAt: 100}},
+		TermActions: []TermActionFact{{TermID: "t1", Kind: ActionRevoke, EffectiveAt: 10, RecordedAt: 0}}}
+	if got := line(evaluate(t, records, 50), "service="); got != "service=None|-|-|0" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// TestTwoTermsEndingTogetherKeepTheLaterGrace (resolver-2, M51): of two terms that end at one instant, the run keeps the later grace.
+func TestTwoTermsEndingTogetherKeepTheLaterGrace(t *testing.T) {
+	records := RecordSet{Terms: []ServiceTermFact{
+		{TermID: "t1", Kind: TermSubscription, StartsAt: 0, EndsAt: 100, GraceEndsAt: microsPtr(150)},
+		{TermID: "t2", Kind: TermSubscription, StartsAt: 50, EndsAt: 100, GraceEndsAt: microsPtr(120)}}}
+	if got := line(evaluate(t, records, 130), "service="); got != "service=Grace|100|150|0" {
+		t.Fatalf("%q", got)
+	}
+	if got := line(evaluate(t, RecordSet{Terms: []ServiceTermFact{records.Terms[1], records.Terms[0]}}, 130), "service="); got != "service=Grace|100|150|0" {
+		t.Fatalf("in the other order: %q", got)
+	}
+}
+
+// TestTheLastActivationOfOneInstantIsTheGreaterVersion (resolver-2, R09): activations of one instant are ordered by version.
+func TestTheLastActivationOfOneInstantIsTheGreaterVersion(t *testing.T) {
+	records, definitions := baseRecords(), baseDefinitions()
+	records.Activations = []DefinitionsActivation{{Version: "bundle-a", ActivatedAt: 0}, {Version: "bundle-b", ActivatedAt: 0}}
+	definitions.Version = "bundle-b"
+	if err := Validate(records, definitions); err != nil {
+		t.Fatal(err)
+	}
+	definitions.Version = "bundle-a"
+	if err := Validate(records, definitions); err == nil {
+		t.Fatal("the earlier version of a tie is no last activation")
+	}
+	if got := LastActivation(records).Version; got != "bundle-b" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// TestAnAllowanceThatLapsedExplainsItselfByTheServiceState (resolver-2, E11).
+func TestAnAllowanceThatLapsedExplainsItselfByTheServiceState(t *testing.T) {
+	until := Micros(10)
+	grant := allowanceGrant("g1", 1)
+	grant.EffectiveUntil = &until
+	records := RecordSet{Grants: []Grant{grant}, Terms: []ServiceTermFact{{TermID: "t1", Kind: TermSubscription, StartsAt: 0, EndsAt: 15}}}
+	if got := line(evaluate(t, records, 20), "allow=ai.capacity|"); got != "allow=ai.capacity|0|SubscriptionExpired|||" {
+		t.Fatalf("%q", got)
+	}
+	// Revoked is not lapsed.
+	records.Revocations = []Revocation{{RevocationID: "r1", GrantID: "g1", ReasonCode: "x", EffectiveFrom: 5, IssuedByActor: "operator"}}
+	if got := line(evaluate(t, records, 20), "allow=ai.capacity|"); got != "allow=ai.capacity|0|NoEntitlement|||" {
+		t.Fatalf("revoked: %q", got)
+	}
+}
+
+// TestAValidAllowanceInGraceIsPaymentGrace (resolver-2, E13): the grant is valid, the paid term is not active.
+func TestAValidAllowanceInGraceIsPaymentGrace(t *testing.T) {
+	records := RecordSet{Grants: []Grant{allowanceGrant("g1", 1)}, Terms: []ServiceTermFact{{TermID: "t1", Kind: TermSubscription, StartsAt: 0, EndsAt: 15, GraceEndsAt: microsPtr(30)}}}
+	if got := line(evaluate(t, records, 20), "allow=ai.capacity|"); got != "allow=ai.capacity|0|PaymentGrace|plan-g1|g1|" {
+		t.Fatalf("%q", got)
+	}
+	records.Terms[0].GraceEndsAt = nil
+	if got := line(evaluate(t, records, 20), "allow=ai.capacity|"); got != "allow=ai.capacity|0|SubscriptionExpired|plan-g1|g1|" {
+		t.Fatalf("an ended term: %q", got)
+	}
+}
+
+// TestAValidQuotaInGraceStaysAvailable (resolver-2, E16): a quota keeps its limit and its reason while the service is in grace; the
+// shape of the persistence suites' Rich() fixture (term [0,30d) with grace to 33d, resolved at 32d).
+func TestAValidQuotaInGraceStaysAvailable(t *testing.T) {
+	records := RecordSet{Grants: []Grant{quotaGrant("g1", "cloud.storage.bytes", 5, 0, SourceSubscription, 0, nil)},
+		Terms: []ServiceTermFact{{TermID: "t1", Kind: TermSubscription, StartsAt: 0, EndsAt: 30 * 86_400_000_000, GraceEndsAt: microsPtr(33 * 86_400_000_000)}}}
+	content := evaluate(t, records, 32*86_400_000_000)
+	if got := line(content, "quota=cloud.storage.bytes|"); got != "quota=cloud.storage.bytes|5|Available|g1:Subscription:5" {
+		t.Fatalf("%q", got)
+	}
+	if got := line(content, "service="); !strings.HasPrefix(got, "service=Grace|") {
+		t.Fatalf("%q", got)
+	}
+}
+
+// TestEveryAdmissionRefusalIsReachedByItsOwnDefectInItsOrder (resolver-2): the eleven texts of ValidateIssue, one by one, and the
+// first rule of the order deciding when a request breaks two.
+func TestEveryAdmissionRefusalIsReachedByItsOwnDefectInItsOrder(t *testing.T) {
+	good := func() IssueGrantRequest {
+		return IssueGrantRequest{AccountID: "acc", Kind: KindCapability, Subject: "cloud.sync", Value: CapabilityValue{}, Source: SourceSubscription, SourceRef: sp("order-1"), EffectiveFrom: 0, IssuedByActor: "commerce"}
+	}
+	if got := ValidateIssue(good()); got != "" {
+		t.Fatalf("the base request is refused: %q", got)
+	}
+	cases := []struct {
+		name string
+		do   func(*IssueGrantRequest)
+		want string
+	}{
+		{"account", func(r *IssueGrantRequest) { r.AccountID = "a b" }, "The workspace identifier is malformed."},
+		{"kind", func(r *IssueGrantRequest) { r.Kind = GrantKind(9) }, "The grant kind is not one of capability, quota or allowance."},
+		{"source", func(r *IssueGrantRequest) { r.Source = GrantSource(9) }, "The grant source is not in the closed source vocabulary."},
+		{"subject", func(r *IssueGrantRequest) { r.Subject = "Bad" }, "The grant subject is malformed."},
+		{"no value", func(r *IssueGrantRequest) { r.Value = nil }, "The grant value does not match its kind or is out of range."},
+		{"value of another kind", func(r *IssueGrantRequest) { r.Value = QuotaValue{} }, "The grant value does not match its kind or is out of range."},
+		{"actor", func(r *IssueGrantRequest) { r.IssuedByActor = "" }, "A grant must name the actor or audited action that issued it."},
+		{"end at start", func(r *IssueGrantRequest) { r.EffectiveUntil = microsPtr(0) }, "A grant must end after it starts."},
+		{"source reference", func(r *IssueGrantRequest) { r.SourceRef = sp("a b") }, "The source reference must be an opaque reference"},
+		{"no source reference", func(r *IssueGrantRequest) { r.SourceRef = nil }, "Every grant names the transaction or audited action that originated it."},
+		{"administrative without a reason", func(r *IssueGrantRequest) { r.Source = SourceAdminGrant }, "An administrative, compensation or migration grant requires a reason."},
+		{"administrative with a blank reason", func(r *IssueGrantRequest) { r.Source, r.Reason = SourceAdminGrant, sp("  ") }, "An administrative, compensation or migration grant requires a reason."},
+		{"ordinary with a malformed reason", func(r *IssueGrantRequest) { r.Reason = sp("bad\nreason") }, "The reason is malformed."},
+	}
+	for _, item := range cases {
+		request := good()
+		item.do(&request)
+		if got := ValidateIssue(request); !strings.HasPrefix(got, item.want) {
+			t.Errorf("%s: %q, want %q", item.name, got, item.want)
+		}
+	}
+	// Two defects: the earlier rule of the order decides.
+	for _, pair := range []struct {
+		first, second func(*IssueGrantRequest)
+		want          string
+	}{
+		{cases[0].do, cases[1].do, cases[0].want}, {cases[1].do, cases[2].do, cases[1].want}, {cases[2].do, cases[3].do, cases[2].want},
+		{cases[3].do, cases[4].do, cases[3].want}, {cases[4].do, cases[6].do, cases[4].want}, {cases[6].do, cases[7].do, cases[6].want},
+		{cases[7].do, cases[8].do, cases[7].want}, {cases[8].do, cases[9].do, cases[8].want}, {cases[9].do, cases[10].do, cases[9].want},
+	} {
+		request := good()
+		pair.second(&request)
+		pair.first(&request)
+		if got := ValidateIssue(request); !strings.HasPrefix(got, pair.want) {
+			t.Errorf("two defects: %q, want %q", got, pair.want)
+		}
+	}
+}

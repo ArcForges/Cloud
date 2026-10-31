@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// The parity corpus: every resolver input and output, and every grant admission, the C# suites of the Entitlement module reach,
-// recorded by tests/ArcForges.Cloud.Tests/Entitlement/ResolverVectorsTests.cs (EVIDENCE: REAL logic, recorded data).
+// The parity corpus: every resolver input and output, and every grant admission, that the six covered classes of the C# suites of the
+// Entitlement module reach (the persistence suites are not recorded; resolver_branches_test.go pins the branches they reach), recorded by tests/ArcForges.Cloud.Tests/Entitlement/ResolverVectorsTests.cs (EVIDENCE: REAL logic, recorded data).
 const corpusPath = "testdata/csharp-resolver-vectors.json"
 
 // The vectors of the committed corpus, as docs/entitlement-resolver.md states them: a truncated or a padded file is a change of the

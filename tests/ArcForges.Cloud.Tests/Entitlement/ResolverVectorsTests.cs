@@ -52,8 +52,10 @@ public sealed class ResolverVectorsTests
     /// The files of this folder that call the resolver or the admission directly, outside the covered suites, each with the reason it
     /// is not a covered one. A file that calls them and is neither covered nor listed here fails the source scan, and a listed file
     /// that no longer calls them fails it too. The persistence suites test the durable D1 store and its codec: they build snapshots
-    /// with the resolver to commit them through the store, over records the covered suites already reach, so a vector from them would
-    /// repeat one the corpus holds; the Go store tests (service_integration_test.go, over PostgreSQL) port what they show.
+    /// with the resolver to commit them through the store. Their inputs are NOT in the corpus, which holds the six covered classes
+    /// only: some of their shapes (the Rich() fixture of the codec tests, a term in grace resolved after its end) reach resolver
+    /// branches no covered suite does, and the Go tests pin those branches directly (resolver_branches_test.go); the Go store tests
+    /// (service_integration_test.go, over PostgreSQL) port what the persistence suites show.
     /// </summary>
     private static readonly Dictionary<string, string> DirectCallsAllowed = new(StringComparer.Ordinal)
     {
@@ -62,7 +64,7 @@ public sealed class ResolverVectorsTests
         ["D1EntitlementStoreTests.cs"] = "persistence: commits snapshots built with the resolver through the durable store and its fences",
         ["D1EntitlementStoreUnitTests.cs"] = "persistence: the store's unit tests build and commit snapshots, and one proves a corrupt history is refused",
         ["D1RebuildEquivalenceTests.cs"] = "persistence: compares a durably stored snapshot with the resolver's rebuild (the covered RebuildEquivalenceTests hold the vectors)",
-        ["PersistenceCodecTests.cs"] = "persistence: the codec's round trip of resolver output; the inputs are the covered suites' shapes",
+        ["PersistenceCodecTests.cs"] = "persistence: the codec's round trip of resolver output; its inputs (Rich() among them) are not recorded, the Go resolver tests pin the branches they reach",
     };
 
     private const string UpdateVariable = "ARCFORGES_UPDATE_RESOLVER_VECTORS";
@@ -111,6 +113,37 @@ public sealed class ResolverVectorsTests
     }
 
     /// <summary>
+    /// Whether a covered suite's source names the type <c>EntitlementService</c> at all: any construction (<c>new EntitlementService(</c>, the
+    /// target-typed <c>new(</c> of a variable declared with the type, a qualified name) needs the name, and a covered suite has no other use of
+    /// it than the two allowed spellings, a composition check through the container and the file name of the clock scan.
+    /// </summary>
+    private static bool NamesTheService(string code) =>
+        Regex.IsMatch(code.Replace("GetRequiredService<EntitlementService>", "", StringComparison.Ordinal).Replace("\"EntitlementService.cs\"", "", StringComparison.Ordinal), @"\bEntitlementService\b");
+
+    [Fact]
+    public void TheScanForAServiceBuiltBySomeSuiteSeesEverySpellingOfTheConstruction()
+    {
+        foreach (var spelling in new[]
+                 {
+                     "var s = new EntitlementService(a, b, c, d);", "var s = new  EntitlementService (a);", "EntitlementService raw = new(a, b, c, d);",
+                     "var s = new ArcForges.Cloud.Modules.Entitlement.Resolver.Application.EntitlementService(a);", "var s = (EntitlementService)x;",
+                     "static EntitlementService Make() => throw null!;",
+                 })
+        {
+            Assert.True(NamesTheService(spelling), spelling);
+        }
+
+        foreach (var allowed in new[]
+                 {
+                     "provider.GetRequiredService<EntitlementService>()", "Path.GetFileName(path) == \"EntitlementService.cs\"", "var f = new EntitlementServiceFacade(inner, d);",
+                     "var port = new EntitlementGrantPortAdapter(harness.ServiceOver(store));",
+                 })
+        {
+            Assert.False(NamesTheService(allowed), allowed);
+        }
+    }
+
+    /// <summary>
     /// The source scan: a covered suite reaches the resolver and the admission only through the recorder and builds no service of its
     /// own (the harness hands out every service, recording ones), and no other file of the folder calls them without being listed with a
     /// reason. The scan reads the text, so it is a guard against an honest mistake and not against a determined bypass: a call through a
@@ -124,13 +157,12 @@ public sealed class ResolverVectorsTests
         var covered = Covered.Select(type => type.Name + ".cs").ToHashSet(StringComparer.Ordinal);
         var resolver = new Regex(@"EntitlementResolver\s*\.\s*Resolve\s*\(");
         var admission = new Regex(@"GrantAdmission\s*\.\s*Validate\s*\(");
-        var service = new Regex(@"new\s+EntitlementService\s*\(");
         foreach (var type in Covered)
         {
             var code = File.ReadAllText(Path.Combine(directory, type.Name + ".cs"));
             Assert.False(resolver.IsMatch(code), type.Name + " calls the resolver directly; use ResolverVectors.Resolve.");
             Assert.False(admission.IsMatch(code), type.Name + " calls grant admission directly; use ResolverVectors.Admit.");
-            Assert.False(service.IsMatch(code), type.Name + " builds a service of its own; take it from the harness (Replica, ServiceOver) so that it records.");
+            Assert.False(NamesTheService(code), type.Name + " names EntitlementService (a construction of its own, however spelled); take every service from the harness (Replica, ServiceOver) so that it records.");
         }
 
         var others = Directory.GetFiles(directory, "*.cs").Select(Path.GetFileName).Where(name => !covered.Contains(name!) && name != "ResolverVectorsTests.cs").ToArray();

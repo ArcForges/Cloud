@@ -15,8 +15,8 @@
 --   * identity.operator is new: the operator role of decision n2.
 --
 -- Every record table is append-only: a trigger refuses UPDATE and DELETE (and the runtime role has neither privilege), so the
--- history the resolver replays can only grow. The derived tables, snapshot and revision, are rebuildable and rewritten in place; the
--- revision trigger only lets a row advance by exactly one. The runtime role writes grants, revocations, definitions activations and
+-- history the resolver replays can only grow. The derived tables, snapshot and revision, are rewritten in place (the snapshot is rebuildable from
+-- the records, within the limit stated at the end of this comment); the revision trigger only lets a row advance by exactly one. The runtime role writes grants, revocations, definitions activations and
 -- service terms (the operator grant writes a compensation term and AdminGrant capability grants in one transaction with its audit
 -- event); it only reads term actions, account status facts and feature releases, whose writers (commerce, trust and safety,
 -- configuration) are later tasks. Operator rows are written and revoked only by the migration role (`arcforges-center admin
@@ -27,7 +27,9 @@
 -- control character) and identity.operator.reason the same: the reason texts can name people, so erasure of an account (AF-PLAT-01,
 -- AF-ID-02) must decide them. No row holds an e-mail address, a credential or a token. Retention: entitlement records are the audit
 -- trail of what an account was entitled to and are kept; the triggers refuse deletion until a retention decision (AF-PLAT-01) adds
--- its own migration. The snapshot may be dropped at any time and is recomputed at the next read.
+-- its own migration. The snapshot is rebuildable from the records but is not freely droppable: the instant a computation may not go
+-- back past is the snapshot's own computed_at, so a snapshot dropped while a replica's clock is behind the newest record of the
+-- account is recomputed in the past (docs/postgres-store.md). The revision is never deleted.
 
 CREATE SCHEMA entitlement;
 

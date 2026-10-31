@@ -18,8 +18,8 @@ import (
 
 // migration0003SHA256 pins the applied form of 0003_entitlement.sql: a migration that has been applied is immutable (the runner
 // refuses a changed one), so this value only changes before the migration is merged. The successor provenance record
-// center-runtime-r20 pins the same file by its hash.
-const migration0003SHA256 = "8eaca09b91e57abc9514c70ced246f965b31f9a2bf898fdb9dabadb2bd7c3f9d"
+// center-runtime-r22 pins the same file by its hash.
+const migration0003SHA256 = "acc92fe98fdc5976d711f7cd393cdaf6781cc79029824559210e4dcf6121bbf2"
 
 // schemasAndGrantsAt are the schemas and the runtime role's grants as the build at a migration version has them: 0003 adds the
 // entitlement schema and, in the identity schema, the operator table.

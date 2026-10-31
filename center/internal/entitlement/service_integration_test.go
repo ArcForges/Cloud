@@ -255,19 +255,8 @@ func TestAClockThatMovesBackwardsNeverRewindsAStoredComputationOrBackdatesARecor
 	s.assertRebuildEqual()
 }
 
-func TestTwoReplicasAtTheSameInstantProduceTheSameSnapshot(t *testing.T) {
-	one := newScenario(t).at(0)
-	one.issue(capabilityRequest("cloud.sync", 0, nil, "s1"))
-	one.addTerm("t1", 0, 30*Day)
-	first := one.at(Day).refresh()
-	replicaClock := &testClock{}
-	replicaClock.At(Day)
-	replica := NewService(one.db.runtime, one.definitions, &sequentialIDs{}, replicaClock.Now)
-	second, err := replica.Read(context.Background(), one.account)
-	if err != nil || !first.SameAs(second) {
-		t.Fatalf("the replicas differ: %v\n%+v\n%+v", err, first, second)
-	}
-}
+// The C# row TwoReplicasAtTheSameInstantProduceTheSameSnapshot is ported as TestASecondReplicaReachesTheSameSnapshotByItsOwnResolution
+// (service_hardening_integration_test.go): a replica that read the first one's stored row would compare it with itself.
 
 func TestAReadReturnsTheStoredSnapshotWhileItsValidityHoldsAndRecomputesAfter(t *testing.T) {
 	s := newScenario(t).at(0)

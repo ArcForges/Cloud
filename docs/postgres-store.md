@@ -137,7 +137,7 @@ delete them, so AF-ID-02's account purge deletes `platform.command_receipt` rows
 ### Entitlement (AF-CTR-03 B)
 
 The third migration (`center/internal/schema/migrations/0003_entitlement.sql`, sha256
-`8eaca09b91e57abc9514c70ced246f965b31f9a2bf898fdb9dabadb2bd7c3f9d`) creates the `entitlement` schema and `identity.operator`; the
+`acc92fe98fdc5976d711f7cd393cdaf6781cc79029824559210e4dcf6121bbf2`) creates the `entitlement` schema and `identity.operator`; the
 logic is described in [center entitlement](center-entitlement.md). Its tables, the runtime role's privileges and who writes them:
 
 - `entitlement.grant`, `revocation`, `service_term`, `definitions_activation`: append-only. A trigger refuses UPDATE and DELETE, and

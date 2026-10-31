@@ -4,9 +4,11 @@ package entitlement
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
 // The service's guards, the equality a rebuild must satisfy and the determinism of a second replica, over real PostgreSQL (fix round 1:
@@ -18,13 +20,17 @@ func TestAnAccountThatIsNoUUIDOrDoesNotExistIsATypedRefusal(t *testing.T) {
 	s := newScenario(t).at(0)
 	ctx := context.Background()
 	unknown := platform.NewID().String()
-	for _, account := range []string{"", "a b", "not-a-uuid", "account-one", "0123456789", s.account + "x", unknown} {
+	nilUUID := "00000000-0000-0000-0000-000000000000"
+	// Tokens that are no canonical uuid, among them the forms of 36 characters and of the real account that only differ in spelling.
+	for _, account := range []string{"", "a b", "not-a-uuid", "account-one", "0123456789", s.account + "x", "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
+		strings.ToUpper(s.account), strings.ReplaceAll(s.account, "-", ""), unknown, nilUUID} {
+		missing := account == unknown || account == nilUUID
 		_, err := s.service.Read(ctx, account)
 		wantRefusal(t, err, RefusedInvalidRequest)
 		_, err = s.service.Refresh(ctx, account)
 		wantRefusal(t, err, RefusedInvalidRequest)
 		_, err = s.service.VerifyRebuild(ctx, account)
-		if account != unknown {
+		if !missing {
 			wantRefusal(t, err, RefusedInvalidRequest)
 		}
 		request := capabilityRequest("cloud.sync", 0, nil, "order-1")
@@ -32,7 +38,7 @@ func TestAnAccountThatIsNoUUIDOrDoesNotExistIsATypedRefusal(t *testing.T) {
 		_, _, err = s.service.IssueGrant(ctx, request)
 		wantRefusal(t, err, RefusedInvalidRequest)
 		_, _, err = s.service.RevokeGrant(ctx, RevokeGrantRequest{AccountID: account, GrantID: platform.NewID().String(), ReasonCode: "refund", IssuedByActor: "operator"})
-		if account != unknown {
+		if !missing {
 			wantRefusal(t, err, RefusedInvalidRequest)
 		}
 	}
@@ -165,4 +171,50 @@ func TestASecondReplicaReachesTheSameSnapshotByItsOwnResolution(t *testing.T) {
 	if err != nil || !left.SameAs(right) || !left.Stored().SameAs(first) {
 		t.Fatalf("two resolutions of one input differ: %v", err)
 	}
+}
+
+// TestTextThatIsNotValidUTF8IsATypedRefusalAndWritesNothing (resolver-6): PostgreSQL refuses such bytes with an untyped error
+// (SQLSTATE 22021); the service refuses them first, in every field a caller can fill with them.
+func TestTextThatIsNotValidUTF8IsATypedRefusalAndWritesNothing(t *testing.T) {
+	s := newScenario(t).at(0)
+	ctx := context.Background()
+	bad := "bad \xff byte"
+	for name, change := range map[string]func(*IssueGrantRequest){
+		"the reason of an administrative grant": func(r *IssueGrantRequest) { administrative(bad)(r) },
+		"the actor":                             func(r *IssueGrantRequest) { r.IssuedByActor = bad },
+	} {
+		request := capabilityRequest("cloud.sync", 0, nil, "order-"+strings.ReplaceAll(name, " ", "-"))
+		request.AccountID = s.account
+		change(&request)
+		_, _, err := s.service.IssueGrant(ctx, request)
+		if refusal := wantRefusal(t, err, RefusedInvalidRequest); refusal.Detail != malformedText {
+			t.Errorf("%s: %q", name, refusal.Detail)
+		}
+	}
+	grant := s.issue(capabilityRequest("cloud.sync", 0, nil, "order-good"))
+	version := s.at(Day).read().Version
+	_, _, err := s.service.RevokeGrant(ctx, RevokeGrantRequest{AccountID: s.account, GrantID: grant.GrantID, ReasonCode: "refund", IssuedByActor: bad, ExpectedSnapshotVersion: version})
+	wantRefusal(t, err, RefusedInvalidRequest)
+	if rows := s.db.count("SELECT count(*) FROM entitlement.grant WHERE account_id = $1::uuid", s.account); rows != 1 {
+		t.Fatalf("%d grants", rows)
+	}
+	if rows := s.db.count("SELECT count(*) FROM entitlement.revocation"); rows != 0 {
+		t.Fatalf("a refused revocation wrote %d rows", rows)
+	}
+	// The service refuses before any store call: one without a store answers the refusal (a call that reached the store would panic).
+	offline := NewService(nil, s.definitions, nil, nil)
+	request := capabilityRequest("cloud.sync", 0, nil, "order-offline")
+	request.AccountID, request.IssuedByActor = s.account, bad
+	_, _, err = offline.IssueGrant(ctx, request)
+	wantRefusal(t, err, RefusedInvalidRequest)
+	request = capabilityRequest("cloud.sync", 0, nil, "order-offline")
+	request.AccountID = s.account
+	administrative(bad)(&request)
+	_, _, err = offline.IssueGrant(ctx, request)
+	wantRefusal(t, err, RefusedInvalidRequest)
+	_, _, err = offline.RevokeGrant(ctx, RevokeGrantRequest{AccountID: s.account, GrantID: grant.GrantID, ReasonCode: "refund", IssuedByActor: bad})
+	wantRefusal(t, err, RefusedInvalidRequest)
+	// A writer that reaches the store without passing the service's check gets the same typed refusal from the constraint mapping.
+	typed := typedConstraint(&store.Error{Operation: "append an entitlement grant", SQLState: "22021", Kind: store.ErrConstraint})
+	wantRefusal(t, typed, RefusedInvalidRequest)
 }

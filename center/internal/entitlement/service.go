@@ -117,6 +117,21 @@ func validAccount(account string) bool {
 	return IsIdentifier(account) && correlation.IDBytes(account) != nil
 }
 
+// malformedText is the refusal of a request whose text is not valid UTF-8 (the C# port adapter's well-formedness rule): PostgreSQL
+// refuses such bytes with an untyped error, so the service refuses them first, and typedConstraint answers the same for a writer that
+// reaches the store without passing here.
+const malformedText = "The request holds text that is not valid UTF-8."
+
+// wellFormed reports that none of the texts holds bytes that are not valid UTF-8.
+func wellFormed(texts ...string) bool {
+	for _, text := range texts {
+		if !WellFormedText(text) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Service) load(ctx context.Context, account string) (State, error) {
 	var state State
 	err := s.db.InTx(ctx, "load the entitlement state", store.TxOptions{ReadOnly: true, Isolation: pgx.RepeatableRead}, func(ctx context.Context, tx pgx.Tx) error {
@@ -199,6 +214,9 @@ func (s *Service) IssueGrant(ctx context.Context, request IssueGrantRequest) (Gr
 	if !validAccount(request.AccountID) {
 		return Grant{}, false, refuse(RefusedInvalidRequest, "The workspace identifier is malformed.")
 	}
+	if !wellFormed(request.IssuedByActor, optionalText(request.Reason), optionalText(request.SourceRef), request.Subject) {
+		return Grant{}, false, refuse(RefusedInvalidRequest, malformedText)
+	}
 	for range attempts {
 		state, err := s.load(ctx, request.AccountID)
 		if err != nil {
@@ -243,6 +261,9 @@ func (s *Service) IssueGrant(ctx context.Context, request IssueGrantRequest) (Gr
 func (s *Service) RevokeGrant(ctx context.Context, request RevokeGrantRequest) (Revocation, bool, error) {
 	if !validAccount(request.AccountID) || !IsIdentifier(request.GrantID) || !IsKey(request.ReasonCode) || !IsActor(request.IssuedByActor) {
 		return Revocation{}, false, refuse(RefusedInvalidRequest, "The revocation names a malformed workspace, grant, reason code or actor.")
+	}
+	if !wellFormed(request.IssuedByActor, request.ReasonCode) {
+		return Revocation{}, false, refuse(RefusedInvalidRequest, malformedText)
 	}
 	for range attempts {
 		state, err := s.load(ctx, request.AccountID)
@@ -507,6 +528,8 @@ func typedConstraint(err error) error {
 	switch {
 	case stored.SQLState == "23503" && stored.Constraint == "revision_account":
 		return refuse(RefusedInvalidRequest, "The account does not exist.")
+	case stored.SQLState == "22021":
+		return refuse(RefusedInvalidRequest, malformedText)
 	case stored.SQLState == "23514" && stored.Constraint == "grant_reason_required_for_operator_sources":
 		return refuse(RefusedInvalidRequest, "A reason is recorded only for an administrative source, and an administrative source needs one.")
 	}

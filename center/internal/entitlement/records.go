@@ -6,8 +6,8 @@
 // and snapshots (migration 0003), the plan catalogue's definitions, and the operator grant of the interim operations page.
 //
 // The pure resolver (this file and rules.go, resolve.go, content.go, admission.go) reads no clock, no store and no randomness and
-// iterates only sorted inputs; testdata/csharp-resolver-vectors.json holds every input and output the C# suites reach, recorded by
-// the C# test project, and TestResolverParityWithEveryCSharpVector replays them all.
+// iterates only sorted inputs; testdata/csharp-resolver-vectors.json holds every input and output the six covered classes of the C# suites
+// reach (not the persistence suites), recorded by the C# test project, and TestResolverParityWithEveryCSharpVector replays them all.
 //
 // Mapping from the C# model (DC-19): the C# "workspace" is the center's account. Go names say Account (AccountID, the account's
 // uuid text), the messages of the resolver's refusals keep the C# wording verbatim (so the parity vectors compare exactly; no message
