@@ -375,6 +375,7 @@ func TestTheReviewRefusesWhatAGrantRefuses(t *testing.T) {
 		"every feature and one named":                {func(f url.Values) { f.Set("all", "on") }, 400, "Choose every feature or some of them, not both."},
 		"a reason that is not valid text":            {func(f url.Values) { f.Set("reason", "bad \xff byte") }, 400, "The reason is not valid text."},
 		"a source reference that is not valid text":  {func(f url.Values) { f.Set("source_ref", "ticket-\xfe") }, 400, "The source reference is not valid text."},
+		"a justification that is not valid text":     {func(f url.Values) { f.Set("self_approval", "bad \xff byte") }, 400, "The justification is not valid text."},
 		"a blank reason":                             {func(f url.Values) { f.Set("reason", "   ") }, 400, "The reason needs 1 to 512 characters"},
 		"a source with a slash":                      {func(f url.Values) { f.Set("source_ref", "a/b") }, 400, "The source reference needs"},
 		"days that are no number":                    {func(f url.Values) { f.Set("expires_days", "ten") }, 400, "whole number from 1 to 400"},
@@ -495,4 +496,73 @@ func time0(text string) (entitlement.Micros, bool) {
 		value = value*10 + int64(digit-'0')
 	}
 	return entitlement.Micros(value), true
+}
+
+// TestTheOperationsPageRefusesWhereTheCenterHasNoPolicy (reviewer-2): through the real page, a hosted center without a plan
+// configuration and a self-hosted one with the surface forced on refuse every route with the text of their reason, and nothing is
+// written; the composed test asserts the wiring of the policy at Operator.Grant, this one the page that renders it.
+func TestTheOperationsPageRefusesWhereTheCenterHasNoPolicy(t *testing.T) {
+	for name, item := range map[string]struct {
+		options settings
+		text    string
+	}{
+		"a hosted center without a plan configuration":    {settings{hosted: true, noPlan: true, policy: writePolicy}, "This center has no plan catalogue"},
+		"a self-hosted center with the surface forced on": {settings{selfHostedOperations: true, policy: writePolicy}, "Operator grants exist only on the official hosted center."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, item.options)
+			operator, target := h.seedAccount(1), h.seedAccount(1)
+			h.makeOperator(operator)
+			b := h.newBrowser()
+			b.mustSignIn(operator)
+			confirm := url.Values{"command_id": {uuid(platform.NewID())}, "account": {uuid(target.id)}, "features": {"remote.view"}, "reason": {"x"}, "source_ref": {"t"},
+				"self_approval": {""}, "expires_at": {"4102444800000000"}}
+			replies := map[string]response{
+				"the form":    b.get("/operations/grant"),
+				"the review":  b.postForm("/operations/grant/review", grantForm(target.id, "remote.view")),
+				"the confirm": b.postForm("/operations/grant/confirm", confirm),
+			}
+			for route, reply := range replies {
+				if reply.status != 400 || !strings.Contains(reply.text(), item.text) || strings.Contains(reply.text(), "feature-") || strings.Contains(reply.text(), "center.operatorGrant") {
+					t.Errorf("%s: %d %s", route, reply.status, reply.text())
+				}
+			}
+			if h.count("SELECT (SELECT count(*) FROM entitlement.grant) + (SELECT count(*) FROM entitlement.service_term)") != 0 {
+				t.Fatal("a refused request wrote")
+			}
+		})
+	}
+}
+
+// TestAStrangerWhoStartsWithAPostIsAudited (operator-6): the audit of a refused request holds the route asked for first, so the
+// POST routes are pinned by accounts whose first request is not the form.
+func TestAStrangerWhoStartsWithAPostIsAudited(t *testing.T) {
+	h := newHarness(t, settings{hosted: true, policy: writePolicy})
+	reviewer, confirmer, target := h.seedAccount(1), h.seedAccount(1), h.seedAccount(1)
+	one, two := h.newBrowser(), h.newBrowser()
+	one.mustSignIn(reviewer)
+	two.mustSignIn(confirmer)
+	if reply := one.postForm("/operations/grant/review", grantForm(target.id, "remote.view")); reply.status != 403 {
+		t.Fatalf("the review: %d", reply.status)
+	}
+	confirm := url.Values{"command_id": {uuid(platform.NewID())}, "account": {uuid(target.id)}, "features": {"remote.view"}, "reason": {"x"}, "source_ref": {"t"},
+		"self_approval": {""}, "expires_at": {"4102444800000000"}}
+	if reply := two.postForm("/operations/grant/confirm", confirm); reply.status != 403 {
+		t.Fatalf("the confirmation: %d", reply.status)
+	}
+	for _, row := range []struct {
+		who    account
+		action string
+	}{{reviewer, "operations.review"}, {confirmer, "operations.confirm"}} {
+		action := row.action
+		var payload []byte
+		if err := h.migration.QueryRow(context.Background(), "SELECT payload FROM audit.audit_event WHERE event_type = $1 AND target_id = $2 AND reason = 'not_operator'",
+			entitlement.AuditOperatorGrantRefused, row.who.id.String()).Scan(&payload); err != nil {
+			t.Errorf("%s: %v", action, err)
+			continue
+		}
+		if want := `{"action":"` + action + `","code":"AUTHORIZATION/permission_denied","reason":"not_operator"}`; string(payload) != want {
+			t.Errorf("%s: %s", action, payload)
+		}
+	}
 }

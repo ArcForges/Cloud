@@ -170,6 +170,11 @@ type settings struct {
 	// hosted is the official hosted center on the development fixtures with the operations surface on: the only configuration
 	// the operator grant page exists in.
 	hosted bool
+	// noPlan is the hosted center without a plan configuration (the production state): no catalogue, so no operator grant.
+	noPlan bool
+	// selfHostedOperations is a self-hosted center with the operations surface forced on (the configuration refuses it, so the
+	// harness appends it to the loaded one): the operator grant's policy then refuses as the self-hosted center does.
+	selfHostedOperations bool
 }
 
 const writePolicy = `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000}`
@@ -222,6 +227,12 @@ func newHarness(t *testing.T, options settings) *harness {
 		if options.surfaces == "" {
 			cfg.Identity.Surfaces = append(cfg.Identity.Surfaces, config.SurfaceOperations)
 		}
+		if options.noPlan {
+			cfg.Plan = config.PlanNone
+		}
+	}
+	if options.selfHostedOperations {
+		cfg.Identity.Surfaces = append(cfg.Identity.Surfaces, config.SurfaceOperations)
 	}
 	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: h.mail, Clock: h.clock.Now, Background: func(work func()) { work() }})
 	if err != nil {

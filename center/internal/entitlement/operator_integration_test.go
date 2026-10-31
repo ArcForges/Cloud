@@ -277,6 +277,7 @@ func TestTheBoundsOfAnOperatorGrantRequest(t *testing.T) {
 		{"every key and named keys", func(r *entitlement.OperatorRequest) { r.All = true }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a reason that is not valid UTF-8", func(r *entitlement.OperatorRequest) { r.Reason = "bad \xff byte" }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a source reference that is not valid UTF-8", func(r *entitlement.OperatorRequest) { r.SourceRef = "ticket-\xfe" }, "VALIDATION/invalid_argument", "invalid_argument"},
+		{"a justification that is not valid UTF-8", func(r *entitlement.OperatorRequest) { r.Account, r.SelfApproval = user.String(), "bad \xff byte" }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"an unknown feature", func(r *entitlement.OperatorRequest) { r.Features = []string{"remote.nothing"} }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a repeated feature", func(r *entitlement.OperatorRequest) { r.Features = []string{"push", "push"} }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a blank reason", func(r *entitlement.OperatorRequest) { r.Reason = "   " }, "VALIDATION/invalid_argument", "invalid_argument"},

@@ -200,19 +200,14 @@ func reasonOf(refusal *arc.Refusal) string {
 
 // check validates a request against the policy and the caller, reading the store only for the operator role and the target account.
 func (o *Operator) check(ctx context.Context, caller OperatorCaller, request OperatorRequest) (OperatorRequest, OperatorPolicy, error) {
-	policy, err := o.policy()
-	switch {
-	case errors.Is(err, ErrGrantsSelfHosted):
-		return OperatorRequest{}, OperatorPolicy{}, arc.InvalidState("operator_grant", "self_hosted")
-	case err != nil:
-		return OperatorRequest{}, OperatorPolicy{}, arc.InvalidState("operator_grant", "no_catalogue")
-	}
+	// The caller comes first: a stranger is refused as one (and audited once per window) whatever the configuration is, so a center
+	// without a policy (self-hosted, or without a catalogue) is no way around the bound on a stranger's audit rows.
 	if caller.Scope != "account" || caller.UserID == (platform.ID{}) {
 		return OperatorRequest{}, OperatorPolicy{}, arc.PermissionDenied(OperatorOperation)
 	}
 	now := o.clock()
 	var operator bool
-	if err = o.db.InTx(ctx, "read the operator role", store.TxOptions{ReadOnly: true}, func(ctx context.Context, tx pgx.Tx) (err error) {
+	if err := o.db.InTx(ctx, "read the operator role", store.TxOptions{ReadOnly: true}, func(ctx context.Context, tx pgx.Tx) (err error) {
 		operator, err = IsOperator(ctx, tx, caller.UserID, now)
 		return err
 	}); err != nil {
@@ -220,6 +215,13 @@ func (o *Operator) check(ctx context.Context, caller OperatorCaller, request Ope
 	}
 	if !operator {
 		return OperatorRequest{}, OperatorPolicy{}, arc.PermissionDenied(OperatorOperation)
+	}
+	policy, err := o.policy()
+	switch {
+	case errors.Is(err, ErrGrantsSelfHosted):
+		return OperatorRequest{}, OperatorPolicy{}, arc.InvalidState("operator_grant", "self_hosted")
+	case err != nil:
+		return OperatorRequest{}, OperatorPolicy{}, arc.InvalidState("operator_grant", "no_catalogue")
 	}
 	normalized, refusal := Normalize(request, policy, caller.UserID, FromTime(now))
 	if refusal != nil {
@@ -329,6 +331,15 @@ type GrantResult struct {
 
 var errRevisionConflict = errors.New("the account changed under the grant")
 
+// isDeadlockVictim reports the store error of a transaction that PostgreSQL ended as a deadlock victim (40P01) or a serialization
+// failure (40001). The grant's statements are sanitized inside the transaction, which hides the SQLSTATE from the store's own retry,
+// so Grant runs the command again itself: two operators granting to each other lock each other's user row (the foreign keys of the
+// entitlement rows share it with the operator's own lock).
+func isDeadlockVictim(err error) bool {
+	var stored *store.Error
+	return errors.As(err, &stored) && (stored.SQLState == "40P01" || stored.SQLState == "40001")
+}
+
 // Grant issues an operator grant, or returns the refusal (an *arc.Refusal), which it has audited in a transaction of its own. A
 // store failure is returned as it is; a grant whose COMMIT went unanswered is store.ErrCommitUnknown.
 func (o *Operator) Grant(ctx context.Context, call GrantCall) (GrantResult, error) {
@@ -351,7 +362,7 @@ func (o *Operator) Grant(ctx context.Context, call GrantCall) (GrantResult, erro
 			return json.Marshal(written)
 		})
 		switch {
-		case errors.Is(err, errRevisionConflict):
+		case errors.Is(err, errRevisionConflict), isDeadlockVictim(err):
 			continue
 		case errors.Is(err, platform.ErrCommandIDReused):
 			return GrantResult{}, o.refused(ctx, call, arc.CommandIDReused())
