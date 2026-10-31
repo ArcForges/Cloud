@@ -39,8 +39,12 @@ classification, a price outside a fixture or any other violation makes the catal
 unavailable (`plan_configuration_invalid`). The classification of a running center is development with the fixtures and production
 without a catalogue; a production-classified catalogue exists only injected into `server.Options` by a test (the fields are
 unexported, so no other package can set them, and `TestNoCodeOfTheRunningCenterInjectsACatalogue` parses the non-test sources of
-package `server` and fails if `Run` composes the center with anything but the literal `Options{}` or any function but `New` reads
-them; `TestThePinOnTheCatalogueInjectionFindsEachWayAroundIt` proves the pin on the real `server.go` changed in each way). The plans are configuration for AF-CTR-09, which turns a purchase of a plan into
+the whole center module and fails if `Run` composes the center with anything but the literal `Options{}`, if anything but the two
+values of the one `feature.Settings` literal in `New` mentions the fields, if `Injected` or `InjectedClass` is named anywhere else
+outside package `feature`, or if `feature.Configure` or `feature.ParseCatalogue` is called beside `New`;
+`TestThePinOnTheCatalogueInjectionFindsEachWayAroundIt` proves the pin on the real sources changed in each way. It does not see a
+call through an import alias of package `feature`, reflection, or the inside of package `feature` itself, whose behaviour its own
+tests pin). The plans are configuration for AF-CTR-09, which turns a purchase of a plan into
 grants of its features; this task issues grants of features, never of plans.
 
 A change of the definitions version is a `definitions_activation` row and raises the entitlement version of an account once, at its
@@ -90,15 +94,30 @@ AF-OPS-01's OperatorService can call it; the interim interface is [the operation
   `entitlement.operator_grant.refused` (reason `not_operator`, with the route asked for on the page) in a transaction of its own and
   **once per hour and account**: the first refusal of the window is audited, the others are counted and answered without a row, so
   an authenticated stranger cannot flood the audit chain. This is the pattern of the sign-in failures ([audit](center-identity.md#audit):
-  the first failure of a window per bucket): `ratelimit.Limiter.Fail` reports the first failure of a window. The other refusals of an
+  the first failure of a window per bucket): `ratelimit.Limiter.Fail` reports the first failure of a window. `Operator.check`
+  decides the caller before the policy, so the bound holds on a center that has no policy as well (self-hosted, or hosted without
+  a catalogue): a stranger there is `not_operator`, audited once per window, and only an operator is told `self_hosted` or
+  `no_catalogue`. The other refusals of an
   operator (a bad request, a missing step-up) are audited every time: they take a signed-in live operator, and each of
   them is a decision the owner may need to read.
 - **Concurrency.** Two operators granting to one account at once both succeed: the account's revision row is locked
   (`SELECT ... FOR UPDATE`, pinned by `TestManyOperatorsGrantingToOneAccountAtOnceAllSucceed`), the history is loaded under the lock
-  and the commit is fenced by the revision. A command that finds the revision changed re-derives and tries again, at most **four
-  attempts**, immediately and without backoff (the lock makes the second attempt find the other writer's commit); when all four
-  lose, nothing is written and the answer is `RESOURCE/overloaded` (the store's contention), after which the same command ID may be
-  sent again. The same command running twice at once answers the same way (`ErrCommandInProgress`).
+  and the commit is fenced by the revision. A command that finds the revision changed re-derives and tries again; the loop is bounded
+  at **four attempts** (the service's `attempts`), immediately and without backoff, and when all of them lose nothing is written and
+  the answer is `RESOURCE/overloaded` (the store's contention), after which the same command ID may be sent again. Because the grant
+  holds the revision row's lock, a second attempt can only follow the race of two first commits of one account (the loser finds the
+  row and writes nothing), so the bound of four is a ceiling the code does not reach in practice; the number is not pinned by a
+  test, the behaviour is (`TestManyOperatorsGrantingToOneAccountAtOnceAllSucceed`). The same command running twice at once answers
+  the same way (`ErrCommandInProgress`).
+- **Two operators granting to each other.** Each grant holds its operator's `identity.user` row and takes a share of the target's
+  through the foreign keys of the rows it writes, so operator A granting to B while B grants to A (or to B's own account) deadlock:
+  PostgreSQL ends one of them as the victim after its deadlock timeout (1 s, SQLSTATE 40P01). The grant's statements are sanitized
+  inside the transaction, which hides that code from the store's own retry, so `Operator.Grant` recognizes the deadlock (and a
+  serialization failure, 40001) itself and runs the command again, at most within the same four attempts: both grants are made, the
+  victim after about a second (`TestTwoOperatorsGrantingToEachOtherAreBothServed`). The evidence is spent only by the attempt that commits.
+- **The writers of the service are optimistic.** `Service.IssueGrant`, `RevokeGrant` and `Refresh` take no revision lock: they
+  derive from the history they read and commit under the revision fence, four attempts, no backoff. Ten concurrent
+  `IssueGrant` calls for one account lose grants to `ConcurrentUpdate`. Nothing calls them yet; see "What waits" (AF-CTR-09).
 
 The records of a grant are the records the resolver reads (a grant is a fact; the snapshot is derived). A term, a status fact or a
 feature release written by its owner admission must refresh the snapshot in the same unit (`Service.Refresh`), as the grant writers
@@ -139,7 +158,7 @@ before the call (`access.CheckRow`). A gate that cannot decide is never a refusa
 plan lacks the feature, and nothing is audited as `access.gated` for it: a commit whose outcome is unknown, a refresh that lost its
 race on every attempt and a center without an entitlement store are `RESOURCE/overloaded` (`access.gateFailure`: the call did not
 happen, retry later; the gate runs before the handler, so the call's own effect is untouched); a store failure keeps its own class
-for the transport (an unreachable store is `RESOURCE/overloaded` too, a context that ended is its own status); anything else is a
+for the transport (an unreachable store, a timeout and a context that ended are `RESOURCE/overloaded` too); anything else is a
 defect and is `INTERNAL/internal`, as everywhere in the center. An authorizer composed without a gate refuses every gated row
 (`mode_invalid`), and a hosted gate without an entitlement reader answers no availability with `ErrNoEntitlementStore`. The context carries the caller's account
 (`feature.WithAccount`).
@@ -175,12 +194,15 @@ is also refused there (`self_hosted`), and the self-hosted gate never reads the 
 
 ## The store
 
-Migration `0003_entitlement.sql` (sha256 `8eaca09b91e57abc9514c70ced246f965b31f9a2bf898fdb9dabadb2bd7c3f9d`) adds the `entitlement`
+Migration `0003_entitlement.sql` (sha256 `acc92fe98fdc5976d711f7cd393cdaf6781cc79029824559210e4dcf6121bbf2`) adds the `entitlement`
 schema and `identity.operator`: `grant`, `revocation`, `service_term`, `service_term_action`, `account_status_fact`,
 `feature_release` and `definitions_activation` (append-only: a trigger refuses UPDATE and DELETE, and the runtime role has neither
 privilege), `revision` and `snapshot` (derived, rewritten in place, the revision only advancing by one), and the operator role
 (written by the migration role only). The runtime role may insert grants, revocations, definitions activations and service terms
-and reads the rest; term actions, status facts and feature releases have no runtime writer until their tasks exist. The details,
+and reads the rest; term actions, status facts and feature releases have no runtime writer until their tasks exist. The service answers
+an account that is no canonical uuid, an account that does not exist, a reason on an ordinary source and text that is not valid UTF-8
+(in an actor, a reason, a source reference or a subject) as the typed refusal `InvalidRequest`, before or as the database refuses it,
+never as an internal error. The details,
 the personal data and the retention are in [PostgreSQL store](postgres-store.md#entitlement-af-ctr-03-b).
 
 ## Post-deploy checklist
@@ -193,10 +215,23 @@ author of this change (no hosted environment was touched).
    is also what the next two commands must not change); no gated feature is reachable.
 2. **The acceptance database** (`arcforges_acceptance`) is migrated to version 3 with the pinned checksum above.
 3. **Enable the surface** on the proof environment by a reviewed change of `FLAGSHIP_SURFACES` to `identity,pages,operations` (it is
-   not part of this change). The change must update the pins that guard against enabling it by accident: the proof environment's
-   `FLAGSHIP_SURFACES` in `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts` (both fail on the bare
-   change, which is intended), and the sentences of this checklist and of `docs/deployment.md`. Then give the proving account the role
-   with the deployment's migration-role path, **selecting the acceptance database explicitly**, because the command works on the
+   not part of this change). The change must update every pin that guards against enabling it by accident. They were found by applying
+   the change in a scratch copy and running `npm test` and `node tooling/dependency-policy.ts` (3 of 972 tests fail, the policy audit
+   fails, nothing else):
+
+   - `tests/worker/center-config.test.ts`: the literal pin of the proof environment's `FLAGSHIP_SURFACES` (test "production enables no
+     surface and the acceptance environment enables identity and pages") and the loop of the test "the surface rule refuses unknown
+     names, a wrong origin and the C# runtime" that says no checked-in environment enables `operations` (invert it for the proof
+     environment, keep it for production);
+   - `tests/worker/proof-deploy.test.ts`: the test "the checked-in proof environment is the isolated acceptance center";
+   - `eng/policy/dependency-policy.json`: `wrangler.json` is an input of the dependency policy ("Dependency input changed without
+     review: wrangler.json"), so the change needs a re-bound policy and a successor receipt (the next `eng/policy/dependency-reviews/af-ctr-03-rNN.json`), and
+     that receipt, which carries the two legal-record digests every receipt carries, needs its own exact-row block in `.gitleaks.toml`
+     and its pin in `tests/worker/provenance.test.ts`, as the receipts of this task have;
+   - the sentences of this checklist and of `docs/deployment.md` and `docs/center-identity.md` that say the proof environment keeps
+     `identity,pages`.
+
+   Then give the proving account the role with the deployment's migration-role path, **selecting the acceptance database explicitly**, because the command works on the
    database of the migration URL unless `ARCFORGES_CENTER_DATABASE_NAME` names another, and its output (`account`, `operatorId`,
    `grantedAt`, `expiresAt`) does not say which one it wrote:
 
@@ -222,7 +257,10 @@ author of this change (no hosted environment was touched).
 
 - **AF-CTR-09** (commerce, Paddle): a purchase becomes a service term, a plan's grants and the status facts; the writers of
   `service_term_action`, `account_status_fact` and `feature_release`; the offer and realm columns of the term; the refresh of the
-  snapshot by the owner admission.
+  snapshot by the owner admission. The writers of `Service` (`IssueGrant`, `RevokeGrant`, `Refresh`) are optimistic: four attempts,
+  no backoff and no revision lock, so concurrent handlers for one account lose grants to `ConcurrentUpdate` (ten concurrent issues
+  gave six refusals in a probe). The commerce writer must serialize per account, or take the revision row's lock as `Operator.write`
+  does, before it relies on them.
 - **AF-OPS-01**: the OperatorService that replaces the interim page and calls `entitlement.Operator`. The interim page's review does
   not check what the confirmation will refuse (an unknown account, a source reference already used, a justification filled in for a
   grant to another account), so the passkey ceremony can be spent on a confirmation that refuses afterwards, and four honest-use
@@ -237,12 +275,33 @@ author of this change (no hosted environment was touched).
   (production is dark, its catalogue empty, and no gated operation reads a snapshot); the fix is a deploy-level fact, a single row
   of the current definitions version written once by the revision that starts with it, which a replica whose version differs
   neither recomputes against nor writes (deferred in fix round 1, `store-1`).
+- **Composition wirings pinned by name or in one mode only** (deferred in fix round 2, `gate-2`). The removal of each wire of the
+  composition is killed by a test, but three variants are not: the authorizer's gate built apart from the center's (the self-hosted
+  composed test has no database and so no authorizer, and the hosted one has no disabled key), a nil operator handed to the pages
+  while `composePages` still calls `c.operator` (pinned by name), and an operator built over an entitlement service with other
+  definitions (its snapshots would carry another version). Follow-up before the first gated operation: compose a self-hosted center
+  over a database and run the disabled-key table through its authorizer's gate, request `/operations/grant` from the composed hosted
+  center, and compare the operator's snapshot version with the gate's.
+- **The cause of a gate failure is neither logged nor audited** (deferred, `gate-3`; an AF-CTR-04 prerequisite). `gateFailure`
+  answers a commit without an answer, a refresh that lost its race and a missing entitlement store as a bare `RESOURCE/overloaded`
+  and writes no `access.gated` row, so an operator cannot tell it from load. Follow-up: wrap the cause (`fmt.Errorf("%w: %w",
+arc.Unavailable(), err)`) and log it with the correlation id in `identityapi.failure` and the pages' failure path, with a test that
+  the line exists. Unreachable today: no gated operation is served.
+- **The Docker-context test models the file rules** (`worker-1`). `tests/worker/docker-context.test.ts` decides what the context
+  carries from the include rules of `.dockerignore` and the closing exclusions of the center, as the other tests of that file do; a
+  real build carries every `center/` file those exclusions do not remove (`!center/` re-includes the tree), so a stray file such as
+  `center/vendor/modules.txt`, a `.s` file or `go.work` would be carried and bound by no record with the test green. At the head every
+  one of the 111 carried files is bound. Follow-up: make the model follow Docker, or add those names to the closing exclusions.
+- **The Container-request scan is keyed on `CLOUD_CONTAINER.getByName(`** (`worker-2`). A request reached by an alias of the
+  namespace, optional chaining, destructuring, bracket access or a helper that receives the namespace is not seen, and the stub-only
+  check names the variable `stub`. The five sites are checked; a sixth in an unusual spelling is not. Follow-up: one helper that builds
+  the request with `redirect: "manual"`, and a test that the namespace is named only in its module.
 - **The clock floor lives only in the snapshot.** A computation never goes back past the stored one, but that floor is the stored
   snapshot's `computed_at`; the records carry their own creation instants and the revision its `updated_at`, and the service does not
   floor against them. A snapshot dropped while a replica's clock is behind the newest record is recomputed in the past. Follow-up
-  (before the snapshot is ever dropped by an operation): floor every instant at the newest record creation or activation instant,
-  and correct the comment of migration `0003` ("may be dropped at any time"), which is older than this statement and cannot be
-  edited without a new checksum.
+  (before the snapshot is ever dropped by an operation): floor every instant at the newest record creation or activation instant.
+  (The comment of migration `0003` says the same as this paragraph since fix round 2; its checksum changed with it, while the
+  migration was still unmerged.)
 - **AF-CTR-04 and later**: the gated operations (task control, nodes, MCP), their quotas and budgets through the resource-control
   stage, and the rows of the operation table that carry a `Feature`. The production `Authorizer` is composed with **no resource
   control** today, so a gated call is not rate limited: AF-CTR-04 must register a per-account control before it serves a gated row,

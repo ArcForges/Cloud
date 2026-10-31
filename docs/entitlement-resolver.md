@@ -103,10 +103,11 @@ calls the suite makes, is the job of the C# drift test below, not of this one.
 The corpus cannot drift from the C# suites unnoticed: `ResolverVectorsTests.TheCommittedVectorsAreWhatTheSuitesProduce` runs every
 `[Fact]` and `[Theory]` row of the six covered classes (found by reflection) under the recorder and compares what they produce with
 the committed file as data, and a source scan fails a covered class that calls the resolver or the admission directly (with any
-spacing), builds a service of its own (the harness hands them out, recording: `Replica`, `ServiceOver`), and a file of the folder
-that calls the resolver and is neither covered nor listed with a reason (the persistence suites of the durable D1 store). The scan
-reads text: it is a guard against an honest mistake and not against a determined bypass, which a call through a helper outside the
-folder or through reflection would be; the drift test still notices a covered row whose vectors change. A suite row that is not a
+spacing), names the type `EntitlementService` at all (a construction in any spelling, the target-typed `new(...)` and a qualified name
+included; the harness hands the services out, recording: `Replica`, `ServiceOver`; only a composition check through the container and a
+file name are allowed), and a file of the folder that calls the resolver and is neither covered nor listed with a reason (the persistence
+suites of the durable D1 store, whose inputs are not in the corpus). The scan reads text: it is a guard against an honest mistake and
+not against a determined bypass, which a call through a helper outside the folder, an alias of the type or reflection would be; the drift test still notices a covered row whose vectors change. A suite row that is not a
 vector has a written reason in the file (`excluded`). To rewrite the corpus after a change of the resolver or a covered suite:
 
 ```sh
