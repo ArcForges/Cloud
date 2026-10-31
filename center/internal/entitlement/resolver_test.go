@@ -133,8 +133,9 @@ func TestTheResolverNamesNoProviderAndHardCodesNoCommercialFigureOrCapability(t 
 	}
 }
 
-// TestRecordOrderNeverChangesTheResult: the resolver iterates sorted data only, so every permutation of the input records gives the
-// same snapshot (the C# FactsRecordedAtTheSameInstant... and EqualPriorities... rows, as a property over a mixed history).
+// TestRecordOrderNeverChangesTheResult: the resolver iterates sorted data only, so the order of the input records does not change the
+// snapshot. The test reverses the grants, the terms and the status facts of one mixed history once (the C#
+// FactsRecordedAtTheSameInstant... and EqualPriorities... rows, as a property over that history); it does not try every permutation.
 func TestRecordOrderNeverChangesTheResult(t *testing.T) {
 	definitions := Definitions{Version: "v1", Capabilities: []CapabilityDefinition{{Key: "a.cap", RequiresPaidTerm: true}, {Key: "b.cap"}},
 		Quotas: []QuotaDefinition{{Key: "q.level", Combination: CombinePriorityReplace}, {Key: "q.sum", Combination: CombineSum}}, Allowances: []AllowanceDefinition{{Key: "al"}}}

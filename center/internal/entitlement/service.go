@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
@@ -109,6 +110,13 @@ func NewService(db *store.DB, definitions DefinitionSource, ids IDSource, clock 
 // Clock is the service's time source.
 func (s *Service) Clock() time.Time { return s.clock() }
 
+// validAccount reports an account identifier the store can serve: an opaque identifier that is a canonical uuid, because the store
+// keys an account by uuid. Any other token is refused as a malformed identifier before a read, instead of failing in the database as
+// an internal error.
+func validAccount(account string) bool {
+	return IsIdentifier(account) && correlation.IDBytes(account) != nil
+}
+
 func (s *Service) load(ctx context.Context, account string) (State, error) {
 	var state State
 	err := s.db.InTx(ctx, "load the entitlement state", store.TxOptions{ReadOnly: true, Isolation: pgx.RepeatableRead}, func(ctx context.Context, tx pgx.Tx) error {
@@ -122,7 +130,7 @@ func (s *Service) load(ctx context.Context, account string) (State, error) {
 // Read is the current snapshot of an account. A stored snapshot is returned while its validity holds; otherwise it is recomputed and
 // stored. A snapshot computed under other definitions than the active ones is recomputed too.
 func (s *Service) Read(ctx context.Context, account string) (StoredSnapshot, error) {
-	if !IsIdentifier(account) {
+	if !validAccount(account) {
 		return StoredSnapshot{}, refuse(RefusedInvalidRequest, "The workspace identifier is malformed.")
 	}
 	// The fast path reads the snapshot row alone: the records are read only when the snapshot has to be recomputed.
@@ -147,7 +155,7 @@ func (s *Service) Read(ctx context.Context, account string) (StoredSnapshot, err
 
 // Refresh recomputes the snapshot at the authoritative instant and stores it when it differs. This is what a validity sweeper calls.
 func (s *Service) Refresh(ctx context.Context, account string) (StoredSnapshot, error) {
-	if !IsIdentifier(account) {
+	if !validAccount(account) {
 		return StoredSnapshot{}, refuse(RefusedInvalidRequest, "The workspace identifier is malformed.")
 	}
 	for range attempts {
@@ -187,6 +195,9 @@ func (s *Service) Refresh(ctx context.Context, account string) (StoredSnapshot, 
 func (s *Service) IssueGrant(ctx context.Context, request IssueGrantRequest) (Grant, bool, error) {
 	if refusal := ValidateIssue(request); refusal != "" {
 		return Grant{}, false, refuse(RefusedInvalidRequest, refusal)
+	}
+	if !validAccount(request.AccountID) {
+		return Grant{}, false, refuse(RefusedInvalidRequest, "The workspace identifier is malformed.")
 	}
 	for range attempts {
 		state, err := s.load(ctx, request.AccountID)
@@ -230,7 +241,7 @@ func (s *Service) IssueGrant(ctx context.Context, request IssueGrantRequest) (Gr
 // stale decision and nothing is written. A replay of the same revocation writes nothing: without an explicit effective instant, any
 // earlier revocation of the grant with the same reason code is the same revocation.
 func (s *Service) RevokeGrant(ctx context.Context, request RevokeGrantRequest) (Revocation, bool, error) {
-	if !IsIdentifier(request.AccountID) || !IsIdentifier(request.GrantID) || !IsKey(request.ReasonCode) || !IsActor(request.IssuedByActor) {
+	if !validAccount(request.AccountID) || !IsIdentifier(request.GrantID) || !IsKey(request.ReasonCode) || !IsActor(request.IssuedByActor) {
 		return Revocation{}, false, refuse(RefusedInvalidRequest, "The revocation names a malformed workspace, grant, reason code or actor.")
 	}
 	for range attempts {
@@ -312,6 +323,9 @@ type RebuildReport struct {
 // VerifyRebuild rebuilds the snapshot from the records alone, at the instant the stored one was computed, and compares them in full.
 // A difference is a defect, not a refresh (EN-02): it is reported and nothing is overwritten.
 func (s *Service) VerifyRebuild(ctx context.Context, account string) (RebuildReport, error) {
+	if !validAccount(account) {
+		return RebuildReport{}, refuse(RefusedInvalidRequest, "The workspace identifier is malformed.")
+	}
 	state, err := s.load(ctx, account)
 	if err != nil {
 		return RebuildReport{}, err
@@ -477,7 +491,24 @@ func (s *Service) commit(ctx context.Context, account string, expected int64, ad
 	case errors.Is(err, store.ErrCommitUnknown):
 		return 0, refuse(RefusedOutcomeUnknown, unknownDetail)
 	case err != nil:
-		return 0, err
+		return 0, typedConstraint(err)
 	}
 	return outcome, nil
+}
+
+// typedConstraint turns the two constraint refusals a caller's request can cause into the typed refusal of an invalid request: an
+// account that has no identity.user row (the revision row's foreign key) and a reason recorded on a source that is not administrative
+// (the grant table's check, which the C# admission admits). Every other failure is returned as it is.
+func typedConstraint(err error) error {
+	var stored *store.Error
+	if !errors.As(err, &stored) {
+		return err
+	}
+	switch {
+	case stored.SQLState == "23503" && stored.Constraint == "revision_account":
+		return refuse(RefusedInvalidRequest, "The account does not exist.")
+	case stored.SQLState == "23514" && stored.Constraint == "grant_reason_required_for_operator_sources":
+		return refuse(RefusedInvalidRequest, "A reason is recorded only for an administrative source, and an administrative source needs one.")
+	}
+	return err
 }

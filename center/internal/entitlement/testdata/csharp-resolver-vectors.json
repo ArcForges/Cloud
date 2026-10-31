@@ -44249,6 +44249,7 @@
         "GrantPortContractTests.AGrantIsIssuedWithItsSnapshotAndReportedAsPrimitives",
         "GrantPortContractTests.AReplayBySourceReferenceIsAnIdempotentNoOpAndADifferentGrantUnderTheReferenceIsAConflict",
         "GrantPortContractTests.ARevocationNamesOneGrantGuardsTheVersionAndReplaysAsANoOp",
+        "GrantPortContractTests.AStoreThatCannotBeReachedIsATypedStatusAnUnknownOutcomeIsNeverReportedAsSuccessAndADefectIsNotHidden",
         "GrantPortContractTests.ASubMicrosecondRevocationInstantAndAMalformedRevocationAreRefused"
       ],
       "definitions": {
@@ -46453,7 +46454,7 @@
       "admission": 1
     },
     "ClockAndStructureTests.TwoReplicasAtTheSameInstantProduceTheSameSnapshot": {
-      "resolver": 3,
+      "resolver": 4,
       "admission": 1
     },
     "GrantPortContractTests.AGrantIsIssuedWithItsSnapshotAndReportedAsPrimitives": {
@@ -46477,7 +46478,7 @@
       "admission": 0
     },
     "GrantPortContractTests.AStoreThatCannotBeReachedIsATypedStatusAnUnknownOutcomeIsNeverReportedAsSuccessAndADefectIsNotHidden": {
-      "resolver": 0,
+      "resolver": 1,
       "admission": 0
     },
     "GrantPortContractTests.ASubMicrosecondRevocationInstantAndAMalformedRevocationAreRefused": {
@@ -46526,7 +46527,6 @@
     "GrantInterfaceTests.ARevocationNamesAnExactGrantInItsOwnWorkspace": "every revocation refusal (unknown grant, stale version, malformed) precedes any resolver call; the Go service tests port them",
     "GrantInterfaceTests.InputRulesAcceptOnlyBoundedOpaqueTokens": "InputRules predicates are ported with a hand-written table test",
     "GrantPortContractTests.AMalformedRequestIsRefusedBeforeAnyStoreCallAndNeverCoerced": "refused by the port adapter\u0027s own well-formedness rules before the service; no resolver or admission call",
-    "GrantPortContractTests.AStoreThatCannotBeReachedIsATypedStatusAnUnknownOutcomeIsNeverReportedAsSuccessAndADefectIsNotHidden": "a store fault ahead of any resolver call; the Go store tests port the typed outcomes",
     "GrantPortContractTests.NoEntitlementTypeCrossesThePublishedPort": "a reflection check of the C# port types; nothing to port"
   }
 }

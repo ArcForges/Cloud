@@ -175,6 +175,18 @@ internal sealed class EntitlementHarness : IScenario
 
     public InMemoryEntitlementStore Store { get; }
 
+    /// <summary>
+    /// A second replica over the same store and definitions with a clock of its own, answering through the vector-recording facade.
+    /// The covered suites take every service from the harness (a raw <c>new EntitlementService(</c> in them fails the source scan of
+    /// <see cref="ResolverVectorsTests"/>), so a service built here cannot reach the resolver without the recorder.
+    /// </summary>
+    public EntitlementServiceFacade Replica(long atSeconds) =>
+        new(new EntitlementService(new RecordingStore(Store, Definitions), Definitions, new RecordingIds(new SequentialIds()), new RecordingTimeProvider(new SettableTimeProvider(DateTimeOffset.UnixEpoch.AddSeconds(atSeconds)))), Definitions);
+
+    /// <summary>A service over a store the test wraps (a scripted fault), recorded like the harness's own.</summary>
+    public EntitlementService ServiceOver(IEntitlementStore store) =>
+        new(new RecordingStore(store, Definitions), Definitions, new RecordingIds(new SequentialIds()), new RecordingTimeProvider(Clock));
+
     public EntitlementServiceFacade Service { get; }
 
     public string WorkspaceId => Workspace;

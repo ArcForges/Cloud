@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using System.Reflection;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Xunit;
 using Xunit.Sdk;
 using Xunit.v3;
@@ -44,8 +45,24 @@ public sealed class ResolverVectorsTests
         ["GrantInterfaceTests.AMalformedWorkspaceIdentifierIsRefusedBeforeAnyRead"] = "refused by the service before any resolver or admission call",
         ["GrantInterfaceTests.ARevocationNamesAnExactGrantInItsOwnWorkspace"] = "every revocation refusal (unknown grant, stale version, malformed) precedes any resolver call; the Go service tests port them",
         ["GrantPortContractTests.AMalformedRequestIsRefusedBeforeAnyStoreCallAndNeverCoerced"] = "refused by the port adapter's own well-formedness rules before the service; no resolver or admission call",
-        ["GrantPortContractTests.AStoreThatCannotBeReachedIsATypedStatusAnUnknownOutcomeIsNeverReportedAsSuccessAndADefectIsNotHidden"] = "a store fault ahead of any resolver call; the Go store tests port the typed outcomes",
         ["GrantPortContractTests.NoEntitlementTypeCrossesThePublishedPort"] = "a reflection check of the C# port types; nothing to port",
+    };
+
+    /// <summary>
+    /// The files of this folder that call the resolver or the admission directly, outside the covered suites, each with the reason it
+    /// is not a covered one. A file that calls them and is neither covered nor listed here fails the source scan, and a listed file
+    /// that no longer calls them fails it too. The persistence suites test the durable D1 store and its codec: they build snapshots
+    /// with the resolver to commit them through the store, over records the covered suites already reach, so a vector from them would
+    /// repeat one the corpus holds; the Go store tests (service_integration_test.go, over PostgreSQL) port what they show.
+    /// </summary>
+    private static readonly Dictionary<string, string> DirectCallsAllowed = new(StringComparer.Ordinal)
+    {
+        ["ResolverVectors.cs"] = "the recorder: the one place that calls the resolver and the admission on behalf of the suites",
+        ["D1EntitlementHarness.cs"] = "persistence: the D1 harness resolves the snapshot it commits through the codec and the durable store",
+        ["D1EntitlementStoreTests.cs"] = "persistence: commits snapshots built with the resolver through the durable store and its fences",
+        ["D1EntitlementStoreUnitTests.cs"] = "persistence: the store's unit tests build and commit snapshots, and one proves a corrupt history is refused",
+        ["D1RebuildEquivalenceTests.cs"] = "persistence: compares a durably stored snapshot with the resolver's rebuild (the covered RebuildEquivalenceTests hold the vectors)",
+        ["PersistenceCodecTests.cs"] = "persistence: the codec's round trip of resolver output; the inputs are the covered suites' shapes",
     };
 
     private const string UpdateVariable = "ARCFORGES_UPDATE_RESOLVER_VECTORS";
@@ -93,16 +110,41 @@ public sealed class ResolverVectorsTests
         if (!JsonNode.DeepEquals(expected, produced)) Assert.Fail("The committed corpus differs from what the suites produce. " + Describe(expected, produced) + " Rewrite it with " + UpdateVariable + "=1, then run prettier on the file.");
     }
 
+    /// <summary>
+    /// The source scan: a covered suite reaches the resolver and the admission only through the recorder and builds no service of its
+    /// own (the harness hands out every service, recording ones), and no other file of the folder calls them without being listed with a
+    /// reason. The scan reads the text, so it is a guard against an honest mistake and not against a determined bypass: a call through a
+    /// helper that lives outside the folder, or through reflection, would not be seen (the drift test above still notices a covered row
+    /// whose vectors changed).
+    /// </summary>
     [Fact]
     public void EveryResolverCallOfACoveredSuiteGoesThroughTheRecorder()
     {
         var directory = Path.Combine(FindRoot(), "tests", "ArcForges.Cloud.Tests", "Entitlement");
+        var covered = Covered.Select(type => type.Name + ".cs").ToHashSet(StringComparer.Ordinal);
+        var resolver = new Regex(@"EntitlementResolver\s*\.\s*Resolve\s*\(");
+        var admission = new Regex(@"GrantAdmission\s*\.\s*Validate\s*\(");
+        var service = new Regex(@"new\s+EntitlementService\s*\(");
         foreach (var type in Covered)
         {
             var code = File.ReadAllText(Path.Combine(directory, type.Name + ".cs"));
-            Assert.False(code.Contains("EntitlementResolver.Resolve(", StringComparison.Ordinal), type.Name + " calls the resolver directly; use ResolverVectors.Resolve.");
-            Assert.False(code.Contains("GrantAdmission.Validate(", StringComparison.Ordinal), type.Name + " calls grant admission directly; use ResolverVectors.Admit.");
+            Assert.False(resolver.IsMatch(code), type.Name + " calls the resolver directly; use ResolverVectors.Resolve.");
+            Assert.False(admission.IsMatch(code), type.Name + " calls grant admission directly; use ResolverVectors.Admit.");
+            Assert.False(service.IsMatch(code), type.Name + " builds a service of its own; take it from the harness (Replica, ServiceOver) so that it records.");
         }
+
+        var others = Directory.GetFiles(directory, "*.cs").Select(Path.GetFileName).Where(name => !covered.Contains(name!) && name != "ResolverVectorsTests.cs").ToArray();
+        foreach (var name in others)
+        {
+            var code = File.ReadAllText(Path.Combine(directory, name!));
+            var calls = resolver.IsMatch(code) || admission.IsMatch(code);
+            var listed = DirectCallsAllowed.ContainsKey(name!);
+            Assert.True(!calls || listed, name + " calls the resolver or the admission directly and is neither a covered suite nor listed in DirectCallsAllowed with a reason.");
+            Assert.True(!listed || calls, name + " is listed in DirectCallsAllowed but no longer calls the resolver or the admission; remove the entry.");
+        }
+
+        var missing = DirectCallsAllowed.Keys.Where(name => !others.Contains(name)).ToArray();
+        Assert.True(missing.Length == 0, "Listed in DirectCallsAllowed but not files of the folder: " + string.Join(", ", missing));
     }
 
     /// <summary>The rows of a theory: its inline data and the static members its member data names (methods without arguments or properties).</summary>

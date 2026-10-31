@@ -14,6 +14,13 @@ import (
 // recorded by tests/ArcForges.Cloud.Tests/Entitlement/ResolverVectorsTests.cs (EVIDENCE: REAL logic, recorded data).
 const corpusPath = "testdata/csharp-resolver-vectors.json"
 
+// The vectors of the committed corpus, as docs/entitlement-resolver.md states them: a truncated or a padded file is a change of the
+// corpus, made on purpose with these two numbers.
+const (
+	corpusResolverVectors  = 284
+	corpusAdmissionVectors = 61
+)
+
 type enumValue int
 
 // UnmarshalJSON reads a C# enum as its name, or as its number when the value was undefined.
@@ -289,8 +296,9 @@ func loadCorpus(t *testing.T) corpus {
 // against recorded data (the C# resolver's answers).
 func TestResolverParityWithEveryCSharpVector(t *testing.T) {
 	loaded := loadCorpus(t)
-	if len(loaded.Resolver) < 100 {
-		t.Fatalf("the corpus holds only %d resolver vectors", len(loaded.Resolver))
+	if len(loaded.Resolver) != corpusResolverVectors {
+		t.Fatalf("the corpus holds %d resolver vectors, the documented number is %d (a corpus rewritten on purpose changes this number and docs/entitlement-resolver.md)",
+			len(loaded.Resolver), corpusResolverVectors)
 	}
 	refusals, answers := 0, 0
 	for _, vector := range loaded.Resolver {
@@ -351,8 +359,9 @@ func asInputError(err error, target **InputError) bool {
 // exactly when the C# GrantAdmission did.
 func TestGrantAdmissionParityWithEveryCSharpVector(t *testing.T) {
 	loaded := loadCorpus(t)
-	if len(loaded.Admission) < 10 {
-		t.Fatalf("the corpus holds only %d admission vectors", len(loaded.Admission))
+	if len(loaded.Admission) != corpusAdmissionVectors {
+		t.Fatalf("the corpus holds %d admission vectors, the documented number is %d (a corpus rewritten on purpose changes this number and docs/entitlement-resolver.md)",
+			len(loaded.Admission), corpusAdmissionVectors)
 	}
 	refused, admitted := 0, 0
 	for _, vector := range loaded.Admission {
@@ -379,8 +388,10 @@ func TestGrantAdmissionParityWithEveryCSharpVector(t *testing.T) {
 	}
 }
 
-// TestEveryCorpusRowHasAVectorOrAReason pins the corpus' own accounting: a row of the C# suites without a vector is excluded with a
-// stated reason, and every vector names the rows that produced it.
+// TestEveryCorpusRowHasAVectorOrAReason pins the corpus' own accounting, and only that: the vectors that name a row are at most its
+// count of calls and at least one when the count is positive, a row without a vector is excluded with a stated reason, and every
+// vector names a row of the corpus. That every row of the C# suites is in the corpus, and that a count is the number of calls the
+// suite makes, is the C# drift test's job (ResolverVectorsTests), which runs them.
 func TestEveryCorpusRowHasAVectorOrAReason(t *testing.T) {
 	loaded := loadCorpus(t)
 	for name, counts := range loaded.Rows {
@@ -392,9 +403,37 @@ func TestEveryCorpusRowHasAVectorOrAReason(t *testing.T) {
 			t.Errorf("the row %s has vectors and is excluded", name)
 		}
 	}
+	resolverBy, admissionBy := map[string]int{}, map[string]int{}
 	for _, vector := range loaded.Resolver {
 		if len(vector.Rows) == 0 {
 			t.Errorf("%s names no row", vector.ID)
+		}
+		for _, row := range vector.Rows {
+			resolverBy[row]++
+		}
+	}
+	for _, vector := range loaded.Admission {
+		if len(vector.Rows) == 0 {
+			t.Errorf("%s names no row", vector.ID)
+		}
+		for _, row := range vector.Rows {
+			admissionBy[row]++
+		}
+	}
+	// A row's count is the number of calls its suite made; equal calls share one vector, so the vectors that name the row are at most
+	// the count, and at least one exactly when the count is positive.
+	for name, counts := range loaded.Rows {
+		if resolverBy[name] > counts.Resolver || admissionBy[name] > counts.Admission || (resolverBy[name] == 0) != (counts.Resolver == 0) ||
+			(admissionBy[name] == 0) != (counts.Admission == 0) {
+			t.Errorf("the row %s made %d resolver and %d admission calls, and the vectors name it %d and %d times", name, counts.Resolver, counts.Admission,
+				resolverBy[name], admissionBy[name])
+		}
+	}
+	for _, by := range []map[string]int{resolverBy, admissionBy} {
+		for name := range by {
+			if _, known := loaded.Rows[name]; !known {
+				t.Errorf("a vector names the row %s, which the corpus does not list", name)
+			}
 		}
 	}
 	for name := range loaded.Excluded {

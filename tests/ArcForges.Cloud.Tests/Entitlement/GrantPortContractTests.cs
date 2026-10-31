@@ -205,7 +205,7 @@ public sealed class GrantPortContractTests
     {
         var harness = new EntitlementHarness().At(100);
         var store = new ScriptedStore(harness.Store);
-        var port = new EntitlementGrantPortAdapter(new EntitlementService(store, harness.Definitions, new SequentialIds(), harness.Clock));
+        var port = new EntitlementGrantPortAdapter(harness.ServiceOver(store));
 
         store.LoadFailure = new EntitlementStoreException(EntitlementStoreFailure.Unavailable, "overloaded");
         Assert.Equal(EntitlementPortStatus.Unavailable, (await port.IssueGrantAsync(Command(), T.Ct)).Status);

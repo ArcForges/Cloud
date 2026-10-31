@@ -22,7 +22,13 @@ public sealed partial class ClockAndStructureTests
         await one.AddTerm(Term("t1", 0, 30 * Day));
         var first = await one.At(Day).Refresh();
 
-        var replica = new EntitlementService(one.Store, one.Definitions, new SequentialIds(), new SettableTimeProvider(DateTimeOffset.UnixEpoch.AddSeconds(Day)));
+        // The replica does not read the first one's stored row (the stored snapshot is valid until day 30, so a read would return it
+        // and compare it with itself): it rebuilds the snapshot from the records alone, at the stored instant, and the rebuild must be
+        // the stored snapshot in full.
+        var replica = one.Replica(Day);
+        var report = await replica.VerifyRebuildAsync(EntitlementHarness.Workspace, CancellationToken.None);
+        Assert.Equal(RebuildStatus.Equal, report.Status);
+        Assert.True(first.SameAs(report.Rebuilt!));
         var second = await replica.ReadAsync(EntitlementHarness.Workspace, CancellationToken.None);
         Assert.True(first.SameAs(second.Value!));
     }
