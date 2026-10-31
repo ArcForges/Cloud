@@ -18,7 +18,8 @@
 //  3. scope and risk: a credential scope the center knows, an account whose state admits the operation, the session upgrade;
 //  4. AGENT/HUMAN separation: the credential's principal is the one the operation serves (account sessions are HUMAN, node and
 //     automation credentials are AGENT);
-//  5. resource controls: the registered controls (rate limits now; quotas and budgets arrive with AF-CTR-04, DC-07);
+//  5. resource controls: the hook for the controls a composition registers (WithControls; none is composed yet, and the quotas,
+//     budgets and per-account limits of the gated operations arrive with AF-CTR-04, DC-07);
 //  6. audit: an operation whose Audit is AuditBeforeCall appends access.authorized, and a failed append refuses the call;
 //  7. the gate: an operation with a Feature key is refused with ENTITLEMENT/feature_not_entitled unless the feature is available to
 //     the caller's account, and the refusal is audited as access.gated.
@@ -29,6 +30,7 @@ package access
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -242,9 +244,12 @@ func Lookup(path string) (Operation, bool) {
 
 // Check compares the table with the served methods of the identity surface: every served method has exactly one row whose
 // session requirement matches its policy, and every row is served.
-func Check(served []ingress.Policy) error {
+func Check(served []ingress.Policy) error { return checkTable(Operations(), served) }
+
+// checkTable is Check over a given table.
+func checkTable(table []Operation, served []ingress.Policy) error {
 	rows := map[string]Operation{}
-	for _, operation := range Operations() {
+	for _, operation := range table {
 		if _, repeated := rows[operation.Path]; repeated {
 			return fmt.Errorf("the operation table names %s twice", operation.Path)
 		}
@@ -288,6 +293,8 @@ func CheckRow(operation Operation) error {
 		return inconsistent("an anonymous row needs no caller")
 	case operation.Feature != "" && !feature.IsGated(operation.Feature):
 		return inconsistent("the feature is not a gated key")
+	case operation.Feature != "" && operation.Restricted:
+		return inconsistent("a gated operation is no security operation a restricted account may reach")
 	case operation.Feature != "" && operation.Audit != AuditBeforeCall:
 		return inconsistent("a gated row is audited before the call")
 	case operation.Audit == AuditBeforeCall && operation.Feature == "" && operation.Risk != "R3" && operation.Risk != "R4":
@@ -363,6 +370,9 @@ type Option func(*Authorizer)
 // feature were unavailable (fail closed).
 func WithGate(gate feature.Gate) Option { return func(a *Authorizer) { a.gate = gate } }
 
+// Gate is the feature gate the authorizer asks, or nil.
+func (a *Authorizer) Gate() feature.Gate { return a.gate }
+
 // WithControls sets the resource controls Authorize runs, in order, before the audit and the gate.
 func WithControls(controls ...Control) Option {
 	return func(a *Authorizer) { a.controls = append([]Control(nil), controls...) }
@@ -403,8 +413,9 @@ func (a *Authorizer) AuthorizeSubject(ctx context.Context, call *ingress.Call, s
 	if !caller.IsAuthenticated() {
 		return operation, arc.Unauthenticated()
 	}
-	// 2. Ownership of the addressed object.
-	if operation.Object != "" {
+	// 2. Ownership of the addressed object. A subject for a row that names no Object is a handler that decided ownership by itself:
+	// refused, because nothing here would check it.
+	if operation.Object != "" || subject != nil {
 		if err := a.owned(ctx, call, operation, subject); err != nil {
 			return operation, err
 		}
@@ -458,7 +469,7 @@ const (
 // owned is stage 2: the addressed object exists and belongs to the caller's account, else STATE/not_found. A row that names an
 // Object and a call without the matching Subject is a defect of the handler and is refused, never admitted.
 func (a *Authorizer) owned(ctx context.Context, call *ingress.Call, operation Operation, subject *Subject) error {
-	if subject == nil || subject.Kind != operation.Object || subject.Owner == nil {
+	if subject == nil || operation.Object == "" || subject.Kind != operation.Object || subject.Owner == nil {
 		return a.refuse(ctx, call, operation, "subject")
 	}
 	owner, found, err := subject.Owner(ctx)
@@ -482,7 +493,7 @@ func (a *Authorizer) gated(ctx context.Context, call *ingress.Call, operation Op
 	case decision.Available:
 		return nil
 	case decision.Err != nil:
-		return decision.Err
+		return gateFailure(decision.Err)
 	}
 	if err := a.audit(ctx, call, operation, AuditGated, string(decision.Reason), map[string]any{"operation": operation.ID, "feature": string(operation.Feature),
 		"reason": string(decision.Reason)}); err != nil {
@@ -516,4 +527,19 @@ func (a *Authorizer) audit(ctx context.Context, call *ingress.Call, operation Op
 			EventType: eventType, Reason: reason, CorrelationID: correlationID, TargetKind: "operation", TargetID: operation.ID, Payload: payload})
 		return err
 	})
+}
+
+// gateFailure is the answer to a gate that could not decide. The gate runs before the handler, so a failure of the snapshot's own
+// refresh did not touch the call's effect: a commit whose outcome is unknown, a refresh that lost its race on every attempt and a
+// center without an entitlement store are an unavailable store (RESOURCE/overloaded, the call did not happen, retry later). A store
+// failure keeps its own classification (the transport maps it) and anything else, a defect of the history or of the code, stays what
+// it is and is answered INTERNAL/internal.
+func gateFailure(err error) error {
+	var refusal *entitlement.Refusal
+	switch {
+	case errors.Is(err, store.ErrCommitUnknown), errors.Is(err, feature.ErrNoEntitlementStore),
+		errors.As(err, &refusal) && (refusal.Kind == entitlement.RefusedOutcomeUnknown || refusal.Kind == entitlement.RefusedConcurrentUpdate):
+		return arc.Unavailable()
+	}
+	return err
 }

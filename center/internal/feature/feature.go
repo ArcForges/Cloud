@@ -42,8 +42,9 @@ func IsGated(key Key) bool {
 }
 
 // OperationKey is one row of the routed task control table (plan section (g)): the key that gates a group of the center's routed
-// operations once AF-CTR-04 and later tasks serve them. The table is the policy; docs/center.md prints it, a test compares the two,
-// and the operation table of package access takes its keys from here.
+// operations once AF-CTR-04 and later tasks serve them. The table is the policy; docs/center.md prints it and a test compares the two.
+// No code links the operation table of package access to it yet: the author of AF-CTR-04 registers a gated row with the key this
+// table names for its group, and adds a test over every row that carries a Feature once such rows exist.
 type OperationKey struct {
 	Key   Key
 	Gates string

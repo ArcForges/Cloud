@@ -125,9 +125,11 @@ controls and audit, in that order and last ([the gate](center-entitlement.md#the
 
 ### Routed task control
 
-The operations that later tasks serve (AF-CTR-04 on) carry these keys. The table is `feature.OperationKeys`, the policy the
-operation table of `internal/access` takes its `Feature` from, and `TestTheCenterDocumentPrintsTheRoutedTaskControlTable` fails when
-this table and the code differ:
+The operations that later tasks serve (AF-CTR-04 on) carry these keys. The table is `feature.OperationKeys`, the policy a gated row
+of the operation table of `internal/access` follows (nothing links the two in code: `access.CheckRow` checks only that a `Feature` is
+a gated key; AF-CTR-04 registers each row with the key of its group and tests every row that carries a `Feature` against this
+table, see [what waits](center-entitlement.md#what-waits-for-later-tasks)), and
+`TestTheCenterDocumentPrintsTheRoutedTaskControlTable` fails when this table and the code differ:
 
 | Key              | Gates                                               |
 | ---------------- | --------------------------------------------------- |

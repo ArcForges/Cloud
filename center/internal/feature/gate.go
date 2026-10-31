@@ -115,7 +115,9 @@ func (c Configuration) OperatorGrants() (entitlement.OperatorPolicy, error) {
 	return entitlement.OperatorPolicy{MaxExpiry: 400 * 24 * time.Hour, AllowCatalogueWide: true, Keys: keys}, nil
 }
 
-var errNoStore = errors.New("no entitlement store is configured")
+// ErrNoEntitlementStore is why a hosted gate with a valid catalogue cannot decide: the center has no entitlement store, so nothing is
+// entitled. A caller answers it as an unavailable store.
+var ErrNoEntitlementStore = errors.New("no entitlement store is configured")
 
 // Reader reads an account's current entitlement snapshot (entitlement.Service).
 type Reader interface {
@@ -162,7 +164,7 @@ func (g gate) Availability(ctx context.Context, key Key) Decision {
 		return Decision{Reason: ReasonNoAccount}
 	}
 	if g.reader == nil {
-		return Decision{Reason: ReasonEntitlementUnavailable, Err: errNoStore}
+		return Decision{Reason: ReasonEntitlementUnavailable, Err: ErrNoEntitlementStore}
 	}
 	snapshot, err := g.reader.Read(ctx, account)
 	if err != nil {

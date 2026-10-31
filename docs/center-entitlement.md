@@ -118,19 +118,24 @@ no-transform` included, and the Worker's page handler checks the surface of each
 `access.Authorize` decides a session call in seven stages. A stage that refuses ends the decision, so a call a stage refused never
 reaches a later one, and the gate is the last:
 
-| #   | Stage                   | Refusal                                                                                                             |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 1   | Authentication          | `AUTHENTICATION/unauthenticated`                                                                                    |
-| 2   | Ownership of the object | `STATE/not_found` for another account's object or none (a row names an `Object`; the handler supplies its owner)    |
-| 3   | Scope and risk          | `permission_denied` (audited `access.refused`: `scope`, `restricted`), `step_up_required` (the session upgrade)     |
-| 4   | AGENT/HUMAN separation  | `permission_denied` (audited `access.refused`: `principal`)                                                         |
-| 5   | Resource controls       | the control's refusal (a rate limit now; quotas and budgets from AF-CTR-04, DC-07)                                  |
-| 6   | Audit before the call   | the store failure when `access.authorized` cannot be appended (the call is refused)                                 |
-| 7   | The gate                | `ENTITLEMENT/feature_not_entitled`, `state.reason` = the feature key, audited `access.gated` with the gate's reason |
+| #   | Stage                   | Refusal                                                                                                                                                                                                                                                                                                             |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Authentication          | `AUTHENTICATION/unauthenticated`                                                                                                                                                                                                                                                                                    |
+| 2   | Ownership of the object | `STATE/not_found` for another account's object or none (a row names an `Object`; the handler supplies its owner); a subject of another kind, or for a row that names no `Object`, is a handler defect: `permission_denied` (audited `access.refused`: `subject`); an owner that cannot be read is the store failure |
+| 3   | Scope and risk          | `permission_denied` (audited `access.refused`: `scope`, `restricted`), `step_up_required` (the session upgrade)                                                                                                                                                                                                     |
+| 4   | AGENT/HUMAN separation  | `permission_denied` (audited `access.refused`: `principal`)                                                                                                                                                                                                                                                         |
+| 5   | Resource controls       | the refusal of a registered control (none is composed yet: the hook for the quotas and budgets of AF-CTR-04, DC-07)                                                                                                                                                                                                 |
+| 6   | Audit before the call   | the store failure when `access.authorized` cannot be appended (the call is refused)                                                                                                                                                                                                                                 |
+| 7   | The gate                | `ENTITLEMENT/feature_not_entitled`, `state.reason` = the feature key, audited `access.gated` with the gate's reason; a gate that cannot decide is the answer below                                                                                                                                                  |
 
 An essential operation (sign-in, account, billing, security, recovery) has no `Feature` and is never gated; a gated row is audited
-before the call (`access.CheckRow`). A gate that cannot read the entitlement is an unavailable store, never a refusal that says the
-plan lacks the feature; an authorizer composed without a gate refuses every gated row. The context carries the caller's account
+before the call (`access.CheckRow`). A gate that cannot decide is never a refusal that says the
+plan lacks the feature, and nothing is audited as `access.gated` for it: a commit whose outcome is unknown, a refresh that lost its
+race on every attempt and a center without an entitlement store are `RESOURCE/overloaded` (`access.gateFailure`: the call did not
+happen, retry later; the gate runs before the handler, so the call's own effect is untouched); a store failure keeps its own class
+for the transport (an unreachable store is `RESOURCE/overloaded` too, a context that ended is its own status); anything else is a
+defect and is `INTERNAL/internal`, as everywhere in the center. An authorizer composed without a gate refuses every gated row
+(`mode_invalid`), and a hosted gate without an entitlement reader answers no availability with `ErrNoEntitlementStore`. The context carries the caller's account
 (`feature.WithAccount`).
 
 The gate's decision in official-hosted mode: no catalogue is `plan_configuration_missing`, an invalid one
@@ -143,7 +148,11 @@ of the plan configuration (none, invalid, fixtures without a grant, fixtures wit
 catalogue with and without a grant, a fixture under the production classification, the self-hosted default, a disabled key, the
 missing push sender). A spy that delegates to the real gate shows it is not asked by an unauthenticated, foreign-device,
 wrong-principal, restricted, upgrade-needing, resource-exhausted or unaudited call (the audit insert fails inside PostgreSQL through a
-trigger that raises, F5). The routed task control table is in [feature availability](center.md#routed-task-control).
+trigger that raises, F5), and a counting resource control shows the same for the owner's budget: it runs once for each admitted call
+and never for a call that stages 1 to 4 refused, which also pins the order of those stages (a foreign device is `not_found` whoever
+asks, a restricted account is refused as restricted before its principal is looked at). The actor, the target and the exact payload of
+one `access.authorized`, one `access.gated` and one `access.refused` row are pinned, and a high-risk row whose handler audits it in
+its own transaction gets no `access.authorized` (`gate_order_integration_test.go`). The routed task control table is in [feature availability](center.md#routed-task-control).
 
 ## Self-hosted mode
 
@@ -194,6 +203,12 @@ author of this change (no hosted environment was touched).
 - **AF-OPS-01**: the OperatorService that replaces the interim page and calls `entitlement.Operator`.
 - **H-07**: the approved prices, limits and the Neon plan and retention; until then the production catalogue is empty.
 - **AF-CTR-04 and later**: the gated operations (task control, nodes, MCP), their quotas and budgets through the resource-control
-  stage, and the rows of the operation table that carry a `Feature`.
+  stage, and the rows of the operation table that carry a `Feature`. The production `Authorizer` is composed with **no resource
+  control** today, so a gated call is not rate limited: AF-CTR-04 must register a per-account control before it serves a gated row,
+  and must check every row that carries a `Feature` against `feature.OperationKeys` (`CheckRow` checks that the key is a gated key,
+  not that it is the key of the row's group; nothing links the table to the operation table in code). Until a per-account control
+  stands in front of it, a gated call appends up to two audit rows (`access.authorized`, and `access.gated` when refused) and
+  serializes with every other audit writer on the single `audit.chain_head` row, entitled or not: that is the cost of the audit that
+  comes before the call, and the reason the control comes first.
 - **AF-CTR-07** (MCP, agent grants) keeps the feature keys and the `feature.Gate` interface as they are; **AF-CLD-06** brings the
   push sender; **AF-PLAT-01** the retention sweeps and the erasure of an account's records.

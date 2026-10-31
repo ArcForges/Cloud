@@ -57,6 +57,8 @@ func probeRows() []Operation {
 		Operation{Path: probePrefix + "Device", ID: "probe.device", Risk: "R2", Session: true, Object: "device", Feature: feature.RemoteView, Audit: AuditBeforeCall},
 		Operation{Path: probePrefix + "Upgrade", ID: "probe.upgrade", Risk: "R2", Session: true, MobileLimited: Upgrade, Feature: feature.CenterExecute, Audit: AuditBeforeCall},
 		Operation{Path: probePrefix + "Essential", ID: "probe.essential", Risk: "R1", Session: true},
+		// A high-risk essential row is audited by its own handler, in the transaction of its effect: Authorize appends nothing for it.
+		Operation{Path: probePrefix + "Sensitive", ID: "probe.sensitive", Risk: "R3", Session: true, Audit: AuditInTransaction},
 	)
 }
 
@@ -160,7 +162,14 @@ func (r *rig) handle(writer http.ResponseWriter, request *http.Request) {
 	var subject *Subject
 	if raw := request.Header.Get("X-Probe-Device"); raw != "" && request.Header.Get("X-Probe-No-Subject") == "" {
 		id := correlation.IDBytes(raw)
-		subject = &Subject{Kind: "device", ID: id, Owner: func(ctx context.Context) (string, bool, error) {
+		kind := "device"
+		if other := request.Header.Get("X-Probe-Kind"); other != "" {
+			kind = other
+		}
+		subject = &Subject{Kind: kind, ID: id, Owner: func(ctx context.Context) (string, bool, error) {
+			if request.Header.Get("X-Probe-Owner-Error") != "" {
+				return "", false, &store.Error{Operation: "read a device", Kind: store.ErrUnavailable}
+			}
 			var owner string
 			err := r.db.Runtime.InTx(ctx, "read a device", store.TxOptions{ReadOnly: true}, func(ctx context.Context, tx pgx.Tx) error {
 				err := tx.QueryRow(ctx, "SELECT user_id::text FROM device.device WHERE device_id = $1", raw).Scan(&owner)
@@ -528,20 +537,23 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*Operation){
-		"a feature that is not gated":                 func(o *Operation) { o.Feature = "billing" },
-		"a gated row that is not audited":             func(o *Operation) { o.Audit = NoAudit },
-		"a gated row audited in its transaction":      func(o *Operation) { o.Audit = AuditInTransaction },
-		"an anonymous gated row":                      func(o *Operation) { o.Session = false },
-		"an anonymous agent row":                      func(o *Operation) { o.Session, o.Feature, o.Audit, o.Agent = false, "", NoAudit, true },
-		"an anonymous row that names an object":       func(o *Operation) { o.Session, o.Feature, o.Audit, o.Object = false, "", NoAudit, "device" },
-		"an R3 row that is not audited":               func(o *Operation) { o.Feature, o.Audit, o.Risk = "", NoAudit, "R3" },
-		"an R4 row that is not audited":               func(o *Operation) { o.Feature, o.Audit, o.Risk = "", NoAudit, "R4" },
-		"an R1 row audited before the call":           func(o *Operation) { o.Feature, o.Risk = "", "R1" },
-		"an agent row with a mobile.limited rule":     func(o *Operation) { o.Agent, o.MobileLimited = true, Upgrade },
-		"an agent row a restricted account may reach": func(o *Operation) { o.Agent, o.Restricted = true, true },
-		"an agent row that needs step-up evidence":    func(o *Operation) { o.Agent, o.StepUp, o.Target = true, Evidence, TargetAccount },
-		"evidence without a target":                   func(o *Operation) { o.StepUp = Evidence },
-		"a target without evidence":                   func(o *Operation) { o.Target = TargetDevice },
+		"a feature that is not gated":                     func(o *Operation) { o.Feature = "billing" },
+		"a gated row that is not audited":                 func(o *Operation) { o.Audit = NoAudit },
+		"a gated row audited in its transaction":          func(o *Operation) { o.Audit = AuditInTransaction },
+		"an anonymous gated row":                          func(o *Operation) { o.Session = false },
+		"an anonymous agent row":                          func(o *Operation) { o.Session, o.Feature, o.Audit, o.Agent = false, "", NoAudit, true },
+		"an anonymous row that names an object":           func(o *Operation) { o.Session, o.Feature, o.Audit, o.Object = false, "", NoAudit, "device" },
+		"an anonymous row with a receipt":                 func(o *Operation) { o.Session, o.Feature, o.Audit, o.Receipt = false, "", NoAudit, true },
+		"an anonymous row a restricted account may reach": func(o *Operation) { o.Session, o.Feature, o.Audit, o.Restricted = false, "", NoAudit, true },
+		"a gated row a restricted account may reach":      func(o *Operation) { o.Restricted = true },
+		"an R3 row that is not audited":                   func(o *Operation) { o.Feature, o.Audit, o.Risk = "", NoAudit, "R3" },
+		"an R4 row that is not audited":                   func(o *Operation) { o.Feature, o.Audit, o.Risk = "", NoAudit, "R4" },
+		"an R1 row audited before the call":               func(o *Operation) { o.Feature, o.Risk = "", "R1" },
+		"an agent row with a mobile.limited rule":         func(o *Operation) { o.Agent, o.MobileLimited = true, Upgrade },
+		"an agent row a restricted account may reach":     func(o *Operation) { o.Agent, o.Restricted = true, true },
+		"an agent row that needs step-up evidence":        func(o *Operation) { o.Agent, o.StepUp, o.Target = true, Evidence, TargetAccount },
+		"evidence without a target":                       func(o *Operation) { o.StepUp = Evidence },
+		"a target without evidence":                       func(o *Operation) { o.Target = TargetDevice },
 	} {
 		row := good
 		mutate(&row)

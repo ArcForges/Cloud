@@ -254,9 +254,13 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		"execute a command under its receipt": effect,
 		// A2: the browser's sign-out (the pages' logout route).
 		"sign out": effect,
+		// Part B: the entitlement store and the operator grant (package entitlement). The refusal audit is bookkeeping around a
+		// refused grant, the role and snapshot reads are reads, and the snapshot's store is the read's own effect.
+		"read the operator role": read, "load the entitlement state": read, "read the entitlement snapshot": read,
+		"store the entitlement snapshot": effect, "audit an operator grant refusal": auxiliary,
 	}
 	found := map[string]string{}
-	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages"} {
+	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages", "../entitlement"} {
 		files, err := filepath.Glob(filepath.Join(directory, "*.go"))
 		if err != nil {
 			t.Fatal(err)
