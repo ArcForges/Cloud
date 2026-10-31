@@ -34,8 +34,18 @@ const SurfaceIdentity Surface = "identity"
 // the identity surface, whose domain functions it calls; it is off wherever FLAGSHIP_SURFACES does not name it.
 const SurfacePages Surface = "pages"
 
+// SurfaceOperations is the interim operations page (AF-CTR-03 part B): the operator's grant of features to an account, with step-up
+// evidence, until AF-OPS-01's operator service replaces it. It needs the identity and pages surfaces (the page's script proves the
+// step-up through the pages' JSON routes), exists on the official hosted center only, and is never part of a self-hosted center's
+// default: it is on only where FLAGSHIP_SURFACES names it.
+const SurfaceOperations Surface = "operations"
+
 // KnownSurfaces is every surface name, in generated order.
-func KnownSurfaces() []Surface { return []Surface{SurfaceIdentity, SurfacePages} }
+func KnownSurfaces() []Surface { return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations} }
+
+// DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces, never the
+// operations page.
+func DefaultSelfHostedSurfaces() []Surface { return []Surface{SurfaceIdentity, SurfacePages} }
 
 // ClientIPHeader is the one header the hosted Worker sets to the client's address (from cf-connecting-ip, overwriting any client
 // value); the generated Worker tables carry the same name.
@@ -53,8 +63,8 @@ type Bootstrap struct {
 
 // Identity is the configuration of the identity surface.
 type Identity struct {
-	// Surfaces are the enabled surfaces. Official-hosted mode enables none unless listed; self-hosted mode enables every known
-	// surface unless listed.
+	// Surfaces are the enabled surfaces. Official-hosted mode enables none unless listed; self-hosted mode enables the default
+	// surfaces (identity and pages, DefaultSelfHostedSurfaces) unless listed; operations is never a default.
 	Surfaces []Surface
 	// ClientIPHeader names the header that carries the client's address (official-hosted mode with a surface enabled requires
 	// exactly ClientIPHeader); empty means the TCP peer.
@@ -323,6 +333,14 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 	if identity.Enabled(SurfacePages) && !identity.Enabled(SurfaceIdentity) {
 		return Identity{}, invalid("the %s surface needs the %s surface: the pages call its domain functions", SurfacePages, SurfaceIdentity)
 	}
+	if identity.Enabled(SurfaceOperations) {
+		if !identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages) {
+			return Identity{}, invalid("the %s surface needs the %s and %s surfaces: its page proves a step-up through the pages' routes", SurfaceOperations, SurfaceIdentity, SurfacePages)
+		}
+		if mode != OfficialHosted {
+			return Identity{}, invalid("the %s surface exists on the official hosted center only: operator grants have no place on a self-hosted center", SurfaceOperations)
+		}
+	}
 	if identity.Enabled(SurfaceIdentity) {
 		if err = RequireRelyingParty(publicBaseURL); err != nil {
 			if get(EnvSurfaces) != "" {
@@ -330,7 +348,7 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 			}
 			// The self-hosted default never refuses to start: identity stays off, and so do the pages that need it, and the start-up
 			// log says why (PLT-16).
-			identity.Surfaces = slices.DeleteFunc(identity.Surfaces, func(s Surface) bool { return s == SurfaceIdentity || s == SurfacePages })
+			identity.Surfaces = slices.DeleteFunc(identity.Surfaces, func(s Surface) bool { return s == SurfaceIdentity || s == SurfacePages || s == SurfaceOperations })
 			identity.Disabled = err.Error()
 		}
 	}
@@ -338,12 +356,12 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 }
 
 // parseSurfaces reads the surface list: exact generated names, comma-separated, without whitespace or repetition. Official-hosted
-// mode enables none unless listed; self-hosted mode enables every known surface unless listed, so an explicit list pins the
-// surfaces across upgrades.
+// mode enables none unless listed; self-hosted mode enables the default surfaces (identity and pages, not operations) unless listed,
+// so an explicit list pins the surfaces across upgrades.
 func parseSurfaces(value string, mode Mode) ([]Surface, error) {
 	if value == "" {
 		if mode == SelfHosted {
-			return KnownSurfaces(), nil
+			return DefaultSelfHostedSurfaces(), nil
 		}
 		return nil, nil
 	}

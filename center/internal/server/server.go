@@ -30,6 +30,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/buildinfo"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/device"
+	"github.com/ArcForges/Cloud/center/internal/entitlement"
 	"github.com/ArcForges/Cloud/center/internal/feature"
 	"github.com/ArcForges/Cloud/center/internal/hello"
 	"github.com/ArcForges/Cloud/center/internal/identity"
@@ -61,8 +62,15 @@ type Center struct {
 	Logger  *slog.Logger
 	Metrics *observe.Metrics
 	Health  buildinfo.Health
-	// Features is the feature gate (AD-0021 section 13a); the stub answers per mode until AF-CTR-03.
-	Features feature.Gate
+	// Features is the feature gate (AD-0021 section 13a): the plan catalogue and the account's entitlement in official-hosted mode,
+	// the built-in default and the operator's limits in self-hosted mode. FeatureConfiguration is what the start made of the plan
+	// configuration; Entitlements is the entitlement service, or nil when no runtime database is configured.
+	Features             feature.Gate
+	FeatureConfiguration feature.Configuration
+	Entitlements         *entitlement.Service
+	// Authorizer is the identity surface's authorization (the stages of access.Authorize, the feature gate among them), or nil where
+	// that surface is off.
+	Authorizer *access.Authorizer
 	// Store is the runtime role's PostgreSQL store, or nil when no runtime database is configured.
 	Store  *store.DB
 	public http.Handler
@@ -99,12 +107,24 @@ type Options struct {
 	// Participants are the device revocation's cascade participants (DC-06): none in AF-CTR-03 (agent grants arrive with
 	// AF-CTR-07 and push with AF-CLD-06); the tests register a stand-in.
 	Participants []device.Participant
+	// catalogue replaces the plan catalogue with a document under a classification: TESTS ONLY (DC-12). It is unexported, so no other
+	// package (the executable included) can set it, and no environment variable, file or configuration reaches it: a running center
+	// has the catalogue of its plan configuration or none. Inside this package, TestTheCatalogueOfARunningCenterComesOnlyFromItsPlan
+	// Configuration parses the non-test files and fails when anything but New reads these two fields or a literal sets them (server.Run
+	// composes the center with Options{}). It exists to prove the production bounds with a production-classified catalogue.
+	catalogue      []byte
+	catalogueClass feature.Classification
 }
 
 // New composes a center from its configuration. Pools connect lazily, so a database that is down does not stop the start; it
 // makes the center unready and its calls fail with UNAVAILABLE.
 func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, error) {
-	center := &Center{Config: cfg, Logger: logger, Metrics: observe.NewMetrics(), Features: feature.NewGate(cfg.Mode, cfg.Plan)}
+	center := &Center{Config: cfg, Logger: logger, Metrics: observe.NewMetrics()}
+	disabled := make([]feature.Key, len(cfg.DisabledFeatures))
+	for index, name := range cfg.DisabledFeatures {
+		disabled[index] = feature.Key(name)
+	}
+	center.FeatureConfiguration = feature.Configure(feature.Settings{Mode: cfg.Mode, Plan: cfg.Plan, Injected: options.catalogue, InjectedClass: options.catalogueClass, Disabled: disabled})
 	center.schemaVersion.Store(-1)
 	build, err := migrate.Load(schema.Migrations())
 	if err != nil {
@@ -129,6 +149,7 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 		}
 		center.pools = append(center.pools, namedPool{"runtime", pool})
 		center.Store = store.New(pool)
+		center.Entitlements = entitlement.NewService(center.Store, center.FeatureConfiguration, nil, options.Clock)
 		center.ready = append(center.ready, component{"database", pool.Ping}, component{"databaseSchema", func(ctx context.Context) error {
 			version, err := migrate.CheckCompatible(ctx, pool, build)
 			if err == nil {
@@ -140,6 +161,11 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 			greeting, backend = hello.Database(pool), BackendRuntime
 		}
 	}
+	var snapshots feature.Reader
+	if center.Entitlements != nil {
+		snapshots = center.Entitlements
+	}
+	center.Features = feature.NewGate(center.FeatureConfiguration, snapshots)
 	if options.Greeting != nil {
 		greeting = options.Greeting
 	}
@@ -187,6 +213,7 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 			center.Close()
 			return nil, err
 		}
+		center.Authorizer = composed.authorizer
 		if cfg.Identity.Enabled(config.SurfacePages) {
 			if pageHandler, err = center.composePages(composed, publicRoutes.Registry, pipelineOptions, logger); err != nil {
 				center.Close()
@@ -238,7 +265,7 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	}
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: options.Mail, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: options.Participants})
-	authorizer := access.NewAuthorizer(c.Store, clock)
+	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
 	dispatcher.Register(server.Methods()...)
 	verifier := session.NewVerifier(c.Store, origin, clock)
@@ -251,10 +278,19 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 func (c *Center) composePages(composed composedIdentity, registry *ingress.Registry, pipeline ingress.Options, logger *slog.Logger) (http.Handler, error) {
 	return pages.New(pages.Options{
 		Origin: config.Origin(c.Config.PublicBaseURL), BasePath: config.BasePath(c.Config.PublicBaseURL),
-		Enabled: func() bool { return c.Config.Identity.Enabled(config.SurfacePages) },
-		Policy:  c.Config.Identity.Policy, Identity: composed.service, Direct: composed.server.Direct(), Access: composed.authorizer, Verifier: composed.verifier,
+		Enabled: func(surface string) bool { return c.Config.Identity.Enabled(config.Surface(surface)) },
+		Policy:  c.Config.Identity.Policy, Operator: c.operator(composed.clock), Identity: composed.service, Direct: composed.server.Direct(), Access: composed.authorizer, Verifier: composed.verifier,
 		DB: c.Store, Registry: registry, ClientIP: pipeline.ClientIP, RequireClientIP: pipeline.RequireClientIP, Clock: composed.clock, Logger: logger,
 	})
+}
+
+// operator is the operator grant of the operations surface, or nil where that surface is not enabled (every route of it then does not
+// exist). The configuration admits the surface only on the official hosted center together with the identity and pages surfaces.
+func (c *Center) operator(clock func() time.Time) *entitlement.Operator {
+	if !c.Config.Identity.Enabled(config.SurfaceOperations) || c.Entitlements == nil {
+		return nil
+	}
+	return entitlement.NewOperator(c.Store, c.Entitlements, c.FeatureConfiguration.OperatorGrants, clock)
 }
 
 // checkIdentityComposition fails closed when the identity surface's registrations, its served Connect methods and the operation
@@ -493,6 +529,20 @@ func (c *Center) writeDatabaseMetrics(writer io.Writer) error {
 	return err
 }
 
+// logPlanConfiguration says what the plan configuration came to: an invalid catalogue is an error that names the rule it broke (the
+// problem is a rule text, never a byte of the document), and an official hosted center without a plan configuration says so. A
+// self-hosted center has no catalogue and logs nothing.
+func (c *Center) logPlanConfiguration(logger *slog.Logger) {
+	switch c.FeatureConfiguration.State {
+	case feature.StateInvalid:
+		logger.Error("the plan catalogue is invalid; every gated feature is unavailable", "problem", c.FeatureConfiguration.Problem)
+	case feature.StateMissing:
+		if c.Config.Mode == config.OfficialHosted {
+			logger.Info("no plan configuration; every gated feature is unavailable until one is configured")
+		}
+	}
+}
+
 // Run serves the center until ctx ends or a listener fails, then shuts down within five seconds.
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	center, err := New(cfg, logger, Options{})
@@ -539,7 +589,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	for _, surface := range cfg.Identity.Surfaces {
 		surfaces = append(surfaces, string(surface))
 	}
-	logger.Info("center started", "mode", string(cfg.Mode), "planConfiguration", planName(cfg.Plan), "publicBaseUrl", cfg.PublicBaseURL, "listeners", bound,
+	center.logPlanConfiguration(logger)
+	logger.Info("center started", "mode", string(cfg.Mode), "planConfiguration", planName(cfg.Plan), "disabledFeatures", cfg.DisabledFeatures, "publicBaseUrl", cfg.PublicBaseURL, "listeners", bound,
 		"helloBackend", center.Health.HelloBackend, "store", center.Store != nil, "schemaBuildVersion", center.buildVersion,
 		"revision", center.Health.Revision, "version", center.Health.Artifact.Version, "surfaces", surfaces,
 		"bootstrapConfigured", cfg.Identity.Bootstrap != nil)

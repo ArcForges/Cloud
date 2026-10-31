@@ -80,6 +80,18 @@ dispatch without the inputs removes a spent or expired one. The token itself is 
 (`eng/verification/browser`, its own package with an exact lockfile that the root `npm ci` and no workflow installs) runs on the
 Windows host after the deployment; it is post-merge evidence, not a CI check.
 
+### Plan configuration and the operator grant (AF-CTR-03 B)
+
+The Container receives `ARCFORGES_CENTER_PLAN_CONFIGURATION` unchanged: production carries none (no catalogue, no gated feature
+available, no operator grant), and the acceptance environment `development-fixtures` (`tests/worker/proof-deploy.test.ts` pins both).
+The Worker passes no other variable of this part: in particular `ARCFORGES_CENTER_DISABLED_FEATURES`, a self-hosted operator's limit
+that the hosted center refuses, is never handed over (`tests/worker/container-classes.test.ts`, PLT-18). The `operations` surface is in
+no checked-in environment: production keeps `FLAGSHIP_SURFACES` empty and the acceptance environment `identity,pages`; enabling
+`operations` for the hosted proof of the operator grant, and giving the proving account the operator role with
+`arcforges-center admin grant-operator` (the migration role's path, like `admin revoke-sessions`; it works on the database of the migration URL unless `ARCFORGES_CENTER_DATABASE_NAME=arcforges_acceptance` names the acceptance one, which the checklist's commands do), are the coordinator's steps after
+the deployment ([post-deploy checklist](center-entitlement.md#post-deploy-checklist)). The deployment's migration gate applies
+migration `0003` to the production database while production is dark, and to the acceptance database.
+
 ### Start environment after a deployment
 
 The Container's start environment follows the deployed Worker version (AF-CTR-03). A `--containers-rollout immediate` deployment

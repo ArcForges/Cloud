@@ -126,7 +126,7 @@ internal sealed class FixedDefinitions(EntitlementDefinitions definitions) : IEn
 /// </summary>
 internal interface IScenario
 {
-    EntitlementService Service { get; }
+    EntitlementServiceFacade Service { get; }
 
     FixedDefinitions Definitions { get; }
 
@@ -163,7 +163,10 @@ internal sealed class EntitlementHarness : IScenario
         Definitions = new FixedDefinitions(Fixtures.Definitions(selfHostRealm));
         Clock = new SettableTimeProvider(DateTimeOffset.UnixEpoch);
         Store = new InMemoryEntitlementStore();
-        Service = new EntitlementService(Store, Definitions, new SequentialIds(), Clock);
+        // The service runs over recording ports and answers through the vector-recording facade (ResolverVectors); both are inert while
+        // no row is being recorded, which is every ordinary run of a suite.
+        Service = new EntitlementServiceFacade(
+            new EntitlementService(new RecordingStore(Store, Definitions), Definitions, new RecordingIds(new SequentialIds()), new RecordingTimeProvider(Clock)), Definitions);
     }
 
     public FixedDefinitions Definitions { get; }
@@ -172,7 +175,19 @@ internal sealed class EntitlementHarness : IScenario
 
     public InMemoryEntitlementStore Store { get; }
 
-    public EntitlementService Service { get; }
+    /// <summary>
+    /// A second replica over the same store and definitions with a clock of its own, answering through the vector-recording facade.
+    /// The covered suites take every service from the harness (a raw <c>new EntitlementService(</c> in them fails the source scan of
+    /// <see cref="ResolverVectorsTests"/>), so a service built here cannot reach the resolver without the recorder.
+    /// </summary>
+    public EntitlementServiceFacade Replica(long atSeconds) =>
+        new(new EntitlementService(new RecordingStore(Store, Definitions), Definitions, new RecordingIds(new SequentialIds()), new RecordingTimeProvider(new SettableTimeProvider(DateTimeOffset.UnixEpoch.AddSeconds(atSeconds)))), Definitions);
+
+    /// <summary>A service over a store the test wraps (a scripted fault), recorded like the harness's own.</summary>
+    public EntitlementService ServiceOver(IEntitlementStore store) =>
+        new(new RecordingStore(store, Definitions), Definitions, new RecordingIds(new SequentialIds()), new RecordingTimeProvider(Clock));
+
+    public EntitlementServiceFacade Service { get; }
 
     public string WorkspaceId => Workspace;
 

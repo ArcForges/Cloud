@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
-import { coldStartBudgetMs } from "../../worker/ingress/routes.ts";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { coldStartBudgetMs, healthPath } from "../../worker/ingress/routes.ts";
 import { trailerFrame } from "../../worker/ingress/io.ts";
 import { proofRouteTable } from "../../worker/ingress/proof-table.ts";
 import { routeRequest as routeWith, type CloudBindings } from "../../worker/router.ts";
@@ -308,10 +310,163 @@ test("the Container request of an API call says redirect manual: a redirect is r
   // The 303 is a non-200 reply of the Container: the call is refused. The 200 of the address it leads to never reaches the client.
   const bytes = new Uint8Array(await response.arrayBuffer());
   assert.notDeepEqual(bytes, okReply);
-  // A health read (the same code path) says it as well.
+  // A health read (the same code path) says it as well, and a redirect answered to it is refused like any other non-200 reply, never
+  // followed to the 200 of the address it names.
+  const health = bindings(async (request) =>
+    platformFetch(
+      () =>
+        new Response(null, { status: 302, headers: { location: "http://container/elsewhere" } }),
+      () => new Response("{}", { headers: { "content-type": "application/json" } }),
+    )(request),
+  );
+  const healthReply = await routeRequest(
+    new Request(`${origin}${healthPath}`, { headers: { "cf-connecting-ip": "203.0.113.7" } }),
+    health.env,
+  );
+  assert.equal(health.seen.requests.length, 1);
+  assert.equal(health.seen.requests[0]?.redirect, "manual");
+  assert.equal(
+    new URL(health.seen.requests[0]?.url ?? "").pathname,
+    healthPath.replace(/^\/api/u, ""),
+  );
+  assert.equal(healthReply.status, 503);
+  assert.equal(await healthReply.text(), "Cloud container is temporarily unavailable.");
   const unary = bindings(async () => new Response(okReply));
   await (await routeRequest(call(hello), unary.env)).arrayBuffer();
   assert.equal(unary.seen.requests[0]?.redirect, "manual");
+});
+
+// The source text without its comments (strings and template literals are kept whole, so an address such as http://container is not
+// mistaken for a comment): a comment that spells `redirect: "manual"` must not stand in for the option.
+const withoutComments = (text: string): string => {
+  let out = "";
+  for (let index = 0; index < text.length;) {
+    const char = text[index] ?? "";
+    const next = text[index + 1];
+    if (char === "/" && next === "/") {
+      while (index < text.length && text[index] !== "\n") index++;
+    } else if (char === "/" && next === "*") {
+      const end = text.indexOf("*/", index + 2);
+      index = end < 0 ? text.length : end + 2;
+      out += " ";
+    } else if (char === '"' || char === "'" || char === "`") {
+      let end = index + 1;
+      while (end < text.length && text[end] !== char) end += text[end] === "\\" ? 2 : 1;
+      out += text.slice(index, end + 1);
+      index = end + 1;
+    } else {
+      out += char;
+      index++;
+    }
+  }
+  return out;
+};
+
+// The index just after the parenthesis that closes the one opened at `open`.
+const closing = (text: string, open: number): number => {
+  let depth = 0;
+  for (let index = open; index < text.length; index++) {
+    const char = text[index];
+    if (char === "(") depth++;
+    else if (char === ")" && --depth === 0) return index + 1;
+  }
+  throw new Error("an unbalanced parenthesis");
+};
+
+// Every place the Worker obtains a Container stub, and what it does with it: a request (.fetch) must say redirect manual in its own
+// arguments, whatever address it builds; anything else is a stub the file only stops.
+const containerSites = (text: string): { request: boolean; manual: boolean }[] => {
+  const code = withoutComments(text);
+  const sites: { request: boolean; manual: boolean }[] = [];
+  for (const match of code.matchAll(/CLOUD_CONTAINER\s*\.getByName\s*\(/gu)) {
+    const afterStub = closing(code, match.index + match[0].length - 1);
+    const fetch = /^\s*\.fetch\s*\(/u.exec(code.slice(afterStub));
+    if (!fetch) {
+      sites.push({ request: false, manual: false });
+      continue;
+    }
+    const open = afterStub + fetch[0].length - 1;
+    const requestArguments = code.slice(open, closing(code, open));
+    sites.push({ request: true, manual: /\bredirect\s*:\s*"manual"/u.test(requestArguments) });
+  }
+  return sites;
+};
+
+test("every request the Worker makes to the Container says redirect manual (H-1): a new request site must say it too", () => {
+  const root = new URL("../../", import.meta.url).pathname;
+  const sources: string[] = [];
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory)) {
+      const file = path.join(directory, entry);
+      if (statSync(file).isDirectory()) walk(file);
+      else if (file.endsWith(".ts") && !file.endsWith(".generated.ts")) sources.push(file);
+    }
+  };
+  walk(path.join(root, "worker"));
+  assert(sources.length > 20, "the Worker sources were found");
+  // The scan is keyed on the call that reaches the Container, not on an address: a request whose URL comes from a constant is seen,
+  // and a comment is not an option. The list is the sites of this task: a sixth must be added here on purpose.
+  const requests = new Map<string, number>();
+  const stubs = new Map<string, number>();
+  for (const file of sources) {
+    const text = readFileSync(file, "utf8");
+    const name = path.relative(root, file);
+    for (const site of containerSites(text)) {
+      if (!site.request) {
+        stubs.set(name, (stubs.get(name) ?? 0) + 1);
+        continue;
+      }
+      assert(site.manual, `${name} makes a Container request without redirect manual`);
+      requests.set(name, (requests.get(name) ?? 0) + 1);
+    }
+  }
+  assert.deepEqual(
+    [...requests.entries()].sort(([a], [b]) => a.localeCompare(b)),
+    [
+      ["worker/foundation/container-client.ts", 1],
+      ["worker/foundation/proof-routes.ts", 1],
+      ["worker/harness/run-alarm.ts", 1],
+      ["worker/ingress/pages.ts", 1],
+      ["worker/ingress/pipeline.ts", 1],
+    ],
+  );
+  // The one stub that is not a request is stopped, never fetched.
+  assert.deepEqual([...stubs.entries()], [["worker/foundation/proof-routes.ts", 1]]);
+  assert(
+    !/\bstub\s*\.fetch\s*\(/u.test(
+      withoutComments(readFileSync(path.join(root, "worker/foundation/proof-routes.ts"), "utf8")),
+    ),
+  );
+});
+
+test("the scan of the Container requests sees a request without the option, a constant address and a comment standing in for it", () => {
+  const request = (options: string, comment = "") =>
+    `${comment}\nconst r = await env.CLOUD_CONTAINER.getByName(name).fetch(new Request(target, { method: "POST"${options} }));`;
+  assert.deepEqual(containerSites(request(', redirect: "manual"')), [
+    { request: true, manual: true },
+  ]);
+  assert.deepEqual(containerSites(request("")), [{ request: true, manual: false }]);
+  assert.deepEqual(containerSites(request("", '// redirect: "manual"')), [
+    { request: true, manual: false },
+  ]);
+  assert.deepEqual(containerSites(request("", '/* redirect: "manual" */')), [
+    { request: true, manual: false },
+  ]);
+  assert.deepEqual(containerSites(request("", 'const note = "redirect manual";')), [
+    { request: true, manual: false },
+  ]);
+  // An address held in a constant, another receiver spelling and a stub kept in a variable are all sites.
+  assert.deepEqual(
+    containerSites("const u = SHARED; await env.CLOUD_CONTAINER\n  .getByName(a)\n  .fetch(u);"),
+    [{ request: true, manual: false }],
+  );
+  assert.deepEqual(
+    containerSites(
+      'const stub = env.CLOUD_CONTAINER.getByName(a); await stub.fetch(new Request(u, { redirect: "manual" }));',
+    ),
+    [{ request: false, manual: false }],
+  );
+  assert.deepEqual(containerSites('const url = "http://container/x"; // not a site'), []);
 });
 
 test("a unary reply that is not exactly one message and a status is never passed on", async () => {

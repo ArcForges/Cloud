@@ -234,8 +234,12 @@ async function step<T>(
       if (totalChanges(world) > changesBefore) {
         record.note = "rate limited (429) after a change was made";
         record.milliseconds = world.now().getTime() - started;
+        // What the step said about its own failure comes with it: "the account may exist; do not delete the credential file" must
+        // not be lost behind the 429.
+        const cause =
+          "error" in outcome && outcome.error instanceof Error ? ` ${outcome.error.message}` : "";
         throw new AcceptanceError(
-          `Step "${name}" was rate limited (429) after a request of it had changed something; it is not repeated.`,
+          `Step "${name}" was rate limited (429) after a request of it had changed something; it is not repeated.${cause}`,
         );
       }
       if (record.attempts >= maxAttempts) {
@@ -624,13 +628,15 @@ export async function runAcceptance(world: World): Promise<void> {
       await a.tab.setValue(selectors.token, bootstrap.token);
       await a.tab.setValue(selectors.displayName, world.displayName);
       const acceptedBefore = a.tab.changes();
+      const unsettledBefore = a.tab.unsettled();
       try {
         await a.tab.click(selectors.create);
         await a.tab.waitForPath(pagePathname(world, pages.passkeys), world.timeoutMs);
       } catch (error) {
-        if (a.tab.changes() > acceptedBefore) {
-          // The center accepted the enrollment (the account is created, the token is spent) and the tab did not arrive: the file
-          // holds the only copy of the owner's key, so it stays.
+        if (a.tab.changes() > acceptedBefore || a.tab.unsettled() > unsettledBefore) {
+          // The center accepted the enrollment (the account is created, the token is spent), or may have: its reply was lost or was
+          // a server error. The tab did not arrive, and the file holds the only copy of the owner's key, so it stays unless every
+          // reply to the enrollment request was a definite refusal.
           const reason = error instanceof Error ? error.message : "the step failed";
           throw new AcceptanceError(
             `The account may exist; do not delete the credential file. Cause: ${reason}`,

@@ -12,8 +12,15 @@ import (
 // served only where the surface is enabled; elsewhere the Worker and the center answer 404.
 const SurfacePages = "pages"
 
+// SurfaceOperations is the operations surface: the interim page of the operator grant (AF-CTR-03 B). It is its own surface, never
+// enabled with identity by default, served only by the official hosted center and only together with the identity and pages
+// surfaces (its page proves a step-up through the pages' routes). AF-OPS-01's OperatorService replaces it.
+const SurfaceOperations = "operations"
+
 // The prefixes of the pages' paths, relative to the public base URL (the Worker owns APIPrefix in front of them).
 const (
+	// PageOperationsPrefix is the path of the operations surface's pages.
+	PageOperationsPrefix = "/operations"
 	// PageBrowserPrefix is the path of the WebBrowserSession routes (Contracts public/http/v1/web-browser.schema.json).
 	PageBrowserPrefix = "/session/v1/web"
 	// PageAccountPrefix is the path of the account pages and their assets.
@@ -44,6 +51,9 @@ const (
 	pageBytesPageReply   = 131_072
 	pageBytesAssetReply  = 131_072
 	pageBytesReceiptJSON = 4096
+	// pageBytesOperationForm bounds an operations form: a reason and a self-approval of 512 characters each, which percent-encode to at
+	// most 9 bytes per character, with the short fields around them.
+	pageBytesOperationForm = 12_288
 )
 
 // PageDurationMilliseconds caps the Worker's budget for one page call (a PBKDF2-free passkey ceremony and a few short transactions).
@@ -89,8 +99,10 @@ type PageRoute struct {
 	Method string
 	Path   string
 	// ID names the route: the contract's route ID of a WebBrowserSession route, else a page name.
-	ID   string
-	Kind PageKind
+	ID string
+	// Surface is the switchable surface the route belongs to: the Worker forwards it only while that surface is enabled.
+	Surface string
+	Kind    PageKind
 	// RequestType is the exact media type of a POST's body ("" for no body).
 	RequestType string
 	// ResponseTypes are the media types the route's replies may have (a refusal is JSON on a JSON route, HTML elsewhere).
@@ -149,6 +161,14 @@ const PageRedirectFragment = "#return="
 
 // PageRoutes are the routes of the pages surface, in registration order.
 func PageRoutes() []PageRoute {
+	rows := pageSurfaceRoutes()
+	for index := range rows {
+		rows[index].Surface = SurfacePages
+	}
+	return rows
+}
+
+func pageSurfaceRoutes() []PageRoute {
 	account := func(path string) string { return PageAccountPrefix + path }
 	browser := func(path string) string { return PageBrowserPrefix + path }
 	html := []string{TypeHTML}
@@ -202,6 +222,27 @@ func PageRoutes() []PageRoute {
 	}
 }
 
+// AllPageRoutes are the page routes of every surface, the pages surface's first.
+func AllPageRoutes() []PageRoute { return append(PageRoutes(), OperationsPageRoutes()...) }
+
+// OperationsPageRoutes are the routes of the operations surface, in registration order: the page of the operator grant, its review (the
+// request normalized, and the step-up target the script proves) and its confirmation (the grant itself, which consumes the
+// step-up). The pages' script and style sheet are the pages surface's assets, which this surface needs enabled.
+func OperationsPageRoutes() []PageRoute {
+	operations := func(path string) string { return PageOperationsPrefix + path }
+	html := []string{TypeHTML}
+	form := func(path, id string) PageRoute {
+		return PageRoute{Method: "POST", Path: path, ID: id, Surface: SurfaceOperations, Kind: PageHTMLKind, RequestType: TypeForm, ResponseTypes: html,
+			MaxRequestBytes: pageBytesOperationForm, MaxResponseBytes: pageBytesPageReply, Cookie: true, SetCookie: SetCookieNone, Redirects: true}
+	}
+	return []PageRoute{
+		{Method: "GET", Path: operations("/grant"), ID: "operations.grant", Surface: SurfaceOperations, Kind: PageHTMLKind, ResponseTypes: html,
+			MaxResponseBytes: pageBytesPageReply, Cookie: true, SetCookie: SetCookieNone, Redirects: true},
+		form(operations("/grant/review"), "operations.review"),
+		form(operations("/grant/confirm"), "operations.confirm"),
+	}
+}
+
 // ErrPageRegistration is the error of an inconsistent page registration.
 var ErrPageRegistration = fmt.Errorf("%w: inconsistent page registration", ErrRegistration)
 
@@ -217,8 +258,12 @@ func CheckPages(rows []PageRoute) error {
 		switch {
 		case row.Method != "GET" && row.Method != "POST":
 			return fmt.Errorf("%w: %s has the method %q", ErrPageRegistration, row.ID, row.Method)
-		case !strings.HasPrefix(row.Path, PageAccountPrefix+"/") && !strings.HasPrefix(row.Path, PageBrowserPrefix+"/"):
+		case row.Surface != SurfacePages && row.Surface != SurfaceOperations:
+			return fmt.Errorf("%w: %s belongs to the surface %q", ErrPageRegistration, row.ID, row.Surface)
+		case row.Surface == SurfacePages && !strings.HasPrefix(row.Path, PageAccountPrefix+"/") && !strings.HasPrefix(row.Path, PageBrowserPrefix+"/"):
 			return fmt.Errorf("%w: %s is outside the page prefixes", ErrPageRegistration, row.Path)
+		case row.Surface == SurfaceOperations && !strings.HasPrefix(row.Path, PageOperationsPrefix+"/"):
+			return fmt.Errorf("%w: %s is outside the operations prefix", ErrPageRegistration, row.Path)
 		case strings.ContainsAny(row.Path, "?#%\\ ") || strings.Contains(row.Path, "//") || strings.Contains(row.Path, "..") || strings.HasSuffix(row.Path, "/"):
 			return fmt.Errorf("%w: %s is not canonical", ErrPageRegistration, row.Path)
 		case seen[key] || ids[row.ID] || row.ID == "":
@@ -257,4 +302,13 @@ func Pages() (Module, error) {
 		return Module{}, err
 	}
 	return Module{Name: "pages", Surface: SurfacePages, Pages: rows, Budgets: map[string]Budget{}}, nil
+}
+
+// Operations is the operations surface's module.
+func Operations() (Module, error) {
+	rows := OperationsPageRoutes()
+	if err := CheckPages(rows); err != nil {
+		return Module{}, err
+	}
+	return Module{Name: "operations", Surface: SurfaceOperations, Pages: rows, Budgets: map[string]Budget{}}, nil
 }

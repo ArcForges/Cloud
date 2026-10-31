@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 	if code == 0 && os.Getenv(pgtest.EnvServer) != "" && (filter == nil || filter.Value.String() == "") && !testing.Short() {
 		provedMu.Lock()
 		defer provedMu.Unlock()
-		for _, route := range routes.PageRoutes() {
+		for _, route := range routes.AllPageRoutes() {
 			if !proved[route.Method+" "+route.Path] {
 				fmt.Fprintf(os.Stderr, "no test proved a success of %s %s (%s)\n", route.Method, route.Path, route.ID)
 				code = 1

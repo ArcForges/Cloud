@@ -60,3 +60,67 @@ COM.16 (WP-42.04, EO-03, MD-03, GR-05) adds the published port, the generic plan
 - **Deferred live checks.** That the provider's REST and binding `batch` is one atomic transaction at production load, real D1 limits and latency for a large commit, and the migration step that applies migration 0024 on the deployed database need the `RES-cloud-deployment` lease and the proof environment (CLOUD.70); they are not run here.
 - **Service term, status and release admissions** are read as records. Their owner admissions (COM.11 for terms, trust and safety for status, configuration for releases) are later tasks.
 - **Distribution, quota and usage, credits, capacity and operator operations** are COM.06, COM.07, COM.08, COM.12 and COM.13.
+
+## The Go port
+
+The Go center carries the same resolver in `center/internal/entitlement` (AF-CTR-03 part B), ported line for line from the module above so
+that the answer to "is this account entitled" is the same function on both sides until AF-CTR-09 retires the C# host. The port is
+pure (`Resolve(records, definitions, asOf)` reads no clock, store or randomness); the store, the service and the operator grant of
+[center entitlement](center-entitlement.md) sit on top of it.
+
+| C# (`Resolver`)                           | Go (`center/internal/entitlement`)                                                        |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `UtcMicros`, the records and the enums    | `records.go`: `Micros`, `Grant`, `Revocation`, `ServiceTermFact`, ...                     |
+| `InputRules`, `RecordSetValidator`        | `rules.go`: `IsIdentifier`, `IsKey`, `IsReason`, `Validate`                               |
+| `EntitlementResolver.Resolve`             | `resolve.go`: `Resolve`, `EvaluateAt`                                                     |
+| `Snapshot.Canonical`                      | `content.go`: `Content.Canonical`                                                         |
+| `GrantAdmission`                          | `admission.go`: `ValidateIssue`, `IsSameIssuance`                                         |
+| `IEntitlementStore`, `D1EntitlementStore` | `store.go`: `Load`, `Commit` on PostgreSQL                                                |
+| `EntitlementService`                      | `service.go`: `Service` (`Read`, `Refresh`, `IssueGrant`, `RevokeGrant`, `VerifyRebuild`) |
+
+What differs, and why:
+
+- **Account, not workspace.** The records name an account (DC-19); the identifiers are the account's uuid text.
+- **Enum names in the canonical text.** The stored form of a snapshot keeps the C# enum names (`Available`, `NoEntitlement`,
+  `WorkspaceSuspended`, ...) so that the canonical text is the same bytes on both sides; the database stores the enums as 1-based
+  `smallint` values.
+- **Refusal wording is verbatim.** The admission refusals and the input errors keep the C# text.
+- **Explicit overflow checks.** Where C# arithmetic is `checked`, the Go port tests the overflow and reports `ErrOverflow` (a record
+  set it cannot interpret is `InvalidHistory`, as before).
+
+### Parity with the C# suites (F1/N2)
+
+`center/internal/entitlement/testdata/csharp-resolver-vectors.json` holds the corpus: 284 resolver vectors (records, definitions and
+instant in, canonical snapshot or input error out) and 61 admission vectors, recorded from the C# suites by a test-side recorder
+(`ResolverVectors`, a facade over recording ports; REAL logic, recorded data). `TestResolverParityWithEveryCSharpVector` and
+`TestGrantAdmissionParityWithEveryCSharpVector` replay every vector through the Go port, and fail on any other number of vectors
+than 284 and 61 (a truncated or padded corpus is a change of the corpus, made on purpose with these two numbers).
+`TestEveryCorpusRowHasAVectorOrAReason` pins the corpus' own accounting: the vectors that name a row are at most the row's count of
+calls (equal calls share a vector) and at least one when the count is positive, a row without a vector has a stated reason, and
+every vector names a row of the corpus. That every row of the covered suites is in the corpus, and that a count is the number of
+calls the suite makes, is the job of the C# drift test below, not of this one.
+
+The corpus cannot drift from the C# suites unnoticed: `ResolverVectorsTests.TheCommittedVectorsAreWhatTheSuitesProduce` runs every
+`[Fact]` and `[Theory]` row of the six covered classes (found by reflection) under the recorder and compares what they produce with
+the committed file as data, and a source scan fails a covered class that calls the resolver or the admission directly (with any
+spacing), builds a service of its own (the harness hands them out, recording: `Replica`, `ServiceOver`), and a file of the folder
+that calls the resolver and is neither covered nor listed with a reason (the persistence suites of the durable D1 store). The scan
+reads text: it is a guard against an honest mistake and not against a determined bypass, which a call through a helper outside the
+folder or through reflection would be; the drift test still notices a covered row whose vectors change. A suite row that is not a
+vector has a written reason in the file (`excluded`). To rewrite the corpus after a change of the resolver or a covered suite:
+
+```sh
+ARCFORGES_UPDATE_RESOLVER_VECTORS=1 dotnet test --project tests/ArcForges.Cloud.Tests -c Release --filter-class ArcForges.Cloud.Tests.Entitlement.ResolverVectorsTests
+npx prettier --write center/internal/entitlement/testdata/csharp-resolver-vectors.json
+```
+
+then replay the Go side (`go test ./internal/entitlement/`); a vector the Go port disagrees with is a defect of one of the two.
+
+The corpus pins what the C# suites reach, and no more. What they do not reach (the 30 refusal texts of the validator at their
+boundaries, the order of the checks, the evaluation branches that a mutation survived: a Max quota, an allowance tie, a pending
+purchase, a restricted allowance, a lapsed quota, the knowledge-time filter of the next boundary, a term action of another term, the
+kind of a grant, the sort of the unrecognized grants, the canonical names of the sources) is pinned by Go tests of their own
+(`resolver_branches_test.go`, with `TestAReplayIsTheSameIssuanceOnlyWhenEveryComparedFieldIsTheSame` for the admission's replay and
+`service_hardening_integration_test.go` for the rebuild's columns). A deterministic differential generator for the C# project was
+not committed: the C# resolver is retired by AF-CTR-09, a generator whose vectors both sides must record, review and replay would
+add a second corpus for a port that has one life left, and the Go tests state the same expectations directly.

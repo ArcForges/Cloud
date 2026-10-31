@@ -139,9 +139,14 @@ in the table. It is deny by default in both directions and decides nothing the c
   fetch (a Durable Object or Container stub's included) follows a redirect unless told not to, and the center's answer for a page
   without a session is a 303 to the sign-in page: followed, it becomes the 404 of `http://container/api/account/sign-in`, a path the
   center does not serve, which lacks the security headers and is the Worker's 503. The handler must see the 303 itself, admit its
-  `Location` (below) and let the browser follow it. This is a hosted-only finding (the first run on proof; a stand-in that does not
-  follow cannot show it), pinned by a stand-in Container that follows a redirect the request did not forbid
-  (`tests/worker/support/platform-fetch.ts`, used by the page, pipeline, proof-route and wake tests).
+  `Location` (below) and let the browser follow it. What only a hosted run shows is the Container hop and the Cloudflare edge: the
+  first run on proof found the 503; a stand-in that does not follow cannot show it. The Durable Object stub boundary follows a
+  redirect the request did not forbid in the pinned workerd too, so it reproduces locally. It is pinned by a stand-in Container that
+  follows a redirect the request did not forbid (`tests/worker/support/platform-fetch.ts`, used by the page, pipeline, proof-route
+  and wake tests), and no request site can omit the option unnoticed: `tests/worker/ingress-pipeline.test.ts` scans the Worker's
+  sources, names the five sites (`worker/ingress/pages.ts`, `pipeline.ts`, `worker/harness/run-alarm.ts`,
+  `worker/foundation/proof-routes.ts`, `container-client.ts`) and fails a site that does not say `redirect: "manual"`, a sixth
+  site that is not on the list, and a redirect answered to the health read.
 - **Budget.** One page call has `pageDurationMs` (15 s) including the body read, aborted by the client's cancellation. A body that
   is not read within the body budget is 408, a call that outlasts the page budget 504 and a client that went away 499
   (`tests/worker/pages-limits.test.ts`); like every other refusal the Worker makes itself, they are plain text with

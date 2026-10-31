@@ -2,7 +2,8 @@
 // Pins that the production Container class is the unchanged Hello class and that the outbound
 // interception, the environment hook and the foundation handlers belong only to the proof class.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
 import { register } from "node:module";
 import test from "node:test";
 import { classifyStartFailureResponse } from "../../worker/readiness/container.ts";
@@ -557,4 +558,55 @@ test("the Worker passes the owner bootstrap through to the center and restarts i
   assert.notEqual(await startDigest(revision, plain), await startDigest(revision, bootstrapped));
   // The C# runtime never receives one.
   assert.deepEqual(centerContainerSettings({ ...bootstrap }).envVars, {});
+});
+
+// PLT-18: ARCFORGES_CENTER_DISABLED_FEATURES is a self-hosted operator's own limit (center/internal/config refuses it in
+// official-hosted mode). The hosted center's availability comes from the plan catalogue and the account's entitlement alone, so the
+// Worker must never hand the variable to the Container, whatever its own environment or a stray binding says.
+test("the self-hosted operator's feature limits are never passed to the hosted center (PLT-18)", () => {
+  const name = "ARCFORGES_CENTER_DISABLED_FEATURES";
+  for (const runtime of ["go", "csharp", "", undefined]) {
+    const settings = centerContainerSettings({
+      ...(runtime === undefined ? {} : { ARCFORGES_HELLO_RUNTIME: runtime }),
+      ARCFORGES_CENTER_MODE: "official-hosted",
+      ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
+      ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
+      FLAGSHIP_SURFACES: "identity,pages",
+      [name]: "push,remote.control",
+    });
+    assert(
+      !Object.hasOwn(settings.envVars, name),
+      `the ${runtime ?? "default"} runtime was handed it`,
+    );
+    assert(!Object.values(settings.envVars).some((value) => value.includes("remote.control")));
+  }
+  // No environment of wrangler.json sets it, and no source of the Worker names it.
+  const root = new URL("../../", import.meta.url).pathname;
+  const wrangler = JSON.parse(readFileSync(path.join(root, "wrangler.json"), "utf8")) as {
+    vars?: Record<string, unknown>;
+    env?: Record<string, { vars?: Record<string, unknown> }>;
+  };
+  for (const [environment, vars] of [
+    ["production", wrangler.vars],
+    ...Object.entries(wrangler.env ?? {}).map(([key, value]) => [key, value.vars] as const),
+  ] as const)
+    assert(
+      !Object.hasOwn(vars ?? {}, name),
+      `wrangler.json environment ${environment} sets ${name}`,
+    );
+  const sources: string[] = [];
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory)) {
+      const file = path.join(directory, entry);
+      if (statSync(file).isDirectory()) walk(file);
+      else if (file.endsWith(".ts")) sources.push(file);
+    }
+  };
+  walk(path.join(root, "worker"));
+  assert(sources.length > 20, "the Worker sources were found");
+  for (const file of sources)
+    assert(
+      !readFileSync(file, "utf8").includes(name),
+      `${path.relative(root, file)} names ${name}`,
+    );
 });

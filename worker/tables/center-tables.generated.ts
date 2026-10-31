@@ -35,7 +35,7 @@ export interface ApiRoute {
 }
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
-export type Surface = "identity" | "pages";
+export type Surface = "identity" | "pages" | "operations";
 
 /** A method of a switchable surface. */
 export interface SurfaceRoute extends ApiRoute {
@@ -50,6 +50,8 @@ export type PageSetCookie = "none" | "session" | "clear";
  * admits a request only for such a row, whose surface is enabled, and answers only what the row allows.
  */
 export interface PageRoute {
+  /** The switchable surface of the route: the page handler forwards it only while FLAGSHIP_SURFACES enables that surface. */
+  readonly surface: Surface;
   readonly method: "GET" | "POST";
   /** The path without the owned /api prefix. */
   readonly path: string;
@@ -70,7 +72,7 @@ export interface PageRoute {
 }
 
 /** The surface names, in registration order; FLAGSHIP_SURFACES lists them comma-separated and exactly. */
-export const surfaceNames: readonly Surface[] = ["identity", "pages"];
+export const surfaceNames: readonly Surface[] = ["identity", "pages", "operations"];
 /** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */
 export const clientIpHeader = "x-arcforges-client-ip";
 /** The width of the correlation id slot of the reply templates below: an Id's 16 bytes (E4-1). */
@@ -85,11 +87,14 @@ export const notActivatedReplies: Readonly<Record<Surface, string>> = {
     "AAAAAF8aXQoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86FSITCgdzdXJmYWNlEghpZGVudGl0eYAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
   pages:
     "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVwYWdlc4AAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
+  operations:
+    "AAAAAGEaXwoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86FyIVCgdzdXJmYWNlEgpvcGVyYXRpb25zgAAAABBncnBjLXN0YXR1czogMA0K",
 };
 /** The byte offset of the correlation id slot in each surface's not_activated template. */
 export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, number>> = {
   identity: 61,
   pages: 61,
+  operations: 61,
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
@@ -386,10 +391,10 @@ export const surfaceRoutes: readonly SurfaceRoute[] = [
   },
 ];
 
-/** The routes of the center's account pages; each is forwarded only while the surface of the pages is enabled. */
-export const pageSurface: Surface = "pages";
+/** The routes of the center's pages (the account pages and the operations page); each is forwarded only while its surface is enabled. */
 export const pageRoutes: readonly PageRoute[] = [
   {
+    surface: "pages",
     method: "GET",
     path: "/session/v1/web/bootstrap",
     kind: "json",
@@ -402,6 +407,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/session/v1/web/authentication/begin",
     kind: "json",
@@ -414,6 +420,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/session/v1/web/authentication/complete",
     kind: "json",
@@ -426,6 +433,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/session/v1/web/enrollment/complete",
     kind: "json",
@@ -438,6 +446,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/session/v1/web/step-up/begin",
     kind: "json",
@@ -450,6 +459,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/session/v1/web/step-up/complete",
     kind: "json",
@@ -462,6 +472,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/session/v1/web/logout",
     kind: "json",
@@ -474,6 +485,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "GET",
     path: "/account/sign-in",
     kind: "html",
@@ -486,6 +498,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "GET",
     path: "/account/bootstrap",
     kind: "html",
@@ -498,6 +511,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "GET",
     path: "/account/passkeys",
     kind: "html",
@@ -510,6 +524,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "GET",
     path: "/account/sessions",
     kind: "html",
@@ -522,6 +537,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "GET",
     path: "/account/devices",
     kind: "html",
@@ -534,6 +550,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "GET",
     path: "/account/sign-out",
     kind: "html",
@@ -546,6 +563,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "GET",
     path: "/account/account.js",
     kind: "asset",
@@ -558,6 +576,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "GET",
     path: "/account/account.css",
     kind: "asset",
@@ -570,6 +589,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/account/passkeys/add",
     kind: "html",
@@ -582,6 +602,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/account/passkeys/complete",
     kind: "html",
@@ -594,6 +615,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/account/passkeys/rename",
     kind: "html",
@@ -606,6 +628,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/account/passkeys/remove",
     kind: "html",
@@ -618,6 +641,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/account/sessions/revoke",
     kind: "html",
@@ -630,6 +654,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/account/sessions/revoke-all",
     kind: "html",
@@ -642,6 +667,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/account/devices/rename",
     kind: "html",
@@ -654,6 +680,7 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: true,
   },
   {
+    surface: "pages",
     method: "POST",
     path: "/account/devices/revoke",
     kind: "html",
@@ -663,6 +690,45 @@ export const pageRoutes: readonly PageRoute[] = [
     maxResponseBytes: 131072,
     cookie: true,
     setCookie: "clear",
+    redirects: true,
+  },
+  {
+    surface: "operations",
+    method: "GET",
+    path: "/operations/grant",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    surface: "operations",
+    method: "POST",
+    path: "/operations/grant/review",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 12288,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: true,
+  },
+  {
+    surface: "operations",
+    method: "POST",
+    path: "/operations/grant/confirm",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 12288,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
     redirects: true,
   },
 ];

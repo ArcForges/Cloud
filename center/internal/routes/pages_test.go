@@ -124,14 +124,14 @@ func TestThePageRoutesAreThePipelinesPlainPathsAndNotTheWorkersOwnRows(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(table.Pages) != len(PageRoutes()) {
+	if len(table.Pages) != len(AllPageRoutes()) {
 		t.Fatalf("the Worker table holds %d page routes", len(table.Pages))
 	}
 	ingress, err := Ingress(modules)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range PageRoutes() {
+	for _, row := range AllPageRoutes() {
 		if !ingress.IsPlain(row.Path) {
 			t.Errorf("the pipeline does not let %s through", row.Path)
 		}
@@ -144,5 +144,65 @@ func TestThePageRoutesAreThePipelinesPlainPathsAndNotTheWorkersOwnRows(t *testin
 		if row.Surface != SurfaceIdentity {
 			t.Errorf("an RPC row of the surface %s", row.Surface)
 		}
+	}
+}
+
+// TestTheOperationsRoutesAreTheirOwnSurface: the interim operator page has three routes under /operations, every one of the
+// operations surface, none of the pages surface; a route is registered in the module of its own surface, and a path outside the
+// prefix of its surface is refused.
+func TestTheOperationsRoutesAreTheirOwnSurface(t *testing.T) {
+	var got []string
+	for _, row := range OperationsPageRoutes() {
+		got = append(got, row.Method+" "+row.Path+" "+row.Surface)
+		if !row.Cookie || !row.Redirects || row.Kind != PageHTMLKind || row.SetCookie != SetCookieNone {
+			t.Errorf("%s: %+v", row.ID, row)
+		}
+	}
+	want := []string{"GET /operations/grant operations", "POST /operations/grant/review operations", "POST /operations/grant/confirm operations"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("the operations routes:\n%s", strings.Join(got, "\n"))
+	}
+	for _, row := range PageRoutes() {
+		if row.Surface != SurfacePages {
+			t.Errorf("%s belongs to %q", row.ID, row.Surface)
+		}
+	}
+	if SurfaceOperations != "operations" || PageOperationsPrefix != "/operations" {
+		t.Fatal(SurfaceOperations, PageOperationsPrefix)
+	}
+	// A POST of the operations carries the reason and the self-approval of 512 characters each; at nine bytes per character
+	// (percent-encoded UTF-8) they fit with the short fields.
+	for _, row := range OperationsPageRoutes() {
+		if row.Method == "POST" && row.MaxRequestBytes < 2*512*9+1024 {
+			t.Errorf("%s: a form bound of %d bytes", row.ID, row.MaxRequestBytes)
+		}
+	}
+	for name, mutate := range map[string]func([]PageRoute) []PageRoute{
+		"an operations route without a surface":    func(rows []PageRoute) []PageRoute { rows[0].Surface = ""; return rows },
+		"an operations route of the pages surface": func(rows []PageRoute) []PageRoute { rows[0].Surface = SurfacePages; return rows },
+		"an operations route outside its prefix":   func(rows []PageRoute) []PageRoute { rows[0].Path = "/account/grant"; return rows },
+		"an unknown surface":                       func(rows []PageRoute) []PageRoute { rows[0].Surface = "billing"; return rows },
+	} {
+		if err := CheckPages(mutate(OperationsPageRoutes())); !errors.Is(err, ErrPageRegistration) {
+			t.Errorf("%s was admitted: %v", name, err)
+		}
+	}
+	pages := PageRoutes()
+	pages[0].Surface = SurfaceOperations
+	if err := CheckPages(pages); !errors.Is(err, ErrPageRegistration) {
+		t.Errorf("a pages route of the operations surface was admitted: %v", err)
+	}
+	modules, err := Center()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations" {
+		t.Fatalf("the surfaces %v", surfaces)
+	}
+	crossed := append([]Module(nil), modules...)
+	crossed[3].Pages = append([]PageRoute(nil), crossed[3].Pages...)
+	crossed[3].Pages[0].Surface = SurfacePages
+	if _, err = Table(crossed); err == nil {
+		t.Fatal("a route of another surface in the operations module was admitted")
 	}
 }

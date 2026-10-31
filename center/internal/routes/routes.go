@@ -113,7 +113,11 @@ func Center() ([]Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Module{hello, identity, pages}, nil
+	operations, err := Operations()
+	if err != nil {
+		return nil, err
+	}
+	return []Module{hello, identity, pages, operations}, nil
 }
 
 // Surfaces are the switchable surfaces of the registrations, in registration order.
@@ -223,8 +227,13 @@ func Table(modules []Module) (WorkerTable, error) {
 	names := map[string]bool{}
 	for _, module := range modules {
 		if len(module.Pages) > 0 {
-			if module.Surface != SurfacePages {
-				return WorkerTable{}, fmt.Errorf("%w: the module %s declares pages outside the %s surface", ErrRegistration, module.Name, SurfacePages)
+			if module.Surface != SurfacePages && module.Surface != SurfaceOperations {
+				return WorkerTable{}, fmt.Errorf("%w: the module %s declares pages outside the %s and %s surfaces", ErrRegistration, module.Name, SurfacePages, SurfaceOperations)
+			}
+			for _, row := range module.Pages {
+				if row.Surface != module.Surface {
+					return WorkerTable{}, fmt.Errorf("%w: the page route %s is in the module %s of another surface", ErrRegistration, row.ID, module.Name)
+				}
 			}
 			if err := CheckPages(module.Pages); err != nil {
 				return WorkerTable{}, err

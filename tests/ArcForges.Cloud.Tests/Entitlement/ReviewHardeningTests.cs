@@ -69,7 +69,7 @@ public sealed class ReviewHardeningTests
         await h.Issue(Capability("cloud.sync", 0, null, "s1"));
         h.Store.Insert(EntitlementHarness.Workspace, r => r with { Activations = r.Activations.Add(new DefinitionsActivation("bundle-9", T(5))) });
         var records = h.Store.Records(EntitlementHarness.Workspace);
-        Assert.Throws<ResolverInputException>(() => EntitlementResolver.Resolve(records, Definitions(), T(10)));
+        Assert.Throws<ResolverInputException>(() => ResolverVectors.Resolve(records, Definitions(), T(10)));
     }
 
     // ---- B2 -------------------------------------------------------------------------------------------------------------
@@ -92,10 +92,10 @@ public sealed class ReviewHardeningTests
             Terms = [new ServiceTermFact("t1", ServiceTermKind.Subscription, T(0), T(100), null, T(0), T(0))],
             StatusFacts = [.. orders[permutation].Select(i => facts[i])],
         });
-        var snapshot = EntitlementResolver.Resolve(records, Definitions(), T(10));
+        var snapshot = ResolverVectors.Resolve(records, Definitions(), T(10));
         Assert.Equal(ServiceState.Suspended, snapshot.Content.Service.State);
         Assert.Equal(EntitlementReason.WorkspaceSuspended, Sync(snapshot).Reason);
-        var baseline = EntitlementResolver.Resolve(records with { StatusFacts = [.. facts] }, Definitions(), T(10));
+        var baseline = ResolverVectors.Resolve(records with { StatusFacts = [.. facts] }, Definitions(), T(10));
         Assert.True(baseline.SameAs(snapshot));
     }
 
@@ -108,13 +108,13 @@ public sealed class ReviewHardeningTests
         var records = Records(CapGrant("g1")) with { Terms = [new ServiceTermFact("t1", ServiceTermKind.Subscription, T(0), T(100), null, T(0), T(0))] };
         foreach (var order in new[] { new[] { renew, cancel }, new[] { cancel, renew } })
         {
-            Assert.Equal(ServiceState.CancelScheduled, EntitlementResolver.Resolve(records with { StatusFacts = [.. order] }, Definitions(), T(10)).Content.Service.State);
+            Assert.Equal(ServiceState.CancelScheduled, ResolverVectors.Resolve(records with { StatusFacts = [.. order] }, Definitions(), T(10)).Content.Service.State);
         }
 
         var noTerm = Records(CapGrant("g1"));
         foreach (var order in new[] { new[] { renew, pending }, new[] { pending, renew } })
         {
-            Assert.Equal(ServiceState.None, EntitlementResolver.Resolve(noTerm with { StatusFacts = [.. order] }, Definitions(), T(10)).Content.Service.State);
+            Assert.Equal(ServiceState.None, ResolverVectors.Resolve(noTerm with { StatusFacts = [.. order] }, Definitions(), T(10)).Content.Service.State);
         }
     }
 
@@ -126,8 +126,8 @@ public sealed class ReviewHardeningTests
             Terms = [new ServiceTermFact("t1", ServiceTermKind.Subscription, T(0), T(100), null, T(0), T(0))],
             StatusFacts = [new WorkspaceStatusFact(T(6), WorkspaceStatus.Normal, true, false), new WorkspaceStatusFact(T(5), WorkspaceStatus.Suspended, true, false)],
         };
-        Assert.Equal(ServiceState.Suspended, EntitlementResolver.Resolve(records, Definitions(), T(5)).Content.Service.State);
-        Assert.Equal(ServiceState.Active, EntitlementResolver.Resolve(records, Definitions(), T(6)).Content.Service.State);
+        Assert.Equal(ServiceState.Suspended, ResolverVectors.Resolve(records, Definitions(), T(5)).Content.Service.State);
+        Assert.Equal(ServiceState.Active, ResolverVectors.Resolve(records, Definitions(), T(6)).Content.Service.State);
     }
 
     // ---- N1 -------------------------------------------------------------------------------------------------------------
@@ -142,8 +142,8 @@ public sealed class ReviewHardeningTests
         foreach (var order in new[] { new[] { early, late }, new[] { late, early } })
         {
             var records = Records(grant) with { Terms = [term], Revocations = [.. order] };
-            Assert.False(Sync(EntitlementResolver.Resolve(records, Definitions(), T(10))).Granted);
-            Assert.False(Sync(EntitlementResolver.Resolve(records, Definitions(), T(60))).Granted);
+            Assert.False(Sync(ResolverVectors.Resolve(records, Definitions(), T(10))).Granted);
+            Assert.False(Sync(ResolverVectors.Resolve(records, Definitions(), T(60))).Granted);
         }
     }
 
@@ -155,17 +155,17 @@ public sealed class ReviewHardeningTests
             Terms = [new ServiceTermFact("t1", ServiceTermKind.Subscription, T(0), T(100), null, T(0), T(0))],
             StatusFacts = [new WorkspaceStatusFact(T(10), WorkspaceStatus.Suspended, true, false)],
         };
-        Assert.Equal(ServiceState.Active, EntitlementResolver.Resolve(records, Definitions(), T(9)).Content.Service.State);
-        Assert.Equal(ServiceState.Suspended, EntitlementResolver.Resolve(records, Definitions(), T(10)).Content.Service.State);
+        Assert.Equal(ServiceState.Active, ResolverVectors.Resolve(records, Definitions(), T(9)).Content.Service.State);
+        Assert.Equal(ServiceState.Suspended, ResolverVectors.Resolve(records, Definitions(), T(10)).Content.Service.State);
     }
 
     [Fact]
     public void ATamperedQuotaAboveTheBoundIsRefusedBeforeAnySumCanOverflow()
     {
         var grant = new Grant("g1", Ws, GrantKind.Quota, "cloud.storage.bytes", new QuotaValue(InputRules.MaxQuotaLimit + 1), GrantSource.Subscription, "r", T(0), null, "commerce", T(0));
-        Assert.Throws<ResolverInputException>(() => EntitlementResolver.Resolve(Records(grant), Definitions(), T(10)));
+        Assert.Throws<ResolverInputException>(() => ResolverVectors.Resolve(Records(grant), Definitions(), T(10)));
         var atBound = grant with { Value = new QuotaValue(InputRules.MaxQuotaLimit) };
-        Assert.Equal(InputRules.MaxQuotaLimit, EntitlementResolver.Resolve(Records(atBound), Definitions(), T(10)).Content.Quotas.First(q => q.Key == "cloud.storage.bytes").Limit);
+        Assert.Equal(InputRules.MaxQuotaLimit, ResolverVectors.Resolve(Records(atBound), Definitions(), T(10)).Content.Quotas.First(q => q.Key == "cloud.storage.bytes").Limit);
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public sealed class ReviewHardeningTests
         Grant Level(string id, long limit) => new(id, Ws, GrantKind.Quota, "support.level", new QuotaValue(limit, 2), GrantSource.Subscription, "r" + id, T(0), null, "commerce", T(0));
         foreach (var order in new[] { new[] { Level("a", 1), Level("b", 2) }, new[] { Level("b", 2), Level("a", 1) } })
         {
-            var snapshot = EntitlementResolver.Resolve(Records(order), Definitions(), T(1));
+            var snapshot = ResolverVectors.Resolve(Records(order), Definitions(), T(1));
             Assert.Equal(1, snapshot.Content.Quotas.Single(q => q.Key == "support.level").Limit);
         }
     }
@@ -183,8 +183,8 @@ public sealed class ReviewHardeningTests
     public void ServiceNeverStartsBeforeItWasAuthorized()
     {
         var records = Records(CapGrant("g1")) with { Terms = [new ServiceTermFact("t1", ServiceTermKind.Subscription, T(0), T(100), null, T(50), T(0))] };
-        Assert.False(Sync(EntitlementResolver.Resolve(records, Definitions(), T(10))).Granted);
-        Assert.True(Sync(EntitlementResolver.Resolve(records, Definitions(), T(50))).Granted);
+        Assert.False(Sync(ResolverVectors.Resolve(records, Definitions(), T(10))).Granted);
+        Assert.True(Sync(ResolverVectors.Resolve(records, Definitions(), T(50))).Granted);
     }
 
     [Fact]
@@ -192,10 +192,10 @@ public sealed class ReviewHardeningTests
     {
         var term = new ServiceTermFact("t1", ServiceTermKind.Subscription, T(0), T(30), T(37), T(0), T(0));
         var lapsed = Records(CapGrant("g1", 0, 30)) with { Terms = [term] };
-        Assert.Equal(EntitlementReason.SubscriptionExpired, Sync(EntitlementResolver.Resolve(lapsed, Definitions(), T(40))).Reason);
-        Assert.Equal(EntitlementReason.PaymentGrace, Sync(EntitlementResolver.Resolve(lapsed, Definitions(), T(33))).Reason);
+        Assert.Equal(EntitlementReason.SubscriptionExpired, Sync(ResolverVectors.Resolve(lapsed, Definitions(), T(40))).Reason);
+        Assert.Equal(EntitlementReason.PaymentGrace, Sync(ResolverVectors.Resolve(lapsed, Definitions(), T(33))).Reason);
         var revoked = lapsed with { Revocations = [new Revocation("r1", "g1", "refund", T(5), "op", T(6))] };
-        Assert.Equal(EntitlementReason.NoEntitlement, Sync(EntitlementResolver.Resolve(revoked, Definitions(), T(40))).Reason);
+        Assert.Equal(EntitlementReason.NoEntitlement, Sync(ResolverVectors.Resolve(revoked, Definitions(), T(40))).Reason);
     }
 
     // ---- N2 -------------------------------------------------------------------------------------------------------------
@@ -206,15 +206,15 @@ public sealed class ReviewHardeningTests
         var quota = new Grant("q1", Ws, GrantKind.Quota, "cloud.storage.bytes", new QuotaValue(1000), GrantSource.Subscription, "q", T(0), null, "commerce", T(0));
         var term = new ServiceTermFact("t1", ServiceTermKind.Subscription, T(0), T(30), null, T(0), T(0));
         var records = Records(quota) with { Terms = [term] };
-        var active = EntitlementResolver.Resolve(records, Definitions(), T(10)).Content.Quotas.Single(q => q.Key == "cloud.storage.bytes");
+        var active = ResolverVectors.Resolve(records, Definitions(), T(10)).Content.Quotas.Single(q => q.Key == "cloud.storage.bytes");
         Assert.Equal(1000, active.Limit);
 
-        var expired = EntitlementResolver.Resolve(records, Definitions(), T(40)).Content.Quotas.Single(q => q.Key == "cloud.storage.bytes");
+        var expired = ResolverVectors.Resolve(records, Definitions(), T(40)).Content.Quotas.Single(q => q.Key == "cloud.storage.bytes");
         Assert.Equal(1000, expired.Limit);
         Assert.Equal(EntitlementReason.Available, expired.Reason);
 
         var suspended = records with { StatusFacts = [new WorkspaceStatusFact(T(5), WorkspaceStatus.Suspended, true, false)] };
-        var quotaEntry = EntitlementResolver.Resolve(suspended, Definitions(), T(10)).Content.Quotas.Single(q => q.Key == "cloud.storage.bytes");
+        var quotaEntry = ResolverVectors.Resolve(suspended, Definitions(), T(10)).Content.Quotas.Single(q => q.Key == "cloud.storage.bytes");
         Assert.Equal(0, quotaEntry.Limit);
         Assert.Empty(quotaEntry.Contributions);
         Assert.Equal(EntitlementReason.WorkspaceSuspended, quotaEntry.Reason);

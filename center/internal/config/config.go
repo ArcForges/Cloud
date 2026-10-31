@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +45,7 @@ const (
 	EnvDatabaseURL        = "ARCFORGES_CENTER_DATABASE_URL"
 	EnvDatabaseMaxConns   = "ARCFORGES_CENTER_DATABASE_MAX_CONNS"
 	EnvPlanConfiguration  = "ARCFORGES_CENTER_PLAN_CONFIGURATION"
+	EnvDisabledFeatures   = "ARCFORGES_CENTER_DISABLED_FEATURES"
 	EnvNeonHello          = "ARCFORGES_NEON_HELLO"
 	EnvNeonDatabaseURL    = "NEON_DATABASE_URL"
 )
@@ -100,6 +102,16 @@ type Config struct {
 	Database *pgxpool.Config
 	// Identity is the identity surface's configuration (AF-CTR-03).
 	Identity Identity
+	// DisabledFeatures are the gated feature keys the operator of a self-hosted center disabled (ARCFORGES_CENTER_DISABLED_FEATURES):
+	// the built-in default enables every other key. It is empty in official-hosted mode, where the variable is refused.
+	DisabledFeatures []string
+}
+
+// GatedFeatureKeys are the six gated feature keys of AD-0021 section 13a. Package feature owns the keys (feature.Gated); the list is
+// here so the configuration can refuse an unknown key at start without importing it, and a test of package feature pins that the two
+// lists are equal.
+func GatedFeatureKeys() []string {
+	return []string{"center.nodes", "center.execute", "remote.view", "remote.control", "center.mcp", "push"}
 }
 
 // ErrInvalid is the error of every refused configuration.
@@ -136,6 +148,9 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, invalid("%s must be empty or %s", EnvPlanConfiguration, PlanDevelopmentFixtures)
 	}
 	var err error
+	if config.DisabledFeatures, err = loadDisabledFeatures(lookup, config.Mode); err != nil {
+		return Config{}, err
+	}
 	if config.PublicBaseURL, err = ParsePublicBaseURL(get(EnvPublicBaseURL), config.Mode); err != nil {
 		return Config{}, invalid("%s: %v", EnvPublicBaseURL, err)
 	}
@@ -198,6 +213,35 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		config.Identity.Disabled = "no runtime database is configured (" + EnvDatabaseURL + ")"
 	}
 	return config, nil
+}
+
+// loadDisabledFeatures reads ARCFORGES_CENTER_DISABLED_FEATURES: comma-separated gated feature keys, exact, without whitespace, empty
+// items or repetition; an unknown key refuses start (a misspelt limit that silently enabled the feature would be the opposite of the
+// operator's intent). The variable is a self-hosted operator's limit and has no meaning on the hosted center, where the plan
+// catalogue and the account's entitlement decide: its presence there, even empty, refuses start (PLT-18; the hosted Worker passes
+// it never).
+func loadDisabledFeatures(lookup func(string) (string, bool), mode Mode) ([]string, error) {
+	value, present := lookup(EnvDisabledFeatures)
+	if !present {
+		return nil, nil
+	}
+	if mode != SelfHosted {
+		return nil, invalid("%s applies to a self-hosted center only; the hosted center's availability comes from the plan catalogue", EnvDisabledFeatures)
+	}
+	if value == "" {
+		return nil, nil
+	}
+	var keys []string
+	for item := range strings.SplitSeq(value, ",") {
+		if !slices.Contains(GatedFeatureKeys(), item) {
+			return nil, invalid("%s must be a comma-separated list of known feature keys (%s)", EnvDisabledFeatures, strings.Join(GatedFeatureKeys(), ", "))
+		}
+		if slices.Contains(keys, item) {
+			return nil, invalid("%s lists a feature key twice", EnvDisabledFeatures)
+		}
+		keys = append(keys, item)
+	}
+	return keys, nil
 }
 
 // address is a listener address host:port; host is empty (every interface), an IP literal or localhost. "off" disables an

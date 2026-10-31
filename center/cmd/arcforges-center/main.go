@@ -2,8 +2,8 @@
 
 // Command arcforges-center is the ArcForges center: one executable that serves the public routes (serve, the default),
 // applies the PostgreSQL migrations (migrate), creates the database, rotates the runtime credential and records its promotion
-// (admin), revokes sessions as the operator's incident tool (admin revoke-sessions) and reports its identity (version,
-// --build-info).
+// (admin), revokes sessions as the operator's incident tool (admin revoke-sessions), grants and revokes the operator role (admin
+// grant-operator, revoke-operator) and reports its identity (version, --build-info).
 package main
 
 import (
@@ -50,6 +50,12 @@ commands:
   admin revoke-sessions --account <uuid> | --all
                                    revoke every unrevoked session of one account, or of every account, whatever its scope
                                    (audited as identity.sessions.revoked_by_operator); prints the counts per scope
+  admin grant-operator --account <uuid> --reason <text> [--days N]
+                                   make an active account an operator for N days (1 to 90, default 30): it may then issue operator
+                                   grants of features on an official-hosted center (audited as identity.operator.granted)
+  admin revoke-operator --account <uuid>
+                                   end the account's operator role now (audited as identity.operator.revoked); the owner who
+                                   bootstrapped the center stays an operator through the bootstrap
   version                          print the build identity as JSON (also --build-info)
   help                             print this help
 
@@ -83,7 +89,14 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	}
 	slot := ""
 	var target revokeTarget
+	var role operatorFlags
 	switch {
+	case command == "admin" && (sub == "grant-operator" || sub == "revoke-operator"):
+		var ok bool
+		if role, ok = parseOperatorFlags(arguments[2:], sub == "grant-operator"); !ok {
+			_, _ = fmt.Fprint(stderr, usage)
+			return exitUsage
+		}
 	case command == "admin" && sub == "revoke-sessions":
 		var ok bool
 		if target, ok = revokeFlags(arguments[2:]); !ok {
@@ -119,6 +132,9 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	case "admin":
 		if sub == "revoke-sessions" {
 			return revokeSessions(target, lookup, stdout, stderr)
+		}
+		if sub == "grant-operator" || sub == "revoke-operator" {
+			return operatorRole(sub, role, lookup, stdout, stderr)
 		}
 		if sub != "ensure-database" && sub != "rotate-runtime-credential" && sub != "confirm-runtime-credential" {
 			_, _ = fmt.Fprint(stderr, usage)

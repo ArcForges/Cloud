@@ -22,7 +22,13 @@ public sealed partial class ClockAndStructureTests
         await one.AddTerm(Term("t1", 0, 30 * Day));
         var first = await one.At(Day).Refresh();
 
-        var replica = new EntitlementService(one.Store, one.Definitions, new SequentialIds(), new SettableTimeProvider(DateTimeOffset.UnixEpoch.AddSeconds(Day)));
+        // The replica does not read the first one's stored row (the stored snapshot is valid until day 30, so a read would return it
+        // and compare it with itself): it rebuilds the snapshot from the records alone, at the stored instant, and the rebuild must be
+        // the stored snapshot in full.
+        var replica = one.Replica(Day);
+        var report = await replica.VerifyRebuildAsync(EntitlementHarness.Workspace, CancellationToken.None);
+        Assert.Equal(RebuildStatus.Equal, report.Status);
+        Assert.True(first.SameAs(report.Rebuilt!));
         var second = await replica.ReadAsync(EntitlementHarness.Workspace, CancellationToken.None);
         Assert.True(first.SameAs(second.Value!));
     }
@@ -49,8 +55,8 @@ public sealed partial class ClockAndStructureTests
         var grant = new Grant("g1", "ws1", GrantKind.Capability, "cloud.sync", new CapabilityValue(), GrantSource.Subscription, "s1", T(0), null, "commerce", T(0));
         var term = new ServiceTermFact("t1", ServiceTermKind.Subscription, T(0), T(100), null, T(0), T(0));
         var records = EntitlementRecordSet.Empty("ws1") with { Grants = [grant], Terms = [term] };
-        Assert.True(EntitlementResolver.Resolve(records, definitions, new UtcMicros(100 * 1_000_000 - 1)).Content.Capabilities.Single(c => c.Key == "cloud.sync").Granted);
-        Assert.False(EntitlementResolver.Resolve(records, definitions, new UtcMicros(100 * 1_000_000)).Content.Capabilities.Single(c => c.Key == "cloud.sync").Granted);
+        Assert.True(ResolverVectors.Resolve(records, definitions, new UtcMicros(100 * 1_000_000 - 1)).Content.Capabilities.Single(c => c.Key == "cloud.sync").Granted);
+        Assert.False(ResolverVectors.Resolve(records, definitions, new UtcMicros(100 * 1_000_000)).Content.Capabilities.Single(c => c.Key == "cloud.sync").Granted);
     }
 
     [Fact]

@@ -244,6 +244,13 @@ func CommandIDReused() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "command_id_reused"}
 }
 
+// FeatureNotEntitled is ENTITLEMENT/feature_not_entitled (errors.md): the plan lacks the cloud feature. state.state is "feature" and
+// state.reason the feature key, whichever reason the gate had (a missing or invalid plan configuration, no entitlement, a lapsed
+// term): the reply never says more than the refusal does, the audit event carries the gate's reason.
+func FeatureNotEntitled(feature string) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_ENTITLEMENT, Code: "feature_not_entitled", State: "feature", Reason: feature}
+}
+
 // NotActivated is STATE/not_activated with state.state = "surface" and state.reason = the surface.
 func NotActivated(surface string) *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "not_activated", State: "surface", Reason: surface}

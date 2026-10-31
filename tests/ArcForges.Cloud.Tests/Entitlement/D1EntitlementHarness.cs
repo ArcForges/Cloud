@@ -34,7 +34,7 @@ internal sealed class D1EntitlementHarness : IScenario, IDisposable
         Definitions = new FixedDefinitions(Fixtures.Definitions(selfHostRealm));
         Port = new ModulePlanPortFactory(Bridge, Bridge.Generation, Clock).For(EntitlementModule.Instance.Descriptor);
         Store = new D1EntitlementStore(Port);
-        Service = new EntitlementService(Store, Definitions, new UuidIds(), Clock);
+        Service = new EntitlementServiceFacade(new EntitlementService(Store, Definitions, new UuidIds(), Clock), Definitions);
     }
 
     public SqliteBridgeExecutor Bridge { get; }
@@ -47,7 +47,7 @@ internal sealed class D1EntitlementHarness : IScenario, IDisposable
 
     public D1EntitlementStore Store { get; }
 
-    public EntitlementService Service { get; }
+    public EntitlementServiceFacade Service { get; }
 
     public static string Uuid(int n) => $"00000000-0000-4000-8000-{n:x12}";
 

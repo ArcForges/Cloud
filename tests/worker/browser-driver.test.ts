@@ -42,6 +42,13 @@ function standIn() {
     url: () => url,
     redirectedFrom: () => from,
   });
+  // A response belongs to the very request object the page announced (Playwright's response.request() is that object).
+  const announced = new Map<string, PwRequest>();
+  const announce = (method: string, url: string, from: PwRequest | null = null): PwRequest => {
+    const made = requestOf(method, url, from);
+    announced.set(`${method} ${url}`, made);
+    return made;
+  };
   const response = (
     method: string,
     url: string,
@@ -50,7 +57,7 @@ function standIn() {
   ): PwResponse => ({
     status: () => status,
     headers: () => headers,
-    request: () => requestOf(method, url),
+    request: () => announced.get(`${method} ${url}`) ?? requestOf(method, url),
   });
   const page: PwPage = {
     async goto(url) {
@@ -100,9 +107,10 @@ function standIn() {
   const request = async (method: string, url: string): Promise<"continued" | "aborted"> => {
     let outcome: "continued" | "aborted" = "continued";
     // The browser announces every request of the page, the routed ones too; only the route can hold one back.
-    handlers.request?.(requestOf(method, url));
+    const announcedRequest = announce(method, url);
+    handlers.request?.(announcedRequest);
     const route: PwRoute = {
-      request: () => requestOf(method, url),
+      request: () => announcedRequest,
       continue: async () => {
         events.push(`continue ${method} ${new URL(url).pathname}`);
       },
@@ -226,6 +234,38 @@ test("a 429 is remembered with its Retry-After until it is read, and only a chan
     world.respond(method, `${origin}${pathname}`, status);
     assert.equal(tab.changes() - before, counted ? 1 : 0, `${method} ${pathname} ${status}`);
   }
+});
+
+test("a POST a step cannot repeat is unsettled until a reply says the center did not act: a refusal settles it, a lost reply or a server error does not", async () => {
+  const world = standIn();
+  const tab = playwrightTab(world.context, world.page, undefined);
+  await tab.goto(`${origin}/api/account/sign-in`);
+  const enrollment = `${origin}/api/session/v1/web/enrollment/complete`;
+  assert.equal(tab.unsettled(), 0);
+  // A flow's begin and a proof are harmless to repeat: never unsettled.
+  await world.request("POST", `${origin}/api/session/v1/web/authentication/begin`);
+  await world.request("GET", `${origin}/api/account/passkeys`);
+  assert.equal(tab.unsettled(), 0);
+  // The request left and nothing came back: the center may have acted.
+  await world.request("POST", enrollment);
+  assert.equal(tab.unsettled(), 1);
+  // Every 4xx is a definite refusal, the 429 of the edge included.
+  for (const status of [400, 403, 413, 429]) {
+    world.respond("POST", enrollment, status);
+    assert.equal(tab.unsettled(), 0, String(status));
+    await world.request("POST", enrollment);
+    assert.equal(tab.unsettled(), 1);
+  }
+  // A server error does not say whether the center acted.
+  world.respond("POST", enrollment, 504);
+  assert.equal(tab.unsettled(), 1, "a 504 settles nothing");
+  world.respond("POST", enrollment, 502);
+  assert.equal(tab.unsettled(), 1);
+  // An accepted reply settles it as a counted change.
+  const changes = tab.changes();
+  world.respond("POST", enrollment, 200);
+  assert.equal(tab.unsettled(), 0);
+  assert.equal(tab.changes(), changes + 1);
 });
 
 test("a console error is a problem unless it is the browser's own favicon request, a policy violation always is", () => {

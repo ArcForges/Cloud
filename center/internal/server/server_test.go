@@ -410,7 +410,8 @@ func TestTheModeSelectsTheFeatureGate(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, key := range feature.Gated() {
-			if center.Features.Availability(t.Context(), key).Available != available {
+			// A self-hosted center enables every gated key but `push`, which needs a push sender nobody has built yet (DC-22).
+			if center.Features.Availability(t.Context(), key).Available != (available && key != feature.Push) {
 				t.Fatalf("%s %s", mode, key)
 			}
 		}
@@ -535,4 +536,28 @@ func TestANotActivatedReplyIsLoggedWithItsCorrelation(t *testing.T) {
 		strings.Contains(metrics.String(), `code="unknown"`) {
 		t.Fatalf("metrics %s", metrics.String())
 	}
+}
+
+// TestTheCatalogueOfARunningCenterComesOnlyFromItsPlanConfiguration (DC-12): the composition reads no catalogue from anywhere but the
+// embedded fixtures of the development plan configuration; the test-only injection is unexported and is wired to no variable, file or
+// flag (TestNoCodeOfTheRunningCenterInjectsACatalogue parses the sources that build the running center).
+func TestTheCatalogueOfARunningCenterComesOnlyFromItsPlanConfiguration(t *testing.T) {
+	for plan, state := range map[config.PlanConfiguration]feature.State{config.PlanNone: feature.StateMissing, config.PlanDevelopmentFixtures: feature.StateValid} {
+		cfg := testConfig(config.OfficialHosted)
+		cfg.Plan = plan
+		center, err := New(cfg, observe.NewLogger(io.Discard, slog.LevelInfo), Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if center.FeatureConfiguration.State != state {
+			t.Errorf("%q: state %d", plan, center.FeatureConfiguration.State)
+		}
+		center.Close()
+	}
+	// An invalid injected catalogue starts the center and enables nothing.
+	center, err := New(testConfig(config.OfficialHosted), observe.NewLogger(io.Discard, slog.LevelInfo), Options{catalogue: []byte("{"), catalogueClass: feature.ClassProduction})
+	if err != nil || center.FeatureConfiguration.State != feature.StateInvalid {
+		t.Fatalf("%v %+v", err, center.FeatureConfiguration)
+	}
+	center.Close()
 }

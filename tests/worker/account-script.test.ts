@@ -1010,6 +1010,7 @@ test("a page that cannot work without its script says so until the script runs (
     ["sign-out", [...common, "sign-out"]],
     ["register", [...common, "register", "create-passkey"]],
     ["passkeys", common],
+    ["operations-review", common],
   ] as const) {
     const shown = page(name, [...ids, "needs-script"]);
     if (name === "register") shown.elements.set("register", creationForm());
@@ -1208,6 +1209,41 @@ test("a step-up sends the class and the target of its form, each in its own plac
   assert.deepEqual(bodies, [
     { operationClass: "identity.revokeAllSessions", method: "passkey", targetHash: "b".repeat(64) },
   ]);
+});
+
+test("the operations review page proves the operator grant's step-up before its form is submitted, and the grant form of the operations page does not", async () => {
+  const target = "c".repeat(64);
+  const form = new Element();
+  form.dataset.stepUpClass = "center.operatorGrant";
+  form.dataset.stepUpTarget = target;
+  const csrf = new Element();
+  csrf.value = "C".repeat(43);
+  form.elements.csrf = csrf;
+  form.querySelectorAll = () => [new Element()];
+  const bodies: unknown[] = [];
+  const review = page("operations-review", common, {
+    forms: [form],
+    fetchImpl: async (url, init) => {
+      if (url.endsWith("/step-up/begin")) {
+        bodies.push(JSON.parse(String(init.body)));
+        return reply(200, challengeBody("stepUp"));
+      }
+      return reply(200, {});
+    },
+  });
+  review.window.document.querySelectorAll = (() => [form]) as never;
+  await script.start(review.window);
+  form.fire("submit");
+  await settle();
+  assert.deepEqual(bodies, [
+    { operationClass: "center.operatorGrant", method: "passkey", targetHash: target },
+  ]);
+  // The request form (page name operations-grant) carries no step-up: the script wires nothing to it.
+  const plain = new Element();
+  const grant = page("operations-grant", common, { forms: [plain] });
+  grant.window.document.querySelectorAll = (() => [plain]) as never;
+  await script.start(grant.window);
+  assert.equal(plain.listeners?.submit?.length ?? 0, 0);
 });
 
 test("a page that arrives with an error puts the focus on the error summary, not the heading (js-7)", async () => {
