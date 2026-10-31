@@ -215,6 +215,9 @@ test("the matcher of the Docker context follows the rules the file states", () =
     assert.equal(carried(target), expected, target);
 });
 
+// Limit: "carried" is modelled from the include rules and the closing exclusions of .dockerignore, like the tests above; a real build
+// carries every center/ file the closing exclusions do not remove, so a stray vendor/, .s or go.work file is not seen here (see
+// "What waits" in docs/center-entitlement.md).
 // Every file the Docker context carries from the Go center is compiled or embedded into the shipped image, so it is an input the
 // release profile must bind: a carried file the profile does not name could change after the admission with no successor record
 // (records-1: the role-granting commands of the executable were once such a file).

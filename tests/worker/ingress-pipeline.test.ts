@@ -373,6 +373,8 @@ const closing = (text: string, open: number): number => {
   throw new Error("an unbalanced parenthesis");
 };
 
+// Limit: the scan is keyed on the literal CLOUD_CONTAINER.getByName(; an alias of the namespace, optional chaining, destructuring,
+// bracket access or a helper that receives the namespace is not seen (see "What waits" in docs/center-entitlement.md).
 // Every place the Worker obtains a Container stub, and what it does with it: a request (.fetch) must say redirect manual in its own
 // arguments, whatever address it builds; anything else is a stub the file only stops.
 const containerSites = (text: string): { request: boolean; manual: boolean }[] => {
