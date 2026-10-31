@@ -95,6 +95,13 @@ type catalogueDocument struct {
 	} `json:"plans"`
 }
 
+// The spellings of the document's fields, at the top level and in a plan. encoding/json matches a name case-insensitively and keeps
+// the last of two, so the pre-pass below refuses every name that is not exactly one of these.
+var (
+	documentFields = []string{"version", "fixture", "notice", "capabilities", "plans"}
+	planFields     = []string{"id", "name", "illustrativePriceUsd", "features"}
+)
+
 var (
 	planIDPattern    = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+){0,7}$`)
 	fixtureVersion   = regexp.MustCompile(`^dev-[A-Za-z0-9._:-]{1,120}$`)
@@ -102,7 +109,8 @@ var (
 )
 
 // ParseCatalogue reads and validates a catalogue document under a classification. It is strict: one JSON object, no unknown or
-// repeated field, no trailing data, at most 64 KiB. A fixture (marker true) is only valid under the development classification and is
+// repeated field (a name is exactly one of the document's spellings: "Version" is neither "version" nor an unknown field to ignore),
+// no trailing data, at most 64 KiB. A fixture (marker true) is only valid under the development classification and is
 // the only catalogue that may carry a price, USD 5 or USD 15; a non-fixture catalogue states no price. It defines exactly the six
 // gated keys. Every refusal is ErrInvalidCatalogue.
 func ParseCatalogue(data []byte, class Classification) (Catalogue, error) {
@@ -197,7 +205,8 @@ func validText(value string, minimum, maximum int) bool {
 	return count >= minimum && count <= maximum && !blank
 }
 
-// refuseRepeatedFields refuses an object that names a field twice at its top level or in a plan (encoding/json would keep the last).
+// refuseRepeatedFields refuses an object that names a field twice at its top level or in a plan (encoding/json would keep the last),
+// and one that names a field in any other spelling than the document's (encoding/json would match it case-insensitively).
 func refuseRepeatedFields(data []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
@@ -210,6 +219,9 @@ func refuseRepeatedFields(data []byte) error {
 			return invalidCatalogue("the document is not a JSON object")
 		}
 		name, _ := token.(string)
+		if !slices.Contains(documentFields, name) {
+			return invalidCatalogue("a field is unknown or not spelled exactly as the catalogue's")
+		}
 		if seen[name] {
 			return invalidCatalogue("a field is repeated")
 		}
@@ -245,6 +257,9 @@ func refuseRepeatedPlanFields(plan []byte) error {
 			return nil
 		}
 		name, _ := token.(string)
+		if !slices.Contains(planFields, name) {
+			return invalidCatalogue("a plan field is unknown or not spelled exactly as the catalogue's")
+		}
 		if seen[name] {
 			return invalidCatalogue("a plan field is repeated")
 		}

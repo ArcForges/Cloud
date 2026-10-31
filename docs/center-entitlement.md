@@ -30,14 +30,17 @@ catalogue document, no file path and no production slot:
 | `development-fixtures` | The embedded `center/internal/feature/fixtures/development.json` (marked `"fixture": true`, with the plans `fixture-all` at an illustrative USD 15 and `fixture-view` at USD 5). Official-hosted only; the acceptance environment sets it, production never does (`tests/worker/proof-deploy.test.ts`). |
 | anything else          | The center does not start.                                                                                                                                                                                                                                                                              |
 
-A catalogue is strict JSON of at most 64 KiB (no unknown or repeated field), with a version, the six gated keys as its
+A catalogue is strict JSON of at most 64 KiB (no unknown or repeated field, and every field name exactly as spelled below: `Version`
+or `FIXTURE` is refused, not matched case-insensitively and not kept as a second value), with a version, the six gated keys as its
 capabilities (exactly those, each once), and at most 16 plans of known keys. A price is allowed only in a fixture, as the
 illustrative USD 5 or 15, and a fixture is allowed only under the development classification: a fixture under the production
 classification, a price outside a fixture or any other violation makes the catalogue invalid, the start logs the rule that failed
-(never a value), and every gated key is unavailable (`plan_configuration_invalid`). The classification of a running center is
-development with the fixtures and production without a catalogue; a production-classified catalogue exists only injected into
-`server.Options` by a test (`Catalogue`, `CatalogueClass`: tests only, and `TestTheCatalogueOfARunningCenterComesOnlyFromItsPlanConfiguration`
-fails if `cmd/arcforges-center` ever sets them). The plans are configuration for AF-CTR-09, which turns a purchase of a plan into
+(never a value; one ERROR line from `Center.logPlanConfiguration`, tested with an injected invalid catalogue), and every gated key is
+unavailable (`plan_configuration_invalid`). The classification of a running center is development with the fixtures and production
+without a catalogue; a production-classified catalogue exists only injected into `server.Options` by a test (the fields are
+unexported, so no other package can set them, and `TestNoCodeOfTheRunningCenterInjectsACatalogue` parses the non-test sources of
+package `server` and fails if `Run` composes the center with anything but the literal `Options{}` or any function but `New` reads
+them; `TestThePinOnTheCatalogueInjectionFindsEachWayAroundIt` proves the pin on the real `server.go` changed in each way). The plans are configuration for AF-CTR-09, which turns a purchase of a plan into
 grants of its features; this task issues grants of features, never of plans.
 
 A change of the definitions version is a `definitions_activation` row and raises the entitlement version of an account once, at its
@@ -161,9 +164,11 @@ configured (`push_sender_not_configured` otherwise, DC-22); none exists before A
 keys with `ARCFORGES_CENTER_DISABLED_FEATURES` (exact known keys, comma-separated; they answer `operator_limit`): an unknown,
 repeated or empty key refuses to start, the variable is refused in official-hosted mode, and the Worker never passes it to a hosted
 Container (PLT-18, `tests/worker/container-classes.test.ts`). `IsSelfHostRealm` of the definitions comes from the center mode (DC-20):
-the C# decisions ID-10 and ID-11 that derived it from a realm record are superseded. A paid grant that lapsed and an operator grant
-that is in force are both still resolved by the resolver with the self-hosted definitions, which the tests show
-(`TestALapsedPaidGrantPlusAnOperatorGrant`). Resource limits are enforced by the tasks whose operations they bound.
+the C# decisions ID-10 and ID-11 that derived it from a realm record are superseded. On the official hosted center, an operator grant re-enables a key
+whose paid grant lapsed, and the end of the operator grant returns the account to `subscription_expired`
+(`TestALapsedPaidGrantPlusAnOperatorGrant`, which runs with the hosted definitions on the development fixtures). The self-host realm
+ignores every official term, the compensation term an operator grant writes included, so an operator grant would do nothing there; it
+is also refused there (`self_hosted`), and the self-hosted gate never reads the resolver. Resource limits are enforced by the tasks whose operations they bound.
 
 ## The store
 

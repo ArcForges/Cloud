@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -540,7 +539,8 @@ func TestANotActivatedReplyIsLoggedWithItsCorrelation(t *testing.T) {
 }
 
 // TestTheCatalogueOfARunningCenterComesOnlyFromItsPlanConfiguration (DC-12): the composition reads no catalogue from anywhere but the
-// embedded fixtures of the development plan configuration; the test-only injection is not wired to any variable, file or flag.
+// embedded fixtures of the development plan configuration; the test-only injection is unexported and is wired to no variable, file or
+// flag (TestNoCodeOfTheRunningCenterInjectsACatalogue parses the sources that build the running center).
 func TestTheCatalogueOfARunningCenterComesOnlyFromItsPlanConfiguration(t *testing.T) {
 	for plan, state := range map[config.PlanConfiguration]feature.State{config.PlanNone: feature.StateMissing, config.PlanDevelopmentFixtures: feature.StateValid} {
 		cfg := testConfig(config.OfficialHosted)
@@ -554,16 +554,8 @@ func TestTheCatalogueOfARunningCenterComesOnlyFromItsPlanConfiguration(t *testin
 		}
 		center.Close()
 	}
-	main, err := os.ReadFile("../../cmd/arcforges-center/main.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(main), "Catalogue") {
-		t.Fatal("the executable's composition sets the test-only catalogue injection")
-	}
-	// An invalid injected catalogue starts the center and enables nothing; it says so in its log.
-	logs := &lockedBuffer{}
-	center, err := New(testConfig(config.OfficialHosted), observe.NewLogger(logs, slog.LevelInfo), Options{Catalogue: []byte("{"), CatalogueClass: feature.ClassProduction})
+	// An invalid injected catalogue starts the center and enables nothing.
+	center, err := New(testConfig(config.OfficialHosted), observe.NewLogger(io.Discard, slog.LevelInfo), Options{catalogue: []byte("{"), catalogueClass: feature.ClassProduction})
 	if err != nil || center.FeatureConfiguration.State != feature.StateInvalid {
 		t.Fatalf("%v %+v", err, center.FeatureConfiguration)
 	}

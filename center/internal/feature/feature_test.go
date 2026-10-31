@@ -5,6 +5,7 @@ package feature
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -219,45 +220,60 @@ func TestACatalogueOfTheProductionClassificationStatesNoFixtureNoNoticeAndNoPric
 	}
 }
 
-func TestEveryInvalidCatalogueIsRefusedWithoutEchoingItsValues(t *testing.T) {
-	fixture, err := DevelopmentFixtures()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = fixture
+// The catalogue's rules, each pinned by a document that breaks that rule alone: the refusal must be the rule's own text, so a case
+// cannot pass on another rule's refusal (config-2). fixtureJSON is a valid development fixture of one plan priced at USD 5.
+func TestEveryInvalidCatalogueIsRefusedByItsOwnRuleWithoutEchoingItsValues(t *testing.T) {
 	replace := func(old, new string) string { return strings.Replace(validProduction, old, new, 1) }
-	fixtureJSON := strings.Replace(strings.Replace(validProduction, `"fixture":false`, `"fixture":true,"notice":"Illustrative."`, 1), `"Plan under test"`, `"Fixture plan (illustrative)","illustrativePriceUsd":5`, 1)
+	fixtureJSON := strings.Replace(strings.Replace(strings.Replace(validProduction, `"fixture":false`, `"fixture":true,"notice":"Illustrative."`, 1), `"2026-q4"`, `"dev-2026-q4"`, 1),
+		`"Plan under test"`, `"Fixture plan (illustrative)","illustrativePriceUsd":5`, 1)
+	if _, err := ParseCatalogue([]byte(fixtureJSON), ClassDevelopment); err != nil {
+		t.Fatalf("the base fixture of the cases is refused: %v", err)
+	}
+	fixture := func(old, new string) string { return strings.Replace(fixtureJSON, old, new, 1) }
 	cases := map[string]struct {
 		document string
 		class    Classification
+		want     string
 	}{
-		"not JSON":                          {`catalogue`, ClassDevelopment},
-		"an array":                          {`[]`, ClassDevelopment},
-		"empty":                             {``, ClassDevelopment},
-		"trailing data":                     {validProduction + `{}`, ClassDevelopment},
-		"an unknown field":                  {replace(`"fixture":false`, `"fixture":false,"extra":1`), ClassDevelopment},
-		"a repeated field":                  {replace(`"fixture":false`, `"fixture":false,"fixture":false`), ClassDevelopment},
-		"a repeated plan field":             {replace(`"id":"plan-test"`, `"id":"plan-test","id":"x"`), ClassDevelopment},
-		"an unknown classification":         {validProduction, Classification(9)},
-		"a fixture under production":        {fixtureJSON, ClassProduction},
-		"a fixture whose version lacks dev": {strings.Replace(fixtureJSON, `"2026-q4"`, `"2026-q5"`, 1), ClassDevelopment},
-		"a dev version without the marker":  {replace(`"2026-q4"`, `"dev-2026"`), ClassDevelopment},
-		"a notice without the marker":       {replace(`"fixture":false`, `"fixture":false,"notice":"x"`), ClassDevelopment},
-		"a price without the marker":        {replace(`"Plan under test"`, `"Plan under test","illustrativePriceUsd":5`), ClassDevelopment},
-		"a fixture price of seven":          {strings.Replace(fixtureJSON, `"illustrativePriceUsd":5`, `"illustrativePriceUsd":7`, 1), ClassDevelopment},
-		"a fixture plan not named Fixture":  {strings.Replace(fixtureJSON, `Fixture plan`, `Plan`, 1), ClassDevelopment},
-		"a missing capability":              {strings.Replace(replace(`,"push"],`, `],`), `"features":["remote.view","push"]`, `"features":["remote.view"]`, 1), ClassDevelopment},
-		"an unknown capability":             {replace(`"push"],`, `"push.extra"],`), ClassDevelopment},
-		"a repeated capability":             {replace(`"center.mcp","push"],`, `"center.mcp","center.mcp"],`), ClassDevelopment},
-		"a plan feature outside":            {replace(`"remote.view","push"`, `"remote.view","unknown"`), ClassDevelopment},
-		"a repeated plan feature":           {replace(`"remote.view","push"`, `"remote.view","remote.view"`), ClassDevelopment},
-		"a plan without features":           {replace(`"features":["remote.view","push"]`, `"features":[]`), ClassDevelopment},
-		"no plans":                          {replace(`"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]`, `"plans":[]`), ClassDevelopment},
-		"a plan ID in capitals":             {replace(`"plan-test"`, `"Plan-Test"`), ClassDevelopment},
-		"a blank plan name":                 {replace(`"Plan under test"`, `"  "`), ClassDevelopment},
-		"a plan name with a control":        {replace(`"Plan under test"`, `"Plan\u0007"`), ClassDevelopment},
-		"a malformed version":               {replace(`"2026-q4"`, `"2026 q4"`), ClassDevelopment},
-		"more than the bound":               {validProduction + strings.Repeat(" ", MaxCatalogueBytes), ClassDevelopment},
+		"not JSON":                                {`catalogue`, ClassDevelopment, "not a JSON object"},
+		"an array":                                {`[]`, ClassDevelopment, "not a JSON object"},
+		"empty":                                   {``, ClassDevelopment, "empty or longer than"},
+		"more than the bound":                     {validProduction + strings.Repeat(" ", MaxCatalogueBytes), ClassDevelopment, "empty or longer than"},
+		"trailing data":                           {validProduction + `{}`, ClassDevelopment, "more than one value"},
+		"an unknown field":                        {replace(`"fixture":false`, `"fixture":false,"extra":1`), ClassDevelopment, "unknown or not spelled exactly"},
+		"an unknown plan field":                   {replace(`"id":"plan-test"`, `"id":"plan-test","extra":1`), ClassDevelopment, "unknown or not spelled exactly"},
+		"a repeated field":                        {replace(`"fixture":false`, `"fixture":false,"fixture":false`), ClassDevelopment, "a field is repeated"},
+		"a repeated plan field":                   {replace(`"id":"plan-test"`, `"id":"plan-test","id":"x"`), ClassDevelopment, "a plan field is repeated"},
+		"a field in capitals":                     {replace(`"version"`, `"VERSION"`), ClassDevelopment, "unknown or not spelled exactly"},
+		"a field repeated in another case":        {replace(`"fixture":false`, `"fixture":false,"Fixture":true`), ClassDevelopment, "unknown or not spelled exactly"},
+		"the version repeated in another case":    {strings.TrimSuffix(validProduction, "}") + `,"Version":"2026-q5"}`, ClassDevelopment, "unknown or not spelled exactly"},
+		"a plan field in another case":            {replace(`"name":"Plan under test"`, `"Name":"Plan under test"`), ClassDevelopment, "plan field is unknown or not spelled exactly"},
+		"a plan name repeated in another case":    {replace(`"name":"Plan under test"`, `"name":"Plan under test","NAME":"Other"`), ClassDevelopment, "plan field is unknown or not spelled exactly"},
+		"the price field spelled with capitals":   {fixture(`illustrativePriceUsd`, `illustrativePriceUSD`), ClassDevelopment, "plan field is unknown or not spelled exactly"},
+		"an unknown classification":               {validProduction, Classification(9), "the classification is unknown"},
+		"a fixture under production":              {fixtureJSON, ClassProduction, "a fixture catalogue under the production classification"},
+		"a fixture whose version lacks dev-":      {fixture(`"dev-2026-q4"`, `"2026-q5"`), ClassDevelopment, "a fixture's version starts with dev-"},
+		"a dev- version without the marker":       {replace(`"2026-q4"`, `"dev-2026"`), ClassDevelopment, "only a fixture has a dev- version"},
+		"a malformed version":                     {replace(`"2026-q4"`, `"2026 q4"`), ClassDevelopment, "the version is malformed"},
+		"a fixture without a notice":              {fixture(`,"notice":"Illustrative."`, ``), ClassDevelopment, "a fixture carries its illustrative notice"},
+		"a fixture with a blank notice":           {fixture(`"notice":"Illustrative."`, `"notice":"  "`), ClassDevelopment, "a fixture carries its illustrative notice"},
+		"a fixture with a notice of control text": {fixture(`"notice":"Illustrative."`, `"notice":"Illustrative.\u0007"`), ClassDevelopment, "a fixture carries its illustrative notice"},
+		"a notice without the marker":             {replace(`"fixture":false`, `"fixture":false,"notice":"x"`), ClassDevelopment, "only a fixture carries a notice"},
+		"a price without the marker":              {replace(`"Plan under test"`, `"Plan under test","illustrativePriceUsd":5`), ClassDevelopment, "only a fixture may state a price"},
+		"a fixture price of seven":                {fixture(`"illustrativePriceUsd":5`, `"illustrativePriceUsd":7`), ClassDevelopment, "illustrative price is USD 5 or USD 15"},
+		"a fixture price of zero":                 {fixture(`,"illustrativePriceUsd":5`, ``), ClassDevelopment, "illustrative price is USD 5 or USD 15"},
+		"a fixture plan not named Fixture":        {fixture(`Fixture plan`, `Plan`), ClassDevelopment, "a fixture plan's name starts with Fixture"},
+		"a missing capability":                    {strings.Replace(replace(`,"push"],`, `],`), `"features":["remote.view","push"]`, `"features":["remote.view"]`, 1), ClassDevelopment, "defines exactly the"},
+		"an unknown capability":                   {replace(`"push"],`, `"push.extra"],`), ClassDevelopment, "a capability is not a gated key or is repeated"},
+		"a repeated capability":                   {replace(`"center.mcp","push"],`, `"center.mcp","center.mcp"],`), ClassDevelopment, "a capability is not a gated key or is repeated"},
+		"a plan feature outside":                  {replace(`"remote.view","push"`, `"remote.view","unknown"`), ClassDevelopment, "a plan feature is not a capability"},
+		"a repeated plan feature":                 {replace(`"remote.view","push"`, `"remote.view","remote.view"`), ClassDevelopment, "a plan feature is not a capability"},
+		"a plan without features":                 {replace(`"features":["remote.view","push"]`, `"features":[]`), ClassDevelopment, "a plan carries from 1 to"},
+		"no plans":                                {replace(`"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]`, `"plans":[]`), ClassDevelopment, "plans"},
+		"a plan ID in capitals":                   {replace(`"plan-test"`, `"Plan-Test"`), ClassDevelopment, "a plan ID is malformed or repeated"},
+		"a repeated plan ID":                      {replace(`"features":["remote.view","push"]}]`, `"features":["remote.view","push"]},{"id":"plan-test","name":"Other","features":["push"]}]`), ClassDevelopment, "a plan ID is malformed or repeated"},
+		"a blank plan name":                       {replace(`"Plan under test"`, `"  "`), ClassDevelopment, "a plan name is blank, long or holds a control character"},
+		"a plan name with a control":              {replace(`"Plan under test"`, `"Plan\u0007"`), ClassDevelopment, "a plan name is blank, long or holds a control character"},
 	}
 	for name, item := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -265,10 +281,60 @@ func TestEveryInvalidCatalogueIsRefusedWithoutEchoingItsValues(t *testing.T) {
 			if !errors.Is(err, ErrInvalidCatalogue) {
 				t.Fatalf("not refused: %v", err)
 			}
-			if strings.Contains(err.Error(), "plan-test") || strings.Contains(err.Error(), "2026-q4") {
+			if !strings.Contains(err.Error(), item.want) {
+				t.Fatalf("refused by another rule: %v, want %q", err, item.want)
+			}
+			if strings.Contains(err.Error(), "plan-test") || strings.Contains(err.Error(), "2026-q4") || strings.Contains(err.Error(), "Other") {
 				t.Fatalf("the error repeats the document: %v", err)
 			}
 		})
+	}
+}
+
+// TestSixteenPlansAreAcceptedAndSeventeenAreTooMany: the bound of the plans, from both sides.
+func TestSixteenPlansAreAcceptedAndSeventeenAreTooMany(t *testing.T) {
+	withPlans := func(count int) string {
+		var plans []string
+		for index := range count {
+			plans = append(plans, fmt.Sprintf(`{"id":"plan-%d","name":"Plan %d","features":["push"]}`, index, index))
+		}
+		return strings.Replace(validProduction, `[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]`, "["+strings.Join(plans, ",")+"]", 1)
+	}
+	if catalogue, err := ParseCatalogue([]byte(withPlans(maxPlans)), ClassDevelopment); err != nil || len(catalogue.Plans) != maxPlans {
+		t.Fatalf("%d plans: %v", maxPlans, err)
+	}
+	if _, err := ParseCatalogue([]byte(withPlans(maxPlans+1)), ClassDevelopment); err == nil || !strings.Contains(err.Error(), "from 1 to 16 plans") {
+		t.Fatalf("%d plans: %v", maxPlans+1, err)
+	}
+}
+
+// TestTheDefinitionsOfAConfigurationFollowTheMode is DC-20: IsSelfHostRealm comes from the center's mode, with a catalogue or without
+// one, and the version is the catalogue's or a well-formed placeholder.
+func TestTheDefinitionsOfAConfigurationFollowTheMode(t *testing.T) {
+	self := Configure(Settings{Mode: config.SelfHosted}).Definitions()
+	if !self.IsSelfHostRealm || !entitlement.IsOpaqueReference(self.Version) || len(self.Capabilities) != 0 {
+		t.Fatalf("a self-hosted center: %+v", self)
+	}
+	for name, configuration := range map[string]Configuration{"no catalogue": Configure(Settings{Mode: config.OfficialHosted}), "the fixtures": hosted(config.PlanDevelopmentFixtures),
+		"an invalid catalogue": Configure(Settings{Mode: config.OfficialHosted, Injected: []byte("{"), InjectedClass: ClassProduction})} {
+		definitions := configuration.Definitions()
+		if definitions.IsSelfHostRealm || !entitlement.IsOpaqueReference(definitions.Version) {
+			t.Errorf("%s: %+v", name, definitions)
+		}
+	}
+	catalogue, err := DevelopmentFixtures()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if definitions := hosted(config.PlanDevelopmentFixtures).Definitions(); definitions.Version != catalogue.Version || len(definitions.Capabilities) != 6 {
+		t.Errorf("the fixtures' definitions: %+v", definitions)
+	}
+	// The realm follows the mode even where a catalogue is present (only a hand-built configuration has one in self-hosted mode).
+	if definitions := (Configuration{Mode: config.SelfHosted, State: StateValid, Catalogue: &catalogue}).Definitions(); !definitions.IsSelfHostRealm || definitions.Version != catalogue.Version {
+		t.Errorf("a self-hosted configuration with a catalogue: %+v", definitions)
+	}
+	if definitions := (Configuration{Mode: config.OfficialHosted, State: StateValid, Catalogue: &catalogue}).Definitions(); definitions.IsSelfHostRealm {
+		t.Errorf("a hosted configuration with a catalogue: %+v", definitions)
 	}
 }
 

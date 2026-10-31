@@ -63,8 +63,8 @@ type Bootstrap struct {
 
 // Identity is the configuration of the identity surface.
 type Identity struct {
-	// Surfaces are the enabled surfaces. Official-hosted mode enables none unless listed; self-hosted mode enables every known
-	// surface unless listed.
+	// Surfaces are the enabled surfaces. Official-hosted mode enables none unless listed; self-hosted mode enables the default
+	// surfaces (identity and pages, DefaultSelfHostedSurfaces) unless listed; operations is never a default.
 	Surfaces []Surface
 	// ClientIPHeader names the header that carries the client's address (official-hosted mode with a surface enabled requires
 	// exactly ClientIPHeader); empty means the TCP peer.

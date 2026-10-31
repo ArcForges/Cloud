@@ -281,7 +281,7 @@ const productionCatalogue = `{"version":"2026-q4","fixture":false,"capabilities"
 "plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]}`
 
 var fixtureCatalogue = `{"version":"dev-test","fixture":true,"capabilities":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"],
-"plans":[{"id":"fixture-all","name":"Fixture","illustrativePriceUSD":15,"features":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"]}]}`
+"plans":[{"id":"fixture-all","name":"Fixture","illustrativePriceUsd":15,"features":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"]}]}`
 
 func gatedKeys() []string {
 	var keys []string

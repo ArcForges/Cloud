@@ -68,6 +68,9 @@ type Center struct {
 	Features             feature.Gate
 	FeatureConfiguration feature.Configuration
 	Entitlements         *entitlement.Service
+	// Authorizer is the identity surface's authorization (the stages of access.Authorize, the feature gate among them), or nil where
+	// that surface is off.
+	Authorizer *access.Authorizer
 	// Store is the runtime role's PostgreSQL store, or nil when no runtime database is configured.
 	Store  *store.DB
 	public http.Handler
@@ -104,11 +107,13 @@ type Options struct {
 	// Participants are the device revocation's cascade participants (DC-06): none in AF-CTR-03 (agent grants arrive with
 	// AF-CTR-07 and push with AF-CLD-06); the tests register a stand-in.
 	Participants []device.Participant
-	// Catalogue replaces the plan catalogue with a document under a classification: TESTS ONLY (DC-12). No environment variable, file
-	// or configuration reaches it, so a running center has the catalogue of its plan configuration or none; a test pins that
-	// cmd/arcforges-center never sets it. It exists to prove the production bounds with a production-classified catalogue.
-	Catalogue      []byte
-	CatalogueClass feature.Classification
+	// catalogue replaces the plan catalogue with a document under a classification: TESTS ONLY (DC-12). It is unexported, so no other
+	// package (the executable included) can set it, and no environment variable, file or configuration reaches it: a running center
+	// has the catalogue of its plan configuration or none. Inside this package, TestTheCatalogueOfARunningCenterComesOnlyFromItsPlan
+	// Configuration parses the non-test files and fails when anything but New reads these two fields or a literal sets them (server.Run
+	// composes the center with Options{}). It exists to prove the production bounds with a production-classified catalogue.
+	catalogue      []byte
+	catalogueClass feature.Classification
 }
 
 // New composes a center from its configuration. Pools connect lazily, so a database that is down does not stop the start; it
@@ -119,7 +124,7 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	for index, name := range cfg.DisabledFeatures {
 		disabled[index] = feature.Key(name)
 	}
-	center.FeatureConfiguration = feature.Configure(feature.Settings{Mode: cfg.Mode, Plan: cfg.Plan, Injected: options.Catalogue, InjectedClass: options.CatalogueClass, Disabled: disabled})
+	center.FeatureConfiguration = feature.Configure(feature.Settings{Mode: cfg.Mode, Plan: cfg.Plan, Injected: options.catalogue, InjectedClass: options.catalogueClass, Disabled: disabled})
 	center.schemaVersion.Store(-1)
 	build, err := migrate.Load(schema.Migrations())
 	if err != nil {
@@ -208,6 +213,7 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 			center.Close()
 			return nil, err
 		}
+		center.Authorizer = composed.authorizer
 		if cfg.Identity.Enabled(config.SurfacePages) {
 			if pageHandler, err = center.composePages(composed, publicRoutes.Registry, pipelineOptions, logger); err != nil {
 				center.Close()
@@ -523,6 +529,20 @@ func (c *Center) writeDatabaseMetrics(writer io.Writer) error {
 	return err
 }
 
+// logPlanConfiguration says what the plan configuration came to: an invalid catalogue is an error that names the rule it broke (the
+// problem is a rule text, never a byte of the document), and an official hosted center without a plan configuration says so. A
+// self-hosted center has no catalogue and logs nothing.
+func (c *Center) logPlanConfiguration(logger *slog.Logger) {
+	switch c.FeatureConfiguration.State {
+	case feature.StateInvalid:
+		logger.Error("the plan catalogue is invalid; every gated feature is unavailable", "problem", c.FeatureConfiguration.Problem)
+	case feature.StateMissing:
+		if c.Config.Mode == config.OfficialHosted {
+			logger.Info("no plan configuration; every gated feature is unavailable until one is configured")
+		}
+	}
+}
+
 // Run serves the center until ctx ends or a listener fails, then shuts down within five seconds.
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	center, err := New(cfg, logger, Options{})
@@ -569,14 +589,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	for _, surface := range cfg.Identity.Surfaces {
 		surfaces = append(surfaces, string(surface))
 	}
-	switch center.FeatureConfiguration.State {
-	case feature.StateInvalid:
-		logger.Error("the plan catalogue is invalid; every gated feature is unavailable", "problem", center.FeatureConfiguration.Problem)
-	case feature.StateMissing:
-		if cfg.Mode == config.OfficialHosted {
-			logger.Info("no plan configuration; every gated feature is unavailable until one is configured")
-		}
-	}
+	center.logPlanConfiguration(logger)
 	logger.Info("center started", "mode", string(cfg.Mode), "planConfiguration", planName(cfg.Plan), "disabledFeatures", cfg.DisabledFeatures, "publicBaseUrl", cfg.PublicBaseURL, "listeners", bound,
 		"helloBackend", center.Health.HelloBackend, "store", center.Store != nil, "schemaBuildVersion", center.buildVersion,
 		"revision", center.Health.Revision, "version", center.Health.Artifact.Version, "surfaces", surfaces,

@@ -773,8 +773,8 @@ routes form the `pages` surface, which needs `identity` (a list with `pages` and
 self-hosted center whose base URL cannot be a relying party leaves both off). The center and the generated Worker table tag them by surface
 (`surfaceRoutes`, PLT-18: `productionRoutes` stay always on); `ARCFORGES_CENTER_SURFACES` (center) and `FLAGSHIP_SURFACES`
 (Worker) list the enabled surfaces as exact generated names, comma-separated. Official-hosted mode enables none unless listed;
-self-hosted mode enables every known surface unless listed (an explicit list pins the surfaces across upgrades; `none` enables
-none). A disabled surface's method is answered with the domain refusal `STATE/not_activated` (`state.reason = identity`): by the
+self-hosted mode enables the default surfaces (`identity` and `pages`) unless listed (an explicit list pins the surfaces across
+upgrades; `none` enables none; `operations` is never a default). A disabled surface's method is answered with the domain refusal `STATE/not_activated` (`state.reason = identity`): by the
 Worker from the generated reply, before any rate limit, credential, body or Container (`tests/worker/ingress-surfaces.test.ts`), and
 by the center with the call's correlation id (logged and counted as an OK reply with that id); a disabled `pages` surface answers every
 page route with 404, the Worker's reply of a path it does not know (plain text), from the Worker's page handler before anything else is read. An enabled one passes the Worker's own
@@ -785,7 +785,7 @@ time rounded up to the second plus the limiter's 60-second period) before it is 
 
 Production carries `"FLAGSHIP_SURFACES": ""` (pinned by `tests/worker/center-config.test.ts`: production stays dark, no page is
 served there); the acceptance environment (`proof`) carries `identity,pages` and `ALLOWED_ORIGIN` = the origin of its public base
-URL. The `identity` and `pages` surfaces exist; AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
+URL. The `identity`, `pages` and `operations` surfaces exist (the last is described below); AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
 after AF-PLAT-01's retention sweeps exist ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)).
 
 The operator grant has a third surface, `operations`: the interim page `/operations/grant` of the operator grant ([center
