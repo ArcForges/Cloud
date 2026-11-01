@@ -74,7 +74,7 @@ function bindings(
   const env: CloudBindings = {
     SOURCE_REVISION: "candidate",
     ALLOWED_ORIGIN: origin,
-    FLAGSHIP_SURFACES: "identity,pages",
+    FLAGSHIP_SURFACES: "identity,pages,operations",
     CLOUD_CONTAINER: {
       getByName() {
         return {
@@ -199,7 +199,13 @@ test("the generated page table is what the pages' contract names", () => {
   assert.equal(pageLocationPrefix, "/api/account/");
   const keys = new Set<string>();
   for (const row of pageRoutes) {
-    assert(row.path.startsWith("/account/") || row.path.startsWith("/session/v1/web/"), row.path);
+    // The pages surface lives under the account and WebBrowserSession prefixes, the operations surface under its own.
+    assert(
+      row.surface === "operations"
+        ? row.path.startsWith("/operations/")
+        : row.path.startsWith("/account/") || row.path.startsWith("/session/v1/web/"),
+      row.path,
+    );
     assert(!/[?#%\\ ]|\/\/|\.\.|\/$/u.test(row.path), `canonical: ${row.path}`);
     assert(row.method === "GET" || row.method === "POST");
     assert.equal(keys.has(`${row.method} ${row.path}`), false);
@@ -250,6 +256,58 @@ test("a disabled surface is the reply of a path the Worker does not know, before
     { FLAGSHIP_SURFACES: "pages" },
   );
   assert.equal((await routeRequest(call(signInPage), env)).status, 200);
+});
+
+test("a route belongs to its own surface: the operations page is not the pages' and is forwarded only while it is enabled", async () => {
+  const operations = pageRoutes.filter((row) => row.surface === "operations");
+  assert.deepEqual(
+    operations.map((row) => `${row.method} ${row.path}`),
+    ["GET /operations/grant", "POST /operations/grant/review", "POST /operations/grant/confirm"],
+  );
+  assert(operations.length < pageRoutes.length);
+  // Every other route is of the pages surface, and the methods of one path share a surface.
+  for (const row of pageRoutes.filter((item) => item.surface !== "operations"))
+    assert.equal(row.surface, "pages", row.path);
+  assert.equal(pageTable.get("/api/operations/grant")?.length, 1);
+  for (const flag of ["identity,pages", "pages", "identity", "operations,x"]) {
+    const { env, seen, keys } = bindings(() => jsonOk(), { FLAGSHIP_SURFACES: flag });
+    for (const row of operations) {
+      const reply = await routeRequest(
+        call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }),
+        env,
+      );
+      const unknown = await routeRequest(
+        new Request("https://proof.example.test/api/account/not-a-page"),
+        env,
+      );
+      assert.equal(reply.status, 404, `${flag} ${row.path}`);
+      const unknownText = await unknown.text();
+      assert.equal(await reply.text(), unknownText);
+      // A method the route lacks is not told apart either: a disabled surface is answered 404 before the method is looked at, never
+      // 405 (a path the Worker knows).
+      const lacking = await routeRequest(
+        new Request(`https://proof.example.test/api${row.path}`, { method: "DELETE" }),
+        env,
+      );
+      assert.equal(lacking.status, 404, `${flag} DELETE ${row.path}`);
+      assert.equal(await lacking.text(), unknownText, `${flag} DELETE ${row.path}`);
+    }
+    assert.equal(seen.length, 0, flag);
+    assert.equal(keys.length, 0, flag);
+  }
+  // The pages surface alone does not open the operations page, and the operations surface alone does not open the pages.
+  const { env: pagesOnly, seen: pagesSeen } = bindings(
+    () => centerReply(200, { type: "text/html; charset=utf-8", body: "x" }),
+    { FLAGSHIP_SURFACES: "identity,pages" },
+  );
+  assert.equal((await routeRequest(call(signInPage), pagesOnly)).status, 200);
+  assert.equal(pagesSeen.length, 1);
+  const { env: both } = bindings(
+    () => centerReply(200, { type: "text/html; charset=utf-8", body: "x" }),
+    { FLAGSHIP_SURFACES: "identity,pages,operations" },
+  );
+  const grant = route("GET", "/operations/grant");
+  assert.equal((await routeRequest(call(grant), both)).status, 200);
 });
 
 test("the request side refuses what breaks the browser protocol before the limit and the Container", async () => {

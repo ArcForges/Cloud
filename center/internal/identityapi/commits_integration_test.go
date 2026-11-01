@@ -243,7 +243,7 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		"list sessions": read, "verify a session": read, "check a rate-limit bucket": read, "list devices": read,
 		// Bookkeeping: counts, reservations, denials and give-backs around an effect, and the audits of refusals.
 		"count a rate-limit bucket": auxiliary, "reserve a rate-limit failure": auxiliary, "give a failure reservation back": auxiliary,
-		"audit an identity refusal": auxiliary, "audit an access refusal": auxiliary, "count a flow attempt": auxiliary,
+		"audit an identity refusal": auxiliary, "audit an access decision": auxiliary, "count a flow attempt": auxiliary,
 		"end an exhausted flow": auxiliary, "release a flow attempt": auxiliary, "count a step-up attempt": auxiliary, "deny a step-up": auxiliary,
 		"release a step-up attempt": auxiliary, "count a registration attempt": auxiliary,
 		// A2: a browser session's renewal on a page load or the bootstrap read.
@@ -254,9 +254,13 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		"execute a command under its receipt": effect,
 		// A2: the browser's sign-out (the pages' logout route).
 		"sign out": effect,
+		// Part B: the entitlement store and the operator grant (package entitlement). The refusal audit is bookkeeping around a
+		// refused grant, the role and snapshot reads are reads, and the snapshot's store is the read's own effect.
+		"read the operator role": read, "load the entitlement state": read, "read the entitlement snapshot": read,
+		"store the entitlement snapshot": effect, "audit an operator grant refusal": auxiliary,
 	}
 	found := map[string]string{}
-	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages"} {
+	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages", "../entitlement"} {
 		files, err := filepath.Glob(filepath.Join(directory, "*.go"))
 		if err != nil {
 			t.Fatal(err)

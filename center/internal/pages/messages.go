@@ -38,14 +38,35 @@ var refusalText = map[string]string{
 
 // reasonText maps CATEGORY/code and state.reason to a more exact text; the reasons are registry values.
 var reasonText = map[string]string{
-	"STATE/invalid_state|last_credential":                  "This is your only way to sign in, so it cannot be removed. Add another passkey first.",
-	"STATE/invalid_state|credentials_locked":               "The account's state does not allow passkeys to be changed.",
-	"VALIDATION/invalid_argument|credential: not_verified": "Your device could not confirm the new passkey. Start again.",
-	"VALIDATION/invalid_argument|display_name: length":     "The name is too long. Use 64 characters or fewer.",
-	"VALIDATION/invalid_argument|display_name: pattern":    "The name needs at least one visible character and no control characters.",
-	"VALIDATION/invalid_argument|name: length":             "The name is too long. Use 64 characters or fewer.",
-	"VALIDATION/invalid_argument|name: pattern":            "The name needs at least one visible character and no control characters.",
-	"VALIDATION/invalid_argument|query: not_admitted":      "This page does not take a query string.",
+	"STATE/invalid_state|last_credential":                      "This is your only way to sign in, so it cannot be removed. Add another passkey first.",
+	"STATE/invalid_state|credentials_locked":                   "The account's state does not allow passkeys to be changed.",
+	"STATE/invalid_state|no_catalogue":                         "This center has no plan catalogue, so there is nothing to grant.",
+	"STATE/invalid_state|self_hosted":                          "Operator grants exist only on the official hosted center.",
+	"STATE/invalid_state|catalogue_wide":                       "A grant of every feature is not allowed on this center. Choose some of them.",
+	"STATE/invalid_state|self_approval_required":               "A grant to your own account needs a justification.",
+	"STATE/invalid_state|account_state":                        "That account's state does not allow a grant.",
+	"VALIDATION/invalid_argument|expires_at: too_far":          "The grant lasts too long for this center. Use fewer days.",
+	"VALIDATION/invalid_argument|expires_days: pattern":        "Enter the number of days as a whole number from 1 to 400.",
+	"VALIDATION/invalid_argument|features: conflicts_with_all": "Choose every feature or some of them, not both.",
+	"VALIDATION/invalid_argument|reason: encoding":             "The reason is not valid text. Type it again.",
+	"VALIDATION/invalid_argument|self_approval: encoding":      "The justification is not valid text. Type it again.",
+	"VALIDATION/invalid_argument|source_ref: encoding":         "The source reference is not valid text. Type it again.",
+	"VALIDATION/invalid_argument|features: required":           "Choose at least one feature.",
+	"VALIDATION/invalid_argument|features: not_in_catalogue":   "A chosen feature is not in this center's catalogue.",
+	"VALIDATION/invalid_argument|account: format":              "The account is not a valid account identifier.",
+	"VALIDATION/invalid_argument|reason: length_or_characters": "The reason needs 1 to 512 characters and no control characters.",
+	"VALIDATION/invalid_argument|source_ref: format":           "The source reference needs 1 to 96 letters, digits or the characters . _ : -.",
+	"VALIDATION/invalid_argument|credential: not_verified":     "Your device could not confirm the new passkey. Start again.",
+	"VALIDATION/invalid_argument|display_name: length":         "The name is too long. Use 64 characters or fewer.",
+	"VALIDATION/invalid_argument|display_name: pattern":        "The name needs at least one visible character and no control characters.",
+	"VALIDATION/invalid_argument|name: length":                 "The name is too long. Use 64 characters or fewer.",
+	"VALIDATION/invalid_argument|name: pattern":                "The name needs at least one visible character and no control characters.",
+	"VALIDATION/invalid_argument|query: not_admitted":          "This page does not take a query string.",
+}
+
+// operationsText is the text of the refusals whose meaning differs on the operations surface from the account pages'.
+var operationsText = map[string]string{
+	"CONFLICT/already_exists": "These features were already granted with that source reference. Use another reference for another grant.",
 }
 
 // messageFor is the text of a refusal for a page.

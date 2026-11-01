@@ -1,0 +1,26 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Review the operator grant</h1>
+<noscript><p>Confirming the grant needs JavaScript. Turn it on for this page and reload.</p></noscript>
+<p id="needs-script" class="help">Confirming the grant needs this page's script. If this line stays, reload the page or allow scripts for it.</p>
+<p id="status" role="status" aria-live="polite"></p>
+<dl>
+<dt>Account</dt><dd>{{.Ops.Account}}{{if .Ops.Self}} (your own account){{end}}</dd>
+<dt>Features</dt><dd>{{range $index, $key := .Ops.Features}}{{if $index}}, {{end}}{{$key}}{{end}}{{if .Ops.All}} (every feature of the catalogue){{end}}</dd>
+<dt>Ends</dt><dd>{{.Ops.ExpiresText}}</dd>
+<dt>Reason</dt><dd>{{.Ops.Reason}}</dd>
+<dt>Source reference</dt><dd>{{.Ops.SourceRef}}</dd>
+{{if .Ops.Self}}<dt>Justification</dt><dd>{{.Ops.SelfApproval}}</dd>{{end}}
+</dl>
+<form method="post" action="{{.Base}}/operations/grant/confirm" data-step-up-class="center.operatorGrant" data-step-up-target="{{.Ops.Target}}">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="command_id" value="{{.Ops.Command}}">
+<input type="hidden" name="account" value="{{.Ops.Account}}">
+<input type="hidden" name="features" value="{{.Ops.FeatureList}}">
+<input type="hidden" name="reason" value="{{.Ops.Reason}}">
+<input type="hidden" name="source_ref" value="{{.Ops.SourceRef}}">
+<input type="hidden" name="self_approval" value="{{.Ops.SelfApproval}}">
+<input type="hidden" name="expires_at" value="{{.Ops.ExpiresAt}}">
+<p><button type="submit" class="primary">Confirm with your passkey</button></p>
+</form>
+<p><a href="{{.Base}}/operations/grant">Change the request</a></p>
+{{end}}

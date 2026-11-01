@@ -29,6 +29,7 @@ const ERROR_TEXT = {
   credential_revoked: "Your session has ended. Sign in again.",
   step_up_required: "This change needs a passkey check first. Try again.",
   permission_denied: "This is not allowed.",
+  feature_not_entitled: "This is not part of your plan.",
   code_reused: "That step was already used. Start again.",
   already_exists: "That passkey is already registered.",
   command_id_reused: "That request was already used for something else. Try again.",
@@ -654,6 +655,7 @@ export function start(window) {
     case "passkeys":
     case "sessions":
     case "devices":
+    case "operations-review":
       return stepUpForms(page);
     default:
       return undefined;

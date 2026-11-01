@@ -185,6 +185,8 @@ func TestMigration0002LandsWholeOverVersion1(t *testing.T) {
 	}
 	build = build[:2]
 	ctx := context.Background()
+	// The rehearsal is of 0002 as production receives it: the grants and the schemas of the build at 0002, before 0003's schema exists.
+	schemas, grants := schemasAndGrantsAt(2)
 	for _, failing := range []bool{true, false} {
 		url, name := pgtest.Database(t)
 		conn := pgtest.Connect(t, url)
@@ -200,7 +202,7 @@ func TestMigration0002LandsWholeOverVersion1(t *testing.T) {
 		if first, err := apply(t, url, build[:1], Options{Runner: "test"}); err != nil || first.Version != 1 {
 			t.Fatalf("version 1: %+v %v", first, err)
 		}
-		options := Options{Runner: "test", RuntimeRole: name + "_runtime"}
+		options := Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas, Grants: grants}
 		if failing {
 			// The last object 0002 creates exists already: 0002 fails at its last statement.
 			if _, err := conn.Exec(ctx, "CREATE TABLE platform.rate_limit (bucket_hash bytea)"); err != nil {

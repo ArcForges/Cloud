@@ -194,12 +194,13 @@ test("an operation is signed with the Worker-to-Container key over the exact pat
   assert.equal(call.request.headers.get("authorization"), null);
 });
 
-test("every request toward the Container says redirect manual, so a redirect is relayed as the Container's answer and never followed (H-1)", async () => {
+test("every request toward the Container says redirect manual, so a redirect is the Container's answer (its bare status, no Location) and never followed (H-1)", async () => {
   const redirect = { status: 303, headers: { location: "http://container/elsewhere" } };
-  // A signed operation (postSigned) and a session route (a plain forward): both name the option, both relay the 303.
+  // A signed operation (postSigned) and a session route (a plain forward): both name the option, both answer the 303 itself.
   const operation = environment(redirect);
   const signed = await handleProof(operator("/proof/v1/guard", {}), operation.env);
   assert.equal(signed.status, 303, "the redirect itself, not what it leads to (a 404)");
+  assert.equal(signed.headers.get("location"), null, "the proof surface copies no Location");
   assert.equal((operation.recorded[0] as Recorded).request.redirect, "manual");
   const session = environment(redirect);
   const bootstrap = await handleProof(

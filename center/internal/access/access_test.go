@@ -110,10 +110,14 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 }
 
 // TestTheStepUpClassesAreTheEvidenceRows: BeginStepUp admits exactly the classes of the rows that need evidence, each with its
-// target, and the center's upgrade class, whose target is the session.
+// target, the center's upgrade class, whose target is the session, and the center-defined operator grant, whose target is the
+// request.
 func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	want := map[string]string{"identity.beginPasskeyRegistration": TargetAccount, "identity.removeAuthIdentity": TargetCredential,
 		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession}
+	if target, ok := StepUpClass("center.operatorGrant"); !ok || target != TargetRequest {
+		t.Fatalf("the operator grant class: %q %v", target, ok)
+	}
 	for _, operation := range Operations() {
 		target, ok := StepUpClass(operation.ID)
 		if wanted, listed := want[operation.ID]; ok != listed || target != wanted {
@@ -123,7 +127,7 @@ func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	if target, ok := StepUpClass(UpgradeClass); !ok || target != TargetSession {
 		t.Fatal("the upgrade class")
 	}
-	for _, class := range []string{"", "identity.updateProfile", "identity.getProfile", "center.operatorGrant", "identity.upgradesession"} {
+	for _, class := range []string{"", "identity.updateProfile", "identity.getProfile", "center.operatorgrant", "center.execute", "identity.upgradesession"} {
 		if _, ok := StepUpClass(class); ok {
 			t.Errorf("%q is a step-up class", class)
 		}

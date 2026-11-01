@@ -1,0 +1,24 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Operator grant</h1>
+<p class="help">This is the interim page of the operator grant. It gives an account the features you choose for a limited time, in one step with a record of why. You confirm it with your passkey on the next page.</p>
+<form method="post" action="{{.Base}}/operations/grant/review">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<p><label for="account">Account identifier</label><br>
+<input id="account" name="account" type="text" maxlength="36" required autocomplete="off" spellcheck="false"></p>
+<fieldset>
+<legend>Features</legend>
+{{range .Ops.Keys}}<p><input id="{{.Field}}" name="{{.Field}}" type="checkbox"{{if .Checked}} checked{{end}}> <label for="{{.Field}}">{{.Key}}</label></p>
+{{end}}
+{{if .Ops.AllowWide}}<p><input id="all" name="all" type="checkbox"> <label for="all">Every feature of the catalogue</label></p>{{end}}
+</fieldset>
+<p><label for="expires_days">Days the grant lasts (1 to {{.Ops.MaxDays}})</label><br>
+<input id="expires_days" name="expires_days" type="number" min="1" max="{{.Ops.MaxDays}}" required value="{{.Ops.ExpiresDays}}"></p>
+<p><label for="reason">Reason (up to 512 characters)</label><br>
+<textarea id="reason" name="reason" rows="3" maxlength="512" required></textarea></p>
+<p><label for="source_ref">Source reference, such as a ticket (letters, digits and . _ : -, up to 96)</label><br>
+<input id="source_ref" name="source_ref" type="text" maxlength="96" required autocomplete="off" spellcheck="false"></p>
+<p><label for="self_approval">Justification, only for a grant to your own account (up to 512 characters)</label><br>
+<textarea id="self_approval" name="self_approval" rows="2" maxlength="512"></textarea></p>
+<p><button type="submit" class="primary">Review the grant</button></p>
+</form>
+{{end}}

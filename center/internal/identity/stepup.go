@@ -484,6 +484,13 @@ func ConsumeEvidence(ctx context.Context, tx pgx.Tx, caller Caller, class string
 	if err != nil {
 		return err
 	}
+	return ConsumeEvidenceFor(ctx, tx, caller, class, target, now)
+}
+
+// ConsumeEvidenceFor is ConsumeEvidence for an operation whose target is named by a hash that is not TargetHash's: the center-defined
+// operations, whose target is the SHA-256 of their canonical request (the operator grant, SEC-10). The rules are the same.
+func ConsumeEvidenceFor(ctx context.Context, tx pgx.Tx, caller Caller, class string, target []byte, now time.Time) error {
+	var err error
 	if _, err = tx.Exec(ctx, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", caller.UserID); err != nil {
 		return err
 	}

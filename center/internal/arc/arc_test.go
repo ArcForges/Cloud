@@ -41,6 +41,7 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		{InvalidState("credential", "last_credential"), "STATE/invalid_state", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{Expired(), "STATE/expired", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{NotActivated("identity"), "STATE/not_activated", foundationv1.RetryMode_RETRY_MODE_NEVER},
+		{FeatureNotEntitled("remote.view"), "ENTITLEMENT/feature_not_entitled", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{CodeReused(), "CONFLICT/code_reused", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{AlreadyExists("credential", nil), "CONFLICT/already_exists", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{AlreadyExists("credential", flowID), "CONFLICT/already_exists", foundationv1.RetryMode_RETRY_MODE_NEVER},
@@ -71,7 +72,7 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		// The detail each row defines, and nothing else.
 		detail := "none"
 		switch item.row {
-		case "VALIDATION/invalid_argument", "AUTHORIZATION/permission_denied", "STATE/invalid_state", "STATE/not_activated", "STATE/not_found",
+		case "VALIDATION/invalid_argument", "AUTHORIZATION/permission_denied", "ENTITLEMENT/feature_not_entitled", "STATE/invalid_state", "STATE/not_activated", "STATE/not_found",
 			"CONFLICT/already_exists":
 			detail = "state"
 		case "RESOURCE/rate_limited":
@@ -121,6 +122,9 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		NotActivated("identity").ArcError(call).GetDetails().GetState().GetReason() != "identity" ||
 		NotActivated("identity").ArcError(call).GetDetails().GetState().GetState() != "surface" ||
 		InvalidState("credential", "last_credential").ArcError(call).GetDetails().GetState().GetState() != "credential" ||
+		FeatureNotEntitled("remote.view").ArcError(call).GetDetails().GetState().GetReason() != "remote.view" ||
+		FeatureNotEntitled("remote.view").ArcError(call).GetDetails().GetState().GetState() != "feature" ||
+		FeatureNotEntitled("remote.view").MessageKey() != "error.entitlement.feature_not_entitled" ||
 		NotActivated("identity").MessageKey() != "error.state.not_activated" {
 		t.Fatal("state details")
 	}

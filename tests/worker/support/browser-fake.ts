@@ -79,6 +79,12 @@ export interface FakeOptions {
   pageRefusesCreation?: boolean;
   /** The center accepts the enrollment (the account exists) but the tab never reaches the passkeys page. */
   enrollmentStays?: boolean;
+  /** The center accepts the enrollment (the account exists) and its reply is lost: the browser sees no answer at all. */
+  enrollmentReplyLost?: boolean;
+  /** The center accepts the enrollment and the Worker answers 504: a server error, not a refusal. */
+  enrollmentServerError?: boolean;
+  /** The center accepts the enrollment and the edge limiter answers the page that follows it with a 429. */
+  limitAfterEnrollment?: boolean;
   /** The edge limiter answers 429 to the page the next N sign-ins lead to (after the center accepted the sign-in). */
   limitAfterSignIn?: number;
   /** The devices page cannot be reached (a connection reset): any failure after the second passkey was registered. */
@@ -218,6 +224,7 @@ export class FakeTab implements Tab {
   private virtualEnabled = false;
   private errorText = "";
   private changeCount = 0;
+  private unsettledCount = 0;
   private handle: string | undefined;
   private currentUrl = "about:blank";
   private page: Page = { kind: "none" };
@@ -371,7 +378,12 @@ export class FakeTab implements Tab {
         center.options.refuseEnrollment === true
       )
         throw new Error("the bootstrap was refused");
-      this.accepted(persistBefore.enrollment);
+      const lost =
+        center.options.enrollmentReplyLost === true ||
+        center.options.enrollmentServerError === true;
+      // A reply that is lost or a server error is no answer the browser counts as accepted, though the center acted on the request.
+      if (lost) this.unsettledCount += 1;
+      else this.accepted(persistBefore.enrollment);
       center.userHandle = userHandle;
       center.tokenSpent = true;
       center.ownerExists = true;
@@ -384,7 +396,12 @@ export class FakeTab implements Tab {
       });
       this.handle = next("session-");
       center.sessions.set(this.handle, { revoked: false, stepUps: 0 });
-      if (center.options.enrollmentStays === true) return;
+      if (center.options.enrollmentStays === true || lost) return;
+      if (center.options.limitAfterEnrollment === true) {
+        // The enrollment is accepted; the redirect GET that follows it meets the edge limiter.
+        this.retryAfter = 5;
+        return;
+      }
       this.navigate(pages.passkeys, "passkeys");
       if (center.options.tokenInUrl) this.currentUrl += `#token=${token}`;
       return;
@@ -608,6 +625,10 @@ export class FakeTab implements Tab {
 
   changes(): number {
     return this.changeCount;
+  }
+
+  unsettled(): number {
+    return this.unsettledCount;
   }
 
   async cookies(): Promise<CookieView[]> {

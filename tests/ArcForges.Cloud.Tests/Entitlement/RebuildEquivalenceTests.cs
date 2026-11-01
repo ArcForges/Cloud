@@ -131,7 +131,7 @@ public sealed class RebuildEquivalenceTests
         var stored = report.Stored!;
 
         // An independent rebuild: the pure function over the stored records only, at the stored instant.
-        var again = EntitlementResolver.Resolve(h.Store.Records(EntitlementHarness.Workspace), h.Definitions.Current(), stored.ComputedAt);
+        var again = ResolverVectors.Resolve(h.Store.Records(EntitlementHarness.Workspace), h.Definitions.Current(), stored.ComputedAt);
         Assert.True(stored.SameAs(again));
 
         // The form that is actually stored reads back to exactly the same snapshot, and so does a rebuild of the read-back value.
@@ -171,7 +171,7 @@ public sealed class RebuildEquivalenceTests
             FeatureReleases = [.. records.FeatureReleases.Reverse()],
             Activations = [.. records.Activations.Reverse()],
         };
-        Assert.True(stored.SameAs(EntitlementResolver.Resolve(reversed, h.Definitions.Current(), stored.ComputedAt)));
+        Assert.True(stored.SameAs(ResolverVectors.Resolve(reversed, h.Definitions.Current(), stored.ComputedAt)));
     }
 
     [Fact]
@@ -180,8 +180,8 @@ public sealed class RebuildEquivalenceTests
         var account = Accounts().Single(candidate => candidate.Name == "late-issued-grant-with-earlier-start");
         var h = await Run(account, tickSeconds: null);
         var records = h.Store.Records(EntitlementHarness.Workspace);
-        var atFiveDays = EntitlementResolver.Resolve(records, h.Definitions.Current(), T(5 * Day));
-        var atTwelveDays = EntitlementResolver.Resolve(records, h.Definitions.Current(), T(12 * Day));
+        var atFiveDays = ResolverVectors.Resolve(records, h.Definitions.Current(), T(5 * Day));
+        var atTwelveDays = ResolverVectors.Resolve(records, h.Definitions.Current(), T(12 * Day));
         Assert.False(Capability(atFiveDays, "cloud.sync").Granted);
         Assert.True(Capability(atTwelveDays, "cloud.sync").Granted);
         Assert.True(atTwelveDays.Version > atFiveDays.Version);
@@ -241,7 +241,7 @@ public sealed class RebuildEquivalenceTests
     [Fact]
     public void AnEmptyHistoryResolvesToAVersionZeroSnapshotThatGrantsNothing()
     {
-        var snapshot = EntitlementResolver.Resolve(EntitlementRecordSet.Empty("ws1"), Definitions(), T(1000));
+        var snapshot = ResolverVectors.Resolve(EntitlementRecordSet.Empty("ws1"), Definitions(), T(1000));
         Assert.Equal(0, snapshot.Version);
         Assert.All(snapshot.Content.Capabilities, c => Assert.False(c.Granted));
         Assert.Equal(ServiceState.None, snapshot.Content.Service.State);

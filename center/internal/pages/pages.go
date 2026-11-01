@@ -34,6 +34,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
+	"github.com/ArcForges/Cloud/center/internal/entitlement"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identityapi"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -48,8 +49,8 @@ type Options struct {
 	Origin string
 	// BasePath is the path of the public base URL below its origin ("" or "/api"): every link and redirect of a page lies below it.
 	BasePath string
-	// Enabled reports whether the pages surface is on; a disabled surface answers 404 to every page route.
-	Enabled func() bool
+	// Enabled reports whether a surface (pages, operations) is on; a route of a disabled surface answers 404.
+	Enabled func(surface string) bool
 	Policy  config.IdentityPolicy
 	// Identity and Direct are the account core and the API methods the pages call; Access decides the calls that do not go through
 	// Direct; Verifier resolves the browser cookie; DB is the store.
@@ -58,6 +59,8 @@ type Options struct {
 	Access   *access.Authorizer
 	Verifier *session.Verifier
 	DB       *store.DB
+	// Operator is the operator grant of the operations surface; nil where that surface is not composed (every route of it is then 404).
+	Operator *entitlement.Operator
 	// Registry holds the ingress policies the calls the pages make carry.
 	Registry *ingress.Registry
 	// ClientIP extracts the client's address of a request; RequireClientIP refuses a request whose address is unknown (hosted mode).
@@ -71,14 +74,14 @@ type Options struct {
 type Handler struct {
 	options  Options
 	routes   map[string]routes.PageRoute
-	paths    map[string]bool
+	paths    map[string]string
 	views    *views
 	handlers map[string]func(*exchange)
 }
 
 // New composes the handler; it refuses an inconsistent registration or option set (fail closed).
 func New(options Options) (*Handler, error) {
-	rows := routes.PageRoutes()
+	rows := routes.AllPageRoutes()
 	if err := routes.CheckPages(rows); err != nil {
 		return nil, err
 	}
@@ -92,10 +95,10 @@ func New(options Options) (*Handler, error) {
 	if options.Logger == nil {
 		options.Logger = slog.New(slog.DiscardHandler)
 	}
-	handler := &Handler{options: options, routes: map[string]routes.PageRoute{}, paths: map[string]bool{}}
+	handler := &Handler{options: options, routes: map[string]routes.PageRoute{}, paths: map[string]string{}}
 	for _, row := range rows {
 		handler.routes[row.Method+" "+row.Path] = row
-		handler.paths[row.Path] = true
+		handler.paths[row.Path] = row.Surface
 	}
 	handler.handlers = map[string]func(*exchange){
 		"webBrowser.bootstrap": (*exchange).bootstrap, "webBrowser.beginAuthentication": (*exchange).beginAuthentication,
@@ -107,6 +110,7 @@ func New(options Options) (*Handler, error) {
 		"form.addPasskey": (*exchange).addPasskey, "form.completePasskey": (*exchange).completePasskey, "form.renamePasskey": (*exchange).renamePasskey,
 		"form.removePasskey": (*exchange).removePasskey, "form.revokeSession": (*exchange).revokeSession,
 		"form.revokeAllSessions": (*exchange).revokeAllSessions, "form.renameDevice": (*exchange).renameDevice, "form.revokeDevice": (*exchange).revokeDevice,
+		"operations.grant": (*exchange).operationsGrantPage, "operations.review": (*exchange).operationsReview, "operations.confirm": (*exchange).operationsConfirm,
 	}
 	for _, row := range rows {
 		if handler.handlers[row.ID] == nil {
@@ -163,7 +167,7 @@ type exchange struct {
 // and answers every refusal as the route's kind answers: JSON on a JSON route, an HTML page elsewhere.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e := &exchange{h: h, w: w, r: r, correlation: correlation.ForRequest(r.Header.Values(ingress.TraceparentHeader), "")}
-	if !h.options.Enabled() || !h.paths[r.URL.Path] {
+	if surface, known := h.paths[r.URL.Path]; !known || !h.options.Enabled(surface) {
 		e.notFound()
 		return
 	}

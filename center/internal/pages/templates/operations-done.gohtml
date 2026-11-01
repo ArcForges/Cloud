@@ -1,0 +1,12 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Operator grant issued</h1>
+<p>{{if .Ops.Replayed}}This grant had already been issued; nothing new was written.{{else}}The grant was written.{{end}}</p>
+<dl>
+<dt>Account</dt><dd>{{.Ops.Account}}</dd>
+<dt>Features</dt><dd>{{.Ops.FeatureList}}</dd>
+<dt>Ends</dt><dd>{{.Ops.ExpiresText}}</dd>
+<dt>Compensation term</dt><dd>{{.Ops.TermID}}</dd>
+<dt>Entitlement version</dt><dd>{{.Ops.Version}}</dd>
+</dl>
+<p><a href="{{.Base}}/operations/grant">Make another grant</a></p>
+{{end}}

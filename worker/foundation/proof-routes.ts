@@ -95,7 +95,8 @@ async function forwardSession(request: Request, env: FoundationEnv): Promise<Res
   let response: Response;
   try {
     response = await env.CLOUD_CONTAINER.getByName(foundationContainerName).fetch(
-      // redirect "manual": the Container's answer is relayed as it is, a redirect included, never followed.
+      // redirect "manual": a redirect is the Container's own answer and is never followed to another address. It reaches the client as
+      // the bare status, because this reply copies only content-type and set-cookie, never a Location; the C# host does not redirect.
       new Request(`http://container${url.pathname}`, {
         method: request.method,
         headers,

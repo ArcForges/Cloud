@@ -137,6 +137,8 @@
 !center/internal/pages/static/
 !center/internal/pages/static/account.js
 !center/internal/pages/static/account.css
+!center/internal/feature/fixtures/
+!center/internal/feature/fixtures/*.json
 !center/internal/schema/migrations/
 !center/internal/schema/migrations/*.sql
 center/tools/

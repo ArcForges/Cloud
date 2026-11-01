@@ -60,7 +60,7 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.publicapi.v1.DeviceService/Rename session 4096",
 		"/arcforges.publicapi.v1.DeviceService/Revoke session 4096",
 	}
-	if len(table.Surfaces) != 2 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || len(table.SurfaceRows) != len(served) {
+	if len(table.Surfaces) != 3 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations || len(table.SurfaceRows) != len(served) {
 		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))
 	}
 	for index, row := range table.SurfaceRows {

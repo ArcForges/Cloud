@@ -78,8 +78,14 @@ func (e *exchange) serve(name string, data pageData) {
 // writeErrorPage answers a refusal as an HTML page with the refusal's text.
 func (e *exchange) writeErrorPage(status int, value *foundationv1.ArcError) {
 	text := messageFor(value, e.h.options.Clock())
+	if own, ok := operationsText[strings.TrimPrefix(value.GetCategory().String(), "ERROR_CATEGORY_")+"/"+value.GetCode()]; ok && e.route.Surface == routes.SurfaceOperations {
+		text = own
+	}
 	data := pageData{Title: pageHeading(status), Page: "error", Error: &errorView{Text: text}, Heading: pageHeading(status), Detail: text,
 		Back: routes.PageAccountPrefix + "/passkeys", BackText: "Back to your account"}
+	if e.route.Surface == routes.SurfaceOperations {
+		data.Back, data.BackText = routes.PageOperationsPrefix+"/grant", "Back to the grant form"
+	}
 	body, err := e.h.views.render("error", data)
 	if err != nil {
 		e.status(http.StatusServiceUnavailable)

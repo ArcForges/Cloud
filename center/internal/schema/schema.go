@@ -25,7 +25,7 @@ func Migrations() fs.FS {
 
 // Schemas are the module schemas the migrations own, in creation order. platform is created by the runner before the first
 // migration (it holds platform.schema_migration).
-var Schemas = []string{"platform", "audit", "fleet", "identity", "device"}
+var Schemas = []string{"platform", "audit", "fleet", "identity", "device", "entitlement"}
 
 // Privilege is one table privilege of the runtime role.
 type Privilege string
@@ -69,6 +69,20 @@ var RuntimeGrants = []Grant{
 	{"identity", "bootstrap", []Privilege{Select, Insert}},
 	{"device", "device", []Privilege{Select, Insert, Update}},
 	{"device", "installation", []Privilege{Select, Insert, Update}},
+	// AF-CTR-03 part B (0003): the operator role is written by the migration role only (decision n2, PLT-10). The entitlement
+	// records are append-only (a trigger refuses UPDATE and DELETE besides): the runtime role writes grants, revocations,
+	// definitions activations and service terms, and only reads term actions, account status facts and feature releases, whose
+	// writers are later tasks (AF-CTR-09 commerce, AF-OPS-01 operations). The snapshot and the revision are derived and rewritten.
+	{"identity", "operator", []Privilege{Select}},
+	{"entitlement", "revision", []Privilege{Select, Insert, Update}},
+	{"entitlement", "snapshot", []Privilege{Select, Insert, Update}},
+	{"entitlement", "grant", []Privilege{Select, Insert}},
+	{"entitlement", "revocation", []Privilege{Select, Insert}},
+	{"entitlement", "service_term", []Privilege{Select, Insert}},
+	{"entitlement", "service_term_action", []Privilege{Select}},
+	{"entitlement", "account_status_fact", []Privilege{Select}},
+	{"entitlement", "feature_release", []Privilege{Select}},
+	{"entitlement", "definitions_activation", []Privilege{Select, Insert}},
 }
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted

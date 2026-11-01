@@ -21,7 +21,7 @@ var (
 )
 
 // pageNames are the templates; each is a content template laid out by base.html.
-var pageNames = []string{"sign-in", "bootstrap", "sign-out", "passkeys", "sessions", "devices", "register", "error"}
+var pageNames = []string{"sign-in", "bootstrap", "sign-out", "passkeys", "sessions", "devices", "register", "error", "operations-grant", "operations-review", "operations-done"}
 
 // views are the parsed templates and the static files.
 type views struct {
@@ -85,6 +85,9 @@ type pageData struct {
 
 	// The passkey creation page.
 	Register registerView
+
+	// The operations pages.
+	Ops operationsView
 }
 
 type profileView struct {

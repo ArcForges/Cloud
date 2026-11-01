@@ -28,7 +28,7 @@ func TestTheSurfacesDefaultPerModeAndAreExactNames(t *testing.T) {
 	}
 	self, err := Load(environment(withIdentity(SelfHosted, nil)))
 	if err != nil || !self.Identity.Enabled(SurfaceIdentity) {
-		t.Fatalf("self-hosted enables every surface by default: %+v %v", self.Identity, err)
+		t.Fatalf("self-hosted enables the default surfaces: %+v %v", self.Identity, err)
 	}
 	enabled, err := Load(environment(withIdentity(OfficialHosted, map[string]string{EnvSurfaces: "identity", EnvClientIPHeader: ClientIPHeader})))
 	if err != nil || !enabled.Identity.Enabled(SurfaceIdentity) || enabled.Identity.ClientIPHeader != ClientIPHeader {
@@ -38,7 +38,7 @@ func TestTheSurfacesDefaultPerModeAndAreExactNames(t *testing.T) {
 	if err != nil || len(none.Identity.Surfaces) != 0 {
 		t.Fatalf("none: %+v %v", none.Identity, err)
 	}
-	for _, value := range []string{"Identity", "identity,", ",identity", "identity,identity", " identity", "identity ", "operations", "identity,none"} {
+	for _, value := range []string{"Identity", "identity,", ",identity", "identity,identity", " identity", "identity ", "billing", "identity,none"} {
 		if _, err = Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: value}))); !errors.Is(err, ErrInvalid) ||
 			!strings.Contains(err.Error(), EnvSurfaces) {
 			t.Errorf("%q: %v", value, err)

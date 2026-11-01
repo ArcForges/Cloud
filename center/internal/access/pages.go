@@ -37,6 +37,9 @@ type PageOperation struct {
 	Credential PageCredential
 	// Calls are the paths of the API methods the route calls; each has a row in Operations.
 	Calls []string
+	// Center is the center-defined operation the route performs or reviews (CenterOperations), or empty. A form that changes something
+	// calls a method of the operation table or performs a center-defined operation; the latter's authority is its own rule.
+	Center string
 }
 
 // PageOperations is the closed table of the page routes. The composition refuses to start when a page route has no row, a row has
@@ -44,29 +47,34 @@ type PageOperation struct {
 func PageOperations() []PageOperation {
 	profile := publicapiv1connect.IdentityServiceGetProfileProcedure
 	return []PageOperation{
-		{"webBrowser.bootstrap", PageOptionalSession, []string{profile}},
-		{"webBrowser.beginAuthentication", PagePreSession, []string{publicapiv1connect.IdentityServiceBeginAuthenticationProcedure}},
-		{"webBrowser.completeAuthentication", PagePreSession, []string{publicapiv1connect.IdentityServiceCompleteAuthenticationProcedure}},
-		{"webBrowser.completeEnrollment", PagePreSession, []string{publicapiv1connect.IdentityServiceCompleteEnrollmentProcedure}},
-		{"webBrowser.beginStepUp", PageSession, []string{publicapiv1connect.IdentityServiceBeginStepUpProcedure}},
-		{"webBrowser.completeStepUp", PageSession, []string{publicapiv1connect.IdentityServiceCompleteStepUpProcedure}},
-		{"webBrowser.logout", PageSession, []string{publicapiv1connect.IdentityServiceRevokeSessionProcedure}},
-		{"page.signIn", PageNoCredential, nil},
-		{"page.bootstrap", PageNoCredential, nil},
-		{"page.passkeys", PageSession, []string{profile, publicapiv1connect.IdentityServiceListAuthIdentitiesProcedure}},
-		{"page.sessions", PageSession, []string{publicapiv1connect.IdentityServiceListSessionsProcedure}},
-		{"page.devices", PageSession, []string{publicapiv1connect.DeviceServiceListProcedure}},
-		{"page.signOut", PageSession, nil},
-		{"asset.script", PageNoCredential, nil},
-		{"asset.style", PageNoCredential, nil},
-		{"form.addPasskey", PageSession, []string{publicapiv1connect.IdentityServiceBeginPasskeyRegistrationProcedure}},
-		{"form.completePasskey", PageSession, []string{publicapiv1connect.IdentityServiceCompletePasskeyRegistrationProcedure}},
-		{"form.renamePasskey", PageSession, []string{publicapiv1connect.IdentityServiceRenameAuthIdentityProcedure}},
-		{"form.removePasskey", PageSession, []string{publicapiv1connect.IdentityServiceRemoveAuthIdentityProcedure}},
-		{"form.revokeSession", PageSession, []string{publicapiv1connect.IdentityServiceRevokeSessionProcedure}},
-		{"form.revokeAllSessions", PageSession, []string{publicapiv1connect.IdentityServiceRevokeAllSessionsProcedure}},
-		{"form.renameDevice", PageSession, []string{publicapiv1connect.DeviceServiceRenameProcedure}},
-		{"form.revokeDevice", PageSession, []string{publicapiv1connect.DeviceServiceRevokeProcedure}},
+		{"webBrowser.bootstrap", PageOptionalSession, []string{profile}, ""},
+		{"webBrowser.beginAuthentication", PagePreSession, []string{publicapiv1connect.IdentityServiceBeginAuthenticationProcedure}, ""},
+		{"webBrowser.completeAuthentication", PagePreSession, []string{publicapiv1connect.IdentityServiceCompleteAuthenticationProcedure}, ""},
+		{"webBrowser.completeEnrollment", PagePreSession, []string{publicapiv1connect.IdentityServiceCompleteEnrollmentProcedure}, ""},
+		{"webBrowser.beginStepUp", PageSession, []string{publicapiv1connect.IdentityServiceBeginStepUpProcedure}, ""},
+		{"webBrowser.completeStepUp", PageSession, []string{publicapiv1connect.IdentityServiceCompleteStepUpProcedure}, ""},
+		{"webBrowser.logout", PageSession, []string{publicapiv1connect.IdentityServiceRevokeSessionProcedure}, ""},
+		{"page.signIn", PageNoCredential, nil, ""},
+		{"page.bootstrap", PageNoCredential, nil, ""},
+		{"page.passkeys", PageSession, []string{profile, publicapiv1connect.IdentityServiceListAuthIdentitiesProcedure}, ""},
+		{"page.sessions", PageSession, []string{publicapiv1connect.IdentityServiceListSessionsProcedure}, ""},
+		{"page.devices", PageSession, []string{publicapiv1connect.DeviceServiceListProcedure}, ""},
+		{"page.signOut", PageSession, nil, ""},
+		{"asset.script", PageNoCredential, nil, ""},
+		{"asset.style", PageNoCredential, nil, ""},
+		{"form.addPasskey", PageSession, []string{publicapiv1connect.IdentityServiceBeginPasskeyRegistrationProcedure}, ""},
+		{"form.completePasskey", PageSession, []string{publicapiv1connect.IdentityServiceCompletePasskeyRegistrationProcedure}, ""},
+		{"form.renamePasskey", PageSession, []string{publicapiv1connect.IdentityServiceRenameAuthIdentityProcedure}, ""},
+		{"form.removePasskey", PageSession, []string{publicapiv1connect.IdentityServiceRemoveAuthIdentityProcedure}, ""},
+		{"form.revokeSession", PageSession, []string{publicapiv1connect.IdentityServiceRevokeSessionProcedure}, ""},
+		{"form.revokeAllSessions", PageSession, []string{publicapiv1connect.IdentityServiceRevokeAllSessionsProcedure}, ""},
+		{"form.renameDevice", PageSession, []string{publicapiv1connect.DeviceServiceRenameProcedure}, ""},
+		{"form.revokeDevice", PageSession, []string{publicapiv1connect.DeviceServiceRevokeProcedure}, ""},
+		// The operations surface: the operator grant is a center-defined operation, performed by the confirmation and reviewed (checked
+		// without effect) by the review. The pages' own sign-in and step-up routes carry the session the operator proves it with.
+		{"operations.grant", PageSession, nil, ""},
+		{"operations.review", PageSession, nil, OperatorGrantClass},
+		{"operations.confirm", PageSession, nil, OperatorGrantClass},
 	}
 }
 
@@ -101,9 +109,16 @@ func PageOperationOf(id string) (PageOperation, bool) {
 // calls at least one (or is the sign-out page and the assets); and a form changes nothing without a method of the table.
 func CheckPages(served []routes.PageRoute) error {
 	rows := map[string]PageOperation{}
+	centers := map[string]bool{}
+	for _, operation := range CenterOperations() {
+		centers[operation.ID] = true
+	}
 	for _, row := range PageOperations() {
 		if _, repeated := rows[row.ID]; repeated {
 			return fmt.Errorf("the page table names %s twice", row.ID)
+		}
+		if row.Center != "" && !centers[row.Center] {
+			return fmt.Errorf("the page table row %s performs %s, which is no center-defined operation", row.ID, row.Center)
 		}
 		rows[row.ID] = row
 		for _, call := range row.Calls {
@@ -125,8 +140,8 @@ func CheckPages(served []routes.PageRoute) error {
 		if route.SetCookie == routes.SetCookieSession && row.Credential != PagePreSession {
 			return fmt.Errorf("the route %s sets a session cookie but is not a sign-in step", route.ID)
 		}
-		if route.Kind == routes.PageHTMLKind && route.Method == "POST" && len(row.Calls) == 0 {
-			return fmt.Errorf("the form %s calls no method of the operation table", route.ID)
+		if route.Kind == routes.PageHTMLKind && route.Method == "POST" && len(row.Calls) == 0 && row.Center == "" {
+			return fmt.Errorf("the form %s calls no method of the operation table and performs no center-defined operation", route.ID)
 		}
 		seen[route.ID] = true
 	}

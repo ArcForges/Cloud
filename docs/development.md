@@ -22,7 +22,7 @@ npm run candidate
 
 `candidate` builds the Linux Native AOT image, inspects its declared user/entry point/source label and extracts licence/provenance files from a stopped container. It never launches the application, restarts a service or runs RPC consumers. The build identity companion comes from the same independently resolved inputs supplied to compilation; it is not claimed as a runtime observation.
 
-`test:container` and `test:worker` remain explicit local diagnostics for affected behavior when an existing native Docker/Linux environment is available. They reject CI execution. `test:artifact` is a separate local packaging investigation; normal source checks do not rebuild candidates for adversarial archive tests. Do not run these commands as routine PR or post-merge gates.
+`test:container` and `test:worker` remain explicit local diagnostics for affected behavior when an existing native Docker/Linux environment is available. They reject CI execution. `test:artifact` checks the real locked Wrangler output against the release profile's approved Worker closure and runs the verifier's own tests; the Linux verification leg runs it as `worker-provenance`, and it is no hosted job (the hosted candidate job runs the verifier itself on the real bundle, so what only the leg adds is the verifier's negative tests and early feedback). Normal source checks do not rebuild candidates for adversarial archive tests. Do not run `test:container` or `test:worker` as routine PR or post-merge gates.
 
 ## Windows and Linux
 
