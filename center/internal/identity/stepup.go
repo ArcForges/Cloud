@@ -194,17 +194,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 0, $10, $11, $12, $13, 1)`, resul
 		return Challenge{}, err
 	}
 	if recipient != "" {
-		message := mail.Message{To: recipient, Subject: "Your ArcForges verification code", Text: stepUpText(code, s.policy.EmailCodeLifetime)}
-		s.background(func() {
-			sendContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-			defer cancel()
-			if err := s.mailer.Send(sendContext, message); err != nil {
-				s.events.ObserveIdentity("email_send", "failed")
-				s.logger.Warn("a step-up code could not be delivered")
-				return
-			}
-			s.events.ObserveIdentity("email_send", "sent")
-		})
+		s.deliver(ctx, mail.Message{To: recipient, Subject: "Your ArcForges verification code", Text: stepUpText(code, s.policy.EmailCodeLifetime)}, deliveryStepUp)
 	}
 	s.events.ObserveIdentity("step_up_begin", methodLabel(method))
 	return result, nil

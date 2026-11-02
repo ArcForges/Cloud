@@ -152,17 +152,7 @@ WHERE a.provider_id = 'email' AND a.subject = $1 AND a.revoked_at IS NULL`, norm
 		return Challenge{}, err
 	}
 	if recipient != nil {
-		message := mail.Message{To: normalized, Subject: "Your ArcForges sign-in code", Text: codeText(code, s.policy.EmailCodeLifetime)}
-		s.background(func() {
-			sendContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-			defer cancel()
-			if err := s.mailer.Send(sendContext, message); err != nil {
-				s.events.ObserveIdentity("email_send", "failed")
-				s.logger.Warn("an e-mail code could not be delivered")
-				return
-			}
-			s.events.ObserveIdentity("email_send", "sent")
-		})
+		s.deliver(ctx, mail.Message{To: normalized, Subject: "Your ArcForges sign-in code", Text: codeText(code, s.policy.EmailCodeLifetime)}, deliverySignIn)
 	}
 	s.events.ObserveIdentity("email_request", "accepted")
 	return result, nil
