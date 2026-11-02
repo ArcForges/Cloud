@@ -8,8 +8,10 @@ import (
 	"testing"
 )
 
-// Every test of this package is MOCKED: local servers on 127.0.0.1 with a throwaway CA, injected dials and transports, no DNS and
-// no external network. The only exceptions are the opt-in probes in live_test.go, which skip without an explicit local switch.
+// Every test of this package is MOCKED: local servers on 127.0.0.1 with a throwaway CA, injected dials and transports, no name
+// resolved but localhost (one test, from the hosts file) and no packet beyond the loopback interface in the ordinary run. The only
+// tests that contact a real service are the opt-in probes and the live send in live_test.go, which skip without an explicit local
+// switch (the live send without a second, confirming one).
 
 const (
 	testFrom = "sender@example.test"

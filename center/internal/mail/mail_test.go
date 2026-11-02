@@ -3,8 +3,14 @@
 package mail
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,5 +79,50 @@ func TestFakeWaitReturnsOnArrivalAndAtContextEnd(t *testing.T) {
 	defer stop()
 	if messages, ok := fake.Wait(short, 2); ok || len(messages) != 1 {
 		t.Fatalf("Wait for a message that never comes: %v %v", messages, ok)
+	}
+}
+
+// TestMessageNeverPrintsItsContents is the structural redaction of the recipient, the subject and the sign-in code: in every shape
+// Go can call the methods through, under every formatting path (MOCKED: nothing is sent).
+func TestMessageNeverPrintsItsContents(t *testing.T) {
+	code := sentinel("sign-in-code")
+	message := Message{To: "recipient-" + code + "@example.test", Subject: "subject-" + code, Text: "Your code is " + code + "\n"}
+	type exported struct{ Message Message }
+	shapes := map[string]any{
+		"value": message, "pointer": &message, "exported field": exported{Message: message}, "slice": []Message{message}, "map": map[string]Message{"k": message},
+		"slice of any": []any{message, &message}, "pointer to exported": &exported{Message: message},
+	}
+	for name, shape := range shapes {
+		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%d", "%t"} {
+			if text := fmt.Sprintf(verb, shape); strings.Contains(text, code) || strings.Contains(text, hex.EncodeToString([]byte(code))) {
+				t.Errorf("%s with %s leaks: %s", name, verb, text)
+			}
+		}
+		for handler, build := range map[string]func(*bytes.Buffer) slog.Handler{
+			"slog text": func(b *bytes.Buffer) slog.Handler { return slog.NewTextHandler(b, nil) },
+			"slog json": func(b *bytes.Buffer) slog.Handler { return slog.NewJSONHandler(b, nil) },
+		} {
+			var out bytes.Buffer
+			slog.New(build(&out)).Info("probe", "value", shape, slog.Any("again", shape))
+			if strings.Contains(out.String(), code) {
+				t.Errorf("%s with %s leaks: %s", name, handler, out.String())
+			}
+		}
+		if data, err := json.Marshal(shape); err != nil || strings.Contains(string(data), code) {
+			t.Errorf("%s with encoding/json: %s, %v", name, data, err)
+		}
+	}
+	if message.String() != redactedMessage || message.GoString() != redactedMessage {
+		t.Error("String or GoString prints more than the marker")
+	}
+	if text, err := message.MarshalText(); err != nil || string(text) != redactedMessage {
+		t.Errorf("MarshalText printed %q, %v", text, err)
+	}
+	if got := fmt.Sprint(message); got != redactedMessage {
+		t.Errorf("Sprint printed %q", got)
+	}
+	// The fields stay readable by code: the adapters and the closed-loop tests read them.
+	if message.To == "" || message.Subject == "" || !strings.Contains(message.Text, code) {
+		t.Error("the redaction hides the fields from code")
 	}
 }

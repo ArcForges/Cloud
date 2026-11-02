@@ -24,6 +24,11 @@ type PostmarkReply struct {
 	Stall bool
 	// StallBody sends the status line and headers, a partial body, and then holds the request open.
 	StallBody bool
+	// Truncate declares a body of 1000 bytes, sends 19 of them and aborts the connection (a body that ends early without any
+	// deadline).
+	Truncate bool
+	// FloodHeader adds a 64 KiB header to an otherwise ordinary answer (above the 16 KiB the adapter accepts, below Go's default).
+	FloodHeader bool
 	// StallAfterBody sends the status line, headers and the complete success body, and then holds the request open (the body
 	// never ends, as when the connection hangs before the final chunk).
 	StallAfterBody bool
@@ -107,7 +112,18 @@ func (p *PostmarkServer) handle(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", reply.Location)
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if reply.FloodHeader {
+		w.Header().Set("X-Pad", strings.Repeat("a", 64<<10))
+	}
 	switch {
+	case reply.Truncate:
+		w.Header().Set("Content-Length", "1000")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"ErrorCode":0,"Mes`)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		panic(http.ErrAbortHandler)
 	case reply.Flood:
 		w.WriteHeader(status)
 		chunk := []byte(strings.Repeat(" ", 64<<10))

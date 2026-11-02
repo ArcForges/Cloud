@@ -543,3 +543,73 @@ func TestTheServersListenOnLoopbackOnly(t *testing.T) {
 		t.Errorf("Postmark stand-in at %q", post.URL())
 	}
 }
+
+func TestSMTPServerCanBeLimitedToAnOldTLSVersion(t *testing.T) {
+	server, ca := newServer(t, func(o *SMTPOptions) { o.Implicit, o.MaxTLSVersion = true, tls.VersionTLS11 })
+	dial := func(min uint16) (*tls.Conn, error) {
+		conn, err := net.DialTimeout("tcp", server.Addr(), 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		secured := tls.Client(conn, &tls.Config{ServerName: hostName, RootCAs: ca.Pool(), MinVersion: min})
+		return secured, secured.Handshake()
+	}
+	if secured, err := dial(tls.VersionTLS12); err == nil {
+		t.Errorf("a TLS 1.2 floor completed a handshake with an old-TLS server (%x)", secured.ConnectionState().Version)
+	}
+	secured, err := dial(tls.VersionTLS10)
+	if err != nil {
+		t.Fatalf("a client that accepts TLS 1.0 and later cannot talk to the old-TLS server: %v", err)
+	}
+	if version := secured.ConnectionState().Version; version != tls.VersionTLS11 {
+		t.Errorf("negotiated %x, want TLS 1.1", version)
+	}
+	_ = secured.Close()
+	server.Captures()
+}
+
+func TestSMTPServerCanRefuseTheDATACommand(t *testing.T) {
+	server, ca := newServer(t, func(o *SMTPOptions) { o.DataCommandReply = "554 5.5.1 no valid recipients" })
+	w := dialWire(t, server.Addr())
+	w.expect("220")
+	w.send("EHLO c.example.test\r\nSTARTTLS\r\n")
+	w.expect("250-")
+	w.expect("220")
+	w.upgrade(ca)
+	w.send("MAIL FROM:<a@example.test>\r\n")
+	w.expect("250")
+	w.send("DATA\r\n")
+	w.expect("554 5.5.1 no valid recipients")
+	w.send("QUIT\r\n")
+	w.expect("221")
+	if c := server.Captures()[0]; len(c.Data) != 0 {
+		t.Errorf("data was accepted after a refused DATA command: %q", c.Data)
+	}
+}
+
+func TestPostmarkStandInTruncatesAndFloodsAHeader(t *testing.T) {
+	token := strings.Join([]string{"synthetic", "word", "built", "postmark", "sentinel"}, "-")
+	post := func(server *PostmarkServer) (*http.Response, error) {
+		request, _ := http.NewRequest(http.MethodPost, server.URL(), strings.NewReader("{}"))
+		request.Header.Set("X-Postmark-Server-Token", token)
+		return (&http.Client{Timeout: 5 * time.Second}).Do(request)
+	}
+	response, err := post(StartPostmark(t, token, PostmarkReply{Truncate: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err == nil || len(body) >= 1000 || !strings.HasPrefix(string(body), `{"ErrorCode":0,"Mes`) {
+		t.Errorf("a truncated answer read %q, %v", body, err)
+	}
+	response, err = post(StartPostmark(t, token, PostmarkReply{FloodHeader: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if got := len(response.Header.Get("X-Pad")); got != 64<<10 {
+		t.Errorf("the padded header is %d bytes", got)
+	}
+}

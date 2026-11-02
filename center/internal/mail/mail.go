@@ -4,9 +4,11 @@
 // behind it: Disabled, which every deployment uses today (the e-mail method is then not offered at all); Fake, which tests inject
 // to read the codes the center sends (the closed loop); and the two live adapters, Postmark over HTTPS and an SMTP submission
 // service over TLS (Amazon SES is the first target), with Guard, which bounds how many sends talk to a provider at once. The
-// adapters are tested against local servers only (MOCKED). Three kinds of test reach a real endpoint, and each skips without its
-// own explicit local switch: the probe of the Postmark API with the public test token (nothing is delivered), the SES handshake
-// that stops before AUTH (no credential exists in the process), and the owner-run live send, which does send one real message.
+// adapters are tested against local servers only (MOCKED): the tests listen on and dial the loopback interface (one resolves the
+// host name localhost from the hosts file), and in the ordinary run no packet leaves the host. Three kinds of test reach a real
+// endpoint, and each skips without its own explicit local switch: the probe of the Postmark API with the public test token
+// (nothing is delivered), the SES handshake that stops before AUTH (no credential exists in the process), and the owner-run live
+// send, which does send one real message (it needs a second, confirming switch as well).
 //
 // What this package does NOT make possible: no real account can be mailed. No production code creates an e-mail identity (the
 // only non-test INSERT INTO identity.auth_identity statements enroll passkeys), so the sign-in-code surface opens when a sender is
@@ -21,6 +23,8 @@ package mail
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -28,12 +32,37 @@ import (
 // DefaultTimeout bounds one send when an adapter is built without a timeout. It is below the 30 s context a delivery runs under.
 const DefaultTimeout = 10 * time.Second
 
-// Message is one e-mail: the recipient, a subject and a plain-text body. It holds a sign-in code, so it is never logged.
+// Message is one e-mail: the recipient, a subject and a plain-text body. It holds a sign-in code, so it is never logged, and it
+// prints a fixed marker through fmt, slog and encoding/json wherever Go can call these methods (a value, a pointer, an exported
+// field, a slice or a map of them). A Message held in an unexported field of another struct is printed by fmt field by field, as
+// every Go type is: the structural redaction is the second line, and the first is the rule that nothing formats a Message (the
+// delivery code logs an Outcome or a class, never a Message).
 type Message struct {
 	To      string
 	Subject string
 	Text    string
 }
+
+// redactedMessage is the only text a Message ever prints.
+const redactedMessage = "mail.Message[redacted]"
+
+// String is the marker.
+func (Message) String() string { return redactedMessage }
+
+// GoString is the marker.
+func (Message) GoString() string { return redactedMessage }
+
+// Format prints the marker for every verb (a struct of strings would otherwise print its fields for %d).
+func (Message) Format(f fmt.State, _ rune) { _, _ = f.Write([]byte(redactedMessage)) }
+
+// LogValue is the marker.
+func (Message) LogValue() slog.Value { return slog.StringValue(redactedMessage) }
+
+// MarshalText is the marker.
+func (Message) MarshalText() ([]byte, error) { return []byte(redactedMessage), nil }
+
+// MarshalJSON is the marker.
+func (Message) MarshalJSON() ([]byte, error) { return []byte(`"` + redactedMessage + `"`), nil }
 
 // Sender delivers messages.
 type Sender interface {

@@ -24,7 +24,8 @@ import (
 const FloodLimit = 64 << 20
 
 // SMTPOptions choose how an SMTP test server behaves. The zero value (apart from the certificate) is a well-behaved submission
-// server: STARTTLS offered, AUTH PLAIN and LOGIN advertised only over TLS, every command accepted.
+// server: STARTTLS offered, AUTH PLAIN and LOGIN advertised in every EHLO reply (AUTH before TLS is refused with 530 and recorded,
+// so the double is more adversarial than a server that hides AUTH until TLS), every command accepted.
 type SMTPOptions struct {
 	// Certificate is the server certificate (CA.Leaf).
 	Certificate tls.Certificate
@@ -34,6 +35,9 @@ type SMTPOptions struct {
 	Implicit bool
 	// NoStartTLS does not advertise STARTTLS (a downgrade) and answers STARTTLS with 502.
 	NoStartTLS bool
+	// MaxTLSVersion, when not zero, makes the server speak TLS 1.0 up to that version only (tls.VersionTLS11 for an old-TLS
+	// server); zero means TLS 1.2 and later.
+	MaxTLSVersion uint16
 
 	// Replacements of single replies. The text is a complete reply line, for example "535 5.7.8 nope".
 	GreetingReply string // the greeting (the connection is then closed after it when the code is 4xx or 5xx)
@@ -42,6 +46,9 @@ type SMTPOptions struct {
 	MailReply     string
 	RcptReply     string
 	DataReply     string // the reply after the message ends
+	// DataCommandReply replaces the 354 that answers the DATA command itself, for example "554 5.5.1 no valid recipients"; the
+	// session then waits for the next command.
+	DataCommandReply string
 
 	// Misbehaviours.
 	StallGreeting         bool // accept the connection and never speak
@@ -177,6 +184,9 @@ func (s *SMTPServer) serve(raw net.Conn) {
 	}
 	conn := raw
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{opts.Certificate}, MinVersion: tls.VersionTLS12}
+	if opts.MaxTLSVersion != 0 {
+		tlsConfig.MinVersion, tlsConfig.MaxVersion = tls.VersionTLS10, opts.MaxTLSVersion
+	}
 	if opts.Implicit {
 		secured := tls.Server(raw, tlsConfig)
 		if err := secured.Handshake(); err != nil {
@@ -282,6 +292,10 @@ func (s *SMTPServer) serve(raw net.Conn) {
 			c.Rcpt = append(c.Rcpt, text)
 			say("250 2.1.5 ok")
 		case "DATA":
+			if opts.DataCommandReply != "" {
+				say(opts.DataCommandReply)
+				continue
+			}
 			say("354 end data with <CR><LF>.<CR><LF>")
 			var data bytes.Buffer
 			for {

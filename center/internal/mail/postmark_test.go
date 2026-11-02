@@ -4,7 +4,10 @@ package mail
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +17,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,7 +27,8 @@ import (
 )
 
 // All Postmark tests are MOCKED: the stand-in of package mailtest or httptest on 127.0.0.1, an injected RoundTripper, or a child
-// process whose only network traffic is a connection attempt to a reserved documentation address (see the proxy test).
+// process (the proxy test) whose adapter dials only through a test hook that maps a made-up host name to a loopback listener. No
+// test here resolves a name or sends a packet beyond the loopback interface.
 
 type postmarkRig struct {
 	server *mailtest.PostmarkServer
@@ -127,16 +132,27 @@ func postmarkCases(recipient string) []outcomeCase {
 		{"422 without a parsable ErrorCode", 422, `<html>`, ErrRejected, "http", 422},
 		{"422 with ErrorCode 0", 422, `{"ErrorCode":0}`, ErrRejected, "http", 422},
 		{"422 with an unknown code", 422, leaky(9999), ErrUnauthorized, "response", 9999},
-		{"404 with ErrorCode 501", 404, leaky(501), ErrRejected, "http", 404},
-		{"HTTP 413 payload", 413, leaky(413), ErrRejected, "http", 413},
+		// The ErrorCode decides on every 4xx that carries a parseable Postmark body (a 404 with ErrorCode 501 is an unknown sender
+		// signature); the status decides when there is none.
+		{"404 with ErrorCode 501", 404, leaky(501), ErrUnauthorized, "response", 501},
+		{"404 with an unknown code", 404, leaky(9999), ErrUnauthorized, "response", 9999},
+		{"400 with ErrorCode 300", 400, leaky(300), ErrRejected, "response", 300},
+		{"HTTP 413 with ErrorCode 413 (not approved)", 413, leaky(413), ErrUnauthorized, "response", 413},
+		{"HTTP 413 payload without a body", 413, "\n", ErrRejected, "http", 413},
+		{"HTTP 413 with ErrorCode 0", 413, `{"ErrorCode":0}`, ErrRejected, "http", 413},
+		{"429 with an unknown code", 429, leaky(9999), ErrUnavailable, "http", 429},
+		{"401 with ErrorCode 300", 401, leaky(300), ErrUnauthorized, "http", 401},
+		{"403 with ErrorCode 300", 403, leaky(300), ErrUnauthorized, "http", 403},
+		{"302 with an unknown code", 302, leaky(9999), ErrUnavailable, "http", 302},
+		{"500 with an unknown code", 500, leaky(9999), ErrUnavailable, "http", 500},
 		{"400", 400, "\n", ErrRejected, "http", 400},
 		{"404", 404, "\n", ErrRejected, "http", 404},
 		{"415", 415, `<html>unsupported</html>`, ErrRejected, "http", 415},
 		{"429", 429, "\n", ErrUnavailable, "http", 429},
-		{"500 with ErrorCode 101", 500, leaky(101), ErrUnavailable, "http", 500},
-		{"500 with ErrorCode 501", 500, leaky(501), ErrUnavailable, "http", 500},
+		{"500 with ErrorCode 101", 500, leaky(101), ErrUnavailable, "response", 101},
+		{"500 with ErrorCode 501", 500, leaky(501), ErrUnauthorized, "response", 501},
 		{"502", 502, "\n", ErrUnavailable, "http", 502},
-		{"503 with ErrorCode 100", 503, leaky(100), ErrUnavailable, "http", 503},
+		{"503 with ErrorCode 100", 503, leaky(100), ErrUnavailable, "response", 100},
 		{"504", 504, "\n", ErrUnavailable, "http", 504},
 		{"201 with a success body", 201, `{"ErrorCode":0,"MessageID":"x"}`, ErrUnavailable, "http", 201},
 		{"202 with a success body", 202, `{"ErrorCode":0,"MessageID":"x"}`, ErrUnavailable, "http", 202},
@@ -198,8 +214,13 @@ func TestPostmarkOutcomeIsAPureFunctionOfStatusAndBody(t *testing.T) {
 		{"399", 399, postmarkResponse{}, false, ErrUnavailable, "http", 399},
 		{"422 with 1235", 422, code(1235), true, ErrUnauthorized, "response", 1235},
 		{"422 unparsed", 422, code(1235), false, ErrRejected, "http", 422},
-		{"418", 418, code(300), true, ErrRejected, "http", 418},
+		{"418 with ErrorCode 300", 418, code(300), true, ErrRejected, "response", 300},
+		{"418 unparsed", 418, postmarkResponse{}, false, ErrRejected, "http", 418},
+		{"599 with the published code 501", 599, code(501), true, ErrUnauthorized, "response", 501},
+		{"599 with an unknown code", 599, code(9999), true, ErrUnavailable, "http", 599},
 		{"599", 599, postmarkResponse{}, false, ErrUnavailable, "http", 599},
+		{"429 with a code", 429, code(300), true, ErrUnavailable, "http", 429},
+		{"401 with a code", 401, code(300), true, ErrUnauthorized, "http", 401},
 	} {
 		stage, got, class := postmarkOutcome(c.status, c.reply, c.parsed)
 		if class != c.class || stage != c.stage || got != c.code {
@@ -272,6 +293,8 @@ func TestPostmarkReadsAtMostTheCapOfAnAnswer(t *testing.T) {
 		expectFailure(t, rig.sender.Send(context.Background(), testMessage()), ErrUnavailable, "response", 0)
 		prefix := `{"ErrorCode":0,"Message":"OK","MessageID":"message-id-test-0001"}`
 		fits := prefix + strings.Repeat(" ", maxPostmarkResponse-len(prefix))
+		over := newPostmarkRig(t, mailtest.PostmarkReply{Body: fits + " "}, nil)
+		expectFailure(t, over.sender.Send(context.Background(), testMessage()), ErrUnavailable, "response", 0) // exactly the cap plus one byte
 		fitting := newPostmarkRig(t, mailtest.PostmarkReply{Body: fits}, nil)
 		if err := fitting.sender.Send(context.Background(), testMessage()); err != nil {
 			t.Errorf("an answer of exactly the cap is refused: %v", err)
@@ -391,14 +414,18 @@ func TestPostmarkVerifiesTheServerCertificate(t *testing.T) {
 	}
 }
 
-// proxyChildEnvironment marks the child process of TestPostmarkNeverUsesTheEnvironmentProxy.
-const proxyChildEnvironment = "ARCFORGES_TEST_MAIL_PROXY_CHILD"
+// The environment variables that hand the re-executed child of the proxy test its fake proxy and its local stand-in.
+const (
+	proxyChildEnvironment   = "ARCFORGES_TEST_MAIL_PROXY_CHILD"
+	proxyStandInEnvironment = "ARCFORGES_TEST_MAIL_PROXY_STANDIN"
+)
 
 // TestPostmarkNeverUsesTheEnvironmentProxy has two layers, each with its own test. The structural layer is deterministic: the
 // default transport has no proxy function. The behavioural layer re-executes this test binary with a fake proxy in the environment
-// (net/http reads the environment once per process, so an in-process test cannot do it reliably) and a target on a reserved
-// documentation address (a loopback target is exempt from the proxy and would prove nothing); the parent counts the connections its
-// fake proxy accepts. The child's only traffic is a connection attempt to 192.0.2.1, an address reserved for documentation.
+// (net/http reads the environment once per process, so an in-process test cannot do it reliably) and is HERMETIC: the adapter is
+// built with the test-only Dial hook, the target is the made-up non-loopback name postmark.test.invalid (Go exempts loopback
+// destinations from proxying, which is why the name must not be loopback), the hook maps that name to a local listener and FAILS
+// the child if it is ever asked to dial the proxy address or anything else. No name is resolved and no packet leaves the host.
 func TestPostmarkNeverUsesTheEnvironmentProxy(t *testing.T) {
 	if os.Getenv(proxyChildEnvironment) == "1" {
 		proxyChild(t)
@@ -411,48 +438,177 @@ func TestPostmarkNeverUsesTheEnvironmentProxy(t *testing.T) {
 		}
 	})
 	t.Run("behavioural", func(t *testing.T) {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = ln.Close() })
-		var accepted atomic.Int64
-		go func() {
-			for {
-				conn, err := ln.Accept()
-				if err != nil {
-					return
-				}
-				accepted.Add(1)
-				_ = conn.Close()
-			}
-		}()
-		proxy := "http://" + ln.Addr().String()
+		proxy := localListener(t)
+		standIn := localListener(t)
 		child := exec.Command(os.Args[0], "-test.run=^TestPostmarkNeverUsesTheEnvironmentProxy$", "-test.count=1", "-test.timeout=60s")
+		proxyURL := "http://" + proxy.addr
 		child.Env = append(slices.DeleteFunc(os.Environ(), func(entry string) bool {
 			upper := strings.ToUpper(entry)
 			return strings.HasPrefix(upper, "HTTP_PROXY=") || strings.HasPrefix(upper, "HTTPS_PROXY=") || strings.HasPrefix(upper, "NO_PROXY=") || strings.HasPrefix(upper, "ALL_PROXY=")
-		}), proxyChildEnvironment+"=1", "HTTP_PROXY="+proxy, "http_proxy="+proxy, "HTTPS_PROXY="+proxy, "https_proxy="+proxy, "NO_PROXY=", "no_proxy=")
+		}), proxyChildEnvironment+"=1", proxyStandInEnvironment+"="+standIn.addr, "HTTP_PROXY="+proxyURL, "http_proxy="+proxyURL,
+			"HTTPS_PROXY="+proxyURL, "https_proxy="+proxyURL, "NO_PROXY=", "no_proxy=")
 		if output, err := child.CombinedOutput(); err != nil {
 			t.Fatalf("the child failed: %v\n%s", err, output)
 		}
-		if got := accepted.Load(); got != 0 {
+		if got := proxy.accepted.Load(); got != 0 {
 			t.Fatalf("the fake proxy accepted %d connections: the adapter used the environment proxy", got)
 		}
 	})
 }
 
-// proxyChild runs inside the child process: it proves the environment is seen (a control), then sends through the default transport
-// to a non-loopback address over http and https.
+// counted is a loopback listener that accepts and closes every connection and counts them.
+type counted struct {
+	addr     string
+	accepted atomic.Int64
+}
+
+func localListener(t *testing.T) *counted {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	l := &counted{addr: ln.Addr().String()}
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			l.accepted.Add(1)
+			_ = conn.Close()
+		}
+	}()
+	return l
+}
+
+// proxyChild runs inside the child process: it proves the environment is seen (a control), then sends through the default
+// transport to a made-up host name over http and https, and requires that the adapter asked its dialer for exactly that name and
+// port and never for the proxy.
 func proxyChild(t *testing.T) {
-	for _, target := range []string{"http://192.0.2.1:9/email", "https://192.0.2.1:9/email"} {
+	standIn := os.Getenv(proxyStandInEnvironment)
+	proxy := strings.TrimPrefix(os.Getenv("HTTP_PROXY"), "http://")
+	var mu sync.Mutex
+	var asked []string
+	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		mu.Lock()
+		asked = append(asked, address)
+		mu.Unlock()
+		if address != "postmark.test.invalid:80" && address != "postmark.test.invalid:443" {
+			return nil, errors.New("the adapter dialled an address it must not dial")
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, standIn)
+	}
+	for _, target := range []string{"http://postmark.test.invalid/email", "https://postmark.test.invalid/email"} {
 		probe, _ := http.NewRequest(http.MethodPost, target, nil)
-		if seen, err := http.ProxyFromEnvironment(probe); err != nil || seen == nil {
+		if seen, err := http.ProxyFromEnvironment(probe); err != nil || seen == nil || seen.Host != proxy {
 			t.Fatalf("control: the environment proxy is not seen for %s (%v)", target, err)
 		}
-		sender := NewPostmark(PostmarkOptions{Token: config.NewSecret(sentinel("postmark-token")), From: testFrom, BaseURL: target, Timeout: 400 * time.Millisecond})
+		sender := NewPostmark(PostmarkOptions{Token: config.NewSecret(sentinel("postmark-token")), From: testFrom, BaseURL: target, Dial: dial, Timeout: 2 * time.Second})
 		if err := sender.Send(context.Background(), testMessage()); err == nil {
-			t.Fatalf("a send to %s succeeded", target)
+			t.Fatalf("a send to %s succeeded against a stand-in that answers nothing", target)
 		}
 	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []string{"postmark.test.invalid:80", "postmark.test.invalid:443"}; !slices.Equal(asked, want) {
+		t.Fatalf("the dialer was asked for %v, want exactly %v (an address of the proxy would be the environment proxy; none would be a hook that is not used)", asked, want)
+	}
+}
+
+// timeoutError is a net.Error that reports a timeout while the context of the send is still live (a dial or handshake limit of the
+// transport that fires before the send deadline).
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "i/o timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+// TestPostmarkTimeoutNeverTravelsWithACode applies the one Timeout rule of both adapters (no code, and the deadline): a status or an
+// ErrorCode that arrived is not a timeout even when the body behind it stalls or ends early; a transport-level timeout that fires
+// before the send deadline is one; a body cut short without any deadline is not.
+func TestPostmarkTimeoutNeverTravelsWithACode(t *testing.T) {
+	for _, status := range []int{401, 422, 500, 503} {
+		rig := newPostmarkRig(t, mailtest.PostmarkReply{Status: status, StallBody: true}, func(o *PostmarkOptions) { o.Timeout = 300 * time.Millisecond })
+		err := rig.sender.Send(context.Background(), testMessage())
+		failure := typed(t, err)
+		if failure.Code != status || failure.Timeout {
+			t.Errorf("status %d with a body that stalls: %v (code %d, timeout %v)", status, err, failure.Code, failure.Timeout)
+		}
+	}
+	truncated := newPostmarkRig(t, mailtest.PostmarkReply{Truncate: true}, nil)
+	failure := expectFailure(t, truncated.sender.Send(context.Background(), testMessage()), ErrUnavailable, "response", 0)
+	if failure.Timeout {
+		t.Error("a body that ends early without any deadline is reported as a timeout")
+	}
+	slow := roundTripperFunc(func(*http.Request) (*http.Response, error) { return nil, timeoutError{} })
+	sender := NewPostmark(PostmarkOptions{Token: config.NewSecret(sentinel("postmark-token")), From: testFrom, Client: &http.Client{Transport: slow}, Timeout: 30 * time.Second})
+	failure = expectFailure(t, sender.Send(context.Background(), testMessage()), ErrUnavailable, "http", 0)
+	if !failure.Timeout {
+		t.Error("a timeout of the transport that fires before the send deadline is not reported as a timeout")
+	}
+}
+
+// TestPostmarkTLSConfigurationIsPinnedByValue is the structural layer of the TLS floor: the value of every field of the default
+// transport that matters for the channel carrying the token.
+func TestPostmarkTLSConfigurationIsPinnedByValue(t *testing.T) {
+	transport, ok := NewPostmark(PostmarkOptions{}).client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("the default transport is not an *http.Transport")
+	}
+	c := transport.TLSClientConfig
+	if c == nil || c.MinVersion != tls.VersionTLS12 || c.MaxVersion != 0 || c.InsecureSkipVerify || c.CipherSuites != nil || c.Renegotiation != tls.RenegotiateNever ||
+		c.KeyLogWriter != nil || c.VerifyConnection != nil || c.VerifyPeerCertificate != nil || c.RootCAs != nil || c.ServerName != "" || c.Certificates != nil {
+		t.Fatalf("the TLS configuration of the Postmark channel is not the pinned one: %+v", c)
+	}
+	if transport.Proxy != nil || transport.DialTLSContext != nil || !transport.DisableKeepAlives || transport.MaxResponseHeaderBytes != 16<<10 {
+		t.Errorf("the transport differs from the pinned one: %+v", transport)
+	}
+}
+
+// TestPostmarkRefusesAServerThatOffersOnlyOldTLS is the behavioural layer, through the production transport settings (only the
+// roots differ, so that the test server can be trusted): a server limited to TLS 1.1 is refused and its handler never entered, while
+// the same server at TLS 1.2 is accepted (the control). Lowering the floor makes the first half fail.
+func TestPostmarkRefusesAServerThatOffersOnlyOldTLS(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		max  uint16
+		ok   bool
+	}{{"TLS 1.1 only", tls.VersionTLS11, false}, {"TLS 1.2", tls.VersionTLS12, true}} {
+		var entered atomic.Int64
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			entered.Add(1)
+			_, _ = io.WriteString(w, `{"ErrorCode":0,"MessageID":"x"}`)
+		}))
+		server.TLS = &tls.Config{MinVersion: tls.VersionTLS10, MaxVersion: c.max}
+		server.StartTLS()
+		pool := x509.NewCertPool()
+		pool.AddCert(server.Certificate())
+		transport := postmarkTransport(nil)
+		transport.TLSClientConfig.RootCAs = pool // the only difference from production: trust the test server
+		sender := NewPostmark(PostmarkOptions{Token: config.NewSecret(sentinel("postmark-token")), From: testFrom, BaseURL: server.URL,
+			Client: &http.Client{Transport: transport}, Timeout: 5 * time.Second})
+		err := sender.Send(context.Background(), testMessage())
+		if c.ok && (err != nil || entered.Load() != 1) {
+			t.Errorf("%s: %v (handler entered %d times)", c.name, err, entered.Load())
+		}
+		if !c.ok {
+			expectFailure(t, err, ErrUnavailable, "http", 0)
+			if entered.Load() != 0 {
+				t.Errorf("%s: the handler was entered: the floor is below TLS 1.2", c.name)
+			}
+		}
+		server.Close()
+	}
+}
+
+// TestPostmarkBoundsAreTheDesignedOnes pins the values of the transport's bounds and measures the response header limit: an answer
+// with a 64 KiB header (above the 16 KiB limit, below Go's default of 1 MiB) is refused.
+func TestPostmarkBoundsAreTheDesignedOnes(t *testing.T) {
+	if maxPostmarkResponse != 16<<10 || maxPostmarkHeader != 16<<10 {
+		t.Fatalf("response bounds %d and %d", maxPostmarkResponse, maxPostmarkHeader)
+	}
+	rig := newPostmarkRig(t, mailtest.PostmarkReply{FloodHeader: true}, nil)
+	expectFailure(t, rig.sender.Send(context.Background(), testMessage()), ErrUnavailable, "http", 0)
 }

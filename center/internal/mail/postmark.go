@@ -21,8 +21,12 @@ import (
 // mistake send the server token to another host. Tests inject a local URL through PostmarkOptions.BaseURL.
 const postmarkURL = "https://api.postmarkapp.com/email"
 
-// maxPostmarkResponse bounds what one send reads from the answer. Postmark's answer is a few hundred bytes.
-const maxPostmarkResponse = 16 << 10
+// maxPostmarkResponse bounds what one send reads from the answer body, and maxPostmarkHeader the response header block the
+// transport accepts. Postmark's answer is a few hundred bytes.
+const (
+	maxPostmarkResponse = 16 << 10
+	maxPostmarkHeader   = 16 << 10
+)
 
 // PostmarkOptions configure the Postmark sender. BaseURL and Client are for tests only: production leaves them empty (the
 // constant https endpoint and the transport built below).
@@ -40,6 +44,30 @@ type PostmarkOptions struct {
 	BaseURL string
 	// Client replaces the HTTP client (tests only). Its redirect policy is replaced either way.
 	Client *http.Client
+	// Dial replaces the dialer of the default transport (tests only; ignored when Client is set). The transport keeps every other
+	// setting, so a test can map a made-up host name to a local listener without a packet leaving the machine.
+	Dial func(ctx context.Context, network, address string) (net.Conn, error)
+}
+
+// postmarkTLSConfig is the TLS configuration of the Postmark channel, which carries the server token: TLS 1.2 or later and the
+// default verification against the system roots, nothing else. A test pins the value of each field and offers the transport an
+// old-TLS server.
+func postmarkTLSConfig() *tls.Config { return &tls.Config{MinVersion: tls.VersionTLS12} }
+
+// postmarkTransport is the transport of the default client: no proxy (the token goes only where the URL says, never through an
+// environment proxy), the TLS configuration above, bounded dial, handshake and response header, one connection per send.
+func postmarkTransport(dial func(ctx context.Context, network, address string) (net.Conn, error)) *http.Transport {
+	if dial == nil {
+		dial = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
+	}
+	return &http.Transport{
+		Proxy:                  nil,
+		TLSClientConfig:        postmarkTLSConfig(),
+		DialContext:            dial,
+		TLSHandshakeTimeout:    5 * time.Second,
+		DisableKeepAlives:      true,
+		MaxResponseHeaderBytes: maxPostmarkHeader,
+	}
 }
 
 // Postmark sends through the Postmark single-message HTTP API. The token travels in a header on a TLS 1.2+ connection that
@@ -63,14 +91,7 @@ func NewPostmark(o PostmarkOptions) *Postmark {
 	}
 	client := o.Client
 	if client == nil {
-		client = &http.Client{Transport: &http.Transport{
-			Proxy:                  nil, // the token goes only where the URL says, never through an environment proxy
-			TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
-			DialContext:            (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-			TLSHandshakeTimeout:    5 * time.Second,
-			DisableKeepAlives:      true,
-			MaxResponseHeaderBytes: 16 << 10,
-		}}
+		client = &http.Client{Transport: postmarkTransport(o.Dial)}
 	}
 	checked := *client
 	checked.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -144,7 +165,8 @@ func (p *Postmark) Send(ctx context.Context, m Message) (result error) {
 	if class == nil {
 		return nil
 	}
-	return p.fail(class, stage, code, readErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded))
+	// The one Timeout rule of both adapters: never together with a code (a status or an ErrorCode that arrived is not a timeout).
+	return p.fail(class, stage, code, code == 0 && readErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded))
 }
 
 // postmarkOutcome classifies an answer by HTTP status and Postmark ErrorCode, never by a bare number alone (HTTP 413 is a payload
@@ -152,27 +174,42 @@ func (p *Postmark) Send(ctx context.Context, m Message) (result error) {
 //
 //   - 200 with ErrorCode 0 and a MessageID is the only success; a 200 that is not Postmark's answer (not JSON, empty, no MessageID:
 //     a captive portal, a proxy) and any other 2xx is unavailable, because the outcome is unknown;
-//   - 401 and 403 are unauthorized; 429, 5xx, 3xx and 1xx are unavailable;
-//   - a parsed non-zero ErrorCode on a 200 or a 422 decides by code (postmarkClassOfCode);
-//   - every other status (400, 404, 413, 415, a 422 without a parsable ErrorCode) is rejected.
+//   - 401 and 403 are unauthorized; 429, 3xx and 1xx are unavailable (by status, whatever the body says);
+//   - a parsed non-zero ErrorCode decides the class (postmarkClassOfCode) on a 200 and on every 4xx, and on a 5xx only when it is
+//     a code of the published table (a 500 with ErrorCode 501 is "no DKIM info" and an operator must act; a 500 with a code nobody
+//     knows stays a transient server error);
+//   - every other status is by status: a 4xx without a parsable ErrorCode (400, 404, 413, 415, a 422 without a body) is rejected, a
+//     5xx is unavailable.
 func postmarkOutcome(status int, reply postmarkResponse, parsed bool) (stage string, code int, class error) {
+	coded := parsed && *reply.ErrorCode != 0
 	switch {
 	case status == http.StatusOK:
 		switch {
 		case parsed && *reply.ErrorCode == 0 && strings.TrimSpace(reply.MessageID) != "":
 			return "", 0, nil
-		case parsed && *reply.ErrorCode != 0:
+		case coded:
 			return "response", *reply.ErrorCode, postmarkClassOfCode(*reply.ErrorCode)
 		}
 		return "response", 0, ErrUnavailable
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
 		return "http", status, ErrUnauthorized
-	case status == http.StatusTooManyRequests, status >= 500, status >= 300 && status < 400, status < 200, status > 200 && status < 300:
+	case status == http.StatusTooManyRequests, status >= 300 && status < 400, status < 200, status > 200 && status < 300:
 		return "http", status, ErrUnavailable
-	case status == http.StatusUnprocessableEntity && parsed && *reply.ErrorCode != 0:
+	case coded && status >= 400 && status < 500, coded && status >= 500 && postmarkKnownCode(*reply.ErrorCode):
 		return "response", *reply.ErrorCode, postmarkClassOfCode(*reply.ErrorCode)
+	case status >= 500:
+		return "http", status, ErrUnavailable
 	}
 	return "http", status, ErrRejected
+}
+
+// postmarkKnownCode reports whether code is in the published table of ErrorCodes that the Email API can return.
+func postmarkKnownCode(code int) bool {
+	switch code {
+	case 10, 100, 101, 300, 402, 403, 406, 410, 411, 412, 413, 422, 501, 1235, 1236, 1480:
+		return true
+	}
+	return false
 }
 
 // postmarkClassOfCode maps a Postmark ErrorCode. 100 (maintenance) and 101 (internal error) are transient; the codes a single

@@ -107,7 +107,9 @@ func (s *SMTP) fail(class error, stage string, err error) error {
 //   - 530, 534, 535, 538, any 5xx at AUTH, and "554 Access denied ..." (SES: the IAM or sending-authorization policy of the SMTP
 //     credential lacks ses:SendRawEmail) are unauthorized: an operator must act. The text prefix is matched on the reply and then
 //     discarded; if SES changes its wording the class degrades to rejected;
-//   - other 5xx (550, 552, 553, "554 Message rejected: ...") are rejected;
+//   - other 5xx (550, 552, 553, "554 Message rejected: ...") are rejected. That includes SES's wording of an unverified identity
+//     (the From address or, in the sandbox, a recipient: "554 Message rejected: Email address is not verified"): deliberately a
+//     per-message refusal, not unauthorized, which the operator note explains;
 //   - 4xx (421, 451, 454) are unavailable.
 func (s *SMTP) classify(stage string, err error) error {
 	var protocol *textproto.Error
@@ -125,6 +127,12 @@ func (s *SMTP) classify(stage string, err error) error {
 	default:
 		return s.fail(ErrUnavailable, stage, err)
 	}
+}
+
+// smtpTLSConfig is the TLS configuration of both modes: the host name is verified against the roots (the system roots in
+// production), TLS 1.2 or later, nothing else. A test pins the value of each field and offers both modes an old-TLS server.
+func smtpTLSConfig(host string, roots *x509.CertPool) *tls.Config {
+	return &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12, RootCAs: roots}
 }
 
 // smtpSession is a connected, greeted and encrypted conversation that has not authenticated yet.
@@ -170,7 +178,7 @@ func (s *SMTP) connect(ctx context.Context) (*smtpSession, error) {
 		return nil, s.fail(class, stage, err)
 	}
 	secured := raw
-	tlsConfig := &tls.Config{ServerName: s.o.Host, MinVersion: tls.VersionTLS12, RootCAs: s.o.RootCAs}
+	tlsConfig := smtpTLSConfig(s.o.Host, s.o.RootCAs)
 	if s.o.Mode == ImplicitTLS {
 		wrapped := tls.Client(raw, tlsConfig)
 		if err = wrapped.HandshakeContext(ctx); err != nil {

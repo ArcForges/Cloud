@@ -4,9 +4,12 @@ package mail
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,8 +19,10 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/mail/mailtest"
 )
 
-// All SMTP tests are MOCKED: the in-process server of package mailtest on 127.0.0.1 with a throwaway CA and an injected dialer. No
-// name is resolved and nothing leaves the machine. The tests that need the race detector say so; the Windows leg runs every other test.
+// All SMTP tests are MOCKED: the in-process server of package mailtest on 127.0.0.1 with a throwaway CA, and (except the one test of
+// the production dial path) an injected dialer, so that no name is resolved and no packet leaves the loopback interface. The one
+// exception resolves the host name localhost, from the hosts file, and dials the loopback address. The tests that need the race
+// detector say so; the Windows leg runs every other test.
 
 type smtpRig struct {
 	server *mailtest.SMTPServer
@@ -270,17 +275,33 @@ func TestSMTPClassifiesEveryReply(t *testing.T) {
 		{"MAIL 530", func(o *mailtest.SMTPOptions) { o.MailReply = "530 5.7.0 Authentication required" }, ErrUnauthorized, "envelope", 530},
 		{"MAIL 554 Access denied", func(o *mailtest.SMTPOptions) { o.MailReply = denied }, ErrUnauthorized, "envelope", 554},
 		{"RCPT 554 Access denied", func(o *mailtest.SMTPOptions) { o.RcptReply = denied }, ErrUnauthorized, "envelope", 554},
-		{"DATA 554 Access denied", func(o *mailtest.SMTPOptions) { o.DataReply = denied }, ErrUnauthorized, "data", 554},
+		{"end of DATA 554 Access denied", func(o *mailtest.SMTPOptions) { o.DataReply = denied }, ErrUnauthorized, "data", 554},
+		// The credential codes are unauthorized at every stage, not only at AUTH (an explicit list, so each code has its row).
+		{"MAIL 534", func(o *mailtest.SMTPOptions) { o.MailReply = "534 5.7.9 mechanism too weak" }, ErrUnauthorized, "envelope", 534},
+		{"MAIL 535", func(o *mailtest.SMTPOptions) { o.MailReply = "535 5.7.8 Authentication Credentials Invalid" }, ErrUnauthorized, "envelope", 535},
+		{"MAIL 538", func(o *mailtest.SMTPOptions) { o.MailReply = "538 5.7.11 encryption required" }, ErrUnauthorized, "envelope", 538},
+		{"end of DATA 530", func(o *mailtest.SMTPOptions) { o.DataReply = "530 5.7.0 Authentication required" }, ErrUnauthorized, "data", 530},
+		{"end of DATA 534", func(o *mailtest.SMTPOptions) { o.DataReply = "534 5.7.9 mechanism too weak" }, ErrUnauthorized, "data", 534},
+		{"end of DATA 535", func(o *mailtest.SMTPOptions) { o.DataReply = "535 5.7.8 Authentication Credentials Invalid" }, ErrUnauthorized, "data", 535},
+		{"end of DATA 538", func(o *mailtest.SMTPOptions) { o.DataReply = "538 5.7.11 encryption required" }, ErrUnauthorized, "data", 538},
+		// A bare 500 sits on the boundary of "any 5xx": unauthorized at AUTH, rejected elsewhere, never unavailable.
+		{"AUTH 500", func(o *mailtest.SMTPOptions) { o.AuthReply = "500 5.5.2 command not recognized" }, ErrUnauthorized, "auth", 500},
+		{"MAIL 500", func(o *mailtest.SMTPOptions) { o.MailReply = "500 5.5.2 command not recognized" }, ErrRejected, "envelope", 500},
+		{"RCPT 500", func(o *mailtest.SMTPOptions) { o.RcptReply = "500 5.5.2 command not recognized" }, ErrRejected, "envelope", 500},
+		// The DATA command itself refused (not the end of the data): the message was never transmitted, so it is never a success.
+		{"DATA command 554", func(o *mailtest.SMTPOptions) { o.DataCommandReply = "554 5.5.1 no valid recipients" }, ErrRejected, "data", 554},
+		{"DATA command 451", func(o *mailtest.SMTPOptions) { o.DataCommandReply = "451 4.3.0 try again later" }, ErrUnavailable, "data", 451},
+		{"DATA command 554 Access denied", func(o *mailtest.SMTPOptions) { o.DataCommandReply = denied }, ErrUnauthorized, "data", 554},
 		{"MAIL 554 not verified", func(o *mailtest.SMTPOptions) { o.MailReply = notVerified }, ErrRejected, "envelope", 554},
-		{"DATA 554 not verified", func(o *mailtest.SMTPOptions) { o.DataReply = notVerified }, ErrRejected, "data", 554},
+		{"end of DATA 554 not verified", func(o *mailtest.SMTPOptions) { o.DataReply = notVerified }, ErrRejected, "data", 554},
 		{"RCPT relay access denied", func(o *mailtest.SMTPOptions) { o.RcptReply = "554 5.7.1 Relay access denied" }, ErrRejected, "envelope", 554},
 		{"RCPT Access denied in the middle", func(o *mailtest.SMTPOptions) { o.RcptReply = "554 Message rejected: reason Access denied somewhere" }, ErrRejected, "envelope", 554},
 		{"MAIL 553", func(o *mailtest.SMTPOptions) { o.MailReply = "553 5.1.3 Syntax error in the address " + testFrom }, ErrRejected, "envelope", 553},
 		{"RCPT 550", func(o *mailtest.SMTPOptions) { o.RcptReply = "550 5.1.1 Mailbox " + testTo + " unknown" }, ErrRejected, "envelope", 550},
-		{"DATA 552", func(o *mailtest.SMTPOptions) { o.DataReply = "552 Message is too long" }, ErrRejected, "data", 552},
+		{"end of DATA 552", func(o *mailtest.SMTPOptions) { o.DataReply = "552 Message is too long" }, ErrRejected, "data", 552},
 		{"MAIL 451", func(o *mailtest.SMTPOptions) { o.MailReply = "451 4.3.0 Temporary local problem" }, ErrUnavailable, "envelope", 451},
 		{"RCPT 421", func(o *mailtest.SMTPOptions) { o.RcptReply = "421 Too many concurrent SMTP connections" }, ErrUnavailable, "envelope", 421},
-		{"DATA 454", func(o *mailtest.SMTPOptions) { o.DataReply = "454 Throttling failure: Maximum sending rate exceeded." }, ErrUnavailable, "data", 454},
+		{"end of DATA 454", func(o *mailtest.SMTPOptions) { o.DataReply = "454 Throttling failure: Maximum sending rate exceeded." }, ErrUnavailable, "data", 454},
 		{"no AUTH offered", func(o *mailtest.SMTPOptions) { o.EHLOReply = "250-" + testHost + "\r\n250 STARTTLS" }, ErrUnauthorized, "auth", 0},
 		{"only AUTH LOGIN", func(o *mailtest.SMTPOptions) { o.EHLOReply = "250-" + testHost + "\r\n250-STARTTLS\r\n250 AUTH LOGIN" }, ErrUnauthorized, "auth", 0},
 	}
@@ -537,5 +558,71 @@ func TestSMTPDialsTheConfiguredHostAndPort(t *testing.T) {
 	_ = sender.Send(context.Background(), testMessage())
 	if asked.Load() != "tcp smtp.example.test:2465" {
 		t.Errorf("the adapter dialled %v", asked.Load())
+	}
+}
+
+// TestSMTPUsesTheProductionDialPath sends through the real dialer (no Dial hook, as mail.New builds the adapter): the double listens
+// on the loopback address and the adapter reaches it by the host name localhost, which the hosts file resolves. A mutant that left
+// the nil dialer in place would panic on every production send and show as an outage.
+func TestSMTPUsesTheProductionDialPath(t *testing.T) {
+	ca := mailtest.NewCA(t, "production dial CA")
+	server := mailtest.StartSMTP(t, mailtest.SMTPOptions{Certificate: ca.Leaf(t, "localhost")})
+	_, text, err := net.SplitHostPort(server.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := NewSMTP(SMTPOptions{Host: "localhost", Port: port, Username: config.NewSecret(sentinel("smtp-user")), Password: config.NewSecret(sentinel("smtp-password")),
+		From: testFrom, Timeout: 5 * time.Second, RootCAs: ca.Pool()})
+	if sender.o.Dial != nil {
+		t.Fatal("the constructor installed a dialer")
+	}
+	if err = sender.Send(context.Background(), testMessage()); err != nil {
+		t.Fatal(err)
+	}
+	sessions := server.Captures()
+	if len(sessions) != 1 || !sessions[0].TLS || len(sessions[0].Rcpt) != 1 || sessions[0].User != sentinel("smtp-user") {
+		t.Errorf("sessions %+v", sessions)
+	}
+}
+
+// TestSMTPRefusesAnOldTLSServerInBothModes is the behavioural layer of the TLS floor: a server limited to TLS 1.1 is refused in
+// StartTLS and in implicit mode, no credential is seen, and the same server at TLS 1.2 is accepted (the control). Lowering the floor
+// of either mode makes the first half fail.
+func TestSMTPRefusesAnOldTLSServerInBothModes(t *testing.T) {
+	for _, implicit := range []bool{false, true} {
+		old := newSMTPRig(t, func(o *mailtest.SMTPOptions) { o.Implicit, o.MaxTLSVersion = implicit, tls.VersionTLS11 }, nil)
+		err := old.sender.Send(context.Background(), testMessage())
+		expectFailure(t, err, ErrUnavailable, "tls", 0)
+		noLeak(t, err, old.user, old.pass)
+		old.noCredentialOnTheWire(t)
+		current := newSMTPRig(t, func(o *mailtest.SMTPOptions) { o.Implicit, o.MaxTLSVersion = implicit, tls.VersionTLS12 }, nil)
+		if err = current.sender.Send(context.Background(), testMessage()); err != nil {
+			t.Errorf("implicit %v: a TLS 1.2 server is refused: %v", implicit, err)
+		}
+	}
+}
+
+// TestSMTPTLSConfigurationIsPinnedByValue is the structural layer: every field of the configuration of both modes.
+func TestSMTPTLSConfigurationIsPinnedByValue(t *testing.T) {
+	roots := x509.NewCertPool()
+	c := smtpTLSConfig("smtp.example.test", roots)
+	if c.MinVersion != tls.VersionTLS12 || c.MaxVersion != 0 || c.InsecureSkipVerify || c.CipherSuites != nil || c.Renegotiation != tls.RenegotiateNever || c.KeyLogWriter != nil ||
+		c.VerifyConnection != nil || c.VerifyPeerCertificate != nil || c.RootCAs != roots || c.ServerName != "smtp.example.test" || c.Certificates != nil {
+		t.Fatalf("the TLS configuration of the SMTP channel is not the pinned one: %+v", c)
+	}
+	if smtpTLSConfig("h", nil).RootCAs != nil {
+		t.Error("production leaves the roots nil (the system roots)")
+	}
+}
+
+// TestSMTPBoundsAreTheDesignedOnes pins the values of the byte cap, the QUIT grace and the default timeout: the flood tests tell a
+// capped read from an uncapped one, not 256 KiB from 16 MiB.
+func TestSMTPBoundsAreTheDesignedOnes(t *testing.T) {
+	if maxServerBytes != 256<<10 || quitGrace != time.Second || DefaultTimeout != 10*time.Second || DefaultTimeout >= 30*time.Second {
+		t.Fatalf("bounds %d, %v, %v", maxServerBytes, quitGrace, DefaultTimeout)
 	}
 }

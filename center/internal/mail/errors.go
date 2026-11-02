@@ -11,14 +11,18 @@ import (
 var (
 	// ErrRejected: the provider refused this message, or the message itself is invalid (the stage says which). Sending it again
 	// unchanged will not help. A refusal of the connection or of the greeting is not a refusal of the message: that is
-	// ErrUnavailable.
+	// ErrUnavailable. Amazon SES reports an unverified identity (the From address or, in the sandbox, a recipient) as
+	// "554 Message rejected", and that is deliberately this class, not ErrUnauthorized: the first live send may show it, and the
+	// operator note says what it most likely means.
 	ErrRejected = errors.New("mail: the provider rejected the message")
 	// ErrUnavailable: a network, timeout, capacity or provider fault, or a connection-level refusal before any credential or
 	// message was offered; the outcome may be unknown and a fresh send may succeed.
 	ErrUnavailable = errors.New("mail: the provider is unavailable")
 	// ErrUnauthorized: the provider refused this account, sender, stream, address, credential or the credential's permission to
-	// send (a revoked token, a pending account, an unconfirmed sender, an IAM policy without ses:SendRawEmail); an operator must
-	// act, and no retry will help until they do. The class does not say which of these it was.
+	// send (a revoked token, a pending account, a Postmark ErrorCode that names the account, the sender signature or the stream
+	// rather than the message and, by design, any Postmark ErrorCode the adapter does not know, an IAM policy without
+	// ses:SendRawEmail); an operator must act, and no retry will help until they do. The class does not say which of these it was.
+	// An unverified SES identity is not in this list: SES words it as a per-message refusal (see ErrRejected).
 	ErrUnauthorized = errors.New("mail: the provider refused the account or the credential")
 )
 
@@ -32,10 +36,12 @@ type Error struct {
 	Provider string
 	// Stage is a closed word: message, config, busy, dial, tls, auth, envelope, data, http, response, panic, send.
 	Stage string
-	// Code is the HTTP status, the SMTP reply code or the Postmark ErrorCode that decided the class; 0 when there is none.
+	// Code is the HTTP status, the SMTP reply code or the Postmark ErrorCode that decided the class; 0 when there is none. It is
+	// chosen by the provider (any integer a Postmark body holds), so it is shown in the text of the error and nowhere else: it must
+	// never become a metric label or a log key (unbounded cardinality), and Outcome is the only label of a failure.
 	Code int
 	// Timeout reports that the deadline of the send (or the context's) ended the conversation. It is never set together with a
-	// Code: a reply that arrived is not a timeout.
+	// Code: a reply that arrived is not a timeout (both adapters apply the rule Code == 0 and the context deadline).
 	Timeout bool
 }
 

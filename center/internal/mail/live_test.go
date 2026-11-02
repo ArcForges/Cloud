@@ -5,6 +5,7 @@ package mail
 import (
 	"context"
 	"crypto/tls"
+	"flag"
 	"os"
 	"strconv"
 	"strings"
@@ -15,7 +16,8 @@ import (
 )
 
 // The opt-in probes and the owner-run live send. Every test here SKIPS unless its explicit local switch is set, so no CI leg and no
-// ordinary `go test` reaches the network. They are the only REAL tests of the package; everything else is MOCKED.
+// ordinary `go test` contacts a real service (the ordinary run sends nothing beyond the loopback interface). They are the only
+// REAL tests of the package; everything else is MOCKED.
 //
 //	ARCFORGES_TEST_POSTMARK_LIVE=1             the public Postmark test token against the real API: nothing is delivered (REAL, contract
 //	                                           only: the test token accepts any sender and any stream, so sender, stream and account
@@ -24,7 +26,11 @@ import (
 //	                                           credential exists in the process (REAL, capability only).
 //	ARCFORGES_TEST_MAIL_LIVE_SEND=1            the owner-run live send: it SENDS ONE REAL MESSAGE through the real adapter. The token, the
 //	                                           credentials, the sender and the recipient come from the environment only (the names are
-//	                                           listed in docs/center.md) and are never printed. Nothing runs it automatically.
+//	                                           listed in docs/center.md) and are never printed. Nothing runs it automatically: it needs a
+//	                                           SECOND, deliberately explicit gate that no verification leg sets (the confirmation variable
+//	                                           below) and a non-empty -run, so a leg that merely inherits the first variable from a shell
+//	                                           that exported it still sends nothing.
+//	ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM=send-one-real-message
 
 // postmarkPublicTestToken is Postmark's documented public test token, built from its words (it is not a credential).
 func postmarkPublicTestToken() string { return strings.Join([]string{"POSTMARK", "API", "TEST"}, "_") }
@@ -92,10 +98,31 @@ func liveSend(t *testing.T, sender Sender) {
 	t.Log("REAL: the provider accepted one message (delivery to the inbox is checked by the owner)")
 }
 
+// liveSendConfirmation is the value of the second gate of the live send.
+const liveSendConfirmation = "send-one-real-message"
+
+// liveSendRefusal says why the live send must not run, or "" when all three gates are open: the switch, the confirmation (which no
+// verification leg sets) and an explicit -run (the pattern of the test run, "" when none was given).
+func liveSendRefusal(getenv func(string) string, run string) string {
+	switch {
+	case getenv("ARCFORGES_TEST_MAIL_LIVE_SEND") != "1":
+		return "set ARCFORGES_TEST_MAIL_LIVE_SEND=1 (and the variables of docs/center.md) to send ONE REAL message through the real adapter"
+	case getenv("ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM") != liveSendConfirmation:
+		return "the live send also needs ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM=" + liveSendConfirmation + " (a second gate that verification legs never set)"
+	case run == "":
+		return "the live send also needs an explicit -run naming the test, so that a run of the whole package never sends"
+	}
+	return ""
+}
+
 func requireLiveEnvironment(t *testing.T, names ...string) map[string]string {
 	t.Helper()
-	if os.Getenv("ARCFORGES_TEST_MAIL_LIVE_SEND") != "1" {
-		t.Skip("set ARCFORGES_TEST_MAIL_LIVE_SEND=1 (and the variables of docs/center.md) to send ONE REAL message through the real adapter")
+	pattern := ""
+	if run := flag.Lookup("test.run"); run != nil {
+		pattern = run.Value.String()
+	}
+	if reason := liveSendRefusal(os.Getenv, pattern); reason != "" {
+		t.Skip(reason)
 	}
 	values := map[string]string{}
 	var missing []string
@@ -131,8 +158,34 @@ func TestLiveSendThroughSMTP(t *testing.T) {
 		Password: config.NewSecret(env["ARCFORGES_TEST_SMTP_PASSWORD"]), From: env["ARCFORGES_TEST_MAIL_FROM"], Timeout: 25 * time.Second}))
 }
 
-// TestTheOptInTestsSkipWithoutTheirSwitch pins that the ordinary run reaches no network: with no switch in the environment, each
-// live test skips (checked by running the helper that decides, not the tests themselves).
+// TestTheLiveSendNeedsAllThreeGates pins the second gate: only the switch, the confirmation and an explicit -run together open it.
+func TestTheLiveSendNeedsAllThreeGates(t *testing.T) {
+	env := func(values map[string]string) func(string) string {
+		return func(name string) string { return values[name] }
+	}
+	switchOn := map[string]string{"ARCFORGES_TEST_MAIL_LIVE_SEND": "1"}
+	both := map[string]string{"ARCFORGES_TEST_MAIL_LIVE_SEND": "1", "ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM": liveSendConfirmation}
+	for name, c := range map[string]struct {
+		values map[string]string
+		run    string
+		open   bool
+	}{
+		"nothing":                   {nil, "", false},
+		"the switch alone":          {switchOn, "TestLiveSendThroughPostmark", false},
+		"the confirmation alone":    {map[string]string{"ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM": liveSendConfirmation}, "TestLiveSendThroughPostmark", false},
+		"a wrong confirmation":      {map[string]string{"ARCFORGES_TEST_MAIL_LIVE_SEND": "1", "ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM": "1"}, "TestLiveSendThroughPostmark", false},
+		"the switch with a word":    {map[string]string{"ARCFORGES_TEST_MAIL_LIVE_SEND": "yes", "ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM": liveSendConfirmation}, "TestLiveSendThroughPostmark", false},
+		"both without a -run":       {both, "", false},
+		"both with an explicit run": {both, "TestLiveSendThroughPostmark", true},
+	} {
+		if reason := liveSendRefusal(env(c.values), c.run); (reason == "") != c.open {
+			t.Errorf("%s: refusal %q, open %v", name, reason, c.open)
+		}
+	}
+}
+
+// TestTheOptInTestsSkipWithoutTheirSwitch pins that the ordinary run contacts no real service: with no switch in the environment,
+// each live test skips (it runs the four tests and requires that each skipped).
 func TestTheOptInTestsSkipWithoutTheirSwitch(t *testing.T) {
 	for _, name := range []string{"ARCFORGES_TEST_POSTMARK_LIVE", "ARCFORGES_TEST_SES_PROBE_HOST", "ARCFORGES_TEST_MAIL_LIVE_SEND"} {
 		if os.Getenv(name) != "" {
