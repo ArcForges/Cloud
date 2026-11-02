@@ -111,6 +111,10 @@ export interface FakeOptions {
   /** The edge limiter answers the first request that completes a new passkey with a 429 (the center never sees it). */
   limitNewPasskeyOnce?: boolean;
   // ---- the operations surface
+  /** The review page hands out a request token that is not the session's (the confirmation is refused for that, not for the step-up). */
+  badRequestToken?: boolean;
+  /** Signing out leaves the session alive (the operator page stays open after the sign-out). */
+  signOutKeepsSession?: boolean;
   /** The surface is not enabled: the Worker answers its plain 404 to every operations route. */
   operationsOff?: boolean;
   /** The signed-in account is no operator: the center audits the refusal and answers 403 on all three routes. */
@@ -360,7 +364,7 @@ export class FakeCenter {
     const refused = this.checkRequest(request);
     if (refused !== undefined) return refused;
     const hidden: [string, string][] = [
-      ["csrf", this.csrf(session)],
+      ["csrf", this.options.badRequestToken === true ? "stale" : this.csrf(session)],
       ["command_id", crypto.randomUUID()],
       ["account", request.account],
       ["features", request.features.join(",")],
@@ -963,7 +967,9 @@ export class FakeTab implements Tab {
       return;
     }
     if (selector === selectors.signOut && this.page.kind === "sign-out") {
-      const keep = center.options.secondBrowserKeepsSession === true && this.index > 0;
+      const keep =
+        (center.options.secondBrowserKeepsSession === true && this.index > 0) ||
+        center.options.signOutKeepsSession === true;
       const record = this.session();
       if (record && !keep) record.revoked = true;
       if (!keep) this.handle = undefined;

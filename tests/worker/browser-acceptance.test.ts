@@ -2000,6 +2000,11 @@ test("defect 3: every step starts from a navigation, so a 429 at any of them sta
     );
     assert.equal(s.center.grants.length, 1, `${route} #${skip}: exactly one grant`);
     assert.equal(s.center.audit.filter((event) => event === "issued").length, 1);
+    // A 429 ends the wait for the page at once: the step does not poll until its timeout before it starts again.
+    assert(
+      s.sleeps.filter((ms) => ms === 250).length < 10,
+      `${route} #${skip}: the step waited for a page the edge had refused`,
+    );
   }
   // A 429 on the page the sign-out leads to meets a step that has changed something (it ended the session): it is not repeated.
   const late = await enrolled({ limitOperatorForm: { skip: 6, times: 1, retryAfter: 5 } });
@@ -2051,6 +2056,10 @@ test("each guard of the operations pages that is turned off is noticed by the ru
     // Evidence that is not consumed would grant the same request again; the center refuses on the source reference, not on the
     // evidence, and the script does not accept that as the refusal of a used step-up.
     ["evidenceReusable", 6, /reported 1 problem[\s\S]*source reference was already used/u],
+    // The confirmation is refused, but not for the step-up: the refusal must be about the passkey check.
+    ["badRequestToken", 3, /The refusal does not ask for a passkey check/u],
+    // Signing out leaves the session alive: the operator page is still open.
+    ["signOutKeepsSession", 7, /still reaches the operator page/u],
     // The surface is off: the Worker's plain 404.
     ["operationsOff", 1, /reported 1 problem[\s\S]*status of 404/u],
     // No plan catalogue: the form is a 400 after the sign-in.
