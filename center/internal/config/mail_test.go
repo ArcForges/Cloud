@@ -126,6 +126,15 @@ type refusal struct {
 	names    string
 }
 
+// ruleReasons and rowReasons are the fixed text each refusal must carry besides the variable's name: the name alone cannot tell
+// two rules apart (a missing sender is also refused by the pair rule, and a value with white space by the rule of its variable).
+var (
+	ruleReasons = map[string]string{"R1": "must be disabled, postmark or smtp", "R2": "is set although the mail provider is disabled",
+		"R6": "does not apply to the", "R9": "must be a duration from", "R10": "has leading or trailing white space"}
+	rowReasons = map[string]string{"R3 from missing": "must be one plain e-mail address", "R4 the pair over 255 bytes": "together are over",
+		"R5 the public test token": "public test token", "R8 mode plain": "plain-text SMTP does not exist"}
+)
+
 func TestEveryRefusalRowIsRefusedNamingTheVariable(t *testing.T) {
 	long := func(n int) string { return strings.Repeat("a", n) }
 	rows := []refusal{
@@ -195,6 +204,8 @@ func TestEveryRefusalRowIsRefusedNamingTheVariable(t *testing.T) {
 		{"R8 password missing", smtpEnvironment(), map[string]string{EnvMailSMTPPassword: ""}, EnvMailSMTPPassword},
 		{"R8 user over 256 bytes", smtpEnvironment(), map[string]string{EnvMailSMTPUsername: long(257)}, EnvMailSMTPUsername},
 		{"R8 password with a control character", smtpEnvironment(), map[string]string{EnvMailSMTPPassword: "a\x7fb"}, EnvMailSMTPPassword},
+		{"R8 user with a tab inside", smtpEnvironment(), map[string]string{EnvMailSMTPUsername: "a\tb"}, EnvMailSMTPUsername},
+		{"R8 password with a newline inside", smtpEnvironment(), map[string]string{EnvMailSMTPPassword: "a\nb"}, EnvMailSMTPPassword},
 		// R9: the timeout.
 		{"R9 not a duration", postmarkEnvironment(), map[string]string{EnvMailTimeout: "soon"}, EnvMailTimeout},
 		{"R9 no unit", postmarkEnvironment(), map[string]string{EnvMailTimeout: "10"}, EnvMailTimeout},
@@ -210,6 +221,9 @@ func TestEveryRefusalRowIsRefusedNamingTheVariable(t *testing.T) {
 		{"R10 password with a leading tab", smtpEnvironment(), map[string]string{EnvMailSMTPPassword: "\t" + mailSentinel("password")}, EnvMailSMTPPassword},
 		{"R10 a blank value", nil, map[string]string{EnvMailTimeout: " "}, EnvMailTimeout},
 		{"R10 host with a newline", smtpEnvironment(), map[string]string{EnvMailSMTPHost: "smtp.example.test\n"}, EnvMailSMTPHost},
+		{"R10 user with a trailing space", smtpEnvironment(), map[string]string{EnvMailSMTPUsername: mailSentinel("user") + " "}, EnvMailSMTPUsername},
+		{"R10 password with a leading space", smtpEnvironment(), map[string]string{EnvMailSMTPPassword: " " + mailSentinel("password")}, EnvMailSMTPPassword},
+		{"R10 provider with a trailing space", postmarkEnvironment(), map[string]string{EnvMailProvider: "postmark "}, EnvMailProvider},
 	}
 	secrets := []string{mailSentinel("token"), mailSentinel("user"), mailSentinel("password")}
 	for _, r := range rows {
@@ -227,6 +241,13 @@ func TestEveryRefusalRowIsRefusedNamingTheVariable(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), ": "+r.names+" ") && !strings.Contains(err.Error(), ": "+r.names+":") {
 			t.Errorf("%s: the refusal %q does not name %s", r.row, err, r.names)
+		}
+		want, ok := rowReasons[r.row]
+		if !ok {
+			want, ok = ruleReasons[strings.Fields(r.row)[0]]
+		}
+		if ok && !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: the refusal %q does not carry %q", r.row, err, want)
 		}
 		// Errors name the variable and never repeat a value: no credential, no offending text.
 		for _, secret := range secrets {
@@ -302,5 +323,47 @@ func TestTheMailVariablesAreNotCompiledIntoTheDefaults(t *testing.T) {
 		if _, err := loadWith(SelfHosted, map[string]string{EnvMailProvider: provider}); err == nil {
 			t.Errorf("%s with no further variable was accepted", provider)
 		}
+	}
+}
+
+// TestTheBoundsOfTheRulesAreInclusive loads each bound exactly (a rule one too strict would refuse a value the design allows).
+func TestTheBoundsOfTheRulesAreInclusive(t *testing.T) {
+	long := func(n int) string { return strings.Repeat("a", n) }
+	for _, timeout := range []string{"2s", "25s", "2000ms", "25000ms"} {
+		custom := postmarkEnvironment()
+		custom[EnvMailTimeout] = timeout
+		if config, err := loadWith(SelfHosted, custom); err != nil || config.Mail.Timeout.String() == "" {
+			t.Errorf("timeout %s: %v", timeout, err)
+		}
+	}
+	custom := postmarkEnvironment()
+	custom[EnvMailPostmarkToken], custom[EnvMailPostmarkStream] = long(MaxPostmarkTokenBytes), long(MaxPostmarkStreamBytes)
+	if config, err := loadWith(SelfHosted, custom); err != nil || len(config.Mail.PostmarkToken.Reveal()) != 128 || len(config.Mail.PostmarkStream) != 40 {
+		t.Errorf("the longest token and stream: %v", err)
+	}
+	custom = postmarkEnvironment()
+	custom[EnvMailPostmarkToken], custom[EnvMailPostmarkStream] = "a", "a"
+	if _, err := loadWith(SelfHosted, custom); err != nil {
+		t.Errorf("the shortest token and stream: %v", err)
+	}
+	custom = smtpEnvironment()
+	custom[EnvMailSMTPUsername], custom[EnvMailSMTPPassword] = long(MaxMailCredentialBytes), long(MaxMailCredentialBytes)
+	if config, err := loadWith(SelfHosted, custom); err != nil || len(config.Mail.SMTPUsername.Reveal()) != 256 || len(config.Mail.SMTPPassword.Reveal()) != 256 {
+		t.Errorf("the longest credentials: %v", err)
+	}
+	// The composed sender: 64 bytes of name, " <", an address of 188 bytes and ">" make 255; one more byte of address makes 256.
+	domain := func(n int) string { return long(60) + "." + long(n-60-1-4) + ".org" } // n bytes in all
+	exact := long(64) + "@" + domain(123)
+	if len(exact) != 188 || len(long(64)+" <"+exact+">") != 255 {
+		t.Fatalf("the fixture is %d bytes", len(exact))
+	}
+	custom = postmarkEnvironment()
+	custom[EnvMailFrom], custom[EnvMailFromName] = exact, long(64)
+	if config, err := loadWith(SelfHosted, custom); err != nil || config.Mail.From != exact {
+		t.Errorf("a sender of exactly 255 bytes: %v", err)
+	}
+	custom[EnvMailFrom] = long(64) + "@" + domain(124)
+	if _, err := loadWith(SelfHosted, custom); err == nil {
+		t.Error("a sender of 256 bytes was accepted")
 	}
 }

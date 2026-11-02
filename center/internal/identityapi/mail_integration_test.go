@@ -320,7 +320,7 @@ func TestAProviderFailureNeverReachesTheReplyAndIsCountedByClass(t *testing.T) {
 			rig := c.rig(t)
 			h := newHarness(t, rig.settings(loosePolicy, false))
 			known, unknown := "failing@example.org", "nobody@example.org"
-			h.seedAccount(1, known)
+			who := h.seedAccount(1, known)
 			h.remember(known, unknown)
 			flows := map[string]*foundationv1.Id{}
 			for _, address := range []string{known, unknown} {
@@ -334,15 +334,25 @@ func TestAProviderFailureNeverReachesTheReplyAndIsCountedByClass(t *testing.T) {
 			if !proto.Equal(blank(failed), blank(quiet)) {
 				t.Fatalf("the reply of a failed delivery differs from the reply of an unknown address:\n%v\n%v", failed, quiet)
 			}
-			if got := h.emailSends(); !maps.Equal(got, map[string]int{c.outcome: 1}) {
-				t.Fatalf("email_send reads %v, want one %s", got, c.outcome)
+			// The step-up by e-mail is another caller of the same delivery: a failing provider changes nothing of its reply either.
+			step := h.beginEmailStepUp(bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken()), who, identity.ClassRevokeAllSessions)
+			if step.GetError() != nil || step.GetValue().GetChallenge().GetMethod() != publicapiv1.AuthMethod_AUTH_METHOD_EMAIL {
+				t.Fatalf("a failed step-up delivery changed the reply: %v", step)
 			}
-			if rig.reached() != 1 {
+			if got := h.emailSends(); !maps.Equal(got, map[string]int{c.outcome: 2}) {
+				t.Fatalf("email_send reads %v, want two %s", got, c.outcome)
+			}
+			if rig.reached() != 2 {
 				t.Fatalf("%d requests reached the provider", rig.reached())
 			}
 			logs := h.logs.String()
-			if !strings.Contains(logs, "outcome="+c.outcome) && !strings.Contains(logs, `"outcome":"`+c.outcome+`"`) {
-				t.Fatalf("the failure was not logged with its class: %s", logs)
+			for _, line := range []string{"an e-mail code could not be delivered", "a step-up code could not be delivered"} {
+				if strings.Count(logs, line) != 1 {
+					t.Fatalf("the log must hold %q once: %s", line, logs)
+				}
+			}
+			if strings.Count(logs, "outcome="+c.outcome)+strings.Count(logs, `"outcome":"`+c.outcome+`"`) != 2 {
+				t.Fatalf("the failures were not logged with their class: %s", logs)
 			}
 			for _, leak := range append(append([]string{known, unknown, word("provider-text")}, rig.secrets...), "ErrorCode") {
 				if strings.Contains(logs, leak) {

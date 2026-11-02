@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/mail"
 )
 
@@ -25,9 +26,14 @@ import (
 type recordedEvents struct {
 	mu    sync.Mutex
 	items []string
+	// hold, when set, runs first in every observation: a test blocks the counting of an outcome with it.
+	hold func(event, outcome string)
 }
 
 func (r *recordedEvents) ObserveIdentity(event, outcome string) {
+	if r.hold != nil {
+		r.hold(event, outcome)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.items = append(r.items, event+" "+outcome)
@@ -156,6 +162,88 @@ func TestDeliverRecoversAPanicOfTheSenderAndStillFinishesTheDelivery(t *testing.
 	}
 }
 
+// drainWithin runs Drain with a bound and fails the test by name when it has not returned after 3 s (a Drain that ignores its bound
+// would otherwise hold the test until the binary's timeout). It returns Drain's error.
+func drainWithin(t *testing.T, service *Service, bound time.Duration) error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	got := make(chan error, 1)
+	go func() { got <- service.Drain(ctx) }()
+	select {
+	case err := <-got:
+		return err
+	case <-time.After(3 * time.Second):
+		t.Fatalf("Drain did not return within 3 s of a %v bound", bound)
+		return nil
+	}
+}
+
+// TestDrainWaitsUntilARecoveredDeliveryHasBeenCounted: Done is deferred before the recovery, so it runs after it. The count of the
+// failed outcome is held; Drain must not return while it is held (a delivery whose outcome is still being counted is unfinished),
+// and returns once it is released.
+func TestDrainWaitsUntilARecoveredDeliveryHasBeenCounted(t *testing.T) {
+	panicking := senderOf(func(context.Context, mail.Message) error { panic("a panic of the sender") })
+	service, events, _ := newDeliverService(panicking, false)
+	reached, release := make(chan struct{}), make(chan struct{})
+	events.hold = func(_, outcome string) {
+		if outcome == "failed" {
+			close(reached)
+			<-release
+		}
+	}
+	service.deliver(context.Background(), deliveryMessage(), deliverySignIn)
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the recovered delivery was never counted")
+	}
+	if err := drainWithin(t, service, 100*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Drain returned %v while the outcome of a recovered delivery was still being counted", err)
+	}
+	close(release)
+	long, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	if err := service.Drain(long); err != nil {
+		t.Errorf("Drain after the count: %v", err)
+	}
+	if got := events.all(); len(got) != 1 || got[0] != "email_send failed" {
+		t.Errorf("events %v", got)
+	}
+}
+
+// TestDeliverSendsWithAContextThatOutlivesTheCallerAndEndsAtTheBound: the request that started a delivery ends before the send does,
+// so the send must not inherit its cancellation; it carries its own deadline of deliveryTimeout, below which every adapter's own
+// timeout (at most 25 s) ends it first.
+func TestDeliverSendsWithAContextThatOutlivesTheCallerAndEndsAtTheBound(t *testing.T) {
+	type seen struct {
+		err      error
+		deadline time.Time
+		ok       bool
+	}
+	got := make(chan seen, 1)
+	sender := senderOf(func(ctx context.Context, _ mail.Message) error {
+		deadline, ok := ctx.Deadline()
+		got <- seen{ctx.Err(), deadline, ok}
+		return nil
+	})
+	service, _, _ := newDeliverService(sender, true)
+	caller, cancel := context.WithCancel(context.Background())
+	cancel() // the request has ended
+	began := time.Now()
+	service.deliver(caller, deliveryMessage(), deliverySignIn)
+	one := <-got
+	if one.err != nil {
+		t.Errorf("the send inherited the cancellation of the request: %v", one.err)
+	}
+	if !one.ok || one.deadline.Sub(began) > deliveryTimeout+time.Second || one.deadline.Sub(began) < deliveryTimeout-time.Second {
+		t.Errorf("the send's deadline is %v after the call (has one: %v), want about %v", one.deadline.Sub(began), one.ok, deliveryTimeout)
+	}
+	if deliveryTimeout != 30*time.Second || deliveryTimeout <= config.MaxMailTimeout {
+		t.Errorf("deliveryTimeout %v must be 30 s and above the adapters' largest timeout %v", deliveryTimeout, config.MaxMailTimeout)
+	}
+}
+
 // senderOf is a Sender made of a function.
 type senderOf func(context.Context, mail.Message) error
 
@@ -209,11 +297,8 @@ func TestDrainDoesNotHoldTheStopPastItsBound(t *testing.T) {
 	})
 	service, _, _ := newDeliverService(stuck, false)
 	service.deliver(context.Background(), deliveryMessage(), deliverySignIn)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	begun := time.Now()
-	if err := service.Drain(ctx); !errors.Is(err, context.DeadlineExceeded) || time.Since(begun) > 3*time.Second {
-		t.Errorf("Drain returned %v after %v with a 100 ms bound", err, time.Since(begun))
+	if err := drainWithin(t, service, 100*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Drain returned %v with a 100 ms bound", err)
 	}
 	close(release)
 	later, stop := context.WithTimeout(context.Background(), 5*time.Second)
@@ -232,9 +317,7 @@ func TestADeliveryIsRegisteredBeforeItsGoroutineExists(t *testing.T) {
 	if captured == nil {
 		t.Fatal("the delivery was not handed to the background hook")
 	}
-	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if err := service.Drain(short); !errors.Is(err, context.DeadlineExceeded) {
+	if err := drainWithin(t, service, 50*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Drain did not wait for a delivery that was accepted but not started: %v", err)
 	}
 	captured()
@@ -288,9 +371,7 @@ func TestDrainAbandonsTheDeliveriesThatWaitInTheGuardAtItsBound(t *testing.T) {
 			t.Errorf("a send over the guard's capacity was counted %q", event)
 		}
 	}
-	short, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	if err := service.Drain(short); !errors.Is(err, context.DeadlineExceeded) {
+	if err := drainWithin(t, service, 100*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Drain returned %v although %d deliveries were still waiting", err, mail.MaxInFlight+mail.MaxWaiting)
 	}
 	close(release)

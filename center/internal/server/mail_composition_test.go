@@ -14,9 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect/v2"
+
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/observe"
+	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
 // The mail composition and the shutdown sequence need no PostgreSQL, so these tests run on both hosts. MOCKED: no provider is
@@ -71,7 +75,7 @@ func TestAnUnbuildableMailConfigurationIsRefusedWithoutRepeatingIt(t *testing.T)
 	cfg := mailConfig(t, postmarkVariables())
 	cfg.Mail.Provider = "ses" // a hand-built configuration; Load would have refused it
 	sender, err := (&Center{Config: cfg}).mailSender(Options{})
-	if err == nil || sender != nil || strings.Contains(err.Error(), composedToken) || strings.Contains(err.Error(), composedFrom) || strings.Contains(err.Error(), "ses") {
+	if err == nil || sender != nil || err.Error() != "the mail configuration cannot build a sender" {
 		t.Errorf("%T %v", sender, err)
 	}
 }
@@ -153,10 +157,15 @@ func TestStopServingStopsTheListenersThenDrainsWithinTheBound(t *testing.T) {
 	}
 
 	stuck := &Center{Logger: observe.NewLogger(logs, slog.LevelInfo), drain: func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }}
-	begun := time.Now()
-	stuck.stopServing(nil, 80*time.Millisecond)
-	if elapsed := time.Since(begun); elapsed > 3*time.Second {
-		t.Errorf("a stuck drain held the stop for %v with an 80 ms bound", elapsed)
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		stuck.stopServing(nil, 80*time.Millisecond)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a stuck drain held the stop for over 3 s with an 80 ms bound")
 	}
 	if !strings.Contains(logs.String(), "deliveries still in flight were abandoned at the shutdown bound") {
 		t.Errorf("an abandoned drain was not logged: %s", logs.String())
@@ -181,5 +190,25 @@ func TestStopServingWaitsForASlowDeliveryAndNotLongerThanItTakes(t *testing.T) {
 	center.stopServing([]*http.Server{httptest.NewUnstartedServer(nil).Config}, 5*time.Second)
 	if !finished.Load() || time.Since(begun) > 3*time.Second {
 		t.Errorf("finished %v after %v", finished.Load(), time.Since(begun))
+	}
+}
+
+// TestComposingTheIdentitySurfaceWiresItsDrainIntoTheShutdown: without the wiring a running center would stop with deliveries in
+// flight and the drain would never run. The composition needs no database to be built (nothing queries until a request comes).
+func TestComposingTheIdentitySurfaceWiresItsDrainIntoTheShutdown(t *testing.T) {
+	center := &Center{Config: mailConfig(t, nil), Logger: observe.NewLogger(&lockedBuffer{}, slog.LevelInfo), Metrics: observe.NewMetrics(), Store: store.New(nil)}
+	if center.drain != nil {
+		t.Fatal("a center without an identity surface has a drain")
+	}
+	if _, err := center.composeIdentity(connect.NewServer(center.recordOutcome), &ingress.Options{}, Options{Mail: mail.NewFake()}, center.Logger); err != nil {
+		t.Fatal(err)
+	}
+	if center.drain == nil {
+		t.Fatal("composeIdentity did not hand the identity service's drain to the center")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := center.drain(ctx); err != nil {
+		t.Errorf("an idle service did not drain: %v", err)
 	}
 }
