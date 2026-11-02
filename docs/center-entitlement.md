@@ -145,7 +145,7 @@ The surface needs `identity` and `pages`, exists only in official-hosted mode an
 only the acceptance environment enables it (`proof` carries `identity,pages,operations` and the development fixture catalogue,
 **MOCKED**, illustrative); production carries no surface and no catalogue, and `tests/worker/center-config.test.ts` and
 `tests/worker/proof-deploy.test.ts` pin both. Where it is off, the Worker answers its plain 404 "Unknown API method." before anything is
-read, as for the pages surface (the center's own 404, where it did not compose the surface, carries the seven security headers); a signed-in account that is no operator (or whose account is not active) gets 403, audited as above. Every reply carries the seven page security headers byte for byte, `Cache-Control: no-store,
+read, as for the pages surface (the center's own 404, where it did not compose the surface, carries the seven security headers); a signed-in account that is no operator (or whose account is not active) gets 403, audited as above. Every reply of the center carries the seven page security headers byte for byte, `Cache-Control: no-store,
 no-transform` included, and the Worker's page handler checks the surface of each route before anything else.
 
 ## The gate
@@ -228,8 +228,8 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
    `x-arcforges-worker-revision` header) is the merge commit (after the Container has
    rolled over, which takes several minutes after the deploy job: stop requesting for 60 to 90 seconds before reading it);
    `ARCFORGES_CENTER_PLAN_CONFIGURATION` is unset in production; `/api/operations/grant` and `/api/account/sign-in` answer the Worker's
-   plain 404 "Unknown API method."; the migration gate applied `0003` to the production database (the tables exist and are empty,
-   and `identity.operator` has no row); no gated feature is reachable.
+   plain 404 "Unknown API method."; the migration gate applied `0003` to the production database (the gate's log shows it); no gated
+   feature is reachable.
 2. **The acceptance database** (`arcforges_acceptance`) is migrated to version 3 with the pinned checksum above.
 3. **The surface is enabled on proof, by the change that rewrote this checklist.** The proof environment's `FLAGSHIP_SURFACES` is
    `identity,pages,operations` (`wrangler.json`; the plan catalogue of proof was already `development-fixtures`, six capabilities and two
@@ -265,7 +265,8 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
    `PASSED` the report says `mode: operator-grant`, four steps with the MOCKED authenticator and three without, and in its facts the
    `entitlementVersion` (at least 1: it depends on the history of the account), `grantedFeatures` `remote.view`, `requestedDays` 1
    (what the form was asked for) and `grantedHours` (the hours from the run to the end the done page showed: the run fails unless it
-   is between 23 and 25), among others. The
+   is between 23 and 25; if the Windows host's clock is about an hour or more off the center's, the check fails at the review of step 3, before
+   any grant is written, so check the host clock before concluding that the center ended the grant wrongly), among others. The
    steps are: the page is closed without a session (the `303`); the sign-in returns to the operator page; a request is reviewed (the
    review writes nothing) and a step-up that was proved for another request is refused with `403`; the same request is reviewed again
    and confirmed with the passkey (the done page names the term and the entitlement version); the same form again answers "This grant
@@ -273,8 +274,9 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
    `403`; sign-out closes the page again. The step that fails says where the defect is: 1 and 2 the redirect and sign-in path, 3 the
    form, the review and the step-up binding, 4 the grant, 5 the replay, 6 the single use of the step-up. One exception: a `403`
    "This is not allowed." at step 2 is NOT a sign-in defect. The signed-in account is not treated as an operator (the owner is one
-   only through its `identity.bootstrap` row and an active account): stop, nothing was written, and escalate with the audit event
-   `entitlement.operator_grant.refused` (reason `not_operator`). A plain-text reply of the Worker itself is read with the table
+   only through its `identity.bootstrap` row and an active account): stop, no grant was written (the sign-in did create a session,
+   which ends by itself); escalate with the step's output; the owner can confirm the refusal as the audit event
+   `entitlement.operator_grant.refused` (reason `not_operator`) in the acceptance database. A plain-text reply of the Worker itself is read with the table
    below. A `429` that the run meets before it changed anything starts the step again; after a change the step fails and
    says so, which is why the runs are separated.
 7. **Afterwards**, the healthz documents and the dark production (steps 1 and 3) again, and nothing to clean up: `revoke-operator` is not
@@ -285,12 +287,12 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
 
 **Plain-text replies of the Worker that the run can meet.** They are the Worker's own, not the center's:
 
-| Reply                                                                                                                     | What it means                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `503` "Cloud container is temporarily unavailable." with `Retry-After`, or `504` "RPC deadline exceeded.", at step 1 or 2 | The Container is cold or still starting, or Neon is waking: warm it with the healthz `curl` and repeat the run once.                                                                                                                                                                                                                                                                      |
-| the same `503` without `Retry-After`, on a Container that is warm                                                         | The Worker refused the center's reply (a header, the status or the media type of a page it has not met before) or the Container's fetch failed: capture `wrangler tail` of the proof Worker while repeating the request once, as the [A2 runbook](center-identity.md#post-deploy-checks-that-only-the-hosted-path-shows) says, and escalate; do not redeploy to see whether it goes away. |
-| `403` "The Origin is not allowed."                                                                                        | The script drove a host other than `ALLOWED_ORIGIN` (`https://proof.arcforges.com`).                                                                                                                                                                                                                                                                                                      |
-| `429` "Rate limit exceeded."                                                                                              | The pause was too short (the edge limit).                                                                                                                                                                                                                                                                                                                                                 |
+| Reply                                                                                                                                                                                                                                           | What it means                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `503` "Cloud container is temporarily unavailable." with `Retry-After`, or `504` "RPC deadline exceeded.", at step 1 or 2, or at the first request after the output says `rate limited (429): waiting 60 s` (the wait lets the Container sleep) | The Container is cold or still starting, or Neon is waking: warm it with the healthz `curl` and repeat the run once.                                                                                                                                                                                                                                                                      |
+| the same `503` without `Retry-After`, on a Container that is warm                                                                                                                                                                               | The Worker refused the center's reply (a header, the status or the media type of a page it has not met before) or the Container's fetch failed: capture `wrangler tail` of the proof Worker while repeating the request once, as the [A2 runbook](center-identity.md#post-deploy-checks-that-only-the-hosted-path-shows) says, and escalate; do not redeploy to see whether it goes away. |
+| `403` "The Origin is not allowed."                                                                                                                                                                                                              | `ALLOWED_ORIGIN` of the deployed proof Worker is not `https://proof.arcforges.com` (the script can drive no other host), or a POST arrived without that Origin: a Worker configuration defect; capture `wrangler tail` and escalate, do not redeploy.                                                                                                                                     |
+| `429` "Rate limit exceeded."                                                                                                                                                                                                                    | The pause was too short (the edge limit).                                                                                                                                                                                                                                                                                                                                                 |
 
 **What the run shows when it passes, and what it does not.**
 
@@ -323,7 +325,7 @@ limiter that counts 60 requests per 60 seconds per client like the hosted one, a
 certificate by its public key hash. It found the three defects the script now guards against (the sign-in follows the return
 fragment; Chromium logs a console error for every 4xx document; a step must start from a navigation or its restart after a 429 breaks).
 The recipe is described in [the acceptance against a center on this machine](center-identity.md#running-the-acceptance-against-a-center-on-this-machine);
-its scripts are not part of the repository. On the final tree the first run (enrolment) passed with 95 requests in 138 seconds, the
+its scripts are not part of the repository. On the final tree the first run (enrolment) passed with 95 requests in 137 seconds, the
 returning run with 81 in 116 seconds and `--operator-grant` with 63 in 89 seconds, each run's busiest minute being 43 requests (the
 script allows 55, the stand-in limiter 60), the runs 90 seconds apart. The database afterwards held one grant of `remote.view` (the
 `AdminGrant` source, the reference `hosted-proof-<time>:remote.view`, ending just under 24 hours after it began), one `compensation`

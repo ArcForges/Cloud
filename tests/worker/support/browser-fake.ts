@@ -14,8 +14,9 @@
 // The operations pages (the operator grant) are as strict as the center's: only an operator reaches them, the step-up evidence is
 // single use and bound to the target of the review it was proved for, a repeated command is answered by its stored result before any
 // evidence is looked at (and only for the very same request), every 4xx document is logged by the browser as a console error, and
-// a request the edge limiter refused (429) never reaches the center. Each FakeOptions switch below breaks one of these guards, so
-// that a test can show the script notices.
+// a request the edge limiter refused (429) never reaches the center. Most FakeOptions switches below break one of these guards or one
+// wait of the script (the read-back and timing switches falsify a page or a report instead), so that a test can show the script
+// notices.
 // It is no evidence about the real center or a real browser; it checks the script's logic.
 //
 // WHERE THE STAND-IN IS NOT THE REAL CENTER (so that nobody reads it as the center's specification; none of these can hide a defect
@@ -28,6 +29,16 @@
 //     revoked-session and no authentication-epoch condition, and no test depends on them.
 //   - The review of the stand-in does not look at the source reference's uniqueness (the real Review does not either: the unique
 //     index refuses a second grant at the confirmation).
+//   - Order of the refusals: the real Grant applies its request check (the operator role, the policy, Normalize) BEFORE the
+//     transaction that consumes the evidence, so a request that is both invalid and unproven is a 400 and asks for no step-up; the
+//     stand-in looks the evidence up first and answers 403 (the script never sends an invalid request).
+//   - A replay: the real Grant applies that same check before platform.Execute answers the stored result (the end must still lie in
+//     the future); the stand-in answers the stored result before it checks the request.
+//   - The real Review performs no read (Normalize: "It performs no read"), so a well-formed account that does not exist is refused
+//     only at the confirmation (not_found, with the consumption rolled back); the stand-in's review refuses it with a 400.
+//   - Audit of the other refusals: the real Grant audits every refusal it makes (the reasons invalid_argument, account_not_found,
+//     already_granted, a reused command, ...; only not_operator is written once per window and account); the stand-in audits only
+//     step_up_required and not_operator and writes nothing for its 400s.
 //   - The texts of the 400 pages ("The form is incomplete.", "That command was already used for another request.", ...) are the
 //     stand-in's own; the real texts are in center/internal/pages/messages.go. The script reads only the heading and the sentence of
 //     the step-up refusal, and the guard table pins one invented text ("source reference was already used") as a stand-in's.

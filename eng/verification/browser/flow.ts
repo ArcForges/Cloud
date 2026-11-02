@@ -1147,7 +1147,7 @@ export async function runOperatorGrant(world: World): Promise<void> {
     );
     const problems = await a.cookieChecks();
     expect(problems.length === 0, `The session cookie: ${problems.join(", ")}.`);
-    // The account has no identifier on any page; the center's own session route names it.
+    // No account page lists the identifier; the center's own session route names it.
     const reply = await a.tab.fetchJson(`${basePath(world)}${sessionBootstrap}`);
     const body = reply.body as {
       csrfToken?: unknown;
