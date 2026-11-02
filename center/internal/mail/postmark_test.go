@@ -262,8 +262,8 @@ func TestPostmarkReadsAtMostTheCapOfAnAnswer(t *testing.T) {
 			t.Errorf("an endless body held the send for %v: it was read to the deadline", elapsed)
 		}
 		time.Sleep(100 * time.Millisecond) // let the stand-in notice the closed connection
-		if written := rig.server.BytesWritten(); written > maxPostmarkResponse+16<<20 {
-			t.Errorf("the server could write %d bytes of an endless answer", written)
+		if written := rig.server.BytesWritten(); written >= mailtest.FloodLimit/2 {
+			t.Errorf("the server could write %d of %d bytes of an endless answer: the reader cap is gone", written, mailtest.FloodLimit)
 		}
 	})
 	t.Run("length check", func(t *testing.T) {

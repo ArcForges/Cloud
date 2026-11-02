@@ -27,7 +27,8 @@ type PostmarkReply struct {
 	// StallAfterBody sends the status line, headers and the complete success body, and then holds the request open (the body
 	// never ends, as when the connection hangs before the final chunk).
 	StallAfterBody bool
-	// Flood answers with an endless body of the status, counted by BytesWritten.
+	// Flood answers with a body that is endless for any client with a cap (it stops at FloodLimit bytes and then holds the request
+	// open), counted by BytesWritten.
 	Flood bool
 }
 
@@ -79,7 +80,7 @@ func (p *PostmarkServer) Requests() []PostmarkRequest {
 	return append([]PostmarkRequest(nil), p.requests...)
 }
 
-// BytesWritten is how many body bytes the stand-in wrote for the Flood reply.
+// BytesWritten is how many body bytes the stand-in wrote for the Flood reply (at most FloodLimit).
 func (p *PostmarkServer) BytesWritten() int64 { return p.written.Load() }
 
 func (p *PostmarkServer) handle(w http.ResponseWriter, r *http.Request) {
@@ -110,13 +111,17 @@ func (p *PostmarkServer) handle(w http.ResponseWriter, r *http.Request) {
 	case reply.Flood:
 		w.WriteHeader(status)
 		chunk := []byte(strings.Repeat(" ", 64<<10))
-		for r.Context().Err() == nil {
+		for r.Context().Err() == nil && p.written.Load() < FloodLimit {
 			n, err := w.Write(chunk)
 			p.written.Add(int64(n))
 			if err != nil {
 				return
 			}
 		}
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
 	case reply.StallBody, reply.StallAfterBody:
 		w.WriteHeader(status)
 		if reply.StallAfterBody {

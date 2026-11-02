@@ -16,6 +16,13 @@ import (
 	"time"
 )
 
+// FloodLimit is how many bytes the endless-answer misbehaviours (SMTPOptions.FloodGreeting, PostmarkReply.Flood) write before they
+// stop and wait for the client. A test asserts that the bytes written stay below half of it with the client's cap in place; a client
+// without a cap reads all of it. The amount a server manages to write before it notices a closed client depends on the host's
+// socket buffers (about 0.4 MiB on Windows, 0.3 to 12 MiB on Linux), so the assertion is relative to this fixed total, never to the
+// cap and never an absolute number tuned on one host.
+const FloodLimit = 64 << 20
+
 // SMTPOptions choose how an SMTP test server behaves. The zero value (apart from the certificate) is a well-behaved submission
 // server: STARTTLS offered, AUTH PLAIN and LOGIN advertised only over TLS, every command accepted.
 type SMTPOptions struct {
@@ -137,7 +144,7 @@ func (s *SMTPServer) Connections() int {
 	return s.conns
 }
 
-// BytesWritten is how many bytes the server wrote to its clients, counted for the endless greeting only.
+// BytesWritten is how many bytes the server wrote to its clients, counted for the endless greeting only (at most FloodLimit).
 func (s *SMTPServer) BytesWritten() int64 { return s.written.Load() }
 
 func (s *SMTPServer) serve(raw net.Conn) {
@@ -158,13 +165,15 @@ func (s *SMTPServer) serve(raw net.Conn) {
 		if n, err := raw.Write([]byte("220-")); err == nil {
 			s.written.Add(int64(n))
 		}
-		for {
+		for s.written.Load() < FloodLimit {
 			n, err := raw.Write(chunk)
 			s.written.Add(int64(n))
 			if err != nil {
 				return
 			}
 		}
+		_, _ = io.Copy(io.Discard, raw) // the limit is reached: wait for the client (or the session deadline)
+		return
 	}
 	conn := raw
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{opts.Certificate}, MinVersion: tls.VersionTLS12}

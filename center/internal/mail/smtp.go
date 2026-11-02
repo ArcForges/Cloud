@@ -22,7 +22,8 @@ import (
 type SMTPMode int
 
 const (
-	// StartTLS connects in clear text, requires the STARTTLS extension and upgrades before anything else is sent (ports 587, 2587, 25).
+	// StartTLS connects in clear text, requires the STARTTLS extension and upgrades before AUTH, the envelope or the message is sent;
+	// only the greeting and EHLO (which names the From domain) travel in clear text (ports 587, 2587, 25).
 	StartTLS SMTPMode = iota
 	// ImplicitTLS wraps the whole connection in TLS (ports 465, 2465).
 	ImplicitTLS
@@ -41,7 +42,8 @@ type SMTPOptions struct {
 	// From is the envelope and header sender and FromName its optional display name; both are validated again at every send.
 	From     string
 	FromName string
-	// HelloName is the EHLO name; the domain of From when empty (never "localhost" and never the container's host name).
+	// HelloName is the EHLO name. When empty it defaults to the domain of From, not to "localhost" and not to the host name of the
+	// machine.
 	HelloName string
 	// Timeout bounds the whole conversation; DefaultTimeout when not positive.
 	Timeout time.Duration

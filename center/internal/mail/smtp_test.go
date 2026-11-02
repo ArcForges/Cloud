@@ -467,8 +467,8 @@ func TestSMTPReadsAtMostTheCapFromAServer(t *testing.T) {
 		t.Errorf("an endless reply line held the send for %v (timeout %v): it was read to the deadline", elapsed, failure.Timeout)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if written := rig.server.BytesWritten(); written > maxServerBytes+16<<20 {
-		t.Errorf("the server could write %d bytes of an endless line", written)
+	if written := rig.server.BytesWritten(); written >= mailtest.FloodLimit/2 {
+		t.Errorf("the server could write %d of %d bytes of an endless line: the cap is gone", written, mailtest.FloodLimit)
 	}
 }
 

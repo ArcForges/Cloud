@@ -415,8 +415,8 @@ func TestSMTPServerMisbehavioursDoWhatTheyNameAndEndWithTheClient(t *testing.T) 
 					break
 				}
 			}
-			if before < 1<<20 {
-				t.Errorf("the server wrote %d bytes", before)
+			if before < 1<<20 || before >= FloodLimit/2 {
+				t.Errorf("the server wrote %d bytes after a client that read 1 MiB and left", before)
 			}
 			if server.BytesWritten() != before {
 				t.Error("the flood does not stop when the client goes away")
@@ -527,7 +527,7 @@ func TestPostmarkStandInMisbehaviours(t *testing.T) {
 			last = server.BytesWritten()
 			time.Sleep(100 * time.Millisecond)
 		}
-		if last < 256<<10 || server.BytesWritten() != last {
+		if last < 256<<10 || last >= FloodLimit/2 || server.BytesWritten() != last {
 			t.Errorf("flood wrote %d then %d", last, server.BytesWritten())
 		}
 	})
