@@ -519,6 +519,34 @@ The acceptance environment (`proof.arcforges.com`) is created by the owner's boo
    - **Directories.** The bootstrap and credential directories are made private only when they are new, empty or hold nothing but
      the tool's own files; a directory someone else filled (`--dir .` in a checkout, a profile folder) is refused untouched, because
      the Windows grant would strip every other entry of it and of what it holds. Name a new directory.
+   - **The operator grant (`--operator-grant`).** After the owner exists and the `operations` surface is on,
+     `node eng/verification/browser/acceptance.ts --operator-grant` signs in with the saved credential and drives the
+     [operations page](center-entitlement.md#the-operations-page) end to end: the page is closed without a session (the `303`); the
+     sign-in returns to the operator page; a request for `remote.view` for one day to the owner's own account (the self-approval
+     path, with a justification) is reviewed, which writes nothing; a step-up that was proved for another request is refused with
+     `403`; the same request is reviewed again and confirmed with the passkey (the done page names the term and the entitlement
+     version); the same form again says "This grant had already been issued; nothing new was written." with the same term and
+     version; a step-up that was already used is refused with `403`; sign-out closes the page again. Four of its seven steps use the
+     MOCKED authenticator (a virtual one in a real browser) and three none; the catalogue is the development fixture (**MOCKED**,
+     illustrative: no page shows a price). No account page lists the account identifier (the operations pages only echo what was
+     typed), so the form field is filled from the center's session route (`GET /session/v1/web/bootstrap`) read from inside the page; the
+     identifier, like the request token, goes only to the redactor: it is in no output and no report. The mode needs the saved credential (without it the run exits 2 and starts no browser), never reads the
+     bootstrap file, refuses to combine with `--real-authenticator`, is headless unless `--headed` is given, registers no passkey
+     (so there is nothing to prune or remove) and writes `artifacts/browser-operator-grant.json` unless `--report` names another
+     file, so that it does not overwrite the acceptance's report; its facts are, among others, `entitlementVersion`,
+     `grantedFeatures`, `requestedDays` (what the form was asked for), `grantedHours` (the hours from the run to the end the done
+     page showed, read back: the run fails unless it is between 23 and 25), `credentialWrites`, `requestsSent` and
+     `requestsBusiest60s`. `--help` prints the usage. **Exit codes:** 0 passed, 1 failed, 2 not
+     started (usage, a missing browser, credential or bootstrap file). **Keep at least 90 seconds between two runs against the
+     hosted environment** (the edge counts the requests of the machine over 60 seconds; a run sends about sixty requests in
+     about a minute and a half under the same budget as the others: 63, the busiest minute 43, in the rehearsal below), and run it
+     after the returning acceptance has passed. Every step starts from a navigation, so a
+     429 that meets it before it changed anything starts it again after the advised time (at most three attempts); after a change
+     (the sign-in, the grant, the sign-out) the step fails and says so. Chromium logs a console error for every 4xx document and a step fails on
+     any console error, so the two steps that provoke a `403` say so (`Tab.expectRefusal`, one expectation at a time) and wait until
+     the browser has reported it; a refusal nobody expected fails its step. That the review writes nothing is, for the browser, the
+     driver's classification of its request (it is not counted as a change); the center's side is proved by the Go tests. The
+     grant ends 24 hours after the run; the account has no entitlement again after that, and nothing is revoked.
 4. **Afterwards** dispatch without the two inputs: the Worker then starts the center without a bootstrap, and the spent or expired
    values leave the configuration.
 
@@ -593,6 +621,35 @@ browser. This is how the flow was run for real before the proof environment is d
    `node eng/verification/browser/acceptance.ts --base-url http://localhost:18080 --chromium ~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome --state-dir <new directory> --bootstrap-file <directory of step 3>/owner-bootstrap.json --report <file> --requests-per-minute 0`.
    Stop and remove the container afterwards.
 
+**The same in official-hosted mode.** Before the operations surface was deployed, the whole script (the enrolment, the returning run
+and `--operator-grant`) ran in a real Chromium against a center in `official-hosted` mode on one machine, which is the closest
+local evidence to the hosted environment (REAL browser, center binary, PostgreSQL with verified TLS and the Worker's page code; the
+Cloudflare platform is replaced by a stub, the authenticator and the catalogue are MOCKED). What that mode demands, and the recipe
+in words (the scripts are coordinator tooling, not part of the repository):
+
+- Steps 2 and 3 of the recipe above apply, with `official-hosted` in place of `self-hosted` and the TLS query on both
+  database URLs. The public base URL must be https with a host that can be a relying party (`https://localhost:<port>/api`), and both
+  database URLs should say `sslmode=verify-full` and `channel_binding=require` (no other key but `connect_timeout`; there is no `sslrootcert` in a
+  URL, so the throwaway CA is named by the `PGSSLROOTCERT` environment variable). The PostgreSQL 18 container of the image
+  `eng/center.py` pins runs with `-c ssl=on` and a server certificate for `localhost` from a throwaway CA; its key must be owned by
+  uid 70 in a directory of mode 755 (a directory of mode 700 gives "could not load server certificate: Permission denied").
+- The center needs `ARCFORGES_CENTER_PLAN_CONFIGURATION=development-fixtures` and
+  `ARCFORGES_CENTER_SURFACES=identity,pages,operations` for the operator page, and
+  `ARCFORGES_CENTER_CLIENT_IP_HEADER=x-arcforges-client-ip`, which names the request header that carries the client address on every
+  request; only the Worker sets that header. A bare center behind a TLS
+  proxy is therefore not enough: the pages also need the Worker's contract (the header, the `Origin` check of every POST, the
+  `/api` prefix, the cookie and reply rules).
+- The edge is the repository's own `routeRequest` (`worker/router.ts`, the page handler included) run by Node behind an HTTPS
+  listener, with a stand-in `CLOUD_CONTAINER` that forwards to the center with `redirect: "manual"` and the client address, and
+  stand-ins of the two rate limiters that count 60 requests per 60 seconds per client as the hosted ones do.
+- Chromium trusts the edge's certificate without a system change and without touching the script: the pinned binary is started by a
+  wrapper named `chrome`, inside a scratch directory `.../chromium-1243/chrome-linux64/` (the script's path guard accepts it), that
+  adds `--ignore-certificate-errors-spki-list=<hash of the edge certificate's public key>`.
+- Run `acceptance.ts` with `--base-url https://localhost:<port>/api`, `--chromium <wrapper>`, `--state-dir <new directory>`,
+  `--bootstrap-file <file>` and `--report <file>` as the first run, as a returning run and with `--operator-grant`, one after another
+  and at least 90 seconds apart, because the stand-in limiter, like the hosted one, counts per client over 60 seconds (two runs back
+  to back met its 429s). The default request budget is kept, so the rehearsal also shows that a run stays under the limit.
+
 **What stays pending.** AR-23 (a real Windows Hello authenticator) is the only acceptance item that needs a person; its procedure is
 [`ar-23-owner-procedure.md`](ar-23-owner-procedure.md). The browser acceptance of the pages against the proof environment is
 post-merge evidence. Against a center on this machine it has run for real: see the pull request's evidence (REAL browser, Chromium
@@ -616,7 +673,8 @@ row. Both commands lock the account's `identity.user` row (`FOR UPDATE`) before 
 `grant-operator` runs for one account leave one live row (the second finds it and is refused) and a `revoke-operator` is ordered
 against an operator grant in flight (the grant takes the same lock before it reads the role). Both commands append
 `identity.operator.granted` or `.revoked` (actor `operator:cli`) in the transaction that writes the row, with the digest and length of
-the reason and never the reason. The owner's standing comes from the bootstrap and is not ended by `revoke-operator`. The operator
+the reason and never the reason. The owner's standing comes from the bootstrap and is not ended by `revoke-operator`; the acceptance environment has exactly one
+account, the owner, so the hosted proof of the operator grant needs neither command. The operator
 grant checks the role again in its own transaction, after taking that lock, so a revocation that committed in between is honoured
 and one that is still open is waited for. An account that is restricted, suspended or deleted is no operator while it is (the row is
 untouched; the role is live again with the account), like any other account it reaches only security operations.
@@ -784,15 +842,17 @@ time rounded up to the second plus the limiter's 60-second period) before it is 
 `ARCFORGES_CENTER_CLIENT_IP_HEADER`; surfaces take effect only with `ARCFORGES_HELLO_RUNTIME=go`.
 
 Production carries `"FLAGSHIP_SURFACES": ""` (pinned by `tests/worker/center-config.test.ts`: production stays dark, no page is
-served there); the acceptance environment (`proof`) carries `identity,pages` and `ALLOWED_ORIGIN` = the origin of its public base
+served there); the acceptance environment (`proof`) carries `identity,pages,operations` and `ALLOWED_ORIGIN` = the origin of its public base
 URL. The `identity`, `pages` and `operations` surfaces exist (the last is described below); AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
 after AF-PLAT-01's retention sweeps exist ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)).
 
 The operator grant has a third surface, `operations`: the interim page `/operations/grant` of the operator grant ([center
 entitlement](center-entitlement.md#the-operations-page)). It needs `identity` and `pages`, exists only in official-hosted mode, is
 never a default of either mode (a list that names it on a self-hosted center, or without the other two, refuses to start), and
-is in no checked-in environment: production carries none, and the acceptance environment (`proof`) keeps `identity,pages` until the
-coordinator enables `operations` for the hosted proof of the grant.
+is enabled in one checked-in environment only: the acceptance environment (`proof`) carries `identity,pages,operations` (with the
+development fixture catalogue) for the hosted proof of the grant, whose run is the [post-deploy
+checklist](center-entitlement.md#post-deploy-checklist) and whose script is the `--operator-grant` mode of [the
+acceptance](#proof-bootstrap-and-acceptance); production carries none, pinned by the same tests as before.
 
 ### Runbooks
 

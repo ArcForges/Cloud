@@ -42,7 +42,7 @@ The production Container runs the Go center (`/app/arcforges-center`, [center](c
 
 The `identity` surface (AF-CTR-03, [accounts, sessions and devices](center-identity.md#surface-switch)) is switched by
 `FLAGSHIP_SURFACES`: production carries `""` (no surface; Hello only, so no account page is served there), the acceptance
-environment `identity,pages` with `ALLOWED_ORIGIN` set to its own origin. The `pages` surface ([account pages](center-identity.md#account-pages-and-browser-sessions))
+environment `identity,pages,operations` with `ALLOWED_ORIGIN` set to its own origin. The `pages` surface ([account pages](center-identity.md#account-pages-and-browser-sessions))
 is switched by the same flag, needs `identity`, and is forwarded by the Worker's [page handler](cloud-ingress.md#page-routes-plt-1);
 a disabled one is a 404 at the edge. The Worker passes the parsed list to the Container as `ARCFORGES_CENTER_SURFACES` and always
 `ARCFORGES_CENTER_CLIENT_IP_HEADER`; a disabled surface is answered at the edge without waking the Container. Both environments bind
@@ -85,11 +85,14 @@ Windows host after the deployment; it is post-merge evidence, not a CI check.
 The Container receives `ARCFORGES_CENTER_PLAN_CONFIGURATION` unchanged: production carries none (no catalogue, no gated feature
 available, no operator grant), and the acceptance environment `development-fixtures` (`tests/worker/proof-deploy.test.ts` pins both).
 The Worker passes no other variable of this part: in particular `ARCFORGES_CENTER_DISABLED_FEATURES`, a self-hosted operator's limit
-that the hosted center refuses, is never handed over (`tests/worker/container-classes.test.ts`, PLT-18). The `operations` surface is in
-no checked-in environment: production keeps `FLAGSHIP_SURFACES` empty and the acceptance environment `identity,pages`; enabling
-`operations` for the hosted proof of the operator grant, and giving the proving account the operator role with
-`arcforges-center admin grant-operator` (the migration role's path, like `admin revoke-sessions`; it works on the database of the migration URL unless `ARCFORGES_CENTER_DATABASE_NAME=arcforges_acceptance` names the acceptance one, which the checklist's commands do), are the coordinator's steps after
-the deployment ([post-deploy checklist](center-entitlement.md#post-deploy-checklist)). The deployment's migration gate applies
+that the hosted center refuses, is never handed over (`tests/worker/container-classes.test.ts`, PLT-18). The `operations` surface is
+enabled in the acceptance environment only: production keeps `FLAGSHIP_SURFACES` empty (and no catalogue), the acceptance environment
+carries `identity,pages,operations` with the development fixture catalogue (**MOCKED**, illustrative), and
+`tests/worker/center-config.test.ts` pins both. The proof owner, the bootstrap owner, counts as operator through
+`identity.bootstrap`, so no `arcforges-center admin grant-operator` (the migration role's path) and no migration-role credential is
+needed for the hosted proof of the operator grant; the hosted run (the `--operator-grant` mode of [the
+acceptance](center-identity.md#proof-bootstrap-and-acceptance), after the regression run, with its pause) is the coordinator's step
+after the deployment ([post-deploy checklist](center-entitlement.md#post-deploy-checklist)). The deployment's migration gate applies
 migration `0003` to the production database while production is dark, and to the acceptance database.
 
 ### Start environment after a deployment
@@ -122,7 +125,7 @@ what the deployed version starts the center with, computed from its configuratio
 `npm run test:live` compares the production health with `artifacts/deployment.json`, and the local Worker check
 (`npm run test:worker`) compares it with the surfaces the candidate's Worker forwards. CI makes no such request
 ([validation policy](validation-policy.md)), so for both environments the post-deploy acceptance reads `/api/healthz`
-`center.surfaces` and compares it with the deployment evidence (`none` on production, `identity,pages` on proof).
+`center.surfaces` and compares it with the deployment evidence (`none` on production, `identity,pages,operations` on proof).
 
 A rollback to a Worker version from before AF-CTR-03 part A1b (`wrangler rollback` or the dashboard, which reach only the
 immediately previous version) brings back a Container class without the start digest. The running center keeps the start

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The acceptance flow of the center's account pages (AF-CTR-03 A2), written against the small browser interface of driver.ts.
 //
-// Two modes:
+// Three modes:
 //   - runAcceptance: Chromium's virtual authenticator (MOCKED hardware in a real browser). The first run enrolls the proof owner
 //     through the bootstrap and saves the credential; every later run signs in with the saved credential. Each run signs in, steps
 //     up, registers a second passkey, lists sessions and devices, ends a session from a second browser, removes the second passkey
@@ -9,6 +9,10 @@
 //   - runRealAuthenticator (AR-23): signs in with the saved virtual credential, removes the virtual authenticator, lets the
 //     owner's Windows Hello create a new passkey, signs out and signs in with Windows Hello, and shows from the pages' own
 //     "last used" times that Windows Hello (not the virtual credential) made the second sign-in.
+//   - runOperatorGrant (AF-CTR-03 B): the same saved virtual credential signs in again (MOCKED hardware in a real browser) and drives
+//     the operations page of the center end to end: closed without a session, sign-in that returns to it, a request reviewed
+//     without a write, a step-up that belongs to another request refused, the grant confirmed, the same form again (replay), a
+//     step-up that was used refused, sign-out. It registers no passkey, so there is nothing to remove afterwards.
 //
 // The saved credential is written before every POST that carries a new credential or an assertion leaves the browser, so a failed
 // run never loses the owner's key; nothing in a log, a report or an error message is a token, a key or a cookie value.
@@ -24,7 +28,18 @@ import {
   withoutTransport,
 } from "./credentials.ts";
 import type { Authenticator, Browser, CookieView, Navigation, Tab } from "./driver.ts";
-import { ids, pages, persistBefore, selectors, sessionCookie } from "./selectors.ts";
+import {
+  confirmFields,
+  forms,
+  ids,
+  operations,
+  pages,
+  persistBefore,
+  selectors,
+  sessionBootstrap,
+  sessionCookie,
+  stepUpAttribute,
+} from "./selectors.ts";
 
 export const mockedLabel = "MOCKED hardware: Chromium virtual authenticator in a real browser";
 export const realLabel = "REAL hardware: Windows Hello";
@@ -68,7 +83,7 @@ export interface StepRecord {
 }
 
 export interface Report {
-  mode: "enroll" | "returning" | "real-authenticator";
+  mode: "enroll" | "returning" | "real-authenticator" | "operator-grant";
   baseUrl: string;
   startedAt: string;
   finishedAt?: string;
@@ -968,4 +983,366 @@ export async function runRealAuthenticator(world: World): Promise<void> {
   await step(world, "sign out", plainLabel, async () => {
     await actor.signOutHere();
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The operator grant (AF-CTR-03 B: the hosted proof of the operations surface)
+
+/** The features of the development fixture catalogue (MOCKED, illustrative), in the order the operator form lists them. */
+export const fixtureFeatures = [
+  "center.nodes",
+  "center.execute",
+  "remote.view",
+  "remote.control",
+  "center.mcp",
+  "push",
+] as const;
+/** The one feature the run grants, and for how long it asks: the smallest write, which should end 24 hours after the run. */
+export const grantedFeature = "remote.view";
+export const requestedDays = 1;
+/** The ends the pages may show for a grant of one day (hours from now, with room for the minute and the clocks of two machines). */
+const endsWindowHours = { min: 23, max: 25 } as const;
+const endsShape = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}) UTC$/u;
+const uuidShape = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const stepUpRefusal = "This change needs a passkey check first.";
+
+/**
+ * The hours from `now` to the end a page shows ("2026-11-03 04:10 UTC", to the minute), or undefined for any other text. The days
+ * the form is asked for are only what is typed: this reads back what the center will grant.
+ */
+export function hoursUntilEnds(ends: string | undefined, now: Date): number | undefined {
+  const found = endsShape.exec(ends ?? "");
+  if (found === null) return undefined;
+  const [, year, month, day, hour, minute] = found.map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const end = Date.UTC(year, month - 1, day, hour, minute);
+  return Number.isFinite(end) ? (end - now.getTime()) / 3_600_000 : undefined;
+}
+
+/** The hours a page's end lies ahead, which must be about one day. */
+function expectOneDay(world: World, ends: string | undefined, what: string): number {
+  const hours = hoursUntilEnds(ends, world.now());
+  expect(
+    hours !== undefined && hours >= endsWindowHours.min && hours <= endsWindowHours.max,
+    `${what} does not end the grant about a day from now.`,
+  );
+  return hours;
+}
+
+/** The same idempotency key with its last digit changed: another command, so that no stored result answers it. */
+export function anotherCommand(command: string): string {
+  return command.replace(/.$/u, command.endsWith("0") ? "1" : "0");
+}
+
+/** The terms and values of the page's description list, by term. */
+async function descriptions(actor: Actor): Promise<Map<string, string>> {
+  const terms = await actor.tab.texts(operations.terms);
+  const values = await actor.tab.texts(operations.details);
+  expect(terms.length === values.length, "The page's terms and values are not in pairs.");
+  return new Map(terms.map((term, index) => [term, values[index] ?? ""]));
+}
+
+/** The hidden fields of the confirmation form, in order: the review's normalized request, as the browser would submit it. */
+async function confirmationFields(actor: Actor): Promise<[string, string][]> {
+  const names = await actor.tab.attributes(operations.confirmHidden, "name");
+  const values = await actor.tab.attributes(operations.confirmHidden, "value");
+  expect(
+    names.join(",") === confirmFields.join(",") && values.length === names.length,
+    "The confirmation form's hidden fields changed.",
+  );
+  return names.map((name, index) => [name ?? "", values[index] ?? ""]);
+}
+
+/**
+ * Waits for the document a form submission leads to: one the main frame received after `previous` (a page of the same address and
+ * heading is told from its predecessor by this), that shows what `ready` says, or that the edge limiter refused with a 429. The new
+ * document's status and headers are the result.
+ */
+export async function awaitDocument(
+  world: World,
+  tab: Tab,
+  previous: Navigation | null,
+  what: string,
+  ready: () => Promise<boolean>,
+): Promise<Navigation> {
+  await until(world, what, async () => {
+    const current = tab.document();
+    // A document the edge limiter refused (429) never becomes the page the step waits for: the caller's check of the reply fails at
+    // once, and the step (which saw the 429) starts again, instead of waiting out the timeout.
+    return current !== null && current !== previous && (current.status === 429 || (await ready()));
+  });
+  const received = tab.document();
+  expect(received !== null, `${what}: the browser received no document.`);
+  // The result of a form submission is not a navigation the step waited the load of. A step owns the assets of the page it waited
+  // for: the page is loaded (its stylesheet and script asked for and answered) before the step ends, so that a 429 on one of them
+  // is seen, and judged, inside this step and not blamed on the next one. A refused document (429) has no page to load.
+  if (received.status !== 429) await tab.waitForSelector(selectors.heading, world.timeoutMs);
+  return received;
+}
+
+/** What a reply of the center's pages must look like: the status, and the security headers of the generated table. */
+function expectReply(reply: Navigation, status: number, what: string): void {
+  expect(reply.status === status, `${what} answered ${reply.status}, not ${status}.`);
+  const missing = headerProblems(reply.headers);
+  expect(missing.length === 0, `${what} lacks or changes security headers: ${missing.join(", ")}.`);
+  expect(reply.headers["content-type"]?.startsWith("text/html") === true, `${what} is not HTML.`);
+}
+
+export async function runOperatorGrant(world: World): Promise<void> {
+  world.report.mode = "operator-grant";
+  world.write(
+    `Operator grant on ${world.baseUrl}: the saved owner credential signs in (MOCKED hardware) and the operations page grants ${grantedFeature} for ${requestedDays} day to the own account`,
+  );
+  expect(world.store.exists(), "There is no saved owner credential; run the acceptance first.");
+  expectSavedCenter(world);
+  world.store.prepare();
+  const stamp = world.now().toISOString().replace(/[-:T]/gu, "").slice(0, 14);
+  // The source reference is unique per run (the center refuses a second grant with the same one), and the reason says what this is.
+  const sourceRef = `hosted-proof-${stamp}`;
+  const reason = `hosted proof of the operator grant ${stamp}`;
+  const justification = "the owner is the only account of the acceptance environment";
+  const confirmAction = `${basePath(world)}${forms.operationsConfirm}`;
+  let account = "";
+
+  const a = await step(
+    world,
+    "the operator page is closed without a session",
+    mockedLabel,
+    async () => {
+      const actor = await Actor.open(world, "owner");
+      await actor.tab.goto(pageUrl(world, pages.operationsGrant));
+      expect(
+        new URL(actor.tab.url()).pathname === pagePathname(world, pages.signIn) &&
+          actor.tab.url().includes("#return="),
+        "The operator page without a session does not lead to the sign-in page.",
+      );
+      expect(
+        (await actor.tab.text(selectors.heading)) === "Sign in to ArcForges",
+        "The operator page without a session does not show the sign-in page.",
+      );
+      return actor;
+    },
+  );
+
+  await step(world, "sign in with the passkey and read the account", mockedLabel, async () => {
+    // A step starts from a navigation, so that a 429 can start it again; the sign-in page then returns to the page it came from.
+    await a.tab.goto(pageUrl(world, pages.operationsGrant));
+    expect(
+      new URL(a.tab.url()).pathname === pagePathname(world, pages.signIn),
+      "The operator page without a session does not lead to the sign-in page.",
+    );
+    await a.enabled(selectors.signIn);
+    await a.tab.click(selectors.signIn);
+    // The sign-in follows the return fragment: it ends on the operator page, not on the passkeys.
+    await a.tab.waitForPath(pagePathname(world, pages.operationsGrant), world.timeoutMs);
+    expect(
+      (await a.tab.text(selectors.heading)) === "Operator grant",
+      "The sign-in did not return to the operator page.",
+    );
+    const problems = await a.cookieChecks();
+    expect(problems.length === 0, `The session cookie: ${problems.join(", ")}.`);
+    // No account page lists the identifier; the center's own session route names it.
+    const reply = await a.tab.fetchJson(`${basePath(world)}${sessionBootstrap}`);
+    const body = reply.body as {
+      csrfToken?: unknown;
+      authenticated?: unknown;
+      session?: { userId?: unknown };
+    } | null;
+    if (typeof body?.csrfToken === "string") world.redactor.add(body.csrfToken);
+    expect(
+      reply.status === 200 && body?.authenticated === true,
+      "The session route does not show a signed-in session.",
+    );
+    const userId = body?.session?.userId;
+    expect(typeof userId === "string" && uuidShape.test(userId), "The session names no account.");
+    account = userId as string;
+    world.redactor.add(account);
+  });
+
+  /** Fills the request form, submits it and checks the review: nothing is written by it. */
+  const review = async (): Promise<void> => {
+    await a.visit(pages.operationsGrant, "Operator grant");
+    const boxes = await a.tab.attributes(operations.featureBoxes, "name");
+    expect(
+      boxes.filter((name) => name !== "all").join(",") ===
+        fixtureFeatures.map((key) => `feature-${key}`).join(","),
+      "The form does not list the features of the development catalogue.",
+    );
+    await a.tab.setValue(operations.account, account);
+    await a.tab.click(operations.feature(grantedFeature));
+    await a.tab.setValue(operations.days, String(requestedDays));
+    await a.tab.setValue(operations.reason, reason);
+    await a.tab.setValue(operations.sourceRef, sourceRef);
+    await a.tab.setValue(operations.selfApproval, justification);
+    const previous = a.tab.document();
+    await a.tab.click(operations.reviewSubmit);
+    const reply = await awaitDocument(
+      world,
+      a.tab,
+      previous,
+      "the review page",
+      async () => (await a.tab.text(selectors.heading)) === "Review the operator grant",
+    );
+    expectReply(reply, 200, "The review");
+    await a.tab.waitForSelector(operations.confirmForm, world.timeoutMs);
+    expect(
+      (await a.tab.attributes(operations.confirmForm, stepUpAttribute))[0] ===
+        "center.operatorGrant",
+      "The review does not ask for the operator grant's step-up.",
+    );
+    expect(
+      /^[0-9a-f]{64}$/u.test(
+        (await a.tab.attributes(operations.confirmForm, "data-step-up-target"))[0] ?? "",
+      ),
+      "The review names no step-up target.",
+    );
+    const shown = await descriptions(a);
+    expect(
+      shown.get("Account") === `${account} (your own account)`,
+      "The review does not show the grant to the own account.",
+    );
+    expect(
+      shown.get("Features") === grantedFeature,
+      "The review does not show the chosen feature.",
+    );
+    expect(shown.get("Reason") === reason, "The review shows another reason.");
+    expect(
+      shown.get("Source reference") === sourceRef,
+      "The review shows another source reference.",
+    );
+    expectOneDay(world, shown.get("Ends"), "The review");
+  };
+
+  await step(
+    world,
+    "review a grant (nothing is written), then confirm with a step-up that belongs to another request (403)",
+    mockedLabel,
+    async () => {
+      const changes = a.tab.changes();
+      await review();
+      expect(a.tab.changes() === changes, "The review changed something.");
+      // The page proves the step-up for the target it names. A reason changed after the review is another request: the evidence
+      // does not fit it and the center refuses (the console error of that 4xx document is the one this step expects).
+      const previous = a.tab.document();
+      await a.tab.setValue(operations.confirmField("reason"), `${reason}!`);
+      a.tab.expectRefusal(403);
+      await a.tab.click(operations.confirmSubmit);
+      const refused = await awaitDocument(
+        world,
+        a.tab,
+        previous,
+        "the refusal page",
+        async () => (await a.tab.text(selectors.heading)) === "This is not allowed",
+      );
+      expectReply(refused, 403, "A step-up for another request");
+      expect(
+        ((await a.tab.text(selectors.errorText)) ?? "").startsWith(stepUpRefusal),
+        "The refusal does not ask for a passkey check.",
+      );
+      await until(world, "the refusal to be reported", async () => a.tab.refusalsPending() === 0);
+      expect(a.tab.changes() === changes, "The refused confirmation changed something.");
+    },
+  );
+
+  let fields: [string, string][] = [];
+  let written = new Map<string, string>();
+  await step(
+    world,
+    "review again and confirm with the passkey: the grant is written",
+    mockedLabel,
+    async () => {
+      await review();
+      fields = await confirmationFields(a);
+      world.redactor.add(...fields.filter(([name]) => name === "csrf").map(([, value]) => value));
+      const previous = a.tab.document();
+      await a.tab.click(operations.confirmSubmit);
+      const reply = await awaitDocument(
+        world,
+        a.tab,
+        previous,
+        "the done page",
+        async () => (await a.tab.text(selectors.heading)) === "Operator grant issued",
+      );
+      expectReply(reply, 200, "The grant");
+      expect(
+        (await a.tab.text(operations.outcome)) === "The grant was written.",
+        "The grant was not written.",
+      );
+      written = await descriptions(a);
+      expect(written.get("Account") === account, "The done page names another account.");
+      expect(written.get("Features") === grantedFeature, "The done page names other features.");
+      // What the center granted, read back from its page: the run reports the hours it saw, not the days it asked for.
+      world.report.facts.grantedHours =
+        Math.round(expectOneDay(world, written.get("Ends"), "The done page") * 10) / 10;
+      expect(
+        uuidShape.test(written.get("Compensation term") ?? ""),
+        "The done page names no term.",
+      );
+      const version = written.get("Entitlement version") ?? "";
+      expect(/^[1-9][0-9]*$/u.test(version), "The done page names no entitlement version.");
+      world.report.facts.entitlementVersion = Number(version);
+    },
+  );
+
+  await step(world, "the same form again says it was already issued", plainLabel, async () => {
+    // A step starts from a navigation: after a 429 it begins again here, and the replay is harmless (it writes nothing).
+    await a.visit(pages.operationsGrant, "Operator grant");
+    const previous = a.tab.document();
+    await a.tab.submitForm(confirmAction, fields);
+    const reply = await awaitDocument(world, a.tab, previous, "the replay's page", async () =>
+      ((await a.tab.text(operations.outcome)) ?? "").startsWith(
+        "This grant had already been issued",
+      ),
+    );
+    expectReply(reply, 200, "The replay");
+    const again = await descriptions(a);
+    // The stored result answers: the same term, the same end, the same version.
+    expect(
+      [...written.entries()].every(([term, value]) => again.get(term) === value) &&
+        again.size === written.size,
+      "The replay does not show the grant that was written.",
+    );
+  });
+
+  await step(world, "a step-up that was used is refused (403)", plainLabel, async () => {
+    await a.visit(pages.operationsGrant, "Operator grant");
+    const previous = a.tab.document();
+    // Another command with the request the evidence was consumed for: no stored result answers it, and the evidence is gone.
+    const reuse = fields.map(([name, value]): [string, string] => [
+      name,
+      name === "command_id" ? anotherCommand(value) : value,
+    ]);
+    a.tab.expectRefusal(403);
+    await a.tab.submitForm(confirmAction, reuse);
+    const refused = await awaitDocument(
+      world,
+      a.tab,
+      previous,
+      "the refusal page",
+      async () => (await a.tab.text(selectors.heading)) === "This is not allowed",
+    );
+    expectReply(refused, 403, "A step-up that was used");
+    expect(
+      ((await a.tab.text(selectors.errorText)) ?? "").startsWith(stepUpRefusal),
+      "The refusal does not ask for a passkey check.",
+    );
+    await until(world, "the refusal to be reported", async () => a.tab.refusalsPending() === 0);
+  });
+
+  await step(world, "sign out", plainLabel, async () => {
+    await a.signOutHere();
+    await a.tab.goto(pageUrl(world, pages.operationsGrant));
+    expect(
+      new URL(a.tab.url()).pathname === pagePathname(world, pages.signIn),
+      "A signed-out browser still reaches the operator page.",
+    );
+  });
+  world.report.facts.grantedFeatures = grantedFeature;
+  world.report.facts.requestedDays = requestedDays;
 }
