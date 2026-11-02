@@ -61,6 +61,7 @@ import {
   newWorld,
   noFreeTransport,
   realLabel,
+  runOperatorGrant,
 } from "../../eng/verification/browser/flow.ts";
 import {
   confirmFields,
@@ -1846,6 +1847,40 @@ test("the operator-grant report has its own default name, and no output holds an
   assert(!text.includes(s.center.userId.slice(0, 8)));
 });
 
+test("the run teaches its redactor the account identifier, the request token, the cookie and the keys, so that a failure never prints them", async () => {
+  const s = await enrolled();
+  const world = newWorld({
+    browser: s.browser,
+    store: store(s),
+    baseUrl,
+    displayName: "Proof owner",
+    mode: "operator-grant",
+    now: () => new Date(s.center.clockSeconds * 1000),
+    sleep: async (milliseconds) => {
+      s.center.clockSeconds += Math.ceil(milliseconds / 1000);
+    },
+    write: (line) => s.stdout.push(line),
+    paceMs: 0,
+  });
+  await runOperatorGrant(world);
+  const handles = [...s.center.sessions.keys()];
+  const secrets = [
+    s.center.userId,
+    handles.map((handle) => s.center.csrf(handle)).at(-1) ?? "",
+    ...(s.browser.tabs.at(-1)?.secretsSeen ?? []),
+    ...store(s)
+      .load()
+      .credentials.flatMap((credential) => [credential.privateKey, credential.credentialId]),
+  ];
+  assert(secrets.length >= 5 && secrets.every((secret) => secret.length >= 8));
+  for (const secret of secrets)
+    assert.equal(
+      world.redactor.redact(`before ${secret} after`),
+      "before [redacted] after",
+      secret,
+    );
+});
+
 test("the operator-grant mode needs the saved credential, refuses to combine with AR-23, never reads the bootstrap, and its usage names the pause between runs", async () => {
   const none = scenario();
   assert.equal(await operatorRun(none), 2);
@@ -1930,16 +1965,12 @@ test("defect 2: a refused document is a console error in the browser, so a step 
 });
 
 test("defect 3: every step starts from a navigation, so a 429 at any of them starts it again, and one grant is written", async () => {
-  // The edge limiter answers the navigation to the operator form of each of the steps 3 to 6 once (the first navigations of the
-  // run are without a session and are not counted).
-  for (const [skip, step] of [
-    [0, 2],
-    [1, 3],
-    [2, 4],
-    [3, 5],
-  ] as const) {
-    const s = await enrolled({ limitOperatorForm: { skip, times: 1, retryAfter: 5 } });
-    assert.equal(await operatorRun(s), 0, `navigation ${skip}: ${s.stderr.join("\n")}`);
+  // The edge limiter answers the navigation to the operator form of each step once: the run goes to it once at every step (the
+  // third and the fourth step through their review), and the step begins again after the advised wait. The last step is the
+  // exception tested below: its navigation follows the sign-out, which is a change.
+  for (let step = 0; step < 6; step += 1) {
+    const s = await enrolled({ limitOperatorForm: { skip: step, times: 1, retryAfter: 5 } });
+    assert.equal(await operatorRun(s), 0, `navigation ${step}: ${s.stderr.join("\n")}`);
     const report = lastReport(s);
     assert.equal(report.steps[step]?.attempts, 2, `step ${step + 1} ran twice`);
     assert.equal(
@@ -1970,6 +2001,20 @@ test("defect 3: every step starts from a navigation, so a 429 at any of them sta
     assert.equal(s.center.grants.length, 1, `${route} #${skip}: exactly one grant`);
     assert.equal(s.center.audit.filter((event) => event === "issued").length, 1);
   }
+  // A 429 on the page the sign-out leads to meets a step that has changed something (it ended the session): it is not repeated.
+  const late = await enrolled({ limitOperatorForm: { skip: 6, times: 1, retryAfter: 5 } });
+  assert.equal(await operatorRun(late), 1);
+  assert.match(
+    late.stderr.join("\n"),
+    /"sign out" was rate limited \(429\) after a request of it had changed something/u,
+  );
+  assert.equal(late.center.grants.length, 1, "the grant was written before");
+  // A 429 that meets a step on every attempt fails it, and a step that never got through grants nothing.
+  const stuck = await enrolled({ limitOperatorForm: { skip: 2, times: 9, retryAfter: 5 } });
+  assert.equal(await operatorRun(stuck), 1);
+  assert.match(stuck.stderr.join("\n"), /rate limited \(429\) on every attempt/u);
+  assert.equal(failedStep(stuck)?.startsWith("review a grant"), true);
+  assert.equal(stuck.center.grants.length, 0);
 });
 
 test("a 429 on the page a sign-in leads to fails the step instead of repeating it, and nothing is granted", async () => {

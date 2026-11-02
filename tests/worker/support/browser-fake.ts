@@ -118,8 +118,9 @@ export interface FakeOptions {
   /** The center has no plan catalogue: the operations routes answer 400. */
   noCatalogue?: boolean;
   /**
-   * The edge limiter answers the navigations to the operator form (GET) with a 429 (the center never sees them): the first
-   * `skip` navigations pass, the next `times` are limited.
+   * The edge limiter answers the navigations to the operator form (GET, with or without a session) with a 429 (the center never
+   * sees them): the first `skip` navigations pass, the next `times` are limited. The run's navigations to it are, in order, those of
+   * the steps 1 and 2 (without a session), 3 to 6 (the form) and 7 (after the sign-out).
    */
   limitOperatorForm?: { skip: number; times: number; retryAfter: number };
   /** The edge limiter answers the next `times` POSTs to this route (a path below the base) with a 429 after `skip` have passed. */
@@ -713,7 +714,7 @@ export class FakeTab implements Tab {
       kind === "passkeys" || kind === "sessions" || kind === "devices" || kind === "ops-grant";
     if (kind === "ops-grant" && options.operationsOff === true)
       return this.serveOperations({ status: 404, kind: "ops-error", heading: "" }, url);
-    if (kind === "ops-grant" && this.session()) {
+    if (kind === "ops-grant") {
       const limited = this.center.limitsForm();
       if (limited !== undefined) return this.limited(limited);
     }
