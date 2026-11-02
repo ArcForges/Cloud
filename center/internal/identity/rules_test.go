@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ArcForges/Cloud/center/internal/device"
+	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
@@ -108,8 +109,52 @@ func TestEmailAddressesAreNormalizedOrRefused(t *testing.T) {
 	}
 }
 
+// addressOfLength builds a valid address of exactly total bytes (a 64-byte local part, labels of at most 63 bytes).
+func addressOfLength(t testing.TB, total int) string {
+	t.Helper()
+	local := strings.Repeat("a", 64)
+	rest := total - len(local) - 1
+	var labels []string
+	for rest > 0 {
+		size := min(rest, 63)
+		if rest-size > 0 && rest-size < 3 {
+			size = rest - 3
+		}
+		labels = append(labels, strings.Repeat("b", size))
+		rest -= size + 1
+	}
+	address := local + "@" + strings.Join(labels, ".")
+	if len(address) != total {
+		t.Fatalf("built %d bytes, want %d", len(address), total)
+	}
+	return address
+}
+
+// TestEmailAddressesFollowTheSharedRuleAtTheEdges pins the single rule of the center (config.ValidMailAddress) from the identity side:
+// the byte bounds in both directions, the numeric and hexadecimal last labels, the encoded-word opener, and the equality with the mail
+// package's validator for every address of the table. (MOCKED: no provider, no database.)
+func TestEmailAddressesFollowTheSharedRuleAtTheEdges(t *testing.T) {
+	cases := map[string]bool{
+		addressOfLength(t, 253): true, addressOfLength(t, 254): true, addressOfLength(t, 255): false, addressOfLength(t, 318): false,
+		"a@127.0.0.1": false, "a@1.1": false, "a@0.0.0.0": false, "a@127.0.0.0x1": false, "a@1.2.3.0x7f": false, "a@example.1": false,
+		"a@x.9a": true, "a@0x7f.0.0.1a": true, "=?utf-8?q?x?=@example.org": false, "a=?b@example.org": false, "a?=b@example.org": true,
+		"A@B.CD": true, "Z@Z.ZZ": true, "z@z.zz": true, "0@0.zz": true, "9@9.zz": true,
+	}
+	for text, want := range cases {
+		normalized, ok := NormalizeEmail(text)
+		if ok != want || (ok && normalized != strings.ToLower(text)) || mail.ValidAddress(strings.ToLower(text)) != want {
+			t.Errorf("%q: NormalizeEmail %q %v, mail.ValidAddress %v, want %v", text, normalized, ok, mail.ValidAddress(strings.ToLower(text)), want)
+		}
+	}
+	// The input bound is on the text given, and the database check of 320 characters stays looser than the application bound.
+	if EmailMaxLength != 254 {
+		t.Errorf("EmailMaxLength is %d", EmailMaxLength)
+	}
+}
+
 func FuzzNormalizeEmail(f *testing.F) {
-	for _, seed := range []string{"ada@example.org", "A@B.CD", "a@b", "\x00@x.y", "a@b..c", strings.Repeat("x", 400)} {
+	for _, seed := range []string{"ada@example.org", "A@B.CD", "a@b", "\x00@x.y", "a@b..c", strings.Repeat("x", 400), "a@127.0.0.1", "a@1.1", "a@127.0.0.0x1",
+		"=?utf-8?q?x?=@example.org", addressOfLength(f, 254), addressOfLength(f, 255), "\u212a@example.org"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, text string) {
@@ -118,11 +163,14 @@ func FuzzNormalizeEmail(f *testing.F) {
 			if normalized != "" {
 				t.Fatal("a refused address has a normal form")
 			}
+			if mail.ValidAddress(text) {
+				t.Fatalf("%q is a valid mail address and NormalizeEmail refuses it", text)
+			}
 			return
 		}
 		again, ok := NormalizeEmail(normalized)
 		if !ok || again != normalized || normalized != strings.ToLower(normalized) || len(normalized) > EmailMaxLength ||
-			strings.Count(normalized, "@") != 1 {
+			strings.Count(normalized, "@") != 1 || !mail.ValidAddress(normalized) {
 			t.Fatalf("%q normalized to %q", text, normalized)
 		}
 		for _, c := range []byte(normalized) {

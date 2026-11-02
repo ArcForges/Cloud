@@ -12,6 +12,8 @@ import (
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"github.com/ArcForges/Cloud/center/internal/config"
 )
 
 // The text bounds of the C# core, counted in UTF-16 code units as the C# host counts them.
@@ -19,7 +21,9 @@ const (
 	DisplayNameMaxUnits = 128
 	SubjectMaxUnits     = 512
 	LabelMaxUnits       = 64
-	EmailMaxLength      = 320
+	// EmailMaxLength is the longest address accepted: the RFC 5321 mailbox bound and the providers' limit (254 bytes). The database
+	// check of an e-mail identity (migration 0002) is looser, 320, and stays so.
+	EmailMaxLength = config.MaxMailAddressBytes
 )
 
 // UserState is the stored account state (identity.user_state).
@@ -108,7 +112,6 @@ func ValidLabel(text *string) bool {
 var (
 	localePattern   = regexp.MustCompile(`^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8}){0,4}$`)
 	timezonePattern = regexp.MustCompile(`^[A-Za-z0-9_/-]{1,64}$`)
-	labelPattern    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
 // ValidLocale is a BCP 47 shaped language tag of at most 35 characters.
@@ -120,37 +123,21 @@ func ValidTimezone(text string) bool {
 	return timezonePattern.MatchString(text) && !strings.Contains(text, "//") && !strings.HasPrefix(text, "/") && !strings.HasSuffix(text, "/")
 }
 
-// NormalizeEmail returns the canonical form of an e-mail address, or false when it is not one: at most 320 bytes, exactly one "@",
-// a local part of 1 to 64 printable ASCII characters without white space, quotes or backslashes, and a domain name of at least two
-// labels of letters, digits and inner hyphens, at most 253 characters; the whole address is lower-cased. Every syntactically valid
-// address is treated alike whether or not an account has it (SEC-05).
+// NormalizeEmail returns the canonical form of an e-mail address, or false when it is not one: the lower-cased address must be a
+// config.ValidMailAddress, the single syntax rule of the center that the mail adapters and the sender's configuration share (one
+// "@", a local part of 1 to 64 atext characters and inner dots, a domain of at least two labels of letters, digits and inner
+// hyphens whose last label contains a letter and is no hexadecimal IP form, at most 254 bytes in all), and the text given is at
+// most 254 bytes. Every syntactically valid address is treated alike whether or not an account has it (SEC-05). The database check
+// of an e-mail identity allows 320 characters (migration 0002, immutable); the application bound is the stricter 254.
 func NormalizeEmail(text string) (string, bool) {
-	if len(text) == 0 || len(text) > EmailMaxLength || strings.Count(text, "@") != 1 {
+	if len(text) == 0 || len(text) > EmailMaxLength {
 		return "", false
 	}
-	local, domain, _ := strings.Cut(strings.ToLower(text), "@")
-	if len(local) == 0 || len(local) > 64 || len(domain) == 0 || len(domain) > 253 {
+	lowered := strings.ToLower(text)
+	if !config.ValidMailAddress(lowered) {
 		return "", false
 	}
-	for index := range len(local) {
-		c := local[index]
-		if c <= ' ' || c >= 0x7f || c == '"' || c == '\\' || c == '(' || c == ')' || c == ',' || c == ':' || c == ';' || c == '<' || c == '>' || c == '[' || c == ']' {
-			return "", false
-		}
-	}
-	if strings.HasPrefix(local, ".") || strings.HasSuffix(local, ".") || strings.Contains(local, "..") {
-		return "", false
-	}
-	labels := strings.Split(domain, ".")
-	if len(labels) < 2 {
-		return "", false
-	}
-	for _, label := range labels {
-		if !labelPattern.MatchString(label) {
-			return "", false
-		}
-	}
-	return local + "@" + domain, true
+	return lowered, true
 }
 
 // CheckRemoval is the last-credential rule (model 01 identity.last_credential): a credential may be removed only when the account may
