@@ -102,6 +102,8 @@ type Config struct {
 	Database *pgxpool.Config
 	// Identity is the identity surface's configuration (AF-CTR-03).
 	Identity Identity
+	// Mail is the e-mail sender's configuration (ARCFORGES_CENTER_MAIL_*): disabled unless a provider is named.
+	Mail Mail
 	// DisabledFeatures are the gated feature keys the operator of a self-hosted center disabled (ARCFORGES_CENTER_DISABLED_FEATURES):
 	// the built-in default enables every other key. It is empty in official-hosted mode, where the variable is refused.
 	DisabledFeatures []string
@@ -200,6 +202,9 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		}
 	default:
 		return Config{}, invalid("%s must be enabled or disabled", EnvNeonHello)
+	}
+	if config.Mail, err = loadMail(lookup); err != nil {
+		return Config{}, err
 	}
 	if config.Identity, err = loadIdentity(get, config.Mode, config.PublicBaseURL, time.Now()); err != nil {
 		return Config{}, err
