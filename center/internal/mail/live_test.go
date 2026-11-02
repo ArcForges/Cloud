@@ -71,7 +71,8 @@ func TestLiveSESHandshakeStopsBeforeAUTH(t *testing.T) {
 	if !available || !strings.Contains(" "+strings.ToUpper(mechanisms)+" ", " PLAIN ") {
 		t.Fatalf("AUTH PLAIN is not advertised after TLS: %v %q", available, mechanisms)
 	}
-	t.Logf("REAL handshake (capability only): mode %d, TLS %x, chains %d, AUTH %s", mode, state.Version, len(state.VerifiedChains), mechanisms)
+	modeName := map[SMTPMode]string{StartTLS: "starttls", ImplicitTLS: "implicit"}[mode]
+	t.Logf("REAL handshake (capability only): %s, %s, %d verified chains, AUTH %s", modeName, tls.VersionName(state.Version), len(state.VerifiedChains), mechanisms)
 }
 
 // liveSend is the owner-run live send: ONE real message through the real adapter. It skips unless the switch and every variable

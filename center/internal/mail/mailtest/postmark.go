@@ -24,6 +24,9 @@ type PostmarkReply struct {
 	Stall bool
 	// StallBody sends the status line and headers, a partial body, and then holds the request open.
 	StallBody bool
+	// StallAfterBody sends the status line, headers and the complete success body, and then holds the request open (the body
+	// never ends, as when the connection hangs before the final chunk).
+	StallAfterBody bool
 	// Flood answers with an endless body of the status, counted by BytesWritten.
 	Flood bool
 }
@@ -114,9 +117,13 @@ func (p *PostmarkServer) handle(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-	case reply.StallBody:
+	case reply.StallBody, reply.StallAfterBody:
 		w.WriteHeader(status)
-		_, _ = io.WriteString(w, `{"ErrorCode":0,"Mess`)
+		if reply.StallAfterBody {
+			_, _ = io.WriteString(w, successBody)
+		} else {
+			_, _ = io.WriteString(w, `{"ErrorCode":0,"Mess`)
+		}
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
 		}

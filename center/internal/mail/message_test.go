@@ -97,6 +97,22 @@ func checkWire(t testing.TB, raw []byte) {
 	}
 }
 
+func TestMessageBoundsAreTheDesignedOnes(t *testing.T) {
+	// The other tests size their forms from the constants; this one pins the numbers, so that raising a bound is a visible change
+	// (200 bytes keep the worst-case subject line under 998 bytes; 16 KiB is far above a sign-in mail).
+	if MaxSubjectBytes != 200 || MaxTextBytes != 16384 {
+		t.Fatalf("bounds %d and %d", MaxSubjectBytes, MaxTextBytes)
+	}
+	text := func(size int) Message { return Message{To: testTo, Subject: "s", Text: strings.Repeat("t", size)} }
+	if validate("smtp", text(16384)) != nil || validate("smtp", text(16385)) == nil {
+		t.Error("the text bound is not 16384 bytes")
+	}
+	subject := func(size int) Message { return Message{To: testTo, Subject: strings.Repeat("s", size), Text: "t"} }
+	if validate("smtp", subject(200)) != nil || validate("smtp", subject(201)) == nil {
+		t.Error("the subject bound is not 200 bytes")
+	}
+}
+
 func TestValidateRefusesEveryInjectionFormAndAcceptsTheOrdinaryMessage(t *testing.T) {
 	good := testMessage()
 	if err := validate("smtp", good); err != nil {

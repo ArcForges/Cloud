@@ -235,6 +235,8 @@ func TestPostmarkDeadlineEndsAStalledRequestAndAStalledBody(t *testing.T) {
 	}{
 		"no answer":    {mailtest.PostmarkReply{Stall: true}, "http"},
 		"stalled body": {mailtest.PostmarkReply{StallBody: true}, "response"},
+		// A complete success answer whose body never ends is not trusted: the read failed, so the outcome is reported as unknown.
+		"complete body that never ends": {mailtest.PostmarkReply{StallAfterBody: true}, "response"},
 	} {
 		rig := newPostmarkRig(t, reply.reply, func(o *PostmarkOptions) { o.Timeout = 300 * time.Millisecond })
 		begun := time.Now()

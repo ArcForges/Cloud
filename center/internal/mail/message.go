@@ -57,8 +57,9 @@ func validate(provider string, m Message) error {
 }
 
 // validateSender refuses a sender identity that could not be written into a header or a command: the From address and the
-// display name come from operator configuration (which validates them at start), and the adapters check them again because a
-// hand-built option set bypasses the configuration.
+// display name come from operator configuration (which validates them at start), and the Postmark adapter checks them again
+// because a hand-built option set bypasses the configuration. The SMTP adapter has no separate call: buildMessage, which runs
+// before any connection, refuses the same two values.
 func validateSender(provider, from, fromName string) error {
 	if !ValidAddress(from) || !config.ValidMailDisplayName(fromName) {
 		return invalid(provider)

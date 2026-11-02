@@ -4,8 +4,9 @@
 // behind it: Disabled, which every deployment uses today (the e-mail method is then not offered at all); Fake, which tests inject
 // to read the codes the center sends (the closed loop); and the two live adapters, Postmark over HTTPS and an SMTP submission
 // service over TLS (Amazon SES is the first target), with Guard, which bounds how many sends talk to a provider at once. The
-// adapters are tested against local servers only (MOCKED): no test sends real mail, and the two opt-in probes of a real endpoint
-// (the public Postmark test token, an SES handshake that stops before AUTH) skip without an explicit local switch.
+// adapters are tested against local servers only (MOCKED). Three kinds of test reach a real endpoint, and each skips without its
+// own explicit local switch: the probe of the Postmark API with the public test token (nothing is delivered), the SES handshake
+// that stops before AUTH (no credential exists in the process), and the owner-run live send, which does send one real message.
 //
 // What this package does NOT make possible: no real account can be mailed. No production code creates an e-mail identity (the
 // only non-test INSERT INTO identity.auth_identity statements enroll passkeys), so the sign-in-code surface opens when a sender is
@@ -13,8 +14,8 @@
 // therefore proves nothing about delivery to a user; it is the adapter, not the product path, that is exercised.
 //
 // Failures are typed (Error, with the classes ErrRejected, ErrUnavailable and ErrUnauthorized) and their text holds closed words
-// and numbers only: never an address, a code, a body, a credential, a URL or the provider's reply text. A credential is a
-// config.Secret, revealed only inside the two adapters.
+// and numbers only (the HTTP status, the SMTP reply code or the Postmark ErrorCode among them): never an address, a sign-in code,
+// a body, a credential, a URL or the provider's reply text. A credential is a config.Secret, revealed only inside the two adapters.
 package mail
 
 import (

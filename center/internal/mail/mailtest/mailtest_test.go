@@ -500,6 +500,18 @@ func TestPostmarkStandInMisbehaviours(t *testing.T) {
 			t.Errorf("read %q, %v", body, err)
 		}
 	})
+	t.Run("StallAfterBody sends the whole answer and then never ends it", func(t *testing.T) {
+		server := StartPostmark(t, token, PostmarkReply{StallAfterBody: true})
+		response, err := get(server, &http.Client{Timeout: 300 * time.Millisecond})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err == nil || !strings.Contains(string(body), `"MessageID":"message-id-test-0001"`) {
+			t.Errorf("read %q, %v", body, err)
+		}
+	})
 	t.Run("Flood writes until the client goes away", func(t *testing.T) {
 		server := StartPostmark(t, token, PostmarkReply{Flood: true})
 		response, err := get(server, &http.Client{Timeout: 5 * time.Second})

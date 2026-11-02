@@ -216,7 +216,8 @@ func (s *SMTP) authenticate(client *smtp.Client) error {
 	return nil
 }
 
-// Send delivers one message: refuse an invalid message or sender, connect (bounded), authenticate over TLS, submit, quit. No retry:
+// Send delivers one message: refuse an invalid message (validate) or sender (buildMessage checks the From address and name and the
+// recipient again, and runs before any connection), connect (bounded), authenticate over TLS, submit, quit. No retry:
 // an ambiguous end (a connection lost after the data) is unavailable and never repeated. The Timeout flag follows the context, but
 // only for a failure that carries no reply code: a refusal that arrived is not a timeout. Once the message is accepted the result is
 // success even when the server does not answer QUIT. A failed AUTH makes net/smtp send "*" and QUIT and wait for their answers, so
@@ -229,9 +230,6 @@ func (s *SMTP) Send(ctx context.Context, m Message) (result error) {
 		}
 	}()
 	if err := validate("smtp", m); err != nil {
-		return err
-	}
-	if err := validateSender("smtp", s.o.From, s.o.FromName); err != nil {
 		return err
 	}
 	data, err := buildMessage(s.o.FromName, s.o.From, m.To, m.Subject, m.Text, s.o.Now())
