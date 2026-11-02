@@ -250,7 +250,8 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
    request headers (`User-Agent` and `Accept`), its beacon count of `0` and its `cache-control: no-store, no-transform` line.
 5. **Regression first.** The returning acceptance on the Windows host
    (`node eng/verification/browser/acceptance.ts`, about three minutes hosted) must print `PASSED`: the account pages keep working with the new
-   surface on.
+   surface on. Run this and the next step from the operator checkout, updated to the merge commit (`git fetch origin main`, then
+   `git checkout --detach origin/main`): an older checkout answers `--operator-grant` with "Unknown argument." and exit 2.
 6. **Pause at least 90 seconds**, warm the Container with `curl -si https://proof.arcforges.com/api/healthz` 10 to 20 seconds before
    the run (the Container sleeps after 60 idle seconds, so the pause itself puts it to sleep; healthz counts against the Hello limiter,
    not the identity limiter), then run the operator grant on the same host:
