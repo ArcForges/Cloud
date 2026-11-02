@@ -54,7 +54,7 @@ func (g *gate) open() { close(g.release) }
 
 // watchdog bounds every wait of a guard test, so that a regression of a bound FAILS by name and fast instead of hanging until the
 // test binary's timeout (a send that never returns, a result that never arrives).
-const watchdog = 10 * time.Second
+const watchdog = 5 * time.Second
 
 // bounded is a context that ends after the watchdog.
 func bounded(t *testing.T) context.Context {

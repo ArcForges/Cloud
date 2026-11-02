@@ -67,6 +67,9 @@ func parseBuilt(t testing.TB, raw []byte) parsed {
 func checkWire(t testing.TB, raw []byte) {
 	t.Helper()
 	for i, c := range raw {
+		if c >= 0x80 {
+			t.Fatalf("a non-ASCII byte %#x at %d: the message must be 7-bit", c, i)
+		}
 		if c == '\r' && (i+1 >= len(raw) || raw[i+1] != '\n') {
 			t.Fatalf("a bare CR at %d", i)
 		}
