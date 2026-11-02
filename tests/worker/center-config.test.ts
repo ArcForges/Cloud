@@ -122,7 +122,7 @@ test("the configuration rule refuses a missing or invalid mode or base URL", () 
 });
 
 // AF-CTR-03 (PLT-12): the surface switch. Production enables no surface (Hello stays), the acceptance environment enables the
-// identity and pages surfaces; FLAGSHIP_SURFACES is exact generated names, comma-separated, in every environment; the pages need
+// identity, pages and operations surfaces; FLAGSHIP_SURFACES is exact generated names, comma-separated, in every environment; the pages need
 // the identity surface they call; wherever identity is on, the Worker's ALLOWED_ORIGIN is the origin of the center's public base
 // URL (the one origin browser sessions are bound to); and no environment carries a bootstrap value (the proof bootstrap's digest and
 // expiry are protected-dispatch inputs, never committed).

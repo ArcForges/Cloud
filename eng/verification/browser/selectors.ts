@@ -21,7 +21,7 @@ export const forms = {
   operationsConfirm: "/operations/grant/confirm",
 } as const;
 
-/** The JSON route that names the signed-in account (the pages show no account identifier): a GET from inside the page. */
+/** The JSON route that names the signed-in account (no account page lists the identifier, so the form field is filled from it): a GET from inside the page. */
 export const sessionBootstrap = "/session/v1/web/bootstrap";
 
 /** The JSON and form POSTs after which the saved credential is written before the request leaves the browser. */

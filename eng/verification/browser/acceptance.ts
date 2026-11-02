@@ -117,6 +117,9 @@ with the saved credential (every later run).
   defaults to artifacts/${defaultReportName.operatorGrant}.
 Edge limit: the hosted edge counts the requests of a client over 60 seconds. Leave at least 90 seconds between two runs against
   the hosted environment, and run --operator-grant only after the returning acceptance has passed.
+Step-up limit: apart from the edge, the center allows 10 step-ups per account in 10 minutes. --operator-grant spends 2 step-ups,
+  a returning run 3, and a restarted step one more: wait ten minutes between repeated attempts, or a 429 of the center looks like
+  the edge's.
 Exit codes: 0 passed, 1 failed, 2 not started (usage, missing browser, credential or bootstrap file).`;
 
 function whole(value: string | undefined, flag: string, min: number, max: number): number {

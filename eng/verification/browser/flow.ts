@@ -997,11 +997,43 @@ export const fixtureFeatures = [
   "center.mcp",
   "push",
 ] as const;
-/** The one feature the run grants, and for how long: the smallest write, which ends 24 hours after the run. */
+/** The one feature the run grants, and for how long it asks: the smallest write, which should end 24 hours after the run. */
 export const grantedFeature = "remote.view";
-export const grantedDays = 1;
+export const requestedDays = 1;
+/** The ends the pages may show for a grant of one day (hours from now, with room for the minute and the clocks of two machines). */
+const endsWindowHours = { min: 23, max: 25 } as const;
+const endsShape = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}) UTC$/u;
 const uuidShape = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const stepUpRefusal = "This change needs a passkey check first.";
+
+/**
+ * The hours from `now` to the end a page shows ("2026-11-03 04:10 UTC", to the minute), or undefined for any other text. The days
+ * the form is asked for are only what is typed: this reads back what the center will grant.
+ */
+export function hoursUntilEnds(ends: string | undefined, now: Date): number | undefined {
+  const found = endsShape.exec(ends ?? "");
+  if (found === null) return undefined;
+  const [, year, month, day, hour, minute] = found.map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const end = Date.UTC(year, month - 1, day, hour, minute);
+  return Number.isFinite(end) ? (end - now.getTime()) / 3_600_000 : undefined;
+}
+
+/** The hours a page's end lies ahead, which must be about one day. */
+function expectOneDay(world: World, ends: string | undefined, what: string): number {
+  const hours = hoursUntilEnds(ends, world.now());
+  expect(
+    hours !== undefined && hours >= endsWindowHours.min && hours <= endsWindowHours.max,
+    `${what} does not end the grant about a day from now.`,
+  );
+  return hours;
+}
 
 /** The same idempotency key with its last digit changed: another command, so that no stored result answers it. */
 export function anotherCommand(command: string): string {
@@ -1032,20 +1064,25 @@ async function confirmationFields(actor: Actor): Promise<[string, string][]> {
  * heading is told from its predecessor by this), that shows what `ready` says, or that the edge limiter refused with a 429. The new
  * document's status and headers are the result.
  */
-async function awaitDocument(
-  actor: Actor,
+export async function awaitDocument(
+  world: World,
+  tab: Tab,
   previous: Navigation | null,
   what: string,
   ready: () => Promise<boolean>,
 ): Promise<Navigation> {
-  await until(actor.world, what, async () => {
-    const current = actor.tab.document();
+  await until(world, what, async () => {
+    const current = tab.document();
     // A document the edge limiter refused (429) never becomes the page the step waits for: the caller's check of the reply fails at
     // once, and the step (which saw the 429) starts again, instead of waiting out the timeout.
     return current !== null && current !== previous && (current.status === 429 || (await ready()));
   });
-  const received = actor.tab.document();
+  const received = tab.document();
   expect(received !== null, `${what}: the browser received no document.`);
+  // The result of a form submission is not a navigation the step waited the load of. A step owns the assets of the page it waited
+  // for: the page is loaded (its stylesheet and script asked for and answered) before the step ends, so that a 429 on one of them
+  // is seen, and judged, inside this step and not blamed on the next one. A refused document (429) has no page to load.
+  if (received.status !== 429) await tab.waitForSelector(selectors.heading, world.timeoutMs);
   return received;
 }
 
@@ -1060,7 +1097,7 @@ function expectReply(reply: Navigation, status: number, what: string): void {
 export async function runOperatorGrant(world: World): Promise<void> {
   world.report.mode = "operator-grant";
   world.write(
-    `Operator grant on ${world.baseUrl}: the saved owner credential signs in (MOCKED hardware) and the operations page grants ${grantedFeature} for ${grantedDays} day to the own account`,
+    `Operator grant on ${world.baseUrl}: the saved owner credential signs in (MOCKED hardware) and the operations page grants ${grantedFeature} for ${requestedDays} day to the own account`,
   );
   expect(world.store.exists(), "There is no saved owner credential; run the acceptance first.");
   expectSavedCenter(world);
@@ -1139,14 +1176,15 @@ export async function runOperatorGrant(world: World): Promise<void> {
     );
     await a.tab.setValue(operations.account, account);
     await a.tab.click(operations.feature(grantedFeature));
-    await a.tab.setValue(operations.days, String(grantedDays));
+    await a.tab.setValue(operations.days, String(requestedDays));
     await a.tab.setValue(operations.reason, reason);
     await a.tab.setValue(operations.sourceRef, sourceRef);
     await a.tab.setValue(operations.selfApproval, justification);
     const previous = a.tab.document();
     await a.tab.click(operations.reviewSubmit);
     const reply = await awaitDocument(
-      a,
+      world,
+      a.tab,
       previous,
       "the review page",
       async () => (await a.tab.text(selectors.heading)) === "Review the operator grant",
@@ -1178,6 +1216,7 @@ export async function runOperatorGrant(world: World): Promise<void> {
       shown.get("Source reference") === sourceRef,
       "The review shows another source reference.",
     );
+    expectOneDay(world, shown.get("Ends"), "The review");
   };
 
   await step(
@@ -1195,7 +1234,8 @@ export async function runOperatorGrant(world: World): Promise<void> {
       a.tab.expectRefusal(403);
       await a.tab.click(operations.confirmSubmit);
       const refused = await awaitDocument(
-        a,
+        world,
+        a.tab,
         previous,
         "the refusal page",
         async () => (await a.tab.text(selectors.heading)) === "This is not allowed",
@@ -1223,7 +1263,8 @@ export async function runOperatorGrant(world: World): Promise<void> {
       const previous = a.tab.document();
       await a.tab.click(operations.confirmSubmit);
       const reply = await awaitDocument(
-        a,
+        world,
+        a.tab,
         previous,
         "the done page",
         async () => (await a.tab.text(selectors.heading)) === "Operator grant issued",
@@ -1236,6 +1277,9 @@ export async function runOperatorGrant(world: World): Promise<void> {
       written = await descriptions(a);
       expect(written.get("Account") === account, "The done page names another account.");
       expect(written.get("Features") === grantedFeature, "The done page names other features.");
+      // What the center granted, read back from its page: the run reports the hours it saw, not the days it asked for.
+      world.report.facts.grantedHours =
+        Math.round(expectOneDay(world, written.get("Ends"), "The done page") * 10) / 10;
       expect(
         uuidShape.test(written.get("Compensation term") ?? ""),
         "The done page names no term.",
@@ -1251,7 +1295,7 @@ export async function runOperatorGrant(world: World): Promise<void> {
     await a.visit(pages.operationsGrant, "Operator grant");
     const previous = a.tab.document();
     await a.tab.submitForm(confirmAction, fields);
-    const reply = await awaitDocument(a, previous, "the replay's page", async () =>
+    const reply = await awaitDocument(world, a.tab, previous, "the replay's page", async () =>
       ((await a.tab.text(operations.outcome)) ?? "").startsWith(
         "This grant had already been issued",
       ),
@@ -1277,7 +1321,8 @@ export async function runOperatorGrant(world: World): Promise<void> {
     a.tab.expectRefusal(403);
     await a.tab.submitForm(confirmAction, reuse);
     const refused = await awaitDocument(
-      a,
+      world,
+      a.tab,
       previous,
       "the refusal page",
       async () => (await a.tab.text(selectors.heading)) === "This is not allowed",
@@ -1299,5 +1344,5 @@ export async function runOperatorGrant(world: World): Promise<void> {
     );
   });
   world.report.facts.grantedFeatures = grantedFeature;
-  world.report.facts.grantedDays = grantedDays;
+  world.report.facts.requestedDays = requestedDays;
 }

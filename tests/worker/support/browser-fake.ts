@@ -17,6 +17,27 @@
 // a request the edge limiter refused (429) never reaches the center. Each FakeOptions switch below breaks one of these guards, so
 // that a test can show the script notices.
 // It is no evidence about the real center or a real browser; it checks the script's logic.
+//
+// WHERE THE STAND-IN IS NOT THE REAL CENTER (so that nobody reads it as the center's specification; none of these can hide a defect
+// of the script, which the stand-in is stricter than or equal to wherever the script can observe a difference):
+//   - Audit: the strings of `FakeCenter.audit` are the shorthand `<outcome>/<reason>` of the events entitlement.operator_grant.issued
+//     and entitlement.operator_grant.refused (the reasons step_up_required and not_operator); the refusal of an account that is no
+//     operator is written once per hour and account, as the real RefuseAccess does.
+//   - Evidence: the real grant consumes the step-up evidence and applies the request's checks in ONE transaction, so a refusal after
+//     the consumption rolls it back; the stand-in consumes only when the request passes. It has no lifetime of the evidence, no
+//     revoked-session and no authentication-epoch condition, and no test depends on them.
+//   - The review of the stand-in does not look at the source reference's uniqueness (the real Review does not either: the unique
+//     index refuses a second grant at the confirmation).
+//   - The texts of the 400 pages ("The form is incomplete.", "That command was already used for another request.", ...) are the
+//     stand-in's own; the real texts are in center/internal/pages/messages.go. The script reads only the heading and the sentence of
+//     the step-up refusal, and the guard table pins one invented text ("source reference was already used") as a stand-in's.
+//   - The stand-in demands all eight confirmation fields and no other; the real form parser refuses unknown and repeated fields and
+//     reads a missing one as empty. The order of its gates is operator first, request token second; the real order is form, token,
+//     then operator.
+//   - Not modelled at all: the Worker's exact Origin rule, content type and size bounds, `form-action 'self'` and trusted types, the
+//     303 hop (goto returns the final document only), the Retry-After header (the wait is set directly), the stylesheet and script of
+//     a page (only an edge refusal of one, FakeOptions.limitAssetAfterPost), and the timing of the browser's console reports (only
+//     FakeOptions.lateRefusalReport).
 import { createHash } from "node:crypto";
 import { pageSecurityHeaders } from "../../../worker/tables/center-tables.generated.ts";
 import type {
@@ -146,6 +167,37 @@ export interface FakeOptions {
   noEvidenceNeeded?: boolean;
   /** The form lists only these features (a catalogue other than the development fixtures). */
   catalogue?: string[];
+  // ---- what the script reads back from the center's pages (each must be noticed)
+  /** The center ignores the days asked for: the review shows an end this many days away. */
+  endsDaysInReview?: number;
+  /** The grant is written to end this many days after it is written, whatever the review showed. */
+  endsDaysInGrant?: number;
+  /** The review shows another account than the one asked for. */
+  reviewShowsAnotherAccount?: boolean;
+  /** The done page (and the replay) names another account than the grant's. */
+  doneShowsAnotherAccount?: boolean;
+  /** The done page (and the replay) names another feature than the grant's. */
+  doneShowsAnotherFeature?: boolean;
+  /** The session route names an account that is no UUID. */
+  sessionUserIdNotUuid?: boolean;
+  /** The session cookie lacks HttpOnly. */
+  badSessionCookie?: boolean;
+  /**
+   * The n-th reply of the center to a POST of the operations routes (1 review, 2 the tampered confirmation's refusal, 3 the second
+   * review, 4 the done page, 5 the replay, 6 the reuse's refusal) lacks this security header, or has another media type.
+   */
+  badPostReply?: { nth: number; header?: string; mediaType?: string };
+  /**
+   * The browser reports the console error of the n-th refused document late: one poll after the step asked, or, if the step never
+   * asks, when the next navigation or POST starts (where no step expects it any more).
+   */
+  lateRefusalReport?: number;
+  /**
+   * The edge limiter refuses the stylesheet of the page that follows the n-th POST reply of the operations routes (numbered as
+   * in badPostReply): the 429 is seen when the page has loaded, or, if no step waits for the load, when the next navigation or
+   * POST starts.
+   */
+  limitAssetAfterPost?: { nth: number; retryAfter: number };
 }
 
 /** One step-up proof of an operator class: the evidence the center keeps until a write consumes it. */
@@ -182,6 +234,11 @@ interface OpsReply {
 }
 
 export const operatorStepUpClass = "center.operatorGrant";
+/** Another account than the owner's, for the switches that make a page name the wrong one. */
+const otherAccount = "00000000-0000-4000-8000-000000000001";
+/** An end as the pages show it: UTC, to the minute ("2026-11-03 04:10 UTC", the center's timeText). */
+const endsText = (micros: number): string =>
+  new Date(micros / 1000).toISOString().replace(/T(\d{2}:\d{2}).*$/u, " $1 UTC");
 const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const opsRefusals: Record<string, string> = {
   stepUp: "This change needs a passkey check first. Go back and try again.",
@@ -216,6 +273,8 @@ export class FakeCenter {
   /** The commands the center has executed, by command id: the stored result a repeat is answered with. */
   readonly commands = new Map<string, Grant>();
   version = 0;
+  /** When the refusal of an account that is no operator was last audited (the real one writes it once per hour and account). */
+  private notOperatorAuditedAt: number | undefined;
   private reviews = 0;
   private operatorForms = 0;
   private operatorPosts = new Map<string, number>();
@@ -292,13 +351,18 @@ export class FakeCenter {
   /** The common start of the three routes: who may reach them (the surface, the catalogue and the operator role). */
   operatorGate(): OpsReply | undefined {
     if (this.options.operationsOff === true) return { status: 404, kind: "ops-error", heading: "" };
-    if (this.options.notOperator === true)
+    if (this.options.notOperator === true) {
+      const due =
+        this.notOperatorAuditedAt === undefined ||
+        this.clockSeconds - this.notOperatorAuditedAt >= 3600;
+      if (due) this.notOperatorAuditedAt = this.clockSeconds;
       return this.refusal(
         403,
         "This is not allowed",
         opsRefusals.notAllowed ?? "",
-        "refused/permission_denied",
+        due ? "refused/not_operator" : undefined,
       );
+    }
     if (this.options.noCatalogue === true)
       return this.refusal(
         400,
@@ -309,14 +373,17 @@ export class FakeCenter {
   }
 
   /** The request form's rules, which the review and the grant both apply (the review writes nothing). */
-  private checkRequest(request: {
-    account: string;
-    features: readonly string[];
-    reason: string;
-    expiresAt: number;
-    sourceRef: string;
-    selfApproval: string;
-  }): OpsReply | undefined {
+  private checkRequest(
+    request: {
+      account: string;
+      features: readonly string[];
+      reason: string;
+      expiresAt: number;
+      sourceRef: string;
+      selfApproval: string;
+    },
+    forGrant: boolean,
+  ): OpsReply | undefined {
     const bad = (error: string): OpsReply =>
       this.refusal(400, "The request was not accepted", error);
     if (request.account !== this.userId) return bad("That account does not exist.");
@@ -331,7 +398,8 @@ export class FakeCenter {
     const now = this.clockSeconds * 1_000_000;
     if (request.expiresAt <= now || request.expiresAt > now + 400 * 86_400 * 1_000_000)
       return bad("The end of the grant is out of range.");
-    if (this.grants.some((grant) => grant.sourceRef === request.sourceRef))
+    // The unique index of the source reference refuses at the grant; the review does not look at it.
+    if (forGrant && this.grants.some((grant) => grant.sourceRef === request.sourceRef))
       return bad("That source reference was already used.");
     return undefined;
   }
@@ -359,9 +427,12 @@ export class FakeCenter {
       reason: form.get(operations.reason) ?? "",
       sourceRef: form.get(operations.sourceRef) ?? "",
       selfApproval: form.get(operations.selfApproval) ?? "",
-      expiresAt: this.clockSeconds * 1_000_000 + this.reviews + Number(days) * 86_400 * 1_000_000,
+      expiresAt:
+        this.clockSeconds * 1_000_000 +
+        this.reviews +
+        (this.options.endsDaysInReview ?? Number(days)) * 86_400 * 1_000_000,
     };
-    const refused = this.checkRequest(request);
+    const refused = this.checkRequest(request, false);
     if (refused !== undefined) return refused;
     const hidden: [string, string][] = [
       ["csrf", this.options.badRequestToken === true ? "stale" : this.csrf(session)],
@@ -381,9 +452,9 @@ export class FakeCenter {
       hidden,
       terms: ["Account", "Features", "Ends", "Reason", "Source reference", "Justification"],
       values: [
-        `${request.account} (your own account)`,
+        `${this.options.reviewShowsAnotherAccount === true ? otherAccount : request.account} (your own account)`,
         request.features.join(", "),
-        new Date(request.expiresAt / 1000).toISOString(),
+        endsText(request.expiresAt),
         request.reason,
         request.sourceRef,
         request.selfApproval,
@@ -406,7 +477,10 @@ export class FakeCenter {
     const grant: Grant = {
       account: request.account,
       features: [...request.features],
-      expiresAt: request.expiresAt,
+      expiresAt:
+        this.options.endsDaysInGrant === undefined
+          ? request.expiresAt
+          : this.clockSeconds * 1_000_000 + this.options.endsDaysInGrant * 86_400 * 1_000_000,
       sourceRef: request.sourceRef,
       reason: request.reason,
       termId: crypto.randomUUID(),
@@ -431,9 +505,9 @@ export class FakeCenter {
         : "The grant was written.",
       terms: ["Account", "Features", "Ends", "Compensation term", "Entitlement version"],
       values: [
-        grant.account,
-        grant.features.join(", "),
-        new Date(grant.expiresAt / 1000).toISOString(),
+        this.options.doneShowsAnotherAccount === true ? otherAccount : grant.account,
+        this.options.doneShowsAnotherFeature === true ? "push" : grant.features.join(", "),
+        endsText(grant.expiresAt),
         grant.termId,
         String(shown),
       ],
@@ -492,8 +566,9 @@ export class FakeCenter {
       return this.done(stored, true);
     }
     const target = this.target(request);
+    let proof: Evidence | undefined;
     if (this.options.noEvidenceNeeded !== true) {
-      const proof = this.evidence.find(
+      proof = this.evidence.find(
         (item) =>
           !item.used &&
           item.operationClass === operatorStepUpClass &&
@@ -508,10 +583,11 @@ export class FakeCenter {
           opsRefusals.stepUp ?? "",
           "refused/step_up_required",
         );
-      if (this.options.evidenceReusable !== true) proof.used = true;
     }
-    const refused = this.checkRequest(request);
+    // The real grant consumes the evidence and applies these checks in one transaction: a refusal rolls the consumption back.
+    const refused = this.checkRequest(request, true);
     if (refused !== undefined) return refused;
+    if (proof !== undefined && this.options.evidenceReusable !== true) proof.used = true;
     this.audit.push("issued");
     return this.done(this.write(request, command, digest), false);
   }
@@ -650,6 +726,12 @@ export class FakeTab implements Tab {
   readonly operatorPosts: string[] = [];
   /** The statuses of the 4xx documents the browser reported as console errors, in order (used up by an expectation or not). */
   readonly refusalsSeen: number[] = [];
+  // Reports and refusals that arrive late (see FakeOptions.lateRefusalReport and limitAssetAfterPost).
+  private heldRefusals: number[] = [];
+  private heldAssets: number[] = [];
+  private heldPolls = 0;
+  private refusalCount = 0;
+  private postReplies = 0;
 
   constructor(center: FakeCenter) {
     this.center = center;
@@ -688,6 +770,7 @@ export class FakeTab implements Tab {
   }
 
   async goto(url: string): Promise<Navigation> {
+    this.flushHeld();
     const target = new URL(url);
     const options = this.center.options;
     if (options.devicesPageFails && target.pathname === this.path(pages.devices))
@@ -744,12 +827,13 @@ export class FakeTab implements Tab {
   }
 
   /** The status and headers of a page the center serves (the generated security headers, unless a test removes one). */
-  private document200(status = 200): Navigation {
+  private document200(status = 200, damage?: { header?: string; mediaType?: string }): Navigation {
     const headers: Record<string, string> = { ...pageSecurityHeaders };
     if (this.center.options.badHeader) delete headers[this.center.options.badHeader];
+    if (damage?.header) delete headers[damage.header];
     const navigation = {
       status,
-      headers: { ...headers, "content-type": "text/html; charset=utf-8" },
+      headers: { ...headers, "content-type": damage?.mediaType ?? "text/html; charset=utf-8" },
     };
     this.latest = navigation;
     return navigation;
@@ -769,6 +853,14 @@ export class FakeTab implements Tab {
   private report(status: number): void {
     if (status < 400 || this.center.options.silentRefusals === true) return;
     this.refusalsSeen.push(status);
+    this.refusalCount += 1;
+    // The browser may report the console error a moment after the document: held until the step asks or the next request starts.
+    if (this.center.options.lateRefusalReport === this.refusalCount) this.heldRefusals.push(status);
+    else this.deliver(status);
+  }
+
+  /** The console error of a refused document reaches the tab: an expectation uses it up, or it is a problem. */
+  private deliver(status: number): void {
     const text = `console error: Failed to load resource: the server responded with a status of ${status} (${status === 403 ? "Forbidden" : "error"})`;
     const found = refusedStatus(text);
     const at = found === undefined ? -1 : this.expectedRefusals.indexOf(found);
@@ -776,9 +868,30 @@ export class FakeTab implements Tab {
     else this.seenProblems.push(text);
   }
 
+  /** The page has loaded: the edge's refusal of one of its assets, which was in flight, reaches the tab. */
+  private flushAssets(): void {
+    for (const retryAfter of this.heldAssets.splice(0)) {
+      this.retryAfter = retryAfter;
+      this.deliver(429);
+    }
+  }
+
+  /** A navigation or a POST starts: whatever the browser had not reported yet is reported now. */
+  private flushHeld(): void {
+    this.flushAssets();
+    for (const status of this.heldRefusals.splice(0)) this.deliver(status);
+    this.heldPolls = 0;
+  }
+
   /** Shows what an operations route answered. `form` is true for the request form itself (a 200 with the form's fields empty). */
-  private serveOperations(reply: OpsReply, url: string, form = false): Navigation {
+  private serveOperations(reply: OpsReply, url: string, form = false, post = false): Navigation {
     this.opsReply = reply;
+    // The n-th reply of the center to a POST of the operations routes may be damaged, or be followed by a refused asset.
+    const nth = post ? ++this.postReplies : 0;
+    const options = this.center.options;
+    const damage = options.badPostReply?.nth === nth ? options.badPostReply : undefined;
+    if (options.limitAssetAfterPost?.nth === nth)
+      this.heldAssets.push(options.limitAssetAfterPost.retryAfter);
     this.currentUrl = url;
     if (form) {
       this.page = { kind: "ops-grant" };
@@ -794,7 +907,7 @@ export class FakeTab implements Tab {
       this.latest = navigation;
       return navigation;
     }
-    return this.document200(reply.status);
+    return this.document200(reply.status, damage);
   }
 
   url(): string {
@@ -845,6 +958,7 @@ export class FakeTab implements Tab {
     const handle = this.handle;
     const record = this.session();
     this.operatorPosts.push(route);
+    this.flushHeld();
     await this.post(route);
     const retry = this.center.limitsPost(route);
     if (retry !== undefined) {
@@ -869,7 +983,7 @@ export class FakeTab implements Tab {
       route === forms.operationsReview
         ? this.center.operatorReview(handle, this.form, this.ticked)
         : this.center.operatorConfirm(handle, this.center.userId, new Map(fields));
-    this.serveOperations(reply, url);
+    this.serveOperations(reply, url, false, true);
     if (reply.status === 200) this.accepted(route);
   }
 
@@ -1101,7 +1215,16 @@ export class FakeTab implements Tab {
     this.secretsSeen.push(csrfToken);
     return {
       status: 200,
-      body: { csrfToken, authenticated: true, session: { userId: this.center.userId } },
+      body: {
+        csrfToken,
+        authenticated: true,
+        session: {
+          userId:
+            this.center.options.sessionUserIdNotUuid === true
+              ? "owner-account-not-a-uuid"
+              : this.center.userId,
+        },
+      },
     };
   }
 
@@ -1124,6 +1247,11 @@ export class FakeTab implements Tab {
   }
 
   refusalsPending(): number {
+    // A report the browser holds back arrives with the second look, as Chromium's does a moment after the document.
+    if (this.heldRefusals.length > 0) {
+      if (this.heldPolls > 0) this.flushHeld();
+      else this.heldPolls += 1;
+    }
     return this.expectedRefusals.length;
   }
 
@@ -1213,6 +1341,9 @@ export class FakeTab implements Tab {
   }
 
   async waitForSelector(selector: string): Promise<void> {
+    // A wait for an element is a wait for the page to have loaded: what the page's assets met reaches the tab by then.
+    this.flushAssets();
+    if (selector === selectors.heading && this.page.kind.startsWith("ops-")) return;
     const known: Record<string, Page["kind"]> = {
       [`${selectors.create}:not([disabled])`]: "bootstrap",
       [`${selectors.signIn}:not([disabled])`]: "sign-in",
@@ -1280,7 +1411,7 @@ export class FakeTab implements Tab {
         name: "__Host-af_session",
         value,
         path: "/",
-        httpOnly: true,
+        httpOnly: this.center.options.badSessionCookie !== true,
         secure: true,
         sameSite: "Strict",
         expires: this.center.clockSeconds + 12 * 3600,
