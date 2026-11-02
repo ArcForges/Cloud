@@ -154,9 +154,9 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
   return [];
 }
 
-test("production enables no surface and the acceptance environment enables identity and pages", () => {
+test("production enables no surface and the acceptance environment enables identity, pages and operations", () => {
   assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
-  assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity,pages");
+  assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity,pages,operations");
   // C1: only the acceptance environment overrides the identity policy, and only with its anonymous-flow ceiling; production keeps
   // the defaults (no global bucket).
   assert.equal(wrangler.vars?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
@@ -207,8 +207,8 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages" }), []);
   assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "pages,identity" }), []);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "pages" }).length, 1);
-  // The operations surface (the operator grant's page) needs both; it is accepted with them, in any order, and is the only name that
-  // is not enabled in a checked-in environment (production carries none, the acceptance environment keeps identity,pages).
+  // The operations surface (the operator grant's page) needs both; it is accepted with them, in any order, and is enabled in the
+  // acceptance environment only (production carries none).
   assert.deepEqual(
     surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,operations" }),
     [],
@@ -219,11 +219,12 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   );
   assert.deepEqual([...surfaces].sort(), ["identity", "operations", "pages"]);
   for (const [name, environment] of environments)
-    assert(
-      !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+    assert.equal(
+      String(environment.vars?.FLAGSHIP_SURFACES ?? "")
         .split(",")
         .includes("operations"),
-      `wrangler.json environment ${name} enables the operations surface`,
+      name === "proof",
+      `wrangler.json environment ${name}: the operations surface is enabled in the acceptance environment and nowhere else`,
     );
 });
 

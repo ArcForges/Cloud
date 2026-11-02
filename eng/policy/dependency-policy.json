@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "14016f94d391a715af54f7434e41a4e8e1f57356",
+  "sourceCommit": "48bcbf29b3985b947ab9be395a7dd87409070364",
   "manifests": ["package.json"],
   "inputs": {
     ".github/workflows/ci.yml": "ea83e46ed10fd87b7c69688b00113e47e09f45acbbaf17922399ea93f731dd0a",
@@ -184,13 +184,13 @@
     "tooling/release-provenance.ts": "a3763964fe3fd3fabb66fa69aaf2296253c36812cf66e0fc526e5c2d909ee171",
     "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
     "tools/ArcForges.Cloud.Generation/packages.lock.json": "36965c2f5b447302352d2abd554b1a034f9e277753f30583c036c86e14fbd256",
-    "wrangler.json": "a8e21f9c9b7001524d8e0e8786d216da496c0cce29b56a3c44684fe4d1452126"
+    "wrangler.json": "0834bd839f41bc276725746a2e52751b522257ff523806ba70933582ad967bb7"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
     "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-03 delegated author, part B); PR review is recorded separately",
-    "date": "2026-10-31",
-    "rationale": "AF-CTR-03 part B (feature availability), fix round 2, after af-ctr-03-r14 (which admitted fix round 1 at cloud-release-r75). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as admitted, and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0, no further package or install script) is unchanged. center/go.mod, center/go.sum, center/dependencies.json, the root package-lock.json, the NuGet locks, the Dockerfile, the base images, the toolchains, .github/workflows/ci.yml, the root package.json, .dockerignore and biome.json are unchanged. Migration 0003_entitlement.sql changes in its comments only (its sha256 is now acc92fe98fdc5976d711f7cd393cdaf6781cc79029824559210e4dcf6121bbf2; it is unmerged, applied nowhere and pinned by the tests, the documents and the profile below); migration 0002's checksum (c7406aae8669a0422ab33b7d5afecbda88b0860a1c9bdd8f3791a50f96c46317) is unchanged. The release profile cloud-release-r76 with its successor records center-runtime-r22 and center-worker-r22 binds the center sources as they are at this change and every non-test file of the executable's package; the Worker sources are as at r74. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a sixteenth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration. Production stays dark: no catalogue, no surface.",
+    "date": "2026-11-02",
+    "rationale": "AF-CTR-03 part B, hosted proof of the operations surface, after af-ctr-03-r15 (which admitted fix round 2 at cloud-release-r76). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as admitted, and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0) is unchanged. The one input that changes is wrangler.json: the acceptance environment's FLAGSHIP_SURFACES becomes identity,pages,operations. Production keeps an empty FLAGSHIP_SURFACES and no plan catalogue. Every other bound input, the center sources, the Worker sources, the Dockerfile, the base images, the toolchains and the migrations are unchanged, so the release profile cloud-release-r76 with center-runtime-r22 and center-worker-r22 stays active. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a seventeenth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration.",
     "inputs": {
       ".github/workflows/ci.yml": "ea83e46ed10fd87b7c69688b00113e47e09f45acbbaf17922399ea93f731dd0a",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -372,7 +372,7 @@
       "tooling/release-provenance.ts": "a3763964fe3fd3fabb66fa69aaf2296253c36812cf66e0fc526e5c2d909ee171",
       "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
       "tools/ArcForges.Cloud.Generation/packages.lock.json": "36965c2f5b447302352d2abd554b1a034f9e277753f30583c036c86e14fbd256",
-      "wrangler.json": "a8e21f9c9b7001524d8e0e8786d216da496c0cce29b56a3c44684fe4d1452126"
+      "wrangler.json": "0834bd839f41bc276725746a2e52751b522257ff523806ba70933582ad967bb7"
     },
     "checks": [
       "locked-restore",
@@ -383,11 +383,11 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "AF-CTR-03 part B (feature availability), fix round 2, after af-ctr-03-r14 (which admitted fix round 1 at cloud-release-r75). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as admitted, and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0, no further package or install script) is unchanged. center/go.mod, center/go.sum, center/dependencies.json, the root package-lock.json, the NuGet locks, the Dockerfile, the base images, the toolchains, .github/workflows/ci.yml, the root package.json, .dockerignore and biome.json are unchanged. Migration 0003_entitlement.sql changes in its comments only (its sha256 is now acc92fe98fdc5976d711f7cd393cdaf6781cc79029824559210e4dcf6121bbf2; it is unmerged, applied nowhere and pinned by the tests, the documents and the profile below); migration 0002's checksum (c7406aae8669a0422ab33b7d5afecbda88b0860a1c9bdd8f3791a50f96c46317) is unchanged. The release profile cloud-release-r76 with its successor records center-runtime-r22 and center-worker-r22 binds the center sources as they are at this change and every non-test file of the executable's package; the Worker sources are as at r74. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a sixteenth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration. Production stays dark: no catalogue, no surface.",
+    "runtimeAssessment": "AF-CTR-03 part B, hosted proof of the operations surface, after af-ctr-03-r15 (which admitted fix round 2 at cloud-release-r76). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as admitted, and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0) is unchanged. The one input that changes is wrangler.json: the acceptance environment's FLAGSHIP_SURFACES becomes identity,pages,operations. Production keeps an empty FLAGSHIP_SURFACES and no plan catalogue. Every other bound input, the center sources, the Worker sources, the Dockerfile, the base images, the toolchains and the migrations are unchanged, so the release profile cloud-release-r76 with center-runtime-r22 and center-worker-r22 stays active. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a seventeenth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-03-r14.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-03-r15.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
-    "reviewedOn": "2026-10-31",
+    "reviewedOn": "2026-11-02",
     "decision": "approved"
   },
   "closure": {
@@ -1185,7 +1185,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-03-r15.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-03-r16.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
