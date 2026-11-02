@@ -21,6 +21,7 @@ import test from "node:test";
 import {
   type Dependencies,
   baseUrlProblem,
+  defaultReportName,
   main,
   parseArguments,
 } from "../../eng/verification/browser/acceptance.ts";
@@ -50,14 +51,28 @@ import {
 } from "../../eng/verification/browser/driver.ts";
 import {
   Redactor,
+  anotherCommand,
   cookieProblems,
+  fixtureFeatures,
+  grantedDays,
+  grantedFeature,
   headerProblems,
   mockedLabel,
   newWorld,
   noFreeTransport,
   realLabel,
 } from "../../eng/verification/browser/flow.ts";
-import { ids, pages, persistBefore, selectors } from "../../eng/verification/browser/selectors.ts";
+import {
+  confirmFields,
+  forms,
+  ids,
+  operations,
+  pages,
+  persistBefore,
+  selectors,
+  sessionBootstrap,
+  stepUpAttribute,
+} from "../../eng/verification/browser/selectors.ts";
 import { createBootstrapFile, generateBootstrap } from "../../eng/verification/proof-bootstrap.ts";
 import { realMachine } from "../../eng/verification/user-only.ts";
 import { pageRoutes, pageSecurityHeaders } from "../../worker/tables/center-tables.generated.ts";
@@ -1694,4 +1709,526 @@ test("the request budget numbers are tied to the edge limit of wrangler.json, in
   assert(defaultRequestsPerMinute + requestBurst <= maxRequestsPerWindow);
   assert(maxRequestsPerWindow < edgeLimitPerMinute);
   assert.equal(defaultRequestsPerMinute + requestBurst, 44);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The operator grant (AF-CTR-03 B): the hosted proof of the operations surface. MOCKED: the authenticator (Chromium's virtual one)
+// and the catalogue (the development fixtures). The stand-in center's operations pages hold the center's own guards; each switch of
+// FakeOptions breaks one, and the run must notice.
+
+interface Report {
+  mode: string;
+  result: string;
+  steps: { name: string; ok: boolean; label: string; attempts: number; note?: string }[];
+  facts: Record<string, unknown>;
+}
+
+/** A scenario whose owner is enrolled (the first run), with the stand-in's switches set after that run. */
+async function enrolled(over: Partial<FakeOptions> = {}): Promise<Scenario> {
+  const s = scenario();
+  assert.equal(await s.run(), 0, s.stderr.join("\n"));
+  Object.assign(s.center.options, over);
+  s.stdout.length = 0;
+  s.stderr.length = 0;
+  return s;
+}
+
+const lastReport = (s: Scenario): Report => JSON.parse(s.reports.at(-1)?.text ?? "{}") as Report;
+const operatorRun = (s: Scenario, extra: string[] = []) => s.run(["--operator-grant", ...extra]);
+/** Names of the steps of the report, in order, with the first one that did not pass. */
+const failedStep = (s: Scenario) => lastReport(s).steps.find((entry) => !entry.ok)?.name;
+
+test("the operator-grant mode signs in with the saved credential, reviews, is refused for another request, is granted, replays and is refused a reuse", async () => {
+  const s = await enrolled();
+  const secretsBefore = store(s)
+    .load()
+    .credentials.map((credential) => credential.credentialId);
+  const counterBefore = s.center.passkeys[0]?.signCount ?? 0;
+  const tabsBefore = s.browser.tabs.length;
+  assert.equal(await operatorRun(s), 0, s.stderr.join("\n"));
+  assert.equal(s.stdout.at(-1), "PASSED");
+  const report = lastReport(s);
+  assert.equal(report.mode, "operator-grant");
+  assert.equal(report.result, "passed");
+  assert.equal(report.steps.length, 7);
+  assert(report.steps.every((entry) => entry.ok && entry.attempts === 1));
+  // Four steps use the MOCKED authenticator, three none; none claims real hardware.
+  assert.deepEqual(
+    report.steps.map((entry) => entry.label === mockedLabel),
+    [true, true, true, true, false, false, false],
+  );
+  assert(report.steps.every((entry) => entry.label !== realLabel));
+  assert.deepEqual(
+    report.steps.map((entry) => entry.name),
+    [
+      "the operator page is closed without a session",
+      "sign in with the passkey and read the account",
+      "review a grant (nothing is written), then confirm with a step-up that belongs to another request (403)",
+      "review again and confirm with the passkey: the grant is written",
+      "the same form again says it was already issued",
+      "a step-up that was used is refused (403)",
+      "sign out",
+    ],
+  );
+  assert.equal(report.facts.entitlementVersion, 1);
+  assert.equal(report.facts.grantedFeatures, "remote.view");
+  assert.equal(report.facts.grantedDays, 1);
+
+  // What the center holds: exactly one grant, of remote.view, for one day, to the owner's own account.
+  assert.equal(s.center.grants.length, 1);
+  const [grant] = s.center.grants;
+  assert.deepEqual(grant?.features, ["remote.view"]);
+  assert.equal(grant?.account, s.center.userId);
+  assert.match(grant?.sourceRef ?? "", /^hosted-proof-\d{14}$/u);
+  const day = 86_400 * 1_000_000;
+  const lifetime = (grant?.expiresAt ?? 0) - s.center.clockSeconds * 1_000_000;
+  assert(lifetime > 0 && lifetime <= day, "the grant ends within a day of the run");
+  // The center audited the two refusals and the one grant, in the order the run made them.
+  assert.deepEqual(s.center.audit, [
+    "refused/step_up_required",
+    "issued",
+    "refused/step_up_required",
+  ]);
+  // Two step-ups were proved: the tampered request's (never consumed) and the grant's (consumed once).
+  assert.deepEqual(
+    s.center.evidence.map((item) => item.used),
+    [false, true],
+  );
+  // The mode registers no passkey and prunes none; the credential file follows the server's counter.
+  assert.equal(s.center.passkeys.length, 1);
+  assert.deepEqual(
+    store(s)
+      .load()
+      .credentials.map((credential) => credential.credentialId),
+    secretsBefore,
+  );
+  assert.equal(store(s).load().credentials[0]?.signCount, s.center.passkeys[0]?.signCount);
+  assert((s.center.passkeys[0]?.signCount ?? 0) > counterBefore);
+  // One browser tab, signed out at the end.
+  assert.equal(
+    s.browser.tabs.length - tabsBefore,
+    1,
+    "this run opens one tab and no second browser",
+  );
+  for (const session of s.center.sessions.values()) assert.equal(session.revoked, true);
+  // The browser reported the two refusals as console errors, and the run expected exactly those.
+  assert.deepEqual(s.browser.tabs.at(-1)?.refusalsSeen, [403, 403]);
+  assert.equal(s.browser.tabs.at(-1)?.refusalsPending(), 0);
+});
+
+test("the operator-grant report has its own default name, and no output holds an account identifier, a request token, a cookie or a key", async () => {
+  const s = await enrolled();
+  assert.equal(await operatorRun(s), 0, s.stderr.join("\n"));
+  assert.equal(path.basename(s.reports[0]?.file ?? ""), "browser-acceptance.json");
+  assert.equal(path.basename(s.reports.at(-1)?.file ?? ""), "browser-operator-grant.json");
+  assert.equal(await operatorRun(s, ["--report", "elsewhere.json"]), 0, s.stderr.join("\n"));
+  assert.equal(path.basename(s.reports.at(-1)?.file ?? ""), "elsewhere.json");
+  const secrets = new Set<string>([s.token, s.center.userId]);
+  for (const credential of store(s).load().credentials) {
+    secrets.add(credential.privateKey);
+    secrets.add(credential.credentialId);
+    if (credential.userHandle) secrets.add(credential.userHandle);
+  }
+  for (const tab of s.browser.tabs) for (const value of tab.secretsSeen) secrets.add(value);
+  for (const handle of s.center.sessions.keys()) secrets.add(s.center.csrf(handle));
+  assert(
+    secrets.size >= 9,
+    "the scan knows what to look for: account, keys, cookies and request tokens",
+  );
+  for (const secret of secrets)
+    assert(
+      !s.everything().includes(secret),
+      `a secret of length ${secret.length} was printed or reported`,
+    );
+  // The report keeps what a reader of the run needs: the version and the feature, not who was granted.
+  const text = s.reports.at(-1)?.text ?? "";
+  assert(text.includes('"entitlementVersion"') && text.includes('"grantedFeatures"'));
+  assert(!text.includes(s.center.userId.slice(0, 8)));
+});
+
+test("the operator-grant mode needs the saved credential, refuses to combine with AR-23, never reads the bootstrap, and its usage names the pause between runs", async () => {
+  const none = scenario();
+  assert.equal(await operatorRun(none), 2);
+  assert.match(none.stderr.join("\n"), /--operator-grant needs the saved owner credential/u);
+  assert.equal(none.launches.length, 0, "no browser is started");
+  const both = scenario();
+  assert.equal(await both.run(["--operator-grant", "--real-authenticator"]), 2);
+  assert.match(both.stderr.join("\n"), /two runs; name one/u);
+  assert.equal(both.launches.length, 0);
+  assert.equal(parse(["--operator-grant"]).operatorGrant, true);
+  assert.equal(parse([]).operatorGrant, false);
+  assert.equal(
+    parse(["--operator-grant"]).headed,
+    false,
+    "no Windows Hello, so no window is needed",
+  );
+  assert.equal(parse(["--operator-grant", "--headed"]).headed, true);
+  assert.equal(
+    path.basename(parse(["--operator-grant"]).report),
+    defaultReportName.operatorGrant,
+    "the mode must not overwrite the acceptance's report",
+  );
+  assert.equal(path.basename(parse([]).report), defaultReportName.acceptance);
+  // The mode is bound by the same request bound and the same hosts as the others.
+  assert.throws(
+    () => parse(["--operator-grant", "--base-url", "https://arcforges.com/api"]),
+    /production/u,
+  );
+  assert.throws(() => parse(["--operator-grant", "--requests-per-minute", "0"]), /localhost only/u);
+  assert.throws(
+    () => parse(["--operator-grant", "--requests-per-minute", "41"]),
+    /localhost only/u,
+  );
+  // After the credential exists the bootstrap is not needed at all.
+  const s = await enrolled();
+  rmSync(path.join(s.bootstrapDir, "owner-bootstrap.json"));
+  assert.equal(await operatorRun(s), 0, s.stderr.join("\n"));
+  // --help prints the usage and starts nothing; the usage states the flag, the exit codes and the pause.
+  const help = scenario();
+  assert.equal(await help.run(["--help"]), 0);
+  assert.equal(help.launches.length, 0);
+  const usage = help.stdout.join("\n");
+  assert.match(usage, /--operator-grant/u);
+  assert.match(usage, /at least 90 seconds between two runs/u);
+  assert.match(usage, /Exit codes: 0 passed, 1 failed, 2 not started/u);
+  assert.match(usage, /browser-operator-grant\.json/u);
+  // An unknown argument shows the same usage.
+  assert.throws(() => parse(["--operator"]), /Unknown argument[\s\S]*at least 90 seconds/u);
+});
+
+test("defect 1: the sign-in returns to the page it came from, so the run waits for the operator page and not for the passkeys", async () => {
+  const s = await enrolled();
+  assert.equal(await operatorRun(s), 0, s.stderr.join("\n"));
+  // A center that ignores the return fragment lands on the passkeys page: the step says so instead of passing.
+  const ignores = await enrolled({ signInIgnoresReturn: true });
+  assert.equal(await operatorRun(ignores), 1);
+  assert.equal(failedStep(ignores), "sign in with the passkey and read the account");
+  assert.equal(ignores.center.grants.length, 0);
+  // A center that sends the visitor to the sign-in page without the fragment fails the first step.
+  const forgets = await enrolled({ noReturnFragment: true });
+  assert.equal(await operatorRun(forgets), 1);
+  assert.equal(failedStep(forgets), "the operator page is closed without a session");
+});
+
+test("defect 2: a refused document is a console error in the browser, so a step that provokes one says so and a refusal nobody expected fails", async () => {
+  // The two refusals the run provokes are expected, reported once each, and used up.
+  const s = await enrolled();
+  assert.equal(await operatorRun(s), 0, s.stderr.join("\n"));
+  assert.deepEqual(s.browser.tabs.at(-1)?.refusalsSeen, [403, 403]);
+  assert.deepEqual(s.browser.tabs.at(-1)?.problems(), []);
+  // An account that is no operator is refused on the page itself, which no step expected: the browser's report fails the step.
+  const refused = await enrolled({ notOperator: true });
+  assert.equal(await operatorRun(refused), 1);
+  assert.equal(failedStep(refused), "sign in with the passkey and read the account");
+  assert.match(refused.stderr.join("\n"), /reported 1 problem[\s\S]*status of 403/u);
+  assert.deepEqual(refused.center.audit, ["refused/permission_denied"]);
+  assert.equal(refused.center.grants.length, 0);
+  // A browser that never reports the refusal leaves the expectation open, and the step waits for it and fails.
+  const silent = await enrolled({ silentRefusals: true });
+  assert.equal(await operatorRun(silent), 1);
+  assert.match(silent.stderr.join("\n"), /Timed out waiting for the refusal to be reported/u);
+});
+
+test("defect 3: every step starts from a navigation, so a 429 at any of them starts it again, and one grant is written", async () => {
+  // The edge limiter answers the navigation to the operator form of each of the steps 3 to 6 once (the first navigations of the
+  // run are without a session and are not counted).
+  for (const [skip, step] of [
+    [0, 2],
+    [1, 3],
+    [2, 4],
+    [3, 5],
+  ] as const) {
+    const s = await enrolled({ limitOperatorForm: { skip, times: 1, retryAfter: 5 } });
+    assert.equal(await operatorRun(s), 0, `navigation ${skip}: ${s.stderr.join("\n")}`);
+    const report = lastReport(s);
+    assert.equal(report.steps[step]?.attempts, 2, `step ${step + 1} ran twice`);
+    assert.equal(
+      report.steps.filter((entry) => entry.attempts > 1).length,
+      1,
+      "and no other step did",
+    );
+    assert(s.sleeps.includes(5000), "the advised wait was kept");
+    assert.equal(s.center.grants.length, 1, `exactly one grant after a 429 at step ${step + 1}`);
+    assert.equal(s.center.audit.filter((event) => event === "issued").length, 1);
+  }
+  // The same for a 429 on a POST the center never saw: the review, the tampered confirmation, the grant, the replay, the reuse.
+  for (const [route, skip, step] of [
+    ["/operations/grant/review", 0, 2],
+    ["/operations/grant/confirm", 0, 2],
+    ["/operations/grant/review", 1, 3],
+    ["/operations/grant/confirm", 1, 3],
+    ["/operations/grant/confirm", 2, 4],
+    ["/operations/grant/confirm", 3, 5],
+  ] as const) {
+    const s = await enrolled({ limitOperatorPost: { route, skip, times: 1, retryAfter: 5 } });
+    assert.equal(await operatorRun(s), 0, `${route} #${skip}: ${s.stderr.join("\n")}`);
+    assert.equal(
+      lastReport(s).steps[step]?.attempts,
+      2,
+      `${route} #${skip}: step ${step + 1} ran twice`,
+    );
+    assert.equal(s.center.grants.length, 1, `${route} #${skip}: exactly one grant`);
+    assert.equal(s.center.audit.filter((event) => event === "issued").length, 1);
+  }
+});
+
+test("a 429 on the page a sign-in leads to fails the step instead of repeating it, and nothing is granted", async () => {
+  const s = await enrolled({ limitAfterSignIn: 1 });
+  assert.equal(await operatorRun(s), 1);
+  assert.match(
+    s.stderr.join("\n"),
+    /rate limited \(429\) after a request of it had changed something/u,
+  );
+  assert.equal(failedStep(s), "sign in with the passkey and read the account");
+  assert.equal(s.center.grants.length, 0);
+});
+
+test("each guard of the operations pages that is turned off is noticed by the run, at the step that checks it", async () => {
+  const stepOf = (n: number) =>
+    [
+      "the operator page is closed without a session",
+      "sign in with the passkey and read the account",
+      "review a grant (nothing is written), then confirm with a step-up that belongs to another request (403)",
+      "review again and confirm with the passkey: the grant is written",
+      "the same form again says it was already issued",
+      "a step-up that was used is refused (403)",
+      "sign out",
+    ][n - 1];
+  for (const [option, step, message] of [
+    // The step-up evidence is not bound to the request it was proved for: the tampered request is granted.
+    ["evidenceIgnoresTarget", 3, /Timed out waiting for the refusal page/u],
+    // No evidence is needed at all.
+    ["noEvidenceNeeded", 3, /Timed out waiting for the refusal page/u],
+    // A repeated command is not recognized: the center asks for evidence again and refuses, which nobody expected here.
+    ["noReplay", 5, /reported 1 problem[\s\S]*passkey check first/u],
+    // The replay answers another version than the grant it repeats.
+    ["replayDiffers", 5, /The replay does not show the grant that was written/u],
+    // Evidence that is not consumed would grant the same request again; the center refuses on the source reference, not on the
+    // evidence, and the script does not accept that as the refusal of a used step-up.
+    ["evidenceReusable", 6, /reported 1 problem[\s\S]*source reference was already used/u],
+    // The surface is off: the Worker's plain 404.
+    ["operationsOff", 1, /reported 1 problem[\s\S]*status of 404/u],
+    // No plan catalogue: the form is a 400 after the sign-in.
+    ["noCatalogue", 2, /reported 1 problem[\s\S]*status of 400/u],
+  ] as const) {
+    const s = await enrolled({ [option]: true });
+    assert.equal(await operatorRun(s), 1, option);
+    assert.equal(failedStep(s), stepOf(step), option);
+    assert.match(s.stderr.join("\n"), message, option);
+    assert.equal(s.stdout.at(-1), "FAILED", option);
+    assert.equal(lastReport(s).result, "failed", option);
+  }
+  // A catalogue other than the development fixtures is not what the proof environment is configured with.
+  const other = await enrolled({ catalogue: ["remote.view"] });
+  assert.equal(await operatorRun(other), 1);
+  assert.match(other.stderr.join("\n"), /does not list the features of the development catalogue/u);
+  assert.equal(other.center.grants.length, 0);
+  // A page of the operations routes that lacks a security header fails the review.
+  const header = await enrolled({ badHeader: "content-security-policy" });
+  assert.equal(await operatorRun(header), 1);
+  assert.match(header.stderr.join("\n"), /content-security-policy/u);
+});
+
+test("the stand-in's operations pages hold the center's guards: a request token, the whole form, a command that is the same request, evidence for the target, once", async () => {
+  const s = await enrolled();
+  assert.equal(await operatorRun(s), 0, s.stderr.join("\n"));
+  const center = s.center;
+  const session = [...center.sessions.keys()].at(-1) ?? "";
+  const grant = center.grants[0];
+  assert(grant !== undefined);
+  const fields = (over: Record<string, string | undefined> = {}) => {
+    const base: Record<string, string> = {
+      csrf: center.csrf(session),
+      command_id: crypto.randomUUID(),
+      account: grant.account,
+      features: grant.features.join(","),
+      reason: grant.reason,
+      source_ref: `other-${grant.sourceRef}`,
+      self_approval: "the owner is the only account of the acceptance environment",
+      expires_at: String(grant.expiresAt),
+    };
+    const merged = { ...base, ...over };
+    return new Map(
+      Object.entries(merged).filter(([, value]) => value !== undefined) as [string, string][],
+    );
+  };
+  const confirm = (map: Map<string, string>) => center.operatorConfirm(session, center.userId, map);
+  // The request token of the session; the whole form; a command id in its shape.
+  assert.equal(confirm(fields({ csrf: "wrong" })).status, 403);
+  assert.equal(confirm(fields({ csrf: undefined })).status, 400);
+  assert.equal(confirm(fields({ command_id: "not-a-uuid" })).status, 400);
+  assert.equal(confirm(new Map([...fields(), ["extra", "x"]])).status, 400);
+  // No evidence: refused, and nothing is written (the source reference is free again).
+  const before = center.grants.length;
+  const noEvidence = confirm(fields());
+  assert.equal(noEvidence.status, 403);
+  assert.match(noEvidence.error ?? "", /passkey check first/u);
+  assert.equal(center.grants.length, before);
+  // Evidence of the class for the request's own target: granted once, and then used up.
+  const target = center.target({
+    account: grant.account,
+    features: grant.features,
+    reason: grant.reason,
+    expiresAt: grant.expiresAt,
+    sourceRef: `other-${grant.sourceRef}`,
+    selfApproval: "the owner is the only account of the acceptance environment",
+  });
+  const proof = (operationClass: string, hash: string) =>
+    center.evidence.push({
+      operationClass,
+      target: hash,
+      userId: center.userId,
+      session,
+      used: false,
+    });
+  proof("identity.removeAuthIdentity", target);
+  assert.equal(confirm(fields()).status, 403, "evidence of another class does not count");
+  proof("center.operatorGrant", "0".repeat(64));
+  assert.equal(confirm(fields()).status, 403, "evidence for another target does not count");
+  proof("center.operatorGrant", target);
+  const command = crypto.randomUUID();
+  const written = confirm(fields({ command_id: command }));
+  assert.equal(written.status, 200);
+  assert.equal(written.error, "The grant was written.");
+  assert.equal(center.grants.length, before + 1);
+  // The same command and request: the stored result, no evidence needed. The same command for another request: refused.
+  const replay = confirm(fields({ command_id: command }));
+  assert.equal(replay.status, 200);
+  assert.match(replay.error ?? "", /had already been issued/u);
+  assert.equal(center.grants.length, before + 1);
+  assert.equal(confirm(fields({ command_id: command, reason: "another reason" })).status, 400);
+  // A new command with the used evidence: refused.
+  assert.equal(confirm(fields({ command_id: crypto.randomUUID() })).status, 403);
+  assert.equal(center.evidence.filter((item) => item.used).length, 2);
+});
+
+test("anotherCommand changes only the last digit and keeps the shape of a command", () => {
+  for (const command of [
+    "7b0c1f3e-5a42-4c1d-9e6a-3d2b8f4a1c90",
+    "7b0c1f3e-5a42-4c1d-9e6a-3d2b8f4a1c91",
+    "7b0c1f3e-5a42-4c1d-9e6a-3d2b8f4a1c9f",
+  ]) {
+    const other = anotherCommand(command);
+    assert.notEqual(other, command);
+    assert.equal(other.slice(0, -1), command.slice(0, -1));
+    assert.match(other, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u);
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The script against the center's own operations pages and routes
+
+test("every element, heading and text the operator-grant mode uses is in the center's operations templates and messages", () => {
+  const grant = template("operations-grant");
+  const review = template("operations-review");
+  const done = template("operations-done");
+  for (const [file, heading] of [
+    [grant, "Operator grant"],
+    [review, "Review the operator grant"],
+    [done, "Operator grant issued"],
+  ] as const)
+    assert(file.includes(`<h1 id="heading" tabindex="-1">${heading}</h1>`), heading);
+  // The request form: its ids, the check box per feature (and the catalogue-wide one), the submit button.
+  for (const selector of [
+    operations.account,
+    operations.days,
+    operations.reason,
+    operations.sourceRef,
+    operations.selfApproval,
+  ])
+    assert(grant.includes(`id="${selector.slice(1)}"`), selector);
+  assert(grant.includes('action="{{.Base}}/operations/grant/review"'));
+  assert(grant.includes('<input id="{{.Field}}" name="{{.Field}}" type="checkbox"'));
+  assert(grant.includes('<input id="all" name="all" type="checkbox">'));
+  assert(grant.includes("<fieldset>") && grant.includes('<button type="submit"'));
+  assert.equal(operations.feature("remote.view"), 'input[name="feature-remote.view"]');
+  // The confirmation form: its action, the step-up class and target, and exactly the eight hidden fields, in the order the script
+  // reads them.
+  assert(review.includes('action="{{.Base}}/operations/grant/confirm"'));
+  assert(review.includes('data-step-up-class="center.operatorGrant"'));
+  assert(review.includes('data-step-up-target="{{.Ops.Target}}"'));
+  const hidden = [...review.matchAll(/<input type="hidden" name="([a-z_]+)"/gu)].map((m) => m[1]);
+  assert.deepEqual(hidden, [...confirmFields]);
+  assert(
+    review.includes('<button type="submit" class="primary">Confirm with your passkey</button>'),
+  );
+  assert(stepUpAttribute === "data-step-up-class");
+  // The terms the script reads, and the sentences it tells apart.
+  for (const term of ["Account", "Features", "Ends", "Reason", "Source reference"])
+    assert(review.includes(`<dt>${term}</dt>`), term);
+  assert(review.includes("(your own account)"));
+  for (const term of ["Account", "Features", "Ends", "Compensation term", "Entitlement version"])
+    assert(done.includes(`<dt>${term}</dt>`), term);
+  assert(done.includes('<h1 id="heading" tabindex="-1">Operator grant issued</h1>\n<p>'));
+  assert(done.includes("This grant had already been issued; nothing new was written."));
+  assert(done.includes("The grant was written."));
+  // The refusal the script waits for: the heading of a 403 page and the step-up sentence the center answers with.
+  const messages = readFileSync(path.join(root, "center/internal/pages/messages.go"), "utf8");
+  assert(messages.includes('return "This is not allowed"'));
+  assert.match(
+    messages,
+    /"AUTHENTICATION\/step_up_required":\s+"This change needs a passkey check first\. Go back and try again\."/u,
+  );
+  assert(template("error").includes('<h1 id="heading" tabindex="-1">{{.Heading}}</h1>'));
+  assert(template("base").includes('<p id="error-text">'));
+  // The route the script reads the account from names the fields it uses.
+  const json = readFileSync(path.join(root, "center/internal/pages/jsonout.go"), "utf8");
+  for (const name of ['`json:"csrfToken"`', '`json:"authenticated"`', '`json:"userId"`'])
+    assert(json.includes(name), name);
+});
+
+test("the features the form lists are the development fixture catalogue, in the order of the center's gated keys", () => {
+  const fixture = JSON.parse(
+    readFileSync(path.join(root, "center/internal/feature/fixtures/development.json"), "utf8"),
+  ) as { fixture: boolean; capabilities: string[] };
+  assert.equal(
+    fixture.fixture,
+    true,
+    "the catalogue is the illustrative fixture (MOCKED), not a priced one",
+  );
+  assert.deepEqual([...fixtureFeatures], fixture.capabilities);
+  const source = readFileSync(path.join(root, "center/internal/feature/feature.go"), "utf8");
+  assert(
+    source.includes(
+      "return []Key{CenterNodes, CenterExecute, RemoteView, RemoteControl, CenterMCP, Push}",
+    ),
+  );
+  assert(fixtureFeatures.includes(grantedFeature as never));
+  assert.equal(grantedFeature, "remote.view");
+  assert.equal(grantedDays, 1);
+  // The proof environment loads exactly this catalogue and the operations surface; production loads neither.
+  const wrangler = JSON.parse(readFileSync(path.join(root, "wrangler.json"), "utf8")) as {
+    vars: Record<string, string>;
+    env: { proof: { vars: Record<string, string> } };
+  };
+  assert.equal(wrangler.env.proof.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, "development-fixtures");
+  assert.equal(wrangler.env.proof.vars.FLAGSHIP_SURFACES, "identity,pages,operations");
+  assert.equal(wrangler.vars.FLAGSHIP_SURFACES, "");
+  assert.equal(wrangler.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, undefined);
+});
+
+test("the operator page is a GET route and its two forms are POST-only routes of the operations surface, none a route the script visits", () => {
+  const routes = pageRoutes.map((route) => ({ ...route }));
+  const find = (method: string, route: string) =>
+    routes.find((candidate) => candidate.method === method && candidate.path === route);
+  assert.equal(find("GET", pages.operationsGrant)?.surface, "operations");
+  for (const route of Object.values(forms)) {
+    assert.equal(find("POST", route)?.surface, "operations", route);
+    assert.equal(
+      find("GET", route),
+      undefined,
+      `${route} is POST-only: the script submits it, never visits it`,
+    );
+  }
+  assert.equal(find("GET", sessionBootstrap)?.surface, "pages");
+  assert.equal(find("GET", sessionBootstrap)?.kind, "json");
+  assert.equal(
+    find("GET", sessionBootstrap)?.redirects,
+    false,
+    "the script's fetch refuses a redirect",
+  );
+  // The review writes nothing, so a step may repeat it after a 429; the confirmation is a change.
+  assert.equal(acceptedChange("POST", 200, `/api${forms.operationsReview}`), false);
+  assert.equal(acceptedChange("POST", 200, `/api${forms.operationsConfirm}`), true);
+  assert.equal(acceptedChange("POST", 403, `/api${forms.operationsConfirm}`), false);
 });
