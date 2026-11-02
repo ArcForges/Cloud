@@ -144,8 +144,8 @@ checked and normalized exactly as a grant would, nothing written, with the step-
 The surface needs `identity` and `pages`, exists only in official-hosted mode and is never a default. Of the checked-in environments
 only the acceptance environment enables it (`proof` carries `identity,pages,operations` and the development fixture catalogue,
 **MOCKED**, illustrative); production carries no surface and no catalogue, and `tests/worker/center-config.test.ts` and
-`tests/worker/proof-deploy.test.ts` pin both. Where it is off, every route answers 404 as the pages surface does, with the security
-headers; a signed-in account that is no operator (or whose account is not active) gets 403, audited as above. Every reply carries the seven page security headers byte for byte, `Cache-Control: no-store,
+`tests/worker/proof-deploy.test.ts` pin both. Where it is off, the Worker answers its plain 404 "Unknown API method." before anything is
+read, as for the pages surface (the center's own 404, where it did not compose the surface, carries the seven security headers); a signed-in account that is no operator (or whose account is not active) gets 403, audited as above. Every reply carries the seven page security headers byte for byte, `Cache-Control: no-store,
 no-transform` included, and the Worker's page handler checks the surface of each route before anything else.
 
 ## The gate
@@ -221,10 +221,11 @@ the personal data and the retention are in [PostgreSQL store](postgres-store.md#
 
 The hosted run on the proof environment is done by the coordinator after the merge and the deployment (a main push deploys
 production, then the `proof: deploy` dispatch deploys the acceptance environment). Nothing below was run by the author of the change
-that enabled the surface on proof: no hosted environment was touched, and nothing runs against production. The order is cheap and
+that enabled the surface on proof: no hosted environment was touched, and the acceptance script never targets production (step 1 only reads production with `curl`). The order is cheap and
 diagnostic first, one request at a time and fewer than ten in a minute (the edge counts the requests of a client over 60 seconds):
 
-1. **Production stays dark.** `curl -si https://arcforges.com/api/healthz` says `center.surfaces` is `none` (after the Container has
+1. **Production stays dark.** `curl -si https://arcforges.com/api/healthz` says `center.surfaces` is `none` and `revision` (or the
+   `x-arcforges-worker-revision` header) is the merge commit (after the Container has
    rolled over, which takes several minutes after the deploy job: stop requesting for 60 to 90 seconds before reading it);
    `ARCFORGES_CENTER_PLAN_CONFIGURATION` is unset in production; `/api/operations/grant` and `/api/account/sign-in` answer the Worker's
    plain 404 "Unknown API method."; the migration gate applied `0003` to the production database (the tables exist and are empty,
@@ -242,46 +243,63 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
    says `center.surfaces` is `identity,pages,operations`, equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`
    (which also records `planConfiguration` `development-fixtures`); a stale value after 90 seconds is diagnosed, not redeployed.
 4. **The page by `curl`**, before any browser: `curl -si https://proof.arcforges.com/api/operations/grant` is `303` to
-   `/api/account/sign-in#return=%2Fapi%2Foperations%2Fgrant` with the seven page security headers and the header
-   `Cache-Control: no-store, no-transform`; `curl -si https://proof.arcforges.com/api/account/sign-in` is still `200`, and
-   `grep -ci 'cloudflareinsights\|data-cf-beacon'` of it prints `0` ([the post-deploy checks that only the hosted path
-   shows](center-identity.md#post-deploy-checks-that-only-the-hosted-path-shows)).
+   `/api/account/sign-in#return=%2Fapi%2Foperations%2Fgrant` with the seven page security headers (the Security headers paragraph of
+   [center-identity.md](center-identity.md#account-pages-and-browser-sessions) lists them), `Cache-Control: no-store, no-transform`
+   among them; the sign-in page is still `200`, and check 2 of [the post-deploy checks that only the hosted path
+   shows](center-identity.md#post-deploy-checks-that-only-the-hosted-path-shows) passes exactly as it is written there, with its two
+   request headers (`User-Agent` and `Accept`), its beacon count of `0` and its `cache-control: no-store, no-transform` line.
 5. **Regression first.** The returning acceptance on the Windows host
    (`node eng/verification/browser/acceptance.ts`, about three minutes hosted) must print `PASSED`: the account pages keep working with the new
    surface on.
-6. **Pause at least 90 seconds**, then run the operator grant on the same host:
-   `node eng/verification/browser/acceptance.ts --operator-grant --report artifacts\browser-operator-grant.json` (a minute and a half to
-   two minutes, about sixty requests, see [the acceptance](center-identity.md#proof-bootstrap-and-acceptance)). The two runs must be separated: the edge limiter counts
-   the requests of the machine over 60 seconds, and a second run that starts inside that window meets its 429s. The run is a real
+6. **Pause at least 90 seconds**, warm the Container with `curl -si https://proof.arcforges.com/api/healthz` 10 to 20 seconds before
+   the run (the Container sleeps after 60 idle seconds, so the pause itself puts it to sleep; healthz counts against the Hello limiter,
+   not the identity limiter), then run the operator grant on the same host:
+   `node eng/verification/browser/acceptance.ts --operator-grant` (its report is `artifacts/browser-operator-grant.json` unless
+   `--report` names another file; a minute and a half to two minutes, about sixty requests, see [the
+   acceptance](center-identity.md#proof-bootstrap-and-acceptance)). The two runs must be separated: the edge limiter counts
+   the requests of the machine over 60 seconds, and a second run that starts inside that window meets its 429s. The center has a
+   limit of its own besides the edge: 10 step-ups per account in 10 minutes. A run spends 2 of them (a restarted step one more) and
+   the returning run 3, so wait ten minutes between repeated attempts. The run is a real
    Chromium and the pinned `playwright-core` against the hosted environment, with the virtual authenticator (**MOCKED** hardware). On
    `PASSED` the report says `mode: operator-grant`, four steps with the MOCKED authenticator and three without, and in its facts the
-   `entitlementVersion` (at least 1: it depends on the history of the account), `grantedFeatures` `remote.view` and `grantedDays` 1. The
+   `entitlementVersion` (at least 1: it depends on the history of the account), `grantedFeatures` `remote.view`, `requestedDays` 1
+   (what the form was asked for) and `grantedHours` (the hours from the run to the end the done page showed: the run fails unless it
+   is between 23 and 25), among others. The
    steps are: the page is closed without a session (the `303`); the sign-in returns to the operator page; a request is reviewed (the
    review writes nothing) and a step-up that was proved for another request is refused with `403`; the same request is reviewed again
    and confirmed with the passkey (the done page names the term and the entitlement version); the same form again answers "This grant
    had already been issued; nothing new was written." with the same term and version; a step-up that was already used is refused with
    `403`; sign-out closes the page again. The step that fails says where the defect is: 1 and 2 the redirect and sign-in path, 3 the
-   form, the review and the step-up binding, 4 the grant, 5 the replay, 6 the single use of the step-up. A plain-text Worker `503`
-   "Cloud container is temporarily unavailable." means the Worker refused the center's reply (a header, the status or the media type of
-   a page the Worker has not met before): capture `wrangler tail` of the proof Worker while repeating the request once, as the
-   [A2 runbook](center-identity.md#post-deploy-checks-that-only-the-hosted-path-shows) says, and escalate; do not redeploy to see
-   whether it goes away. A `429` that the run meets before it changed anything starts the step again; after a change the step fails and
+   form, the review and the step-up binding, 4 the grant, 5 the replay, 6 the single use of the step-up. One exception: a `403`
+   "This is not allowed." at step 2 is NOT a sign-in defect. The signed-in account is not treated as an operator (the owner is one
+   only through its `identity.bootstrap` row and an active account): stop, nothing was written, and escalate with the audit event
+   `entitlement.operator_grant.refused` (reason `not_operator`). A plain-text reply of the Worker itself is read with the table
+   below. A `429` that the run meets before it changed anything starts the step again; after a change the step fails and
    says so, which is why the runs are separated.
 7. **Afterwards**, the healthz documents and the dark production (steps 1 and 3) again, and nothing to clean up: `revoke-operator` is not
    needed and cannot end the bootstrap owner's standing, and the grant and its service term end 24 hours after the run
    (`days = 1`, `remote.view` only). The records are append-only, so nothing is deleted; a second run within those 24 hours is fine
    (the source reference `hosted-proof-<UTC time>` is unique per run). If the run stops after the grant was written, its browser
-   session ends by itself after 12 hours, and the credential file already holds the counters.
+   session ends by itself (30 minutes idle, 12 hours at the latest), and the credential file already holds the counters.
 
-**What the run shows, and what it does not.**
+**Plain-text replies of the Worker that the run can meet.** They are the Worker's own, not the center's:
 
-| Evidence                                                                                                         | Label                                                                                                                              |
-| ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Healthz `center.surfaces` of proof equals `proof-deployment.json`; production `none` and its routes 404          | REAL (hosted)                                                                                                                      |
-| The `303` without a session, the `200` with the seven headers for the owner, the grant, the replay, the refusals | REAL hosted run; the authenticator is **MOCKED** (Chromium's virtual one), the catalogue is **MOCKED** (illustrative fixtures)     |
-| The `403` for an account that is no operator                                                                     | **NOT evidenced hosted**; REAL in the Go integration tests (real PostgreSQL) and in the local rehearsal                            |
-| The local rehearsal in official-hosted mode (below)                                                              | REAL browser, center binary, PostgreSQL with verified TLS and the Worker's page code; MOCKED platform, authenticator and catalogue |
-| A gated call after the grant                                                                                     | does not exist before AF-CTR-04: only the grant, the entitlement version and the audit are visible                                 |
+| Reply                                                                                                                     | What it means                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `503` "Cloud container is temporarily unavailable." with `Retry-After`, or `504` "RPC deadline exceeded.", at step 1 or 2 | The Container is cold or still starting, or Neon is waking: warm it with the healthz `curl` and repeat the run once.                                                                                                                                                                                                                                                                      |
+| the same `503` without `Retry-After`, on a Container that is warm                                                         | The Worker refused the center's reply (a header, the status or the media type of a page it has not met before) or the Container's fetch failed: capture `wrangler tail` of the proof Worker while repeating the request once, as the [A2 runbook](center-identity.md#post-deploy-checks-that-only-the-hosted-path-shows) says, and escalate; do not redeploy to see whether it goes away. |
+| `403` "The Origin is not allowed."                                                                                        | The script drove a host other than `ALLOWED_ORIGIN` (`https://proof.arcforges.com`).                                                                                                                                                                                                                                                                                                      |
+| `429` "Rate limit exceeded."                                                                                              | The pause was too short (the edge limit).                                                                                                                                                                                                                                                                                                                                                 |
+
+**What the run shows when it passes, and what it does not.**
+
+| Evidence                                                                                                                     | Label                                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Healthz `center.surfaces` of proof equals `proof-deployment.json`; production `none` and its routes 404                      | REAL (hosted)                                                                                                                                                               |
+| The `303` without a session, the `200` with the seven headers for the owner, the grant, the replay, the two step-up refusals | REAL hosted run; the authenticator is **MOCKED** (Chromium's virtual one), the catalogue is **MOCKED** (illustrative fixtures)                                              |
+| The `403` for an account that is no operator                                                                                 | **NOT evidenced hosted**; REAL in the Go integration tests (real PostgreSQL) and in the local rehearsal                                                                     |
+| The local rehearsal in official-hosted mode (below)                                                                          | REAL browser, center binary, PostgreSQL with verified TLS and the Worker's page code; MOCKED platform, authenticator and catalogue                                          |
+| A gated call after the grant                                                                                                 | does not exist before AF-CTR-04: only the grant and the entitlement version are visible (the audit rows are written, but no page shows them and the run does not read them) |
 
 The 403 for an account that is no operator is NOT evidenced on the hosted environment: the acceptance environment has exactly one
 account, the bootstrap owner, who counts as operator, and the center creates accounts only through the one-shot bootstrap (nothing else in
@@ -289,7 +307,8 @@ the center inserts into `identity.user`, the mail sender is disabled in every de
 account). It is proved by
 `TestOnlyAnOperatorReachesTheOperationsPage` (four accounts: no role, an expired role, a revoked role and a restricted account with a
 live role get 403 on all three routes, nothing is written, one audit row each) and `TestAStrangerWhoStartsWithAPostIsAudited`, with the
-real ingress, cookie session, passkey ceremony and PostgreSQL and the fixture catalogue, and by the local rehearsal below, where the
+real ingress, cookie session and PostgreSQL, the passkey ceremony run by a virtual authenticator (MOCKED hardware) and the MOCKED fixture
+catalogue, and by the local rehearsal below, where the
 owner's `identity.bootstrap` row of a throwaway database was removed and the same real Chromium then got "This is not allowed." (403)
 from the page. Also not evidenced: the production behaviour of the page (dark by design), any gated call (AF-CTR-04), concurrency between
 operators (Go integration tests only), and a Windows Hello confirmation (AR-23 stays the owner's step).

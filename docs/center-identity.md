@@ -528,13 +528,15 @@ The acceptance environment (`proof.arcforges.com`) is created by the owner's boo
      version); the same form again says "This grant had already been issued; nothing new was written." with the same term and
      version; a step-up that was already used is refused with `403`; sign-out closes the page again. Four of its seven steps use the
      MOCKED authenticator (a virtual one in a real browser) and three none; the catalogue is the development fixture (**MOCKED**,
-     illustrative: no page shows a price). The account identifier, which no page shows, is read from the center's session route
-     (`GET /session/v1/web/bootstrap`) from inside the page and, like the request token, goes only to the redactor: it is in no
-     output and no report. The mode needs the saved credential (without it the run exits 2 and starts no browser), never reads the
+     illustrative: no page shows a price). No account page lists the account identifier (the operations pages only echo what was
+     typed), so the form field is filled from the center's session route (`GET /session/v1/web/bootstrap`) read from inside the page; the
+     identifier, like the request token, goes only to the redactor: it is in no output and no report. The mode needs the saved credential (without it the run exits 2 and starts no browser), never reads the
      bootstrap file, refuses to combine with `--real-authenticator`, is headless unless `--headed` is given, registers no passkey
      (so there is nothing to prune or remove) and writes `artifacts/browser-operator-grant.json` unless `--report` names another
-     file, so that it does not overwrite the acceptance's report; its facts are `entitlementVersion`, `grantedFeatures`,
-     `grantedDays`, `requestsSent` and `requestsBusiest60s`. `--help` prints the usage. **Exit codes:** 0 passed, 1 failed, 2 not
+     file, so that it does not overwrite the acceptance's report; its facts are, among others, `entitlementVersion`,
+     `grantedFeatures`, `requestedDays` (what the form was asked for), `grantedHours` (the hours from the run to the end the done
+     page showed, read back: the run fails unless it is between 23 and 25), `credentialWrites`, `requestsSent` and
+     `requestsBusiest60s`. `--help` prints the usage. **Exit codes:** 0 passed, 1 failed, 2 not
      started (usage, a missing browser, credential or bootstrap file). **Keep at least 90 seconds between two runs against the
      hosted environment** (the edge counts the requests of the machine over 60 seconds; a run sends about sixty requests in
      about a minute and a half under the same budget as the others: 63, the busiest minute 43, in the rehearsal below), and run it
@@ -625,14 +627,16 @@ local evidence to the hosted environment (REAL browser, center binary, PostgreSQ
 Cloudflare platform is replaced by a stub, the authenticator and the catalogue are MOCKED). What that mode demands, and the recipe
 in words (the scripts are coordinator tooling, not part of the repository):
 
-- The public base URL must be https with a host that can be a relying party (`https://localhost:<port>/api`), and both database URLs
-  must say `sslmode=verify-full` and `channel_binding=require` (no other key but `connect_timeout`; there is no `sslrootcert` in a
+- Steps 2 and 3 of the recipe above apply, with `official-hosted` in place of `self-hosted` and the TLS query on both
+  database URLs. The public base URL must be https with a host that can be a relying party (`https://localhost:<port>/api`), and both
+  database URLs should say `sslmode=verify-full` and `channel_binding=require` (no other key but `connect_timeout`; there is no `sslrootcert` in a
   URL, so the throwaway CA is named by the `PGSSLROOTCERT` environment variable). The PostgreSQL 18 container of the image
   `eng/center.py` pins runs with `-c ssl=on` and a server certificate for `localhost` from a throwaway CA; its key must be owned by
   uid 70 in a directory of mode 755 (a directory of mode 700 gives "could not load server certificate: Permission denied").
 - The center needs `ARCFORGES_CENTER_PLAN_CONFIGURATION=development-fixtures` and
-  `ARCFORGES_CENTER_SURFACES=identity,pages,operations` for the operator page, and the client-address header
-  `ARCFORGES_CENTER_CLIENT_IP_HEADER=x-arcforges-client-ip` on every request, which only the Worker sets. A bare center behind a TLS
+  `ARCFORGES_CENTER_SURFACES=identity,pages,operations` for the operator page, and
+  `ARCFORGES_CENTER_CLIENT_IP_HEADER=x-arcforges-client-ip`, which names the request header that carries the client address on every
+  request; only the Worker sets that header. A bare center behind a TLS
   proxy is therefore not enough: the pages also need the Worker's contract (the header, the `Origin` check of every POST, the
   `/api` prefix, the cookie and reply rules).
 - The edge is the repository's own `routeRequest` (`worker/router.ts`, the page handler included) run by Node behind an HTTPS
