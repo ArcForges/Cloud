@@ -2565,13 +2565,34 @@ test("a 429 on an asset of a page that a form submission led to is judged inside
   assert.equal(replay.center.grants.length, 1);
 });
 
-test("the browser may report a refused document late: the wait for the report of each of the two refusals is needed, and with both the run passes", async () => {
+test("the browser may report a refused document late, or never: each of the two waits for the report is needed, and with both the run passes", async () => {
+  // A report that arrives at the second look is waited for: the run passes, and the step looked twice (the first look finds it held).
   for (const nth of [1, 2]) {
     const s = await enrolled({ lateRefusalReport: nth });
     assert.equal(await operatorRun(s), 0, `refusal ${nth}: ${s.stderr.join("\n")}`);
-    assert.deepEqual(s.browser.tabs.at(-1)?.refusalsSeen, [403, 403]);
-    assert.equal(s.browser.tabs.at(-1)?.refusalsPending(), 0);
-    assert.deepEqual(s.browser.tabs.at(-1)?.problems(), []);
+    const tab = s.browser.tabs.at(-1);
+    assert.deepEqual(tab?.refusalsSeen, [403, 403]);
+    assert.equal(tab?.refusalsPending(), 0);
+    assert.deepEqual(tab?.problems(), []);
+    assert.equal(tab?.heldLooks, 2, `the late report of refusal ${nth} was waited for (two looks)`);
+  }
+  // A report that never comes fails the step that provoked the refusal (the tampered confirmation, then the reuse), each on its own.
+  for (const [nth, step] of [
+    [1, 3],
+    [2, 6],
+  ] as const) {
+    const s = await enrolled({ silentRefusal: nth });
+    assert.equal(await operatorRun(s), 1, `refusal ${nth}`);
+    assert.equal(
+      lastReport(s).steps.findIndex((entry) => !entry.ok),
+      step - 1,
+      `refusal ${nth}`,
+    );
+    assert.match(
+      s.stderr.join("\n"),
+      /Timed out waiting for the refusal to be reported/u,
+      `refusal ${nth}`,
+    );
   }
 });
 

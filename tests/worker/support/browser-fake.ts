@@ -187,9 +187,12 @@ export interface FakeOptions {
    * review, 4 the done page, 5 the replay, 6 the reuse's refusal) lacks this security header, or has another media type.
    */
   badPostReply?: { nth: number; header?: string; mediaType?: string };
+  /** The browser never reports the console error of the n-th refused document (the other refusals are reported). */
+  silentRefusal?: number;
   /**
-   * The browser reports the console error of the n-th refused document late: one poll after the step asked, or, if the step never
-   * asks, when the next navigation or POST starts (where no step expects it any more).
+   * The browser reports the console error of the n-th refused document late: at the second look of the step that waits for it, or,
+   * if no step waits, when the next step states its own expectation (and takes the place of the expected one), or when the next
+   * navigation or POST starts.
    */
   lateRefusalReport?: number;
   /**
@@ -730,6 +733,8 @@ export class FakeTab implements Tab {
   private heldRefusals: number[] = [];
   private heldAssets: number[] = [];
   private heldPolls = 0;
+  /** How many times a step looked at refusalsPending while a report was held back (a late report was waited for). */
+  heldLooks = 0;
   private refusalCount = 0;
   private postReplies = 0;
 
@@ -852,8 +857,9 @@ export class FakeTab implements Tab {
   /** Chromium logs a console error for every document the server refused; a step that expects one says so (Tab.expectRefusal). */
   private report(status: number): void {
     if (status < 400 || this.center.options.silentRefusals === true) return;
-    this.refusalsSeen.push(status);
     this.refusalCount += 1;
+    if (this.center.options.silentRefusal === this.refusalCount) return;
+    this.refusalsSeen.push(status);
     // The browser may report the console error a moment after the document: held until the step asks or the next request starts.
     if (this.center.options.lateRefusalReport === this.refusalCount) this.heldRefusals.push(status);
     else this.deliver(status);
@@ -1244,11 +1250,15 @@ export class FakeTab implements Tab {
     if (!Number.isInteger(status) || status < 400 || status > 499)
       throw new Error("An expected refusal is a 4xx status.");
     this.expectedRefusals = [status];
+    // A report still on its way arrives now, and takes the place of the expectation that was just stated.
+    for (const held of this.heldRefusals.splice(0)) this.deliver(held);
+    this.heldPolls = 0;
   }
 
   refusalsPending(): number {
     // A report the browser holds back arrives with the second look, as Chromium's does a moment after the document.
     if (this.heldRefusals.length > 0) {
+      this.heldLooks += 1;
       if (this.heldPolls > 0) this.flushHeld();
       else this.heldPolls += 1;
     }
