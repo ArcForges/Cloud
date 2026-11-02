@@ -488,3 +488,73 @@ func TestRevealRuleIsNotVacuous(t *testing.T) {
 		}
 	}
 }
+
+// testOnlyOptions are the options of the adapters that only tests set.
+var testOnlyOptions = []string{"RootCAs", "Dial", "BaseURL", "Client", "Proxy"}
+
+// newSetsTestOnlyOptions lists the test-only options that the function New of internal/mail/new.go sets, as a key of a literal or by
+// assignment; it fails the pin when the function does not exist (a vacuous pin).
+func newSetsTestOnlyOptions(t testing.TB, files sourceSet) []string {
+	t.Helper()
+	source, ok := files["internal/mail/new.go"]
+	if !ok {
+		t.Fatal("internal/mail/new.go is not in the tree")
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), "new.go", source, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	var seenNew bool
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "New" || function.Recv != nil {
+			continue
+		}
+		seenNew = true
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			switch n := node.(type) {
+			case *ast.KeyValueExpr:
+				if key, ok := n.Key.(*ast.Ident); ok && slices.Contains(testOnlyOptions, key.Name) {
+					found = append(found, key.Name)
+				}
+			case *ast.AssignStmt:
+				for _, lhs := range n.Lhs {
+					if selector, ok := lhs.(*ast.SelectorExpr); ok && slices.Contains(testOnlyOptions, selector.Sel.Name) {
+						found = append(found, selector.Sel.Name)
+					}
+				}
+			}
+			return true
+		})
+	}
+	if !seenNew {
+		t.Fatal("new.go has no function New")
+	}
+	return found
+}
+
+// TestNewSetsNoTestOnlyOption is the pin of the production constructor: it builds the adapters with the system roots, a plain
+// dialer, the constant endpoint and their own transport. The scan of the whole module allows these options inside package mail (the
+// adapters' own defaults read them), so this check is the one that keeps the constructor itself clean.
+func TestNewSetsNoTestOnlyOption(t *testing.T) {
+	files := loadSources(t)
+	if found := newSetsTestOnlyOptions(t, files); len(found) != 0 {
+		t.Fatalf("New sets the test-only options %v", found)
+	}
+	original := string(files["internal/mail/new.go"])
+	for name, mutated := range map[string]string{
+		"a RootCAs key":      strings.Replace(original, "Timeout: m.Timeout})), nil\n\tcase config.MailSMTP", "Timeout: m.Timeout, Client: nil})), nil\n\tcase config.MailSMTP", 1),
+		"a Dial key":         strings.Replace(original, "FromName: m.FromName, Timeout: m.Timeout})), nil\n\t}", "FromName: m.FromName, Timeout: m.Timeout, Dial: nil})), nil\n\t}", 1),
+		"a BaseURL key":      strings.Replace(original, "Stream: m.PostmarkStream,", "Stream: m.PostmarkStream, BaseURL: \"http://127.0.0.1:1/\",", 1),
+		"an assignment":      strings.Replace(original, "var mode SMTPMode", "var mode SMTPMode\n\t\tvar o SMTPOptions\n\t\to.RootCAs = nil", 1),
+		"a Proxy assignment": strings.Replace(original, "var mode SMTPMode", "var mode SMTPMode\n\t\tvar tr struct{ Proxy int }\n\t\ttr.Proxy = 1", 1),
+	} {
+		if mutated == original {
+			t.Fatalf("%s: the mutant did not apply", name)
+		}
+		if found := newSetsTestOnlyOptions(t, files.with("internal/mail/new.go", mutated)); len(found) == 0 {
+			t.Errorf("%s: the pin did not see it", name)
+		}
+	}
+}
