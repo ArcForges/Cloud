@@ -47,13 +47,13 @@ func (h *harness) redeem(flow *foundationv1.Id, code string, from caller) *publi
 	return response
 }
 
-// lastCode is the code of the newest fake message to an address.
+// lastCode is the code of the newest message to an address, whichever inbox holds it.
 func (h *harness) lastCode(address string) string {
 	h.t.Helper()
-	messages := h.mail.Messages()
-	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].To == address {
-			match := codePattern.FindStringSubmatch(messages[index].Text)
+	letters := h.inbox.letters()
+	for index := len(letters) - 1; index >= 0; index-- {
+		if letters[index].to == address {
+			match := codePattern.FindStringSubmatch(letters[index].text)
 			if match == nil {
 				h.t.Fatal("a message without a code")
 			}

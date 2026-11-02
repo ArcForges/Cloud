@@ -76,8 +76,10 @@ type harness struct {
 	migration *pgx.Conn
 	database  string
 	mail      *mail.Fake
-	clock     *clock
-	logs      *lockedBuffer
+	// inbox is what reached the provider: the Fake's messages, or the requests and sessions of a provider double.
+	inbox inbox
+	clock *clock
+	logs  *lockedBuffer
 	// bootstrap is the owner bootstrap token of the configuration (generated at run time; only its digest is configuration).
 	bootstrap string
 	// secrets collects every credential the test saw, for the scans of F12.
@@ -106,6 +108,13 @@ type settings struct {
 	policy      string
 	noBootstrap bool
 	mailOff     bool
+	// sender replaces the Fake (an adapter in front of a provider double, a gated or a failing sender) and inbox reads what reached
+	// it; both are needed together. The default is the Fake and its own inbox.
+	sender mail.Sender
+	inbox  inbox
+	// asyncMail leaves Options.Background unset, so each delivery runs in its own goroutine exactly as in production; the default
+	// runs it inline, which keeps the other tests deterministic. A test that sets it waits on awaitSends, never on a sleep.
+	asyncMail bool
 	// participants are the device revocation's cascade participants (DC-06, DC-17: AF-CTR-07's agent grants and AF-CLD-06's push
 	// registrations).
 	participants []device.Participant
@@ -156,11 +165,22 @@ func newHarness(t *testing.T, options settings) *harness {
 		t.Fatal(err)
 	}
 	var sender mail.Sender = h.mail
+	h.inbox = fakeInbox{h.mail}
+	if options.sender != nil {
+		if options.inbox == nil {
+			t.Fatal("a harness sender needs the inbox that reads what reached it")
+		}
+		sender, h.inbox = options.sender, options.inbox
+	}
 	if options.mailOff {
 		sender = mail.Disabled{}
 	}
+	background := func(work func()) { work() }
+	if options.asyncMail {
+		background = nil
+	}
 	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: sender, Clock: h.clock.Now,
-		Background: func(work func()) { work() }, Participants: options.participants})
+		Background: background, Participants: options.participants})
 	if err != nil {
 		t.Fatal(err)
 	}
