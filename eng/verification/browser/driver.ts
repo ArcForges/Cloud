@@ -62,6 +62,26 @@ export interface Tab {
   waitForSelector(selector: string, timeoutMs: number): Promise<void>;
   /** Runs `hook` before a POST to each of these paths leaves the browser; if the hook throws, the request is aborted. */
   beforePost(paths: readonly string[], hook: (pathname: string) => Promise<void>): Promise<void>;
+  /**
+   * A same-origin GET of a JSON route made from inside the page: the browser's cookies go along, a redirect is an error, and the
+   * answer is the status and the parsed body (null where the body is no JSON). Nothing is written to a log.
+   */
+  fetchJson(path: string): Promise<{ status: number; body: unknown }>;
+  /**
+   * Submits a POST form as the browser does, from the page the tab shows: a navigation to the action with these fields, in order,
+   * and no script of the page runs. The values are not part of any log line.
+   */
+  submitForm(action: string, fields: readonly (readonly [string, string])[]): Promise<void>;
+  /** The status and headers of the latest document the main frame received (a redirect hop included), or null before any. */
+  document(): Navigation | null;
+  /**
+   * Says that the next document the browser reports refused with this 4xx status is expected. Chromium logs a console error for
+   * every 4xx document ("Failed to load resource"), and a step fails on any console error, so a step that provokes a refusal
+   * states it here. One expectation at a time: a step that starts again after a 429 states it again instead of stacking a second.
+   */
+  expectRefusal(status: number): void;
+  /** How many expected refusals the browser has not reported yet (0 when it reported the one the step expected). */
+  refusalsPending(): number;
   /** Console errors, page errors and policy violations seen so far (text only). */
   problems(): string[];
   /** The Retry-After seconds of a 429 seen since the last call (cleared by it), or undefined. */
@@ -125,17 +145,30 @@ export function consoleProblem(
   return undefined;
 }
 
+/**
+ * The status of the console error Chromium writes for every request the server refused ("Failed to load resource: the server
+ * responded with a status of 403 (Forbidden)"), or undefined for any other problem. A 4xx document is logged like this too.
+ */
+export function refusedStatus(problem: string): number | undefined {
+  const found =
+    /^console error: Failed to load resource: the server responded with a status of ([45]\d{2})\b/u.exec(
+      problem,
+    );
+  return found === null ? undefined : Number(found[1]);
+}
+
 /** Whether a response is a change the center accepted: a POST that succeeded and that a step could not repeat harmlessly. */
 export function acceptedChange(method: string, status: number, pathname: string): boolean {
   return method === "POST" && status < 400 && !harmless.test(pathname);
 }
 
 /**
- * The POSTs that a step may repeat after a 429: they start a flow or prove something; nothing is changed that a repeat would trip
- * over. A completed sign-in is not one of them: it adds a session, and a step of a returning run that starts again from its
- * navigation finds the browser signed in already.
+ * The POSTs that a step may repeat after a 429: they start a flow, prove something or review a request; nothing is changed that a
+ * repeat would trip over (the operator grant's review writes nothing). A completed sign-in is not one of them: it adds a session,
+ * and a step of a returning run that starts again from its navigation finds the browser signed in already.
  */
-const harmless = /\/(?:authentication\/begin|step-up\/(?:begin|complete))$/u;
+const harmless =
+  /\/(?:authentication\/begin|step-up\/(?:begin|complete)|operations\/grant\/review)$/u;
 /** The requests the budget lets out at once. */
 export const requestBurst = 4;
 
@@ -335,6 +368,8 @@ export interface PwRequest {
   url(): string;
   /** The request that was answered by a redirect to this one (null for a request that is not a redirect hop). */
   redirectedFrom(): PwRequest | null;
+  /** Whether the request loads a document into a frame. */
+  isNavigationRequest(): boolean;
 }
 export interface PwRoute {
   request(): PwRequest;
@@ -362,7 +397,10 @@ export interface PwPage {
   goto(url: string, options: { waitUntil: "load" }): Promise<PwResponse | null>;
   url(): string;
   locator(selector: string): PwLocator;
-  evaluate<Arg>(fn: (arg: Arg) => void, arg: Arg): Promise<void>;
+  evaluate<Arg, Result = void>(
+    fn: (arg: Arg) => Result | Promise<Result>,
+    arg: Arg,
+  ): Promise<Result>;
   waitForURL(predicate: (url: URL) => boolean, options: { timeout: number }): Promise<void>;
   waitForLoadState(state: "load", options: { timeout: number }): Promise<void>;
   route(url: string, handler: (route: PwRoute) => Promise<void>): Promise<unknown>;
@@ -482,6 +520,10 @@ export function playwrightTab(
   // The POSTs of a kind a step cannot repeat that have no definite answer yet (see Tab.unsettled).
   const unsettled = new Set<unknown>();
   const hooks = new Map<string, (pathname: string) => Promise<void>>();
+  // The latest document the main frame received (a new object for each one, so that a caller can tell a new document from the old).
+  let latestDocument: Navigation | null = null;
+  // The 4xx statuses a step has said it expects the browser to report as console errors (see Tab.expectRefusal).
+  const refusals: number[] = [];
   let routing: Promise<unknown> | undefined;
   // One DevTools session per tab: the WebAuthn environment (and its single internal authenticator) belongs to it.
   let session: PwCdpSession | undefined;
@@ -496,11 +538,18 @@ export function playwrightTab(
   };
   page.on("console", (message) => {
     const problem = consoleProblem(message.type(), message.text(), message.location().url);
-    if (problem !== undefined) problems.push(problem);
+    if (problem === undefined) return;
+    // A refusal the step expected is not a problem; it is used up by the one report of it. Any other is.
+    const status = refusedStatus(problem);
+    const expected = status === undefined ? -1 : refusals.indexOf(status);
+    if (expected >= 0) refusals.splice(expected, 1);
+    else problems.push(problem);
   });
   page.on("pageerror", (error) => problems.push(`page error: ${error.message.slice(0, 300)}`));
   page.on("response", (response) => {
     const status = response.status();
+    if (response.request().isNavigationRequest())
+      latestDocument = { status, headers: response.headers() };
     if (status === 429) {
       const seconds = Number(response.headers()["retry-after"] ?? "60");
       retryAfter = Math.max(
@@ -599,6 +648,51 @@ export function playwrightTab(
       for (const pathname of paths) hooks.set(pathname, hook);
       await route();
     },
+    async fetchJson(pathname) {
+      return page.evaluate(async (target: string) => {
+        const reply = await fetch(target, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+          referrerPolicy: "same-origin",
+        });
+        let body: unknown = null;
+        try {
+          body = await reply.json();
+        } catch {
+          body = null;
+        }
+        return { status: reply.status, body };
+      }, pathname);
+    },
+    submitForm: (action, fields) =>
+      page.evaluate(
+        ({ target, items }: { target: string; items: readonly (readonly [string, string])[] }) => {
+          const form = document.createElement("form");
+          form.method = "post";
+          form.action = target;
+          for (const [name, value] of items) {
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = name;
+            input.value = value;
+            form.append(input);
+          }
+          document.body.append(form);
+          form.submit();
+        },
+        { target: action, items: fields },
+      ),
+    document: () => latestDocument,
+    expectRefusal(status) {
+      if (!Number.isInteger(status) || status < 400 || status > 499)
+        throw new Error("An expected refusal is a 4xx status.");
+      refusals.length = 0;
+      refusals.push(status);
+    },
+    refusalsPending: () => refusals.length,
     problems: () => [...problems],
     rateLimited() {
       const seconds = retryAfter;

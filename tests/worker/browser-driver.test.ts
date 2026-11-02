@@ -15,9 +15,11 @@ import {
   type PwRoute,
   RequestBudget,
   RequestMeter,
+  acceptedChange,
   defaultRequestsPerMinute,
   playwrightBrowser,
   playwrightTab,
+  refusedStatus,
 } from "../../eng/verification/browser/driver.ts";
 
 interface Sent {
@@ -37,10 +39,13 @@ function standIn() {
   } = {};
   let routeHandler: ((route: PwRoute) => Promise<void>) | undefined;
   let routed = 0;
+  // The requests that load a document into the frame (a test marks them; every other request is a subresource or a fetch).
+  const navigations = new Set<string>();
   const requestOf = (method: string, url: string, from: PwRequest | null = null): PwRequest => ({
     method: () => method,
     url: () => url,
     redirectedFrom: () => from,
+    isNavigationRequest: () => navigations.has(`${method} ${url}`),
   });
   // A response belongs to the very request object the page announced (Playwright's response.request() is that object).
   const announced = new Map<string, PwRequest>();
@@ -59,6 +64,8 @@ function standIn() {
     headers: () => headers,
     request: () => announced.get(`${method} ${url}`) ?? requestOf(method, url),
   });
+  // What the page does with a function it is asked to run (a test sets it to run the function against a stand-in browser).
+  let evaluator: (fn: (arg: unknown) => unknown, arg: unknown) => unknown = async () => {};
   const page: PwPage = {
     async goto(url) {
       events.push(`goto ${url}`);
@@ -74,7 +81,8 @@ function standIn() {
           },
         }),
       }) as never,
-    evaluate: async () => {},
+    evaluate: ((fn: (arg: unknown) => unknown, arg: unknown) =>
+      evaluator(fn, arg)) as PwPage["evaluate"],
     waitForURL: async () => {},
     waitForLoadState: async (state) => {
       events.push(`wait ${state}`);
@@ -132,6 +140,13 @@ function standIn() {
     routed: () => routed,
     respond: (method: string, url: string, status: number, headers?: Record<string, string>) =>
       handlers.response?.(response(method, url, status, headers)),
+    /** The next response of this request is a document of the frame. */
+    document: (method: string, url: string) => {
+      navigations.add(`${method} ${url}`);
+    },
+    evaluateWith: (run: (fn: (arg: unknown) => unknown, arg: unknown) => unknown) => {
+      evaluator = run;
+    },
     console: (type: string, text: string, url = "") =>
       handlers.console?.({ type: () => type, text: () => text, location: () => ({ url }) }),
     pageError: (message: string) => handlers.pageerror?.(new Error(message)),
@@ -286,6 +301,175 @@ test("a console error is a problem unless it is the browser's own favicon reques
     "console warning: Refused by the Content Security Policy",
     "page error: boom",
   ]);
+});
+
+const refused = (status: number) =>
+  `Failed to load resource: the server responded with a status of ${status} (Forbidden)`;
+
+test("a refused document is a console error; a step that expects its status is not failed by the one report, and a second report or another status still is", () => {
+  const world = standIn();
+  const tab = playwrightTab(world.context, world.page, undefined);
+  assert.equal(refusedStatus(`console error: ${refused(403)}`), 403);
+  assert.equal(refusedStatus(`console error: ${refused(429)}`), 429);
+  assert.equal(refusedStatus("console error: Failed to load resource"), undefined);
+  assert.equal(refusedStatus(`console warning: ${refused(403)}`), undefined);
+  assert.equal(tab.refusalsPending(), 0);
+  // An expectation is used up by the one report of it.
+  tab.expectRefusal(403);
+  assert.equal(tab.refusalsPending(), 1);
+  world.console("error", refused(403), `${origin}/api/operations/grant/confirm`);
+  assert.deepEqual(tab.problems(), []);
+  assert.equal(tab.refusalsPending(), 0);
+  world.console("error", refused(403), `${origin}/api/operations/grant/confirm`);
+  assert.equal(tab.problems().length, 1, "a refusal nobody expected is a problem");
+  // Another status than the expected one is a problem, and the expectation stays open.
+  tab.expectRefusal(403);
+  world.console("error", refused(404), `${origin}/api/x`);
+  assert.equal(tab.problems().length, 2);
+  assert.equal(tab.refusalsPending(), 1);
+  // One expectation at a time: a step that starts again states it again and does not stack a second.
+  tab.expectRefusal(403);
+  tab.expectRefusal(403);
+  assert.equal(tab.refusalsPending(), 1);
+  world.console("error", refused(403));
+  assert.equal(tab.refusalsPending(), 0);
+  assert.equal(tab.problems().length, 2);
+  world.console("error", refused(403));
+  assert.equal(tab.problems().length, 3, "so the second report of a restarted step is a problem");
+  // Only a 4xx can be expected; other console errors and policy violations are never excused.
+  for (const bad of [200, 399, 500, 0, 403.5]) assert.throws(() => tab.expectRefusal(bad), /4xx/u);
+  tab.expectRefusal(403);
+  world.console(
+    "error",
+    "Refused to execute inline script because it violates the Content Security Policy",
+  );
+  world.console("warning", "Trusted Type violation");
+  assert.equal(tab.problems().length, 5);
+  assert.equal(tab.refusalsPending(), 1);
+});
+
+test("the latest document is a new object for each document of the main frame, a redirect hop included, and a subresource is not one", () => {
+  const world = standIn();
+  const tab = playwrightTab(world.context, world.page, undefined);
+  assert.equal(tab.document(), null);
+  const page = `${origin}/api/operations/grant`;
+  world.document("GET", page);
+  world.document("POST", `${origin}/api/operations/grant/confirm`);
+  world.respond("GET", `${origin}/api/account/account.js`, 200, {
+    "content-type": "text/javascript",
+  });
+  assert.equal(tab.document(), null, "a script is not a document");
+  world.respond("GET", page, 303, { location: "/api/account/sign-in" });
+  const hop = tab.document();
+  assert.equal(hop?.status, 303);
+  world.respond("GET", page, 200, { "content-type": "text/html; charset=utf-8" });
+  const first = tab.document();
+  assert.equal(first?.status, 200);
+  assert.deepEqual(first?.headers, { "content-type": "text/html; charset=utf-8" });
+  // The same status and headers again is another document: a caller tells it from the old one by identity.
+  world.respond("GET", page, 200, { "content-type": "text/html; charset=utf-8" });
+  assert.notEqual(tab.document(), first);
+  world.respond("POST", `${origin}/api/operations/grant/confirm`, 403, {});
+  assert.equal(tab.document()?.status, 403);
+  world.respond("GET", `${origin}/api/account/account.css`, 200, {});
+  assert.equal(tab.document()?.status, 403, "a stylesheet leaves the latest document as it was");
+  // The accepted-change rule: the review writes nothing, the confirmation is a change, a refusal is not.
+  assert.equal(acceptedChange("POST", 200, "/api/operations/grant/review"), false);
+  assert.equal(acceptedChange("POST", 200, "/api/operations/grant/confirm"), true);
+  assert.equal(acceptedChange("POST", 403, "/api/operations/grant/confirm"), false);
+  const before = tab.changes();
+  world.respond("POST", `${origin}/api/operations/grant/review`, 200, {});
+  assert.equal(tab.changes(), before, "a review is not a change");
+  world.respond("POST", `${origin}/api/operations/grant/confirm`, 200, {});
+  assert.equal(tab.changes(), before + 1);
+});
+
+test("a JSON route is read from inside the page without following a redirect, and a form is posted as a navigation with its fields in order", async () => {
+  const world = standIn();
+  const tab = playwrightTab(world.context, world.page, undefined);
+  world.evaluateWith(async (fn, arg) => fn(arg));
+  const globals = globalThis as unknown as Record<string, unknown>;
+  const saved = { fetch: globals.fetch, document: globals.document };
+  try {
+    const calls: { target: string; init: Record<string, unknown> }[] = [];
+    let body: () => Promise<unknown> = async () => ({ authenticated: true });
+    globals.fetch = async (target: string, init: Record<string, unknown>) => {
+      calls.push({ target, init });
+      return { status: 200, json: () => body() };
+    };
+    assert.deepEqual(await tab.fetchJson("/api/session/v1/web/bootstrap"), {
+      status: 200,
+      body: { authenticated: true },
+    });
+    assert.deepEqual(calls, [
+      {
+        target: "/api/session/v1/web/bootstrap",
+        init: {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+          referrerPolicy: "same-origin",
+        },
+      },
+    ]);
+    // A body that is no JSON is no body; the status still comes back.
+    body = async () => {
+      throw new Error("not json");
+    };
+    assert.deepEqual(await tab.fetchJson("/api/x"), { status: 200, body: null });
+
+    interface Element {
+      tag: string;
+      type?: string;
+      name?: string;
+      value?: string;
+      method?: string;
+      action?: string;
+      children: Element[];
+    }
+    const appended: Element[] = [];
+    const submitted: Element[] = [];
+    globals.document = {
+      body: { append: (element: Element) => appended.push(element) },
+      createElement: (tag: string): Element & { append(child: Element): void; submit(): void } => {
+        const element: Element & { append(child: Element): void; submit(): void } = {
+          tag,
+          children: [],
+          append(child) {
+            element.children.push(child);
+          },
+          submit() {
+            submitted.push(element);
+          },
+        };
+        return element;
+      },
+    };
+    await tab.submitForm("/api/operations/grant/confirm", [
+      ["csrf", "token-value"],
+      ["command_id", "c"],
+      ["reason", "a & b"],
+    ]);
+    assert.equal(appended.length, 1);
+    assert.equal(submitted.length, 1);
+    assert.equal(submitted[0], appended[0], "the form that was appended is the one submitted");
+    const form = submitted[0];
+    assert.equal(form?.method, "post");
+    assert.equal(form?.action, "/api/operations/grant/confirm");
+    assert.deepEqual(
+      form?.children.map((child) => [child.tag, child.type, child.name, child.value]),
+      [
+        ["input", "hidden", "csrf", "token-value"],
+        ["input", "hidden", "command_id", "c"],
+        ["input", "hidden", "reason", "a & b"],
+      ],
+    );
+  } finally {
+    globals.fetch = saved.fetch;
+    globals.document = saved.document;
+  }
 });
 
 test("the authenticators of a tab share one WebAuthn session, carry their transport, and take only the DevTools fields", async () => {

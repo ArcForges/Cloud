@@ -4,12 +4,15 @@
 //
 //   node eng/verification/browser/acceptance.ts [--base-url https://proof.arcforges.com/api]
 //   node eng/verification/browser/acceptance.ts --real-authenticator          (AR-23, with the owner at the keyboard)
+//   node eng/verification/browser/acceptance.ts --operator-grant              (the operations page, after an acceptance run)
 //
 // The browser is the Playwright Chromium revision 1243 that playwright-core 1.63.0 names, started by its explicit executable
 // path; nothing is downloaded. The authenticator is Chromium's virtual authenticator, which is MOCKED hardware in a real browser;
 // only --real-authenticator reaches Windows Hello. The first run uses the bootstrap token file that proof-bootstrap.ts wrote and
-// saves the owner's credential in a user-only file; later runs sign in with it. Nothing the run prints, reports or throws holds a
-// token, a key or a cookie value, and tracing, screenshots and videos are never switched on.
+// saves the owner's credential in a user-only file; later runs sign in with it. --operator-grant signs in with that credential
+// (it registers no passkey) and drives the operations page of the center: review, a refused step-up, the confirmed grant, its
+// replay and a refused reuse. Nothing the run prints, reports or throws holds a token, a key, a cookie value, an account
+// identifier or a page's request token, and tracing, screenshots and videos are never switched on.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -38,6 +41,7 @@ import {
   type Report,
   newWorld,
   runAcceptance,
+  runOperatorGrant,
   runRealAuthenticator,
 } from "./flow.ts";
 
@@ -60,6 +64,7 @@ export interface Options {
   displayName: string;
   headed: boolean;
   realAuthenticator: boolean;
+  operatorGrant: boolean;
   report: string;
   paceMs: number;
   timeoutMs: number;
@@ -96,9 +101,23 @@ export function baseUrlProblem(value: string): string | undefined {
   return undefined;
 }
 
+/** The report a mode writes unless --report names another file: the operator grant must not overwrite the acceptance's. */
+export const defaultReportName = {
+  acceptance: "browser-acceptance.json",
+  operatorGrant: "browser-operator-grant.json",
+};
+
 const usage = `Usage: node eng/verification/browser/acceptance.ts [--base-url <url>] [--chromium <path>] [--state-dir <dir>]
-  [--bootstrap-file <file>] [--display-name <text>] [--headed] [--real-authenticator] [--report <file>]
-  [--pace-ms <n>] [--timeout-ms <n>] [--real-timeout-ms <n>] [--requests-per-minute <n>]`;
+  [--bootstrap-file <file>] [--display-name <text>] [--headed] [--real-authenticator | --operator-grant] [--report <file>]
+  [--pace-ms <n>] [--timeout-ms <n>] [--real-timeout-ms <n>] [--requests-per-minute <n>] [--help]
+Without --real-authenticator or --operator-grant the run enrolls the owner (the first run, with the bootstrap file) or signs in
+with the saved credential (every later run).
+--operator-grant needs the saved owner credential. It signs in with the MOCKED authenticator, then on the operations page reviews
+  and confirms a grant of remote.view for 1 day to the owner's own account, and checks the replay and the refusals. Its report
+  defaults to artifacts/${defaultReportName.operatorGrant}.
+Edge limit: the hosted edge counts the requests of a client over 60 seconds. Leave at least 90 seconds between two runs against
+  the hosted environment, and run --operator-grant only after the returning acceptance has passed.
+Exit codes: 0 passed, 1 failed, 2 not started (usage, missing browser, credential or bootstrap file).`;
 
 function whole(value: string | undefined, flag: string, min: number, max: number): number {
   if (value === undefined || !/^\d+$/u.test(value) || Number(value) < min || Number(value) > max)
@@ -120,13 +139,15 @@ export function parseArguments(
     displayName: "Proof owner",
     headed: false,
     realAuthenticator: false,
-    report: path.resolve("artifacts", "browser-acceptance.json"),
+    operatorGrant: false,
+    report: path.resolve("artifacts", defaultReportName.acceptance),
     paceMs: 750,
     timeoutMs: 30_000,
     realTimeoutMs: 180_000,
     requestsPerMinute: defaultRequestsPerMinute,
   };
   let headless = false;
+  let reportNamed = false;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -154,6 +175,7 @@ export function parseArguments(
         break;
       case "--report":
         options.report = path.resolve(text());
+        reportNamed = true;
         break;
       case "--headed":
         options.headed = true;
@@ -163,6 +185,9 @@ export function parseArguments(
         break;
       case "--real-authenticator":
         options.realAuthenticator = true;
+        break;
+      case "--operator-grant":
+        options.operatorGrant = true;
         break;
       case "--pace-ms":
         options.paceMs = whole(value, flag, 0, 60_000);
@@ -184,6 +209,10 @@ export function parseArguments(
         throw new UsageError(`Unknown argument.\n${usage}`);
     }
   }
+  if (options.realAuthenticator && options.operatorGrant)
+    throw new UsageError("--real-authenticator and --operator-grant are two runs; name one.");
+  if (options.operatorGrant && !reportNamed)
+    options.report = path.resolve("artifacts", defaultReportName.operatorGrant);
   if (options.realAuthenticator) {
     // Windows Hello needs a window the owner can see and answer.
     if (headless)
@@ -256,6 +285,10 @@ export function summary(report: Report): string[] {
 
 /** Runs the command; the result is the process exit code (0 passed, 1 failed, 2 not started). */
 export async function main(argv: readonly string[], deps: Dependencies): Promise<number> {
+  if (argv.includes("--help")) {
+    deps.write(usage);
+    return 0;
+  }
   let options: Options;
   try {
     options = parseArguments(argv, deps.environment, deps.platform, deps.home);
@@ -276,13 +309,13 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
   const store = new CredentialStore(options.stateDir, deps.machine);
   let bootstrap: ReturnType<typeof readBootstrapFile> | undefined;
   try {
-    if (options.realAuthenticator && !store.exists()) {
+    if ((options.realAuthenticator || options.operatorGrant) && !store.exists()) {
       deps.writeError(
-        "--real-authenticator needs the saved owner credential; run the acceptance once first.",
+        `${options.realAuthenticator ? "--real-authenticator" : "--operator-grant"} needs the saved owner credential; run the acceptance once first.`,
       );
       return 2;
     }
-    if (!options.realAuthenticator && !store.exists()) {
+    if (!options.realAuthenticator && !options.operatorGrant && !store.exists()) {
       bootstrap = readBootstrapFile(options.bootstrapFile, deps.machine);
       if (new Date(bootstrap.expiresAt).getTime() <= deps.now().getTime()) {
         deps.writeError(
@@ -313,7 +346,13 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
     timeoutMs: options.timeoutMs,
     paceMs: options.paceMs,
     realTimeoutMs: options.realTimeoutMs,
-    mode: options.realAuthenticator ? "real-authenticator" : bootstrap ? "enroll" : "returning",
+    mode: options.realAuthenticator
+      ? "real-authenticator"
+      : options.operatorGrant
+        ? "operator-grant"
+        : bootstrap
+          ? "enroll"
+          : "returning",
   });
   world.write(
     `playwright-core ${requiredPlaywrightCore}, Chromium ${world.report.browserVersion} (revision ${requiredChromiumRevision}), ${options.headed ? "headed" : "headless"}`,
@@ -321,6 +360,7 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
   let exitCode = 0;
   try {
     if (options.realAuthenticator) await runRealAuthenticator(world);
+    else if (options.operatorGrant) await runOperatorGrant(world);
     else await runAcceptance(world);
     world.report.result = "passed";
   } catch (error) {
