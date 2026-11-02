@@ -1,16 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package mail is the center's outbound e-mail of sign-in codes. Only two senders exist until live delivery is decided (AR-14,
-// H-19): Disabled, which every deployment uses (the e-mail method is then not offered at all), and Fake, which tests inject to
-// read the codes the center sends (the closed loop). No mail configuration passes through the Worker. The live provider adapters
-// (Postmark, Amazon SES) arrive later behind the same interface.
+// Package mail is the center's outbound e-mail of sign-in and verification codes. It holds the Sender interface and the senders
+// behind it: Disabled, which every deployment uses today (the e-mail method is then not offered at all); Fake, which tests inject
+// to read the codes the center sends (the closed loop); and the two live adapters, Postmark over HTTPS and an SMTP submission
+// service over TLS (Amazon SES is the first target), with Guard, which bounds how many sends talk to a provider at once. The
+// adapters are tested against local servers only (MOCKED): no test sends real mail, and the two opt-in probes of a real endpoint
+// (the public Postmark test token, an SES handshake that stops before AUTH) skip without an explicit local switch.
+//
+// What this package does NOT make possible: no real account can be mailed. No production code creates an e-mail identity (the
+// only non-test INSERT INTO identity.auth_identity statements enroll passkeys), so the sign-in-code surface opens when a sender is
+// Enabled but never reaches Send for a real account, and the browser channel refuses e-mail unconditionally. A mail setup
+// therefore proves nothing about delivery to a user; it is the adapter, not the product path, that is exercised.
+//
+// Failures are typed (Error, with the classes ErrRejected, ErrUnavailable and ErrUnauthorized) and their text holds closed words
+// and numbers only: never an address, a code, a body, a credential, a URL or the provider's reply text. A credential is a
+// config.Secret, revealed only inside the two adapters.
 package mail
 
 import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 )
+
+// DefaultTimeout bounds one send when an adapter is built without a timeout. It is below the 30 s context a delivery runs under.
+const DefaultTimeout = 10 * time.Second
 
 // Message is one e-mail: the recipient, a subject and a plain-text body. It holds a sign-in code, so it is never logged.
 type Message struct {
@@ -44,14 +59,23 @@ type Fake struct {
 	mu       sync.Mutex
 	messages []Message
 	notify   chan struct{}
-	fail     bool
+	failure  error
 }
 
-// SetFailing makes Send fail (a provider failure) or succeed again.
+// SetFailing makes Send fail with a typed unavailable error (a provider outage) or succeed again.
 func (f *Fake) SetFailing(fail bool) {
+	if fail {
+		f.SetError(&Error{Class: ErrUnavailable, Provider: "fake", Stage: "send"})
+		return
+	}
+	f.SetError(nil)
+}
+
+// SetError makes every Send return err (nil: succeed again), so a test can drive each failure class.
+func (f *Fake) SetError(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.fail = fail
+	f.failure = err
 }
 
 // NewFake is an empty fake sender.
@@ -64,8 +88,8 @@ func (f *Fake) Enabled() bool { return true }
 func (f *Fake) Send(_ context.Context, message Message) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.fail {
-		return errors.New("the fake provider refused the message")
+	if f.failure != nil {
+		return f.failure
 	}
 	f.messages = append(f.messages, message)
 	select {
