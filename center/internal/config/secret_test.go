@@ -98,6 +98,9 @@ func TestSecretPrintsTheMarkerWhereGoCanCallItsMethods(t *testing.T) {
 	if got := fmt.Sprintf("%+v", exportedHolder{Secret: secret}); got != "{Secret:"+redacted+"}" {
 		t.Errorf("an exported field printed %q", got)
 	}
+	if secret.String() != redacted || secret.GoString() != redacted {
+		t.Errorf("String printed %q and GoString %q: a consumer that calls them directly would print the credential", secret.String(), secret.GoString())
+	}
 	var out bytes.Buffer
 	slog.New(slog.NewJSONHandler(&out, nil)).Info("probe", "secret", secret)
 	if !strings.Contains(out.String(), `"secret":"`+redacted+`"`) {

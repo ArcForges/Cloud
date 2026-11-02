@@ -83,6 +83,12 @@ func checkWire(t testing.TB, raw []byte) {
 		if len(line)+2 > 998 {
 			t.Fatalf("a header line of %d bytes", len(line)+2)
 		}
+		if strings.Contains(line, "=?") && len(line) > 76 {
+			t.Fatalf("a line with an encoded-word of %d characters (RFC 2047 section 2 allows 76)", len(line))
+		}
+		if line[0] == ' ' || line[0] == '\t' { // a continuation of the field before it
+			continue
+		}
 		name, _, _ := strings.Cut(line, ":")
 		seen[name]++
 	}
@@ -142,6 +148,14 @@ func TestValidateRefusesEveryInjectionFormAndAcceptsTheOrdinaryMessage(t *testin
 		"Subject CRLF":           with(func(m *Message) { m.Subject = "x\r\nBcc: a@example.test" }),
 		"Subject NUL":            with(func(m *Message) { m.Subject = "x\x00y" }),
 		"Subject tab":            with(func(m *Message) { m.Subject = "x\ty" }),
+		"Subject SOH first":      with(func(m *Message) { m.Subject = "\x01abc" }),
+		"Subject DEL first":      with(func(m *Message) { m.Subject = "\x7fabc" }),
+		"Subject ESC first":      with(func(m *Message) { m.Subject = "\x1babc" }),
+		"Subject NEL first":      with(func(m *Message) { m.Subject = "\u0085abc" }),
+		"Text SOH first":         with(func(m *Message) { m.Text = "\x01abc" }),
+		"Text DEL first":         with(func(m *Message) { m.Text = "\x7fabc" }),
+		"Text ESC first":         with(func(m *Message) { m.Text = "\x1babc" }),
+		"Text NEL first":         with(func(m *Message) { m.Text = "\u0085abc" }),
 		"Subject DEL":            with(func(m *Message) { m.Subject = "x\x7fy" }),
 		"Subject NEL":            with(func(m *Message) { m.Subject = "x\u0085y" }),
 		"Subject only a space":   with(func(m *Message) { m.Subject = " " }),
@@ -242,9 +256,16 @@ func TestEachLayerRefusesInjection(t *testing.T) {
 				t.Errorf("sender %q is refused: %v", name, err)
 			}
 		}
+		for _, form := range [][2]string{{addressOfLength(t, 188), strings.Repeat("n", 64)}, {addressOfLength(t, 251), "n"}, {addressOfLength(t, 254), ""}} {
+			if err := validateSender("postmark", form[0], form[1]); err != nil { // 255, 255 and a bare 254
+				t.Errorf("the sender of %d+%d bytes is refused: %v", len(form[0]), len(form[1]), err)
+			}
+		}
 		for _, form := range [][2]string{
 			{"", ""}, {"a@127.0.0.1", ""}, {"a@example.test,b@example.test", ""}, {"Ada <a@example.test>", ""}, {testFrom, "Ada\r\nBcc: x@example.test"},
-			{testFrom, "=?utf-8?q?x?="}, {testFrom, "Ada <x@example.test>"}, {testFrom, strings.Repeat("n", 65)},
+			{testFrom, "=?utf-8?q?x?="}, {testFrom, "Ada <x@example.test>"}, {testFrom, strings.Repeat("n", 65)}, {testFrom, "Inc."},
+			// The composed "Name <address>" is bounded by Postmark's 255 characters: 64 + 3 + 189 = 256, 1 + 3 + 254 = 258.
+			{addressOfLength(t, 189), strings.Repeat("n", 64)}, {addressOfLength(t, 254), "n"}, {addressOfLength(t, 252), "n"},
 		} {
 			expectFailure(t, validateSender("postmark", form[0], form[1]), ErrRejected, "message", 0)
 		}
@@ -292,15 +313,36 @@ func TestBuildMessageWritesTheDocumentedHeadersAndABodyThatRoundTrips(t *testing
 	}
 }
 
-// TestSubjectsRoundTripThroughRFC2047AndTheWorstCaseLineStaysUnderTheLimit measures the bound: a 200-byte non-ASCII subject expands
-// about 3.7 times into encoded words of at most 75 characters separated by one space, on ONE physical line of 740 bytes (with
-// "Subject: " and the line end), under the 998-byte limit of RFC 5322 section 2.1.1. The 78-character recommendation is knowingly
-// not met for a subject that needs encoding.
-func TestSubjectsRoundTripThroughRFC2047AndTheWorstCaseLineStaysUnderTheLimit(t *testing.T) {
+// subjectLines returns the physical lines of the Subject field (the line and its continuations) of a built message.
+func subjectLines(raw []byte) []string {
+	var lines []string
+	collecting := false
+	for _, line := range strings.Split(string(raw), "\r\n") {
+		switch {
+		case line == "":
+			return lines
+		case strings.HasPrefix(line, "Subject:"):
+			collecting = true
+			lines = append(lines, line)
+		case collecting && (line[0] == ' ' || line[0] == '\t'):
+			lines = append(lines, line)
+		default:
+			collecting = false
+		}
+	}
+	return lines
+}
+
+// TestSubjectsRoundTripThroughRFC2047AndAFoldedSubjectKeepsEveryLineWithinTheLimit measures the bound. A subject that needs encoding
+// is written as "Subject:" alone and one encoded-word of at most 75 characters per continuation line (CRLF and a space between them,
+// RFC 2047 section 2), so no physical line of the field passes 76 characters, whatever the subject size; the worst case is the
+// longest subject of 200 bytes, all of it encoded (about 740 characters of encoded text). A printable-ASCII subject stays on the
+// Subject line as it is, and every subject reads back unchanged.
+func TestSubjectsRoundTripThroughRFC2047AndAFoldedSubjectKeepsEveryLineWithinTheLimit(t *testing.T) {
 	for _, subject := range []string{
-		"Plain ASCII subject", "a=b and c?d", "=", "?=", "=x", "x?=", "tab-free  two  spaces", "Ihr Code äöü", "✓",
-		"é =x", strings.Repeat("é", 100), strings.Repeat("\U0001F600", 50), strings.Repeat("漢", 66) + "ab",
-		"é" + strings.Repeat("=", 199), "é" + strings.Repeat("?", 198),
+		"Plain ASCII subject", "a=b and c?d", "=", "?=", "=x", "x?=", "tab-free  two  spaces", "Ihr Code \u00e4\u00f6\u00fc", "\u2713",
+		"\u00e9 =x", strings.Repeat("\u00e9", 100), strings.Repeat("\U0001F600", 50), strings.Repeat("\u6f22", 66) + "ab",
+		"\u00e9" + strings.Repeat("=", 199), "\u00e9" + strings.Repeat("?", 198), strings.Repeat("s", MaxSubjectBytes),
 	} {
 		raw, err := buildMessage("", testFrom, testTo, subject, "body", buildTime)
 		if err != nil {
@@ -311,32 +353,38 @@ func TestSubjectsRoundTripThroughRFC2047AndTheWorstCaseLineStaysUnderTheLimit(t 
 			t.Errorf("%q came back as %q", subject, got)
 		}
 	}
-	worst := strings.Repeat("é", 100) // 200 bytes, the longest subject, every byte of it encoded
+	ascii, _ := buildMessage("", testFrom, testTo, "Plain ASCII subject", "b", buildTime)
+	if lines := subjectLines(ascii); len(lines) != 1 || lines[0] != "Subject: Plain ASCII subject" {
+		t.Errorf("an ASCII subject is %q", lines)
+	}
+	short, _ := buildMessage("", testFrom, testTo, "\u2713", "b", buildTime)
+	if lines := subjectLines(short); len(lines) != 2 || lines[0] != "Subject:" || lines[1] != " =?utf-8?q?=E2=9C=93?=" {
+		t.Errorf("a short encoded subject is %q", lines)
+	}
+	worst := strings.Repeat("\u00e9", 100) // 200 bytes, the longest subject, every byte of it encoded
 	raw, err := buildMessage("", testFrom, testTo, worst, "b", buildTime)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var line string
-	for _, l := range strings.Split(string(raw), "\r\n") {
-		if strings.HasPrefix(l, "Subject: ") {
-			line = l
+	lines := subjectLines(raw)
+	if len(lines) < 10 || lines[0] != "Subject:" {
+		t.Fatalf("the worst-case subject is %d lines: %q", len(lines), lines)
+	}
+	total := 0
+	for _, line := range lines[1:] {
+		word := line[1:]
+		total += len(word)
+		if line[0] != ' ' || len(line) > 76 || len(word) > 75 || !strings.HasPrefix(word, "=?utf-8?q?") || !strings.HasSuffix(word, "?=") {
+			t.Errorf("continuation line %q (%d characters)", line, len(line))
 		}
 	}
-	if len(line)+2 > 998 || len(line)+2 < 700 {
-		t.Errorf("the worst-case subject line is %d bytes with its line end: the bound of 998 or this test's idea of the worst case changed", len(line)+2)
-	}
-	for _, word := range strings.Fields(strings.TrimPrefix(line, "Subject: ")) {
-		if len(word) > 75 || !strings.HasPrefix(word, "=?utf-8?q?") || !strings.HasSuffix(word, "?=") {
-			t.Errorf("encoded word %q (%d characters)", word, len(word))
-		}
-	}
-	if MaxSubjectBytes*37/10+len("Subject: ")+2 > 998 {
-		t.Errorf("MaxSubjectBytes %d can no longer keep a header line under 998 bytes", MaxSubjectBytes)
+	if total < 700 {
+		t.Errorf("the worst case encodes to %d characters: this test's idea of the worst case changed", total)
 	}
 }
 
 func TestValidAddressIsTheSharedRuleAndNetMailAgreesOnEveryAddressItAccepts(t *testing.T) {
-	for _, text := range []string{"ada@example.org", "A.b+c@Sub.Example.ORG", "a@x.9a", "!#$%&'*+-/=?^_`{|}~@example.org", addressOfLength(t, 254)} {
+	for _, text := range []string{"ada@example.org", "A.b+c@Sub.Example.ORG", "a@x.9a", "!#$%&'*+-/?=^_`{|}~@example.org", "a?=b@example.org", addressOfLength(t, 254)} {
 		if !ValidAddress(text) {
 			t.Errorf("%q should be valid", text)
 		}
@@ -367,6 +415,12 @@ func checkAddress(t testing.TB, text string) {
 	if strings.Trim(last, "0123456789") == "" {
 		t.Fatalf("%q has an all-numeric last label", text)
 	}
+	if lower := strings.ToLower(last); strings.HasPrefix(lower, "0x") && strings.Trim(lower[2:], "0123456789abcdef") == "" {
+		t.Fatalf("%q has a hexadecimal IP-like last label", text)
+	}
+	if local, _, _ := strings.Cut(text, "@"); strings.Contains(local, "=?") {
+		t.Fatalf("%q has an encoded-word opener in the local part", text)
+	}
 }
 
 // FuzzValidAddress checks that an address the validator accepts is exactly what net/mail reads as one bare address, with no
@@ -374,7 +428,8 @@ func checkAddress(t testing.TB, text string) {
 func FuzzValidAddress(f *testing.F) {
 	long := addressOfLength(f, 254)
 	for _, seed := range []string{
-		"ada@example.org", "a@127.0.0.1", "a@1.1", "a@x.9a", "a@example.1", "a@b", "a@b@c.de", "a b@c.de", "a@b.de,c@d.ef",
+		"ada@example.org", "a@127.0.0.1", "a@1.1", "a@x.9a", "a@example.1", "a@127.0.0.0x1", "a@1.2.3.0x7f", "=?utf-8?q?x?=@example.org",
+		"=?utf-8?q?a=0D=0ABcc=3A_evil=40x.test?=@example.org", "a?=b@example.org", "a@b", "a@b@c.de", "a b@c.de", "a@b.de,c@d.ef",
 		"\"a\"@b.cd", "<a@b.cd>", "a@b.cd\r\nBcc: x@y.zz", "A@B.CD", long, long + "x", strings.Repeat("a", 65) + "@b.cd",
 	} {
 		f.Add(seed)

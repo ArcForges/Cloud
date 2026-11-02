@@ -19,9 +19,9 @@ import (
 
 // Bounds of a message: a sign-in code mail is a few hundred bytes.
 const (
-	// MaxSubjectBytes bounds the subject. With the 3.7-fold growth of RFC 2047 encoding the longest header line is 740 bytes
-	// ("Subject: " and the line end included), under the 998-byte limit of RFC 5322 section 2.1.1; raising the bound much above
-	// 260 would break that limit (a test measures the worst case).
+	// MaxSubjectBytes bounds the subject. A subject that needs RFC 2047 encoding grows about 3.7-fold and is written folded into
+	// encoded-words of at most 75 characters, one per physical line (CRLF and a space between them, RFC 2047 section 2), so no line
+	// passes 76 characters whatever the bound; a test measures the worst case.
 	MaxSubjectBytes = 200
 	// MaxTextBytes bounds the body.
 	MaxTextBytes = 16 << 10
@@ -57,21 +57,24 @@ func validate(provider string, m Message) error {
 }
 
 // validateSender refuses a sender identity that could not be written into a header or a command: the From address and the
-// display name come from operator configuration (which validates them at start), and the Postmark adapter checks them again
-// because a hand-built option set bypasses the configuration. The SMTP adapter has no separate call: buildMessage, which runs
-// before any connection, refuses the same two values.
+// display name come from operator configuration (which validates them at start with the same rule, including the 255-byte bound
+// of the composed "Name <address>" that Postmark enforces), and the Postmark adapter checks them again because a hand-built
+// option set bypasses the configuration. The SMTP adapter has no separate call: buildMessage, which runs before any connection,
+// refuses the same pair with the same rule.
 func validateSender(provider, from, fromName string) error {
-	if !ValidAddress(from) || !config.ValidMailDisplayName(fromName) {
+	if !config.ValidMailSender(from, fromName) {
 		return invalid(provider)
 	}
 	return nil
 }
 
 // buildMessage renders one RFC 5322 message with CRLF line ends: headers, a blank line and a quoted-printable UTF-8 text body.
-// from and to are ValidAddress values and fromName satisfies config.ValidMailDisplayName; buildMessage checks them again (the
-// second layer after validate and validateSender, each with its own test), so that no input can add a header line.
+// from and fromName satisfy config.ValidMailSender and to is a ValidAddress; buildMessage checks them again (the second layer
+// after validate, each with its own test), so that no input can add a header line. A subject that needs RFC 2047 encoding is
+// folded: "Subject:" alone on its line and one encoded-word of at most 75 characters per continuation line, so that no line of the
+// field passes 76 characters (RFC 2047 section 2); a printable-ASCII subject stays on the Subject line as it is.
 func buildMessage(fromName, from, to, subject, text string, now time.Time) ([]byte, error) {
-	if !ValidAddress(from) || !ValidAddress(to) || !config.ValidMailDisplayName(fromName) ||
+	if !config.ValidMailSender(from, fromName) || !ValidAddress(to) ||
 		strings.ContainsAny(subject, "\r\n\x00") || strings.Contains(subject, "=?") {
 		return nil, errors.New("mail: invalid header value")
 	}
@@ -88,7 +91,12 @@ func buildMessage(fromName, from, to, subject, text string, now time.Time) ([]by
 		header("From", from)
 	}
 	header("To", to)
-	header("Subject", mime.QEncoding.Encode("utf-8", subject)) // unchanged when it is printable ASCII
+	if encoded := mime.QEncoding.Encode("utf-8", subject); strings.HasPrefix(encoded, "=?") {
+		// The sequence "?= =?" cannot occur inside an encoded-word (a Q-encoded "=" and "?" are escaped), so it separates words.
+		out.WriteString("Subject:\r\n " + strings.ReplaceAll(encoded, "?= =?", "?=\r\n =?") + "\r\n")
+	} else {
+		header("Subject", encoded) // unchanged when it is printable ASCII
+	}
 	header("Date", now.UTC().Format(time.RFC1123Z))
 	header("Message-ID", "<"+hex.EncodeToString(id[:])+"@"+domain+">")
 	header("MIME-Version", "1.0")
