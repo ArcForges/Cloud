@@ -179,7 +179,7 @@ audit trail of what an account was entitled to and are kept; the append-only tri
 ### Fleet (AF-CTR-04)
 
 The fourth migration (`center/internal/schema/migrations/0004_fleet_enrollment.sql`, sha256
-`0cad855754db9c011ffb0a77f1db519da0a6672e314cc52f1a349480bcf91c48`) lands the three tables of node enrollment whole; the logic is
+`babcd36d812138e688183501c0e9bd87aee9d9d0bcb6c6158a7b03c1226fe101`) lands the three tables of node enrollment whole; the logic is
 described in [center fleet](center-fleet.md). The runtime role has SELECT, INSERT and UPDATE on each, never DELETE:
 
 - `fleet.node`: one row per enrollment of a node ID in an account, bound to the node's device and `arcforges-node` installation; a

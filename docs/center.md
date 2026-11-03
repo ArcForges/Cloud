@@ -445,7 +445,7 @@ hand-written Worker sources.
     "binary": "arcforges-center",
     "mode": "official-hosted",
     "publicBaseUrl": "https://…",
-    "surfaces": "none | identity | identity,pages | identity,pages,operations | identity,pages,fleet"
+    "surfaces": "none | the enabled surfaces in registration order (identity, pages, operations, fleet), comma-separated"
   }
 }
 ```

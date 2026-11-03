@@ -125,7 +125,7 @@ AF-OPS-01's OperatorService can call it; the interim interface is [the operation
   derive from the history they read and commit under the revision fence, four attempts, no backoff (the same constant as the
   grant's; `TestAWriterThatNeverWinsTheRaceFailsClosedWithATypedError` counts the four attempts of `IssueGrant`). Ten concurrent
   `IssueGrant` calls for one account lose grants to `ConcurrentUpdate`. Nothing served calls `IssueGrant` or `RevokeGrant` yet;
-  `Refresh` is called by the gate's reader (`Service.Read`), which no served operation reaches until AF-CTR-04, where two first gated
+  `Refresh` is called by the gate's reader (`Service.Read`), which no served operation reaches until the first gated operation (AF-CTR-05), where two first gated
   calls of one account race through it: the loser reloads and returns the winner's snapshot, and only a call that loses on all four
   attempts is answered `RESOURCE/overloaded`. See "What waits" (AF-CTR-09).
 
@@ -160,7 +160,7 @@ reaches a later one, and the gate is the last:
 | 2   | Ownership of the object | `STATE/not_found` for another account's object or none (a row names an `Object`; the handler supplies its owner); a subject of another kind, or for a row that names no `Object`, is a handler defect: `permission_denied` (audited `access.refused`: `subject`); an owner that cannot be read is the store failure |
 | 3   | Scope and risk          | `permission_denied` (audited `access.refused`: `scope`, `restricted`), `step_up_required` (the session upgrade)                                                                                                                                                                                                     |
 | 4   | AGENT/HUMAN separation  | `permission_denied` (audited `access.refused`: `principal`)                                                                                                                                                                                                                                                         |
-| 5   | Resource controls       | the refusal of a registered control (none is composed yet: the hook for the quotas and budgets of AF-CTR-04, DC-07)                                                                                                                                                                                                 |
+| 5   | Resource controls       | the refusal of a registered control (none is composed yet: the hook for the quotas and budgets of the first gated operation, AF-CTR-05, DC-07)                                                                                                                                                                      |
 | 6   | Audit before the call   | the store failure when `access.authorized` cannot be appended (the call is refused)                                                                                                                                                                                                                                 |
 | 7   | The gate                | `ENTITLEMENT/feature_not_entitled`, `state.reason` = the feature key, audited `access.gated` with the gate's reason; a gate that cannot decide is the answer below                                                                                                                                                  |
 
@@ -178,7 +178,7 @@ The gate's decision in official-hosted mode: no catalogue is `plan_configuration
 `plan_configuration_invalid`, a valid one the account's snapshot (`cap=` entries of the stored canonical text: granted, or the
 resolver's reason). The reasons are the closed vocabulary of [feature availability](center.md#center-mode-and-feature-availability).
 
-No gated operation is served before AF-CTR-04, so the gate is proved on test-only operations (F9): one per key behind the real
+No gated operation is served before AF-CTR-05 (AF-CTR-04 serves none), so the gate is proved on test-only operations (F9): one per key behind the real
 ingress pipeline, the real bearer verifier and a real PostgreSQL (`center/internal/access/gate_integration_test.go`), in every state
 of the plan configuration (none, invalid, fixtures without a grant, fixtures with a grant, a test-injected production-classified
 catalogue with and without a grant, a fixture under the production classification, the self-hosted default, a disabled key, the
@@ -303,7 +303,7 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
 | The `303` without a session, the `200` with the seven headers for the owner, the grant, the replay, the two step-up refusals | REAL hosted run; the authenticator is **MOCKED** (Chromium's virtual one), the catalogue is **MOCKED** (illustrative fixtures)                                              |
 | The `403` for an account that is no operator                                                                                 | **NOT evidenced hosted**; REAL in the Go integration tests (real PostgreSQL) and in the local rehearsal                                                                     |
 | The local rehearsal in official-hosted mode (below)                                                                          | REAL browser, center binary, PostgreSQL with verified TLS and the Worker's page code; MOCKED platform, authenticator and catalogue                                          |
-| A gated call after the grant                                                                                                 | does not exist before AF-CTR-04: only the grant and the entitlement version are visible (the audit rows are written, but no page shows them and the run does not read them) |
+| A gated call after the grant                                                                                                 | does not exist before AF-CTR-05: only the grant and the entitlement version are visible (the audit rows are written, but no page shows them and the run does not read them) |
 
 The 403 for an account that is no operator is NOT evidenced on the hosted environment: the acceptance environment has exactly one
 account, the bootstrap owner, who counts as operator, and the center creates accounts only through the one-shot bootstrap (nothing else in
@@ -314,7 +314,7 @@ live role get 403 on all three routes, nothing is written, one audit row each) a
 real ingress, cookie session and PostgreSQL, the passkey ceremony run by a virtual authenticator (MOCKED hardware) and the MOCKED fixture
 catalogue, and by the local rehearsal below, where the
 owner's `identity.bootstrap` row of a throwaway database was removed and the same real Chromium then got "This is not allowed." (403)
-from the page. Also not evidenced: the production behaviour of the page (dark by design), any gated call (AF-CTR-04), concurrency between
+from the page. Also not evidenced: the production behaviour of the page (dark by design), any gated call (AF-CTR-05), concurrency between
 operators (Go integration tests only), and a Windows Hello confirmation (AR-23 stays the owner's step).
 
 **The local rehearsal** (REAL browser, center binary, PostgreSQL and Worker router code; the Cloudflare platform is replaced by a

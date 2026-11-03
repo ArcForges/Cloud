@@ -16,9 +16,9 @@ The methods belong to the switchable surface `fleet`. It needs `identity` and `p
 known name from part E1a, and it is enabled nowhere yet: production `FLAGSHIP_SURFACES` stays `""`, the acceptance environment keeps
 `identity,pages,operations` until part E3's hosted run, and the self-hosted default stays `identity,pages` until the pages exist
 (`TestTheFleetSurfaceNeedsIdentityAndPagesAndIsNoDefaultYet`). With the surface off, every fleet method answers `STATE/not_activated`
-with `state.reason` `fleet`, from the Worker's generated reply before anything else is read, and from the center. A self-hosted
-center whose base URL cannot be a WebAuthn relying party clears every surface, `fleet` included: every surface other than `identity`
-needs `identity`.
+with `state.reason` `fleet`, from the Worker's generated reply before anything else is read, and from the center. The three methods' Worker budget is the contract's 10 s deadline. A self-hosted center whose base URL cannot be a WebAuthn relying
+party clears the default surfaces and serves none (`TestASelfHostedCenterOnAnAddressServesNoSurface`); a list that names a surface
+refuses to start there.
 
 ## Served methods
 
@@ -57,34 +57,36 @@ come from the node keys of the identity policy:
 
 The relations are checked at start: access at most idle, idle at most absolute.
 
-**RefreshNodeSession** takes the refresh token alone (the token is bound to its row; there is no installation in the request). The
-token is looked up first, with one point read and no lock. A token that names nothing (malformed or unknown) counts in its client
-prefix's failure bucket and is `AUTHENTICATION/unauthenticated`, or `RESOURCE/rate_limited` with `retry_at` once the window holds more
-than its limit; a token that names a session never waits on that bucket, so junk from a neighbour on the same network cannot lock
-its nodes out (`TestJunkRefreshesDoNotLockOutAPrefix`, `TestAThousandJunkRefreshesThenAValidOne`). A session's current token counts
-in its own bucket; a spent token is never limited, so its reuse always runs. The rotation is strict: there is no grace window.
-Presenting a spent refresh token (also a retry whose reply was lost) revokes the credential family, and the node signs in again. A
-live account token is refused with `AUTHORIZATION/permission_denied`; a revoked session, device or installation is
-`AUTHENTICATION/credential_revoked`, an expired family `AUTHENTICATION/token_expired`, a suspended account
-`AUTHENTICATION/unauthenticated`, and a restricted account's node keeps refreshing. The rotating transaction marks the node seen and
-reads the published keys; a session whose installation has no live node row is `credential_revoked` and nothing rotates. The reply
-carries the new pair, `access_expires_at`, `access_lifetime_ms` (the lifetime as issued), `session_expires_at` (the family's absolute
-end) and the center's published `command_keys` and `entitlement_keys`. A refresh is not audited; a reuse is
-(`identity.session.refresh_reused`, whose payload names the scope).
+**RefreshNodeSession** takes the refresh token alone (the token is bound to its row; there is no installation in the request). An
+empty token or one over 8,192 bytes is `VALIDATION/invalid_argument` (`refresh_token`, `length`) and counts nowhere. The token is then
+looked up first, with one point read and no lock. A token that names nothing (malformed or unknown) is `RESOURCE/rate_limited` with
+`retry_at` when its client prefix's failure bucket already holds its limit (nothing is written then); otherwise its failure is
+counted and it is `AUTHENTICATION/unauthenticated`, and the failure that fills the window is audited `identity.rate_limited` once. A
+token that names a session never waits on that bucket, so junk from a neighbour on the same network cannot lock its nodes out
+(`TestJunkRefreshesDoNotLockOutAPrefix`, `TestAThousandJunkRefreshesThenAValidOne`). A session's current token counts in its own
+bucket; a spent token is never limited, so its reuse always runs. The rotation is strict: there is no grace window. Presenting a spent
+refresh token (also a retry whose reply was lost) revokes the credential family, and the node signs in again. A live account token
+is refused with `AUTHORIZATION/permission_denied`; a revoked session, device or installation is `AUTHENTICATION/credential_revoked`,
+an expired family `AUTHENTICATION/token_expired`, a suspended account `AUTHENTICATION/unauthenticated`, and a restricted account's
+node keeps refreshing. The rotating transaction marks the node seen and reads the published keys; a session whose installation has no
+live node row is `credential_revoked` and nothing rotates. The reply carries the new pair, `access_expires_at`, `access_lifetime_ms`
+(the lifetime as issued), `session_expires_at` (the family's absolute end) and the center's published `command_keys` and
+`entitlement_keys`. A refresh is not audited; a reuse is (`identity.session.refresh_reused`, whose payload names the scope).
 
 **What strict rotation costs.** The refresh credential is a bearer token; the node key plays no role in refresh (in AF-CTR-04 it is
 not used after enrollment). A reply lost after the center committed the rotation (a Worker deadline during a cold start, a deploy)
 leaves the node holding a spent token: its next refresh revokes the family and the node must sign in again. On the hosted center the
 Container sleeps after 60 seconds idle, so nearly every unattended refresh meets a cold start. At 36 refreshes a day (13,140 a year)
-and an assumed post-commit loss of 1 in 10,000 refreshes, a node would be signed out about 1.3 times a year; the real rate is
-measured in the end-to-end acceptance and the hosted run H2. Key-authenticated recovery is a later task's decision.
+and an assumed post-commit loss of 1 in 10,000 refreshes, a node would be signed out about 1.3 times a year; the real rate will
+be measured in the end-to-end acceptance and the hosted run H2. Key-authenticated recovery is a later task's decision.
 
 **ReportNodeInfo** updates what the node says about itself. The node ID must be the credential's (`node.node_id: mismatch`), the OS
 cannot change (`node.os: mismatch`: another OS is another machine, which signs in under its own node ID), the name passes the node-name
 rule below and the version is SemVer 2.0.0. A changed name, architecture or version (compared in canonical form, so a rebuild at
 another commit is no change) updates the node row and the installation's version, and the device takes the new name only while it
 still bears the name the node reported before: a name the account gave the device wins. The node is marked seen; the event
-`fleet.node.info_reported` is appended only when something changed. A restricted account's node is refused.
+`fleet.node.info_reported` is appended only when something changed. A restricted account's node is refused. A replay of a committed
+report (the same command ID) is answered with its receipt before the installation's bucket is counted.
 
 **SignOutNode** revokes the calling node credential (revoke reason 1, signed out); the node record, device and installation stay, so
 the node signs in again in place. A restricted account's node may call it. A retry after the revocation (also a retry whose reply was
@@ -93,28 +95,34 @@ methods answer `AUTHENTICATION/unauthenticated` when the credential's installati
 
 ## Enrollment
 
-`fleet.Enroll` is the one function both sign-in flows call in their success transaction. Its rules, in this order:
+`fleet.Enroll` is the one function both sign-in flows will call in their success transaction (parts E1b and E2); until then it is
+exercised by SEEDED function-level tests that call it directly. Its rules, in the order the code applies them:
 
-1. The approving account is locked and must be Active; the approving session is locked (in the session slot of the lock order) and
-   the approval lapses when that session was revoked by the account, by revoking all sessions, with its device or by an operator, or
-   when its authentication or recovery epoch moved since the approval (a sign-out or an expiry does not lapse it). A lapse writes
-   nothing; the sign-in methods (parts E1b and E2) then end the flow as expired.
+1. The approving account is locked and must be Active (else the approval lapses).
 2. A node ID live in another account is `CONFLICT/already_exists` (`state.state` `node`, no resource).
-3. A node ID live in this account is re-enrolled in place: its older sessions are revoked (reason 7, superseded), its name, version
+3. A node ID live in this account on another OS is `VALIDATION/invalid_argument` (`node.os: mismatch`): another OS is another
+   machine, which signs in under a node ID of its own.
+4. A key an installation holds is registered once ever: held by a live installation (other than the node's own, re-used in rule 6)
+   it is `CONFLICT/already_exists` (`state.state` `node_key`, `state.reason` `already_registered`); held by a revoked one (the key was
+   retired) it is `AUTHENTICATION/credential_revoked`, and the node deletes its key and starts again. For a new node, the cap must
+   admit one more live node (`RESOURCE/quota_exceeded`, `limit_name` `max_nodes_per_account`, `maximum` the cap).
+5. After the locks of the order below, the approving session is locked (in the session slot) and the approval lapses when that
+   session was revoked by the account, by revoking all sessions, with its device or by an operator, or when its authentication or
+   recovery epoch moved since the approval (a sign-out or an expiry does not lapse it). So a refusal of rules 2 to 4 is answered
+   before a lapse.
+6. A node ID live in this account is re-enrolled in place: its older sessions are revoked (reason 7, superseded), its name, version
    and architecture are updated, a different key replaces the stored one at the next key version, and the device follows the
-   reported name as for ReportNodeInfo.
-4. Otherwise the node gets a new device (platform mapped by name: Windows is `windows` (1), Linux is `linux` (3), never the OsFamily
-   number), an `arcforges-node` installation holding the key at version 1, and a node row, once the cap admits one more live node
-   (`RESOURCE/quota_exceeded`, `limit_name` `max_nodes_per_account`, `maximum` the cap).
-5. A key an installation holds is registered once ever: held by a live installation (other than the one re-used in rule 3) it is
-   `CONFLICT/already_exists` (`state.state` `node_key`, `state.reason` `already_registered`); held by a revoked one (the key was
-   retired) it is `AUTHENTICATION/credential_revoked`, and the node deletes its key and starts again.
+   reported name as for ReportNodeInfo. Otherwise the node gets a new device (platform mapped by name: Windows is `windows` (1),
+   Linux is `linux` (3), never the OsFamily number), an `arcforges-node` installation holding the key at version 1, and a node row.
 
-The node session it issues gets the node lifetimes; `fleet.node.enrolled` (node ID, OS, architecture, canonical version, key
-fingerprint, flow `pkce` or `device`, `first` or `reenrolled`, key version) is its last statement. A concurrent enrollment of the
-same node ID or key is store contention, and the identical retry answers the rule that then applies. A sign-in after a sign-out
-replaces the node key (the sign-in methods refuse a key an installation holds or held before approval), so an in-place re-enrollment
-normally arrives with a new key.
+Enroll runs in a savepoint of the caller's transaction and rolls it back on a lapse, on every refusal and on a store failure, so
+nothing of the enrollment remains even when the caller then commits (as a flow that ends EXPIRED will): no device, installation,
+session, superseded session or key (`TestNothingOfARefusedEnrollmentRemains`). The node session it issues gets the node lifetimes;
+`fleet.node.enrolled` (node ID, OS, architecture, canonical version, key fingerprint, flow `pkce` or `device`, `first` or
+`reenrolled`, key version) is its last statement. A concurrent enrollment of the same node ID or key is store contention, and the
+identical retry answers the rule that then applies. The sign-in methods will refuse a key an installation holds or held before
+approval (parts E1b and E2), so a sign-in after a sign-out will replace the node key, and an in-place re-enrollment will normally
+arrive with a new key.
 
 **Node names and versions.** A node name is 1 to 64 UTF-16 units of letters, marks, numbers, punctuation, symbols and the single
 space, without a leading, trailing or doubled space, at most three combining marks in a row, no braille blank and at least one
@@ -127,14 +135,27 @@ the text before the first `+` (`fleet.ValidNodeVersion`).
 
 One global order, cited by the threat model (SEC-12): a sign-in flow row, `identity.user`, `device.device`, `device.installation`,
 the `identity.session` rows, `fleet.node`. It is the order of `device.Revoke` (device, installations, sessions, then the cascade
-participants, so `fleet.node` last) with the flow row and the account in front. Enroll locks the account, then for a node live in the
-account its device (re-checking that it is not revoked) and installation, then the approving session `FOR SHARE`, then supersedes
-the installation's sessions, then locks and re-reads the node row; new rows are inserted after the locks, and their only waits are
-unique-index waits. ReportNodeInfo locks the device only when it renames it, then the installation, then the node row;
-RefreshNodeSession locks its session and then updates the node row; SignOutNode touches its own session only; the operator's
-revoke-device locks the account first. In every transaction a command receipt is the first row written and the audit chain head the
-last. `TestEnrollTakesItsLocksInTheGlobalOrder` holds each row in turn and checks which rows Enroll already holds while it waits;
-the race tests run every transaction without retries, so a deadlock fails them.
+participants, so `fleet.node` last) with the flow row and the account in front. The writers that lock more than one of these rows
+take them in this order:
+
+- Enroll: the account, then for a node live in the account its device (re-checking that it is not revoked) and installation, then
+  the approving session `FOR SHARE`, then the supersession of the installation's sessions, then the node row (locked and re-read);
+  new rows are inserted after the locks, and their only waits are unique-index waits.
+- ReportNodeInfo: the device only when it renames it, then the installation, then the node row.
+- RefreshNodeSession: its session, then the node row.
+- The account's step-up evidence path (RevokeSession of another session, RevokeAllSessions, RemoveAuthIdentity, DeviceService.Revoke
+  of another device): the account first, then (for a device) `device.Revoke`.
+- The operator's `admin revoke-sessions` and `admin revoke-device`: the accounts first (in account order for `revoke-sessions
+--all`), then the sessions, or `device.Revoke`.
+
+The writers that lock fewer rows skip slots and never go back: SignOutNode, a sign-out of the caller's own session and a browser
+session's renewal lock one session row; the own-device DeviceService.Revoke takes no account lock and starts at the device; a sign-in
+(`device.EnsureNative`, `EnsureBrowser`) locks its own installation and device and then inserts its session; a step-up proof and the
+session upgrade lock the proving session. In every transaction a command receipt is the first row written and the audit chain head the
+last. `TestEnrollTakesItsLocksInTheGlobalOrder` and `TestReportNodeInfoAndRevokeNeverDeadlock` hold one row at a time and check which
+rows the waiting transaction already holds. The race tests (enrollment, refresh, report and the operator's revoke-sessions against
+revocation and re-enrollment) run every transaction with one attempt (the refresh through `fleet.Options.RefreshAttempts`), so a
+deadlock is an error of the round and fails them.
 
 ## Revocation
 
@@ -148,7 +169,8 @@ free to enroll again with a new key; the revoked installation keeps holding the 
 
 The center delivers the public keys of `fleet.signing_key` with every sign-in and refresh: every key of a purpose that is neither
 retired nor expired, including a registered successor whose `not_before` lies ahead, so a node holds it before the center signs with
-it (`platform.PublishedKeys`). Until keys are registered the sets are empty. Generating the private keys and holding them in platform
+it (`platform.PublishedKeys`); a key whose retirement is scheduled ahead is published with that instant as its `not_after`. Until keys
+are registered the sets are empty. Generating the private keys and holding them in platform
 secrets is AF-CTR-05's.
 
 **Runbook.** With the migration role:
@@ -177,7 +199,8 @@ estimate of 3 MB with its indexes), removed at the family's absolute end by AF-P
 ## Metrics, audit and transactions
 
 `arcforges_center_fleet_events_total{event,outcome}` counts closed pairs (`refresh` rotated, reused, refused, rate_limited; `report`
-changed, unchanged; `sign_out` signed_out; `enroll` outcomes once the sign-in methods call it). Audit events: `fleet.node.enrolled`,
+changed, unchanged, rate_limited; `sign_out` signed_out; `enroll` outcomes once the sign-in methods call it); any other pair is counted as `unlisted`, and the fleet integration harness fails
+a test after which the composed center counted one. Audit events: `fleet.node.enrolled`,
 `fleet.node.info_reported`, `fleet.node.signed_out`, `fleet.signing_key.registered`, `fleet.signing_key.retired`, `device.revoked`
 (with the participant count), `identity.session.refresh_reused` (with the scope), `access.refused`, `identity.rate_limited`; no
 payload holds a token, code, address or e-mail. Transactions per request: RefreshNodeSession one lookup (no transaction held), one

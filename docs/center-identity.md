@@ -88,7 +88,7 @@ account's node still reaches (the node's own sign-out).
 Since AF-CTR-03 part B `Authorize` decides a session call in seven ordered stages, and a stage that refuses ends the decision:
 authentication, ownership of the object the call addresses (another account's object is `STATE/not_found`; a row names an `Object`
 and the handler hands `AuthorizeSubject` its owner), scope and risk (known scope, restricted account, session upgrade),
-AGENT/HUMAN separation, the resource controls (a hook for the quotas and budgets of AF-CTR-04, DC-07), the audit that comes before
+AGENT/HUMAN separation, the resource controls (a hook for the quotas and budgets of the first gated operation, AF-CTR-05, DC-07), the audit that comes before
 the call (`access.authorized`, a failed append refuses the call) and the feature gate (`ENTITLEMENT/feature_not_entitled`,
 `state.reason` = the feature key, audited as `access.gated`). A row carries the gate's key as `Feature`; every identity row is an
 essential operation with none, so nothing here is gated, and the R3 rows keep appending their audit event in the transaction of
@@ -377,7 +377,7 @@ bearer or a cookie against the store on every call: a revoked session, device or
 **Refresh rotation and reuse** (n3). One function rotates both kinds of native session: RefreshSession admits the account-session
 scopes with the request's installation, RefreshNodeSession (AF-CTR-04, [center fleet](center-fleet.md#node-credentials)) the `node`
 scope without one, and each session's new tokens get the lifetimes of its scope. A live token of a scope the method does not serve is
-`AUTHORIZATION/permission_denied` with nothing written; revocation and expiry are checked before the scope, and a spent token of any
+`AUTHORIZATION/permission_denied` with nothing rotated or spent (the method's bucket count stays); revocation and expiry are checked before the scope, and a spent token of any
 scope takes the reuse path. `RefreshSession(refresh_token, installation_id)` locks the session by the token's digest,
 checks revocation and expiry, then the installation, the scope (`account` and `mobile.limited` only) and the account, records the
 presented digest as spent and issues the next generation, and reads the session's device for the reply in the same transaction, so a
