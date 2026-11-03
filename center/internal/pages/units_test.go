@@ -27,7 +27,7 @@ func everyRefusal(at time.Time) []*arc.Refusal {
 		arc.Unauthenticated(), arc.TokenExpired(), arc.CredentialRevoked(), arc.StepUpRequired(), arc.PermissionDenied("device.list"),
 		arc.NotFound("session", id), arc.InvalidState("credential", "last_credential"), arc.InvalidState("account", "credentials_locked"), arc.InvalidState("account", "other"),
 		arc.Expired(), arc.NotActivated("pages"), arc.CodeReused(), arc.AlreadyExists("credential", id), arc.CommandIDReused(), arc.RevisionConflict(1, 2),
-		arc.RateLimited("sign_in_prefix", 30, at.Add(90*time.Second)), arc.RateLimited("sign_in_prefix", 30, at.Add(10*time.Minute)), arc.Unavailable(), arc.Internal(), arc.CommitUnknown(),
+		arc.RateLimited("sign_in_prefix", 30, at.Add(90*time.Second)), arc.RateLimited("sign_in_prefix", 30, at.Add(10*time.Minute)), arc.Unavailable(), arc.Internal(),
 	}
 }
 

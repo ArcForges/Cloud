@@ -18,8 +18,8 @@ import (
 // details that row defines, exactly: a row without details carries none, and not_found and already_exists carry state.resource
 // with the kind and only the ID the caller named (F19). Every rendering, dated as the reply dates it, also passes the subset of
 // the Contracts foundation rules that arctest.Violations checks (B6, E4, F-7; it names the rules it leaves out): its
-// StateFailure states a state and a reason, a resource always has its Id, an AFTER_TIME advice carries its retry_at, and only
-// INTERNAL/internal pairs AFTER_TIME with effect UNKNOWN (the one named exemption).
+// StateFailure states a state and a reason, a resource always has its Id, an AFTER_TIME advice carries its retry_at, and no refusal
+// pairs AFTER_TIME with effect UNKNOWN (INTERNAL/internal is NEVER with UNKNOWN; there is no exemption).
 func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 	at := time.Date(2026, 10, 28, 12, 0, 0, 123456789, time.UTC)
 	flowID := []byte{0x0b, 0x6e, 0x1c, 0x52, 0x2d, 0x40, 0x4e, 0x0f, 0x8a, 0x5c, 0x41, 0x7f, 0x19, 0x9d, 0x60, 0x21}
@@ -45,12 +45,11 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		{CodeReused(), "CONFLICT/code_reused", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{AlreadyExists("credential", nil), "CONFLICT/already_exists", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{AlreadyExists("credential", flowID), "CONFLICT/already_exists", foundationv1.RetryMode_RETRY_MODE_NEVER},
-		{CommitUnknown(), "INTERNAL/internal", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{CommandIDReused(), "CONFLICT/command_id_reused", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{RevisionConflict(3, 4), "CONFLICT/revision_conflict", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{RateLimited("sign_in_prefix", 30, at), "RESOURCE/rate_limited", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
 		{Unavailable(), "RESOURCE/overloaded", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
-		{Internal(), "INTERNAL/internal", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
+		{Internal(), "INTERNAL/internal", foundationv1.RetryMode_RETRY_MODE_NEVER},
 	}
 	call := correlation.New()
 	for _, item := range cases {
@@ -138,7 +137,8 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 	if stale.GetExpected().GetValue() != 3 || stale.GetActual().GetValue() != 4 {
 		t.Fatalf("revision details %v", stale)
 	}
-	// A receipt keeps exactly the refusals whose advice is NEVER: the others turn into a success with the same command.
+	// A receipt keeps exactly the refusals whose advice is NEVER and whose effect is known: the others turn into a success with the
+	// same command (Internal advises NEVER with UNKNOWN and says nothing about the command).
 	for _, refusal := range []*Refusal{NotFound("session", flowID), InvalidState("credential", "last_credential"), RevisionConflict(1, 2), CodeReused(),
 		AlreadyExists("credential", nil)} {
 		if !refusal.Final() {
@@ -155,28 +155,31 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 	if len(arctest.Violations(Unavailable().ArcError(call))) != 1 {
 		t.Fatal("the foundation check admits AFTER_TIME without retry_at")
 	}
-	// F-7: the arcError clause admits AFTER_TIME with effect UNKNOWN for INTERNAL/internal only, and the Instant bounds hold.
+	// F-7: the arcError clause admits effect UNKNOWN with no AFTER_TIME at all, INTERNAL/internal included, and the Instant bounds hold.
 	unknown := Unavailable().Dated(at)
 	unknown.Effect = foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN
 	if len(arctest.Violations(unknown.ArcError(call))) != 1 || len(arctest.Violations(Internal().Dated(at).ArcError(call))) != 0 {
-		t.Fatal("the arcError clause or its one exemption")
+		t.Fatal("the arcError clause")
 	}
-	// A-2: the exemption needs both the category INTERNAL and the code "internal": either alone does not exempt the pair, and the
-	// bound of LimitFailure.recovery_at is held like retry_at's.
-	for name, mutate := range map[string]func(*foundationv1.ArcError){
-		"INTERNAL with another code": func(value *foundationv1.ArcError) { value.Code = proto.String("store_corrupt") },
-		"another category with the code": func(value *foundationv1.ArcError) {
-			value.Category = foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE.Enum()
-		},
-	} {
-		value := Internal().Dated(at).ArcError(call)
-		value.Effect = foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN.Enum()
-		if len(arctest.Violations(value)) != 0 {
-			t.Fatalf("the exempt pair itself is refused: %v", arctest.Violations(value))
-		}
-		mutate(value)
-		if len(arctest.Violations(value)) != 1 {
-			t.Errorf("%s is exempt from the arcError clause", name)
+	// E4-INTERNAL: no exemption. The pair INTERNAL/internal had (AFTER_TIME with UNKNOWN) is a violation like any other, whatever the
+	// category and code of the reply, and Internal itself is NEVER with UNKNOWN.
+	pair := Internal().Dated(at).ArcError(call)
+	if pair.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_NEVER || pair.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN ||
+		pair.GetRetry().GetRetryAt() != nil {
+		t.Fatalf("INTERNAL/internal is %v with %v", pair.GetRetry(), pair.GetEffect())
+	}
+	pair.Retry = &foundationv1.RetryAdvice{Mode: foundationv1.RetryMode_RETRY_MODE_AFTER_TIME.Enum(), RetryAt: Instant(at.Add(time.Second))}
+	if len(arctest.Violations(pair)) != 1 {
+		t.Errorf("INTERNAL/internal is exempt from the arcError clause: %v", arctest.Violations(pair))
+	}
+	for _, code := range []string{"internal", "store_corrupt"} {
+		for _, category := range []foundationv1.ErrorCategory{foundationv1.ErrorCategory_ERROR_CATEGORY_INTERNAL, foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE} {
+			value := Internal().Dated(at).ArcError(call)
+			value.Code, value.Category = proto.String(code), category.Enum()
+			value.Retry = pair.Retry
+			if len(arctest.Violations(value)) != 1 {
+				t.Errorf("%s/%s is exempt from the arcError clause", category, code)
+			}
 		}
 	}
 	for _, bad := range []*foundationv1.Instant{{UnixSeconds: proto.Int64(arctest.InstantMaxSeconds + 1), Nanos: proto.Uint32(0)},
@@ -198,14 +201,14 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		}
 	}
 	for range 50 {
-		for _, refusal := range []*Refusal{Unavailable(), Internal()} {
+		for _, refusal := range []*Refusal{Unavailable()} {
 			dated := refusal.Dated(at)
 			if dated.RetryAt.Before(at.Add(time.Second)) || !dated.RetryAt.Before(at.Add(2*time.Second)) || !refusal.RetryAt.IsZero() {
 				t.Fatalf("%s dated %v at %v", refusal.Key(), dated.RetryAt, at)
 			}
 		}
 	}
-	for _, refusal := range []*Refusal{RateLimited("sign_in_prefix", 30, at.Add(time.Hour)), StepUpRequired(), CommitUnknown(), Expired()} {
+	for _, refusal := range []*Refusal{RateLimited("sign_in_prefix", 30, at.Add(time.Hour)), StepUpRequired(), Internal(), Expired()} {
 		if refusal.Dated(at) != refusal {
 			t.Errorf("%s was dated", refusal.Key())
 		}
@@ -230,5 +233,58 @@ func TestAReplyCarriesTheErrorAsFieldThree(t *testing.T) {
 	var decoded foundationv1.ArcError
 	if err = proto.Unmarshal(payload, &decoded); err != nil || !proto.Equal(&decoded, value) {
 		t.Fatalf("decoded %v %v", &decoded, err)
+	}
+}
+
+// TestReconciliationOperationIsSetExactlyWithReconcile (E4-INTERNAL): the wire mapping sets RetryAdvice.reconciliation_operation when,
+// and only when, the advice is RECONCILE (Contracts rule retryAdvice), and a refusal that breaks that cannot be rendered; the check
+// every test applies (arctest.Violations) finds the same break in an ArcError that was not built by this package.
+func TestReconciliationOperationIsSetExactlyWithReconcile(t *testing.T) {
+	call := correlation.New()
+	const operation = "arcforges.publicapi.v1.IdentityService/ListSessions"
+	reconcile := &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_INTERNAL, Code: "internal",
+		Retry: foundationv1.RetryMode_RETRY_MODE_RECONCILE, Reconcile: operation, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN}
+	value := reconcile.Dated(time.Now()).ArcError(call)
+	if value.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_RECONCILE || value.GetRetry().GetReconciliationOperation() != operation ||
+		value.GetRetry().GetRetryAt() != nil || len(arctest.Violations(value)) != 0 {
+		t.Fatalf("RECONCILE with its operation: %v %v", value.GetRetry(), arctest.Violations(value))
+	}
+	if reconcile.Final() {
+		t.Error("a RECONCILE refusal is final")
+	}
+	// No other refusal of the package states an operation.
+	for _, refusal := range []*Refusal{Internal(), Unavailable(), StepUpRequired(), Expired(), RateLimited("x", 1, time.Now())} {
+		if refusal.Reconcile != "" || refusal.Dated(time.Now()).ArcError(call).GetRetry().ReconciliationOperation != nil {
+			t.Errorf("%s names a reconciliation operation", refusal.Key())
+		}
+	}
+	panics := func(refusal *Refusal) (broke bool) {
+		defer func() { broke = recover() != nil }()
+		refusal.ArcError(call)
+		return false
+	}
+	without := *reconcile
+	without.Reconcile = ""
+	other := *Internal()
+	other.Reconcile = operation
+	malformed := *reconcile
+	malformed.Reconcile = "not a valid operation name"
+	for name, refusal := range map[string]*Refusal{"RECONCILE without an operation": &without, "an operation without RECONCILE": &other,
+		"an operation that does not match the pattern": &malformed} {
+		if !panics(refusal) {
+			t.Errorf("%s was rendered", name)
+		}
+	}
+	// The check finds both breaks in an ArcError built elsewhere.
+	missing := reconcile.ArcError(call)
+	missing.Retry.ReconciliationOperation = nil
+	stray := Internal().ArcError(call)
+	stray.Retry.ReconciliationOperation = proto.String(operation)
+	badName := reconcile.ArcError(call)
+	badName.Retry.ReconciliationOperation = proto.String("not a valid operation name")
+	for name, broken := range map[string]*foundationv1.ArcError{"missing": missing, "stray": stray, "malformed": badName} {
+		if len(arctest.Violations(broken)) != 1 {
+			t.Errorf("the check admits a %s reconciliation operation: %v", name, arctest.Violations(broken))
+		}
 	}
 }

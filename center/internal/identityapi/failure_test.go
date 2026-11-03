@@ -19,7 +19,7 @@ import (
 // TestEveryStoreFailureHasItsEffectAndAdvice pins the reply of each store failure (F6): a write whose COMMIT went unanswered may have
 // happened, so it is INTERNAL with effect UNKNOWN and never retried as it was; a store that is down or contended before the commit
 // did nothing and may be retried after a while (an auxiliary transaction's unanswered commit too, logged as a warning with the
-// correlation id); any other failure is INTERNAL, retried once after a while.
+// correlation id); any other failure is INTERNAL with effect UNKNOWN, retry NEVER (E4-INTERNAL).
 func TestEveryStoreFailureHasItsEffectAndAdvice(t *testing.T) {
 	var logs bytes.Buffer
 	server := New(nil, nil, nil, nil, slog.New(slog.NewJSONHandler(&logs, nil)))
@@ -42,7 +42,7 @@ func TestEveryStoreFailureHasItsEffectAndAdvice(t *testing.T) {
 		"contention": {&store.Error{Operation: "refresh a session", Kind: store.ErrContention}, "RESOURCE/overloaded",
 			foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN, foundationv1.RetryMode_RETRY_MODE_AFTER_TIME, false, false},
 		"a missing privilege": {&store.Error{Operation: "refresh a session", Kind: store.ErrPermission}, "INTERNAL/internal",
-			foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN, foundationv1.RetryMode_RETRY_MODE_AFTER_TIME, true, false},
+			foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN, foundationv1.RetryMode_RETRY_MODE_NEVER, true, false},
 	} {
 		logs.Reset()
 		reply := server.failure(context.Background(), call, item.err)

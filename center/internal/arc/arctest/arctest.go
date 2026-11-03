@@ -27,7 +27,7 @@ const (
 // so later drift in Contracts is not detected. It checks:
 //   - ArcError: code, category (1 to 9), message key (pattern), retry and effect (1 to 3) are required; the correlation id is
 //     required (a valid Id: 16 bytes, not all zero), also in the Worker's generated replies (E4-1); the arcError rule's generic
-//     clause, effect UNKNOWN never with AFTER_TIME, with one named exemption below;
+//     clause, effect UNKNOWN never with AFTER_TIME (no exemption: INTERNAL/internal is NEVER with UNKNOWN);
 //   - RetryAdvice: the mode is required (1 to 4); the rule retryAdvice (retry_at if and only if AFTER_TIME, a reconciliation
 //     operation, matching the pattern, if and only if RECONCILE);
 //   - Instant (retry_at, LimitFailure.recovery_at): unix_seconds and nanos are required and within their bounds;
@@ -54,12 +54,9 @@ func Violations(value *foundationv1.ArcError) []string {
 	check(value.GetRetry() != nil && value.GetRetry().Mode != nil && value.GetRetry().GetMode() >= 1 && value.GetRetry().GetMode() <= 4,
 		"ArcError.retry.mode is required (1 to 4)")
 	check(value.Effect != nil && value.GetEffect() >= 1 && value.GetEffect() <= 3, "ArcError.effect is required (1 to 3)")
-	// The arcError rule's generic clause: effect UNKNOWN never with AFTER_TIME. INTERNAL/internal (arc.Internal) is the one exemption:
-	// Design errors.md row 85 prescribes "AFTER_TIME once" with effect "UNKNOWN unless known", against Contracts 62ccef1
-	// eng/foundation_semantics.py arcError. That open conflict predates this PR (#118) and is routed to the AF-CTR-03 Design
-	// companion (E4-INTERNAL); a second refusal with this pair fails here.
-	exempt := value.GetCategory() == foundationv1.ErrorCategory_ERROR_CATEGORY_INTERNAL && value.GetCode() == "internal"
-	check(exempt || !(value.GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN &&
+	// The arcError rule's generic clause: effect UNKNOWN never with AFTER_TIME, for every category and code (Design errors.md, "UNKNOWN
+	// never pairs with AFTER_TIME"; INTERNAL/internal advises NEVER with UNKNOWN).
+	check(!(value.GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN &&
 		value.GetRetry().GetMode() == foundationv1.RetryMode_RETRY_MODE_AFTER_TIME),
 		"ArcError: effect UNKNOWN never with retry AFTER_TIME (rule arcError)")
 	instant := func(at *foundationv1.Instant, name string) {

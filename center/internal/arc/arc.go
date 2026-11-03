@@ -27,6 +27,12 @@ type Refusal struct {
 	Code     string
 	// Retry is the advice: NEVER unless set.
 	Retry foundationv1.RetryMode
+	// Reconcile is the read operation a RECONCILE advice names (RetryAdvice.reconciliation_operation): the fully qualified
+	// operation, for example "arcforges.publicapi.v1.IdentityService/ListSessions", matching the pattern of
+	// foundation-baseline.json. It is set exactly when Retry is RECONCILE: ArcError refuses (panics) a RECONCILE without it and
+	// an operation without RECONCILE, so such a refusal cannot reach a reply. No refusal of the identity surface advises RECONCILE
+	// yet (an unanswered effect COMMIT is INTERNAL with NEVER, below); the field is here for the refusals of later parts.
+	Reconcile string
 	// RetryAt is the earliest retry of an AFTER_TIME advice.
 	RetryAt time.Time
 	// Reason is state.reason; State is state.state.
@@ -77,11 +83,20 @@ func (r *Refusal) MessageKey() string {
 }
 
 // ArcError renders the refusal with the call's correlation id; the effect is DID_NOT_HAPPEN unless the refusal states another
-// (an internal failure whose commit may have happened is UNKNOWN).
+// (an internal failure whose commit may have happened is UNKNOWN). It panics for a refusal that breaks the rule retryAdvice's
+// reconciliation clause (a RECONCILE advice without its operation, an operation without RECONCILE, an operation that does not
+// match the pattern): that is a bug of the refusal's constructor, which the tests of every constructor find, never a runtime
+// condition.
 func (r *Refusal) ArcError(call correlation.Context) *foundationv1.ArcError {
 	retry := r.Retry
 	if retry == foundationv1.RetryMode_RETRY_MODE_UNSPECIFIED {
 		retry = foundationv1.RetryMode_RETRY_MODE_NEVER
+	}
+	if (retry == foundationv1.RetryMode_RETRY_MODE_RECONCILE) != (r.Reconcile != "") {
+		panic("arc: " + r.Key() + ": a reconciliation operation is set if and only if the retry advice is RECONCILE (rule retryAdvice)")
+	}
+	if r.Reconcile != "" && !statePattern.MatchString(r.Reconcile) {
+		panic("arc: " + r.Key() + ": the reconciliation operation does not match the pattern of foundation-baseline.json")
 	}
 	effect := r.Effect
 	if effect == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNSPECIFIED {
@@ -99,6 +114,9 @@ func (r *Refusal) ArcError(call correlation.Context) *foundationv1.ArcError {
 	}
 	if !r.RetryAt.IsZero() {
 		value.Retry.RetryAt = Instant(r.RetryAt)
+	}
+	if r.Reconcile != "" {
+		value.Retry.ReconciliationOperation = proto.String(r.Reconcile)
 	}
 	switch {
 	case r.Revision != nil:
@@ -232,11 +250,15 @@ func RevisionConflict(expected, actual int64) *Refusal {
 		Revision: &Revision{Expected: expected, Actual: actual}}
 }
 
-// Final reports a refusal that the same command can never turn into a success (its retry advice is NEVER): a command receipt
-// keeps it and answers a replay with it. Any other refusal (step_up_required, token_expired, rate_limited, overloaded, internal)
-// rolls the receipt back, so the same command ID can succeed after the step-up, the refresh or the wait its advice names.
+// Final reports a refusal that the same command can never turn into a success (its retry advice is NEVER and its effect is known): a
+// command receipt keeps it and answers a replay with it. Any other refusal (step_up_required, token_expired, rate_limited,
+// overloaded) rolls the receipt back, so the same command ID can succeed after the step-up, the refresh or the wait its advice
+// names. So does a refusal whose effect is UNKNOWN, although its advice is NEVER (Internal): the failure says nothing about the
+// command, so a replay under the same ID must run the command again (AD-0004), not be answered with the failure. A RECONCILE
+// refusal is not final either; the first row that uses it states what its receipt keeps.
 func (r *Refusal) Final() bool {
-	return r.Retry == foundationv1.RetryMode_RETRY_MODE_UNSPECIFIED || r.Retry == foundationv1.RetryMode_RETRY_MODE_NEVER
+	return (r.Retry == foundationv1.RetryMode_RETRY_MODE_UNSPECIFIED || r.Retry == foundationv1.RetryMode_RETRY_MODE_NEVER) &&
+		r.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN
 }
 
 // CommandIDReused is CONFLICT/command_id_reused.
@@ -271,7 +293,7 @@ const (
 	retryJitter = time.Second
 )
 
-// Dated is the refusal as it goes on the wire at now (E4): an AFTER_TIME refusal that names no instant (Unavailable, Internal)
+// Dated is the refusal as it goes on the wire at now (E4): an AFTER_TIME refusal that names no instant (Unavailable)
 // gets retry_at now plus retryDelay and the jitter, because the Contracts rule retryAdvice (foundation-baseline.json) pairs
 // AFTER_TIME with retry_at. A refusal that names its instant (RateLimited) and any other advice are returned as they are. It is
 // applied once, where a refusal becomes the reply's ArcError.
@@ -290,18 +312,20 @@ func Unavailable() *Refusal {
 		Retry: foundationv1.RetryMode_RETRY_MODE_AFTER_TIME}
 }
 
-// Internal is INTERNAL/internal: an unexpected failure (logged with the correlation id), retried once after a while; its effect
-// is unknown because the failure may have followed a commit.
+// Internal is INTERNAL/internal: an unexpected failure (logged with the correlation id) and, since its cause is unknown, a failure
+// whose effect may have happened (effect UNKNOWN). Retry is NEVER because the Contracts rule arcError rejects effect UNKNOWN with
+// AFTER_TIME, and Design errors.md says so for the row (AFTER_TIME once only for DID_NOT_HAPPEN or HAPPENED): a client that holds
+// the command's identity may send the same command again (a command receipt makes that safe), which is guidance, not advice.
+//
+// It is also the failure of the write that carries a call's effect when its COMMIT was sent without an answer (store.ErrCommitUnknown):
+// the effect may have happened, and the same call is never retried as it was, because a refresh token or a flow it presented may
+// already be spent; the client signs in again or reads the state it needs. An auxiliary transaction's unanswered COMMIT (a
+// rate-limit count, a flow attempt, a refusal's audit) leaves the effect undone and is answered as Unavailable (D10).
+//
+// No caller proves that the effect did not happen, so there is no constructor that answers INTERNAL/internal with AFTER_TIME and
+// DID_NOT_HAPPEN (errors.md allows one); the callers that fail before any write (a flow without its claim) fail the same way
+// on every retry, so waiting would not help them either.
 func Internal() *Refusal {
-	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_INTERNAL, Code: "internal",
-		Retry: foundationv1.RetryMode_RETRY_MODE_AFTER_TIME, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN}
-}
-
-// CommitUnknown is INTERNAL/internal for the write that carries a call's effect when its COMMIT was sent without an answer: it may
-// have happened (effect UNKNOWN), and the same call is never retried as it was (retry NEVER), because a refresh token or a flow it
-// presented may already be spent; the client signs in again or reads the state it needs. An auxiliary transaction's unanswered
-// COMMIT (a rate-limit count, a flow attempt, a refusal's audit) leaves the effect undone and is answered as Unavailable (D10).
-func CommitUnknown() *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_INTERNAL, Code: "internal",
 		Retry: foundationv1.RetryMode_RETRY_MODE_NEVER, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN}
 }

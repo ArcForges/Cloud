@@ -109,10 +109,9 @@ func (s *Server) Methods() []connect.Method {
 	}
 }
 
-// failure is the ArcError of an error: a refusal as it is, the call's effect write whose commit outcome is unknown as
-// INTERNAL/internal with effect UNKNOWN and retry NEVER (F6), a store that is down or contended as RESOURCE/overloaded (an
-// auxiliary transaction's unanswered commit included, D10), anything else as INTERNAL/internal (logged with the correlation id;
-// store errors never carry row values).
+// failure is the ArcError of an error: a refusal as it is, the call's effect write whose commit outcome is unknown (F6) and
+// anything else as INTERNAL/internal with effect UNKNOWN and retry NEVER (logged with the correlation id; store errors never carry
+// row values), a store that is down or contended as RESOURCE/overloaded (an auxiliary transaction's unanswered commit included, D10).
 func (s *Server) failure(ctx context.Context, call *ingress.Call, err error) *foundationv1.ArcError {
 	if err == nil {
 		return nil
@@ -130,8 +129,9 @@ func (s *Server) failure(ctx context.Context, call *ingress.Call, err error) *fo
 		return value
 	case errors.As(err, &refusal):
 	case errors.Is(err, store.ErrCommitUnknown):
+		// Listed before the store failures below: an unanswered commit may wrap a timeout or a cancellation, and is never overloaded.
 		s.logger.ErrorContext(ctx, "identity call failed", "method", call.Policy.FullName, "correlationId", call.Correlation.CorrelationID, "error", err.Error())
-		refusal = arc.CommitUnknown()
+		refusal = arc.Internal()
 	case errors.Is(err, store.ErrUnavailable), errors.Is(err, store.ErrTimeout), errors.Is(err, store.ErrContention), errors.Is(err, store.ErrCanceled),
 		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		var storeErr *store.Error
