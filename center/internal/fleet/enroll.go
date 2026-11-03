@@ -29,8 +29,8 @@ const MaxNodesLimit = "max_nodes_per_account"
 
 // ErrApprovalLapsed is an enrollment whose approval no longer stands (protocol-6): the approving account is not Active, or the
 // approving session was revoked by the account, by the revocation of all its sessions, of its device or by an operator, or an
-// authentication or recovery epoch moved since the approval. Nothing was written; the caller ends the flow (EXPIRED) in a
-// transaction of its own and answers STATE/expired.
+// authentication or recovery epoch moved since the approval. Nothing of the enrollment remains: Enroll rolls its savepoint back
+// (as for every refusal). The sign-in methods (parts E1b and E2) will end the flow as expired and answer STATE/expired.
 var ErrApprovalLapsed = errors.New("the approval of the enrollment lapsed")
 
 // Approver is the approving account's session as the approval recorded it.
@@ -87,10 +87,32 @@ var lapsingReasons = map[int16]bool{session.RevokedByAccount: true, session.Revo
 //	    (state node_key, reason already_registered); held by a revoked one (the key was retired), AUTHENTICATION/credential_revoked.
 //
 // A device revoked between the unlocked read and its lock is resolved again as (d), so its revoked installation's key answers (e).
-// The approving session is locked FOR SHARE in the session slot of the global order; a lapse returns ErrApprovalLapsed. The event
-// fleet.node.enrolled is the last statement. A concurrent enrollment of the same node ID or key is store contention (the identical
-// retry answers the rule that then applies).
+// A re-enrollment on another OS is refused (node.os: mismatch) before anything is written. The approving session is locked FOR
+// SHARE in the session slot of the global order, after the rules above, so a refusal of (c), (e) or the cap is answered before a
+// lapse; a lapse returns ErrApprovalLapsed. The event fleet.node.enrolled is the last statement. A concurrent enrollment of the same
+// node ID or key is store contention (the identical retry answers the rule that then applies).
+//
+// Enroll runs in a savepoint of the caller's transaction and rolls it back on every error (a lapse, any refusal, a store failure), so
+// a caller that commits after a refusal (to end its flow) keeps nothing of the enrollment: no device, installation, session or key.
 func Enroll(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, request EnrollRequest, now time.Time) (Enrolled, error) {
+	savepoint, err := tx.Begin(ctx)
+	if err != nil {
+		return Enrolled{}, store.Sanitize("open the enrollment's savepoint", err)
+	}
+	enrolled, err := enroll(ctx, savepoint, policy, request, now)
+	if err != nil {
+		if rollbackErr := savepoint.Rollback(ctx); rollbackErr != nil {
+			return Enrolled{}, store.Sanitize("roll the enrollment back", rollbackErr)
+		}
+		return Enrolled{}, err
+	}
+	if err = savepoint.Commit(ctx); err != nil {
+		return Enrolled{}, store.Sanitize("release the enrollment's savepoint", err)
+	}
+	return enrolled, nil
+}
+
+func enroll(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, request EnrollRequest, now time.Time) (Enrolled, error) {
 	now = now.UTC().Truncate(time.Microsecond)
 	if !ValidNodeKey(request.PublicKey) {
 		return Enrolled{}, arc.InvalidArgument("node_public_key", "not_p256")
@@ -109,15 +131,20 @@ func Enroll(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, reques
 	}
 	var live struct {
 		enrollmentID, userID, deviceID, installationID platform.ID
+		os                                             int16
 	}
-	err = tx.QueryRow(ctx, "SELECT enrollment_id, user_id, device_id, installation_id FROM fleet.node WHERE node_id = $1 AND revoked_at IS NULL",
-		request.NodeID).Scan(&live.enrollmentID, &live.userID, &live.deviceID, &live.installationID)
+	err = tx.QueryRow(ctx, "SELECT enrollment_id, user_id, device_id, installation_id, os FROM fleet.node WHERE node_id = $1 AND revoked_at IS NULL",
+		request.NodeID).Scan(&live.enrollmentID, &live.userID, &live.deviceID, &live.installationID, &live.os)
 	found := err == nil
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Enrolled{}, store.Sanitize("find the node", err)
 	}
 	if found && live.userID != request.UserID {
 		return Enrolled{}, arc.AlreadyExists("node", nil)
+	}
+	// A node ID on another operating system is another machine: it signs in under a node ID of its own.
+	if found && live.os != request.Node.Platform.OS {
+		return Enrolled{}, arc.InvalidArgument("node.os", "mismatch")
 	}
 	if found {
 		var locked bool
@@ -201,12 +228,8 @@ func reenroll(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, requ
 	var stillLive bool
 	err = tx.QueryRow(ctx, "SELECT user_id, device_id, display_name, os, revoked_at IS NULL FROM fleet.node WHERE enrollment_id = $1 FOR UPDATE", enrollmentID).
 		Scan(&owner, &onDevice, &reportedName, &os, &stillLive)
-	if err != nil || !stillLive || owner != request.UserID || onDevice != deviceID {
+	if err != nil || !stillLive || owner != request.UserID || onDevice != deviceID || os != request.Node.Platform.OS {
 		return Enrolled{}, &store.Error{Operation: "lock the node", Kind: store.ErrContention}
-	}
-	// A node ID on another operating system is another machine: it signs in under a node ID of its own.
-	if os != request.Node.Platform.OS {
-		return Enrolled{}, arc.InvalidArgument("node.os", "mismatch")
 	}
 	if _, err = tx.Exec(ctx, `UPDATE device.installation SET public_key = $2, key_version = $3, app_version = $4, last_active_at = greatest(last_active_at, $5),
     rev = rev + 1 WHERE installation_id = $1`, installationID, request.PublicKey, keyVersion, request.Node.Version, now); err != nil {

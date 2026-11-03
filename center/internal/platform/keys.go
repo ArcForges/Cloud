@@ -77,11 +77,13 @@ ORDER BY not_before DESC, kid`, purpose, at)
 
 // PublishedKeys returns the keys of a purpose that a node is given with its credentials (AF-CTR-04, CTR4-KEY-03): every key that is
 // neither retired nor expired at the instant, including a registered successor whose not_before lies ahead, so a node holds it before
-// the center signs with it. Oldest first. ValidKeys stays the signing and verification set.
+// the center signs with it. A key retired at a later instant is published with that instant as its not_after, so a node stops
+// trusting it then. Oldest first. ValidKeys stays the signing and verification set.
 func PublishedKeys(ctx context.Context, q interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 }, purpose KeyPurpose, at time.Time) ([]SigningKey, error) {
-	rows, err := q.Query(ctx, `SELECT kid, purpose, algorithm, public_key, secret_binding, not_before, not_after, retired_at FROM fleet.signing_key
+	rows, err := q.Query(ctx, `SELECT kid, purpose, algorithm, public_key, secret_binding, not_before, least(not_after, coalesce(retired_at, not_after)),
+    retired_at FROM fleet.signing_key
 WHERE purpose = $1 AND not_after > $2 AND (retired_at IS NULL OR retired_at > $2)
 ORDER BY not_before, kid`, purpose, at)
 	if err != nil {

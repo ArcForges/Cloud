@@ -121,6 +121,13 @@ func TestTheFleetAdministrationCommands(t *testing.T) {
 	if published, err = platform.PublishedKeys(ctx, center, platform.CommandSigning, time.Now().Add(time.Second)); err != nil || len(published) != 1 {
 		t.Fatalf("published after the retirement: %d %v", len(published), err)
 	}
+	// F5: a retirement scheduled ahead is published as the key's not_after, so a node stops trusting it then.
+	retireAt := now.Add(40 * 24 * time.Hour)
+	command(0, "admin", "retire-signing-key", "--kid", "cmdsuccessor", "--at", retireAt.Format(time.RFC3339))
+	if published, err = platform.PublishedKeys(ctx, center, platform.CommandSigning, time.Now().Add(time.Second)); err != nil || len(published) != 1 ||
+		!published[0].NotAfter.Equal(retireAt) {
+		t.Fatalf("a scheduled retirement: %+v %v", published, err)
+	}
 
 	// revoke-device: a node enrolled by an account, released by the operator by its node ID.
 	user, browser, nodeID := platform.NewID(), platform.NewID(), platform.NewID()

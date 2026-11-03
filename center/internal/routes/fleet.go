@@ -27,9 +27,10 @@ func FleetMethods() []IdentityMethod {
 	}
 }
 
-// fleetBudget is the transport budget of every fleet method: small replies (a token pair with the key sets, or a receipt) and a few
-// short transactions, the identity surface's deadline.
-var fleetBudget = Budget{MaxFrameBytes: 65_536, MaxUnaryResponseBytes: 65_536, MaxDurationMilliseconds: 15_000, Instance: HealthInstance}
+// fleetBudget is the transport budget of every fleet method: small replies (a token pair with the key sets, or a receipt), a few short
+// transactions, and the contract's 10 s deadline of the three methods (a refresh that outlived the node's deadline and committed
+// would leave the node a spent token).
+var fleetBudget = Budget{MaxFrameBytes: 65_536, MaxUnaryResponseBytes: 65_536, MaxDurationMilliseconds: 10_000, Instance: HealthInstance}
 
 // Fleet is the fleet surface's module.
 func Fleet() (Module, error) {

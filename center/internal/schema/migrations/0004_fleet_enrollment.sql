@@ -178,7 +178,7 @@ CREATE TABLE fleet.device_authorization (
     begin_asn                    bigint,
     interval_ms                  integer     NOT NULL,
     last_poll_at                 timestamptz,
-    lookups                      smallint    NOT NULL,
+    lookups                      smallint    NOT NULL DEFAULT 0,
     created_at                   timestamptz NOT NULL,
     expires_at                   timestamptz NOT NULL,
     viewed_by                    uuid,

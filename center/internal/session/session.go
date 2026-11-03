@@ -198,6 +198,9 @@ type Admission struct {
 	Scopes       []Scope
 	Installation *platform.ID
 	Operation    string
+	// Attempts bounds the rotation's retries of a serialization failure or deadlock (0 is the store's default); a race test sets 1, so
+	// a deadlock is its error instead of being retried away.
+	Attempts int
 }
 
 // AccountRefresh is IdentityService.RefreshSession's admission: the account-session scopes, with the request's installation.
@@ -276,7 +279,7 @@ func Refresh(ctx context.Context, db *store.DB, policy config.IdentityPolicy, to
 	digest := secret.Digest()
 	var issued Native
 	var reuse *Reuse
-	err := db.InTx(ctx, "refresh a session", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+	err := db.InTx(ctx, "refresh a session", store.TxOptions{Attempts: admission.Attempts}, func(ctx context.Context, tx pgx.Tx) error {
 		issued, reuse = Native{}, nil
 		var row struct {
 			sessionID, userID, deviceID, installationID, familyID platform.ID

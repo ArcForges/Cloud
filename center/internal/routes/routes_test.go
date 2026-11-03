@@ -70,13 +70,14 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))
 	}
 	for index, row := range table.SurfaceRows {
-		surface := SurfaceIdentity
+		// The fleet rows carry the contract's 10 s deadline (F3); the identity rows the identity surface's 15 s.
+		surface, deadline := SurfaceIdentity, 15_000
 		if strings.HasPrefix(row.Path, "/arcforges.fleet.v1.") {
-			surface = SurfaceFleet
+			surface, deadline = SurfaceFleet, 10_000
 		}
 		if got := fmt.Sprintf("%s %s %d", row.Path, row.Auth, row.MaxRequestBytes); got != served[index] || row.Surface != surface ||
 			!row.RequestMeta || row.Instance != HealthInstance || row.Kind != "unary" || row.MaxFrameBytes != 65_536 ||
-			row.MaxUnaryResponseBytes != 65_536 || row.MaxDurationMilliseconds != 15_000 {
+			row.MaxUnaryResponseBytes != 65_536 || row.MaxDurationMilliseconds != deadline {
 			t.Fatalf("surface row %d: %+v", index, row)
 		}
 	}

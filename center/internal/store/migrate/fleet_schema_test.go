@@ -18,7 +18,7 @@ import (
 
 // migration0004SHA256 pins the applied form of 0004_fleet_enrollment.sql: an applied migration is immutable, so this value only
 // changes before the migration is merged. The successor provenance record of this part pins the same file by its hash.
-const migration0004SHA256 = "0cad855754db9c011ffb0a77f1db519da0a6672e314cc52f1a349480bcf91c48"
+const migration0004SHA256 = "babcd36d812138e688183501c0e9bd87aee9d9d0bcb6c6158a7b03c1226fe101"
 
 // TestMigration0004LandsWholeOverVersion3 rehearses the production step of 0004 as the 0002 and 0003 rehearsals do: a database at
 // version 3, owned by a migration role that is not a superuser, receives 0004 from the center's own runner. A copy of 0004 that fails
@@ -214,8 +214,15 @@ func TestTheFleetStoreConstraints(t *testing.T) {
 		approverVals+", decode(repeat('c1', 32), 'hex'), now() + interval '2 minutes', now(), now(), '"+nodeSession+"', '"+enrollment+"'"))
 	must(t, authorization("gen_random_uuid()", "1", "", ""))
 	must(t, authorization("'"+delivered+"'", "6", approverCols+", completed_at, session_id, enrollment_id", approverVals+", now(), '"+nodeSession+"', '"+enrollment+"'"))
-	// A node version keeps a prerelease; the revoke reasons 7 and 8 are admitted.
+	// A node version keeps a prerelease; an authorization inserted without its lookups starts at 0.
 	must(t, "UPDATE fleet.node SET version = '1.0.0-rc.1', rev = rev + 1 WHERE enrollment_id = '"+enrollment+"'")
+	must(t, strings.Replace(strings.Replace(authorization("'00000000-0000-4000-8000-000000000094'", "1", "", ""), "interval_ms, lookups,", "interval_ms,", 1),
+		"5000, 0,", "5000,", 1))
+	var lookups int
+	if err := conn.QueryRow(ctx, "SELECT lookups FROM fleet.device_authorization WHERE authorization_id = '00000000-0000-4000-8000-000000000094'").
+		Scan(&lookups); err != nil || lookups != 0 {
+		t.Fatalf("an authorization without its lookups: %d %v", lookups, err)
+	}
 
 	type refusal struct{ statement, constraint string }
 	refused := map[string]refusal{
@@ -242,6 +249,7 @@ func TestTheFleetStoreConstraints(t *testing.T) {
 		"a SLOW_DOWN authorization":                {authorization("gen_random_uuid()", "2", "", ""), "device_authorization_state"},
 		"a sixth lookup":                           {strings.Replace(authorization("gen_random_uuid()", "1", "", ""), "5000, 0,", "5000, 6,", 1), "device_authorization_lookups"},
 		"an interval below one second":             {strings.Replace(authorization("gen_random_uuid()", "1", "", ""), "5000", "999", 1), "device_authorization_interval"},
+		"an interval above a minute":               {strings.Replace(authorization("gen_random_uuid()", "1", "", ""), "5000", "60001", 1), "device_authorization_interval"},
 		"a reuse mark on a pending authorization":  {authorization("gen_random_uuid()", "1", ", reused_at", ", now()"), "device_authorization_result"},
 		"a completed authorization without result": {authorization("gen_random_uuid()", "6", approverCols+", completed_at", approverVals+", now()"), "device_authorization_result"},
 	}
@@ -265,7 +273,9 @@ func TestTheFleetStoreConstraints(t *testing.T) {
 		t.Fatalf("a retired key was registered again: %v", err)
 	}
 	must(t, "INSERT INTO device.installation (installation_id, device_id, user_id, product_id, app_version, platform, public_key, key_version, installed_at, last_active_at, rev) VALUES (gen_random_uuid(), '"+browserDev+"', '"+user+"', 'arcforges-node', '1', 'linux', "+otherKey+", 1, now(), now(), 1)")
-	must(t, "UPDATE identity.session SET revoked_at = now(), revoke_reason = 8, rev = rev + 1 WHERE session_id = '"+nodeSession+"'")
+	// The revoke reasons 7 (superseded) and 8 (enrollment code reused) are admitted.
+	must(t, "UPDATE identity.session SET revoked_at = now(), revoke_reason = 7, rev = rev + 1 WHERE session_id = '"+nodeSession+"'")
+	must(t, "UPDATE identity.session SET revoke_reason = 8, rev = rev + 1 WHERE session_id = '"+nodeSession+"'")
 
 	// Final states: a denied flow never changes; a completed flow becomes REVOKED once and then never changes; a delivered
 	// authorization records its reuse once and then never changes.

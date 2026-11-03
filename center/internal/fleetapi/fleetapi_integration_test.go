@@ -395,6 +395,11 @@ func TestScopeMatrixOverFleetRows(t *testing.T) {
 	if reply.Body == nil || proto.Unmarshal(reply.Body, response) != nil || failure(response.GetError()) != "AUTHORIZATION/permission_denied" {
 		t.Fatalf("a node on GetProfile: %+v", reply)
 	}
+	// SEC-6: the refusal of a node credential names the node's installation as its actor, as every fleet event does.
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type = $1 AND actor_ref = $2", access.AuditRefused,
+		"node:"+node.result.InstallationID.String()) != 1 {
+		t.Fatal("the node's refusal is not audited with the node as its actor")
+	}
 }
 
 // TestJunkRefreshesDoNotLockOutAPrefix (E1-15, protocol-8): tokens that name nothing fill only their prefix's failure bucket; a valid
@@ -476,3 +481,22 @@ func TestNoGeneratedSecretIsStoredLoggedOrAudited(t *testing.T) {
 
 var _ = pgx.ErrNoRows
 var _ = store.TxOptions{}
+
+// TestAReportReplayIsAnsweredWithItsReceipt (F2): a node whose reply to a committed report was lost retries with the same command ID
+// after its installation's bucket is full, and gets the stored receipt, not rate_limited; the replay does not spend the bucket.
+func TestAReportReplayIsAnsweredWithItsReceipt(t *testing.T) {
+	h := newHarness(t, settings{policy: `{"nodeReportInstallationLimit": 1}`})
+	node := h.enroll(1)
+	committed := command()
+	first, refusal := h.report(node.access, committed, node.node.Info())
+	if refusal != nil {
+		t.Fatalf("the first report: %v", failure(refusal))
+	}
+	if _, refusal = h.report(node.access, command(), node.node.Info()); failure(refusal) != "RESOURCE/rate_limited" {
+		t.Fatalf("a new report over the bucket: %v", failure(refusal))
+	}
+	again, refusal := h.report(node.access, committed, node.node.Info())
+	if refusal != nil || !proto.Equal(again.GetReceipt(), first.GetReceipt()) {
+		t.Fatalf("the replay: %v", failure(refusal))
+	}
+}

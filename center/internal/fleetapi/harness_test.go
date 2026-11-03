@@ -90,6 +90,12 @@ func newHarness(t *testing.T, options settings) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(center.Close)
+	// F1: every fleet event the composed center counted during the test is a listed pair (observe.FleetOutcomes).
+	t.Cleanup(func() {
+		if unlisted := center.Metrics.Summary()["fleet "+observe.Unlisted+" "+observe.Unlisted]; unlisted != 0 {
+			t.Errorf("the center counted %d fleet events outside the closed list", unlisted)
+		}
+	})
 	listener := httptest.NewServer(center.Public())
 	t.Cleanup(listener.Close)
 	h.metrics = center

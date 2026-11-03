@@ -38,12 +38,14 @@ func (noEvents) ObserveFleet(string, string) {}
 // marks the node seen and reads the published keys. ReportNodeInfo counts its installation's bucket, then runs under its command
 // receipt. SignOutNode runs under its command receipt.
 type Service struct {
-	db     *store.DB
-	policy config.IdentityPolicy
-	limits *ratelimit.Limiter
-	clock  func() time.Time
-	events Events
-	logger *slog.Logger
+	// attempts bounds the refresh rotation's retries (Options.RefreshAttempts).
+	attempts int
+	db       *store.DB
+	policy   config.IdentityPolicy
+	limits   *ratelimit.Limiter
+	clock    func() time.Time
+	events   Events
+	logger   *slog.Logger
 }
 
 // Options configure a Service.
@@ -53,11 +55,14 @@ type Options struct {
 	Clock  func() time.Time
 	Events Events
 	Logger *slog.Logger
+	// RefreshAttempts bounds the refresh rotation's retries of a deadlock or serialization failure; 0 is the store's default. The
+	// race tests set 1, so a deadlock fails them.
+	RefreshAttempts int
 }
 
 // New is the fleet service of a store.
 func New(options Options) *Service {
-	service := &Service{db: options.DB, policy: options.Policy, limits: ratelimit.New(options.DB), clock: options.Clock, events: options.Events,
+	service := &Service{attempts: options.RefreshAttempts, db: options.DB, policy: options.Policy, limits: ratelimit.New(options.DB), clock: options.Clock, events: options.Events,
 		logger: options.Logger}
 	if service.clock == nil {
 		service.clock = time.Now
@@ -126,8 +131,8 @@ type Refreshed struct {
 const MaxTokenLength = 8192
 
 // Refresh rotates a node session (RefreshNodeSession; CRD-04, protocol-8). The token is looked up first: a token that names nothing
-// (malformed or unknown) is counted in its client prefix's failure bucket and answered AUTHENTICATION/unauthenticated, or
-// RESOURCE/rate_limited once the window holds more than its limit, while a token that names a session never waits on that bucket (a neighbour's
+// (malformed or unknown) is answered RESOURCE/rate_limited when its client prefix's failure bucket holds its limit, and otherwise
+// counted in that bucket and answered AUTHENTICATION/unauthenticated, while a token that names a session never waits on that bucket (a neighbour's
 // junk cannot lock a network's nodes out). A session's current token is counted in its own bucket; a spent token is never limited, so
 // its reuse always revokes the family. The rotation is strict (session.Refresh with the node admission): no grace window, a spent
 // token revokes the family (credential_revoked), a live account token is AUTHORIZATION/permission_denied. In the rotating transaction
@@ -142,16 +147,24 @@ func (s *Service) Refresh(ctx context.Context, request Request, token string) (R
 	}
 	switch {
 	case !presented.Known():
-		// The prefix failure bucket counts the call and refuses it once the window holds more than its limit; the first refusal of a
-		// window is audited.
+		// N-2: the prefix's failure bucket is checked (refused once it holds its limit, with nothing written), and only an admitted
+		// call counts its failure; the failure that fills the window is audited identity.rate_limited, once per window.
 		bucket := s.bucket(ratelimit.NodeRefreshPrefix, ratelimit.Prefix(request.ClientIP))
-		decision, err := s.limits.Fail(ctx, bucket, s.now())
+		decision, err := s.limits.Check(ctx, bucket, s.now())
 		if err != nil {
 			return Refreshed{}, err
 		}
-		if decision.Count > bucket.Window.Limit {
-			decision.First = decision.Count == bucket.Window.Limit+1
-			return Refreshed{}, s.limited(ctx, request, bucket, decision, "refresh", Anonymous)
+		if !decision.Allowed {
+			s.events.ObserveFleet("refresh", "rate_limited")
+			return Refreshed{}, decision.Refusal(bucket)
+		}
+		if decision, err = s.limits.Fail(ctx, bucket, s.now()); err != nil {
+			return Refreshed{}, err
+		}
+		if decision.Count == bucket.Window.Limit {
+			if err = s.auditAlone(ctx, request, Anonymous, "identity.rate_limited", string(bucket.Kind), map[string]any{"bucket": string(bucket.Kind)}); err != nil {
+				return Refreshed{}, err
+			}
 		}
 		s.events.ObserveFleet("refresh", "refused")
 		return Refreshed{}, arc.Unauthenticated()
@@ -167,7 +180,9 @@ func (s *Service) Refresh(ctx context.Context, request Request, token string) (R
 	}
 	var refreshed Refreshed
 	now := s.now()
-	issued, reuse, err := session.Refresh(ctx, s.db, s.policy, token, session.NodeRefresh(), now, request.CorrelationID,
+	admission := session.NodeRefresh()
+	admission.Attempts = s.attempts
+	issued, reuse, err := session.Refresh(ctx, s.db, s.policy, token, admission, now, request.CorrelationID,
 		func(ctx context.Context, tx pgx.Tx, issued session.Native) error {
 			tag, err := tx.Exec(ctx, `UPDATE fleet.node SET last_seen_at = greatest(last_seen_at, $2), rev = rev + 1
 WHERE installation_id = (SELECT installation_id FROM identity.session WHERE session_id = $1) AND revoked_at IS NULL`, issued.SessionID, now)

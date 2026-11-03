@@ -240,7 +240,8 @@ func retireSigningKey(rest []string) (func(ctx context.Context, tx pgx.Tx, now t
 
 // revokeDevice is `admin revoke-device` (Q21, cloud-15 item 6), the operator's release of a node ID that another account holds: the
 // device (named directly, or as the device of the node ID's live enrollment) is revoked by the operator with the full cascade
-// (installations, every session whatever its scope, the node rows), the account locked first as every revocation path does, audited
+// (installations, every session whatever its scope, the node rows), the account locked first as the step-up evidence path and
+// admin revoke-sessions do (the global order of docs/center-fleet.md), audited
 // device.revoked with the actor operator:cli. The node ID is then free; the revoked installation keeps holding its key.
 func revokeDevice(rest []string) (func(ctx context.Context, tx pgx.Tx, now time.Time) (map[string]any, error), bool) {
 	flags, ok := fleetFlags(rest, "--device", "--node")

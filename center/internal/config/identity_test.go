@@ -90,7 +90,8 @@ func TestAnAddressHostOrAMissingStoreKeepsIdentityOff(t *testing.T) {
 		!strings.Contains(cfg.Identity.Disabled, "domain name") {
 		t.Fatalf("the default with an IP host: %+v %v", cfg.Identity, err)
 	}
-	// cloud-6: the fallback clears every surface, whatever a later default adds (every surface other than identity needs it).
+	// cloud-6: the fallback clears the default's surfaces (the code clears the whole list, so a later default that adds a surface is
+	// cleared too; the server's TestASelfHostedCenterOnAnAddressServesNoSurface shows the composed result).
 	values[EnvPublicBaseURL] = "https://192.168.1.10:8443"
 	if cfg, err = Load(environment(values)); err != nil || len(cfg.Identity.Surfaces) != 0 || cfg.Identity.Enabled(SurfaceFleet) {
 		t.Fatalf("the default with a private IP host: %+v %v", cfg.Identity, err)

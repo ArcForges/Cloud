@@ -8,8 +8,8 @@
 //
 // One global lock order (cloud-1, SEC-12): a sign-in flow row (taken by the flow's own transaction, E1b and E2), identity.user,
 // device.device, device.installation, the identity.session rows, fleet.node. It is device.Revoke's order (device, installation,
-// sessions, then the participants, so fleet.node last) with the flow row and the account in front. Every writer of these rows
-// follows it:
+// sessions, then the participants, so fleet.node last) with the flow row and the account in front. The writers of these rows that
+// lock more than one of them take them in this order:
 //
 //   - Enroll locks the account (FOR UPDATE: it also makes the node cap race-free), then, for a node that is live in the account, its
 //     device (re-checking that it is not revoked) and installation, then the approving session (FOR SHARE, in the session slot: an
@@ -18,9 +18,15 @@
 //     answered as store contention.
 //   - ReportNodeInfo locks the device only when it renames it, then the installation, then the node row.
 //   - RefreshNodeSession locks the session row (session.Refresh), then updates the node row.
-//   - SignOutNode touches its own session row only.
-//   - The participant runs inside device.Revoke, last.
-//   - The operator's revoke-device command locks the account first, as the step-up evidence path does.
+//   - The account's step-up evidence path (identity.ConsumeEvidence: RevokeSession of another session, RevokeAllSessions,
+//     RemoveAuthIdentity, DeviceService.Revoke of another device) locks the account first; device.Revoke then takes the device,
+//     installations, sessions and, through the participant, the node rows.
+//   - The operator's admin revoke-sessions and admin revoke-device lock the accounts first.
+//
+// The writers that lock fewer rows skip slots but never go back: SignOutNode, a sign-out of the caller's own session and a browser
+// session's renewal touch one session row; the own-device DeviceService.Revoke takes no account lock and starts at the device; a
+// sign-in (device.EnsureNative, EnsureBrowser) locks its own installation and device and then inserts a session; a step-up proof and
+// the session upgrade lock the proving session. docs/center-fleet.md lists them.
 //
 // In every transaction a command receipt (when there is one) is the first row written and the audit chain head the last.
 package fleet

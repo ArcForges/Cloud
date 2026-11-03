@@ -220,6 +220,11 @@ func execute[V proto.Message](ctx context.Context, s *Server, command platform.C
 		}
 		return proto.MarshalOptions{Deterministic: true}.Marshal(result)
 	})
+	return decode(outcome, err, value)
+}
+
+// decode is the answer of a receipt outcome: the stored reply, the stored refusal (as *storedRefusal) or the failure.
+func decode[V proto.Message](outcome platform.Outcome, err error, value V) (V, error) {
 	var zero V
 	switch {
 	case errors.Is(err, platform.ErrCommandIDReused):
@@ -294,6 +299,11 @@ func (s *Server) reportNodeInfo(ctx context.Context, call *ingress.Call, message
 		info, err := fleet.ParseNodeInfo(message.GetNode())
 		if err != nil {
 			return nil, err
+		}
+		// F2: a replay of a committed report is answered with its receipt at once; only a command without one counts in the
+		// installation's bucket.
+		if outcome, found, err := platform.Lookup(ctx, s.db, receiptCommand); err != nil || found {
+			return decode(outcome, err, &fleetv1.NodeEnrollmentServiceReportNodeInfoValue{})
 		}
 		if err = s.fleet.TakeReport(ctx, request(call), node); err != nil {
 			return nil, err

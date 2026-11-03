@@ -20,7 +20,8 @@
 //     automation credentials are AGENT), and an AGENT operation admits exactly the credential scopes its row names (a node row
 //     admits a node credential, never an automation one): another scope is refused with the audit reason scope;
 //  5. resource controls: the hook for the controls a composition registers (WithControls; none is composed yet, and the quotas,
-//     budgets and per-account limits of the gated operations arrive with AF-CTR-04, DC-07);
+//     budgets and per-account limits of the gated operations arrive with the first gated operation, AF-CTR-05's node connection,
+//     DC-07);
 //  6. audit: an operation whose Audit is AuditBeforeCall appends access.authorized, and a failed append refuses the call;
 //  7. the gate: an operation with a Feature key is refused with ENTITLEMENT/feature_not_entitled unless the feature is available to
 //     the caller's account, and the refusal is audited as access.gated.
@@ -541,6 +542,12 @@ func (a *Authorizer) refuse(ctx context.Context, call *ingress.Call, operation O
 // audit appends one event about the call in a transaction of its own: it is no effect of the call it is about (D10). An error is
 // the store failure, which refuses the call.
 func (a *Authorizer) audit(ctx context.Context, call *ingress.Call, operation Operation, eventType, reason string, details map[string]any) error {
+	// The actor is the credential's: a node credential acts as its installation (node:<installation>, as every fleet event names it),
+	// any other as its account (SEC-6).
+	actor := "account:" + call.Caller.UserID
+	if call.Caller.Scope == "node" && call.Caller.InstallationID != "" {
+		actor = "node:" + call.Caller.InstallationID
+	}
 	payload, err := json.Marshal(details)
 	if err != nil {
 		return err
@@ -552,7 +559,7 @@ func (a *Authorizer) audit(ctx context.Context, call *ingress.Call, operation Op
 		correlationID = &id
 	}
 	return a.db.InTx(ctx, "audit an access decision", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := platform.AppendAudit(ctx, tx, platform.Event{EventID: platform.NewID(), OccurredAt: a.clock(), ActorRef: "account:" + call.Caller.UserID,
+		_, err := platform.AppendAudit(ctx, tx, platform.Event{EventID: platform.NewID(), OccurredAt: a.clock(), ActorRef: actor,
 			EventType: eventType, Reason: reason, CorrelationID: correlationID, TargetKind: "operation", TargetID: operation.ID, Payload: payload})
 		return err
 	})
