@@ -323,6 +323,25 @@ def build_native() -> Path:
     return executable
 
 
+# The bounded waits of stopping the smoke's center: how long it has to exit after SIGTERM (terminate() on Windows), and how long the
+# kill that follows may take.
+STOP_GRACE_SECONDS = 30
+KILL_WAIT_SECONDS = 10
+
+
+def stop_process(process: subprocess.Popen, grace: float = STOP_GRACE_SECONDS,
+                 kill_wait: float = KILL_WAIT_SECONDS) -> tuple[int, bool]:
+    """Stops a child: SIGTERM (terminate), then, if it has not exited within `grace` seconds, SIGKILL (kill) and a wait of at most
+    `kill_wait` seconds. Returns the exit code and whether the kill was needed. A child that survives the kill raises
+    subprocess.TimeoutExpired, so no path leaves it running without saying so."""
+    process.terminate()
+    try:
+        return process.wait(timeout=grace), False
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return process.wait(timeout=kill_wait), True
+
+
 def smoke(executable: Path, linux: bool) -> dict[str, object]:
     """Starts the native executable as a self-hosted center on an ephemeral loopback port and checks it serves and refuses."""
     identity = json.loads(subprocess.run([str(executable), "version"], capture_output=True, text=True, check=True).stdout)
@@ -371,13 +390,16 @@ def smoke(executable: Path, linux: bool) -> dict[str, object]:
             reply = http.client.HTTPResponse(connection)
             reply.begin()
             body = reply.read()
-        # The center answers the refusal with HTTP 200 and the trailers in the body (WriteRefusal). urllib raised on any other status;
-        # http.client reports it without raising, so the status is compared here as well as the body.
+        # The center answers the refusal with HTTP 200 and the trailers in the body (WriteRefusal). urllib raised only for a status
+        # outside 2xx (any other 2xx passed); http.client reports every status without raising, so the status is compared exactly
+        # here, as well as the body.
         if reply.status != 200 or body != b"\x80\x00\x00\x00\x2egrpc-status: 12\r\ngrpc-message: unimplemented\r\n":
             raise SystemExit(f"[center] an unregistered method was not refused as UNIMPLEMENTED (HTTP {reply.status})")
     finally:
-        process.terminate()
-        code = process.wait(timeout=30)
+        # Never leaves the center running: one that does not exit within the grace period is killed (and the smoke fails below).
+        code, killed = stop_process(process)
+    if killed:
+        raise SystemExit(f"[center] the center did not exit within {STOP_GRACE_SECONDS} s of the stop request and was killed; see " + str(log))
     # SIGTERM stops the center gracefully on Linux; Windows has no SIGTERM, so terminate() ends the process there.
     if linux and (code != 0 or '"msg":"center stopped"' not in log.read_text(encoding="utf-8")):
         raise SystemExit("[center] the center did not shut down gracefully on SIGTERM; see " + str(log))
