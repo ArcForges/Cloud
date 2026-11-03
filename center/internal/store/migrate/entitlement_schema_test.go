@@ -22,20 +22,21 @@ import (
 const migration0003SHA256 = "acc92fe98fdc5976d711f7cd393cdaf6781cc79029824559210e4dcf6121bbf2"
 
 // schemasAndGrantsAt are the schemas and the runtime role's grants as the build at a migration version has them: 0003 adds the
-// entitlement schema and, in the identity schema, the operator table.
+// entitlement schema and, in the identity schema, the operator table; 0004 adds the fleet tables node, node_sign_in and
+// device_authorization (the fleet schema itself exists since 0001).
 func schemasAndGrantsAt(version int) ([]string, []schema.Grant) {
-	if version >= 3 {
-		return schema.Schemas, schema.RuntimeGrants
-	}
 	var schemas []string
 	for _, name := range schema.Schemas {
-		if name != "entitlement" {
+		if version >= 3 || name != "entitlement" {
 			schemas = append(schemas, name)
 		}
 	}
 	var grants []schema.Grant
 	for _, grant := range schema.RuntimeGrants {
-		if grant.Schema != "entitlement" && !(grant.Schema == "identity" && grant.Table == "operator") {
+		switch {
+		case version < 3 && (grant.Schema == "entitlement" || grant.Schema == "identity" && grant.Table == "operator"):
+		case version < 4 && grant.Schema == "fleet" && grant.Table != "signing_key":
+		default:
 			grants = append(grants, grant)
 		}
 	}
@@ -63,7 +64,8 @@ func TestMigration0003LandsWholeOverVersion2(t *testing.T) {
 		if second, err := apply(t, url, build[:2], Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas2, Grants: grants2}); err != nil || second.Version != 2 {
 			t.Fatalf("version 2: %+v %v", second, err)
 		}
-		options := Options{Runner: "test", RuntimeRole: name + "_runtime"}
+		schemas3, grants3 := schemasAndGrantsAt(3)
+		options := Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas3, Grants: grants3}
 		if failing {
 			broken := fstest.MapFS{}
 			entries, err := fs.ReadDir(schema.Migrations(), ".")
@@ -89,7 +91,7 @@ func TestMigration0003LandsWholeOverVersion2(t *testing.T) {
 			if !errors.As(err, &failure) || failure.Name != "0003_entitlement.sql" || failure.SQLState != "22012" {
 				t.Fatalf("the failing 0003: %v", err)
 			}
-			status, err := Inspect(ctx, conn, build)
+			status, err := Inspect(ctx, conn, build[:3])
 			var objects string
 			if err == nil {
 				err = conn.QueryRow(ctx, `SELECT coalesce(string_agg(name, ', ' ORDER BY name), '') FROM (
@@ -103,7 +105,7 @@ func TestMigration0003LandsWholeOverVersion2(t *testing.T) {
 			}
 			continue
 		}
-		result, err := apply(t, url, build, options)
+		result, err := apply(t, url, build[:3], options)
 		if err != nil || result.Version != 3 || len(result.Ran) != 1 || result.Ran[0].Name != "0003_entitlement.sql" ||
 			result.Ran[0].SHA256 != migration0003SHA256 || result.Grants != "reconciled" || result.State != StateCurrent {
 			t.Fatalf("0003 over version 2: %+v %v", result, err)

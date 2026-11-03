@@ -83,6 +83,12 @@ var RuntimeGrants = []Grant{
 	{"entitlement", "account_status_fact", []Privilege{Select}},
 	{"entitlement", "feature_release", []Privilege{Select}},
 	{"entitlement", "definitions_activation", []Privilege{Select, Insert}},
+	// AF-CTR-04 (0004): enrolled nodes and the two sign-in flows. Rows are marked, never deleted at runtime (the retention sweeps
+	// run with the migration role, AF-PLAT-01); the signing keys stay read-only (registration and retirement are migration-role
+	// admin commands).
+	{"fleet", "node", []Privilege{Select, Insert, Update}},
+	{"fleet", "node_sign_in", []Privilege{Select, Insert, Update}},
+	{"fleet", "device_authorization", []Privilege{Select, Insert, Update}},
 }
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted
