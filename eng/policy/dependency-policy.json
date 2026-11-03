@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "ba069f92c3cca68d668268d2ea53b32b86c60f51",
+  "sourceCommit": "3381ef48ce8c426fea1301d175baf82c40f42ed1",
   "manifests": ["package.json"],
   "inputs": {
     ".github/workflows/ci.yml": "ea83e46ed10fd87b7c69688b00113e47e09f45acbbaf17922399ea93f731dd0a",
@@ -18,7 +18,7 @@
     "center/toolchain.json": "ad46e23c3a42ecc48b5f2383e6039aeffb11d9723bafac038fc6c648b7bd5a51",
     "center/tools/go.mod": "1abc5df8e2b367cff0d4de646d089c62eb89ade03538ae799450a096a86d600b",
     "center/tools/go.sum": "6394a2049a55c360f2fc72d96588570ece75a3b1350fad580da4070d53b0ae2f",
-    "eng/center.py": "467806441bbd01f72f31666de2a3b893d331a4d0bc9e0d65d4a8693883f40760",
+    "eng/center.py": "ced5631acacd9a53acf4b337caeb30b5e862b3a4037cc2fdf1f29882f16bbbe8",
     "eng/provenance/artifact-profiles/cloud-release-r45.json": "d0fec3a81b20cd236eb713de3a3857f19f1c219175ac51c60aa62344f12084b6",
     "eng/provenance/artifact-profiles/cloud-release-r52.json": "f5d2c7d64f08eedad77ba64979458a47548d1678e0ca493947179da74ce20fc6",
     "eng/provenance/artifact-profiles/cloud-release-r53.json": "760b5e025bcc5de22c0270e882211dd65ecb97e77ef75adad0959b4f10863862",
@@ -46,6 +46,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r75.json": "c31ceb04240ae85fb839608e8655f00823ca04b8e2876567b2f1fa9a3a36a99e",
     "eng/provenance/artifact-profiles/cloud-release-r76.json": "1d369a9e078e8bf0d5f28679dd2244128d1da1627c75ec7893b2e4c9957e09eb",
     "eng/provenance/artifact-profiles/cloud-release-r77.json": "92cee64d76c72ecdaf43aa4984b7b9b76174b0176c86ce28d321097e371c12ae",
+    "eng/provenance/artifact-profiles/cloud-release-r78.json": "6b8a070a1bbe4fc11cb67e8e643f91ae3ad4ae1e2e48d6ef198b29e3d7f23e1a",
     "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
     "eng/provenance/records/center-runtime-r10.json": "f48e644fec2814d5c2669b517e0ec276d8051c5ca82be1c255efc9403f9bbc03",
     "eng/provenance/records/center-runtime-r11.json": "2684a8b7a960382d94904f80e8a814d22cfc9ef3796b42eaeee67a9065b0f92f",
@@ -62,6 +63,7 @@
     "eng/provenance/records/center-runtime-r21.json": "a4b1c350c8e609c65436e0092fbc003863e523b60e3424b5849e4b48ce919d18",
     "eng/provenance/records/center-runtime-r22.json": "089043d21c136e4707f6d4f83b4a29e09925218ba47cebd6811a7414f6ab1176",
     "eng/provenance/records/center-runtime-r23.json": "49e72287a01e006d93e7b3a6b048281e6e47e14511432986476631c8cb03a43a",
+    "eng/provenance/records/center-runtime-r24.json": "eb52588e697556b4780f22a5e603039d986c50b561920e8434e65b95b0c9802b",
     "eng/provenance/records/center-runtime-r3.json": "d5a7a237da63a5b40cc126e17bb4799b1104671437640f61c83ec12115d1d9de",
     "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
     "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
@@ -85,6 +87,7 @@
     "eng/provenance/records/center-worker-r21.json": "d5a118f5c3cc983a86f64e6a767b5b422ce6ad0462e9a0c184bd2fde31a72069",
     "eng/provenance/records/center-worker-r22.json": "a400b448ceab8dd324ea48449d9cefe86675bfd6d28af4317fea8d50fc8acdb0",
     "eng/provenance/records/center-worker-r23.json": "d6b3f94efe0657a193e212eca95a8d99fdc4bc76fb9bf11db6de47434897cac9",
+    "eng/provenance/records/center-worker-r24.json": "16ea37e544820067a2dde2775f6762bc49ba1073f5abf06db8b02df237961537",
     "eng/provenance/records/center-worker-r3.json": "628fc3b8b715491124752c544cc10bc135a7c9965aa0013f5aecc6d73080f97e",
     "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
     "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
@@ -191,9 +194,9 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-03 delegated author, part B); PR review is recorded separately",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-03 delegated author, live mail adapters, review fix round 1); PR review is recorded separately",
     "date": "2026-11-03",
-    "rationale": "AF-CTR-03 live mail adapters, after af-ctr-03-r16 (which re-bound wrangler.json for the operations surface of the acceptance environment at cloud-release-r76). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as admitted (the adapters use the standard library only: net/smtp, crypto/tls and net/http), and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0) is unchanged. center/go.mod, center/go.sum, center/dependencies.json, the root package-lock.json, the NuGet locks, the Dockerfile, the base images, the toolchains, .github/workflows/ci.yml, wrangler.json and the root package.json are unchanged. The bound input that changes is eng/center.py (two fuzz targets). The release profile cloud-release-r77 with its successor records center-runtime-r23 and center-worker-r23 binds the center sources, .dockerignore and the Worker sources as they are at this change; the test doubles of center/internal/mail/mailtest are excluded from the Docker context and are no image input. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in an eighteenth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration. Mail stays disabled in every environment and production stays dark: no catalogue, no surface.",
+    "rationale": "AF-CTR-03 live mail adapters, review fix round 1, after af-ctr-03-r17 (which admitted the adapters at cloud-release-r77). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as admitted (the adapters use the standard library only: net/smtp, crypto/tls and net/http), and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0) is unchanged. center/go.mod, center/go.sum, center/dependencies.json, the root package-lock.json, the NuGet locks, the Dockerfile, .dockerignore, the base images, the toolchains, .github/workflows/ci.yml, wrangler.json, the root package.json and the Worker sources are unchanged. The bound input that changes is eng/center.py (the smoke test of the center). The release profile cloud-release-r78 with its successor records center-runtime-r24 and center-worker-r24 binds the center sources and the Worker sources as they are at this change; the test doubles of center/internal/mail/mailtest are excluded from the Docker context and are no image input. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a nineteenth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration. Mail stays disabled in every environment and production stays dark: no catalogue, no surface.",
     "inputs": {
       ".github/workflows/ci.yml": "ea83e46ed10fd87b7c69688b00113e47e09f45acbbaf17922399ea93f731dd0a",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -209,7 +212,7 @@
       "center/toolchain.json": "ad46e23c3a42ecc48b5f2383e6039aeffb11d9723bafac038fc6c648b7bd5a51",
       "center/tools/go.mod": "1abc5df8e2b367cff0d4de646d089c62eb89ade03538ae799450a096a86d600b",
       "center/tools/go.sum": "6394a2049a55c360f2fc72d96588570ece75a3b1350fad580da4070d53b0ae2f",
-      "eng/center.py": "467806441bbd01f72f31666de2a3b893d331a4d0bc9e0d65d4a8693883f40760",
+      "eng/center.py": "ced5631acacd9a53acf4b337caeb30b5e862b3a4037cc2fdf1f29882f16bbbe8",
       "eng/provenance/artifact-profiles/cloud-release-r45.json": "d0fec3a81b20cd236eb713de3a3857f19f1c219175ac51c60aa62344f12084b6",
       "eng/provenance/artifact-profiles/cloud-release-r52.json": "f5d2c7d64f08eedad77ba64979458a47548d1678e0ca493947179da74ce20fc6",
       "eng/provenance/artifact-profiles/cloud-release-r53.json": "760b5e025bcc5de22c0270e882211dd65ecb97e77ef75adad0959b4f10863862",
@@ -237,6 +240,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r75.json": "c31ceb04240ae85fb839608e8655f00823ca04b8e2876567b2f1fa9a3a36a99e",
       "eng/provenance/artifact-profiles/cloud-release-r76.json": "1d369a9e078e8bf0d5f28679dd2244128d1da1627c75ec7893b2e4c9957e09eb",
       "eng/provenance/artifact-profiles/cloud-release-r77.json": "92cee64d76c72ecdaf43aa4984b7b9b76174b0176c86ce28d321097e371c12ae",
+      "eng/provenance/artifact-profiles/cloud-release-r78.json": "6b8a070a1bbe4fc11cb67e8e643f91ae3ad4ae1e2e48d6ef198b29e3d7f23e1a",
       "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
       "eng/provenance/records/center-runtime-r10.json": "f48e644fec2814d5c2669b517e0ec276d8051c5ca82be1c255efc9403f9bbc03",
       "eng/provenance/records/center-runtime-r11.json": "2684a8b7a960382d94904f80e8a814d22cfc9ef3796b42eaeee67a9065b0f92f",
@@ -253,6 +257,7 @@
       "eng/provenance/records/center-runtime-r21.json": "a4b1c350c8e609c65436e0092fbc003863e523b60e3424b5849e4b48ce919d18",
       "eng/provenance/records/center-runtime-r22.json": "089043d21c136e4707f6d4f83b4a29e09925218ba47cebd6811a7414f6ab1176",
       "eng/provenance/records/center-runtime-r23.json": "49e72287a01e006d93e7b3a6b048281e6e47e14511432986476631c8cb03a43a",
+      "eng/provenance/records/center-runtime-r24.json": "eb52588e697556b4780f22a5e603039d986c50b561920e8434e65b95b0c9802b",
       "eng/provenance/records/center-runtime-r3.json": "d5a7a237da63a5b40cc126e17bb4799b1104671437640f61c83ec12115d1d9de",
       "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
       "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
@@ -276,6 +281,7 @@
       "eng/provenance/records/center-worker-r21.json": "d5a118f5c3cc983a86f64e6a767b5b422ce6ad0462e9a0c184bd2fde31a72069",
       "eng/provenance/records/center-worker-r22.json": "a400b448ceab8dd324ea48449d9cefe86675bfd6d28af4317fea8d50fc8acdb0",
       "eng/provenance/records/center-worker-r23.json": "d6b3f94efe0657a193e212eca95a8d99fdc4bc76fb9bf11db6de47434897cac9",
+      "eng/provenance/records/center-worker-r24.json": "16ea37e544820067a2dde2775f6762bc49ba1073f5abf06db8b02df237961537",
       "eng/provenance/records/center-worker-r3.json": "628fc3b8b715491124752c544cc10bc135a7c9965aa0013f5aecc6d73080f97e",
       "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
       "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
@@ -389,9 +395,9 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "AF-CTR-03 live mail adapters, after af-ctr-03-r16 (which re-bound wrangler.json for the operations surface of the acceptance environment at cloud-release-r76). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as admitted (the adapters use the standard library only: net/smtp, crypto/tls and net/http), and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0) is unchanged. center/go.mod, center/go.sum, center/dependencies.json, the root package-lock.json, the NuGet locks, the Dockerfile, the base images, the toolchains, .github/workflows/ci.yml, wrangler.json and the root package.json are unchanged. The bound input that changes is eng/center.py (two fuzz targets). The release profile cloud-release-r77 with its successor records center-runtime-r23 and center-worker-r23 binds the center sources, .dockerignore and the Worker sources as they are at this change; the test doubles of center/internal/mail/mailtest are excluded from the Docker context and are no image input. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in an eighteenth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration. Mail stays disabled in every environment and production stays dark: no catalogue, no surface.",
+    "runtimeAssessment": "AF-CTR-03 live mail adapters, review fix round 1, after af-ctr-03-r17 (which admitted the adapters at cloud-release-r77). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as admitted (the adapters use the standard library only: net/smtp, crypto/tls and net/http), and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0) is unchanged. center/go.mod, center/go.sum, center/dependencies.json, the root package-lock.json, the NuGet locks, the Dockerfile, .dockerignore, the base images, the toolchains, .github/workflows/ci.yml, wrangler.json, the root package.json and the Worker sources are unchanged. The bound input that changes is eng/center.py (the smoke test of the center). The release profile cloud-release-r78 with its successor records center-runtime-r24 and center-worker-r24 binds the center sources and the Worker sources as they are at this change; the test doubles of center/internal/mail/mailtest are excluded from the Docker context and are no image input. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a nineteenth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration. Mail stays disabled in every environment and production stays dark: no catalogue, no surface.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-03-r16.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-03-r17.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-11-03",
     "decision": "approved"
@@ -1177,7 +1183,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["center-runtime-r23", "center-worker-r23"],
+  "artifactRecords": ["center-runtime-r24", "center-worker-r24"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1191,7 +1197,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-03-r17.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-03-r18.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
