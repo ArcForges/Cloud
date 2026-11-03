@@ -1276,6 +1276,13 @@ test("every code the center sends has a text of its own (js-7)", () => {
   assert(seen.size === codes.length);
 });
 
+test("an internal failure is not described as one to try again (E4-INTERNAL: retry NEVER, effect UNKNOWN)", () => {
+  const text = script.errorText(new script.ApiError(503, "internal"));
+  assert.match(text, /may or may not have been completed/u);
+  assert.doesNotMatch(text, /try again/iu);
+  assert.match(script.errorText(new script.ApiError(503, "overloaded")), /try again/iu);
+});
+
 test("the sign-out page reads the CSRF token, posts the logout with it and goes to the sign-in (js-7)", async () => {
   const seen: string[] = [];
   const out = page("sign-out", [...common, "sign-out"], {

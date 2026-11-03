@@ -372,6 +372,12 @@ center ports both exactly (`center/internal/ingress/errors.go`, `TestTheRefusalT
 | `auth.credential_revoked`             | 16 `UNAUTHENTICATED`    | `AUTHENTICATION`    | a known bearer whose session, device or installation was revoked (AF-CTR-03) |
 | any other `ArcError` (domain refusal) | 0 `OK`                  | its own category    | after admission: the `ArcError` in the reply, with the call's correlation id |
 
+An unexpected failure of the domain code is `INTERNAL/internal` with retry `NEVER` and effect `UNKNOWN` (`arc.Internal()`): the Contracts
+rule `arcError` rejects `UNKNOWN` with `AFTER_TIME`, the failure may have followed the call's effect, and the advice therefore is not to
+repeat the call as it was; a client that knows the command's identity may send the same command again, which the command receipt makes
+safe. `RetryAdvice.reconciliation_operation` is set exactly with a `RECONCILE` advice (`arc.Refusal.Reconcile`); no center refusal uses it
+yet. Details: `docs/center-identity.md`, "Refusals".
+
 A transport refusal is trailers-only: to binary gRPC-Web it is HTTP 200 with one trailer frame, byte for byte the C# host's
 (`grpc-status: N\r\ngrpc-message: <code>\r\n`, the message percent-encoded as .NET's `Uri.EscapeDataString`); to native gRPC it
 is the trailers-only `HEADERS` of gRPC over HTTP/2. It has no reply message and therefore no correlation id. The Hello keeps its

@@ -444,10 +444,15 @@ keys refused). A method a path does not have is 405 and an unknown path 404. A d
 center that is the Worker's reply of a path it does not know (plain text, before anything about the request is read), on a
 self-hosted center the handler's 404 with the security headers and no body. The statuses of a reply of the center that the Worker
 keeps are 200, 303, 400, 403, 404, 413, 415 and 429 (a rate limit: the center's carries the ArcError's retry advice in its body); the
-Worker turns any other status of the Container into its own 503. The statuses the Worker answers itself, without the Container, are
-the 400, 403, 413, 415 and 429 of the request rules above (its edge limit sets `Retry-After`), 405 for a method a path does not
-have, 408 for a body not read within the body budget, 499 for a client that went away and 504 for a call that outlasted
-`pageDurationMs`. The contract defines no error body for these routes, so a refusal of a JSON route is the
+Worker turns any other status of the Container into its own 503, plain text, with no `Retry-After`. The statuses the Worker answers
+itself, without the Container, are the 400, 403, 413, 415 and 429 of the request rules above (its edge limit sets `Retry-After`),
+405 for a method a path does not have, 408 for a body not read within the body budget, 499 for a client that went away, 504 for a
+call that outlasted `pageDurationMs` and 503 for a Container it could not use. Two of these carry a `Retry-After`: the edge-limit
+429 and the 503 for a Container the platform could not start (`Retry-After: 2`, `worker/readiness/container.ts`
+`containerUnavailable(true)`: the request never reached the host, so a retry is meaningful); every other 503 of the Worker, the
+ones for a reply of the Container it refuses included, has none. The center's own refusal of status 503 (an internal failure, a
+store that is down) reaches the browser as that 503 only through the Worker's rule above: the browser sees the center's ArcError
+only for the statuses the Worker keeps, so its retry advice is the body's, never a header. The contract defines no error body for these routes, so a refusal of a JSON route is the
 [ArcError](center.md#arcerror-and-grpc-status) as JSON, `{"error": {"category", "code", "messageKey", "retry", "effect",
 "correlationId", "details"}}`, and of a page an HTML page with a fixed text of its code (the center never sends text to show).
 This is a gap of the contract document, routed to the Contracts and Design owners.
@@ -804,43 +809,46 @@ Every domain refusal is one row of ArcForges-Design `contracts/errors.md`, rende
 `message_key` `error.<category>.<code>`, retry advice, effect `DID_NOT_HAPPEN` except `INTERNAL/internal`, whose effect is `UNKNOWN`) with the call's
 correlation id, in the reply with gRPC `OK`:
 
-| Refusal                             | When                                                                                                                                                                                    |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VALIDATION/invalid_argument`       | a field outside its rule (`state.state` = the field path, `state.reason` = field path and rule), a method or purpose not offered                                                        |
-| `VALIDATION/invalid_cursor`         | a malformed page cursor, one of another listing or one whose instant is out of range                                                                                                    |
-| `AUTHENTICATION/unauthenticated`    | a wrong or unknown proof, an account that may not sign in, a refused bootstrap (all alike)                                                                                              |
-| `AUTHENTICATION/token_expired`      | an expired refresh token                                                                                                                                                                |
-| `AUTHENTICATION/credential_revoked` | a revoked session, device or installation; a reused refresh token                                                                                                                       |
-| `AUTHENTICATION/step_up_required`   | a write without its evidence, or a `mobile.limited` session on an `upgrade` row (retry the same command after a step-up)                                                                |
-| `AUTHORIZATION/permission_denied`   | a scope or account state the operation does not admit (`state.state` `operation`, `state.reason` = the operation ID); another account's installation                                    |
-| `CONFLICT/code_reused`              | a completed flow or proved step-up presented again, or a sign-in completion still in progress (a passkey registration's is `RESOURCE/overloaded`)                                       |
-| `CONFLICT/already_exists`           | a passkey whose credential ID is registered already (`state.state` `credential`; `state.resource` only for the account's own live credential)                                           |
-| `CONFLICT/revision_conflict`        | a stale `meta.expected_rev` (`RevisionConflict` with the expected and the current revision)                                                                                             |
-| `CONFLICT/command_id_reused`        | a command ID used before with another request                                                                                                                                           |
-| `STATE/not_found`                   | an unknown or invisible flow, step-up challenge, session, credential, device or account (`state.state` = its kind; `state.resource` = the ID the caller sent, F19, or its own account)  |
-| `STATE/invalid_state`               | the last live credential (`last_credential`); an account whose state does not allow the change (`credentials_locked`)                                                                   |
-| `STATE/expired`                     | an expired flow, or one whose attempts are exhausted                                                                                                                                    |
-| `STATE/not_activated`               | a method of a disabled surface (`state.state` `surface`, `state.reason` = the surface)                                                                                                  |
-| `RESOURCE/rate_limited`             | a rate-limit bucket over its limit, or a flow's sends exhausted (`email_code_sends`)                                                                                                    |
-| `RESOURCE/overloaded`               | the store is unreachable or contended (before any commit, or an unanswered commit of a transaction that carries no effect of the call), or a command still running: retry after a while |
-| `INTERNAL/internal`                 | the call's effect write whose commit went unanswered (effect `UNKNOWN`, retry `NEVER`); anything else (retry after a while); logged with the correlation id, never with request content |
+| Refusal                             | When                                                                                                                                                                                                      |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VALIDATION/invalid_argument`       | a field outside its rule (`state.state` = the field path, `state.reason` = field path and rule), a method or purpose not offered                                                                          |
+| `VALIDATION/invalid_cursor`         | a malformed page cursor, one of another listing or one whose instant is out of range                                                                                                                      |
+| `AUTHENTICATION/unauthenticated`    | a wrong or unknown proof, an account that may not sign in, a refused bootstrap (all alike)                                                                                                                |
+| `AUTHENTICATION/token_expired`      | an expired refresh token                                                                                                                                                                                  |
+| `AUTHENTICATION/credential_revoked` | a revoked session, device or installation; a reused refresh token                                                                                                                                         |
+| `AUTHENTICATION/step_up_required`   | a write without its evidence, or a `mobile.limited` session on an `upgrade` row (retry the same command after a step-up)                                                                                  |
+| `AUTHORIZATION/permission_denied`   | a scope or account state the operation does not admit (`state.state` `operation`, `state.reason` = the operation ID); another account's installation                                                      |
+| `CONFLICT/code_reused`              | a completed flow or proved step-up presented again, or a sign-in completion still in progress (a passkey registration's is `RESOURCE/overloaded`)                                                         |
+| `CONFLICT/already_exists`           | a passkey whose credential ID is registered already (`state.state` `credential`; `state.resource` only for the account's own live credential)                                                             |
+| `CONFLICT/revision_conflict`        | a stale `meta.expected_rev` (`RevisionConflict` with the expected and the current revision)                                                                                                               |
+| `CONFLICT/command_id_reused`        | a command ID used before with another request                                                                                                                                                             |
+| `STATE/not_found`                   | an unknown or invisible flow, step-up challenge, session, credential, device or account (`state.state` = its kind; `state.resource` = the ID the caller sent, F19, or its own account)                    |
+| `STATE/invalid_state`               | the last live credential (`last_credential`); an account whose state does not allow the change (`credentials_locked`)                                                                                     |
+| `STATE/expired`                     | an expired flow, or one whose attempts are exhausted                                                                                                                                                      |
+| `STATE/not_activated`               | a method of a disabled surface (`state.state` `surface`, `state.reason` = the surface)                                                                                                                    |
+| `RESOURCE/rate_limited`             | a rate-limit bucket over its limit, or a flow's sends exhausted (`email_code_sends`)                                                                                                                      |
+| `RESOURCE/overloaded`               | the store is unreachable or contended (before any commit, or an unanswered commit of a transaction that carries no effect of the call), or a command still running: retry after a while                   |
+| `INTERNAL/internal`                 | the call's effect write whose commit went unanswered (effect `UNKNOWN`, retry `NEVER`); anything else, the same advice (the cause is unknown); logged with the correlation id, never with request content |
 
 Every `StateFailure` detail is a valid foundation message (Contracts `foundation-baseline.json`): `state` and `reason` are always
 set, `state` matches `^[A-Za-z0-9._:/-]{1,128}$`, and a `state.resource` (`AggregateRef`) always carries a 16-byte, nonzero `id`;
 a refusal without such an ID carries no resource. For not_found and already_exists `state` is the object's kind and `reason` the
 code. Every `AFTER_TIME` advice carries `retry.retry_at` (rule `retryAdvice`): a rate-limit bucket's is the end of its window, a
 flow's exhausted e-mail code sends (`email_code_sends`) name the flow's expiry, after which a new flow is needed, and a refusal
-that names no instant (`RESOURCE/overloaded`, `INTERNAL/internal` with `AFTER_TIME`) is dated where it becomes the reply's
-`ArcError`, one second after the refusal plus up to one second of jitter (`arc.Refusal.Dated`, E4). `TestEveryRefusalIsAnErrorsRow`
+that names no instant (`RESOURCE/overloaded`) is dated where it becomes the reply's `ArcError`, one second after the refusal plus up to one second of jitter (`arc.Refusal.Dated`, E4). `TestEveryRefusalIsAnErrorsRow`
 checks every constructor's rendering against those rules, the integration tests check every refusal they decode against
 `retryAdvice`, and the Worker's generated replies meet it (`rate_limited` carries the instant the Worker writes, `not_activated` is
 `NEVER`). The Worker's generated replies carry the correlation id Contracts requires in `ArcError.correlation_id` (E4-1): each
 template holds a 16-byte slot, which the Worker fills with the call's identity before it answers, and `arctest.Violations` (the
 check every test applies to a refusal, now with no uncorrelated exemption) is applied to the templates as the Worker completes them
-(`TestTheSurfaceRepliesAreTheCentersRefusals`, `tests/worker/ingress-surfaces.test.ts`). One contract gap predates this part (#118):
-`INTERNAL/internal` pairs `AFTER_TIME` with effect `UNKNOWN`, as Design errors.md prescribes but the Contracts `arcError` rule
-forbids (the test's one named exemption, which needs both the category `INTERNAL` and the code `internal`; routed to the AF-CTR-03
-Design companion, E4-INTERNAL).
+(`TestTheSurfaceRepliesAreTheCentersRefusals`, `tests/worker/ingress-surfaces.test.ts`). `INTERNAL/internal` is `NEVER` with effect `UNKNOWN` (`arc.Internal()`; E4-INTERNAL, the repair of a contract gap of #118 that
+paired `AFTER_TIME` with `UNKNOWN`, which the Contracts `arcError` rule forbids and Design errors.md now no longer prescribes): the
+cause is unknown, so the failure may have followed the effect. A client that holds the command's identity may send the same command
+again (the receipt makes it safe); that is guidance, not advice, and a receipt never keeps the failure (`arc.Refusal.Final`).
+`arctest.Violations` has no exemption for it. `arc.Refusal.Reconcile` carries the read operation of a `RECONCILE` advice
+(`RetryAdvice.reconciliation_operation`, set exactly with `RECONCILE`; the rendering refuses any other combination); no refusal of
+the center advises `RECONCILE` yet, the field is there for AF-CTR-04. The old `arc.CommitUnknown()` is the same refusal and was
+folded into `arc.Internal()`.
 
 The ingress adds two transport refusals for a known bearer (both gRPC 16 `UNAUTHENTICATED`): `auth.token_expired` and
 `auth.credential_revoked`. They need companion rows in errors.md's center ingress table (DC-14).

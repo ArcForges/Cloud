@@ -40,7 +40,8 @@ const ERROR_TEXT = {
   not_activated: "This page is not available.",
   rate_limited: "Too many attempts. Wait a little and try again.",
   overloaded: "The service is busy. Try again in a moment.",
-  internal: "Something went wrong on our side. Try again in a moment.",
+  internal:
+    "Something went wrong on our side. The request may or may not have been completed, so check before you do it again.",
 };
 
 const CANCELLED_TEXT = "The passkey prompt was closed. Try again when you are ready.";
