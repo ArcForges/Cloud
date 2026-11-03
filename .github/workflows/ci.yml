@@ -58,7 +58,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # Source (ubuntu-latest) on proof dispatches: 11m59s before #127; after #127 11m34s (passed) and cancelled at the 15m cap after 15m14s (Verify the Go center 4m15s -> 5m35s/7m32s).
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
