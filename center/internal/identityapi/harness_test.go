@@ -76,8 +76,10 @@ type harness struct {
 	migration *pgx.Conn
 	database  string
 	mail      *mail.Fake
-	clock     *clock
-	logs      *lockedBuffer
+	// inbox is what reached the provider: the Fake's messages, or the requests and sessions of a provider double.
+	inbox inbox
+	clock *clock
+	logs  *lockedBuffer
 	// bootstrap is the owner bootstrap token of the configuration (generated at run time; only its digest is configuration).
 	bootstrap string
 	// secrets collects every credential the test saw, for the scans of F12.
@@ -106,6 +108,13 @@ type settings struct {
 	policy      string
 	noBootstrap bool
 	mailOff     bool
+	// sender replaces the Fake (an adapter in front of a provider double, a gated or a failing sender) and inbox reads what reached
+	// it; both are needed together. The default is the Fake and its own inbox.
+	sender mail.Sender
+	inbox  inbox
+	// asyncMail leaves Options.Background unset, so each delivery runs in its own goroutine exactly as in production; the default
+	// runs it inline, which keeps the other tests deterministic. A test that sets it waits on awaitSends, never on a sleep.
+	asyncMail bool
 	// participants are the device revocation's cascade participants (DC-06, DC-17: AF-CTR-07's agent grants and AF-CLD-06's push
 	// registrations).
 	participants []device.Participant
@@ -156,11 +165,22 @@ func newHarness(t *testing.T, options settings) *harness {
 		t.Fatal(err)
 	}
 	var sender mail.Sender = h.mail
+	h.inbox = fakeInbox{h.mail}
+	if options.sender != nil {
+		if options.inbox == nil {
+			t.Fatal("a harness sender needs the inbox that reads what reached it")
+		}
+		sender, h.inbox = options.sender, options.inbox
+	}
 	if options.mailOff {
 		sender = mail.Disabled{}
 	}
+	background := func(work func()) { work() }
+	if options.asyncMail {
+		background = nil
+	}
 	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: sender, Clock: h.clock.Now,
-		Background: func(work func()) { work() }, Participants: options.participants})
+		Background: background, Participants: options.participants})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,6 +210,7 @@ type reply struct {
 	message string
 	body    []byte
 	http    int
+	header  http.Header
 }
 
 // caller is how a request authenticates and where it comes from.
@@ -243,7 +264,7 @@ func (h *harness) post(path string, request proto.Message, from caller) reply {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	result := reply{http: response.StatusCode}
+	result := reply{http: response.StatusCode, header: response.Header.Clone()}
 	for position := 0; position+5 <= len(body); {
 		flag, length := body[position], int(binary.BigEndian.Uint32(body[position+1:position+5]))
 		payload := body[position+5 : position+5+length]
@@ -268,6 +289,13 @@ func (h *harness) post(path string, request proto.Message, from caller) reply {
 // rpc posts a request and decodes the reply message; the call must complete (grpc-status 0).
 func rpc[Response proto.Message](h *harness, path string, request proto.Message, from caller, response Response) Response {
 	h.t.Helper()
+	decoded, _ := rpcWithReply(h, path, request, from, response)
+	return decoded
+}
+
+// rpcWithReply is rpc that also returns the raw reply (the HTTP code and the response headers).
+func rpcWithReply[Response proto.Message](h *harness, path string, request proto.Message, from caller, response Response) (Response, reply) {
+	h.t.Helper()
 	answer := h.post(path, request, from)
 	if answer.status != "0" || answer.body == nil {
 		h.t.Fatalf("%s: grpc-status %q %q (HTTP %d)", path, answer.status, answer.message, answer.http)
@@ -276,7 +304,7 @@ func rpc[Response proto.Message](h *harness, path string, request proto.Message,
 		h.t.Fatal(err)
 	}
 	domainError(h.t, answer) // checks the retry advice of a refusal
-	return response
+	return response, answer
 }
 
 // retryAdvice is the Contracts rule retryAdvice (foundation-baseline.json; E4): retry_at if and only if the advice is AFTER_TIME,

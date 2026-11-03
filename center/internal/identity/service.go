@@ -49,8 +49,9 @@ type Service struct {
 	logger    *slog.Logger
 	// codeSlots bounds the PBKDF2 computations running at once (PLT-9).
 	codeSlots chan struct{}
-	// background runs the deliveries that follow a response.
+	// background runs the deliveries that follow a response; deliveries tracks them for the shutdown (deliver.go).
 	background func(func())
+	deliveries deliveries
 	// participants revoke what each holds for a device in the device revocation's transaction (DC-06).
 	participants []device.Participant
 }

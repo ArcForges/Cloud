@@ -108,6 +108,12 @@ test("every package of the Go center and its embedded migrations are admitted to
   assert(
     rules.indexOf("center/**/*_test.go") > rules.indexOf("!center/internal/store/migrate/*.go"),
   );
+  // Docker applies the last matching line: the closing rule that removes the mail test doubles works only below the rules that admit
+  // them (above them the context carries the doubles, and the matcher below, which ignores order, would not see it).
+  assert(
+    rules.indexOf("center/internal/mail/mailtest/") >
+      rules.indexOf("!center/internal/mail/mailtest/*.go"),
+  );
 });
 
 test("a rule never admits tests, the Worker, the plan files, build output or a stray file", () => {
@@ -208,6 +214,10 @@ test("the matcher of the Docker context follows the rules the file states", () =
     ["center/internal/pages/templates/notes.md", false],
     ["center/internal/feature/fixtures/development.json", true],
     ["center/internal/identity/passkey/virtual/virtual.go", true],
+    // The mail package is carried; its test doubles are admitted by rule (the folder holds Go sources) and removed again by the
+    // closing exclusion, so the image never carries them and they are no image input (only test files import them).
+    ["center/internal/mail/guard.go", true],
+    ["center/internal/mail/mailtest/smtpserver.go", false],
     ["center/tools/anything.go", false],
     ["center/README.md", false],
     ["tests/worker/docker-context.test.ts", false],

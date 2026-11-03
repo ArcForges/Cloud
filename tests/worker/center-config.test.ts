@@ -244,3 +244,12 @@ test("the surface limiter's period is the generated edge period in every environ
     );
   }
 });
+
+// AF-CTR-03 (mail): mail stays disabled in every environment. The provider and every other mail variable are absent from the
+// committed configuration (the enabling PR, which needs the owner's accounts, adds the non-secret ones and the secrets path); the
+// Worker passes none to the center while the provider is unset.
+test("no environment of wrangler.json names a mail provider or any mail variable", () => {
+  for (const [name, environment] of environments)
+    for (const key of Object.keys(environment.vars ?? {}))
+      assert(!/MAIL/u.test(key), `wrangler.json environment ${name} carries ${key}`);
+});

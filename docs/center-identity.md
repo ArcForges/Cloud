@@ -31,7 +31,7 @@ those methods stay unregistered.
 | `center/internal/identityapi`                | The Connect handlers of the served IdentityService and DeviceService methods and the command receipts of the writes            |
 | `center/internal/pages`                      | The account pages (`html/template`), their one script and style sheet, the `/session/v1/web` routes and the forms (A2)         |
 | `center/internal/ratelimit`, `internal/page` | Fixed-window rate limits on `platform.rate_limit`; bounded paging with opaque keyset cursors                                   |
-| `center/internal/mail`, `internal/arc`       | The e-mail sender (disabled, or the test fake); the domain refusals of errors.md and their `ArcError` rendering                |
+| `center/internal/mail`, `internal/arc`       | The e-mail senders (disabled, fake, Postmark, SMTP); the domain refusals of errors.md and their `ArcError` rendering           |
 
 ## Served methods
 
@@ -264,9 +264,68 @@ PBKDF2-HMAC-SHA-256 with a 16-byte salt (20,000 iterations, at most two at a tim
 attempts, counted in their own transaction before the code is checked, and three sends; a resend replaces the code and never resets
 the attempts. Every syntactically valid address gets the same reply and the same statements whether or not an account has it, and
 the code is mailed after the response only when one does (`TestAnUnknownAddressLooksLikeAKnownOne`). E-mail sign-up does not exist
-(accounts come from the bootstrap and, later, AF-ID-02); with the mail sender disabled, which every deployment uses until live
-delivery is decided (AR-14, H-19), the e-mail method is left out of ListAuthProviders and refused with `VALIDATION/invalid_argument`
-(`method: not_offered`). Tests inject the fake sender and close the loop through it.
+(accounts come from the owner bootstrap; no task yet owns the enrollment of an e-mail identity, so no production code creates one and no
+real account can be mailed); with the mail sender disabled, which every deployment uses until live delivery is decided (AR-14, H-19), the
+e-mail method is left out of ListAuthProviders and refused with `VALIDATION/invalid_argument` (`method: not_offered`); with a live
+adapter configured it is listed. Tests inject the fake sender and close the loop through it, and through each live adapter against a
+local double (MOCKED).
+
+**Mail delivery** (AF-CTR-03). The sign-in code and the step-up code are the only messages of the identity surface, and both are sent
+by one function, `deliver` (`center/internal/identity/deliver.go`). A send path that AF-ID-02 may add differs in risk (an address a user
+types is not an address the center already holds), so it must decide that for itself and go through `deliver` too. The rules, each with its
+test:
+
+- **The reply never waits for the provider.** The delivery is registered, then run in its own goroutine after the response is built, under
+  a 30 s ceiling that no adapter reaches (an adapter's timeout is 10 s by default and 25 s at most). A known and an unknown address get
+  equal replies while a send is held (`TestTheReplyNeverWaitsForTheProvider`, the production goroutine path, no wall-clock threshold).
+- **The delivery follows the commit.** `deliver` is called after the transaction returned, never inside its closure (`TestTheCodeIsSentAfterTheCommitAndOutsideTheTransaction`:
+  the flow's send count and the step-up challenge are visible to another connection when `Send` runs).
+- **Known and unknown addresses run the same statements**, and an address with no account is never sent to, not even a dummy message: a
+  dummy would spend provider quota and mail third parties (`TestAnUnknownAddressLooksLikeAKnownOne`; no request at the provider, in
+  `TestTheEmailClosedLoopsRunThroughEachAdapter`).
+- **The pool is bounded and fails inside the delivery.** At most four sends talk to the provider at once and sixty-four more wait in
+  memory; a send past that, or one whose context ends first, is refused as `unavailable` (stage `busy`) and nothing in the reply path can
+  see it. There is no durable queue, outbox or table. The decision to wait or to refuse looks only at how many sends are inside the pool, never at the lookup result of the address being
+  mailed; since only addresses with an account enter the pool, other people's accounts can still delay one's mail (the residual below).
+  The provider's latency and quota, and the order and delay of mails, remain channels that an attacker with a mailbox could observe:
+  they are residual risks, accepted and documented, not claimed impossible.
+- **No refund.** A failed delivery costs the flow one of its three sends and gives none back: a refund for known accounts would let a caller
+  who asks four times tell a known address from an unknown one (`TestAFailedDeliveryNeverRefundsASend`: a flow accepts three requests and
+  refuses the fourth identically for a working provider, a failing provider and an unknown address; `TestAFailedDeliveryNeverRefundsABucketUnderTheDefaultLimits`:
+  the same under the default limits for the address bucket, five an hour, and the prefix bucket, ten an hour). A provider outage can exhaust a flow in
+  a minute; the user starts a new flow, within the buckets above.
+- **No per-address observable.** `email_send` counts the closed outcome (`sent`, `rejected`, `unavailable`, `unauthorized`, `failed`)
+  globally, and the WARN line of a failure carries that word and nothing else: no address, no code, no provider text and no provider code
+  (`TestADeliveryLogsNeverAnythingButTheOutcome`). The metrics are operator-only.
+- **Provider failures never reach the caller.** The reply, the HTTP code, the gRPC status and the response headers (apart from the date and the
+  correlation id) of a failed delivery equal those of an address with no account, for every class of both adapters
+  (`TestAProviderFailureNeverReachesTheReplyAndIsCountedByClass`).
+- **A panic inside the Postmark or SMTP adapter is recovered by the adapter itself and counted `unavailable`** (stage `panic`; neither the
+  counter nor the log can tell it from an outage). `deliver` recovers a panic of any other sender where the goroutine starts and counts it
+  `failed`: an unrecovered panic there would end the process.
+  The delivery is finished only after its outcome is counted (`TestDrainWaitsUntilARecoveredDeliveryHasBeenCounted`).
+- **Shutdown.** The listeners stop, then `Service.Drain` waits for the deliveries within the rest of the same 5 s; a delivery that starts
+  after the drain began is refused (`unavailable`), and what is still running at the bound is abandoned (up to 64 of them wait for a slot)
+  and logged once; a drain with nothing pending returns at once, so that line appears only when deliveries were abandoned
+  (`TestDrainWithNothingPendingReturnsAtOnceEvenWithAnEndedContext`). The tracker is tested against concurrent deliveries
+  (`TestDeliveriesRaceWithTheDrainOnTheClosedFlag`, whose judge is the race detector of the Linux leg) and against concurrent drains
+  (`TestConcurrentDrainsAreAllReleasedWhenTheLastDeliveryFinishes`), the one bound of the listeners and the drain by
+  `TestStopServingSpendsOneBoundOnTheListenersAndTheDrainTogether`, and the wiring of the drain into `Run` is pinned by source
+  (`TestTheShutdownWiringOfRunAndComposeIdentityIsPinned`: the drain is the `Drain` of the one identity service that `composeIdentity`
+  builds and gives to the request server and the pages); no test drives a real delivery through the shutdown of `Run`. Delivery is
+  at-most-once: a stop between the commit and the send loses the code, and the user resends.
+
+The address rule of the sign-in is the one rule of the center, `config.ValidMailAddress`, after lower-casing: ASCII, at most 254 bytes (RFC 5321's path limit and the
+providers' limit), a letter in the last label, no hexadecimal IP form, no `=?` in the local part. The text given is bounded before it is lower-cased
+(`TestTheLengthBoundIsOnTheTextGiven`). The Contracts schema allows more: `maxLength: 320` and the pattern `^[!-?A-~]+@[!-?A-~]+$` for the e-mail fields, which is
+also the database check's bound; a client that validates against the schema alone may send an address of 255 to 320 bytes, which the center refuses with
+`VALIDATION/invalid_argument` (the reason names the pattern), and before the live adapters it accepted a well-formed address of up to 318 bytes (its text bound
+was 320). Tightening the Contracts bound to 254 is a follow-up of the Contracts repository, and nothing in this change depends on it.
+
+The outcome words, what an operator reads and the verification labels are in [center](center.md#mail-delivery-and-what-an-operator-sees).
+Every test named here is MOCKED (a fake, a gated sender or a double on the loopback interface); those through the adapters need the
+PostgreSQL of the Linux leg. **No real account can be mailed today**: no production code creates an e-mail identity, so none of this
+runs for a real user.
 
 **Owner bootstrap** (AD-0021 §6). The deployment configures the SHA-256 of a one-time token and its expiry
 (`ARCFORGES_CENTER_BOOTSTRAP_SHA256`, `ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT`, at most seven days ahead). The digest is the SHA-256 of
@@ -353,8 +412,9 @@ nothing replays. A page never reads or writes a table.
 
 All paths are below the public base URL (`/api/...` on the hosted deployments). `/account` itself, profile editing (`UpdateProfile`
 stays an API method), recovery, e-mail change and the provider callback are not pages; recovery and the callback are AF-ID-02's.
-The browser channel offers the passkey method only: e-mail (and password and OIDC) is `not_offered` on it until the mail sender is
-live (the mail PR), exactly as the API's e-mail method is left out while the sender is disabled.
+The browser channel offers the passkey method only: e-mail (and password and OIDC) is `not_offered` on it, whether or not a mail
+sender is live, and the pages have no e-mail route; the browser channel refuses e-mail unconditionally. This is a decision (the live
+mail adapters do not change it), and it is the API's e-mail method, not the pages, that a live sender opens.
 
 **Cookie.** A sign-in (or the bootstrap) sets exactly one cookie in this byte form, and nothing else sets or reads another:
 `__Host-af_session=<43 base64url characters>; Path=/; Max-Age=<seconds>; Secure; HttpOnly; SameSite=Strict`; a sign-out removes it with

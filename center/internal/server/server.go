@@ -77,6 +77,8 @@ type Center struct {
 	admin  http.Handler
 	pools  []namedPool
 	ready  []component
+	// drain waits for the identity surface's deliveries (nil where that surface is off); stopServing calls it.
+	drain func(context.Context) error
 	// schemaVersion is the database's migration version seen by the last readiness check (-1 before one succeeded), and
 	// buildVersion the number of migrations of this build.
 	schemaVersion atomic.Int64
@@ -97,8 +99,8 @@ type component struct {
 type Options struct {
 	// Greeting replaces the configured Hello greeting.
 	Greeting hello.Greeting
-	// Mail is the e-mail sender of the identity surface; nil is the disabled sender, the only one a deployment uses until live
-	// delivery is decided (tests inject the fake sender).
+	// Mail replaces the e-mail sender of the identity surface (tests inject the fake sender). Nil builds the sender of the mail
+	// configuration (config.Mail): the disabled sender unless a provider is configured, and no hosted environment configures one.
 	Mail mail.Sender
 	// Clock replaces the identity surface's clock.
 	Clock func() time.Time
@@ -264,14 +266,33 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	if err != nil {
 		return composedIdentity{}, errors.New("the public base URL cannot be a WebAuthn relying party")
 	}
-	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: options.Mail, Bootstrap: c.Config.Identity.Bootstrap,
+	sender, err := c.mailSender(options)
+	if err != nil {
+		return composedIdentity{}, err
+	}
+	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: sender, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: options.Participants})
+	c.drain = service.Drain
 	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
 	dispatcher.Register(server.Methods()...)
 	verifier := session.NewVerifier(c.Store, origin, clock)
 	pipeline.Bearer, pipeline.Browser = verifier, verifier
 	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock}, nil
+}
+
+// mailSender is the sender of the identity surface: the injected one of a test, otherwise the one the mail configuration builds (the
+// disabled sender unless a provider is configured). Run composes the center with Options{}, so a running center always takes the
+// second path; the error names nothing of the configuration.
+func (c *Center) mailSender(options Options) (mail.Sender, error) {
+	if options.Mail != nil {
+		return options.Mail, nil
+	}
+	sender, err := mail.New(c.Config.Mail)
+	if err != nil {
+		return nil, errors.New("the mail configuration cannot build a sender")
+	}
+	return sender, nil
 }
 
 // composePages builds the pages handler over the identity surface's composition. The pages surface needs the identity surface; the
@@ -594,7 +615,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	logger.Info("center started", "mode", string(cfg.Mode), "planConfiguration", planName(cfg.Plan), "disabledFeatures", cfg.DisabledFeatures, "publicBaseUrl", cfg.PublicBaseURL, "listeners", bound,
 		"helloBackend", center.Health.HelloBackend, "store", center.Store != nil, "schemaBuildVersion", center.buildVersion,
 		"revision", center.Health.Revision, "version", center.Health.Artifact.Version, "surfaces", surfaces,
-		"bootstrapConfigured", cfg.Identity.Bootstrap != nil)
+		"bootstrapConfigured", cfg.Identity.Bootstrap != nil, "mail", mailName(cfg.Mail))
 	if cfg.Identity.Disabled != "" {
 		logger.Error("the identity surface is off", "reason", cfg.Identity.Disabled)
 	}
@@ -615,13 +636,34 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			result = errors.New("a center listener stopped unexpectedly")
 		}
 	}
-	shutdown, cancel := context.WithTimeout(context.Background(), routes.ShutdownMilliseconds*time.Millisecond)
+	center.stopServing(servers, routes.ShutdownMilliseconds*time.Millisecond)
+	logger.Info("center stopped")
+	return result
+}
+
+// stopServing is the shutdown sequence of Run: the listeners stop, then the identity surface's deliveries drain, all within one
+// bound (the five seconds of routes.ShutdownMilliseconds in Run; a parameter so that a test does not wait for them). Run's deferred
+// Close then closes the pools. A delivery still running at the bound is abandoned and logged, and it may outlive the pools; that
+// includes the ones waiting for a slot in the mail guard (up to 64), which the process exit ends (a delivery touches no store today).
+func (c *Center) stopServing(servers []*http.Server, bound time.Duration) {
+	shutdown, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
 	for _, server := range servers {
 		_ = server.Shutdown(shutdown)
 	}
-	logger.Info("center stopped")
-	return result
+	if c.drain != nil {
+		if err := c.drain(shutdown); err != nil {
+			c.Logger.Warn("deliveries still in flight were abandoned at the shutdown bound")
+		}
+	}
+}
+
+// mailName is the provider name of the start line: the name only, never a credential, address or host.
+func mailName(m config.Mail) string {
+	if m.Provider == "" {
+		return config.MailDisabled
+	}
+	return m.Provider
 }
 
 // surfaceList is the health document's statement of the served surfaces: their names comma-separated, or "none".

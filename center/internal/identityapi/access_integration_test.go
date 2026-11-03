@@ -558,7 +558,16 @@ func TestRateLimitsKeyByPrefixAndAccount(t *testing.T) {
 // lookup searches for, so its log is not scanned for addresses). Every table is also scanned for the hex of each value and of each
 // credential's raw bytes, as row_to_json renders a bytea column, so a code or token stored in clear in a bytea column is found too.
 func TestNoSecretReachesTheStoreOrTheLogs(t *testing.T) {
-	h := newHarness(t, settings{policy: `{"emailPerAddressLimit": 100}`})
+	noSecretReachesTheStoreOrTheLogs(t, settings{policy: `{"emailPerAddressLimit": 100}`}, nil, nil)
+}
+
+// noSecretReachesTheStoreOrTheLogs is the body of that test, run once with the Fake and once with each real adapter configured with
+// synthetic credentials (credentials are remembered as secrets, and provoke runs a failing delivery before the scan, so that the
+// log line of a failure is scanned too; it returns the addresses it used). Besides the store and the logs it scans the documents an operator reads: the metrics text,
+// the readiness document and the health document.
+func noSecretReachesTheStoreOrTheLogs(t *testing.T, options settings, credentials []string, provoke func(*harness) []string) {
+	h := newHarness(t, options)
+	h.remember(credentials...)
 	ctx := context.Background()
 	admin := pgtest.Connect(t, pgtest.WithDatabase(t, pgtest.ServerURL(t), h.database))
 	if _, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"); err != nil {
@@ -595,6 +604,9 @@ func TestNoSecretReachesTheStoreOrTheLogs(t *testing.T) {
 		t.Fatalf("the write under a receipt: %s", failure(refusal))
 	}
 
+	if provoke != nil {
+		addresses = append(addresses, provoke(h)...) // the addresses it used: scanned like the others
+	}
 	secrets := *h.secrets
 	if len(secrets) < 12 {
 		t.Fatalf("only %d secrets were collected", len(secrets))
@@ -661,6 +673,10 @@ WHERE table_schema IN ('identity', 'device', 'platform', 'audit') AND table_type
 	scan("pg_stat_statements", strings.ToLower(statistics), lowered)
 	scan("the center's log", h.logs.String(), secrets)
 	scan("the center's log", strings.ToLower(h.logs.String()), lowered)
+	for where, text := range h.operatorTexts() {
+		scan(where, text, secrets)
+		scan(where, strings.ToLower(text), lowered)
+	}
 	if log, ok := pgtest.ServerLog(t); ok {
 		scan("the test server's log", log, secrets)
 		if !strings.Contains(log, "identity.session") {

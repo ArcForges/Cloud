@@ -4,7 +4,9 @@
 // mode and base URL. It also passes the enabled surfaces the Worker forwards (FLAGSHIP_SURFACES as parsed here, "none" when none)
 // and always names the header the Worker sets to the client's address, so the center and the Worker agree on both, and passes the
 // identity policy override where an environment sets one (only the acceptance environment's anonymous-flow ceiling) and the owner bootstrap
-// (digest and expiry) that a protected proof dispatch sets (never a checked-in value). The Hello's own Neon credential reaches only the C# host, or a Go center without a store. Proof subclasses
+// (digest and expiry) that a protected proof dispatch sets (never a checked-in value). The Hello's own Neon credential reaches only the C# host, or a Go center without a store. The
+// mail variables reach a Go center only while ARCFORGES_CENTER_MAIL_PROVIDER names a provider, and then only that provider's own closed list; an unset, empty or "disabled" provider
+// passes none (a secret left in the Worker environment is never handed on), and no deployed environment names a provider today. Proof subclasses
 // keep their closed outbound policy and their own environment hook.
 //
 // The start environment follows the deployed Worker version (AF-CTR-03). A Container image rollout restarts a running instance with
@@ -37,7 +39,65 @@ export interface CenterEnvironment {
   /** The owner bootstrap of a protected proof dispatch (AF-CTR-03 A2): the SHA-256 of a one-time token and its expiry. */
   ARCFORGES_CENTER_BOOTSTRAP_SHA256?: string;
   ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT?: string;
+  /**
+   * The mail configuration of the Go center (AF-CTR-03): the provider and its settings; the token, the user name and the password are
+   * Worker secrets. The names are the center's own (center/internal/config/mail.go), repeated in mailVariables and compared with it by
+   * a test.
+   */
+  ARCFORGES_CENTER_MAIL_PROVIDER?: string;
+  ARCFORGES_CENTER_MAIL_FROM?: string;
+  ARCFORGES_CENTER_MAIL_FROM_NAME?: string;
+  ARCFORGES_CENTER_MAIL_TIMEOUT?: string;
+  ARCFORGES_CENTER_MAIL_POSTMARK_TOKEN?: string;
+  ARCFORGES_CENTER_MAIL_POSTMARK_STREAM?: string;
+  ARCFORGES_CENTER_MAIL_SMTP_HOST?: string;
+  ARCFORGES_CENTER_MAIL_SMTP_PORT?: string;
+  ARCFORGES_CENTER_MAIL_SMTP_MODE?: string;
+  ARCFORGES_CENTER_MAIL_SMTP_USERNAME?: string;
+  ARCFORGES_CENTER_MAIL_SMTP_PASSWORD?: string;
   FLAGSHIP_SURFACES?: string;
+}
+
+/** A mail variable of the Go center. */
+type MailName = keyof CenterEnvironment & `ARCFORGES_CENTER_MAIL_${string}`;
+
+/**
+ * The mail variables handed to the Go center, by provider: each list is the whole of what that provider's configuration reads, so a
+ * stale variable of the other provider (the secrets a Worker keeps from an earlier deploy) is never handed on and cannot make the
+ * center refuse to start.
+ */
+const mailVariables: Record<"postmark" | "smtp", readonly MailName[]> = {
+  postmark: [
+    "ARCFORGES_CENTER_MAIL_PROVIDER",
+    "ARCFORGES_CENTER_MAIL_FROM",
+    "ARCFORGES_CENTER_MAIL_FROM_NAME",
+    "ARCFORGES_CENTER_MAIL_TIMEOUT",
+    "ARCFORGES_CENTER_MAIL_POSTMARK_TOKEN",
+    "ARCFORGES_CENTER_MAIL_POSTMARK_STREAM",
+  ],
+  smtp: [
+    "ARCFORGES_CENTER_MAIL_PROVIDER",
+    "ARCFORGES_CENTER_MAIL_FROM",
+    "ARCFORGES_CENTER_MAIL_FROM_NAME",
+    "ARCFORGES_CENTER_MAIL_TIMEOUT",
+    "ARCFORGES_CENTER_MAIL_SMTP_HOST",
+    "ARCFORGES_CENTER_MAIL_SMTP_PORT",
+    "ARCFORGES_CENTER_MAIL_SMTP_MODE",
+    "ARCFORGES_CENTER_MAIL_SMTP_USERNAME",
+    "ARCFORGES_CENTER_MAIL_SMTP_PASSWORD",
+  ],
+};
+
+/**
+ * The mail variables to hand the Go center for a provider value: none while mail is unset, empty or "disabled"; the closed list of
+ * "postmark" or "smtp" (an exact string match); anything else, including a value that is not a string, throws a fixed error that
+ * names no value (as an unknown Hello runtime does).
+ */
+function mailVariablesOf(provider: unknown): readonly MailName[] {
+  if (provider === undefined || provider === "" || provider === "disabled") return [];
+  if (provider === "postmark") return mailVariables.postmark;
+  if (provider === "smtp") return mailVariables.smtp;
+  throw new Error("Unknown mail provider.");
 }
 
 /** What the Container runs: the entrypoint (undefined keeps the image's C# default), its environment and TCP egress. */
@@ -65,6 +125,12 @@ export function centerContainerSettings(center: CenterEnvironment): CenterContai
     ] as const) {
       const value = center[name];
       if (value !== undefined) settings.envVars[name] = value;
+    }
+    // The mail variables of the named provider, each only when it is a non-empty string. The egress switch is the database's: a mail
+    // variable never widens it (the identity surface that sends mail needs the store, and with it the switch is already on).
+    for (const name of mailVariablesOf(center.ARCFORGES_CENTER_MAIL_PROVIDER)) {
+      const value: unknown = center[name];
+      if (typeof value === "string" && value !== "") settings.envVars[name] = value;
     }
     settings.envVars.ARCFORGES_CENTER_SURFACES = centerSurfaces(center.FLAGSHIP_SURFACES);
     settings.envVars.ARCFORGES_CENTER_CLIENT_IP_HEADER = clientIpHeader;

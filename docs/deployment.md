@@ -51,7 +51,7 @@ an `IDENTITY_RATE_LIMITER` (60 per minute per location and client) for the surfa
 `ARCFORGES_CENTER_IDENTITY_POLICY` with its anonymous-flow ceiling (600 flows per hour), because it shares the production Neon
 project ([identity policy](center-identity.md#identity-policy)); production passes no policy. No bootstrap or mail value is ever in
 `wrangler.json` (the proof bootstrap is an input of the protected dispatch, [below](#the-acceptance-environments-owner-bootstrap));
-e-mail delivery stays disabled in every environment.
+e-mail delivery stays disabled in every environment ([mail](#mail)).
 
 Both edge rate limits, the Hello's and the surface's, key a client by `edgeClientKey` (AF-CTR-03 F7): an IPv4 address, or the IPv4
 address of an IPv4-mapped IPv6 address, by itself; an IPv6 address by its /64 network (the generated `edgeIpv6PrefixBits`), so one
@@ -94,6 +94,60 @@ needed for the hosted proof of the operator grant; the hosted run (the `--operat
 acceptance](center-identity.md#proof-bootstrap-and-acceptance), after the regression run, with its pause) is the coordinator's step
 after the deployment ([post-deploy checklist](center-entitlement.md#post-deploy-checklist)). The deployment's migration gate applies
 migration `0003` to the production database while production is dark, and to the acceptance database.
+
+### Mail
+
+E-mail delivery stays **disabled in every environment**: `wrangler.json` names no mail variable (a test fails if one appears), no workflow
+or deploy script references a mail secret, and nothing in this change creates a GitHub secret. The live adapters and the Worker's passthrough
+are what the later enabling step builds on; that step still needs the owner's provider accounts and a verified sender domain, a change of the
+deploy step and the secrets path, and the decisions listed below. **No real account can be mailed even then**: no production code creates
+an e-mail identity, so enabling a provider builds the adapter and validates its configuration but nothing calls `Send` until a task owns the
+enrollment of an e-mail identity (the credential is not used and nothing about the provider is tested; the owner-run live send is the only
+test of the credential).
+
+- **The Worker's passthrough** (`worker/foundation/cloud-container.ts`) hands the Go center the mail variables of the provider that
+  `ARCFORGES_CENTER_MAIL_PROVIDER` names, exactly, and only those: six names for `postmark`, nine for `smtp` (the lists repeat
+  `center/internal/config/mail.go` and a test compares them). A name is copied only when its value is a non-empty string. The provider unset,
+  empty or `disabled` passes nothing, even when a token is present in the Worker's environment (Wrangler keeps secrets that a deployment
+  does not list, so a stale one is expected); any other value, including one that is not a string, makes the Worker throw a fixed error
+  (`Unknown mail provider.`) before a Container starts. The C# runtime receives none. The passthrough does not depend on the store and does
+  not touch the egress switch: `enableInternet` is already on wherever the identity surface runs, because the store is a TCP connection.
+- **Rotation and removal** follow the start digest below: the digest covers every variable, so a rotated token, a changed sender or a provider
+  switched off restarts the center before the next request.
+- **The enabling step** (a later change, owner-dependent) adds the non-secret variables to the `vars` of one environment in `wrangler.json`
+  and the credentials as `--secrets-file` secrets of the deploy step, beside the runtime URL, from GitHub `cloudflare` environment secrets
+  named `MAIL_POSTMARK_TOKEN_ACCEPTANCE` (Postmark) or `MAIL_SMTP_USERNAME_ACCEPTANCE` and `MAIL_SMTP_PASSWORD_ACCEPTANCE` (SES); a secret is
+  mapped in the `env:` of the step that deploys, never the job. No production twin is created before AF-PROD-01 chooses between a separate
+  GitHub environment with a reviewer and a suffix convention inside the one shared environment (the suffix is a convention, not a boundary).
+  One Postmark Server per environment gives separate message streams, statistics, suppression lists and revocable tokens. It does **not**
+  restrict the From address: Postmark documents that sender signatures and domains belong to the account, so a token of the acceptance
+  Server can send as any confirmed signature or domain of the same Postmark account, a production domain registered there included.
+  Isolating the production domain from the acceptance token needs a separate Postmark account (or accepting that exposure); the owner decides
+  at H-19 and AF-PROD-01. A text scan of the workflows for mail secrets belongs to that step.
+- **Open before AF-PROD-01:** a Postmark token lets the center send arbitrary mail as the product's DKIM-signed domain, and the Container's
+  egress is open (`enableInternet`), so whether mail should instead leave through an outbound handler that fixes the destination is to be
+  decided again before the production environment gets a provider. A Postmark Server token not restricting the From address (above)
+  reinforces that decision.
+- **What the enabling change must update.** Among the statements that turn false once a provider is enabled on an environment: this section
+  and the sentence above it that e-mail delivery stays disabled in every environment, the "E-mail codes" and "Mail delivery" paragraphs of
+  [center identity](center-identity.md#sign-in) (the e-mail method is then offered at API level, and still refused on the browser channel),
+  the sentence of [center identity](center-identity.md#proof-bootstrap-and-acceptance) that the e-mail and recovery methods are not offered
+  to the proof account (the e-mail method is then offered at API level, and nobody can sign in by e-mail because no e-mail identity
+  exists), the sentence of [entitlement](center-entitlement.md) that the mail sender is disabled in every deployment, the Mail bullet of
+  `AGENTS.md` ("mail stays disabled in every deployed environment"), and two sentences of [center](center.md) ("No deployed environment
+  configures a provider" in the Mail section and "no deployed environment names one" in the Worker passthrough paragraph). The list is
+  not complete: before the change is cut, search the repository for `disabled in every`, `not offered`, `deployed environment` and
+  `every deployment` (the documents, `AGENTS.md` and the comments of `center/internal/mail/mail.go` and
+  `worker/foundation/cloud-container.ts`); no test asserts these sentences. Post-deploy expectations
+  that change on that environment: `ListAuthProviders` lists passkey and e-mail; a non-browser e-mail `BeginAuthentication` returns the neutral
+  flow reply; the browser channel still answers `not_offered`; the start line names the provider; the secrets list gains the secret names
+  above; production is unchanged. Risk to state there: enabling mail on an environment before an e-mail identity can exist opens an
+  anonymous request-code surface (each request costs rate-limit state, a flow row and a PBKDF2 run) that can never reach the provider and
+  has no verification value, so the enabling should wait for a task that owns the enrollment of an e-mail identity.
+- **Not proven by this change** (owner steps): the sender domain's DKIM, SPF and DMARC alignment, a message reaching an inbox, the Postmark
+  approval state and the SES sandbox state, the isolation of the production sender from a leaked acceptance Postmark token (Postmark documents
+  none inside one account), and whether a Cloudflare Container can reach SMTP ports at all (the documentation is silent;
+  Postmark over 443 is the lower-risk first provider). The evidence table is in [center](center.md#mail-verification-and-the-opt-in-live-tests).
 
 ### Start environment after a deployment
 

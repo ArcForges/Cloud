@@ -665,7 +665,8 @@ These are exposed today:
 - **Identity surface** (AF-CTR-03): `arcforges_center_identity_events_total{event,outcome}` counts sign-in stages
   (`sign_in_begin` by method, `sign_in_complete` succeeded or refused), refreshes (rotated, refused, reused), rate-limit refusals
   by bucket kind (`rate_limited`), bootstrap outcomes, e-mail code requests (`email_request` accepted) and e-mail deliveries
-  (`email_send` sent or failed); since A1b also step-up stages (`step_up_begin` by method; `step_up_complete` proved, refused or
+  (`email_send`: `sent`, `rejected`, `unavailable`, `unauthorized` or `failed`, counted when the delivery ends; the in-process counters reset at a
+  restart and are not the `EMAILS_SENT` meter of AF-PLAT-01); since A1b also step-up stages (`step_up_begin` by method; `step_up_complete` proved, refused or
   upgraded, where `upgraded` is counted in addition to `proved`) and passkey registration (`registration_begin`;
   `registration_complete` succeeded or refused). The periodic metrics log line carries them.
 - **Unanswered auxiliary commits** (D10): a transaction of auxiliary bookkeeping (a count, an attempt, a reservation, a denial, a
@@ -681,8 +682,8 @@ Alert conditions for AF-OPS-01:
 - dead-lettered outbox rows or jobs (`state = 3` in `platform.outbox`, `state = 4` in `platform.job_lease`). This needs a
   metric of AF-PLAT-01's sweeps; until then it is a query.
 - identity: any `refresh` `reused` (a stolen or replayed refresh token), `rate_limited` growing for one bucket kind (an attack
-  or a misconfigured client), `bootstrap` outcomes other than `completed` on a deployment that has an owner, `email_send` `failed`,
-  and `access.refused` audit events (a node, push or automation credential calling account methods);
+  or a misconfigured client), `bootstrap` outcomes other than `completed` on a deployment that has an owner, `email_send` other than `sent` growing (`unauthorized` is the credential or permission of the mail provider and
+  needs an operator at once; it is a counter and a WARN line, not a page, and this change adds no alert), and `access.refused` audit events (a node, push or automation credential calling account methods);
 - identity since A1b: `step_up_complete` `refused` growing without `rate_limited` for `sign_in_failures_account` following (a slow
   guessing of step-up proofs against one session that stays under the limit; `identity.step_up.failed` is audited only once per
   window), and `registration_complete` `refused` growing;

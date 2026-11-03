@@ -23,8 +23,9 @@ type Provider struct {
 	ID     string
 	Method int32
 	Name   string
-	// Enrollment reports whether the provider creates accounts; none does (accounts come from the owner bootstrap and, later, from
-	// AF-ID-02's invitations), and the answer never says whether a bootstrap is pending.
+	// Enrollment reports whether the provider creates accounts; none does (accounts come from the owner bootstrap; no task yet owns
+	// the enrollment of an e-mail identity, so no production code creates one), and the answer never says whether a bootstrap is
+	// pending.
 	Enrollment bool
 }
 
