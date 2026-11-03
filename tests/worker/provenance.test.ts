@@ -499,7 +499,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     assert.equal(block.regexTarget, "secret");
     assert.deepEqual(block.regexes, ["^[0-9a-f]{64}$"]);
   }
-  // AF-CTR-03: one block per file (the policy and the receipts af-ctr-03-r1 to af-ctr-03-r16), each row one exact
+  // AF-CTR-03: one block per file (the policy and the receipts af-ctr-03-r1 to af-ctr-03-r17), each row one exact
   // key-and-digest line of an immutable record named in the inputs maps.
   // The digests are computed here from the records, so this file holds no digest literal.
   const records = [
@@ -524,6 +524,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/af-ctr-03-r14.json",
     "eng/policy/dependency-reviews/af-ctr-03-r15.json",
     "eng/policy/dependency-reviews/af-ctr-03-r16.json",
+    "eng/policy/dependency-reviews/af-ctr-03-r17.json",
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
@@ -542,7 +543,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       `${file}.backup`,
       `x/${file}`,
       ...files.filter((_, other) => other !== index),
-      "eng/policy/dependency-reviews/af-ctr-03-r17.json",
+      "eng/policy/dependency-reviews/af-ctr-03-r18.json",
     ])
       assert.ok(!exempt.test(other), other);
     // Positive control: the rows match exactly the lines that name the two records, and every row matches one.
