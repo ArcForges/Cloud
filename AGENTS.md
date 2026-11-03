@@ -132,5 +132,9 @@ the remaining C# code.
   checksums, role and database names, slots, timestamps, counts, and the target the operator named), and the deploy job's runtime
   password reaches only a private temporary file and the Worker secret. Store tests run against a
   real PostgreSQL on Linux (`ARCFORGES_TEST_POSTGRES_URL`; the check starts a pinned container) and skip on Windows.
+- Mail ([center](docs/center.md#mail)): every message of the identity surface goes through `identity`'s `deliver`; a credential is a
+  `config.Secret`, revealed only in `mail/postmark.go` and `mail/smtp.go`; `mail/mailtest` is imported by `_test.go` files only; a test
+  never contacts a real provider unless its own explicit local switch is set; mail stays disabled in every deployed environment, and
+  no workflow or script references a mail secret until the later enabling step. No real account can be mailed yet.
 - The C# executable stays the image's default entrypoint for the proof environment; `ARCFORGES_HELLO_RUNTIME=csharp` through a
   reviewed main push is the Hello rollback. Go is not .NET Native AOT; health reports `runtime=go` and `nativeAot=false`.

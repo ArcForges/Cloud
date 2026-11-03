@@ -102,6 +102,156 @@ from `ARCFORGES_CENTER_PUBLIC_BASE_URL`. The production deployment states its va
 (`ARCFORGES_CENTER_MODE=official-hosted`, `ARCFORGES_CENTER_PUBLIC_BASE_URL=https://arcforges.com/api`), which
 `worker/foundation/cloud-container.ts` passes to the Container unchanged.
 
+### Mail
+
+Mail is disabled unless `ARCFORGES_CENTER_MAIL_PROVIDER` names a provider. A disabled center sends nothing and does not offer the
+e-mail sign-in method. The live adapters (Postmark over HTTPS and an SMTP submission service over TLS, Amazon SES being the first
+target; AF-CTR-03) are tested **MOCKED**: against servers on the loopback interface, never against the real service
+([evidence](#mail-verification-and-the-opt-in-live-tests)). No deployed environment configures a provider, and none can before the
+owner has the provider accounts, a verified sender domain and the secrets ([deployment](deployment.md#mail)).
+
+**No real account can be mailed.** Nothing in the center creates an e-mail identity: the only statements that insert an identity
+row enroll passkeys, and no task yet owns the enrollment of an e-mail identity. The sign-in-code and step-up calls therefore never
+reach the sender for a real account (an address with no account is answered alike and never sent to), and the browser channel
+refuses e-mail unconditionally. A configured provider exercises the adapter and its configuration; it does not deliver a code to a
+user, and nothing in this repository proves that it would.
+
+| Variable                                | Default                           | Rule                                                                                                                                                                                |
+| --------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ARCFORGES_CENTER_MAIL_PROVIDER`        | disabled                          | `disabled` (or unset), `postmark` or `smtp`, exactly                                                                                                                                |
+| `ARCFORGES_CENTER_MAIL_FROM`            | none                              | Required with a provider: one plain address (no display name, list or IP literal), at most 254 bytes                                                                                |
+| `ARCFORGES_CENTER_MAIL_FROM_NAME`       | none                              | Optional display name: at most 64 bytes of printable ASCII without `" \ < > ( ) [ ] , : ; @ .` or an encoded-word opener (`=?`); the composed `Name <address>` is at most 255 bytes |
+| `ARCFORGES_CENTER_MAIL_TIMEOUT`         | `10s`                             | A Go duration from `2s` to `25s`: the bound of one send, connect to reply                                                                                                           |
+| `ARCFORGES_CENTER_MAIL_POSTMARK_TOKEN`  | none                              | `postmark`: required, 1 to 128 bytes of visible ASCII (a secret); Postmark's public test token is refused, because it delivers nothing                                              |
+| `ARCFORGES_CENTER_MAIL_POSTMARK_STREAM` | `outbound`                        | `postmark`: the message stream, 1 to 40 bytes of `a-z`, `0-9` and hyphen                                                                                                            |
+| `ARCFORGES_CENTER_MAIL_SMTP_HOST`       | none                              | `smtp`: required, a DNS name of at least two labels, at most 253 bytes; an IP address is refused, because the certificate is checked against the name                               |
+| `ARCFORGES_CENTER_MAIL_SMTP_PORT`       | `587` (`starttls`), `465` (`tls`) | `smtp`: 1 to 65535                                                                                                                                                                  |
+| `ARCFORGES_CENTER_MAIL_SMTP_MODE`       | `starttls`                        | `smtp`: `starttls` or `tls` (TLS from the first byte). There is no plain-text mode, not even for a relay on the loopback interface                                                  |
+| `ARCFORGES_CENTER_MAIL_SMTP_USERNAME`   | none                              | `smtp`: required, 1 to 256 bytes without control characters (a secret)                                                                                                              |
+| `ARCFORGES_CENTER_MAIL_SMTP_PASSWORD`   | none                              | `smtp`: required, 1 to 256 bytes without control characters (a secret)                                                                                                              |
+
+The center refuses to start on: leading or trailing white space in any mail variable; a provider other than `disabled`, `postmark` or
+`smtp`; any other mail variable set while the provider is unset or `disabled`; a variable of the other provider; a missing or invalid
+value above. The refusal names the variable and never its value. The sender address and the SMTP host follow the one address rule of
+the center (`config.ValidMailAddress`, which also validates a sign-in address: ASCII, a dot-atom local part of at most 64 bytes, a
+domain of at least two labels whose last label contains a letter, at most 254 bytes in all). The three secrets are `config.Secret`
+values; the start line names the provider only (`"mail": "disabled|postmark|smtp"`), and the value is never printed in any shape the
+tests cover; where Go cannot call the methods (a Secret reached through an unexported field) it prints an address.
+
+Two examples for a self-hosted center (placeholders; one Postmark Server or one IAM user per center):
+
+```sh
+# Postmark: the sender signature of the Server is locked to the From address.
+ARCFORGES_CENTER_MAIL_PROVIDER=postmark \
+ARCFORGES_CENTER_MAIL_FROM=<sender-address> \
+ARCFORGES_CENTER_MAIL_POSTMARK_TOKEN=<postmark-server-token> \
+./arcforges-center serve
+
+# Amazon SES over SMTP: the SMTP credentials of an IAM user allowed ses:SendRawEmail; 587 and 465 are the defaults of the two modes.
+ARCFORGES_CENTER_MAIL_PROVIDER=smtp \
+ARCFORGES_CENTER_MAIL_FROM=<verified-sender-address> \
+ARCFORGES_CENTER_MAIL_SMTP_HOST=<region-smtp-endpoint> \
+ARCFORGES_CENTER_MAIL_SMTP_USERNAME=<smtp-username> \
+ARCFORGES_CENTER_MAIL_SMTP_PASSWORD=<smtp-password> \
+./arcforges-center serve
+```
+
+Any SMTP submission service that offers TLS and `AUTH PLAIN` after TLS works; certificate verification uses the system roots, so a
+relay with a private CA needs that CA in the system trust store. Amazon SES also accepts connections on 2587 and 2465, which a network
+that filters 587 and 465 often leaves open. Any other HTTP provider is out of scope.
+
+### Mail delivery and what an operator sees
+
+The sign-in code and the step-up code are the only messages. A message is sent after the reply has been built, never inside a
+transaction and never in the reply's path: the reply of a request does not depend on the provider, on the account having the address,
+or on a failure (the contract is the "Mail delivery" paragraph of [center identity](center-identity.md#sign-in)). Four sends talk to the provider at once and
+sixty-four more wait inside the process; a send past that is refused as `unavailable` without reaching the provider. A send ends at the
+provider timeout above (10 s by default, 25 s at most) and in any case at 30 s. There is no retry and no queue: a failed or lost
+message is not repeated by the center, and a stop of the process loses the sends in flight (the drain gives them the part of the 5 s
+stop bound that the listeners leave; what is still running then is abandoned and logged as
+`deliveries still in flight were abandoned at the shutdown bound`). Under a slow provider the guard loses more than its 68 places
+suggest: when a send takes L, about 4 x floor(30 s / L) sends are delivered inside the 30 s (about 40 at 3 s, about 12 at 9.5 s), so the
+68 hold only while the provider answers in under about 1.76 s.
+
+`arcforges_center_identity_events_total{event="email_send",outcome=…}` counts every delivery by one closed outcome, and every outcome
+but `sent` is also logged as one WARN line (`an e-mail code could not be delivered` or `a step-up code could not be delivered`) with the
+field `outcome` and nothing else: no address, no code, no provider text and no provider code. The counters reset at every restart and
+reach the operator in the periodic `metrics` log line.
+
+| Outcome        | Meaning                                                                                                                                                                                                         |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sent`         | The provider accepted the message. That is not delivery to an inbox                                                                                                                                             |
+| `rejected`     | The provider refused this message or the message was invalid; sending it again unchanged will not help                                                                                                          |
+| `unavailable`  | A network, timeout, capacity or provider fault, a refusal before any credential was offered, or the center's own guard being full or stopping; a later send may succeed                                         |
+| `unauthorized` | The provider refused the account, sender, stream, credential or its permission to send; an operator must act. It is a counter and a WARN line, not a page: AF-OPS-01 owns paging, and this change adds no alert |
+| `failed`       | Anything else: a sender that failed without a typed reason, or a panic of the sender (recovered)                                                                                                                |
+
+Amazon SES words an unverified From identity (and, in its sandbox, an unverified recipient) as `554 Message rejected`, which the center
+counts as `rejected`: on a first send, `rejected` most likely means that identity is not verified, and `unauthorized` means the credential
+or the IAM policy. That is the documented behaviour of SES; no credential was used to observe it. A failed delivery costs the flow one of
+its three sends (the center never refunds one), so a provider outage can exhaust a flow in a minute; the user starts a new flow.
+
+The Design meter `EMAILS_SENT` is counted by the identity e-mail adapter and belongs to AF-PLAT-01. The in-process counter above resets at
+every restart and is not that meter; `deliver` (`center/internal/identity/deliver.go`) is the one place such a meter hooks in.
+
+### Mail verification and the opt-in live tests
+
+What is proved, and how:
+
+| Claim                                                                                                                                                                                                                                                                                                                                    | Evidence                                                                                                             | Label                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| Both adapters speak the documented protocol to a double: classification of every answer, certificate and name verification, no STARTTLS downgrade, no credential before TLS, byte and time bounds, no redirect and no environment proxy                                                                                                  | `center/internal/mail` tests, the doubles of `center/internal/mail/mailtest` (importable from `_test.go` files only) | MOCKED (loopback servers)        |
+| The configuration rules, the composition, the delivery counting, panic recovery and drain                                                                                                                                                                                                                                                | `center/internal/config`, `server` and `identity` tests                                                              | MOCKED                           |
+| The sign-in, resend and step-up loops through each adapter; an unknown address makes no request; each failure class leaves the reply unchanged and is counted; no refund; the reply never waits for the provider                                                                                                                         | `center/internal/identityapi` tests on a real PostgreSQL (the Linux leg)                                             | MOCKED provider, real PostgreSQL |
+| The Worker hands the center the mail variables of the named provider only                                                                                                                                                                                                                                                                | `tests/worker/container-classes.test.ts`, `center-config.test.ts`                                                    | MOCKED                           |
+| The Postmark API contract with Postmark's public test token: the draft request is accepted and a wrong token is `unauthorized`; nothing is delivered, and the sender, the stream and the account state are not exercised                                                                                                                 | the first probe below                                                                                                | REAL when run (skips otherwise)  |
+| An Amazon SES SMTP endpoint offers TLS 1.2 or later with a verified chain and `AUTH PLAIN`, up to but excluding AUTH                                                                                                                                                                                                                     | the second probe below                                                                                               | REAL when run (skips otherwise)  |
+| A real message is accepted by a real provider through the real adapter                                                                                                                                                                                                                                                                   | the owner-run live send below                                                                                        | REAL when the owner runs it      |
+| A message reaches a real inbox; the sender domain passes DKIM, SPF and DMARC; the Postmark approval state and the SES sandbox state; bounces and suppression; real latency and failure behaviour; whether the Cloudflare Container can reach SMTP ports (the documentation is silent; 443 for Postmark is the lower-risk first provider) | not provable by this change                                                                                          | NOT PROVEN (owner step)          |
+| What SES does inside DATA (for example about line endings): the double rejects a bare CR or LF, which is a model of strictness, not known SES behaviour                                                                                                                                                                                  | none                                                                                                                 | NOT PROVEN                       |
+| Delivery of a sign-in code to a user                                                                                                                                                                                                                                                                                                     | none: no e-mail identity can exist                                                                                   | NOT PROVEN                       |
+
+Every test of the package `mail` skips its real-service form unless an explicit local switch is set, so no verification leg and no ordinary
+`go test` contacts a provider. From the `center` directory:
+
+```sh
+# Postmark's public test token against the real API (nothing is delivered).
+ARCFORGES_TEST_POSTMARK_LIVE=1 go test -count=1 -run '^TestLivePostmarkContractWithThePublicTestToken$' ./internal/mail/
+
+# An SES endpoint's handshake up to AUTH (no credential exists in the process); 465 and 2465 select TLS from the first byte.
+ARCFORGES_TEST_SES_PROBE_HOST=<region-smtp-endpoint> ARCFORGES_TEST_SES_PROBE_PORT=2587 \
+  go test -count=1 -run '^TestLiveSESHandshakeStopsBeforeAUTH$' ./internal/mail/
+```
+
+The owner-run live send **sends one real message** through the real adapter. It needs three things at once, so that a shell that merely
+exported the first variable sends nothing: `ARCFORGES_TEST_MAIL_LIVE_SEND=1`, `ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM=send-one-real-message`
+and an explicit `-run`. The credentials, the sender and the recipient come from the environment only and are never printed; the test
+skips, naming the missing variables, when one is not set. Use an address of your own as the recipient: the message has the fixed subject
+`ArcForges live send test`.
+
+```sh
+# Postmark (ARCFORGES_TEST_POSTMARK_STREAM is optional and defaults to outbound)
+ARCFORGES_TEST_MAIL_LIVE_SEND=1 ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM=send-one-real-message \
+ARCFORGES_TEST_POSTMARK_TOKEN=<postmark-server-token> ARCFORGES_TEST_MAIL_FROM=<sender-address> \
+ARCFORGES_TEST_MAIL_RECIPIENT=<your-own-address> \
+  go test -count=1 -run '^TestLiveSendThroughPostmark$' ./internal/mail/
+
+# SMTP (the port selects the mode: 465 and 2465 are TLS from the first byte, every other port is STARTTLS)
+ARCFORGES_TEST_MAIL_LIVE_SEND=1 ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM=send-one-real-message \
+ARCFORGES_TEST_SMTP_HOST=<region-smtp-endpoint> ARCFORGES_TEST_SMTP_PORT=587 \
+ARCFORGES_TEST_SMTP_USERNAME=<smtp-username> ARCFORGES_TEST_SMTP_PASSWORD=<smtp-password> \
+ARCFORGES_TEST_MAIL_FROM=<verified-sender-address> ARCFORGES_TEST_MAIL_RECIPIENT=<your-own-address> \
+  go test -count=1 -run '^TestLiveSendThroughSMTP$' ./internal/mail/
+```
+
+The names are exactly: `ARCFORGES_TEST_POSTMARK_LIVE`, `ARCFORGES_TEST_SES_PROBE_HOST`, `ARCFORGES_TEST_SES_PROBE_PORT`,
+`ARCFORGES_TEST_MAIL_LIVE_SEND`, `ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM`, `ARCFORGES_TEST_POSTMARK_TOKEN`,
+`ARCFORGES_TEST_POSTMARK_STREAM`, `ARCFORGES_TEST_SMTP_HOST`, `ARCFORGES_TEST_SMTP_PORT`, `ARCFORGES_TEST_SMTP_USERNAME`,
+`ARCFORGES_TEST_SMTP_PASSWORD`, `ARCFORGES_TEST_MAIL_FROM` and `ARCFORGES_TEST_MAIL_RECIPIENT`. Two more, `ARCFORGES_TEST_MAIL_PROXY_CHILD` and
+`ARCFORGES_TEST_MAIL_PROXY_STANDIN`, are set by a test for its own child process and are not for operators. A successful live send proves that
+a provider accepted one message from the adapter; it does not prove delivery to an inbox, and it does not prove the sign-in path, which
+cannot reach a real account.
+
 ## Center mode and feature availability
 
 The mode is explicit configuration (AD-0021 §13a); there is no default. `internal/feature` answers feature availability behind the
@@ -318,7 +468,9 @@ credential, a request or response body, a command line, output or file content. 
 `worker/foundation/cloud-container.ts` selects `/app/arcforges-center` when `ARCFORGES_HELLO_RUNTIME=go` and passes the center
 mode, base URL and plan configuration, and the runtime role's URL (the Worker secret `ARCFORGES_CENTER_DATABASE_URL` that the
 deployment rotates; [PostgreSQL store](postgres-store.md#deployment)). The Hello's own Neon secret reaches only the C# host or a
-Go center without a store (`tooling/neon-runtime.ts`). The Dockerfile builds the
+Go center without a store (`tooling/neon-runtime.ts`). The mail variables reach a Go center only while
+`ARCFORGES_CENTER_MAIL_PROVIDER` names a provider, and then only that provider's own (the closed lists of the Worker, compared with
+`center/internal/config/mail.go` by a test); no deployed environment names one, so none is passed ([mail](#mail)). The Dockerfile builds the
 center with the pinned Go archive (`center/toolchain.json`, SHA-256 checked), `go mod verify`, `CGO_ENABLED=0`, `-trimpath`,
 `-buildvcs=false` and the identity `-ldflags`, beside the C# executable, which stays the image's default entrypoint. The
 candidate inspects both ELF members and their legal files without running them (`tooling/release-provenance.ts`).

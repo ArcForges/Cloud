@@ -28,7 +28,8 @@ const (
 // inet_aton) and the RFC 2047 encoded-word opener "=?" in the local part (a consumer that decodes the line as unstructured text
 // would turn =?utf-8?q?...?= into any characters, line breaks included; "?=" alone is harmless and stays legal).
 //
-// It is the single source of the syntax rule; package mail's ValidAddress delegates to it. It lives here because config has no
+// It is the single source of the syntax rule; package mail's ValidAddress and identity's NormalizeEmail (after lower-casing) delegate
+// to it. It lives here because config has no
 // in-repository dependency, so mail and identity can both import it without a cycle. Letter case is kept: a caller that needs a
 // canonical form lower-cases first.
 func ValidMailAddress(text string) bool {

@@ -10,6 +10,11 @@
 // (nothing is delivered), the SES handshake that stops before AUTH (no credential exists in the process), and the owner-run live
 // send, which does send one real message (it needs a second, confirming switch as well).
 //
+// New builds the sender of a validated configuration (config.Mail): Disabled unless a provider is named, otherwise that provider's
+// adapter behind a Guard; the server calls it, and the identity service sends only through its deliver function, which counts the
+// outcome, logs a failure as one closed word, recovers a panic and is drained at the shutdown. The hosted Worker hands the Container
+// the mail variables only while a provider is named, and no deployed environment names one.
+//
 // What this package does NOT make possible: no real account can be mailed. No production code creates an e-mail identity (the
 // only non-test INSERT INTO identity.auth_identity statements enroll passkeys), so the sign-in-code surface opens when a sender is
 // Enabled but never reaches Send for a real account, and the browser channel refuses e-mail unconditionally. A mail setup
