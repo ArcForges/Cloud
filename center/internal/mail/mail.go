@@ -72,15 +72,16 @@ func (Message) MarshalText() ([]byte, error) { return []byte(redactedMessage), n
 // MarshalJSON is the marker.
 func (Message) MarshalJSON() ([]byte, error) { return []byte(`"` + redactedMessage + `"`), nil }
 
-// errSerialized is what the binary encoders answer: a Message is never serialized as bytes (encoding/gob would otherwise write its
-// exported fields, the recipient, the subject and the sign-in code, in clear text; no code serializes a Message, and a durable queue
-// is excluded by design).
+// errSerialized is what GobEncode and MarshalBinary answer, so that encoding/gob, and any encoder that honours
+// encoding.BinaryMarshaler, refuse a Message instead of writing its exported fields (the recipient, the subject and the sign-in
+// code) in clear text. An encoder that reads the exported fields itself (encoding/asn1, or a reflecting encoder) is not covered:
+// the rule is that no code serializes a Message, and a durable queue is excluded by design.
 var errSerialized = errors.New("mail: a Message is never serialized")
 
 // GobEncode refuses: encoding/gob ignores MarshalText and MarshalJSON and writes the exported fields.
 func (Message) GobEncode() ([]byte, error) { return nil, errSerialized }
 
-// MarshalBinary refuses, like GobEncode (the binary encoders of the standard library and of gob-like libraries look for it).
+// MarshalBinary refuses, like GobEncode (encoding/gob and the encoders that honour encoding.BinaryMarshaler look for it).
 func (Message) MarshalBinary() ([]byte, error) { return nil, errSerialized }
 
 // Sender delivers messages.

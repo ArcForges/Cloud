@@ -90,9 +90,10 @@ func (s *Service) Drain(ctx context.Context) error { return s.deliveries.drain(c
 //
 // The outcome is the closed word of mail.Outcome (sent, rejected, unavailable, unauthorized, failed), counted as an
 // email_send event and, when it is not "sent", logged as one fixed line with that word only: never the recipient, the code, the error
-// text or the error's numeric code (a provider-chosen value must not become a label or a log key). A panic of the sender is
-// recovered and counted failed, because an unrecovered panic in this goroutine would end the whole process. There is no refund of a
-// flow's sends after a failure and no retry: a refund would tell a caller whether an address has an account.
+// text or the error's numeric code (a provider-chosen value must not become a label or a log key). A panic of a sender that does
+// not recover its own (the Fake and a test sender) is recovered here and counted failed, because an unrecovered panic in this
+// goroutine would end the whole process; the Postmark and SMTP adapters recover their own and count it unavailable (stage panic).
+// There is no refund of a flow's sends after a failure and no retry: a refund would tell a caller whether an address has an account.
 func (s *Service) deliver(ctx context.Context, message mail.Message, failure string) {
 	if !s.deliveries.add() {
 		s.observeDelivery("unavailable", failure)
