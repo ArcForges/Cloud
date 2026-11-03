@@ -106,9 +106,9 @@ from `ARCFORGES_CENTER_PUBLIC_BASE_URL`. The production deployment states its va
 
 Mail is disabled unless `ARCFORGES_CENTER_MAIL_PROVIDER` names a provider. A disabled center sends nothing and does not offer the
 e-mail sign-in method. The live adapters (Postmark over HTTPS and an SMTP submission service over TLS, Amazon SES being the first
-target; AF-CTR-03) are tested **MOCKED** in every ordinary run: against servers on the loopback interface. Three tests reach a real
+target; AF-CTR-03) are tested **MOCKED** in every ordinary run: against servers on the loopback interface. Four tests reach a real
 endpoint only when an explicit local switch is set (the public Postmark test token, an unauthenticated SES handshake and the owner-run live
-send); see the [evidence](#mail-verification-and-the-opt-in-live-tests). No deployed environment configures a provider, and none can before the
+send in its Postmark form and in its SMTP form); see the [evidence](#mail-verification-and-the-opt-in-live-tests). No deployed environment configures a provider, and none can before the
 owner has the provider accounts, a verified sender domain and the secrets ([deployment](deployment.md#mail)).
 
 **No real account can be mailed.** Nothing in the center creates an e-mail identity: the only statements that insert an identity
@@ -159,7 +159,7 @@ ARCFORGES_CENTER_MAIL_SMTP_PASSWORD=<smtp-password> \
 ```
 
 The SMTP adapter is written for a submission service that offers TLS and `AUTH PLAIN` after TLS. Only Amazon SES was probed, and only up
-to AUTH; no message has been accepted by any real service (NOT PROVEN). Certificate verification uses the system roots, so a relay with a
+to AUTH; no message has been accepted by any SMTP service (NOT PROVEN). Certificate verification uses the system roots, so a relay with a
 private CA needs that CA in the system trust store. Amazon SES also accepts connections on 2587 and 2465, which a network
 that filters 587 and 465 often leaves open. Any other HTTP provider is out of scope.
 

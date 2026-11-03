@@ -128,10 +128,17 @@ test of the credential).
   egress is open (`enableInternet`), so whether mail should instead leave through an outbound handler that fixes the destination is to be
   decided again before the production environment gets a provider. A Postmark Server token not restricting the From address (above)
   reinforces that decision.
-- **What the enabling change must update.** Statements that turn false once a provider is enabled on an environment: this section and the
-  sentence above it that e-mail delivery stays disabled in every environment, the "E-mail codes" and "Mail delivery" paragraphs of
+- **What the enabling change must update.** Among the statements that turn false once a provider is enabled on an environment: this section
+  and the sentence above it that e-mail delivery stays disabled in every environment, the "E-mail codes" and "Mail delivery" paragraphs of
   [center identity](center-identity.md#sign-in) (the e-mail method is then offered at API level, and still refused on the browser channel),
-  and the sentence of [entitlement](center-entitlement.md) that the mail sender is disabled in every deployment. Post-deploy expectations
+  the sentence of [center identity](center-identity.md#proof-bootstrap-and-acceptance) that the e-mail and recovery methods are not offered
+  to the proof account (the e-mail method is then offered at API level, and nobody can sign in by e-mail because no e-mail identity
+  exists), the sentence of [entitlement](center-entitlement.md) that the mail sender is disabled in every deployment, the Mail bullet of
+  `AGENTS.md` ("mail stays disabled in every deployed environment"), and two sentences of [center](center.md) ("No deployed environment
+  configures a provider" in the Mail section and "no deployed environment names one" in the Worker passthrough paragraph). The list is
+  not complete: before the change is cut, search the repository for `disabled in every`, `not offered`, `deployed environment` and
+  `every deployment` (the documents, `AGENTS.md` and the comments of `center/internal/mail/mail.go` and
+  `worker/foundation/cloud-container.ts`); no test asserts these sentences. Post-deploy expectations
   that change on that environment: `ListAuthProviders` lists passkey and e-mail; a non-browser e-mail `BeginAuthentication` returns the neutral
   flow reply; the browser channel still answers `not_offered`; the start line names the provider; the secrets list gains the secret names
   above; production is unchanged. Risk to state there: enabling mail on an environment before an e-mail identity can exist opens an

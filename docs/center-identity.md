@@ -308,17 +308,19 @@ test:
   after the drain began is refused (`unavailable`), and what is still running at the bound is abandoned (up to 64 of them wait for a slot)
   and logged once; a drain with nothing pending returns at once, so that line appears only when deliveries were abandoned
   (`TestDrainWithNothingPendingReturnsAtOnceEvenWithAnEndedContext`). The tracker is tested against concurrent deliveries
-  (`TestDeliveriesRaceWithTheDrainOnTheClosedFlag`, whose judge is the race detector of the Linux leg), the one bound of the listeners and the
-  drain by `TestStopServingSpendsOneBoundOnTheListenersAndTheDrainTogether`, and the wiring of the drain into `Run` is pinned by source
-  (`TestTheShutdownWiringOfRunAndComposeIdentityIsPinned`); no test drives a real delivery through the shutdown of `Run`. Delivery is
+  (`TestDeliveriesRaceWithTheDrainOnTheClosedFlag`, whose judge is the race detector of the Linux leg) and against concurrent drains
+  (`TestConcurrentDrainsAreAllReleasedWhenTheLastDeliveryFinishes`), the one bound of the listeners and the drain by
+  `TestStopServingSpendsOneBoundOnTheListenersAndTheDrainTogether`, and the wiring of the drain into `Run` is pinned by source
+  (`TestTheShutdownWiringOfRunAndComposeIdentityIsPinned`: the drain is the `Drain` of the one identity service that `composeIdentity`
+  builds and gives to the request server and the pages); no test drives a real delivery through the shutdown of `Run`. Delivery is
   at-most-once: a stop between the commit and the send loses the code, and the user resends.
 
 The address rule of the sign-in is the one rule of the center, `config.ValidMailAddress`, after lower-casing: ASCII, at most 254 bytes (RFC 5321's path limit and the
 providers' limit), a letter in the last label, no hexadecimal IP form, no `=?` in the local part. The text given is bounded before it is lower-cased
 (`TestTheLengthBoundIsOnTheTextGiven`). The Contracts schema allows more: `maxLength: 320` and the pattern `^[!-?A-~]+@[!-?A-~]+$` for the e-mail fields, which is
 also the database check's bound; a client that validates against the schema alone may send an address of 255 to 320 bytes, which the center refuses with
-`VALIDATION/invalid_argument` (the reason names the pattern), and before the live adapters it accepted up to 320 bytes. Tightening the Contracts bound to
-254 is a follow-up of the Contracts repository, and nothing in this change depends on it.
+`VALIDATION/invalid_argument` (the reason names the pattern), and before the live adapters it accepted a well-formed address of up to 318 bytes (its text bound
+was 320). Tightening the Contracts bound to 254 is a follow-up of the Contracts repository, and nothing in this change depends on it.
 
 The outcome words, what an operator reads and the verification labels are in [center](center.md#mail-delivery-and-what-an-operator-sees).
 Every test named here is MOCKED (a fake, a gated sender or a double on the loopback interface); those through the adapters need the

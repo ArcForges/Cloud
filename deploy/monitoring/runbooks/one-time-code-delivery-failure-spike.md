@@ -19,7 +19,7 @@ Confirm the ten-minute failure rate exceeded 20% with at least 20 outcomes. Dist
 
 ## Verification
 
-No sign-in path can reach a real account yet (no e-mail identity exists), so there is no test delivery to verify through the product. Verify the adapter with the owner-run live send (docs/center.md, "Mail verification") and read the `email_send` outcome counts: `unauthorized` is the provider credential or permission and needs an operator, `rejected` a message or sender the provider refused, `unavailable` a network or provider fault. Confirm that suppression/rate-limit protections remain active. Do not treat an accepted send as proof that a user received or read a code.
+No sign-in path can reach a real account yet (no e-mail identity exists), so there is no test delivery to verify through the product. Verify the adapter with the owner-run live send (docs/center.md, "Mail verification") and read the `email_send` outcome counts: `unauthorized` is the provider credential or permission and needs an operator, `rejected` a message or sender the provider refused, `unavailable` a network, timeout, capacity or provider fault, a refusal before any credential was offered, the center's own guard being full or stopping, or a panic recovered inside the adapter (stage `panic`; neither the counter nor the log tells it from an outage). Confirm that suppression/rate-limit protections remain active. Do not treat an accepted send as proof that a user received or read a code.
 
 ## Rollback and escalation
 
