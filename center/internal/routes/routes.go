@@ -117,7 +117,11 @@ func Center() ([]Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Module{hello, identity, pages, operations}, nil
+	fleet, err := Fleet()
+	if err != nil {
+		return nil, err
+	}
+	return []Module{hello, identity, pages, operations, fleet}, nil
 }
 
 // Surfaces are the switchable surfaces of the registrations, in registration order.

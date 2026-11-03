@@ -43,6 +43,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
 	"github.com/ArcForges/Contracts/go/arcforges/publicapi/v1/publicapiv1connect"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
@@ -179,6 +180,14 @@ func Operations() []Operation {
 			Receipt: true},
 		{Path: publicapiv1connect.DeviceServiceRevokeProcedure, ID: "device.revoke", Risk: "R3", Audit: AuditInTransaction, Session: true, Restricted: true,
 			MobileLimited: UpgradeUnlessOwn, StepUp: EvidenceUnlessOwn, Target: TargetDevice, Receipt: true},
+		// The fleet surface (AF-CTR-04 E1a): the node refreshes anonymously with its refresh token (never under a receipt: it presents
+		// a one-use secret); it reports its info and signs itself out with its node credential under a receipt of principal
+		// node:<installation>. A restricted account's node may sign out (it only removes access) but not report. Never gated.
+		{Path: fleetv1connect.NodeEnrollmentServiceRefreshNodeSessionProcedure, ID: "fleet.refreshNodeSession", Risk: "R1"},
+		{Path: fleetv1connect.NodeEnrollmentServiceReportNodeInfoProcedure, ID: "fleet.reportNodeInfo", Risk: "R1", Session: true, Scopes: []string{"node"},
+			Receipt: true},
+		{Path: fleetv1connect.NodeEnrollmentServiceSignOutNodeProcedure, ID: "fleet.signOutNode", Risk: "R2", Session: true, Scopes: []string{"node"},
+			Restricted: true, Receipt: true, Audit: AuditInTransaction},
 	}
 }
 

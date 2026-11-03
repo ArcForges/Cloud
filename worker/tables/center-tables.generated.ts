@@ -35,7 +35,7 @@ export interface ApiRoute {
 }
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
-export type Surface = "identity" | "pages" | "operations";
+export type Surface = "identity" | "pages" | "operations" | "fleet";
 
 /** A method of a switchable surface. */
 export interface SurfaceRoute extends ApiRoute {
@@ -72,7 +72,7 @@ export interface PageRoute {
 }
 
 /** The surface names, in registration order; FLAGSHIP_SURFACES lists them comma-separated and exactly. */
-export const surfaceNames: readonly Surface[] = ["identity", "pages", "operations"];
+export const surfaceNames: readonly Surface[] = ["identity", "pages", "operations", "fleet"];
 /** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */
 export const clientIpHeader = "x-arcforges-client-ip";
 /** The width of the correlation id slot of the reply templates below: an Id's 16 bytes (E4-1). */
@@ -89,12 +89,15 @@ export const notActivatedReplies: Readonly<Record<Surface, string>> = {
     "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVwYWdlc4AAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
   operations:
     "AAAAAGEaXwoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86FyIVCgdzdXJmYWNlEgpvcGVyYXRpb25zgAAAABBncnBjLXN0YXR1czogMA0K",
+  fleet:
+    "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVmbGVldIAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
 };
 /** The byte offset of the correlation id slot in each surface's not_activated template. */
 export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, number>> = {
   identity: 61,
   pages: 61,
   operations: 61,
+  fleet: 61,
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
@@ -388,6 +391,42 @@ export const surfaceRoutes: readonly SurfaceRoute[] = [
     instance: "hello",
     requestMeta: true,
     surface: "identity",
+  },
+  {
+    path: "/arcforges.fleet.v1.NodeEnrollmentService/RefreshNodeSession",
+    kind: "unary",
+    auth: "anonymous",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "fleet",
+  },
+  {
+    path: "/arcforges.fleet.v1.NodeEnrollmentService/ReportNodeInfo",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "fleet",
+  },
+  {
+    path: "/arcforges.fleet.v1.NodeEnrollmentService/SignOutNode",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "fleet",
   },
 ];
 

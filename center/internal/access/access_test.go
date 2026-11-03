@@ -4,19 +4,25 @@ package access
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 )
 
+// identityPolicies are the served methods the operation table covers: the identity surface's and the fleet surface's (AF-CTR-04).
 func identityPolicies(t *testing.T) []ingress.Policy {
 	t.Helper()
 	module, err := routes.Identity()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return module.Policies
+	fleet, err := routes.Fleet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(module.Policies, fleet.Policies...)
 }
 
 func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
@@ -80,6 +86,10 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"identity.revokeAllSessions":           "R3 upgrade evidence account receipt restricted",
 		"device.rename":                        "R1 upgrade none - receipt restricted",
 		"device.revoke":                        "R3 upgrade-unless-own evidence-unless-own device receipt restricted",
+		// AF-CTR-04 E1a (CTR4-DES-02 as amended by cloud-4 and Q24): the node rows.
+		"fleet.refreshNodeSession": "R1 anonymous",
+		"fleet.reportNodeInfo":     "R1 allowed none - receipt active node",
+		"fleet.signOutNode":        "R2 allowed none - receipt restricted node",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
 	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own"}
@@ -98,6 +108,9 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 				restricted = "restricted"
 			}
 			got = fmt.Sprintf("%s %s %s %s %s %s", operation.Risk, mobile[operation.MobileLimited], evidence[operation.StepUp], target, receipt, restricted)
+			if len(operation.Scopes) > 0 {
+				got += " " + strings.Join(operation.Scopes, ",")
+			}
 		}
 		if want[operation.ID] != got {
 			t.Errorf("%s: %q, want %q", operation.ID, got, want[operation.ID])
@@ -150,5 +163,24 @@ func TestTheMobileLimitedRules(t *testing.T) {
 				t.Errorf("%s own=%v: evidence", operation.ID, own)
 			}
 		}
+	}
+}
+
+// TestFleetRowsCarryNoFeature (E1-2, CTR4-DES-03): node enrollment is an account and device operation and is never gated (AD-0021
+// section 13a), so no fleet row of the table carries a Feature or is audited before the call; the node rows admit the node scope
+// only. A gated fleet row would first need the prerequisites of docs/center-entitlement.md ("What waits for later tasks").
+func TestFleetRowsCarryNoFeature(t *testing.T) {
+	rows := 0
+	for _, operation := range Operations() {
+		if !strings.HasPrefix(operation.ID, "fleet.") {
+			continue
+		}
+		rows++
+		if operation.Feature != "" || operation.Audit == AuditBeforeCall || operation.Session && strings.Join(operation.Scopes, ",") != "node" {
+			t.Errorf("%s: feature %q, audit %d, scopes %v", operation.ID, operation.Feature, operation.Audit, operation.Scopes)
+		}
+	}
+	if rows == 0 {
+		t.Fatal("no fleet row: the test is vacuous")
 	}
 }

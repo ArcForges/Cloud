@@ -114,6 +114,9 @@ test("every package of the Go center and its embedded migrations are admitted to
     rules.indexOf("center/internal/mail/mailtest/") >
       rules.indexOf("!center/internal/mail/mailtest/*.go"),
   );
+  // The MOCKED node of the center's tests (AF-CTR-04) sits under center/internal/*/, which the rules admit; its closing exclusion
+  // comes after them.
+  assert(rules.indexOf("center/internal/nodetest/") > rules.indexOf("!center/internal/*/*.go"));
 });
 
 test("a rule never admits tests, the Worker, the plan files, build output or a stray file", () => {
@@ -218,6 +221,11 @@ test("the matcher of the Docker context follows the rules the file states", () =
     // closing exclusion, so the image never carries them and they are no image input (only test files import them).
     ["center/internal/mail/guard.go", true],
     ["center/internal/mail/mailtest/smtpserver.go", false],
+    // AF-CTR-04: the fleet packages are carried; the test node is not.
+    ["center/internal/fleet/enroll.go", true],
+    ["center/internal/fleetapi/fleetapi.go", true],
+    ["center/internal/nodetest/nodetest.go", false],
+    ["center/internal/schema/migrations/0004_fleet_enrollment.sql", true],
     ["center/tools/anything.go", false],
     ["center/README.md", false],
     ["tests/worker/docker-context.test.ts", false],

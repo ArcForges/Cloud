@@ -123,7 +123,8 @@ func sessionRequests(who account, credential, target platform.ID, targetDevice p
 func sessionRows(t *testing.T, requests map[string]proto.Message, each func(operation access.Operation, request proto.Message)) {
 	t.Helper()
 	for _, operation := range access.Operations() {
-		if !operation.Session {
+		// The fleet surface's node rows (AF-CTR-04) have their own scope matrix (fleetapi TestScopeMatrixOverFleetRows).
+		if !operation.Session || strings.HasPrefix(operation.ID, "fleet.") {
 			continue
 		}
 		request, ok := requests[operation.Path]
@@ -446,6 +447,10 @@ func TestTheServedMethodsAreExactlyTheIdentitySet(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range table.SurfaceRows {
+		// The fleet surface's rows are pinned by fleetapi's TestFleetRowsAreTheServedMethods.
+		if row.Surface == routes.SurfaceFleet {
+			continue
+		}
 		if !pinned[row.Path] {
 			t.Errorf("the Worker table lists %s", row.Path)
 		}

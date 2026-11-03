@@ -140,6 +140,8 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
     return ["the pages surface needs the identity surface"];
   if (names.includes("operations") && !(names.includes("identity") && names.includes("pages")))
     return ["the operations surface needs the identity and pages surfaces"];
+  if (names.includes("fleet") && !(names.includes("identity") && names.includes("pages")))
+    return ["the fleet surface needs the identity and pages surfaces"];
   if (names.includes("identity")) {
     const base = vars?.ARCFORGES_CENTER_PUBLIC_BASE_URL;
     const origin =
@@ -217,7 +219,20 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
     surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "operations,pages,identity" }),
     [],
   );
-  assert.deepEqual([...surfaces].sort(), ["identity", "operations", "pages"]);
+  // AF-CTR-04: node enrollment (fleet) needs both as well; it is a known name from part E1a and enabled nowhere yet (the
+  // acceptance environment gets it for its hosted run in part E3, production with AF-PROD-01).
+  assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,fleet" }), []);
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,fleet" }).length, 1);
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "fleet" }).length, 1);
+  assert.deepEqual([...surfaces].sort(), ["fleet", "identity", "operations", "pages"]);
+  for (const [name, environment] of environments)
+    assert(
+      !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+        .split(",")
+        .includes("fleet"),
+      `wrangler.json environment ${name}: the fleet surface is enabled nowhere in part E1a`,
+    );
+  assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("fleet"));
   for (const [name, environment] of environments)
     assert.equal(
       String(environment.vars?.FLAGSHIP_SURFACES ?? "")
