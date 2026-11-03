@@ -169,6 +169,8 @@ type arcErrorJSON struct {
 type retryJSON struct {
 	Mode    string `json:"mode"`
 	RetryAt string `json:"retryAt,omitempty"`
+	// ReconciliationOperation is the read operation a RECONCILE advice names; no refusal of the pages' routes advises RECONCILE yet.
+	ReconciliationOperation string `json:"reconciliationOperation,omitempty"`
 }
 
 type detailsJSON struct {
@@ -220,6 +222,9 @@ func errorOf(value *foundationv1.ArcError) errorReply {
 	}
 	if at := value.GetRetry().GetRetryAt(); at != nil {
 		result.Retry.RetryAt = formatInstant(instantOf(at))
+	}
+	if operation := value.GetRetry().GetReconciliationOperation(); operation != "" {
+		result.Retry.ReconciliationOperation = operation
 	}
 	if id := value.GetCorrelationId().GetValue(); len(id) == 16 {
 		result.CorrelationID = correlation.FormatID(id)

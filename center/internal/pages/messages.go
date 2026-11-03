@@ -33,7 +33,7 @@ var refusalText = map[string]string{
 	"STATE/not_activated":               "This page is not available.",
 	"RESOURCE/rate_limited":             "Too many attempts. Wait a little and try again.",
 	"RESOURCE/overloaded":               "The service is busy. Try again in a moment.",
-	"INTERNAL/internal":                 "Something went wrong on our side. Try again in a moment.",
+	"INTERNAL/internal":                 "Something went wrong on our side. The request may or may not have been completed, so check before you do it again.",
 }
 
 // reasonText maps CATEGORY/code and state.reason to a more exact text; the reasons are registry values.
@@ -97,6 +97,15 @@ func withRetry(text string, value *foundationv1.ArcError, now time.Time) string 
 		return fmt.Sprintf("%s Try again in %d seconds.", text, seconds)
 	}
 	return fmt.Sprintf("%s Try again in about %d minutes.", text, (seconds+59)/60)
+}
+
+// headingFor is the heading of an error page for a refusal: an internal failure may have had its effect (INTERNAL/internal advises
+// NEVER with UNKNOWN), so its page never says "Try again shortly", which the heading of a 503 or 500 says of a busy service.
+func headingFor(status int, value *foundationv1.ArcError) string {
+	if value.GetCategory() == foundationv1.ErrorCategory_ERROR_CATEGORY_INTERNAL {
+		return "Something went wrong"
+	}
+	return pageHeading(status)
 }
 
 // pageHeading is the heading of an error page for a status.
