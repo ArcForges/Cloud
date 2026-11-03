@@ -208,6 +208,10 @@ test("the matcher of the Docker context follows the rules the file states", () =
     ["center/internal/pages/templates/notes.md", false],
     ["center/internal/feature/fixtures/development.json", true],
     ["center/internal/identity/passkey/virtual/virtual.go", true],
+    // The mail package is carried; its test doubles are admitted by rule (the folder holds Go sources) and removed again by the
+    // closing exclusion, so the image never carries them and they are no image input (only test files import them).
+    ["center/internal/mail/guard.go", true],
+    ["center/internal/mail/mailtest/smtpserver.go", false],
     ["center/tools/anything.go", false],
     ["center/README.md", false],
     ["tests/worker/docker-context.test.ts", false],

@@ -132,6 +132,8 @@
 !center/internal/identity/passkey/virtual/*.go
 !center/internal/arc/arctest/
 !center/internal/arc/arctest/*.go
+!center/internal/mail/mailtest/
+!center/internal/mail/mailtest/*.go
 !center/internal/pages/templates/
 !center/internal/pages/templates/*.gohtml
 !center/internal/pages/static/
@@ -145,3 +147,4 @@ center/tools/
 center/cmd/center-gen/
 center/**/testdata/
 center/**/*_test.go
+center/internal/mail/mailtest/
