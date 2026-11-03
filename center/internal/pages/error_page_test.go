@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
+
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/routes"
@@ -70,5 +72,17 @@ func TestAnInternalFailureNeverPromisesARetry(t *testing.T) {
 	e.writeErrorPage(http.StatusServiceUnavailable, arc.Unavailable().Dated(now).ArcError(correlation.New()))
 	if !strings.Contains(busy.Body.String(), "Try again shortly") || !strings.Contains(busy.Body.String(), "Try again in a moment") {
 		t.Errorf("the page of a busy service: %s", busy.Body.String())
+	}
+}
+
+// TestTheJSONBodyNamesTheReconciliationOperation (E4-INTERNAL): an ArcError whose advice is RECONCILE reaches the WebBrowserSession
+// JSON body with its operation, and no other advice shows the member. No refusal of the center advises RECONCILE yet.
+func TestTheJSONBodyNamesTheReconciliationOperation(t *testing.T) {
+	const operation = "arcforges.publicapi.v1.IdentityService/ListSessions"
+	reconcile := &arc.Refusal{Category: arc.Internal().Category, Code: "internal", Effect: arc.Internal().Effect}
+	reconcile.Retry, reconcile.Reconcile = foundationv1.RetryMode_RETRY_MODE_RECONCILE, operation
+	body := errorOf(reconcile.ArcError(correlation.New())).Error
+	if body.Retry.Mode != "reconcile" || body.Retry.ReconciliationOperation != operation || body.Retry.RetryAt != "" {
+		t.Errorf("the JSON of a RECONCILE advice: %+v", body.Retry)
 	}
 }
