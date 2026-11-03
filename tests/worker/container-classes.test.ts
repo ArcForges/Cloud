@@ -610,3 +610,188 @@ test("the self-hosted operator's feature limits are never passed to the hosted c
       `${path.relative(root, file)} names ${name}`,
     );
 });
+
+// AF-CTR-03 (mail): the Worker hands the Go center the mail variables of the provider ARCFORGES_CENTER_MAIL_PROVIDER names and
+// nothing else. The names are the center's own (center/internal/config/mail.go), so the lists are compared with that file. MOCKED:
+// synthetic values made of words; no provider is contacted and no deployed environment names one.
+const mailPrefix = "ARCFORGES_CENTER_MAIL_";
+const centerSource = readFileSync(
+  new URL("../../center/internal/config/mail.go", import.meta.url),
+  "utf8",
+);
+/** Every mail variable the center's configuration declares, read from its source. */
+const centerMailNames = [
+  ...centerSource.matchAll(/^\tEnvMail\w+\s*=\s*"(ARCFORGES_CENTER_MAIL_\w+)"$/gmu),
+].map((match) => match[1] as string);
+const mailCommon = ["PROVIDER", "FROM", "FROM_NAME", "TIMEOUT"].map((name) => mailPrefix + name);
+const mailPostmark = ["POSTMARK_TOKEN", "POSTMARK_STREAM"].map((name) => mailPrefix + name);
+const mailSmtp = ["SMTP_HOST", "SMTP_PORT", "SMTP_MODE", "SMTP_USERNAME", "SMTP_PASSWORD"].map(
+  (name) => mailPrefix + name,
+);
+const goCenter = {
+  ARCFORGES_HELLO_RUNTIME: "go",
+  ARCFORGES_CENTER_MODE: "official-hosted",
+  ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
+  ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
+  FLAGSHIP_SURFACES: "identity",
+};
+/** Every mail variable set to a synthetic value, with the provider as given. */
+function everyMailVariable(provider: unknown): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const name of centerMailNames)
+    values[name] = `synthetic-word-${name.slice(mailPrefix.length)}`;
+  values[`${mailPrefix}PROVIDER`] = provider as string;
+  return values;
+}
+const mailKeys = (settings: Settings) =>
+  Object.keys(settings.envVars)
+    .filter((name) => name.startsWith(mailPrefix))
+    .sort();
+
+test("the Worker's mail lists are the center's eleven variables, split by provider as the center splits them", () => {
+  assert.equal(centerMailNames.length, 11);
+  assert.deepEqual(
+    [...centerMailNames].sort(),
+    [...mailCommon, ...mailPostmark, ...mailSmtp].sort(),
+  );
+  assert.deepEqual(
+    mailKeys(centerContainerSettings({ ...goCenter, ...everyMailVariable("postmark") })),
+    [...mailCommon, ...mailPostmark].sort(),
+  );
+  assert.deepEqual(
+    mailKeys(centerContainerSettings({ ...goCenter, ...everyMailVariable("smtp") })),
+    [...mailCommon, ...mailSmtp].sort(),
+  );
+});
+
+test("the Go center gets the values of the named provider unchanged and nothing the provider does not read", () => {
+  for (const [provider, own, foreign] of [
+    ["postmark", mailPostmark, mailSmtp],
+    ["smtp", mailSmtp, mailPostmark],
+  ] as const) {
+    const all = everyMailVariable(provider);
+    const { envVars } = centerContainerSettings({ ...goCenter, ...all });
+    for (const name of [...mailCommon, ...own]) assert.equal(envVars[name], all[name], name);
+    for (const name of foreign)
+      assert(!Object.hasOwn(envVars, name), `${provider} was handed ${name}`);
+  }
+});
+
+test("an unset, empty or disabled provider hands the center no mail variable, whatever else is set", () => {
+  for (const provider of [undefined, "", "disabled"]) {
+    const values = everyMailVariable(provider);
+    if (provider === undefined) delete values[`${mailPrefix}PROVIDER`];
+    const settings = centerContainerSettings({ ...goCenter, ...values });
+    assert.deepEqual(mailKeys(settings), [], String(provider));
+    assert(
+      !Object.values(settings.envVars).some((value) => value.startsWith("synthetic-word-")),
+      "a mail value was handed on",
+    );
+  }
+  // Production names no provider: its container is the Go center without a mail variable.
+  assert.deepEqual(mailKeys(centerContainerSettings(goCenter)), []);
+});
+
+test("an unknown provider is a fixed error that names no value, and so is a value that is not a string", () => {
+  const unknown = [
+    "ses",
+    "Postmark",
+    "POSTMARK",
+    " postmark",
+    "postmark ",
+    "SMTP",
+    " smtp",
+    "smtp\n",
+    "disabled ",
+    "Disabled",
+    "none",
+    "smtps",
+    "toString",
+    "__proto__",
+    "constructor",
+    "1",
+  ];
+  for (const provider of unknown)
+    assert.throws(
+      () => centerContainerSettings({ ...goCenter, ...everyMailVariable(provider) }),
+      (error: Error) => error.message === "Unknown mail provider.",
+      provider,
+    );
+  for (const provider of [1, true, null, {}, [], ["postmark"]])
+    assert.throws(
+      () => centerContainerSettings({ ...goCenter, ...everyMailVariable(provider) }),
+      (error: Error) => error.message === "Unknown mail provider.",
+      JSON.stringify(provider),
+    );
+});
+
+test("only a non-empty string is handed on, and the C# runtime never receives a mail variable", () => {
+  const values = everyMailVariable("postmark");
+  values[`${mailPrefix}FROM_NAME`] = "";
+  values[`${mailPrefix}POSTMARK_STREAM`] = undefined as unknown as string;
+  values[`${mailPrefix}TIMEOUT`] = 5 as unknown as string;
+  const { envVars } = centerContainerSettings({ ...goCenter, ...values });
+  for (const name of ["FROM_NAME", "POSTMARK_STREAM", "TIMEOUT"])
+    assert(!Object.hasOwn(envVars, mailPrefix + name), name);
+  assert.equal(envVars[`${mailPrefix}POSTMARK_TOKEN`], values[`${mailPrefix}POSTMARK_TOKEN`]);
+  for (const runtime of ["csharp", "", undefined]) {
+    for (const provider of ["postmark", "smtp", "ses"]) {
+      const settings = centerContainerSettings({
+        ...(runtime === undefined ? {} : { ARCFORGES_HELLO_RUNTIME: runtime }),
+        ...everyMailVariable(provider),
+      });
+      assert.deepEqual(settings.envVars, {}, `${runtime ?? "default"} runtime, ${provider}`);
+    }
+  }
+});
+
+test("a mail variable never widens the egress switch, and a rotated credential restarts the center", async () => {
+  const database = { ARCFORGES_CENTER_DATABASE_URL: "synthetic-runtime-credential" };
+  assert.equal(
+    centerContainerSettings({ ...goCenter, ...everyMailVariable("smtp") }).enableInternet,
+    false,
+  );
+  assert.equal(
+    centerContainerSettings({ ...goCenter, ...database, ...everyMailVariable("smtp") })
+      .enableInternet,
+    true,
+  );
+  const revision = "d".repeat(40);
+  const first = centerContainerSettings({ ...goCenter, ...everyMailVariable("postmark") });
+  const rotated = centerContainerSettings({
+    ...goCenter,
+    ...everyMailVariable("postmark"),
+    [`${mailPrefix}POSTMARK_TOKEN`]: "synthetic-word-rotated",
+  });
+  assert.notEqual(await startDigest(revision, first), await startDigest(revision, rotated));
+  // Switching mail off restarts it too: the variables are part of what a start hands the Container.
+  const off = centerContainerSettings(goCenter);
+  assert.notEqual(await startDigest(revision, first), await startDigest(revision, off));
+});
+
+test("the production Container class hands the mail variables to a configured center and none to a disabled one", () => {
+  const environment = {
+    ...goCenter,
+    ARCFORGES_CENTER_DATABASE_URL: "synthetic-runtime-credential",
+  };
+  const configured = new CloudContainer(containerContext, {
+    ...environment,
+    ...everyMailVariable("smtp"),
+  });
+  assert.deepEqual(
+    Object.keys(configured.envVars as Record<string, string>)
+      .filter((name) => name.startsWith(mailPrefix))
+      .sort(),
+    [...mailCommon, ...mailSmtp].sort(),
+  );
+  const disabled = new CloudContainer(containerContext, {
+    ...environment,
+    ...everyMailVariable("disabled"),
+  });
+  assert.deepEqual(
+    Object.keys(disabled.envVars as Record<string, string>).filter((name) =>
+      name.startsWith(mailPrefix),
+    ),
+    [],
+  );
+});
