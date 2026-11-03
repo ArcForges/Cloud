@@ -58,7 +58,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # Measured: 11m59s on the proof dispatch before the live mail adapters (#127), about 15m35s after (Verify the Go center alone went from 4m15s to 7m32s).
+    # Source (ubuntu-latest) on proof dispatches: 11m59s before #127; after #127 11m34s (passed) and cancelled at the 15m cap after 15m14s (Verify the Go center 4m15s -> 5m35s/7m32s).
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
