@@ -420,8 +420,12 @@ func TestTheHostRulesApplyInBothModes(t *testing.T) {
 		for _, bad := range []string{"127.0.0.1", "10.0.0.5", "relay", "localhost", "127.0.0.0x1", "[::1]", "smtp .example.test", "smtp_1.example.test", host(253), host(254)} {
 			custom := smtpEnvironment()
 			custom[EnvMailSMTPMode], custom[EnvMailSMTPHost] = mode, bad
-			if _, err := loadWith(SelfHosted, custom); err == nil {
+			_, err := loadWith(SelfHosted, custom)
+			if err == nil {
 				t.Errorf("mode %s: the host %.40q (%d bytes) was accepted", mode, bad, len(bad))
+			} else if len(bad) > 252 && (!strings.Contains(err.Error(), "at most 252 bytes") || !strings.Contains(err.Error(), EnvMailSMTPHost)) {
+				// The operator is told the limit the center applies: 252 bytes, and the variable.
+				t.Errorf("mode %s: the refusal of a host of %d bytes does not state the limit of 252 bytes: %v", mode, len(bad), err)
 			}
 		}
 		for _, good := range []string{"smtp.example.test", host(250), host(252)} {

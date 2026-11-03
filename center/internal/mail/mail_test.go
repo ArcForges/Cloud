@@ -83,9 +83,10 @@ func TestFakeWaitReturnsOnArrivalAndAtContextEnd(t *testing.T) {
 	}
 }
 
-// TestMessageIsNeverSerializedBinary: encoding/gob ignores the text and JSON marshalers and writes the exported fields, so a Message
-// refuses the binary encoders structurally; the sign-in code never reaches the bytes.
-func TestMessageIsNeverSerializedBinary(t *testing.T) {
+// TestMessageRefusesGobAndTheBinaryMarshalers: encoding/gob ignores the text and JSON marshalers and writes the exported fields, so
+// a Message answers GobEncode and MarshalBinary with an error, and encoding/gob refuses it (it writes no byte of the recipient or
+// the code). An encoder that reads the exported fields itself (encoding/asn1) is not covered by these methods.
+func TestMessageRefusesGobAndTheBinaryMarshalers(t *testing.T) {
 	code := sentinel("gob-code")
 	message := Message{To: "recipient@example.test", Subject: "subject", Text: "Your code is " + code + "\n"}
 	for name, value := range map[string]any{"value": message, "pointer": &message, "slice": []Message{message}, "struct field": struct{ M Message }{message}} {
@@ -105,7 +106,7 @@ func TestMessageIsNeverSerializedBinary(t *testing.T) {
 // TestMessageNeverPrintsItsContents is the structural redaction of the recipient, the subject and the sign-in code: in every shape
 // Go can call the methods through, under the formatting paths listed here (the verbs below, slog's text and JSON handlers, encoding/json;
 // %p and encoding/gob are not among them: %p is a typo-level misuse that fmt answers without a Formatter, and gob is refused by
-// TestMessageIsNeverSerializedBinary) (MOCKED: nothing is sent).
+// TestMessageRefusesGobAndTheBinaryMarshalers) (MOCKED: nothing is sent).
 func TestMessageNeverPrintsItsContents(t *testing.T) {
 	code := sentinel("sign-in-code")
 	message := Message{To: "recipient-" + code + "@example.test", Subject: "subject-" + code, Text: "Your code is " + code + "\n"}

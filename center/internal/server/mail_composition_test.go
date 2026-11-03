@@ -317,9 +317,11 @@ func sourceOf(t *testing.T, node ast.Node) string {
 }
 
 // TestTheShutdownWiringOfRunAndComposeIdentityIsPinned pins what no unit test of the server can run without a delivery in flight: the
-// drain the center stops with is the Drain of the identity service that composeIdentity built (not a no-op and not another
-// service's), it is assigned nowhere else, Run stops through stopServing exactly once with the 5 s of routes.ShutdownMilliseconds,
-// and Run closes the center only by the defer it starts with (so the pools outlive the stop).
+// drain the center stops with is the Drain of the identity service that composeIdentity built (not a no-op), composeIdentity builds
+// exactly one identity service and the request server (identityapi.New) and the pages are given that same variable, so no other
+// service stands in for it; the drain is assigned nowhere else, Run stops through stopServing exactly once with the 5 s of
+// routes.ShutdownMilliseconds, and Run closes the center only by the defer it starts with (so the pools outlive the stop). The
+// comparison is of the text of the expressions: an alias of the service would be reported, which fails closed.
 func TestTheShutdownWiringOfRunAndComposeIdentityIsPinned(t *testing.T) {
 	files := parsedPackageSources(t)
 	assignments := 0
@@ -368,6 +370,47 @@ func TestTheShutdownWiringOfRunAndComposeIdentityIsPinned(t *testing.T) {
 	})
 	if built == "" || built != serviceName {
 		t.Errorf("c.drain is %s.Drain, but composeIdentity built the service %q with identity.New", serviceName, built)
+	}
+	// composeIdentity builds one identity service, and the request server and the pages are given that variable.
+	constructions, served, paged := 0, []string{}, []string{}
+	ast.Inspect(files["server.go"], func(node ast.Node) bool {
+		function, ok := node.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "composeIdentity" {
+			return true
+		}
+		ast.Inspect(function.Body, func(inner ast.Node) bool {
+			switch n := inner.(type) {
+			case *ast.CallExpr:
+				switch sourceOf(t, n.Fun) {
+				case "identity.New":
+					constructions++
+				case "identityapi.New":
+					if len(n.Args) > 0 {
+						served = append(served, sourceOf(t, n.Args[0]))
+					}
+				}
+			case *ast.CompositeLit:
+				if n.Type == nil || sourceOf(t, n.Type) != "composedIdentity" {
+					return true
+				}
+				for _, element := range n.Elts {
+					if pair, isPair := element.(*ast.KeyValueExpr); isPair && sourceOf(t, pair.Key) == "service" {
+						paged = append(paged, sourceOf(t, pair.Value))
+					}
+				}
+			}
+			return true
+		})
+		return false
+	})
+	if constructions != 1 {
+		t.Errorf("composeIdentity calls identity.New %d times", constructions)
+	}
+	if len(served) != 1 || served[0] != serviceName {
+		t.Errorf("c.drain is %s.Drain, but identityapi.New serves requests over %v", serviceName, served)
+	}
+	if len(paged) != 1 || paged[0] != serviceName {
+		t.Errorf("c.drain is %s.Drain, but the pages are given the service %v", serviceName, paged)
 	}
 	stops, closes, deferredCloses := 0, 0, 0
 	ast.Inspect(files["server.go"], func(node ast.Node) bool {

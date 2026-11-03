@@ -321,6 +321,41 @@ func TestDrainWithNothingPendingReturnsAtOnceEvenWithAnEndedContext(t *testing.T
 	}
 }
 
+// TestConcurrentDrainsAreAllReleasedWhenTheLastDeliveryFinishes: the tracker holds for any number of callers of Drain. They wait on the
+// one channel the first drain created and the last delivery releases all of them; a drain that made a new channel for every call
+// would strand the earlier callers until their own bound and report the abandonment of a delivery that finished.
+func TestConcurrentDrainsAreAllReleasedWhenTheLastDeliveryFinishes(t *testing.T) {
+	const drainers = 20
+	release := make(chan struct{})
+	service, _, _ := newDeliverService(senderOf(func(ctx context.Context, _ mail.Message) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	}), false)
+	service.deliver(context.Background(), deliveryMessage(), deliverySignIn)
+	results := make(chan error, drainers)
+	for range drainers {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			results <- service.Drain(ctx)
+		}()
+	}
+	time.Sleep(200 * time.Millisecond) // the drainers are waiting for the pending delivery
+	close(release)
+	released := 0
+	for range drainers {
+		if err := <-results; err == nil {
+			released++
+		}
+	}
+	if released != drainers {
+		t.Errorf("%d of %d concurrent drains returned nil after the delivery finished; the others reported an abandonment", released, drainers)
+	}
+}
+
 // senderOf is a Sender made of a function.
 type senderOf func(context.Context, mail.Message) error
 

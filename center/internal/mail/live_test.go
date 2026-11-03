@@ -16,10 +16,11 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/config"
 )
 
-// The opt-in probes and the owner-run live send. Every live test here SKIPS unless its explicit local switch is set (the two tests that
-// check the gates themselves always run), so no CI leg and no
-// ordinary `go test` contacts a real service (the ordinary run sends nothing beyond the loopback interface). They are the only
-// REAL tests of the package; everything else is MOCKED.
+// The opt-in probes and the owner-run live send. Every live test here SKIPS unless its explicit local switch is set (the three tests
+// that check the gates themselves are not live tests: they run in an ordinary run, except that
+// TestTheOptInTestsSkipWithoutTheirSwitch skips itself when a live switch is set), so no CI leg and no ordinary `go test` contacts a
+// real service (the ordinary run sends nothing beyond the loopback interface). The four live tests are the only REAL tests of the
+// package; everything else is MOCKED.
 //
 //	ARCFORGES_TEST_POSTMARK_LIVE=1             the public Postmark test token against the real API: nothing is delivered (REAL, contract
 //	                                           only: the test token accepts any sender and any stream, so sender, stream and account
@@ -132,9 +133,11 @@ func liveRunPattern() string {
 	return ""
 }
 
-func requireLiveEnvironment(t skipper, getenv func(string) string, run string, names ...string) map[string]string {
+// requireLiveEnvironment skips unless the three gates are open (the -run pattern is the one of this test binary) and every named
+// variable is set; it returns their values.
+func requireLiveEnvironment(t skipper, getenv func(string) string, names ...string) map[string]string {
 	t.Helper()
-	if reason := liveSendRefusal(getenv, run); reason != "" {
+	if reason := liveSendRefusal(getenv, liveRunPattern()); reason != "" {
 		t.Skip(reason)
 	}
 	values := map[string]string{}
@@ -151,13 +154,13 @@ func requireLiveEnvironment(t skipper, getenv func(string) string, run string, n
 }
 
 func TestLiveSendThroughPostmark(t *testing.T) {
-	env := requireLiveEnvironment(t, os.Getenv, liveRunPattern(), "ARCFORGES_TEST_POSTMARK_TOKEN", "ARCFORGES_TEST_MAIL_FROM", "ARCFORGES_TEST_MAIL_RECIPIENT")
+	env := requireLiveEnvironment(t, os.Getenv, "ARCFORGES_TEST_POSTMARK_TOKEN", "ARCFORGES_TEST_MAIL_FROM", "ARCFORGES_TEST_MAIL_RECIPIENT")
 	liveSend(t, NewPostmark(PostmarkOptions{Token: config.NewSecret(env["ARCFORGES_TEST_POSTMARK_TOKEN"]), From: env["ARCFORGES_TEST_MAIL_FROM"],
 		Stream: os.Getenv("ARCFORGES_TEST_POSTMARK_STREAM"), Timeout: 25 * time.Second}))
 }
 
 func TestLiveSendThroughSMTP(t *testing.T) {
-	env := requireLiveEnvironment(t, os.Getenv, liveRunPattern(), "ARCFORGES_TEST_SMTP_HOST", "ARCFORGES_TEST_SMTP_PORT", "ARCFORGES_TEST_SMTP_USERNAME", "ARCFORGES_TEST_SMTP_PASSWORD",
+	env := requireLiveEnvironment(t, os.Getenv, "ARCFORGES_TEST_SMTP_HOST", "ARCFORGES_TEST_SMTP_PORT", "ARCFORGES_TEST_SMTP_USERNAME", "ARCFORGES_TEST_SMTP_PASSWORD",
 		"ARCFORGES_TEST_MAIL_FROM", "ARCFORGES_TEST_MAIL_RECIPIENT")
 	port, err := strconv.Atoi(env["ARCFORGES_TEST_SMTP_PORT"])
 	if err != nil {
@@ -227,33 +230,38 @@ func (r *recordingSkipper) Skipf(format string, args ...any) {
 	r.skipped = append(r.skipped, fmt.Sprintf(format, args...))
 }
 
-// TestTheLiveSendGlueAppliesTheGatesAndNamesTheMissingVariables: requireLiveEnvironment passes the -run pattern and the environment
-// it is given to the three gates, and a missing variable skips naming the variable and nothing else.
+// TestTheLiveSendGlueAppliesTheGatesAndNamesTheMissingVariables: requireLiveEnvironment applies the three gates to the environment it
+// is given and to the -run pattern of the running binary (the test sets that flag, as the two live tests have no other way to
+// receive it), and a missing variable skips naming the variable and nothing else.
 func TestTheLiveSendGlueAppliesTheGatesAndNamesTheMissingVariables(t *testing.T) {
 	open := map[string]string{"ARCFORGES_TEST_MAIL_LIVE_SEND": "1", "ARCFORGES_TEST_MAIL_LIVE_SEND_CONFIRM": liveSendConfirmation, "ARCFORGES_TEST_X": "a", "ARCFORGES_TEST_Y": "b"}
 	getenv := func(name string) string { return open[name] }
-	var all recordingSkipper
-	values := requireLiveEnvironment(&all, getenv, "TestLiveSendThroughPostmark", "ARCFORGES_TEST_X", "ARCFORGES_TEST_Y")
-	if len(all.skipped) != 0 || values["ARCFORGES_TEST_X"] != "a" || values["ARCFORGES_TEST_Y"] != "b" {
-		t.Fatalf("all three gates are open and the variables are set: skipped %v, values %v", all.skipped, values)
-	}
-	var noRun recordingSkipper
-	requireLiveEnvironment(&noRun, getenv, "", "ARCFORGES_TEST_X")
-	if len(noRun.skipped) != 1 || !strings.Contains(noRun.skipped[0], "-run") {
-		t.Errorf("an empty -run did not skip at the third gate: %v", noRun.skipped)
-	}
-	var missing recordingSkipper
-	requireLiveEnvironment(&missing, getenv, "TestLiveSendThroughPostmark", "ARCFORGES_TEST_X", "ARCFORGES_TEST_ABSENT")
-	if len(missing.skipped) != 1 || !strings.Contains(missing.skipped[0], "ARCFORGES_TEST_ABSENT") || strings.Contains(missing.skipped[0], "ARCFORGES_TEST_X,") {
-		t.Errorf("a missing variable: %v", missing.skipped)
-	}
 	// liveRunPattern is the flag of the running binary: it follows -test.run.
 	run := flag.Lookup("test.run")
 	before := run.Value.String()
 	defer func() { _ = run.Value.Set(before) }()
-	for _, pattern := range []string{"^TestSomething$", ""} {
+	setRun := func(pattern string) {
+		t.Helper()
 		if err := run.Value.Set(pattern); err != nil || liveRunPattern() != pattern {
-			t.Errorf("liveRunPattern is %q after the flag was set to %q (%v)", liveRunPattern(), pattern, err)
+			t.Fatalf("liveRunPattern is %q after the flag was set to %q (%v)", liveRunPattern(), pattern, err)
 		}
+	}
+	setRun("^TestLiveSendThroughPostmark$")
+	var all recordingSkipper
+	values := requireLiveEnvironment(&all, getenv, "ARCFORGES_TEST_X", "ARCFORGES_TEST_Y")
+	if len(all.skipped) != 0 || values["ARCFORGES_TEST_X"] != "a" || values["ARCFORGES_TEST_Y"] != "b" {
+		t.Fatalf("all three gates are open and the variables are set: skipped %v, values %v", all.skipped, values)
+	}
+	setRun("")
+	var noRun recordingSkipper
+	requireLiveEnvironment(&noRun, getenv, "ARCFORGES_TEST_X")
+	if len(noRun.skipped) != 1 || !strings.Contains(noRun.skipped[0], "-run") {
+		t.Errorf("an empty -run did not skip at the third gate: %v", noRun.skipped)
+	}
+	setRun("^TestLiveSendThroughPostmark$")
+	var missing recordingSkipper
+	requireLiveEnvironment(&missing, getenv, "ARCFORGES_TEST_X", "ARCFORGES_TEST_ABSENT")
+	if len(missing.skipped) != 1 || !strings.Contains(missing.skipped[0], "ARCFORGES_TEST_ABSENT") || strings.Contains(missing.skipped[0], "ARCFORGES_TEST_X,") {
+		t.Errorf("a missing variable: %v", missing.skipped)
 	}
 }

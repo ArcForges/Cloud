@@ -426,8 +426,6 @@ func checkAddress(t testing.TB, text string) {
 	}
 }
 
-// FuzzValidAddress checks that an address the validator accepts is exactly what net/mail reads as one bare address, with no
-// specials and a letter in the last label. The seeds cover the numeric-last-label forms and the byte bounds.
 // TestValidAddressRefusesTheRecipientListForms: a comma, a semicolon or an angle bracket in the local part would make the recipient a
 // list or a display name in the Postmark To field and in a header; the domain rule refuses them after the @ whatever the local part
 // rule says, so these forms put them before it.
@@ -439,6 +437,9 @@ func TestValidAddressRefusesTheRecipientListForms(t *testing.T) {
 	}
 }
 
+// FuzzValidAddress checks that an address the validator accepts is exactly what net/mail reads as one bare address, with no
+// specials and a letter in the last label. The seeds cover the numeric-last-label forms, the recipient-list forms and the byte
+// bounds.
 func FuzzValidAddress(f *testing.F) {
 	long := addressOfLength(f, 254)
 	for _, seed := range []string{

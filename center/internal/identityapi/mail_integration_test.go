@@ -614,7 +614,7 @@ const bucketPolicy = `{"signInPerPrefixLimit": 1000, "signInFailuresAccountLimit
 // TestAFailedDeliveryNeverRefundsABucketUnderTheDefaultLimits: the per-flow count is not the only state a request leaves. Under the
 // default limits a working provider, a failing provider and an unknown address are given exactly the same sequence of replies, six
 // requests for one address (the sixth is refused by the address bucket after five) and thirteen more addresses of the same /24 (the
-// prefix bucket refuses from the tenth count of the hour on, six of which the first part used). A bucket given back after a failed delivery would let the sixth request through for a
+// prefix bucket refuses from the eleventh count of the hour on; the first part used six of the ten counts it accepts). A bucket given back after a failed delivery would let the sixth request through for a
 // failing known address only, which tells known from unknown one request later than the flow count would. MOCKED sender, real
 // PostgreSQL; each case has a /24 of its own.
 func TestAFailedDeliveryNeverRefundsABucketUnderTheDefaultLimits(t *testing.T) {
@@ -666,10 +666,11 @@ func TestAFailedDeliveryNeverRefundsABucketUnderTheDefaultLimits(t *testing.T) {
 	unknown := run("unknown", "198.51.102", known("u"), false)
 	wantAddress := []string{"ok", "ok", "ok", "ok", "ok", "RESOURCE/rate_limited:email_address"}
 	// The six requests of the first part were counted by the prefix bucket too (the sixth, refused by the address bucket, included), so
-	// four of the thirteen are accepted before the tenth count of the hour.
+	// four of the thirteen are accepted: the tenth count of the hour is the last one accepted.
 	wantPrefix := append(slices.Repeat([]string{"ok"}, 4), slices.Repeat([]string{"RESOURCE/rate_limited:email_prefix"}, 9)...)
 	for label, got := range map[string]result{"working": working, "failing": failing, "unknown": unknown} {
-		// The address bucket counted the five and the prefix bucket counted ten of the thirteen, whatever the provider did.
+		// The address bucket accepted five of its six requests and the prefix bucket four of the thirteen (ten counts with the first
+		// part's six), whatever the provider did.
 		if !slices.Equal(got.addressSequence, wantAddress) || !slices.Equal(got.prefixSequence, wantPrefix) {
 			t.Errorf("%s: address %v, prefix %v; want %v and %v", label, got.addressSequence, got.prefixSequence, wantAddress, wantPrefix)
 		}

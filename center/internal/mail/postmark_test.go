@@ -191,10 +191,12 @@ func TestPostmarkClassifiesEveryAnswer(t *testing.T) {
 	}
 }
 
-// TestEveryPublishedPostmarkErrorCodeKeepsItsClassOnA4xxAndA5xx: the published table of ErrorCodes decides the class on a 5xx too
-// (an unpublished code on a 5xx stays transient), so a code missing from postmarkKnownCode would turn an operator-must-act refusal
-// into an outage. One row per published code, on both statuses; an unpublished code is the control.
-func TestEveryPublishedPostmarkErrorCodeKeepsItsClassOnA4xxAndA5xx(t *testing.T) {
+// TestEachCodeOfTheAdaptersTableKeepsItsClassOnA4xxAndA5xx: the adapter's table of 16 ErrorCodes (postmarkKnownCode) decides the
+// class on a 5xx too (a code outside the table on a 5xx stays transient), so a code missing from the table would turn an
+// operator-must-act refusal into an outage. One row per code of the table, on both statuses; a code outside the table is the
+// control and takes the catch-all (how the real service classes the account, sender, stream and source-address codes is NOT
+// PROVEN until the first live send).
+func TestEachCodeOfTheAdaptersTableKeepsItsClassOnA4xxAndA5xx(t *testing.T) {
 	published := map[int]error{10: ErrUnauthorized, 100: ErrUnavailable, 101: ErrUnavailable, 300: ErrRejected, 402: ErrRejected, 403: ErrRejected,
 		406: ErrRejected, 410: ErrRejected, 411: ErrRejected, 412: ErrUnauthorized, 413: ErrUnauthorized, 422: ErrUnauthorized, 501: ErrUnauthorized,
 		1235: ErrUnauthorized, 1236: ErrUnauthorized, 1480: ErrUnauthorized}
