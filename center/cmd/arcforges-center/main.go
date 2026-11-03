@@ -3,7 +3,8 @@
 // Command arcforges-center is the ArcForges center: one executable that serves the public routes (serve, the default),
 // applies the PostgreSQL migrations (migrate), creates the database, rotates the runtime credential and records its promotion
 // (admin), revokes sessions as the operator's incident tool (admin revoke-sessions), grants and revokes the operator role (admin
-// grant-operator, revoke-operator) and reports its identity (version, --build-info).
+// grant-operator, revoke-operator), registers and retires the center's public signing keys and releases a node ID by revoking its
+// device (admin register-signing-key, retire-signing-key, revoke-device; AF-CTR-04) and reports its identity (version, --build-info).
 package main
 
 import (
@@ -56,6 +57,17 @@ commands:
   admin revoke-operator --account <uuid>
                                    end the account's operator role now (audited as identity.operator.revoked); the owner who
                                    bootstrapped the center stays an operator through the bootstrap
+  admin register-signing-key --purpose command|entitlement --kid <id> --public-key-file <pem|der> --secret-binding <NAME>
+                             --not-before <rfc3339> --not-after <rfc3339>
+                                   record the public half of a signing key (ES256 P-256) whose private half the named platform
+                                   secret holds; nodes receive it with their next sign-in or refresh (audited as
+                                   fleet.signing_key.registered)
+  admin retire-signing-key --kid <id> [--at <rfc3339>]
+                                   retire a signing key now or at the instant (audited as fleet.signing_key.retired); prints how
+                                   many valid keys of its purpose remain
+  admin revoke-device --device <uuid> | --node <uuid>
+                                   revoke a device (named, or as the device of a node ID's live enrollment) with its installations,
+                                   sessions and node rows, freeing the node ID (audited as device.revoked by operator:cli)
   version                          print the build identity as JSON (also --build-info)
   help                             print this help
 
@@ -90,6 +102,9 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	slot := ""
 	var target revokeTarget
 	var role operatorFlags
+	if command == "admin" && (sub == "register-signing-key" || sub == "retire-signing-key" || sub == "revoke-device") {
+		return fleetAdmin(sub, arguments[2:], lookup, stdout, stderr)
+	}
 	switch {
 	case command == "admin" && (sub == "grant-operator" || sub == "revoke-operator"):
 		var ok bool
