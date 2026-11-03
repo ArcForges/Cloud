@@ -278,28 +278,47 @@ test:
 - **The reply never waits for the provider.** The delivery is registered, then run in its own goroutine after the response is built, under
   a 30 s ceiling that no adapter reaches (an adapter's timeout is 10 s by default and 25 s at most). A known and an unknown address get
   equal replies while a send is held (`TestTheReplyNeverWaitsForTheProvider`, the production goroutine path, no wall-clock threshold).
+- **The delivery follows the commit.** `deliver` is called after the transaction returned, never inside its closure (`TestTheCodeIsSentAfterTheCommitAndOutsideTheTransaction`:
+  the flow's send count and the step-up challenge are visible to another connection when `Send` runs).
 - **Known and unknown addresses run the same statements**, and an address with no account is never sent to, not even a dummy message: a
   dummy would spend provider quota and mail third parties (`TestAnUnknownAddressLooksLikeAKnownOne`; no request at the provider, in
   `TestTheEmailClosedLoopsRunThroughEachAdapter`).
 - **The pool is bounded and fails inside the delivery.** At most four sends talk to the provider at once and sixty-four more wait in
   memory; a send past that, or one whose context ends first, is refused as `unavailable` (stage `busy`) and nothing in the reply path can
-  see it. There is no durable queue, outbox or table. Whether a message waits or is lost does not depend on whether another address has an
-  account. The provider's latency and quota, and the order and delay of mails, remain channels that an attacker with a mailbox could observe:
+  see it. There is no durable queue, outbox or table. The decision to wait or to refuse looks only at how many sends are inside the pool, never at the lookup result of the address being
+  mailed; since only addresses with an account enter the pool, other people's accounts can still delay one's mail (the residual below).
+  The provider's latency and quota, and the order and delay of mails, remain channels that an attacker with a mailbox could observe:
   they are residual risks, accepted and documented, not claimed impossible.
 - **No refund.** A failed delivery costs the flow one of its three sends and gives none back: a refund for known accounts would let a caller
   who asks four times tell a known address from an unknown one (`TestAFailedDeliveryNeverRefundsASend`: a flow accepts three requests and
-  refuses the fourth identically for a working provider, a failing provider and an unknown address). A provider outage can exhaust a flow in
+  refuses the fourth identically for a working provider, a failing provider and an unknown address; `TestAFailedDeliveryNeverRefundsABucketUnderTheDefaultLimits`:
+  the same under the default limits for the address bucket, five an hour, and the prefix bucket, ten an hour). A provider outage can exhaust a flow in
   a minute; the user starts a new flow, within the buckets above.
 - **No per-address observable.** `email_send` counts the closed outcome (`sent`, `rejected`, `unavailable`, `unauthorized`, `failed`)
   globally, and the WARN line of a failure carries that word and nothing else: no address, no code, no provider text and no provider code
   (`TestADeliveryLogsNeverAnythingButTheOutcome`). The metrics are operator-only.
-- **Provider failures never reach the caller.** The reply, a header and a status are those of a delivery that worked, for every class of both
-  adapters (`TestAProviderFailureNeverReachesTheReplyAndIsCountedByClass`).
-- **A panic of an adapter is recovered** where the goroutine starts and counted `failed`: an unrecovered panic there would end the process.
+- **Provider failures never reach the caller.** The reply, the HTTP code, the gRPC status and the response headers (apart from the date and the
+  correlation id) of a failed delivery equal those of an address with no account, for every class of both adapters
+  (`TestAProviderFailureNeverReachesTheReplyAndIsCountedByClass`).
+- **A panic inside the Postmark or SMTP adapter is recovered by the adapter itself and counted `unavailable`** (stage `panic`; neither the
+  counter nor the log can tell it from an outage). `deliver` recovers a panic of any other sender where the goroutine starts and counts it
+  `failed`: an unrecovered panic there would end the process.
   The delivery is finished only after its outcome is counted (`TestDrainWaitsUntilARecoveredDeliveryHasBeenCounted`).
 - **Shutdown.** The listeners stop, then `Service.Drain` waits for the deliveries within the rest of the same 5 s; a delivery that starts
   after the drain began is refused (`unavailable`), and what is still running at the bound is abandoned (up to 64 of them wait for a slot)
-  and logged once. Delivery is at-most-once: a stop between the commit and the send loses the code, and the user resends.
+  and logged once; a drain with nothing pending returns at once, so that line appears only when deliveries were abandoned
+  (`TestDrainWithNothingPendingReturnsAtOnceEvenWithAnEndedContext`). The tracker is tested against concurrent deliveries
+  (`TestDeliveriesRaceWithTheDrainOnTheClosedFlag`, whose judge is the race detector of the Linux leg), the one bound of the listeners and the
+  drain by `TestStopServingSpendsOneBoundOnTheListenersAndTheDrainTogether`, and the wiring of the drain into `Run` is pinned by source
+  (`TestTheShutdownWiringOfRunAndComposeIdentityIsPinned`); no test drives a real delivery through the shutdown of `Run`. Delivery is
+  at-most-once: a stop between the commit and the send loses the code, and the user resends.
+
+The address rule of the sign-in is the one rule of the center, `config.ValidMailAddress`, after lower-casing: ASCII, at most 254 bytes (RFC 5321's path limit and the
+providers' limit), a letter in the last label, no hexadecimal IP form, no `=?` in the local part. The text given is bounded before it is lower-cased
+(`TestTheLengthBoundIsOnTheTextGiven`). The Contracts schema allows more: `maxLength: 320` and the pattern `^[!-?A-~]+@[!-?A-~]+$` for the e-mail fields, which is
+also the database check's bound; a client that validates against the schema alone may send an address of 255 to 320 bytes, which the center refuses with
+`VALIDATION/invalid_argument` (the reason names the pattern), and before the live adapters it accepted up to 320 bytes. Tightening the Contracts bound to
+254 is a follow-up of the Contracts repository, and nothing in this change depends on it.
 
 The outcome words, what an operator reads and the verification labels are in [center](center.md#mail-delivery-and-what-an-operator-sees).
 Every test named here is MOCKED (a fake, a gated sender or a double on the loopback interface); those through the adapters need the

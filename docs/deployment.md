@@ -99,9 +99,11 @@ migration `0003` to the production database while production is dark, and to the
 
 E-mail delivery stays **disabled in every environment**: `wrangler.json` names no mail variable (a test fails if one appears), no workflow
 or deploy script references a mail secret, and nothing in this change creates a GitHub secret. The live adapters and the Worker's passthrough
-exist so that the later enabling step needs only the owner's accounts and configuration. **No real account can be mailed even then**: no
-production code creates an e-mail identity, so enabling a provider exercises the adapter, not a path to a user, until a task owns the
-enrollment of an e-mail identity.
+are what the later enabling step builds on; that step still needs the owner's provider accounts and a verified sender domain, a change of the
+deploy step and the secrets path, and the decisions listed below. **No real account can be mailed even then**: no production code creates
+an e-mail identity, so enabling a provider builds the adapter and validates its configuration but nothing calls `Send` until a task owns the
+enrollment of an e-mail identity (the credential is not used and nothing about the provider is tested; the owner-run live send is the only
+test of the credential).
 
 - **The Worker's passthrough** (`worker/foundation/cloud-container.ts`) hands the Go center the mail variables of the provider that
   `ARCFORGES_CENTER_MAIL_PROVIDER` names, exactly, and only those: six names for `postmark`, nine for `smtp` (the lists repeat
@@ -117,13 +119,27 @@ enrollment of an e-mail identity.
   named `MAIL_POSTMARK_TOKEN_ACCEPTANCE` (Postmark) or `MAIL_SMTP_USERNAME_ACCEPTANCE` and `MAIL_SMTP_PASSWORD_ACCEPTANCE` (SES); a secret is
   mapped in the `env:` of the step that deploys, never the job. No production twin is created before AF-PROD-01 chooses between a separate
   GitHub environment with a reviewer and a suffix convention inside the one shared environment (the suffix is a convention, not a boundary).
-  One Postmark Server per environment, its sender signature locked to the one From address, so that a leaked acceptance token cannot send as
-  production. A text scan of the workflows for mail secrets belongs to that step.
+  One Postmark Server per environment gives separate message streams, statistics, suppression lists and revocable tokens. It does **not**
+  restrict the From address: Postmark documents that sender signatures and domains belong to the account, so a token of the acceptance
+  Server can send as any confirmed signature or domain of the same Postmark account, a production domain registered there included.
+  Isolating the production domain from the acceptance token needs a separate Postmark account (or accepting that exposure); the owner decides
+  at H-19 and AF-PROD-01. A text scan of the workflows for mail secrets belongs to that step.
 - **Open before AF-PROD-01:** a Postmark token lets the center send arbitrary mail as the product's DKIM-signed domain, and the Container's
   egress is open (`enableInternet`), so whether mail should instead leave through an outbound handler that fixes the destination is to be
-  decided again before the production environment gets a provider.
+  decided again before the production environment gets a provider. A Postmark Server token not restricting the From address (above)
+  reinforces that decision.
+- **What the enabling change must update.** Statements that turn false once a provider is enabled on an environment: this section and the
+  sentence above it that e-mail delivery stays disabled in every environment, the "E-mail codes" and "Mail delivery" paragraphs of
+  [center identity](center-identity.md#sign-in) (the e-mail method is then offered at API level, and still refused on the browser channel),
+  and the sentence of [entitlement](center-entitlement.md) that the mail sender is disabled in every deployment. Post-deploy expectations
+  that change on that environment: `ListAuthProviders` lists passkey and e-mail; a non-browser e-mail `BeginAuthentication` returns the neutral
+  flow reply; the browser channel still answers `not_offered`; the start line names the provider; the secrets list gains the secret names
+  above; production is unchanged. Risk to state there: enabling mail on an environment before an e-mail identity can exist opens an
+  anonymous request-code surface (each request costs rate-limit state, a flow row and a PBKDF2 run) that can never reach the provider and
+  has no verification value, so the enabling should wait for a task that owns the enrollment of an e-mail identity.
 - **Not proven by this change** (owner steps): the sender domain's DKIM, SPF and DMARC alignment, a message reaching an inbox, the Postmark
-  approval state and the SES sandbox state, and whether a Cloudflare Container can reach SMTP ports at all (the documentation is silent;
+  approval state and the SES sandbox state, the isolation of the production sender from a leaked acceptance Postmark token (Postmark documents
+  none inside one account), and whether a Cloudflare Container can reach SMTP ports at all (the documentation is silent;
   Postmark over 443 is the lower-risk first provider). The evidence table is in [center](center.md#mail-verification-and-the-opt-in-live-tests).
 
 ### Start environment after a deployment
