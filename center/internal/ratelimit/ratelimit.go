@@ -47,12 +47,19 @@ const (
 	// AnonymousFlows counts every flow an anonymous call creates in one global bucket (key "all"), only where the policy sets its
 	// opt-in ceiling (the acceptance environment, C1).
 	AnonymousFlows Kind = "anonymous_flows"
+	// NodeRefreshPrefix counts, per client address prefix, the RefreshNodeSession calls whose token names nothing (malformed or
+	// unknown): a failure bucket, so a call that names a session never waits on it (AF-CTR-04, protocol-8).
+	NodeRefreshPrefix Kind = "node_refresh_prefix"
+	// NodeRefreshSession counts the refreshes of one node session's current token (a spent token is never limited: its reuse runs).
+	NodeRefreshSession Kind = "node_refresh_session"
+	// NodeReportInstallation counts ReportNodeInfo calls per node installation.
+	NodeReportInstallation Kind = "node_report_installation"
 )
 
 // Kinds is every bucket kind.
 func Kinds() []Kind {
 	return []Kind{SignInPrefix, SignInFailuresAccount, EmailPrefix, EmailAddress, RedeemFailuresAddress, RefreshPrefix, StepUpAccount, BootstrapPrefix,
-		AnonymousFlows}
+		AnonymousFlows, NodeRefreshPrefix, NodeRefreshSession, NodeReportInstallation}
 }
 
 // Window is the window of a bucket kind in a policy.
@@ -76,6 +83,12 @@ func Window(policy config.IdentityPolicy, kind Kind) config.Window {
 		return policy.BootstrapPerPrefix
 	case AnonymousFlows:
 		return policy.AnonymousFlows
+	case NodeRefreshPrefix:
+		return policy.NodeRefreshPerPrefix
+	case NodeRefreshSession:
+		return policy.NodeRefreshPerSession
+	case NodeReportInstallation:
+		return policy.NodeReportPerInstallation
 	}
 	return config.Window{}
 }

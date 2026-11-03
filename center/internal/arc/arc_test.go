@@ -48,6 +48,8 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		{CommandIDReused(), "CONFLICT/command_id_reused", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{RevisionConflict(3, 4), "CONFLICT/revision_conflict", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{RateLimited("sign_in_prefix", 30, at), "RESOURCE/rate_limited", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
+		{KeyAlreadyRegistered(), "CONFLICT/already_exists", foundationv1.RetryMode_RETRY_MODE_NEVER},
+		{QuotaExceeded("max_nodes_per_account", 100), "RESOURCE/quota_exceeded", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{Unavailable(), "RESOURCE/overloaded", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
 		{Internal(), "INTERNAL/internal", foundationv1.RetryMode_RETRY_MODE_NEVER},
 	}
@@ -74,7 +76,7 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		case "VALIDATION/invalid_argument", "AUTHORIZATION/permission_denied", "ENTITLEMENT/feature_not_entitled", "STATE/invalid_state", "STATE/not_activated", "STATE/not_found",
 			"CONFLICT/already_exists":
 			detail = "state"
-		case "RESOURCE/rate_limited":
+		case "RESOURCE/rate_limited", "RESOURCE/quota_exceeded":
 			detail = "limit"
 		case "CONFLICT/revision_conflict":
 			detail = "revision"
@@ -132,6 +134,15 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		limited.GetRetry().GetRetryAt().GetUnixSeconds() != at.Unix() || limited.GetRetry().GetRetryAt().GetNanos() != 123456000 ||
 		limited.GetDetails().GetLimit().GetRecoveryAt().GetUnixSeconds() != at.Unix() {
 		t.Fatalf("limit details %v", limited)
+	}
+	// AF-CTR-04: the held-key refusal names the node key and no resource; the node cap names its limit and maximum, no retry instant.
+	if held := KeyAlreadyRegistered().ArcError(call).GetDetails().GetState(); held.GetState() != "node_key" || held.GetReason() != "already_registered" ||
+		held.GetResource() != nil {
+		t.Fatalf("held-key details %v", held)
+	}
+	if capped := QuotaExceeded("max_nodes_per_account", 100).ArcError(call); capped.GetDetails().GetLimit().GetLimitName() != "max_nodes_per_account" ||
+		capped.GetDetails().GetLimit().GetMaximum().GetValue() != "100" || capped.GetRetry().GetRetryAt() != nil {
+		t.Fatalf("quota details %v", capped)
 	}
 	stale := RevisionConflict(3, 4).ArcError(call).GetDetails().GetRevision()
 	if stale.GetExpected().GetValue() != 3 || stale.GetActual().GetValue() != 4 {

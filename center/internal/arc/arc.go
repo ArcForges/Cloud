@@ -244,6 +244,19 @@ func AlreadyExists(kind string, id []byte) *Refusal {
 		Reason: "already_exists", Resource: resource(kind, id)}
 }
 
+// KeyAlreadyRegistered is CONFLICT/already_exists with state.state = "node_key" and state.reason = "already_registered", without a
+// resource (AF-CTR-04, C0 freeze item 4): the node public key a sign-in presents is held by an installation. It never names the
+// installation or its account.
+func KeyAlreadyRegistered() *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "already_exists", State: "node_key", Reason: "already_registered"}
+}
+
+// QuotaExceeded is RESOURCE/quota_exceeded (errors.md: NEVER, limit): a resource cap of the account is reached; the limit names the
+// cap and its maximum (AF-CTR-04: max_nodes_per_account). Retrying does not help until the account frees one.
+func QuotaExceeded(name string, maximum int64) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE, Code: "quota_exceeded", Limit: &Limit{Name: name, Maximum: maximum}}
+}
+
 // RevisionConflict is CONFLICT/revision_conflict: meta.expected_rev differs from the object's current revision (re-read, merge).
 func RevisionConflict(expected, actual int64) *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_CONFLICT, Code: "revision_conflict",

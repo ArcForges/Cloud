@@ -126,7 +126,7 @@ func (s *Service) Refresh(ctx context.Context, request Request, token string, in
 		return SignedIn{}, err
 	}
 	var view *device.View
-	issued, reuse, err := session.Refresh(ctx, s.db, s.policy, token, installationID, s.now(), request.CorrelationID,
+	issued, reuse, err := session.Refresh(ctx, s.db, s.policy, token, session.AccountRefresh(installationID), s.now(), request.CorrelationID,
 		func(ctx context.Context, tx pgx.Tx, issued session.Native) error {
 			var err error
 			if view, err = device.Get(ctx, tx, issued.UserID, issued.DeviceID); err == nil && view == nil {

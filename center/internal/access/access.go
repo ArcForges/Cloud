@@ -17,14 +17,20 @@
 //  2. ownership: the object the call addresses belongs to the caller's account, else STATE/not_found (rows that name an Object);
 //  3. scope and risk: a credential scope the center knows, an account whose state admits the operation, the session upgrade;
 //  4. AGENT/HUMAN separation: the credential's principal is the one the operation serves (account sessions are HUMAN, node and
-//     automation credentials are AGENT);
+//     automation credentials are AGENT), and an AGENT operation admits exactly the credential scopes its row names (a node row
+//     admits a node credential, never an automation one): another scope is refused with the audit reason scope;
 //  5. resource controls: the hook for the controls a composition registers (WithControls; none is composed yet, and the quotas,
 //     budgets and per-account limits of the gated operations arrive with AF-CTR-04, DC-07);
 //  6. audit: an operation whose Audit is AuditBeforeCall appends access.authorized, and a failed append refuses the call;
 //  7. the gate: an operation with a Feature key is refused with ENTITLEMENT/feature_not_entitled unless the feature is available to
 //     the caller's account, and the refusal is audited as access.gated.
 //
-// Essential operations (sign-in, account, billing, security and recovery) carry no Feature and are never gated.
+// Essential operations (sign-in, account, billing, security and recovery) carry no Feature and are never gated. The node enrollment
+// rows of the fleet surface (AF-CTR-04) are essential too (AD-0021 section 13a): node sign-in, refresh, report and sign-out.
+//
+// The audit reasons of access.refused are scope (a credential scope the center does not know, or one the AGENT row does not admit),
+// restricted (a restricted account on a row it may not reach), principal (an AGENT credential on a HUMAN row or the reverse) and
+// subject; the reply is always AUTHORIZATION/permission_denied with state operation and the operation ID as its reason.
 package access
 
 import (
@@ -32,6 +38,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -106,7 +113,8 @@ const UpgradeClass = "identity.upgradeSession"
 // Operation is one row of the operation table.
 type Operation struct {
 	Path string
-	// ID is the contract operation ID (con-07), the permission_denied reason and the step-up operation class.
+	// ID is the contract operation ID (con-07), the permission_denied reason and the step-up operation class. con-07 names no fleet
+	// operation, so the fleet rows carry center-defined IDs fleet.<method in lower camel case> (AF-CTR-04).
 	ID string
 	// Risk is the contract risk class (R1 to R4).
 	Risk string
@@ -124,9 +132,10 @@ type Operation struct {
 	// Feature is the gated feature key of the operation (AD-0021 section 13a), or empty for an essential operation, which is never
 	// gated. A gated operation is a session operation audited before the call (AuditBeforeCall).
 	Feature feature.Key
-	// Agent is true for an operation served to AGENT credentials (node and automation scopes) instead of HUMAN account sessions
-	// (account and mobile.limited). No identity row is an agent operation.
-	Agent bool
+	// Scopes are the credential scopes of an operation served to AGENT credentials instead of HUMAN account sessions: empty for a HUMAN
+	// row (account and mobile.limited), otherwise a subset of the AGENT scopes node and automation, and only those are admitted (a
+	// node row refuses an automation credential). No identity row is an agent operation; the fleet node rows admit node only.
+	Scopes []string
 	// Object is the kind of the object the call addresses (device, task, ...), or empty. Authorize then needs the object's owner (a
 	// Subject) and answers STATE/not_found for an object of another account before it decides anything else.
 	Object string
@@ -242,7 +251,7 @@ func Lookup(path string) (Operation, bool) {
 	return Operation{}, false
 }
 
-// Check compares the table with the served methods of the identity surface: every served method has exactly one row whose
+// Check compares the table with the served methods of the identity and fleet surfaces: every served method has exactly one row whose
 // session requirement matches its policy, and every row is served.
 func Check(served []ingress.Policy) error { return checkTable(Operations(), served) }
 
@@ -279,7 +288,8 @@ func checkTable(table []Operation, served []ingress.Policy) error {
 
 // CheckRow refuses a row that contradicts itself: evidence and its target go together; an anonymous row carries nothing that needs
 // a caller; a Feature is a gated key, is audited before the call and belongs to a session operation; an R3 or higher row is audited;
-// an agent operation is no mobile.limited, restricted or step-up row, because those rules are about a person's session.
+// an agent operation names only the agent scopes and is no mobile.limited or step-up row, because those rules are about a person's
+// session (a restricted account's node may still reach an agent row marked Restricted, such as its own sign-out).
 func CheckRow(operation Operation) error {
 	inconsistent := func(why string) error {
 		return fmt.Errorf("the operation row of %s is inconsistent: %s", operation.Path, why)
@@ -288,7 +298,7 @@ func CheckRow(operation Operation) error {
 	case (operation.StepUp != NoEvidence) != (operation.Target != ""):
 		return inconsistent("evidence and its target go together")
 	case !operation.Session && (operation.StepUp != NoEvidence || operation.Receipt || operation.MobileLimited != Allowed || operation.Restricted ||
-		operation.Agent || operation.Object != "" || operation.Audit != NoAudit):
+		len(operation.Scopes) > 0 || operation.Object != "" || operation.Audit != NoAudit):
 		// A gated row is audited before the call, so it is caught here as well.
 		return inconsistent("an anonymous row needs no caller")
 	case operation.Feature != "" && !feature.IsGated(operation.Feature):
@@ -301,8 +311,15 @@ func CheckRow(operation Operation) error {
 		return inconsistent("only a gated or high-risk row is audited before the call")
 	case (operation.Risk == "R3" || operation.Risk == "R4") && operation.Audit == NoAudit:
 		return inconsistent("a high-risk row is audited")
-	case operation.Agent && (operation.MobileLimited != Allowed || operation.Restricted || operation.StepUp != NoEvidence):
+	case len(operation.Scopes) > 0 && (operation.MobileLimited != Allowed || operation.StepUp != NoEvidence):
 		return inconsistent("an agent row follows no person's session rule")
+	}
+	seen := map[string]bool{}
+	for _, scope := range operation.Scopes {
+		if principal, known := PrincipalOf(scope); !known || principal != Agent || seen[scope] {
+			return inconsistent("an agent row names each agent scope it admits once (node, automation)")
+		}
+		seen[scope] = true
 	}
 	return nil
 }
@@ -329,7 +346,7 @@ func PrincipalOf(scope string) (Principal, bool) {
 }
 
 func (o Operation) principal() Principal {
-	if o.Agent {
+	if len(o.Scopes) > 0 {
 		return Agent
 	}
 	return Human
@@ -430,9 +447,12 @@ func (a *Authorizer) AuthorizeSubject(ctx context.Context, call *ingress.Call, s
 	case operation.MobileLimited == Upgrade && operation.NeedsUpgrade(caller, false):
 		return operation, arc.StepUpRequired()
 	}
-	// 4. AGENT/HUMAN separation.
+	// 4. AGENT/HUMAN separation, and the exact scopes of an AGENT row.
 	if principal != operation.principal() {
 		return operation, a.refuse(ctx, call, operation, "principal")
+	}
+	if principal == Agent && !slices.Contains(operation.Scopes, caller.Scope) {
+		return operation, a.refuse(ctx, call, operation, "scope")
 	}
 	// 5. Resource controls.
 	for _, control := range a.controls {

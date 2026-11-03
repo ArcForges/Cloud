@@ -46,12 +46,29 @@ type Metrics struct {
 	latencies map[string]*histogram
 	refusals  map[refusalKey]uint64
 	identity  map[eventKey]uint64
+	fleet     map[eventKey]uint64
 }
+
+// FleetOutcomes is the closed label set of the fleet surface's events (AF-CTR-04, CR-02): refresh of a node session (rotated, a
+// spent token's reuse, refused, rate limited), an enrollment (first or re-enrolled, and its refusals: the node ID live in another
+// account, the key held live, the key retired, the node cap, an approval that lapsed), a report of node info (changed or not) and a
+// node's sign-out. ObserveFleet counts only these pairs; any other pair is counted as unlisted, which a test refuses.
+func FleetOutcomes() map[string][]string {
+	return map[string][]string{
+		"refresh":  {"rotated", "reused", "refused", "rate_limited"},
+		"enroll":   {"first", "reenrolled", "node_conflict", "key_registered", "key_retired", "quota", "lapsed"},
+		"report":   {"changed", "unchanged"},
+		"sign_out": {"signed_out"},
+	}
+}
+
+// Unlisted is the label pair a fleet event outside FleetOutcomes is counted under.
+const Unlisted = "unlisted"
 
 // NewMetrics is an empty metrics registry.
 func NewMetrics() *Metrics {
 	return &Metrics{requests: map[requestKey]uint64{}, latencies: map[string]*histogram{}, refusals: map[refusalKey]uint64{},
-		identity: map[eventKey]uint64{}}
+		identity: map[eventKey]uint64{}, fleet: map[eventKey]uint64{}}
 }
 
 // ObserveRequest counts one finished request.
@@ -89,6 +106,19 @@ func (m *Metrics) ObserveIdentity(event, outcome string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.identity[eventKey{event, outcome}]++
+}
+
+// ObserveFleet counts one outcome of the fleet surface; both labels are closed values of FleetOutcomes chosen by the code.
+func (m *Metrics) ObserveFleet(event, outcome string) {
+	key := eventKey{Unlisted, Unlisted}
+	for _, listed := range FleetOutcomes()[event] {
+		if listed == outcome {
+			key = eventKey{event, outcome}
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fleet[key]++
 }
 
 // WritePrometheus writes the metrics in the Prometheus text exposition format (version 0.0.4).
@@ -148,6 +178,18 @@ func (m *Metrics) WritePrometheus(writer io.Writer) error {
 	for _, key := range events {
 		fmt.Fprintf(&text, "arcforges_center_identity_events_total{event=%q,outcome=%q} %d\n", key.event, key.outcome, m.identity[key])
 	}
+	text.WriteString("# HELP arcforges_center_fleet_events_total Fleet surface outcomes, by event and outcome.\n")
+	text.WriteString("# TYPE arcforges_center_fleet_events_total counter\n")
+	fleet := make([]eventKey, 0, len(m.fleet))
+	for key := range m.fleet {
+		fleet = append(fleet, key)
+	}
+	sort.Slice(fleet, func(i, j int) bool {
+		return fleet[i].event+"\x00"+fleet[i].outcome < fleet[j].event+"\x00"+fleet[j].outcome
+	})
+	for _, key := range fleet {
+		fmt.Fprintf(&text, "arcforges_center_fleet_events_total{event=%q,outcome=%q} %d\n", key.event, key.outcome, m.fleet[key])
+	}
 	_, err := io.WriteString(writer, text.String())
 	return err
 }
@@ -156,7 +198,7 @@ func (m *Metrics) WritePrometheus(writer io.Writer) error {
 func (m *Metrics) Summary() map[string]uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	summary := make(map[string]uint64, len(m.requests)+len(m.refusals)+len(m.identity))
+	summary := make(map[string]uint64, len(m.requests)+len(m.refusals)+len(m.identity)+len(m.fleet))
 	for key, count := range m.requests {
 		summary[key.method+" "+key.code] = count
 	}
@@ -165,6 +207,9 @@ func (m *Metrics) Summary() map[string]uint64 {
 	}
 	for key, count := range m.identity {
 		summary["identity "+key.event+" "+key.outcome] += count
+	}
+	for key, count := range m.fleet {
+		summary["fleet "+key.event+" "+key.outcome] += count
 	}
 	return summary
 }

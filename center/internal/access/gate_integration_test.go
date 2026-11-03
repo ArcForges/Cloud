@@ -53,7 +53,7 @@ func probeRows() []Operation {
 		rows = append(rows, Operation{Path: probePrefix + method(key), ID: "probe." + string(key), Risk: "R2", Session: true, Feature: key, Audit: AuditBeforeCall})
 	}
 	return append(rows,
-		Operation{Path: probePrefix + "Agent", ID: "probe.agent", Risk: "R2", Session: true, Agent: true, Feature: feature.CenterNodes, Audit: AuditBeforeCall},
+		Operation{Path: probePrefix + "Agent", ID: "probe.agent", Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes, Audit: AuditBeforeCall},
 		Operation{Path: probePrefix + "Device", ID: "probe.device", Risk: "R2", Session: true, Object: "device", Feature: feature.RemoteView, Audit: AuditBeforeCall},
 		Operation{Path: probePrefix + "Upgrade", ID: "probe.upgrade", Risk: "R2", Session: true, MobileLimited: Upgrade, Feature: feature.CenterExecute, Audit: AuditBeforeCall},
 		Operation{Path: probePrefix + "Essential", ID: "probe.essential", Risk: "R1", Session: true},
@@ -543,7 +543,7 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 		"a gated row that is not audited":                 func(o *Operation) { o.Audit = NoAudit },
 		"a gated row audited in its transaction":          func(o *Operation) { o.Audit = AuditInTransaction },
 		"an anonymous gated row":                          func(o *Operation) { o.Session = false },
-		"an anonymous agent row":                          func(o *Operation) { o.Session, o.Feature, o.Audit, o.Agent = false, "", NoAudit, true },
+		"an anonymous agent row":                          func(o *Operation) { o.Session, o.Feature, o.Audit, o.Scopes = false, "", NoAudit, []string{"node"} },
 		"an anonymous row that names an object":           func(o *Operation) { o.Session, o.Feature, o.Audit, o.Object = false, "", NoAudit, "device" },
 		"an anonymous row with a receipt":                 func(o *Operation) { o.Session, o.Feature, o.Audit, o.Receipt = false, "", NoAudit, true },
 		"an anonymous row a restricted account may reach": func(o *Operation) { o.Session, o.Feature, o.Audit, o.Restricted = false, "", NoAudit, true },
@@ -551,9 +551,11 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 		"an R3 row that is not audited":                   func(o *Operation) { o.Feature, o.Audit, o.Risk = "", NoAudit, "R3" },
 		"an R4 row that is not audited":                   func(o *Operation) { o.Feature, o.Audit, o.Risk = "", NoAudit, "R4" },
 		"an R1 row audited before the call":               func(o *Operation) { o.Feature, o.Risk = "", "R1" },
-		"an agent row with a mobile.limited rule":         func(o *Operation) { o.Agent, o.MobileLimited = true, Upgrade },
-		"an agent row a restricted account may reach":     func(o *Operation) { o.Agent, o.Restricted = true, true },
-		"an agent row that needs step-up evidence":        func(o *Operation) { o.Agent, o.StepUp, o.Target = true, Evidence, TargetAccount },
+		"an agent row with a mobile.limited rule":         func(o *Operation) { o.Scopes, o.MobileLimited = []string{"node"}, Upgrade },
+		"an agent row that needs step-up evidence":        func(o *Operation) { o.Scopes, o.StepUp, o.Target = []string{"node"}, Evidence, TargetAccount },
+		"an agent row of a HUMAN scope":                   func(o *Operation) { o.Scopes = []string{"account"} },
+		"an agent row of the push scope":                  func(o *Operation) { o.Scopes = []string{"push"} },
+		"an agent row that names a scope twice":           func(o *Operation) { o.Scopes = []string{"node", "node"} },
 		"evidence without a target":                       func(o *Operation) { o.StepUp = Evidence },
 		"a target without evidence":                       func(o *Operation) { o.Target = TargetDevice },
 	} {
@@ -563,12 +565,27 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 			t.Errorf("%s was admitted", name)
 		}
 	}
-	// The R3 identity rows are audited by their handlers, and no identity row is gated, agent or object-addressed.
+	// cloud-4: an essential agent row a restricted account's node may reach (its sign-out) is admitted, for node and automation.
+	for _, scopes := range [][]string{{"node"}, {"node", "automation"}} {
+		agent := Operation{Path: probePrefix + "SignOut", ID: "probe.signOut", Risk: "R2", Session: true, Scopes: scopes, Restricted: true, Receipt: true,
+			Audit: AuditInTransaction}
+		if err := CheckRow(agent); err != nil {
+			t.Errorf("%v: %v", scopes, err)
+		}
+	}
+	// The R3 identity rows are audited by their handlers, and no identity row is gated, agent or object-addressed; no fleet row is
+	// gated (AD-0021 section 13a: node enrollment is an account and device operation).
 	for _, operation := range Operations() {
 		if err := CheckRow(operation); err != nil {
 			t.Error(err)
 		}
-		if operation.Feature != "" || operation.Agent || operation.Object != "" || operation.Audit == AuditBeforeCall {
+		if strings.HasPrefix(operation.ID, "fleet.") {
+			if operation.Feature != "" || operation.Object != "" || operation.Audit == AuditBeforeCall {
+				t.Errorf("%s: a fleet row carries a gate rule", operation.ID)
+			}
+			continue
+		}
+		if operation.Feature != "" || len(operation.Scopes) > 0 || operation.Object != "" || operation.Audit == AuditBeforeCall {
 			t.Errorf("%s: an essential identity row carries a gate rule", operation.ID)
 		}
 		if (operation.Risk == "R3") != (operation.Audit == AuditInTransaction) {
