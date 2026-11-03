@@ -371,8 +371,10 @@ def smoke(executable: Path, linux: bool) -> dict[str, object]:
             reply = http.client.HTTPResponse(connection)
             reply.begin()
             body = reply.read()
-        if body != b"\x80\x00\x00\x00\x2egrpc-status: 12\r\ngrpc-message: unimplemented\r\n":
-            raise SystemExit("[center] an unregistered method was not refused as UNIMPLEMENTED")
+        # The center answers the refusal with HTTP 200 and the trailers in the body (WriteRefusal). urllib raised on any other status;
+        # http.client reports it without raising, so the status is compared here as well as the body.
+        if reply.status != 200 or body != b"\x80\x00\x00\x00\x2egrpc-status: 12\r\ngrpc-message: unimplemented\r\n":
+            raise SystemExit(f"[center] an unregistered method was not refused as UNIMPLEMENTED (HTTP {reply.status})")
     finally:
         process.terminate()
         code = process.wait(timeout=30)
