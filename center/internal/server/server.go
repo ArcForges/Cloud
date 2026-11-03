@@ -643,8 +643,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 // stopServing is the shutdown sequence of Run: the listeners stop, then the identity surface's deliveries drain, all within one
 // bound (the five seconds of routes.ShutdownMilliseconds in Run; a parameter so that a test does not wait for them). Run's deferred
-// Close then closes the pools, so no delivery outlives its store. A delivery still running at the bound is abandoned and logged;
-// that includes the ones waiting for a slot in the mail guard (up to 64), which the process exit ends.
+// Close then closes the pools. A delivery still running at the bound is abandoned and logged, and it may outlive the pools; that
+// includes the ones waiting for a slot in the mail guard (up to 64), which the process exit ends (a delivery touches no store today).
 func (c *Center) stopServing(servers []*http.Server, bound time.Duration) {
 	shutdown, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()

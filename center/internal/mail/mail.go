@@ -18,7 +18,9 @@
 // What this package does NOT make possible: no real account can be mailed. No production code creates an e-mail identity (the
 // only non-test INSERT INTO identity.auth_identity statements enroll passkeys), so the sign-in-code surface opens when a sender is
 // Enabled but never reaches Send for a real account, and the browser channel refuses e-mail unconditionally. A mail setup
-// therefore proves nothing about delivery to a user; it is the adapter, not the product path, that is exercised.
+// therefore proves nothing about delivery to a user, and enabling a provider tests nothing about the provider: the adapter is built and
+// its configuration validated, but nothing calls Send until an e-mail identity can exist. The credential is used only by the opt-in live
+// send.
 //
 // Failures are typed (Error, with the classes ErrRejected, ErrUnavailable and ErrUnauthorized) and their text holds closed words
 // and numbers only (the HTTP status, the SMTP reply code or the Postmark ErrorCode among them): never an address, a sign-in code,
@@ -57,7 +59,8 @@ func (Message) String() string { return redactedMessage }
 // GoString is the marker.
 func (Message) GoString() string { return redactedMessage }
 
-// Format prints the marker for every verb (a struct of strings would otherwise print its fields for %d).
+// Format prints the marker for every verb except %p (fmt prints a bad verb's operand without consulting a Formatter, and go vet does not
+// report it; a Message is never formatted with %p). A struct of strings would otherwise print its fields for %d.
 func (Message) Format(f fmt.State, _ rune) { _, _ = f.Write([]byte(redactedMessage)) }
 
 // LogValue is the marker.
@@ -68,6 +71,17 @@ func (Message) MarshalText() ([]byte, error) { return []byte(redactedMessage), n
 
 // MarshalJSON is the marker.
 func (Message) MarshalJSON() ([]byte, error) { return []byte(`"` + redactedMessage + `"`), nil }
+
+// errSerialized is what the binary encoders answer: a Message is never serialized as bytes (encoding/gob would otherwise write its
+// exported fields, the recipient, the subject and the sign-in code, in clear text; no code serializes a Message, and a durable queue
+// is excluded by design).
+var errSerialized = errors.New("mail: a Message is never serialized")
+
+// GobEncode refuses: encoding/gob ignores MarshalText and MarshalJSON and writes the exported fields.
+func (Message) GobEncode() ([]byte, error) { return nil, errSerialized }
+
+// MarshalBinary refuses, like GobEncode (the binary encoders of the standard library and of gob-like libraries look for it).
+func (Message) MarshalBinary() ([]byte, error) { return nil, errSerialized }
 
 // Sender delivers messages.
 type Sender interface {

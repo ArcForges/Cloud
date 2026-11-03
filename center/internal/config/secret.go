@@ -47,7 +47,7 @@ func (Secret) String() string { return redacted }
 // GoString is the marker.
 func (Secret) GoString() string { return redacted }
 
-// Format prints the marker for every verb.
+// Format prints the marker for every verb except %p (fmt bypasses a Formatter for it; a Secret then prints an address, never the value).
 func (Secret) Format(f fmt.State, _ rune) { _, _ = f.Write([]byte(redacted)) }
 
 // LogValue is the marker.

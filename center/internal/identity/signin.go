@@ -38,7 +38,7 @@ type Begin struct {
 	HasClaim   bool
 	// Browser is a browser's begin on the account pages (the WebBrowserSession routes): the flow belongs to the browser channel and
 	// to the relying party's origin, the claim is a WebBrowserInstallationClaim (product arcforges-web), and only the passkey method
-	// is offered (e-mail codes on the browser channel arrive with the live mail adapters).
+	// is offered (e-mail is refused on the browser channel whether or not a sender is live: a decision, not a gap).
 	Browser bool
 }
 

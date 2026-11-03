@@ -19,41 +19,59 @@ const (
 // deliveryTimeout is the context of one send; the adapters' own timeout (at most 25 s) is below it.
 const deliveryTimeout = 30 * time.Second
 
-// deliveries tracks the sends that follow a response, so that the shutdown can wait for them.
+// deliveries tracks the sends that follow a response, so that the shutdown can wait for them. The count and the closed flag sit under
+// one mutex; idle is created by the first drain and closed, once, when the tracker is closed and no delivery is pending.
 type deliveries struct {
-	mu     sync.Mutex
-	closed bool
-	wait   sync.WaitGroup
+	mu      sync.Mutex
+	closed  bool
+	pending int
+	idle    chan struct{}
 }
 
-// add registers one delivery, synchronously and BEFORE its goroutine exists (a Wait that raced a later Add would be undefined), and
-// reports false once the tracker is closed: a delivery that arrives after the shutdown began is refused, not started.
+// add registers one delivery, synchronously and BEFORE its goroutine exists, and reports false once the tracker is closed: a delivery
+// that arrives after the shutdown began is refused, not started.
 func (d *deliveries) add() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
 		return false
 	}
-	d.wait.Add(1)
+	d.pending++
 	return true
 }
 
-func (d *deliveries) done() { d.wait.Done() }
+// done ends one delivery; the last one after the tracker was closed releases the drain.
+func (d *deliveries) done() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.pending--
+	if d.closed && d.pending == 0 {
+		close(d.idle)
+	}
+}
 
 // drain closes the tracker and waits until every accepted delivery has finished or ctx ends, whichever comes first; it returns
-// ctx's error in the second case. The deliveries that are still running then are abandoned: that includes the goroutines that wait
-// in the mail guard for a slot (up to 64 of them), which the process exit ends.
+// ctx's error in the second case, and nil at once, even for an ended ctx, when no delivery is pending. The deliveries that are still
+// running then are abandoned: that includes the goroutines that wait in the mail guard for a slot (up to 64 of them), which the
+// process exit ends.
 func (d *deliveries) drain(ctx context.Context) error {
 	d.mu.Lock()
-	d.closed = true
+	if !d.closed {
+		d.closed = true
+		d.idle = make(chan struct{})
+		if d.pending == 0 {
+			close(d.idle)
+		}
+	}
+	idle := d.idle
 	d.mu.Unlock()
-	finished := make(chan struct{})
-	go func() {
-		d.wait.Wait()
-		close(finished)
-	}()
 	select {
-	case <-finished:
+	case <-idle:
+		return nil
+	default:
+	}
+	select {
+	case <-idle:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

@@ -169,7 +169,7 @@ func loadSMTP(mail Mail, values map[string]string) (Mail, error) {
 	mail.SMTPHost = values[EnvMailSMTPHost]
 	// A DNS name of at least two labels with a letter in the last one: an IP literal is refused (the certificate is checked by name).
 	if !ValidMailAddress("a@" + mail.SMTPHost) {
-		return Mail{}, invalid("%s must be a DNS name of at least two labels (an IP address is refused), at most 253 bytes", EnvMailSMTPHost)
+		return Mail{}, invalid("%s must be a DNS name of at least two labels (an IP address is refused), at most 252 bytes", EnvMailSMTPHost)
 	}
 	port := DefaultStartTLSPort
 	if mail.SMTPMode == MailTLS {
