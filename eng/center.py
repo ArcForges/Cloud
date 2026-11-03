@@ -15,11 +15,13 @@ control and never modifies a tracked file.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -358,10 +360,17 @@ def smoke(executable: Path, linux: bool) -> dict[str, object]:
         if health["runtime"] != "go" or health["center"] != {"binary": "arcforges-center", "mode": "self-hosted",
                                                               "publicBaseUrl": "http://127.0.0.1:8080", "surfaces": "none"}:
             raise SystemExit("[center] the self-hosted health document is wrong")
-        request = urllib.request.Request(f"http://{address}/arcforges.hello.v1.HelloService/Unknown", data=b"\0\0\0\0\0",
-                                         headers={"Content-Type": "application/grpc-web+proto"}, method="POST")
-        with opener.open(request, timeout=10) as response:
-            body = response.read()
+        # One write for the head and the five body bytes. The center answers a method it does not know before it reads the body and
+        # closes the connection; a body that follows in a second segment (what urllib sends) reaches a closed socket, and some TCP
+        # stacks (Windows) then reset the connection under the answer: a WinError 10054 in about one smoke in fifty.
+        head = (f"POST /arcforges.hello.v1.HelloService/Unknown HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/grpc-web+proto\r\n"
+                "Content-Length: 5\r\nConnection: close\r\n\r\n").encode("ascii")
+        host, _, port = address.rpartition(":")
+        with socket.create_connection((host.strip("[]"), int(port)), timeout=10) as connection:
+            connection.sendall(head + b"\0\0\0\0\0")
+            reply = http.client.HTTPResponse(connection)
+            reply.begin()
+            body = reply.read()
         if body != b"\x80\x00\x00\x00\x2egrpc-status: 12\r\ngrpc-message: unimplemented\r\n":
             raise SystemExit("[center] an unregistered method was not refused as UNIMPLEMENTED")
     finally:
