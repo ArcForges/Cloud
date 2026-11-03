@@ -37,10 +37,9 @@ print(json.dumps(result))
 `;
 
 test("stop_process lets a child that exits on the stop request go and kills one that does not", () => {
-  const run = spawnSync("python", ["-I", "-c", harness, path.join(root, "eng/center.py")], {
+  const run = spawnSync("python", ["-I", "-B", "-c", harness, path.join(root, "eng/center.py")], {
     encoding: "utf8",
     timeout: 60_000,
-    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
   });
   assert.equal(run.status, 0, run.stderr);
   const result = JSON.parse(run.stdout.trim().split("\n").at(-1) as string) as Record<
