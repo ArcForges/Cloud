@@ -40,7 +40,7 @@ func leaks(text, sentinel string) []string {
 }
 
 // TestSecretNeverPrintsItsValue runs the shapes a credential can be reached through (a bare value, an exported field, an
-// unexported field, a slice, a map, a pointer) through every formatting path (MOCKED: no provider is involved). The shapes with
+// unexported field, a slice, a map, a pointer) through the verbs, handlers and encoders this test lists (not %p, which fmt answers without a Formatter) (MOCKED: no provider is involved). The shapes with
 // an unexported field are the ones a plain-string Secret fails: fmt cannot call methods on a value reached through an unexported
 // field, so only the pointer keeps the string out of reach.
 func TestSecretNeverPrintsItsValue(t *testing.T) {

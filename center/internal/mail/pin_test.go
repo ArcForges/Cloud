@@ -23,7 +23,9 @@ import (
 // address-taken; VerifyConnection, VerifyPeerCertificate, DialTLS, DialTLSContext); tls.Config only inside internal/mail, only as a
 // literal there, whose MinVersion is tls.VersionTLS12 or tls.VersionTLS13 and whose other keys are on an allow-list, and no later
 // assignment of MinVersion, CipherSuites, Renegotiation or KeyLogWriter outside the test double; the test-only options RootCAs,
-// Dial, BaseURL, Client and Proxy set nowhere outside package mail; no environment proxy, default HTTP client or default transport,
+// Dial, BaseURL, Client and Proxy (and Now in package mail) set, by key or by assignment (parentheses included), only in smtp.go and
+// postmark.go, the adapters' own files, and in New by no key, assignment or positional literal (TestNewSetsNoTestOnlyOption, backed
+// by the behavioural checks of new_test.go); no environment proxy, default HTTP client or default transport,
 // no http.Get-style helper; no environment read in internal/mail; net/smtp imported only by smtp.go; no dot import of the packages
 // above; Secret.Reveal referenced (called or taken as a method value) only in the two adapters; mailtest imported by no non-test file
 // and importing nothing of this repository.
@@ -39,6 +41,7 @@ const (
 	mailDirectory = "internal/mail/"
 	mailtestDir   = "internal/mail/mailtest/"
 	smtpFile      = "internal/mail/smtp.go"
+	postmarkFile  = "internal/mail/postmark.go"
 )
 
 // revealAllowed are the only non-test files that may reference Secret.Reveal.
@@ -178,7 +181,7 @@ func scanSources(files sourceSet) []string {
 			switch n := node.(type) {
 			case *ast.AssignStmt:
 				for _, lhs := range n.Lhs {
-					selector, ok := lhs.(*ast.SelectorExpr)
+					selector, ok := unparen(lhs).(*ast.SelectorExpr)
 					if !ok {
 						continue
 					}
@@ -192,8 +195,12 @@ func scanSources(files sourceSet) []string {
 							report(ruleTLSAssign, path, "an assignment of "+selector.Sel.Name)
 						}
 					case "RootCAs", "Dial", "BaseURL", "Client", "Proxy":
-						if !inMail || inMailtest {
+						if path != smtpFile && path != postmarkFile {
 							report(ruleOption, path, "an assignment of "+selector.Sel.Name)
+						}
+					case "Now":
+						if inMail && path != smtpFile && path != postmarkFile {
+							report(ruleOption, path, "an assignment of Now")
 						}
 					}
 				}
@@ -209,8 +216,12 @@ func scanSources(files sourceSet) []string {
 					case "VerifyConnection", "VerifyPeerCertificate", "DialTLS", "DialTLSContext":
 						report(ruleHook, path, "the key "+key.Name)
 					case "RootCAs", "Dial", "BaseURL", "Client", "Proxy":
-						if !inMail || inMailtest {
+						if path != smtpFile && path != postmarkFile {
 							report(ruleOption, path, "the key "+key.Name)
+						}
+					case "Now":
+						if inMail && path != smtpFile && path != postmarkFile {
+							report(ruleOption, path, "the key Now")
 						}
 					}
 				}
@@ -420,6 +431,10 @@ func TestTheScanSeesEveryForbiddenForm(t *testing.T) {
 		{"Dial key outside the mail package", real.with("internal/identity/x.go", "package other\n\ntype o struct{ Dial int }\n\nvar _ = o{Dial: 1}\n"), ruleOption},
 		{"BaseURL assigned outside the mail package", real.with("internal/server/x.go", "package other\n\ntype o struct{ BaseURL string }\n\nfunc f(p *o) { p.BaseURL = \"x\" }\n"), ruleOption},
 		{"Client key outside the mail package", real.with("internal/server/x.go", "package other\n\ntype o struct{ Client int }\n\nvar _ = o{Client: 1}\n"), ruleOption},
+		{"RootCAs assigned in a sibling file of package mail", real.appended(t, "internal/mail/guard.go", "func relaxed(c *struct{ RootCAs int }) { c.RootCAs = 1 }"), ruleOption},
+		{"RootCAs assigned in parentheses in a sibling file", real.appended(t, "internal/mail/guard.go", "func relaxed(c *struct{ RootCAs int }) { (c.RootCAs) = 1 }"), ruleOption},
+		{"Dial key in a sibling file of package mail", real.appended(t, "internal/mail/guard.go", "var _ = struct{ Dial int }{Dial: 1}"), ruleOption},
+		{"Now key in a sibling file of package mail", real.appended(t, "internal/mail/guard.go", "var _ = struct{ Now int }{Now: 1}"), ruleOption},
 		{"Proxy key in mailtest", real.with("internal/mail/mailtest/x.go", "package mailtest\n\ntype o struct{ Proxy int }\n\nvar _ = o{Proxy: 1}\n"), ruleOption},
 		{"RootCAs key in mailtest", real.with("internal/mail/mailtest/x.go", "package mailtest\n\ntype o struct{ RootCAs int }\n\nvar _ = o{RootCAs: 1}\n"), ruleOption},
 		{"ProxyFromEnvironment", real.appended(t, "internal/mail/postmark.go", "var _ = http.ProxyFromEnvironment"), ruleHTTP},
@@ -463,8 +478,8 @@ func TestTheScanSeesEveryForbiddenForm(t *testing.T) {
 	}
 	legal := []struct{ name, path, source string }{
 		{"a read of InsecureSkipVerify", "internal/config/x.go", "package config\n\ntype c struct{ InsecureSkipVerify bool }\n\nfunc f(v *c) bool { return !v.InsecureSkipVerify }\n"},
-		{"Proxy nil in the adapter", "internal/mail/x.go", "package mail\n\ntype t struct{ Proxy func() }\n\nvar _ = t{Proxy: nil}\n"},
-		{"a RootCAs key in the adapter", "internal/mail/x.go", "package mail\n\nimport \"crypto/tls\"\n\nvar _ = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: nil}\n"},
+		{"Proxy nil in the adapter", "internal/mail/postmark.go", "package mail\n\ntype t struct{ Proxy func() }\n\nvar _ = t{Proxy: nil}\n"},
+		{"a RootCAs key in the adapter", "internal/mail/postmark.go", "package mail\n\nimport \"crypto/tls\"\n\nvar _ = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: nil}\n"},
 		{"TLS 1.3 as the floor", "internal/mail/x.go", "package mail\n\nimport \"crypto/tls\"\n\nvar _ = &tls.Config{MinVersion: tls.VersionTLS13}\n"},
 		{"tls.Config in mailtest with MinVersion and certificates", "internal/mail/mailtest/x.go", "package mailtest\n\nimport \"crypto/tls\"\n\nvar _ = &tls.Config{Certificates: nil, MinVersion: tls.VersionTLS12}\n"},
 		{"the test double weakening its own server", "internal/mail/mailtest/x.go", "package mailtest\n\nimport \"crypto/tls\"\n\nfunc f(c *tls.Config) { c.MinVersion, c.MaxVersion = tls.VersionTLS10, tls.VersionTLS11 }\n"},
@@ -490,7 +505,18 @@ func TestRevealRuleIsNotVacuous(t *testing.T) {
 }
 
 // testOnlyOptions are the options of the adapters that only tests set.
-var testOnlyOptions = []string{"RootCAs", "Dial", "BaseURL", "Client", "Proxy"}
+var testOnlyOptions = []string{"RootCAs", "Dial", "BaseURL", "Client", "Proxy", "Now"}
+
+// unparen removes the parentheses around an expression: (o.RootCAs) = x assigns the field like o.RootCAs = x.
+func unparen(expression ast.Expr) ast.Expr {
+	for {
+		paren, ok := expression.(*ast.ParenExpr)
+		if !ok {
+			return expression
+		}
+		expression = paren.X
+	}
+}
 
 // newSetsTestOnlyOptions lists the test-only options that the function New of internal/mail/new.go sets, as a key of a literal or by
 // assignment; it fails the pin when the function does not exist (a vacuous pin).
@@ -518,9 +544,19 @@ func newSetsTestOnlyOptions(t testing.TB, files sourceSet) []string {
 				if key, ok := n.Key.(*ast.Ident); ok && slices.Contains(testOnlyOptions, key.Name) {
 					found = append(found, key.Name)
 				}
+			case *ast.CompositeLit:
+				// A positional literal of an options type sets every field by position, the test-only ones included.
+				if name, ok := n.Type.(*ast.Ident); ok && strings.HasSuffix(name.Name, "Options") {
+					for _, element := range n.Elts {
+						if _, keyed := element.(*ast.KeyValueExpr); !keyed {
+							found = append(found, "a positional "+name.Name)
+							break
+						}
+					}
+				}
 			case *ast.AssignStmt:
 				for _, lhs := range n.Lhs {
-					if selector, ok := lhs.(*ast.SelectorExpr); ok && slices.Contains(testOnlyOptions, selector.Sel.Name) {
+					if selector, ok := unparen(lhs).(*ast.SelectorExpr); ok && slices.Contains(testOnlyOptions, selector.Sel.Name) {
 						found = append(found, selector.Sel.Name)
 					}
 				}
@@ -544,11 +580,15 @@ func TestNewSetsNoTestOnlyOption(t *testing.T) {
 	}
 	original := string(files["internal/mail/new.go"])
 	for name, mutated := range map[string]string{
-		"a RootCAs key":      strings.Replace(original, "Timeout: m.Timeout})), nil\n\tcase config.MailSMTP", "Timeout: m.Timeout, Client: nil})), nil\n\tcase config.MailSMTP", 1),
-		"a Dial key":         strings.Replace(original, "FromName: m.FromName, Timeout: m.Timeout})), nil\n\t}", "FromName: m.FromName, Timeout: m.Timeout, Dial: nil})), nil\n\t}", 1),
-		"a BaseURL key":      strings.Replace(original, "Stream: m.PostmarkStream,", "Stream: m.PostmarkStream, BaseURL: \"http://127.0.0.1:1/\",", 1),
-		"an assignment":      strings.Replace(original, "var mode SMTPMode", "var mode SMTPMode\n\t\tvar o SMTPOptions\n\t\to.RootCAs = nil", 1),
-		"a Proxy assignment": strings.Replace(original, "var mode SMTPMode", "var mode SMTPMode\n\t\tvar tr struct{ Proxy int }\n\t\ttr.Proxy = 1", 1),
+		"a Client key":               strings.Replace(original, "Timeout: m.Timeout})), nil\n\tcase config.MailSMTP", "Timeout: m.Timeout, Client: nil})), nil\n\tcase config.MailSMTP", 1),
+		"a RootCAs key":              strings.Replace(original, "FromName: m.FromName, Timeout: m.Timeout})), nil\n\t}", "FromName: m.FromName, Timeout: m.Timeout, RootCAs: nil})), nil\n\t}", 1),
+		"a Now key":                  strings.Replace(original, "FromName: m.FromName, Timeout: m.Timeout})), nil\n\t}", "FromName: m.FromName, Timeout: m.Timeout, Now: nil})), nil\n\t}", 1),
+		"a positional literal":       strings.Replace(original, "SMTPOptions{Host: m.SMTPHost, Port: m.SMTPPort, Mode: mode, Username: m.SMTPUsername, Password: m.SMTPPassword,\n\t\t\tFrom: m.From, FromName: m.FromName, Timeout: m.Timeout}", "SMTPOptions{m.SMTPHost, m.SMTPPort, mode, m.SMTPUsername, m.SMTPPassword, m.From, m.FromName, \"\", m.Timeout, nil, nil, nil}", 1),
+		"a parenthesised assignment": strings.Replace(original, "var mode SMTPMode", "var mode SMTPMode\n\t\tvar o SMTPOptions\n\t\t(o.RootCAs) = nil", 1),
+		"a Dial key":                 strings.Replace(original, "FromName: m.FromName, Timeout: m.Timeout})), nil\n\t}", "FromName: m.FromName, Timeout: m.Timeout, Dial: nil})), nil\n\t}", 1),
+		"a BaseURL key":              strings.Replace(original, "Stream: m.PostmarkStream,", "Stream: m.PostmarkStream, BaseURL: \"http://127.0.0.1:1/\",", 1),
+		"an assignment":              strings.Replace(original, "var mode SMTPMode", "var mode SMTPMode\n\t\tvar o SMTPOptions\n\t\to.RootCAs = nil", 1),
+		"a Proxy assignment":         strings.Replace(original, "var mode SMTPMode", "var mode SMTPMode\n\t\tvar tr struct{ Proxy int }\n\t\ttr.Proxy = 1", 1),
 	} {
 		if mutated == original {
 			t.Fatalf("%s: the mutant did not apply", name)

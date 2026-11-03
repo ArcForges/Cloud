@@ -428,12 +428,23 @@ func checkAddress(t testing.TB, text string) {
 
 // FuzzValidAddress checks that an address the validator accepts is exactly what net/mail reads as one bare address, with no
 // specials and a letter in the last label. The seeds cover the numeric-last-label forms and the byte bounds.
+// TestValidAddressRefusesTheRecipientListForms: a comma, a semicolon or an angle bracket in the local part would make the recipient a
+// list or a display name in the Postmark To field and in a header; the domain rule refuses them after the @ whatever the local part
+// rule says, so these forms put them before it.
+func TestValidAddressRefusesTheRecipientListForms(t *testing.T) {
+	for _, text := range []string{"a,b@example.org", "a;b@example.org", "a<b@example.org", "a>b@example.org", "x,evil@example.org", "<a@example.org", "a@example.org>"} {
+		if ValidAddress(text) {
+			t.Errorf("%q is a valid address", text)
+		}
+	}
+}
+
 func FuzzValidAddress(f *testing.F) {
 	long := addressOfLength(f, 254)
 	for _, seed := range []string{
 		"ada@example.org", "a@127.0.0.1", "a@1.1", "a@x.9a", "a@example.1", "a@127.0.0.0x1", "a@1.2.3.0x7f", "=?utf-8?q?x?=@example.org",
 		"=?utf-8?q?a=0D=0ABcc=3A_evil=40x.test?=@example.org", "a?=b@example.org", "a@b", "a@b@c.de", "a b@c.de", "a@b.de,c@d.ef",
-		"\"a\"@b.cd", "<a@b.cd>", "a@b.cd\r\nBcc: x@y.zz", "A@B.CD", long, long + "x", strings.Repeat("a", 65) + "@b.cd",
+		"\"a\"@b.cd", "<a@b.cd>", "a@b.cd\r\nBcc: x@y.zz", "A@B.CD", "a,b@example.org", "a;b@example.org", "a<b@example.org", "a>b@example.org", long, long + "x", strings.Repeat("a", 65) + "@b.cd",
 	} {
 		f.Add(seed)
 	}

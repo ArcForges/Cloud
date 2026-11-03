@@ -97,6 +97,11 @@ func TestSMTPDeliversOverStartTLSAndImplicitTLS(t *testing.T) {
 			t.Fatalf("%s: %v", mode, err)
 		}
 		c := rig.capture(t)
+		// AUTH PLAIN carries an empty authorization identity: the credential alone names the account (a mailbox provider reads a
+		// non-empty identity as a request to act for another user).
+		if c.AuthPayload != "\x00"+rig.user+"\x00"+rig.pass {
+			t.Errorf("%s: the AUTH PLAIN initial response is not an empty identity, the user and the password", mode)
+		}
 		if !c.TLS || c.AuthSeenBeforeTLS || c.User != rig.user || c.Password != rig.pass || !c.Quit {
 			t.Errorf("%s: tls=%v authBefore=%v user=%q quit=%v", mode, c.TLS, c.AuthSeenBeforeTLS, c.User, c.Quit)
 		}

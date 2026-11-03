@@ -670,6 +670,10 @@ test("the Go center gets the values of the named provider unchanged and nothing 
     ["smtp", mailSmtp, mailPostmark],
   ] as const) {
     const all = everyMailVariable(provider);
+    // A value with white space at its edges arrives byte for byte: the center's own rule (R10) refuses a pasted newline, and a Worker
+    // that trimmed it would repair the mistake silently and hide it from the operator.
+    all[`${mailPrefix}FROM_NAME`] = "  synthetic\n";
+    all[`${mailPrefix}TIMEOUT`] = " ";
     const { envVars } = centerContainerSettings({ ...goCenter, ...all });
     for (const name of [...mailCommon, ...own]) assert.equal(envVars[name], all[name], name);
     for (const name of foreign)

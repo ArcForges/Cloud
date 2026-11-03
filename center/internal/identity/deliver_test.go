@@ -244,6 +244,83 @@ func TestDeliverSendsWithAContextThatOutlivesTheCallerAndEndsAtTheBound(t *testi
 	}
 }
 
+// TestDeliveriesRaceWithTheDrainOnTheClosedFlag: handlers call deliver while the shutdown calls Drain. Every delivery is either
+// accepted and then counted exactly once as sent, or refused after the tracker closed and counted unavailable, never lost and
+// never counted twice; the race detector (the Linux leg) sees a closed flag or a count touched without the mutex.
+func TestDeliveriesRaceWithTheDrainOnTheClosedFlag(t *testing.T) {
+	const rounds, callers = 60, 24
+	for round := range rounds {
+		fake := mail.NewFake()
+		service, events, _ := newDeliverService(fake, false)
+		start := make(chan struct{})
+		var wait sync.WaitGroup
+		for range callers {
+			wait.Add(1)
+			go func() {
+				defer wait.Done()
+				<-start
+				service.deliver(context.Background(), deliveryMessage(), deliverySignIn)
+			}()
+		}
+		close(start)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		drained := service.Drain(ctx)
+		cancel()
+		wait.Wait()
+		// A delivery that raced the drain may have started after it returned; the second drain waits for those that were accepted.
+		again, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := service.Drain(again); err != nil {
+			t.Fatalf("round %d: the second drain: %v (the first: %v)", round, err, drained)
+		}
+		stop()
+		counted := events.all()
+		if len(counted) != callers || countOf(counted, "email_send sent")+countOf(counted, "email_send unavailable") != callers ||
+			countOf(counted, "email_send sent") != len(fake.Messages()) {
+			t.Fatalf("round %d: %d events %v for %d deliveries, %d sent", round, len(counted), counted, callers, len(fake.Messages()))
+		}
+	}
+}
+
+// TestDrainWithNothingPendingReturnsAtOnceEvenWithAnEndedContext: the shutdown gives the drain what the listeners leave, which can be
+// nothing; an idle service, or one whose deliveries all finished, is drained, not abandoned. A pending delivery with an ended context
+// is the only case that returns the context's error.
+func TestDrainWithNothingPendingReturnsAtOnceEvenWithAnEndedContext(t *testing.T) {
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 200 {
+		idle, _, _ := newDeliverService(mail.NewFake(), false)
+		if err := idle.Drain(ended); err != nil {
+			t.Fatalf("an idle service reported %v", err)
+		}
+		finished, events, _ := newDeliverService(mail.NewFake(), true)
+		finished.deliver(context.Background(), deliveryMessage(), deliverySignIn)
+		if len(events.all()) != 1 {
+			t.Fatal("the synchronous delivery did not finish")
+		}
+		if err := finished.Drain(ended); err != nil {
+			t.Fatalf("a service whose deliveries finished reported %v", err)
+		}
+	}
+	release := make(chan struct{})
+	pending, _, _ := newDeliverService(senderOf(func(ctx context.Context, _ mail.Message) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	}), false)
+	pending.deliver(context.Background(), deliveryMessage(), deliverySignIn)
+	if err := pending.Drain(ended); !errors.Is(err, context.Canceled) {
+		t.Errorf("a pending delivery with an ended context reported %v", err)
+	}
+	close(release)
+	later, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	if err := pending.Drain(later); err != nil {
+		t.Errorf("the delivery never finished: %v", err)
+	}
+}
+
 // senderOf is a Sender made of a function.
 type senderOf func(context.Context, mail.Message) error
 

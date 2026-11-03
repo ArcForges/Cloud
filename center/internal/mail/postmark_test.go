@@ -191,6 +191,31 @@ func TestPostmarkClassifiesEveryAnswer(t *testing.T) {
 	}
 }
 
+// TestEveryPublishedPostmarkErrorCodeKeepsItsClassOnA4xxAndA5xx: the published table of ErrorCodes decides the class on a 5xx too
+// (an unpublished code on a 5xx stays transient), so a code missing from postmarkKnownCode would turn an operator-must-act refusal
+// into an outage. One row per published code, on both statuses; an unpublished code is the control.
+func TestEveryPublishedPostmarkErrorCodeKeepsItsClassOnA4xxAndA5xx(t *testing.T) {
+	published := map[int]error{10: ErrUnauthorized, 100: ErrUnavailable, 101: ErrUnavailable, 300: ErrRejected, 402: ErrRejected, 403: ErrRejected,
+		406: ErrRejected, 410: ErrRejected, 411: ErrRejected, 412: ErrUnauthorized, 413: ErrUnauthorized, 422: ErrUnauthorized, 501: ErrUnauthorized,
+		1235: ErrUnauthorized, 1236: ErrUnauthorized, 1480: ErrUnauthorized}
+	for code, want := range published {
+		reply := postmarkResponse{ErrorCode: &code, MessageID: "x"}
+		for _, status := range []int{422, 500} {
+			if _, got, class := postmarkOutcome(status, reply, true); class != want || got != code {
+				t.Errorf("code %d on %d: class %v code %d, want %v", code, status, class, got, want)
+			}
+		}
+	}
+	unpublished := 99999
+	reply := postmarkResponse{ErrorCode: &unpublished, MessageID: "x"}
+	if _, _, class := postmarkOutcome(500, reply, true); class != ErrUnavailable {
+		t.Errorf("an unpublished code on a 500: %v", class)
+	}
+	if _, _, class := postmarkOutcome(422, reply, true); class != ErrUnauthorized {
+		t.Errorf("an unpublished code on a 422: %v", class)
+	}
+}
+
 // TestPostmarkOutcomeIsAPureFunctionOfStatusAndBody pins the decision table without a server, including statuses a server cannot
 // easily produce.
 func TestPostmarkOutcomeIsAPureFunctionOfStatusAndBody(t *testing.T) {

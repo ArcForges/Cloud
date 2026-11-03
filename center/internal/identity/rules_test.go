@@ -100,6 +100,7 @@ func TestEmailAddressesAreNormalizedOrRefused(t *testing.T) {
 		"": "", "ada": "", "ada@": "", "@example.org": "", "a@b@example.org": "", "ada@localhost": "", "a da@example.org": "",
 		".ada@example.org": "", "ada.@example.org": "", "a..da@example.org": "", "ada@-example.org": "", "ada@example-.org": "",
 		"\"ada\"@example.org": "", "ada@exa_mple.org": "", strings.Repeat("a", 65) + "@example.org": "",
+		"a,b@example.org": "", "a;b@example.org": "", "a<b@example.org": "", "a>b@example.org": "",
 	}
 	for text, want := range cases {
 		got, ok := NormalizeEmail(text)
@@ -149,6 +150,27 @@ func TestEmailAddressesFollowTheSharedRuleAtTheEdges(t *testing.T) {
 	// The input bound is on the text given, and the database check of 320 characters stays looser than the application bound.
 	if EmailMaxLength != 254 {
 		t.Errorf("EmailMaxLength is %d", EmailMaxLength)
+	}
+}
+
+// TestTheLengthBoundIsOnTheTextGiven: lower-casing can shrink a text (U+212A KELVIN SIGN is three bytes and becomes the one byte
+// "k"), so the bound of 254 bytes is checked on the text as given, before the lower-cased form is built; the shared rule alone
+// would accept the 256-byte form below. The Contracts schema allows 320 bytes; the center refuses what is over 254.
+func TestTheLengthBoundIsOnTheTextGiven(t *testing.T) {
+	plain := addressOfLength(t, 254)
+	plain = plain[:len(plain)-1] + "k"
+	if got, ok := NormalizeEmail(plain); !ok || got != plain {
+		t.Fatalf("the 254-byte address with a plain k is refused: %q %v", got, ok)
+	}
+	kelvin := plain[:len(plain)-1] + "\u212a"
+	if len(kelvin) != 256 {
+		t.Fatalf("the fixture is %d bytes", len(kelvin))
+	}
+	if got, ok := NormalizeEmail(kelvin); ok {
+		t.Fatalf("a 256-byte text is accepted because its lower-cased form is 254 bytes: %q", got)
+	}
+	if _, ok := NormalizeEmail(addressOfLength(t, 320)); ok {
+		t.Fatal("a 320-byte address (the Contracts bound and the database check) is accepted")
 	}
 }
 

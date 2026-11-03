@@ -70,8 +70,9 @@ type Capture struct {
 	TLS bool
 	// AuthSeenBeforeTLS reports that the client sent AUTH in clear text.
 	AuthSeenBeforeTLS bool
-	// User and Password are the decoded AUTH PLAIN credential.
-	User, Password string
+	// User and Password are the decoded AUTH PLAIN credential, and AuthPayload the whole decoded initial response (the authorization
+	// identity, a NUL, the user, a NUL and the password), so that a test sees the authorization identity too.
+	User, Password, AuthPayload string
 	// From is the MAIL command line and Rcpt the RCPT command lines.
 	From string
 	Rcpt []string
@@ -264,6 +265,7 @@ func (s *SMTPServer) serve(raw net.Conn) {
 			}
 			if fields := strings.Fields(text); len(fields) == 3 && strings.EqualFold(fields[1], "PLAIN") {
 				decoded, _ := base64.StdEncoding.DecodeString(fields[2])
+				c.AuthPayload = string(decoded)
 				if parts := strings.Split(string(decoded), "\x00"); len(parts) == 3 {
 					c.User, c.Password = parts[1], parts[2]
 				}

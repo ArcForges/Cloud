@@ -3,12 +3,19 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,6 +24,7 @@ import (
 	"connectrpc.com/connect/v2"
 
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/observe"
@@ -137,6 +145,13 @@ func TestStopServingStopsTheListenersThenDrainsWithinTheBound(t *testing.T) {
 	}
 	server := &http.Server{Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
 	go func() { _ = server.Serve(listener) }()
+	// Shutdown closes only the listeners that Serve has registered: one round trip proves that it has, so the test cannot race the
+	// start of the goroutine (without it the drain dials a listener that Shutdown never saw, and the order looks wrong).
+	response, getErr := http.Get("http://" + listener.Addr().String() + "/")
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	_ = response.Body.Close()
 	var listenerClosedWhenDrained atomic.Bool
 	logs := &lockedBuffer{}
 	center := &Center{Logger: observe.NewLogger(logs, slog.LevelInfo), drain: func(ctx context.Context) error {
@@ -173,8 +188,9 @@ func TestStopServingStopsTheListenersThenDrainsWithinTheBound(t *testing.T) {
 	(&Center{Logger: observe.NewLogger(logs, slog.LevelInfo)}).stopServing(nil, time.Second) // no identity surface: nothing to drain
 }
 
-// TestARunningCenterWaitsForASlowDeliveryBeforeItStops composes the real pieces of the shutdown: the identity service's drain behind
-// stopServing.
+// TestStopServingWaitsForASlowDeliveryAndNotLongerThanItTakes: a drain that finishes inside the bound is waited for, and the stop
+// takes no longer than the drain (the drain here is a fake; the real service's drain is pinned by the identity tests and by
+// TestTheShutdownWiringOfRunAndComposeIdentityIsPinned).
 func TestStopServingWaitsForASlowDeliveryAndNotLongerThanItTakes(t *testing.T) {
 	var finished atomic.Bool
 	center := &Center{Logger: observe.NewLogger(&lockedBuffer{}, slog.LevelInfo), drain: func(ctx context.Context) error {
@@ -210,5 +226,179 @@ func TestComposingTheIdentitySurfaceWiresItsDrainIntoTheShutdown(t *testing.T) {
 	defer cancel()
 	if err := center.drain(ctx); err != nil {
 		t.Errorf("an idle service did not drain: %v", err)
+	}
+}
+
+// TestStopServingSpendsOneBoundOnTheListenersAndTheDrainTogether: a request that outlives the bound holds the listener shutdown for
+// the whole bound, and the drain then gets what is left, which is nothing: the stop takes about one bound, not two (two bounds would
+// pass the 6 s the Worker waits for a stale center, routes.StaleStopMilliseconds).
+func TestStopServingSpendsOneBoundOnTheListenersAndTheDrainTogether(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		entered <- struct{}{}
+		<-release
+	}))
+	server.Start()
+	defer server.Close()
+	defer close(release)
+	go func() {
+		if response, err := http.Get(server.URL); err == nil {
+			_ = response.Body.Close()
+		}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request never reached the handler")
+	}
+	var drainedWith time.Duration
+	center := &Center{Logger: observe.NewLogger(&lockedBuffer{}, slog.LevelInfo), drain: func(ctx context.Context) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return errors.New("the drain has no deadline")
+		}
+		drainedWith = time.Until(deadline)
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	const bound = 400 * time.Millisecond
+	begun := time.Now()
+	center.stopServing([]*http.Server{server.Config}, bound)
+	if elapsed := time.Since(begun); elapsed > bound*3/2 {
+		t.Errorf("the stop took %v with a bound of %v: the drain got a bound of its own", elapsed, bound)
+	}
+	if drainedWith > bound/4 {
+		t.Errorf("the drain was given %v after the listeners had spent the bound", drainedWith)
+	}
+}
+
+// TestStopServingDoesNotReportAbandonmentWhenNothingIsInFlight: the drain of the real identity service, given a bound that is
+// already spent (a request held the listeners for the whole bound), is nil when no delivery is pending, so no abandonment is logged.
+func TestStopServingDoesNotReportAbandonmentWhenNothingIsInFlight(t *testing.T) {
+	logs := &lockedBuffer{}
+	idle := identity.New(identity.Options{})
+	for range 50 {
+		(&Center{Logger: observe.NewLogger(logs, slog.LevelInfo), drain: idle.Drain}).stopServing(nil, 0)
+	}
+	if strings.Contains(logs.String(), "abandoned") {
+		t.Errorf("an idle service was reported as abandoned: %s", logs.String())
+	}
+}
+
+// parsedPackageSources parses the non-test Go files of this package.
+func parsedPackageSources(t *testing.T) map[string]*ast.File {
+	t.Helper()
+	paths, err := filepath.Glob("*.go")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no sources: %v", err)
+	}
+	files := map[string]*ast.File{}
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		files[path] = file
+	}
+	return files
+}
+
+func sourceOf(t *testing.T, node ast.Node) string {
+	t.Helper()
+	var out bytes.Buffer
+	if err := printer.Fprint(&out, token.NewFileSet(), node); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(strings.Fields(out.String()), "")
+}
+
+// TestTheShutdownWiringOfRunAndComposeIdentityIsPinned pins what no unit test of the server can run without a delivery in flight: the
+// drain the center stops with is the Drain of the identity service that composeIdentity built (not a no-op and not another
+// service's), it is assigned nowhere else, Run stops through stopServing exactly once with the 5 s of routes.ShutdownMilliseconds,
+// and Run closes the center only by the defer it starts with (so the pools outlive the stop).
+func TestTheShutdownWiringOfRunAndComposeIdentityIsPinned(t *testing.T) {
+	files := parsedPackageSources(t)
+	assignments := 0
+	var serviceName string
+	for path, file := range files {
+		ast.Inspect(file, func(node ast.Node) bool {
+			assign, ok := node.(*ast.AssignStmt)
+			if !ok {
+				return true
+			}
+			for index, lhs := range assign.Lhs {
+				if selector, isSelector := lhs.(*ast.SelectorExpr); isSelector && selector.Sel.Name == "drain" && index < len(assign.Rhs) {
+					assignments++
+					call, isSelectorValue := assign.Rhs[index].(*ast.SelectorExpr)
+					if !isSelectorValue || call.Sel.Name != "Drain" || path != "server.go" {
+						t.Errorf("%s: drain is assigned %s", path, sourceOf(t, assign.Rhs[index]))
+						continue
+					}
+					serviceName = sourceOf(t, call.X)
+				}
+			}
+			return true
+		})
+	}
+	if assignments != 1 || serviceName == "" {
+		t.Fatalf("drain is assigned %d times", assignments)
+	}
+	// The variable is the one that identity.New initialised in composeIdentity.
+	var built string
+	ast.Inspect(files["server.go"], func(node ast.Node) bool {
+		function, ok := node.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "composeIdentity" {
+			return true
+		}
+		ast.Inspect(function.Body, func(inner ast.Node) bool {
+			assign, isAssign := inner.(*ast.AssignStmt)
+			if !isAssign || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+				return true
+			}
+			if call, isCall := assign.Rhs[0].(*ast.CallExpr); isCall && sourceOf(t, call.Fun) == "identity.New" {
+				built = sourceOf(t, assign.Lhs[0])
+			}
+			return true
+		})
+		return false
+	})
+	if built == "" || built != serviceName {
+		t.Errorf("c.drain is %s.Drain, but composeIdentity built the service %q with identity.New", serviceName, built)
+	}
+	stops, closes, deferredCloses := 0, 0, 0
+	ast.Inspect(files["server.go"], func(node ast.Node) bool {
+		function, ok := node.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "Run" {
+			return true
+		}
+		ast.Inspect(function.Body, func(inner ast.Node) bool {
+			switch n := inner.(type) {
+			case *ast.DeferStmt:
+				if sourceOf(t, n.Call) == "center.Close()" {
+					deferredCloses++
+				}
+			case *ast.ExprStmt:
+				if call, isCall := n.X.(*ast.CallExpr); isCall {
+					switch sourceOf(t, call.Fun) {
+					case "center.Close":
+						closes++
+					case "center.stopServing":
+						stops++
+						if got := sourceOf(t, call.Args[1]); got != "routes.ShutdownMilliseconds*time.Millisecond" {
+							t.Errorf("Run stops with the bound %s", got)
+						}
+					}
+				}
+			}
+			return true
+		})
+		return false
+	})
+	if stops != 1 || closes != 0 || deferredCloses != 1 {
+		t.Errorf("Run calls stopServing %d times, closes the center %d times and defers its Close %d times", stops, closes, deferredCloses)
 	}
 }

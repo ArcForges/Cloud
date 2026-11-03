@@ -4,6 +4,7 @@ package mail
 
 import (
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,8 @@ func TestNewBuildsAGuardedPostmarkAdapterFromTheConfiguration(t *testing.T) {
 	transport, isTransport := postmark.client.Transport.(*http.Transport)
 	o := postmark.o
 	if o.Token.Reveal() != sentinel("postmark-token") || o.From != testFrom || o.FromName != "ArcForges" || o.Stream != "sign-in" || o.Timeout != 7*time.Second ||
-		o.BaseURL != postmarkURL || o.Client != nil || o.Dial != nil || !isTransport || transport.Proxy != nil {
+		o.BaseURL != postmarkURL || o.Client != nil || o.Dial != nil || !isTransport || transport.Proxy != nil ||
+		!reflect.DeepEqual(transport.TLSClientConfig, postmarkTLSConfig()) {
 		t.Errorf("the Postmark adapter differs from the configuration or carries a test-only option: %+v", o)
 	}
 }
@@ -61,7 +63,7 @@ func TestNewBuildsAGuardedSMTPAdapterFromTheConfigurationInBothModes(t *testing.
 		}
 		o := smtp.o
 		if o.Host != testHost || o.Port != 2587 || o.Mode != want || o.Username.Reveal() != sentinel("smtp-user") || o.Password.Reveal() != sentinel("smtp-password") ||
-			o.From != testFrom || o.FromName != "ArcForges" || o.Timeout != 9*time.Second || o.RootCAs != nil || o.Dial != nil {
+			o.From != testFrom || o.FromName != "ArcForges" || o.Timeout != 9*time.Second || o.RootCAs != nil || o.Dial != nil || reflect.ValueOf(o.Now).Pointer() != reflect.ValueOf(time.Now).Pointer() {
 			t.Errorf("mode %s: the SMTP adapter differs from the configuration or carries a test-only option: %+v", mode, o)
 		}
 	}

@@ -169,6 +169,7 @@ func TestEveryRefusalRowIsRefusedNamingTheVariable(t *testing.T) {
 		{"R5 token over 128 bytes", postmarkEnvironment(), map[string]string{EnvMailPostmarkToken: long(129)}, EnvMailPostmarkToken},
 		{"R5 token with a space", postmarkEnvironment(), map[string]string{EnvMailPostmarkToken: "a b"}, EnvMailPostmarkToken},
 		{"R5 token with a control character", postmarkEnvironment(), map[string]string{EnvMailPostmarkToken: "a\x01b"}, EnvMailPostmarkToken},
+		{"R5 token with DEL", postmarkEnvironment(), map[string]string{EnvMailPostmarkToken: "a\x7fb"}, EnvMailPostmarkToken},
 		{"R5 token non-ASCII", postmarkEnvironment(), map[string]string{EnvMailPostmarkToken: "aéb"}, EnvMailPostmarkToken},
 		{"R5 stream upper case", postmarkEnvironment(), map[string]string{EnvMailPostmarkStream: "Outbound"}, EnvMailPostmarkStream},
 		{"R5 stream with an underscore", postmarkEnvironment(), map[string]string{EnvMailPostmarkStream: "a_b"}, EnvMailPostmarkStream},
@@ -204,6 +205,7 @@ func TestEveryRefusalRowIsRefusedNamingTheVariable(t *testing.T) {
 		{"R8 password missing", smtpEnvironment(), map[string]string{EnvMailSMTPPassword: ""}, EnvMailSMTPPassword},
 		{"R8 user over 256 bytes", smtpEnvironment(), map[string]string{EnvMailSMTPUsername: long(257)}, EnvMailSMTPUsername},
 		{"R8 password with a control character", smtpEnvironment(), map[string]string{EnvMailSMTPPassword: "a\x7fb"}, EnvMailSMTPPassword},
+		{"R8 password with a unit separator", smtpEnvironment(), map[string]string{EnvMailSMTPPassword: "a\x1fb"}, EnvMailSMTPPassword},
 		{"R8 user with a tab inside", smtpEnvironment(), map[string]string{EnvMailSMTPUsername: "a\tb"}, EnvMailSMTPUsername},
 		{"R8 password with a newline inside", smtpEnvironment(), map[string]string{EnvMailSMTPPassword: "a\nb"}, EnvMailSMTPPassword},
 		// R9: the timeout.
@@ -365,5 +367,72 @@ func TestTheBoundsOfTheRulesAreInclusive(t *testing.T) {
 	custom[EnvMailFrom] = long(64) + "@" + domain(124)
 	if _, err := loadWith(SelfHosted, custom); err == nil {
 		t.Error("a sender of 256 bytes was accepted")
+	}
+}
+
+// TestTheCharacterClassesOfTheRulesAreExact loads the characters at the edges of each class: a rule one character too strict refuses a
+// value the design allows (the center would not start for a valid token), and one too loose accepts a byte the provider refuses.
+func TestTheCharacterClassesOfTheRulesAreExact(t *testing.T) {
+	long := func(n int) string { return strings.Repeat("a", n) }
+	for _, token := range []string{"!", "~", "a~b!", "A.b-c_d", "0", "z", long(MaxPostmarkTokenBytes)} {
+		custom := postmarkEnvironment()
+		custom[EnvMailPostmarkToken] = token
+		if config, err := loadWith(SelfHosted, custom); err != nil || config.Mail.PostmarkToken.Reveal() != token {
+			t.Errorf("token %q: %v", token, err)
+		}
+	}
+	for _, stream := range []string{"z", "a", "0", "9", "z9", "a0", "0a", "z0-9", "a-b", long(MaxPostmarkStreamBytes)} {
+		custom := postmarkEnvironment()
+		custom[EnvMailPostmarkStream] = stream
+		if config, err := loadWith(SelfHosted, custom); err != nil || config.Mail.PostmarkStream != stream {
+			t.Errorf("stream %q: %v", stream, err)
+		}
+	}
+	for _, credential := range []string{"pass word", "a b", "~!@#$%^&*()", "a\u00e9", long(MaxMailCredentialBytes)} {
+		custom := smtpEnvironment()
+		custom[EnvMailSMTPUsername], custom[EnvMailSMTPPassword] = credential, credential
+		if config, err := loadWith(SelfHosted, custom); err != nil || config.Mail.SMTPUsername.Reveal() != credential || config.Mail.SMTPPassword.Reveal() != credential {
+			t.Errorf("credential %q: %v", credential, err)
+		}
+	}
+	// The documented defaults, by value and not by the name of the constant.
+	if DefaultMailTimeout != 10*time.Second || MinMailTimeout != 2*time.Second || MaxMailTimeout != 25*time.Second || DefaultStartTLSPort != 587 || DefaultTLSPort != 465 {
+		t.Error("a documented default or bound changed")
+	}
+	if config, err := loadWith(SelfHosted, postmarkEnvironment()); err != nil || config.Mail.Timeout != 10*time.Second {
+		t.Errorf("the default timeout is %v (%v)", config.Mail.Timeout, err)
+	}
+}
+
+// TestTheHostRulesApplyInBothModes: the SMTP host is checked by name in the implicit TLS mode as much as in STARTTLS (a skipped check
+// would start a center that cannot verify its certificate), and the longest host is 252 bytes: the address rule's 254 less "a@".
+func TestTheHostRulesApplyInBothModes(t *testing.T) {
+	long := func(n int) string { return strings.Repeat("a", n) }
+	host := func(total int) string { // a name of exactly total bytes: labels of at most 63 bytes and a last label of letters
+		labels := []string{}
+		for total > 63+1+3 {
+			labels = append(labels, long(63))
+			total -= 64
+		}
+		return strings.Join(append(labels, long(total)), ".")
+	}
+	for _, mode := range []string{MailStartTLS, MailTLS} {
+		for _, bad := range []string{"127.0.0.1", "10.0.0.5", "relay", "localhost", "127.0.0.0x1", "[::1]", "smtp .example.test", "smtp_1.example.test", host(253), host(254)} {
+			custom := smtpEnvironment()
+			custom[EnvMailSMTPMode], custom[EnvMailSMTPHost] = mode, bad
+			if _, err := loadWith(SelfHosted, custom); err == nil {
+				t.Errorf("mode %s: the host %.40q (%d bytes) was accepted", mode, bad, len(bad))
+			}
+		}
+		for _, good := range []string{"smtp.example.test", host(250), host(252)} {
+			custom := smtpEnvironment()
+			custom[EnvMailSMTPMode], custom[EnvMailSMTPHost] = mode, good
+			if config, err := loadWith(SelfHosted, custom); err != nil || config.Mail.SMTPHost != good {
+				t.Errorf("mode %s: the host of %d bytes was refused: %v", mode, len(good), err)
+			}
+		}
+	}
+	if len(host(252)) != 252 || len(host(253)) != 253 {
+		t.Fatalf("the fixtures are %d and %d bytes", len(host(252)), len(host(253)))
 	}
 }

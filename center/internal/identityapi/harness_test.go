@@ -210,6 +210,7 @@ type reply struct {
 	message string
 	body    []byte
 	http    int
+	header  http.Header
 }
 
 // caller is how a request authenticates and where it comes from.
@@ -263,7 +264,7 @@ func (h *harness) post(path string, request proto.Message, from caller) reply {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	result := reply{http: response.StatusCode}
+	result := reply{http: response.StatusCode, header: response.Header.Clone()}
 	for position := 0; position+5 <= len(body); {
 		flag, length := body[position], int(binary.BigEndian.Uint32(body[position+1:position+5]))
 		payload := body[position+5 : position+5+length]
@@ -288,6 +289,13 @@ func (h *harness) post(path string, request proto.Message, from caller) reply {
 // rpc posts a request and decodes the reply message; the call must complete (grpc-status 0).
 func rpc[Response proto.Message](h *harness, path string, request proto.Message, from caller, response Response) Response {
 	h.t.Helper()
+	decoded, _ := rpcWithReply(h, path, request, from, response)
+	return decoded
+}
+
+// rpcWithReply is rpc that also returns the raw reply (the HTTP code and the response headers).
+func rpcWithReply[Response proto.Message](h *harness, path string, request proto.Message, from caller, response Response) (Response, reply) {
+	h.t.Helper()
 	answer := h.post(path, request, from)
 	if answer.status != "0" || answer.body == nil {
 		h.t.Fatalf("%s: grpc-status %q %q (HTTP %d)", path, answer.status, answer.message, answer.http)
@@ -296,7 +304,7 @@ func rpc[Response proto.Message](h *harness, path string, request proto.Message,
 		h.t.Fatal(err)
 	}
 	domainError(h.t, answer) // checks the retry advice of a refusal
-	return response
+	return response, answer
 }
 
 // retryAdvice is the Contracts rule retryAdvice (foundation-baseline.json; E4): retry_at if and only if the advice is AFTER_TIME,

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"maps"
 	"mime/quotedprintable"
@@ -13,6 +14,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	netmail "net/mail"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -326,13 +329,21 @@ func TestAProviderFailureNeverReachesTheReplyAndIsCountedByClass(t *testing.T) {
 			for _, address := range []string{known, unknown} {
 				flows[address] = h.beginEmail(address, caller{}).GetValue().GetChallenge().GetFlowId()
 			}
-			failed := h.requestCode(flows[known], known, caller{})
-			quiet := h.requestCode(flows[unknown], unknown, caller{})
+			ask := func(flow *foundationv1.Id, address string) (*publicapiv1.IdentityServiceRequestEmailCodeResponse, reply) {
+				return rpcWithReply(h, requestCodePath, &publicapiv1.IdentityServiceRequestEmailCodeRequest{Meta: meta(), FlowId: flow, Email: proto.String(address),
+					Purpose: publicapiv1.AuthPurpose_AUTH_PURPOSE_AUTHENTICATE.Enum()}, caller{}, &publicapiv1.IdentityServiceRequestEmailCodeResponse{})
+			}
+			failed, failedReply := ask(flows[known], known)
+			quiet, quietReply := ask(flows[unknown], unknown)
 			if failed.GetError() != nil || quiet.GetError() != nil {
 				t.Fatalf("a reply failed: %v %v", failed.GetError(), quiet.GetError())
 			}
 			if !proto.Equal(blank(failed), blank(quiet)) {
 				t.Fatalf("the reply of a failed delivery differs from the reply of an unknown address:\n%v\n%v", failed, quiet)
+			}
+			if failedReply.http != quietReply.http || failedReply.status != quietReply.status ||
+				!reflect.DeepEqual(comparableHeaders(failedReply), comparableHeaders(quietReply)) {
+				t.Fatalf("a failed delivery shows in the HTTP code or a header: %d %v and %d %v", failedReply.http, comparableHeaders(failedReply), quietReply.http, comparableHeaders(quietReply))
 			}
 			// The step-up by e-mail is another caller of the same delivery: a failing provider changes nothing of its reply either.
 			step := h.beginEmailStepUp(bearer(h.signIn(who, newClaim(t), caller{}).GetAccessToken()), who, identity.ClassRevokeAllSessions)
@@ -582,4 +593,138 @@ func TestNoSecretReachesTheStoreOrTheLogsWithAnAdapter(t *testing.T) {
 		rig := newSMTPRig(t, nil, 5*time.Second)
 		noSecretReachesTheStoreOrTheLogs(t, rig.settings(policy, false), rig.secrets, nil)
 	})
+}
+
+// comparableHeaders are the response headers of a reply without the ones that differ between two requests by nature (the date and the
+// correlation id).
+func comparableHeaders(r reply) http.Header {
+	headers := r.header.Clone()
+	for name := range headers {
+		if lower := strings.ToLower(name); lower == "date" || strings.Contains(lower, "correlation") || strings.Contains(lower, "request-id") {
+			delete(headers, name)
+		}
+	}
+	return headers
+}
+
+// bucketPolicy leaves the e-mail limits at their defaults (5 per hour per address, 10 per hour per /24) and raises the others, so
+// that the sign-in and step-up buckets do not refuse first.
+const bucketPolicy = `{"signInPerPrefixLimit": 1000, "signInFailuresAccountLimit": 1000, "stepUpPerAccountLimit": 1000}`
+
+// TestAFailedDeliveryNeverRefundsABucketUnderTheDefaultLimits: the per-flow count is not the only state a request leaves. Under the
+// default limits a working provider, a failing provider and an unknown address are given exactly the same sequence of replies, six
+// requests for one address (the sixth is refused by the address bucket after five) and thirteen more addresses of the same /24 (the
+// prefix bucket refuses from the tenth count of the hour on, six of which the first part used). A bucket given back after a failed delivery would let the sixth request through for a
+// failing known address only, which tells known from unknown one request later than the flow count would. MOCKED sender, real
+// PostgreSQL; each case has a /24 of its own.
+func TestAFailedDeliveryNeverRefundsABucketUnderTheDefaultLimits(t *testing.T) {
+	h := newHarness(t, settings{policy: bucketPolicy})
+	type result struct{ addressSequence, prefixSequence []string }
+	run := func(label, prefix string, address func(index int) string, failing bool) result {
+		t.Helper()
+		if failing {
+			h.mail.SetError(&mail.Error{Class: mail.ErrUnavailable, Provider: "smtp", Stage: "data", Code: 451})
+		} else {
+			h.mail.SetError(nil)
+		}
+		var out result
+		ask := func(flow *foundationv1.Id, mailbox string, client string) string {
+			reply := h.requestCode(flow, mailbox, caller{ip: client})
+			if reply.GetError() == nil {
+				return "ok"
+			}
+			return failure(reply.GetError()) + ":" + reply.GetError().GetDetails().GetLimit().GetLimitName()
+		}
+		// Six requests for one address: a new flow after three (a flow allows three sends).
+		var flow *foundationv1.Id
+		for request := range 6 {
+			if request%3 == 0 {
+				flow = h.beginEmail(address(0), caller{ip: prefix + ".1"}).GetValue().GetChallenge().GetFlowId()
+			}
+			out.addressSequence = append(out.addressSequence, ask(flow, address(0), prefix+".1"))
+		}
+		// Thirteen addresses of the same /24, one request each.
+		for index := 1; index <= 13; index++ {
+			mailbox := address(index)
+			flow = h.beginEmail(mailbox, caller{ip: prefix + ".2"}).GetValue().GetChallenge().GetFlowId()
+			out.prefixSequence = append(out.prefixSequence, ask(flow, mailbox, prefix+".2"))
+		}
+		t.Logf("%s: %v / %v", label, out.addressSequence, out.prefixSequence)
+		return out
+	}
+	known := func(tag string) func(int) string {
+		return func(index int) string { return fmt.Sprintf("%s%d@example.org", tag, index) }
+	}
+	// Known accounts exist for the working and the failing cases; the unknown case has none.
+	for _, tag := range []string{"w", "f"} {
+		for index := range 14 {
+			h.seedAccount(1, known(tag)(index))
+		}
+	}
+	working := run("working", "198.51.100", known("w"), false)
+	failing := run("failing", "198.51.101", known("f"), true)
+	unknown := run("unknown", "198.51.102", known("u"), false)
+	wantAddress := []string{"ok", "ok", "ok", "ok", "ok", "RESOURCE/rate_limited:email_address"}
+	// The six requests of the first part were counted by the prefix bucket too (the sixth, refused by the address bucket, included), so
+	// four of the thirteen are accepted before the tenth count of the hour.
+	wantPrefix := append(slices.Repeat([]string{"ok"}, 4), slices.Repeat([]string{"RESOURCE/rate_limited:email_prefix"}, 9)...)
+	for label, got := range map[string]result{"working": working, "failing": failing, "unknown": unknown} {
+		// The address bucket counted the five and the prefix bucket counted ten of the thirteen, whatever the provider did.
+		if !slices.Equal(got.addressSequence, wantAddress) || !slices.Equal(got.prefixSequence, wantPrefix) {
+			t.Errorf("%s: address %v, prefix %v; want %v and %v", label, got.addressSequence, got.prefixSequence, wantAddress, wantPrefix)
+		}
+	}
+}
+
+// TestTheCodeIsSentAfterTheCommitAndOutsideTheTransaction: with the inline background the send runs on the request's goroutine, so a
+// sender that looks at the database through another connection sees whether the transaction has committed. The flow's send count
+// and the step-up challenge must be visible when Send runs (a send inside the closure would run before the commit, and again at
+// every retry of the closure, and would mail a code for a flow that a rollback removes).
+func TestTheCodeIsSentAfterTheCommitAndOutsideTheTransaction(t *testing.T) {
+	probe := &visibilityProbe{fake: mail.NewFake()}
+	h := newHarness(t, settings{policy: loosePolicy, sender: probe, inbox: fakeInbox{probe.fake}})
+	probe.sends = func() int { return h.count("SELECT coalesce(sum(sends), 0) FROM identity.auth_flow") }
+	probe.challenges = func() int { return h.count("SELECT count(*) FROM identity.step_up_challenge") }
+	address := "visible@example.org"
+	who := h.seedAccount(1, address)
+	h.remember(address)
+	flow := h.beginEmail(address, caller{}).GetValue().GetChallenge().GetFlowId()
+	if reply := h.requestCode(flow, address, caller{}); reply.GetError() != nil {
+		t.Fatalf("send: %s", failure(reply.GetError()))
+	}
+	if got := probe.seen(); len(got) != 1 || got[0] != [2]int{1, 0} {
+		t.Fatalf("at the first Send the flow's send count and the step-up challenges visible to another connection were %v, want [1 0]", got)
+	}
+	native := h.signIn(who, newClaim(t), caller{})
+	if step := h.beginEmailStepUp(bearer(native.GetAccessToken()), who, identity.ClassRevokeAllSessions); step.GetError() != nil {
+		t.Fatalf("begin the step-up: %s", failure(step.GetError()))
+	}
+	if got := probe.seen(); len(got) != 2 || got[1] != [2]int{1, 1} {
+		t.Fatalf("at the step-up Send the visible state was %v, want the committed challenge: [1 1]", got)
+	}
+}
+
+// visibilityProbe is a sender that records what another connection sees of the database at the moment of each Send.
+type visibilityProbe struct {
+	fake       *mail.Fake
+	sends      func() int
+	challenges func() int
+	mu         sync.Mutex
+	observed   [][2]int
+}
+
+func (v *visibilityProbe) Enabled() bool { return true }
+
+func (v *visibilityProbe) Send(ctx context.Context, message mail.Message) error {
+	seen := [2]int{v.sends(), v.challenges()}
+	v.mu.Lock()
+	v.observed = append(v.observed, seen)
+	v.mu.Unlock()
+	return v.fake.Send(ctx, message)
+}
+
+func (v *visibilityProbe) seen() [][2]int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return append([][2]int(nil), v.observed...)
 }
