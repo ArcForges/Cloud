@@ -538,7 +538,10 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
   files.forEach((file, index) => {
     const block = rows[index];
     assert.ok(block);
-    assert.match(String(block.description), /^AF-CTR-0[34]: /u);
+    assert.match(
+      String(block.description),
+      file.includes("af-ctr-04-") ? /^AF-CTR-04: /u : /^AF-CTR-03: /u,
+    );
     assert.equal(block.regexTarget, "line");
     assert.deepEqual(block.paths, [`^${regexText(file)}$`]);
     assert.deepEqual(block.regexes, expected);

@@ -1283,6 +1283,18 @@ test("an internal failure is not described as one to try again (E4-INTERNAL: ret
   assert.match(script.errorText(new script.ApiError(503, "overloaded")), /try again/iu);
 });
 
+test("a reply without a code never promises a retry: behind the hosted Worker an internal failure is a plain 503 (E4-INTERNAL)", () => {
+  // The Worker turns the center's own 503 (an internal failure, retry NEVER with effect UNKNOWN) into its plain-text 503 with no
+  // ArcError, so the script cannot tell it from any other failure and must not say to try again.
+  for (const error of [new script.ApiError(503, ""), new script.ApiError(500, ""), undefined]) {
+    const text = script.errorText(error);
+    assert.match(text, /may or may not have taken effect/u);
+    assert.doesNotMatch(text, /try again/iu);
+  }
+  // A code-carrying AFTER_TIME refusal keeps its busy text.
+  assert.match(script.errorText(new script.ApiError(503, "overloaded")), /try again/iu);
+});
+
 test("the sign-out page reads the CSRF token, posts the logout with it and goes to the sign-in (js-7)", async () => {
   const seen: string[] = [];
   const out = page("sign-out", [...common, "sign-out"], {

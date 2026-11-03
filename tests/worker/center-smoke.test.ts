@@ -13,26 +13,36 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const harness = String.raw`
-import importlib.util, json, subprocess, sys, time
+import importlib.util, json, signal, subprocess, sys, time
 spec = importlib.util.spec_from_file_location("center_eng", sys.argv[1])
 center = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(center)
-STUBBORN = "import signal, sys, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nprint('ready', flush=True)\ntime.sleep(300)"
-POLITE = "import sys, time\nprint('ready', flush=True)\ntime.sleep(300)"
+STUBBORN = "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nprint('ready', flush=True)\ntime.sleep(30)"
+POLITE = "import time\nprint('ready', flush=True)\ntime.sleep(30)"
+children = []
 def start(source):
-    child = subprocess.Popen([sys.executable, "-c", source], stdout=subprocess.PIPE, text=True)
+    child = subprocess.Popen([sys.executable, "-c", source], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    children.append(child)
     child.stdout.readline()
     return child
 result = {}
-polite = start(POLITE)
-started = time.monotonic()
-code, killed = center.stop_process(polite, grace=10, kill_wait=5)
-result["polite"] = {"killed": killed, "exited": polite.poll() is not None, "seconds": time.monotonic() - started}
-if hasattr(__import__("signal"), "SIGKILL") and sys.platform != "win32":
-    stubborn = start(STUBBORN)
+try:
+    polite = start(POLITE)
     started = time.monotonic()
-    code, killed = center.stop_process(stubborn, grace=1, kill_wait=5)
-    result["stubborn"] = {"killed": killed, "exited": stubborn.poll() is not None, "code": code, "seconds": time.monotonic() - started}
+    code, killed = center.stop_process(polite, grace=10, kill_wait=5)
+    result["polite"] = {"killed": killed, "exited": polite.poll() is not None, "seconds": time.monotonic() - started}
+    if sys.platform != "win32":
+        stubborn = start(STUBBORN)
+        started = time.monotonic()
+        code, killed = center.stop_process(stubborn, grace=1, kill_wait=5)
+        result["stubborn"] = {"killed": killed, "exited": stubborn.poll() is not None, "code": code, "seconds": time.monotonic() - started}
+finally:
+    # Whatever happened above, no child outlives the harness.
+    for child in children:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=10)
+        child.stdout.close()
 print(json.dumps(result))
 `;
 

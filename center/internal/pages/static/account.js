@@ -46,7 +46,8 @@ const ERROR_TEXT = {
 
 const CANCELLED_TEXT = "The passkey prompt was closed. Try again when you are ready.";
 const UNSUPPORTED_TEXT = "This browser cannot use passkeys.";
-const GENERIC_TEXT = "The request could not be completed. Try again in a moment.";
+const GENERIC_TEXT =
+  "The request could not be completed, and it may or may not have taken effect. Reload the page to see the current state.";
 const NETWORK_TEXT = "The center could not be reached. Check the connection and try again.";
 
 /** An error reply of a route (or a failure to reach it): its HTTP status and ArcError code. */

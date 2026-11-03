@@ -444,15 +444,19 @@ keys refused). A method a path does not have is 405 and an unknown path 404. A d
 center that is the Worker's reply of a path it does not know (plain text, before anything about the request is read), on a
 self-hosted center the handler's 404 with the security headers and no body. The statuses of a reply of the center that the Worker
 keeps are 200, 303, 400, 403, 404, 413, 415 and 429 (a rate limit: the center's carries the ArcError's retry advice in its body); the
-Worker turns any other status of the Container into its own 503, plain text, with no `Retry-After`. The statuses the Worker answers
+Worker turns any other status of the Container into its own plain-text 503 (with a `Retry-After` only for a Container the platform could not start, below). The statuses the Worker answers
 itself, without the Container, are the 400, 403, 413, 415 and 429 of the request rules above (its edge limit sets `Retry-After`),
 405 for a method a path does not have, 408 for a body not read within the body budget, 499 for a client that went away, 504 for a
 call that outlasted `pageDurationMs` and 503 for a Container it could not use. Two of these carry a `Retry-After`: the edge-limit
 429 and the 503 for a Container the platform could not start (`Retry-After: 2`, `worker/readiness/container.ts`
 `containerUnavailable(true)`: the request never reached the host, so a retry is meaningful); every other 503 of the Worker, the
-ones for a reply of the Container it refuses included, has none. The center's own refusal of status 503 (an internal failure, a
-store that is down) reaches the browser as that 503 only through the Worker's rule above: the browser sees the center's ArcError
-only for the statuses the Worker keeps, so its retry advice is the body's, never a header. The contract defines no error body for these routes, so a refusal of a JSON route is the
+ones for a reply of the Container it refuses included, has none. The center's own refusal of status 503 (an internal failure, a store that is down) reaches the browser in one of two ways. On a
+self-hosted center the browser gets the center's own page or JSON body: for `INTERNAL/internal` retry `never`, effect `unknown` and a
+text that says the request may or may not have been completed, for `RESOURCE/overloaded` the retry advice and the busy text. On the
+hosted center the Worker replaces that 503 with its own plain-text 503 that carries no ArcError and no `Retry-After`, so the page
+script cannot tell the two apart and shows its generic text, which promises no retry (the request may or may not have taken effect;
+reload the page to see the current state), and an HTML page shows the Worker's "Cloud container is temporarily unavailable." instead
+of the center's page. The contract defines no error body for these routes, so a refusal of a JSON route is the
 [ArcError](center.md#arcerror-and-grpc-status) as JSON, `{"error": {"category", "code", "messageKey", "retry", "effect",
 "correlationId", "details"}}`, and of a page an HTML page with a fixed text of its code (the center never sends text to show).
 This is a gap of the contract document, routed to the Contracts and Design owners.
