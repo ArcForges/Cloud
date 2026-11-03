@@ -7,7 +7,8 @@ sells nothing, charges nobody and activates nothing: the production catalogue is
 prices and limits (H-07).
 
 The commerce path (a purchase becomes grants and terms) is AF-CTR-09, the operator's own service is AF-OPS-01, and the gated
-operations themselves (task control, nodes, MCP, push) arrive with AF-CTR-04 and later. [What waits](#what-waits-for-later-tasks) lists
+operations themselves (node connection, task control, MCP, push) arrive with AF-CTR-05 and later: AF-CTR-04's node enrollment is an
+essential operation and serves no gated row ([center fleet](center-fleet.md), pinned by `TestFleetRowsCarryNoFeature`). [What waits](#what-waits-for-later-tasks) lists
 what this document does not describe because it does not exist yet.
 
 ## Evidence labels
@@ -346,7 +347,7 @@ term, no `identity.operator` row, and the audit events `issued` once and `refuse
   each refusal its own text (deferred in fix round 1, `page-3`: unreachable in production, where the surface is off and the catalogue
   is empty).
 - **H-07**: the approved prices, limits and the Neon plan and retention; until then the production catalogue is empty.
-- **Before the first gated operation (an AF-CTR-04 prerequisite) and before H-07**: the activation of definitions is per account and
+- **Before the first gated operation (AF-CTR-05's node connection; AF-CTR-04 serves none) and before H-07**: the activation of definitions is per account and
   keyed by the version of the replica that reads. Two revisions with different definitions versions running side by side (a rolling
   deploy) each recompute and append an activation at every read of an account whose last activation is the other's, so the snapshot
   version climbs by one per read and the 2000-record bound (activations count) wedges the account for good. Unreachable today
@@ -360,7 +361,7 @@ term, no `identity.operator` row, and the audit events `issued` once and `refuse
   definitions (its snapshots would carry another version). Follow-up before the first gated operation: compose a self-hosted center
   over a database and run the disabled-key table through its authorizer's gate, request `/operations/grant` from the composed hosted
   center, and compare the operator's snapshot version with the gate's.
-- **The cause of a gate failure is neither logged nor audited** (deferred, `gate-3`; an AF-CTR-04 prerequisite). `gateFailure`
+- **The cause of a gate failure is neither logged nor audited** (deferred, `gate-3`; a prerequisite of the first gated operation). `gateFailure`
   answers a commit without an answer, a refresh that lost its race and a missing entitlement store as a bare `RESOURCE/overloaded`
   and writes no `access.gated` row, so an operator cannot tell it from load. Follow-up: wrap the cause (`fmt.Errorf("%w: %w",
 arc.Unavailable(), err)`) and log it with the correlation id in `identityapi.failure` and the pages' failure path, with a test that
@@ -380,9 +381,10 @@ arc.Unavailable(), err)`) and log it with the correlation id in `identityapi.fai
   (before the snapshot is ever dropped by an operation): floor every instant at the newest record creation or activation instant.
   (The comment of migration `0003` says the same as this paragraph since fix round 2; its checksum changed with it, while the
   migration was still unmerged.)
-- **AF-CTR-04 and later**: the gated operations (task control, nodes, MCP), their quotas and budgets through the resource-control
-  stage, and the rows of the operation table that carry a `Feature`. The production `Authorizer` is composed with **no resource
-  control** today, so a gated call is not rate limited: AF-CTR-04 must register a per-account control before it serves a gated row,
+- **AF-CTR-05 and later**: the gated operations (node connection, task control, MCP), their quotas and budgets through the
+  resource-control stage, and the rows of the operation table that carry a `Feature` (AF-CTR-04's fleet rows carry none). The
+  production `Authorizer` is composed with **no resource control** today, so a gated call is not rate limited: the task that serves
+  the first gated row must register a per-account control before it does,
   and must check every row that carries a `Feature` against `feature.OperationKeys` (`CheckRow` checks that the key is a gated key,
   not that it is the key of the row's group; nothing links the table to the operation table in code). Until a per-account control
   stands in front of it, a gated call appends up to two audit rows (`access.authorized`, and `access.gated` when refused) and

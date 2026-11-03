@@ -86,7 +86,7 @@ variable and never repeats its value.
 | `NEON_DATABASE_URL`                     | none     | With the Neon Hello and no store: a complete pooled Neon URL with `sslmode` and `channel_binding=require`; pool of two, exec query mode; `application_name` `arcforges-center` (the Go Hello sent `arcforges-go-hello`)                                                                                                                                                                                                                                     |
 | `ARCFORGES_CENTER_DATABASE_URL`         | none     | The runtime role's pooled URL of the store (a login role of the runtime group; [PostgreSQL store](postgres-store.md)); verified TLS with channel binding, except a loopback host of a self-hosted center                                                                                                                                                                                                                                                    |
 | `ARCFORGES_CENTER_DATABASE_MAX_CONNS`   | `4`      | Pool size of the runtime database, 1 to 32                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `ARCFORGES_CENTER_SURFACES`             | per mode | The enabled surfaces: exact names (`identity`, `pages`, `operations`), comma-separated, or `none`; `pages` needs `identity`; `operations` needs both and exists only in official-hosted mode; official-hosted enables none by default, self-hosted `identity` and `pages` ([surface switch](center-identity.md#surface-switch)); a surface needs the runtime database                                                                                       |
+| `ARCFORGES_CENTER_SURFACES`             | per mode | The enabled surfaces: exact names (`identity`, `pages`, `operations`, `fleet`), comma-separated, or `none`; `pages` needs `identity`; `operations` needs both and exists only in official-hosted mode; `fleet` (node enrollment, [center fleet](center-fleet.md)) needs both; official-hosted enables none by default, self-hosted `identity` and `pages` ([surface switch](center-identity.md#surface-switch)); a surface needs the runtime database       |
 | `ARCFORGES_CENTER_CLIENT_IP_HEADER`     | none     | Empty or `X-Arcforges-Client-Ip`; required in official-hosted mode while a surface is enabled (the Worker always passes it); self-hosted only with trusted proxies                                                                                                                                                                                                                                                                                          |
 | `ARCFORGES_CENTER_TRUSTED_PROXIES`      | none     | Self-hosted only: CIDR prefixes, comma-separated, whose client-address header is trusted                                                                                                                                                                                                                                                                                                                                                                    |
 | `ARCFORGES_CENTER_BOOTSTRAP_SHA256`     | none     | With `..._EXPIRES_AT`: the SHA-256 (64 lowercase hex characters) of the exact owner bootstrap token text, prefix included (`printf %s "$TOKEN" \| sha256sum`); never the token itself                                                                                                                                                                                                                                                                       |
@@ -96,7 +96,8 @@ variable and never repeats its value.
 The `migrate` and `admin` commands read their own variables (`ARCFORGES_CENTER_MIGRATION_DATABASE_URL`, the migration role's
 direct URL; `ARCFORGES_CENTER_DATABASE_NAME`; `ARCFORGES_CENTER_RUNTIME_ROLE`; `ARCFORGES_CENTER_RUNTIME_SECRET_FILE`;
 `ARCFORGES_CENTER_RUNTIME_POOLED_HOST`; `ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT`); `serve` never reads them
-([PostgreSQL store](postgres-store.md)). No URL of the official deployment is compiled
+([PostgreSQL store](postgres-store.md)); `admin register-signing-key`, `retire-signing-key` and `revoke-device` are the fleet's
+([center fleet](center-fleet.md#the-centers-signing-keys)). No URL of the official deployment is compiled
 into a code path: `TestNoOfficialEndpointIsCompiledIn` fails if one appears, and health and every URL the center issues derive
 from `ARCFORGES_CENTER_PUBLIC_BASE_URL`. The production deployment states its values in `wrangler.json`
 (`ARCFORGES_CENTER_MODE=official-hosted`, `ARCFORGES_CENTER_PUBLIC_BASE_URL=https://arcforges.com/api`), which
@@ -278,10 +279,10 @@ controls and audit, in that order and last ([the gate](center-entitlement.md#the
 
 ### Routed task control
 
-The operations that later tasks serve (AF-CTR-04 on) carry these keys. The table is `feature.OperationKeys`, the policy a gated row
+The operations that later tasks serve (AF-CTR-05 on; AF-CTR-04's node enrollment is essential and carries none) carry these keys. The table is `feature.OperationKeys`, the policy a gated row
 of the operation table of `internal/access` follows (nothing links the two in code: `access.CheckRow` checks only that a `Feature` is
-a gated key; AF-CTR-04 registers each row with the key of its group and tests every row that carries a `Feature` against this
-table, see [what waits](center-entitlement.md#what-waits-for-later-tasks)), and
+a gated key; the task that serves the first gated row registers each row with the key of its group and tests every row that carries a
+`Feature` against this table, see [what waits](center-entitlement.md#what-waits-for-later-tasks)), and
 `TestTheCenterDocumentPrintsTheRoutedTaskControlTable` fails when this table and the code differ:
 
 | Key              | Gates                                               |
@@ -293,7 +294,7 @@ table, see [what waits](center-entitlement.md#what-waits-for-later-tasks)), and
 | `center.mcp`     | MCP                                                 |
 | `push`           | push                                                |
 
-Resource limits (quotas, budgets, concurrency) are enforced by the tasks whose operations they bound, from AF-CTR-04 on, through
+Resource limits (quotas, budgets, concurrency) are enforced by the tasks whose operations they bound, from AF-CTR-05 on, through
 the resource-control stage of `Authorize`; the entitlement layer decides whether a feature is available, not how much of it.
 
 ## Self-hosted mode
@@ -444,7 +445,7 @@ hand-written Worker sources.
     "binary": "arcforges-center",
     "mode": "official-hosted",
     "publicBaseUrl": "https://…",
-    "surfaces": "none | identity | identity,pages | identity,pages,operations"
+    "surfaces": "none | identity | identity,pages | identity,pages,operations | identity,pages,fleet"
   }
 }
 ```
@@ -461,7 +462,8 @@ Readiness is separate from health. `GET /readyz` on the admin listener answers `
 when every configured database answers a ping within two seconds (`helloDatabase`, `database`) and the store's schema carries
 every migration of this build exactly (`databaseSchema`), and `503` with `unavailable` otherwise. `GET /metrics` on the same
 listener exposes the Prometheus text format: `arcforges_center_requests_total{method,code}`,
-`arcforges_center_request_duration_seconds{method}` (histogram), `arcforges_center_refusals_total{code,category}` and the
+`arcforges_center_request_duration_seconds{method}` (histogram), `arcforges_center_refusals_total{code,category}`,
+`arcforges_center_fleet_events_total{event,outcome}` (closed pairs, [center fleet](center-fleet.md#metrics-audit-and-transactions)) and the
 database pool and schema metrics of the [PostgreSQL store](postgres-store.md#observability-and-alert-conditions). Labels are closed values: a registered method path or `plain`,
 `unregistered`, `not_found`; a gRPC code name or `http_<status>`; a registry code and an `ArcError` category. The admin
 listener is not configured in the hosted Container, so production adds no route; there the metrics reach the operator as the
