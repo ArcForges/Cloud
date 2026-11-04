@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { auditLicences } from "../../tooling/licence-boundary.ts";
 import { gitEnvironment } from "../../tooling/process.ts";
+import { scratchDirectory } from "./support/scratch.ts";
 
 function fixture() {
-  const root = mkdtempSync(path.join(os.tmpdir(), "licence-inventory-"));
+  const root = scratchDirectory("licence-inventory-");
   execFileSync("git", ["init", "-q"], { cwd: root, windowsHide: true, env: gitEnvironment() });
   execFileSync(
     "git",

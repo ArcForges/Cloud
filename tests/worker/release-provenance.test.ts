@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import {
-  cpSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { before, test } from "node:test";
@@ -21,6 +13,7 @@ import {
   verifyWorker,
 } from "../../tooling/release-provenance.ts";
 import { root } from "../../tooling/process.ts";
+import { scratchDirectory } from "./support/scratch.ts";
 
 let worker: Buffer;
 let metadata: Record<string, unknown>;
@@ -87,7 +80,7 @@ function filesUnder(directory: string, prefix = ""): string[] {
 }
 
 function imageFixture() {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "cloud-image-provenance-"));
+  const directory = scratchDirectory("cloud-image-provenance-");
   cpSync(path.join(root, "artifacts/image-notices"), path.join(directory, "notices"), {
     recursive: true,
   });

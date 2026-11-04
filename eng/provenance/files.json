@@ -1462,6 +1462,8 @@
     "tests/worker/support/plan-calls.ts",
     "tests/worker/support/platform-fetch.ts",
     "tests/worker/support/readiness-fixtures.ts",
+    "tests/worker/support/scratch-probe.ts",
+    "tests/worker/support/scratch.ts",
     "tests/worker/support/sqlite-d1.ts",
     "tests/worker/support/traceparent.ts",
     "tests/worker/support/windows-machine.ts",

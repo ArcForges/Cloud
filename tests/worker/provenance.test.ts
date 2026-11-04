@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -19,9 +19,10 @@ import {
   validateRecord,
 } from "../../tooling/provenance.ts";
 import { root as owner } from "../../tooling/process.ts";
+import { scratchDirectory } from "./support/scratch.ts";
 
 function fixture() {
-  const root = mkdtempSync(path.join(os.tmpdir(), "cloud-provenance-"));
+  const root = scratchDirectory("cloud-provenance-");
   const write = (file: string, value: unknown) => {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     writeFileSync(
@@ -368,7 +369,7 @@ scenario("inherited hook Git selection cannot redirect source or fixture operati
   }
 });
 scenario("reject linked paths escaping a repository", (f) => {
-  const outside = mkdtempSync(path.join(os.tmpdir(), "cloud-provenance-outside-"));
+  const outside = scratchDirectory("cloud-provenance-outside-");
   try {
     writeFileSync(path.join(outside, "source.txt"), "outside");
     symlinkSync(

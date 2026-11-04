@@ -4,8 +4,6 @@
 // engine SQLite shares with D1. SQLite is not D1: workerd's D1 run (npm run test:d1:families:local) repeats the contention cases on
 // the closest local engine, and the provider's REST batch atomicity stays a deferred live check.
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -23,6 +21,7 @@ import {
   workerDictionary,
   type FixtureValues,
 } from "./support/family-fixtures.ts";
+import { scratchDirectory } from "./support/scratch.ts";
 
 const dictionary = workerDictionary(fixtureManifest());
 type Db = ReturnType<typeof openFamilyD1>;
@@ -122,8 +121,8 @@ test("a guard is classified as a failed precondition and any other CHECK keeps t
   });
 });
 
-test("two writers that read the same revision: one commits, the other is refused whole and succeeds after rereading", async () => {
-  const directory = mkdtempSync(path.join(tmpdir(), "family-contention-"));
+test("two writers that read the same revision: one commits, the other is refused whole and succeeds after rereading", async (t) => {
+  const directory = scratchDirectory("family-contention-", t);
   const file = path.join(directory, "d1.sqlite");
   const first = openFamilyD1(file);
   seed(first);
