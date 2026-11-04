@@ -68,6 +68,14 @@ func TargetHash(class string, accountID, targetID platform.ID) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// TextTargetHash is a step-up target named by a text rather than an ID (AF-CTR-04 E2: the device-code approval's target is the
+// normalized user code, 8 upper-case letters): the lowercase hexadecimal SHA-256 of the class, the account in its canonical lowercase
+// text and the target text, each on its own line, as TargetHash; a client computes the same hash for BeginStepUp.
+func TextTargetHash(class string, accountID platform.ID, text string) string {
+	digest := sha256.Sum256([]byte(class + "\n" + accountID.String() + "\n" + text))
+	return hex.EncodeToString(digest[:])
+}
+
 var (
 	classPattern      = regexp.MustCompile(`^[A-Za-z0-9._:/-]{1,128}$`)
 	targetHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)

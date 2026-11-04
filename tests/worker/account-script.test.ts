@@ -1276,6 +1276,17 @@ test("every code the center sends has a text of its own (js-7)", () => {
   assert(seen.size === codes.length);
 });
 
+test("code_invalid is described truly for an unknown code and for a code whose lookups are spent (AF-CTR-04 E2)", () => {
+  // VALIDATION/code_invalid answers both an unknown user code and the sixth lookup of a live one: the text must not claim the code
+  // was not recognized, and it names the way out (a new sign-in on the device).
+  const text = script.errorText(new script.ApiError(400, "code_invalid"));
+  assert.equal(
+    text,
+    "That code cannot be used. Check it, or start the sign-in again on the device.",
+  );
+  assert(!/not recognized|wrong|unknown/u.test(text));
+});
+
 test("an internal failure is not described as one to try again (E4-INTERNAL: retry NEVER, effect UNKNOWN)", () => {
   const text = script.errorText(new script.ApiError(503, "internal"));
   assert.match(text, /may or may not have been completed/u);

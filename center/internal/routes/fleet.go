@@ -16,16 +16,20 @@ const SurfaceFleet = "fleet"
 // verifier and proof (and the CSR that release 1 ignores).
 const fleetRequestBytes = 4096
 
-// FleetMethods are the NodeEnrollmentService methods the center serves, in registration order: part E1b's browser sign-in, then part
-// E1a's refresh, report and sign-out. Every other method of the service stays unregistered (UNIMPLEMENTED, no Worker row) until its
-// part serves it: the device-code sign-in (E2), and the phone pairing, certificate, LAN, entitlement-token, entitlement-key and
-// support-upload methods of later tasks.
+// FleetMethods are the NodeEnrollmentService methods the center serves, in registration order: part E1b's browser sign-in, part E2's
+// device-code sign-in, then part E1a's refresh, report and sign-out. Every other method of the service stays unregistered
+// (UNIMPLEMENTED, no Worker row) until its task serves it: the phone pairing, certificate, LAN, entitlement-token, entitlement-key and
+// support-upload methods.
 func FleetMethods() []IdentityMethod {
 	return []IdentityMethod{
 		{fleetv1connect.NodeEnrollmentServiceBeginNodeSignInProcedure, false, fleetRequestBytes},
 		{fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure, true, fleetRequestBytes},
 		{fleetv1connect.NodeEnrollmentServiceApproveNodeSignInProcedure, true, fleetRequestBytes},
 		{fleetv1connect.NodeEnrollmentServiceCompleteNodeSignInProcedure, false, fleetRequestBytes},
+		{fleetv1connect.NodeEnrollmentServiceStartDeviceAuthorizationProcedure, false, fleetRequestBytes},
+		{fleetv1connect.NodeEnrollmentServicePollDeviceAuthorizationProcedure, false, fleetRequestBytes},
+		{fleetv1connect.NodeEnrollmentServiceLookupDeviceCodeProcedure, true, fleetRequestBytes},
+		{fleetv1connect.NodeEnrollmentServiceApproveDeviceCodeProcedure, true, fleetRequestBytes},
 		{fleetv1connect.NodeEnrollmentServiceRefreshNodeSessionProcedure, false, fleetRequestBytes},
 		{fleetv1connect.NodeEnrollmentServiceReportNodeInfoProcedure, true, fleetRequestBytes},
 		{fleetv1connect.NodeEnrollmentServiceSignOutNodeProcedure, true, fleetRequestBytes},
@@ -33,12 +37,12 @@ func FleetMethods() []IdentityMethod {
 }
 
 // fleetBudget is the transport budget of a fleet method: small replies (a token pair with the key sets, a flow, or a receipt), a few
-// short transactions, and the contract's deadline of the method: 5 s for GetNodeSignInFlow, 15 s for CompleteNodeSignIn, 10 s for
-// the others (a refresh or a completion that outlived the node's deadline and committed would leave the node a spent token).
+// short transactions, and the contract's deadline of the method: 5 s for GetNodeSignInFlow and LookupDeviceCode, 15 s for
+// CompleteNodeSignIn, 10 s for the others (a refresh or a completion that outlived the node's deadline and committed would leave the node a spent token).
 func fleetBudget(path string) Budget {
 	deadline := 10_000
 	switch path {
-	case fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure:
+	case fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure, fleetv1connect.NodeEnrollmentServiceLookupDeviceCodeProcedure:
 		deadline = 5_000
 	case fleetv1connect.NodeEnrollmentServiceCompleteNodeSignInProcedure:
 		deadline = 15_000

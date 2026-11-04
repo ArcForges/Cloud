@@ -5,7 +5,8 @@
 // and the Worker table has no row for it), authorizes each call with the operation table before anything else, maps the contract
 // messages to package fleet and answers every refusal as the reply's ArcError with the call's correlation id. Part E1a serves
 // RefreshNodeSession, ReportNodeInfo and SignOutNode, part E1b the browser sign-in (BeginNodeSignIn, GetNodeSignInFlow,
-// ApproveNodeSignIn, CompleteNodeSignIn); the device-code sign-in follows in E2.
+// ApproveNodeSignIn, CompleteNodeSignIn), part E2 the device-code sign-in (StartDeviceAuthorization, PollDeviceAuthorization,
+// LookupDeviceCode, ApproveDeviceCode).
 package fleetapi
 
 import (
@@ -86,6 +87,10 @@ func (s *Server) Methods() []connect.Method {
 		method("GetNodeSignInFlow", fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure, s.getNodeSignInFlow),
 		method("ApproveNodeSignIn", fleetv1connect.NodeEnrollmentServiceApproveNodeSignInProcedure, s.approveNodeSignIn),
 		method("CompleteNodeSignIn", fleetv1connect.NodeEnrollmentServiceCompleteNodeSignInProcedure, s.completeNodeSignIn),
+		method("StartDeviceAuthorization", fleetv1connect.NodeEnrollmentServiceStartDeviceAuthorizationProcedure, s.startDeviceAuthorization),
+		method("PollDeviceAuthorization", fleetv1connect.NodeEnrollmentServicePollDeviceAuthorizationProcedure, s.pollDeviceAuthorization),
+		method("LookupDeviceCode", fleetv1connect.NodeEnrollmentServiceLookupDeviceCodeProcedure, s.lookupDeviceCode),
+		method("ApproveDeviceCode", fleetv1connect.NodeEnrollmentServiceApproveDeviceCodeProcedure, s.approveDeviceCode),
 		method("RefreshNodeSession", fleetv1connect.NodeEnrollmentServiceRefreshNodeSessionProcedure, s.refreshNodeSession),
 		method("ReportNodeInfo", fleetv1connect.NodeEnrollmentServiceReportNodeInfoProcedure, s.reportNodeInfo),
 		method("SignOutNode", fleetv1connect.NodeEnrollmentServiceSignOutNodeProcedure, s.signOutNode),

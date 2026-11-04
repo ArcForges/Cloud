@@ -20,7 +20,7 @@ const ProofDomain = "ArcForges node-key-proof v1\n"
 const (
 	// ProofComplete is CompleteNodeSignIn's: binding = flow_id (16 bytes) || code (UTF-8, 43 characters).
 	ProofComplete byte = 0x01
-	// ProofPoll is PollDeviceAuthorization's (part E2): binding = device_code (UTF-8, 43 characters).
+	// ProofPoll is PollDeviceAuthorization's (AF-CTR-04 E2): binding = device_code (UTF-8, 43 characters).
 	ProofPoll byte = 0x02
 )
 

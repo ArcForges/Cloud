@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestFleetExchangeCapture",
   "contractsCohort": "1.0.0-ci.424.1",
-  "centerCommit": "7c1b060",
+  "centerCommit": "3ab4fe0",
   "method": "ReportNodeInfo",
   "case": "ok",
   "outcome": "ok",
@@ -29,8 +29,10 @@
     "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
     "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
     "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "a device code the center drew: the canonical base64url of 32 bytes of 0xd0+n",
+    "a user code the center drew: BBBBBBB and the n-th letter of the code alphabet; verification_uri_complete carries its placeholder",
     "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
     "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
   ],
-  "sha256": "1f81a919c874d7d9f38ca1a4b182580ec91b6a0a387eb5f21cf7768922c959f5"
+  "sha256": "03405892c8d41f4150e6272f797eaefbd5e353ba4b7063e0437d8c98d24402eb"
 }

@@ -16,8 +16,8 @@ import (
 // (AF-CTR-04 protocol-6): revoking all other sessions and removing a credential cancel the account's approved node sign-ins that no
 // node collected yet, because an approval otherwise outlives the remediation that the approving session itself performs (that
 // session is neither revoked nor moved to a new epoch by "sign out all other sessions"). The identity composition (server.New)
-// registers the fleet's participants, one per sign-in flow table, in a fixed order: fleet.node_sign_in now, part E2's
-// fleet.device_authorization after it; that order will be the lock order between the two tables.
+// registers the fleet's participants, one per sign-in flow table, in a fixed order: fleet.node_sign_in, then
+// fleet.device_authorization (AF-CTR-04 E2); that order is the lock order between the two tables.
 type AccountParticipant interface {
 	// Name is the participant's name in the audit counts.
 	Name() string

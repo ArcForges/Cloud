@@ -30,7 +30,8 @@ const MaxNodesLimit = "max_nodes_per_account"
 // ErrApprovalLapsed is an enrollment whose approval no longer stands (protocol-6): the approving account is not Active, or the
 // approving session was revoked by the account, by the revocation of all its sessions, of its device or by an operator, or an
 // authentication or recovery epoch moved since the approval. Nothing of the enrollment remains: Enroll rolls its savepoint back
-// (as for every refusal). The sign-in methods (parts E1b and E2) will end the flow as expired and answer STATE/expired.
+// (as for every refusal). CompleteNodeSignIn ends the browser flow EXPIRED and answers STATE/expired; PollDeviceAuthorization ends the
+// device authorization EXPIRED and answers the state EXPIRED.
 var ErrApprovalLapsed = errors.New("the approval of the enrollment lapsed")
 
 // Approver is the approving account's session as the approval recorded it.

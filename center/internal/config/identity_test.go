@@ -300,6 +300,39 @@ func TestTheBrowserSignInPolicyHasItsDefaultsAndBounds(t *testing.T) {
 	}
 }
 
+// TestTheDeviceSignInPolicyHasItsDefaultsAndBounds pins the keys of the device-code sign-in (AF-CTR-04 E2; cloud-5 item 4): the
+// poll failure bucket per network and the two user-code entry budgets, with the convention of the other windows. The poll interval,
+// the authorization's lifetime and the 5 lookups of a live code are contract values and no keys, so a document naming them is
+// refused. A document that sets every node key at once still fits the override bound.
+func TestTheDeviceSignInPolicyHasItsDefaultsAndBounds(t *testing.T) {
+	defaults := DefaultIdentityPolicy()
+	if defaults.NodePollPerPrefix != (Window{Limit: 120, Window: 10 * time.Minute}) || defaults.DeviceEntryPerAccount != (Window{Limit: 5, Window: 15 * time.Minute}) ||
+		defaults.DeviceEntryPerPrefix != (Window{Limit: 20, Window: 15 * time.Minute}) {
+		t.Fatalf("device sign-in defaults %+v", defaults)
+	}
+	for _, document := range []string{`{"nodePollPrefixLimit": 0}`, `{"nodePollPrefixWindow": "59s"}`, `{"deviceEntryAccountLimit": 10001}`,
+		`{"deviceEntryAccountWindow": "25h"}`, `{"deviceEntryPrefixLimit": 0}`, `{"devicePollInterval": "5s"}`, `{"deviceAuthorizationLifetime": "10m"}`,
+		`{"nodePollAuthorizationLimit": 6}`, `{"deviceCodeLookups": 5}`} {
+		if _, err := ParseIdentityPolicy(document); err == nil {
+			t.Errorf("%s was admitted", document)
+		}
+	}
+	every := `{"nodeAccessLifetime": "15m", "nodeRefreshIdleLifetime": "1h", "nodeRefreshAbsolute": "9600h", "maxNodesPerAccount": 1000,
+"nodeRefreshPrefixLimit": 10000, "nodeRefreshPrefixWindow": "24h", "nodeRefreshSessionLimit": 1, "nodeRefreshSessionWindow": "1m",
+"nodeReportInstallationLimit": 3, "nodeReportInstallationWindow": "2h", "nodeCodeLifetime": "30s", "nodeFlowPrefixLimit": 10000,
+"nodeFlowPrefixWindow": "24h", "nodeFlowNodeLimit": 1, "nodeFlowNodeWindow": "1m", "nodeCompletePrefixLimit": 5, "nodeCompletePrefixWindow": "3m",
+"nodeApproveAccountLimit": 2, "nodeApproveAccountWindow": "2h", "nodePollPrefixLimit": 7, "nodePollPrefixWindow": "4m",
+"deviceEntryAccountLimit": 1, "deviceEntryAccountWindow": "24h", "deviceEntryPrefixLimit": 10000, "deviceEntryPrefixWindow": "1m"}`
+	if len(every) > MaxIdentityPolicyBytes {
+		t.Fatalf("a document with every node key is %d bytes", len(every))
+	}
+	policy, err := ParseIdentityPolicy(every)
+	if err != nil || policy.NodePollPerPrefix != (Window{Limit: 7, Window: 4 * time.Minute}) || policy.DeviceEntryPerAccount != (Window{Limit: 1, Window: 24 * time.Hour}) ||
+		policy.DeviceEntryPerPrefix != (Window{Limit: 10000, Window: time.Minute}) {
+		t.Fatalf("every device sign-in key: %+v %v", policy, err)
+	}
+}
+
 // TestTheFleetSurfaceRefusesABaseURLTooLongForItsURLs (OQ-13): with fleet enabled the public base URL is at most 462 characters, so
 // every URL the center derives for a node stays within the contract's 512; without fleet the longer URL still starts.
 func TestTheFleetSurfaceRefusesABaseURLTooLongForItsURLs(t *testing.T) {

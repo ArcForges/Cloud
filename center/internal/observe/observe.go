@@ -54,7 +54,11 @@ type Metrics struct {
 // re-enrolled, and its refusals: the node ID live in another account, the key held live, the key retired, the node cap, an approval
 // that lapsed), a node's sign-out, and the browser sign-in (AF-CTR-04 E1b): a Begin (started, refused, rate limited), a review
 // (recorded, shown without a record, refused), a decision (approved, its code reissued, denied, refused, rate limited) and a Complete
-// (completed, refused, a correct code presented again, a failed verifier or key proof, an approval that lapsed, rate limited).
+// (completed, refused, a correct code presented again, a failed verifier or key proof, an approval that lapsed, rate limited), and
+// the device-code sign-in (AF-CTR-04 E2): a Start (started, refused, rate limited), a poll (each state value it answers, delivered
+// credentials, a reuse, a lapse, an unknown code, a failed key proof, refused, rate limited), a lookup (shown, refused, rate limited),
+// a decision (approved, denied, refused, rate limited) and every user-code entry that keeps its reservation, by kind (an unknown or
+// foreign code, an expired code, a code in another state, a decision without the caller's review, a live code's sixth lookup).
 // ObserveFleet counts only these pairs; any other pair is counted as unlisted, and the fleet surface's integration harness (fleetapi)
 // fails every test after which the composed center counted an unlisted pair.
 func FleetOutcomes() map[string][]string {
@@ -67,6 +71,12 @@ func FleetOutcomes() map[string][]string {
 		"review":   {"reviewed", "shown", "refused"},
 		"approve":  {"approved", "reissued", "denied", "refused", "rate_limited"},
 		"complete": {"completed", "refused", "reused", "proof_failed", "lapsed", "rate_limited"},
+		"start":    {"started", "refused", "rate_limited"},
+		"poll": {"pending", "slow_down", "delivered", "denied", "expired", "reused", "lapsed", "not_found", "proof_failed", "refused",
+			"rate_limited"},
+		"lookup":        {"shown", "refused", "rate_limited"},
+		"device_decide": {"approved", "denied", "refused", "rate_limited"},
+		"entry":         {"unknown", "expired", "state", "unreviewed", "lookups"},
 	}
 }
 

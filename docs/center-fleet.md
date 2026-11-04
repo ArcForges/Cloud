@@ -2,9 +2,8 @@
 
 AF-CTR-04 connects an ArcForges node to an account on a center: a person approves the node's sign-in in a browser (PKCE loopback) or
 with a device code, and the node then holds a node credential that it refreshes and can sign out. This page describes what the center
-serves for it. Parts E1a and E1b (this state) serve the browser sign-in, the node's refresh, report and sign-out, and hold the
-enrollment function both sign-in flows call; the device-code sign-in (part E2) and the pages `/connect` and `/activate` (part E3)
-follow. The node side is the ArcForges CloudLink (parts N1 and N2).
+serves for it. Parts E1a, E1b and E2 (this state) serve the browser sign-in, the device-code sign-in, the node's refresh, report and
+sign-out, and hold the enrollment function both sign-in flows call; the pages `/connect` and `/activate` (part E3) follow. The node side is the ArcForges CloudLink (parts N1 and N2).
 
 Enrollment is an account and device operation and is never gated (AD-0021 section 13a): every fleet row of the operation table has
 no `Feature` (`TestFleetRowsCarryNoFeature`, `TestFleetRowsAreTheServedMethods`). The gated `center.nodes` key is the node's
@@ -17,7 +16,7 @@ known name from part E1a, and it is enabled nowhere yet: production `FLAGSHIP_SU
 `identity,pages,operations` until part E3's hosted run, and the self-hosted default stays `identity,pages` until the pages exist
 (`TestTheFleetSurfaceNeedsIdentityAndPagesAndIsNoDefaultYet`). With the surface off, every fleet method answers `STATE/not_activated`
 with `state.reason` `fleet`, from the Worker's generated reply before anything else is read, and from the center. Each method's Worker
-budget is the contract's deadline: 5 s for GetNodeSignInFlow, 15 s for CompleteNodeSignIn, 10 s for the others. A center that serves
+budget is the contract's deadline: 5 s for GetNodeSignInFlow and LookupDeviceCode, 15 s for CompleteNodeSignIn, 10 s for the others. A center that serves
 `fleet` needs a public base URL of at most 462 characters (it refuses to start otherwise), so every URL it derives for a node stays
 within the contract's 512 (`TestTheFleetSurfaceRefusesABaseURLTooLongForItsURLs`). A self-hosted center whose base URL cannot be a WebAuthn relying
 party clears the default surfaces and serves none (`TestASelfHostedCenterOnAnAddressServesNoSurface`); a list that names a surface
@@ -25,19 +24,23 @@ refuses to start there.
 
 ## Served methods
 
-| Method                                   | Operation ID               | Risk | Credential                          | Restricted account's node | Receipt                                       |
-| ---------------------------------------- | -------------------------- | ---- | ----------------------------------- | ------------------------- | --------------------------------------------- |
-| NodeEnrollmentService.BeginNodeSignIn    | `fleet.beginNodeSignIn`    | R1   | anonymous                           | (no credential)           | never (`meta.command_id` is correlation only) |
-| NodeEnrollmentService.GetNodeSignInFlow  | `fleet.getNodeSignInFlow`  | R2   | account session                     | refused (the account)     | never (a mark)                                |
-| NodeEnrollmentService.ApproveNodeSignIn  | `fleet.approveNodeSignIn`  | R3   | account session, step-up to approve | refused (the account)     | never (the reply holds the code)              |
-| NodeEnrollmentService.CompleteNodeSignIn | `fleet.completeNodeSignIn` | R1   | anonymous (the flow-bound proof)    | (no credential)           | never (a one-use code)                        |
-| NodeEnrollmentService.RefreshNodeSession | `fleet.refreshNodeSession` | R1   | anonymous (refresh token)           | allowed                   | never                                         |
-| NodeEnrollmentService.ReportNodeInfo     | `fleet.reportNodeInfo`     | R1   | node credential                     | refused                   | yes (`node:<installation id>`)                |
-| NodeEnrollmentService.SignOutNode        | `fleet.signOutNode`        | R2   | node credential                     | allowed                   | yes (`node:<installation id>`)                |
+| Method                                         | Operation ID                     | Risk | Credential                            | Restricted account's node | Receipt                                       |
+| ---------------------------------------------- | -------------------------------- | ---- | ------------------------------------- | ------------------------- | --------------------------------------------- |
+| NodeEnrollmentService.BeginNodeSignIn          | `fleet.beginNodeSignIn`          | R1   | anonymous                             | (no credential)           | never (`meta.command_id` is correlation only) |
+| NodeEnrollmentService.GetNodeSignInFlow        | `fleet.getNodeSignInFlow`        | R2   | account session                       | refused (the account)     | never (a mark)                                |
+| NodeEnrollmentService.ApproveNodeSignIn        | `fleet.approveNodeSignIn`        | R3   | account session, step-up to approve   | refused (the account)     | never (the reply holds the code)              |
+| NodeEnrollmentService.CompleteNodeSignIn       | `fleet.completeNodeSignIn`       | R1   | anonymous (the flow-bound proof)      | (no credential)           | never (a one-use code)                        |
+| NodeEnrollmentService.StartDeviceAuthorization | `fleet.startDeviceAuthorization` | R1   | anonymous                             | (no credential)           | never (the reply holds the device code)       |
+| NodeEnrollmentService.PollDeviceAuthorization  | `fleet.pollDeviceAuthorization`  | R1   | anonymous (device code and key proof) | (no credential)           | never (a one-use secret)                      |
+| NodeEnrollmentService.LookupDeviceCode         | `fleet.lookupDeviceCode`         | R2   | account session                       | refused (the account)     | never (a review)                              |
+| NodeEnrollmentService.ApproveDeviceCode        | `fleet.approveDeviceCode`        | R3   | account session, step-up to approve   | refused (the account)     | yes (`account:<id>`)                          |
+| NodeEnrollmentService.RefreshNodeSession       | `fleet.refreshNodeSession`       | R1   | anonymous (refresh token)             | allowed                   | never                                         |
+| NodeEnrollmentService.ReportNodeInfo           | `fleet.reportNodeInfo`           | R1   | node credential                       | refused                   | yes (`node:<installation id>`)                |
+| NodeEnrollmentService.SignOutNode              | `fleet.signOutNode`              | R2   | node credential                       | allowed                   | yes (`node:<installation id>`)                |
 
 con-07 names no fleet operation, so the IDs are the center's own (`fleet.<method>`). Every other `NodeEnrollmentService` method stays
-unregistered (`UNIMPLEMENTED`, no Worker row): the device-code sign-in methods until part E2, and the phone
-pairing, certificate, LAN, entitlement-token, entitlement-key and support-upload methods of later tasks. `GetEntitlementKeys` is not
+unregistered (`UNIMPLEMENTED`, no Worker row): the phone pairing, certificate, LAN, entitlement-token, entitlement-key and
+support-upload methods of later tasks. `GetEntitlementKeys` is not
 used to deliver the center's keys: a node needs the next key at every refresh without a second round trip, and that method is
 anonymous.
 
@@ -135,6 +138,111 @@ is a policy key (`nodeFlowPrefixLimit`/`Window`, `nodeFlowNodeLimit`/`Window`, `
 `nodeApproveAccountLimit`/`Window`; counts 1..10000, windows 1m..24h; `nodeCodeLifetime` 30s..10m). The flow lifetime and the review
 window are the contract's 10 minutes and no keys.
 
+## Device-code sign-in
+
+A headless node starts an authorization and shows its user code; an account looks the code up (LookupDeviceCode) and approves or
+denies it (ApproveDeviceCode); part E3's `/activate` page will call the same domain functions in process, and until it exists the
+review and the decision are these two API methods; the node polls with its device code and a proof by its node key
+(CTR4-DEV-01..09 as amended by the plan review's Q8, protocol-8, protocol-9, protocol-19, contracts-9, cloud-5 and cloud-10, and by
+the C0 comments of `fleet.proto`). A caller that holds the device code but not the node key learns nothing of the authorization's
+state and writes nothing to it.
+
+**Start** (anonymous). The request is checked field by field before anything is counted: the node's description (as for Begin) and
+`node_public_key`. Then the client network's and the node ID's buckets, which BeginNodeSignIn counts too, are counted (with the
+opt-in `anonymous_flows` ceiling), and a key that an installation holds or held is refused before approval with
+`CONFLICT/already_exists` (`state.state` `node_key`, `state.reason` `already_registered`). A newer Start of the same node ID and the
+same key expires the node's PENDING authorizations that present that key (one with another key, and a browser flow of the node,
+are left alone). The authorization is PENDING for 600
+seconds with a poll interval of 5,000 ms (the contract's values; no policy keys). The device code is 32 random bytes in 43 base64url
+characters, stored only as the SHA-256 of the bytes; the user code is 8 letters of `BCDFGHJKLMNPQRSTVWXZ` drawn without bias
+(a random byte below 240, modulo 20), returned as the 8 letters and stored as the SHA-256 of them, and no other PENDING or APPROVED
+authorization holds it (a collision draws again, five times at most, then `RESOURCE/overloaded`). `verification_uri` is
+`<public base URL>/activate` and `verification_uri_complete` `<public base URL>/activate#code=XXXX-XXXX`, which the node derives itself
+and requires to match. `meta.command_id` is correlation only: every call starts a new authorization.
+
+**Entries and the budgets** (Q8 as merged). A user code is read case-insensitively with `-` and spaces ignored (ASCII letters only);
+anything else is `VALIDATION/invalid_argument` (`user_code: required` or `user_code: pattern`). "Malformed input costs nothing.
+Every other entry first reserves one unit of the account budget and one of the network budget; a right lookup gives both back."
+"Once the account or network budget is spent, every entry (also a right one) is RESOURCE/rate_limited with retry_at until the
+window ends." The budgets are `device_entry_account` (5 per 15 minutes per account) and `device_entry_prefix` (20 per 15 minutes per
+client network); the account's unit is reserved first, and when the network's is refused the account's is given back. An entry is
+a lookup or a decision. The center gives the units back exactly when the entry names a live code the caller may act on: a lookup
+that shows the node, a decision made, and a decision of a code the caller reviewed that is refused `step_up_required` or
+`quota_exceeded`; a store failure gives them back too (not after a commit whose answer was lost). Every other entry keeps them
+(the F7 resolution of the E2 decisions): an unknown code or one another account decided (`VALIDATION/code_invalid`,
+`limit.limit_name` `device_entry_account`, `limit.maximum` the window's cap, `limit.available` the account's entries left), an
+expired code (`STATE/expired`), a code in another state (`STATE/invalid_state`, `state.state` `device_authorization`, the state
+name), the decision of a code the caller did not review, and the sixth lookup of a live code. The center deviates here from the plan
+review's protocol-9 corrected fix item 3 on both halves: a decision of a code another account reviewed, and of a code nobody
+reviewed, is `STATE/invalid_state` `not_reviewed` and keeps the reservation, because a free `not_reviewed` would let a denial (which
+needs no step-up) probe the live codes under review. Its cost: a reviewer displaced by another account that holds the code pays
+for the `not_reviewed` it then meets (residual risks below). The kept unit that fills a budget is audited `identity.rate_limited`; every
+kept unit is counted by its kind (`entry` unknown, expired, state, unreviewed, lookups), the alert signal for guessing across
+accounts.
+
+**Lookup** (account session; `mobile.limited` upgrades first; a restricted account is refused). For a PENDING, unexpired code it
+counts one lookup, records the reviewing account and time (the latest review wins: a displaced reviewer's decision is
+`not_reviewed`) and returns the node as it described itself. "The sixth and later lookups of one live code are refused with
+VALIDATION/code_invalid (limit.limit_name device_code_lookups, limit.available 0); the authorization stays PENDING"; every lookup
+counts, the same account's too, and the fifth is audited `fleet.device_authorization.lookups_exhausted`. A code another account
+decided is answered as an unknown code, also after its expiry. Neither a lookup nor a refusal writes the authorization except the
+counted lookup itself.
+
+**Decision** (account session, under the account's command receipt; the reply is a `Receipt`). "Only a code this account looked up
+within the last 10 minutes can be decided" (`STATE/invalid_state` `not_reviewed`; with the 600-second life every review of a live
+code is younger). An approval needs a proved step-up of class `fleet.approveDeviceCode` bound to the normalized user code (8
+upper-case letters: the target hash is the SHA-256 of the class, the account ID and the code, each on its own line, as
+`identity.TextTargetHash` computes it), consumed in the approval's transaction; a denial needs none. "The approving account may deny
+an APPROVED authorization whose credentials are not yet delivered"; approving it again is `invalid_state` `approved`. An approval
+checks the node cap early (`RESOURCE/quota_exceeded`, `max_nodes_per_account`; Enroll enforces it) and stores the approving session,
+its authentication method and time and its epochs. An absent `approve` is refused (`approve: required`). A replay of a committed
+decision is answered with its receipt and counts nothing; a final refusal is kept by the receipt, `step_up_required` is not. The
+account's decisions of both sign-in flows count in `node_approve_account` (20 per hour).
+
+**Poll** (anonymous). The shape of `device_code` and `node_key_proof` (64 bytes) is checked first. Then, in this order:
+
+1. the device code is looked up by its digest (one point read; the code is the lookup key, so there is no stored value to compare in
+   constant time): a code that names nothing is counted in the client network's failure bucket `node_poll_prefix` (120 per 10
+   minutes) and is `STATE/not_found`, refused `RESOURCE/rate_limited` with nothing counted once that bucket holds its limit;
+2. the node key proof is verified outside any transaction, in every state: ES256 in IEEE P1363 form, 64 bytes, r and s in [1, n-1],
+   low-S, over `"ArcForges node-key-proof v1\n" || 0x02 || SHA-256(public base URL) || node ID || device code`. A failure is
+   `AUTHENTICATION/unauthenticated`, counted like an unknown code, with nothing written ("A bad node key proof on an APPROVED
+   authorization is AUTHENTICATION/unauthenticated and leaves it APPROVED"), so a holder of the device code alone cannot learn the
+   state, slow the node down or spend its bucket;
+3. a proved poll counts in its authorization's bucket `node_poll_authorization` (6 per 10 seconds, a constant): over it,
+   `RESOURCE/rate_limited`, nothing written; a proved poll never waits on `node_poll_prefix`;
+4. one transaction locks the authorization and decides under the lock: PENDING or APPROVED past its expiry becomes EXPIRED; DENIED,
+   EXPIRED and COMPLETED are answered as they are and never written, except the first poll after delivery, which records the reuse
+   (`reused_at`), revokes the delivered credential family (session revoke reason 8, audited
+   `fleet.device_authorization.code_reused` once) and answers COMPLETED without credentials; a PENDING or APPROVED authorization
+   polled sooner than its interval less 500 ms after its previous poll is SLOW_DOWN with the interval grown by 5,000 ms up to
+   60,000 ms (the center's cap) and nothing else, while the first poll is never early; PENDING records the poll; APPROVED runs
+   `fleet.Enroll` in this transaction, becomes COMPLETED and answers APPROVED with the node credential (as CompleteNodeSignIn's). An
+   approval that lapsed ends it EXPIRED in the same transaction, audited `fleet.device_authorization.approval_lapsed`, answered
+   EXPIRED; any other refusal of Enroll (`already_exists` for the node ID or the key, `credential_revoked`, `quota_exceeded`,
+   `node.os: mismatch`) rolls everything back and leaves it APPROVED.
+
+A store failure of the delivery leaves the authorization APPROVED (the next poll delivers); an unanswered commit of it is
+`INTERNAL/internal` (effect `UNKNOWN`, retry `NEVER`) and the node signs in again. The transaction's kind follows the unlocked read:
+a poll that read the authorization APPROVED runs in the delivery's effect transaction whatever the lock then decides (also
+SLOW_DOWN, an expiry or a DENIED that the account's remediation set meanwhile), so an unanswered commit of such a poll is
+`INTERNAL/internal` too, and the node signs in again although nothing was issued; a poll that read another state and finds a
+delivery or a reuse to do under the lock runs again as an effect transaction. A node never sends a poll before the reply of its
+previous one: the loser of two concurrent polls of an APPROVED authorization finds it COMPLETED and takes the reuse path, which
+revokes the winner's credentials (strict, as refresh reuse). An approved authorization no poll collects within its 600 seconds ends
+EXPIRED; nothing was issued, so nothing is revoked.
+
+**Approvals end with the account's remediation** as for the browser sign-in: RevokeAllSessions and RemoveAuthIdentity deny the
+account's APPROVED device authorizations (credentials not yet delivered) in their own transaction, after its browser flows and before
+their step-up evidence locks the account, counted in their audit events (`participants`, `fleet.device_authorization`), with the same
+two statements: the first locks, in authorization ID order, the account's APPROVED authorizations and the PENDING ones it reviewed
+last, the second denies the locked ones that are APPROVED with a snapshot taken after the locks.
+
+**Buckets.** `node_poll_prefix`, `device_entry_account` and `device_entry_prefix` are policy keys (`nodePollPrefixLimit`/`Window`,
+`deviceEntryAccountLimit`/`Window`, `deviceEntryPrefixLimit`/`Window`; counts 1..10000, windows 1m..24h); Start shares Begin's
+`nodeFlowPrefix*`, `nodeFlowNode*` and the decision `nodeApproveAccount*`. The 600 seconds, the 5,000 ms interval and its step, the
+5 lookups and the per-authorization poll bucket are the contract's or constant values and no keys.
+
 ## Node credentials
 
 A node credential is an `identity.session` row of scope `node` (3), product `arcforges-node`, bound to the node's own device and
@@ -191,8 +299,8 @@ methods answer `AUTHENTICATION/unauthenticated` when the credential's installati
 
 ## Enrollment
 
-`fleet.Enroll` is the one function the sign-in flows call in their success transaction: CompleteNodeSignIn since part E1b, and part
-E2's device poll will; its own rules are also exercised by SEEDED function-level tests that call it directly. Its rules, in the order the code applies them:
+`fleet.Enroll` is the one function the sign-in flows call in their success transaction: CompleteNodeSignIn (part E1b) and the
+delivering PollDeviceAuthorization (part E2); its own rules are also exercised by SEEDED function-level tests that call it directly. Its rules, in the order the code applies them:
 
 1. The approving account is locked and must be Active (else the approval lapses).
 2. A node ID live in another account is `CONFLICT/already_exists` (`state.state` `node`, no resource).
@@ -216,10 +324,10 @@ nothing of the enrollment remains even when the caller then commits (as a flow t
 session, superseded session or key (`TestNothingOfARefusedEnrollmentRemains`). The node session it issues gets the node lifetimes;
 `fleet.node.enrolled` (node ID, OS, architecture, canonical version, key fingerprint, flow `pkce` or `device`, `first` or
 `reenrolled`, key version) is its last statement. A concurrent enrollment of the same node ID or key is store contention, and the
-identical retry answers the rule that then applies. BeginNodeSignIn refuses a key an installation holds or held before approval
-(part E2's StartDeviceAuthorization will too), so a sign-in after a sign-out replaces the node key, and an in-place re-enrollment
+identical retry answers the rule that then applies. BeginNodeSignIn and StartDeviceAuthorization refuse a key an installation holds
+or held before approval, so a sign-in after a sign-out replaces the node key, and an in-place re-enrollment
 normally arrives with a new key. A caller may record its result in Enroll's transaction before `fleet.node.enrolled`
-(`EnrollRequest.Record`: the browser sign-in's COMPLETED flow).
+(`EnrollRequest.Record`: the browser sign-in's COMPLETED flow, the device authorization's COMPLETED row).
 
 **Node names and versions.** A node name is 1 to 64 UTF-16 units of letters, marks, numbers, punctuation, symbols and the single
 space, without a leading, trailing or doubled space, at most three combining marks in a row, no braille blank and at least one
@@ -230,7 +338,7 @@ the text before the first `+` (`fleet.ValidNodeVersion`).
 
 ## Lock order
 
-One global order, cited by the threat model (SEC-12): a sign-in flow row, `identity.user`, `device.device`, `device.installation`,
+One global order, cited by the threat model (SEC-12): a sign-in flow row (a browser flow or a device authorization), `identity.user`, `device.device`, `device.installation`,
 the `identity.session` rows, `fleet.node`. It is the order of `device.Revoke` (device, installations, sessions, then the cascade
 participants, so `fleet.node` last) with the flow row and the account in front. The writers that lock more than one of these rows
 take them in this order:
@@ -246,14 +354,27 @@ take them in this order:
   family's sessions. The foreign keys of the review mark, the approval and the denial take `FOR KEY SHARE` on the deciding account
   (and, for an approval, on its session) after the flow row; no writer that holds an account or a session `FOR UPDATE` then waits for
   a flow row, so they close no cycle.
+- StartDeviceAuthorization: the node ID's PENDING authorizations that present its key, in authorization ID order (the one order of
+  every writer that locks several authorization rows), then its insert. LookupDeviceCode: one authorization row (its review's
+  foreign key then takes `FOR KEY SHARE` on the account). ApproveDeviceCode: its command receipt row, the authorization row, then
+  (approving) the account through the step-up evidence and the proved challenge; the update's foreign keys take `FOR KEY SHARE` on
+  the account and the approving session. PollDeviceAuthorization: the authorization row, then Enroll's locks; a reuse: the
+  authorization row, then the delivered family's sessions. Lookup and Approve give the entry budgets back (the `platform.rate_limit`
+  rows, the account's then the network's) after every row of the order and before the audit chain head; every other user of those
+  rows locks one row in its own transaction, except the give-back of an entry outside its decision, which takes the same two rows in
+  the same order. No writer locks a device authorization and then a browser flow.
 - RevokeAllSessions and RemoveAuthIdentity: the account's APPROVED flows and the PENDING flows it reviewed last, in flow ID order (the
-  approval participant `fleet.node_sign_in`; part E2's `fleet.device_authorization` participant will run after it), then the account
-  through the step-up evidence.
+  approval participant `fleet.node_sign_in`), then the account's APPROVED device authorizations and the PENDING ones it reviewed last,
+  in authorization ID order (`fleet.device_authorization`, registered after it: the only writer that locks rows of both tables, in
+  that order), then the account through the step-up evidence.
 - ReportNodeInfo: the device only when it renames it, then the installation, then the node row.
 - RefreshNodeSession: its session, then the node row.
 - The account's step-up evidence path (RevokeSession of another session, RevokeAllSessions, RemoveAuthIdentity, DeviceService.Revoke
   of another device): the account first, then (for a device) `device.Revoke`.
-- The operator's `admin revoke-sessions` and `admin revoke-device`: the accounts first, then the sessions, or `device.Revoke`.
+- The operator's `admin revoke-sessions` and `admin revoke-device`: the accounts first, then the sessions, or `device.Revoke`; neither
+  takes a flow or authorization row. A poll that waits for `revoke-sessions` holds only its authorization row, an approval only its receipt row and its
+  authorization row (`revoke-sessions` takes neither), and an
+  approval it overtakes lapses in Enroll (`TestOperatorRevokeSessionsRacingADeviceApprovalOrPollNeverDeadlocks`).
   `revoke-sessions` locks its account (every account in account order for `--all`) `FOR NO KEY UPDATE`; `revoke-device` locks the
   device's account `FOR UPDATE`.
 
@@ -277,11 +398,13 @@ upgrade lock the proving session. One writer goes back in the order: a sign-in (
 code) locks its installation and its device in one statement, the installation first, and then inserts its session. It meets a
 writer of the order only on the same installation: `device.Revoke` of its device, or Enroll and ReportNodeInfo when a native claim
 names a node's installation ID (refused after the lock). PostgreSQL breaks such a deadlock: the sign-in, DeviceService.Revoke and
-ReportNodeInfo retry it as store contention (default attempts; Enroll's sign-in flows, parts E1b and E2, will too); the operator's `admin revoke-device` runs once and reports the
+ReportNodeInfo retry it as store contention (default attempts, as Enroll's sign-in flows do); the operator's `admin revoke-device` runs once and reports the
 failure, and the operator runs it again. Reordering the statement is routed to a later Cloud change of the device package. In every
 transaction a command receipt is the first row written and the audit chain head the last.
 
 `TestCompleteTakesItsLocksInTheGlobalOrder`, `TestApproveTakesTheFlowBeforeTheAccount`, `TestTheApprovalHookTakesTheFlowsBeforeTheAccount`,
+`TestPollTakesItsLocksInTheGlobalOrder`, `TestApproveDeviceCodeTakesTheAuthorizationBeforeTheAccount`,
+`TestTheApprovalHooksTakeTheFlowsThenTheAuthorizationsBeforeTheAccount`, `TestTheLoserOfTwoPollsRevokesTheWinner`,
 `TestEnrollTakesItsLocksInTheGlobalOrder`, `TestReportNodeInfoAndRevokeNeverDeadlock` and
 `TestOperatorRevocationTakesTheAccountLocksFirst` hold one row at a time and check which rows the waiting transaction already holds;
 `TestAnOSMismatchIsRefusedBeforeTheDeviceLock` holds the node's device and expects the OS refusal at once. In the race tests
@@ -325,7 +448,8 @@ each other (AF-CTR-05's custody owns the schedule).
 ## Store
 
 Migration `0004_fleet_enrollment.sql` ([PostgreSQL store](postgres-store.md#fleet-af-ctr-04)) holds `fleet.node` and the two sign-in
-flow tables. `identity.spent_refresh` gains one row per node refresh: at the default cadence about 13,140 rows per node-year (an
+flow tables; `0005_device_user_code_index.sql` indexes the user code of every device authorization (0004 indexes only the live ones),
+because a lookup and a decision answer an expired code or one in another state, and the approver may deny an APPROVED one. `identity.spent_refresh` gains one row per node refresh: at the default cadence about 13,140 rows per node-year (an
 estimate of 3 MB with its indexes), removed at the family's absolute end by AF-PLAT-01's sweep; until then they only grow, and
 `SELECT count(*) FROM identity.spent_refresh` is the operator's measure.
 
@@ -334,10 +458,14 @@ estimate of 3 MB with its indexes), removed at the family's absolute end by AF-P
 `arcforges_center_fleet_events_total{event,outcome}` counts closed pairs (`refresh` rotated, reused, refused, rate_limited; `report`
 changed, unchanged, rate_limited; `sign_out` signed_out; `enroll` first, reenrolled, node_conflict, key_registered, key_retired,
 quota, lapsed; `begin` started, refused, rate_limited; `review` reviewed, shown, refused; `approve` approved, reissued, denied,
-refused, rate_limited; `complete` completed, refused, reused, proof_failed, lapsed, rate_limited); any other pair is counted as
+refused, rate_limited; `complete` completed, refused, reused, proof_failed, lapsed, rate_limited; `start` started, refused,
+rate_limited; `poll` pending, slow_down, delivered, denied, expired, reused, lapsed, not_found, proof_failed, refused, rate_limited;
+`lookup` shown, refused, rate_limited; `device_decide` approved, denied, refused, rate_limited; `entry` unknown, expired, state,
+unreviewed, lookups: every user-code entry that keeps its reservation, by kind); any other pair is counted as
 `unlisted`, and the fleet integration harness fails a test after which the composed center counted one. Audit events:
 `fleet.node.enrolled`, `fleet.node_sign_in.approved`, `.code_reissued`, `.denied`, `.verifier_failed`, `.code_reused`,
-`.approval_lapsed`, `fleet.node.info_reported`, `fleet.node.signed_out`, `fleet.signing_key.registered`, `fleet.signing_key.retired`,
+`.approval_lapsed`, `fleet.device_authorization.approved`, `.denied`, `.lookups_exhausted`, `.code_reused`, `.approval_lapsed`,
+`fleet.node.info_reported`, `fleet.node.signed_out`, `fleet.signing_key.registered`, `fleet.signing_key.retired`,
 `device.revoked` (with the participant count), `identity.session.refresh_reused` (with the scope), `identity.sessions.revoked_all` and
 `identity.credential.removed` (with the cancelled approvals), `access.refused`, `identity.rate_limited`; no payload holds a token,
 code, verifier, proof, address or e-mail. Transactions per request: BeginNodeSignIn its bucket counts, one read of the key's holder (no
@@ -347,19 +475,32 @@ CompleteNodeSignIn one read (no transaction held), the failure bucket's count on
 completion, a reuse or a lapse) or one auxiliary transaction (the failure marker, which carries the reuse revocation when it finds
 the flow completed by a racing presentation of the code; an unanswered commit of it is then answered `RESOURCE/overloaded` although
 the revocation may have committed, and the retry answers `code_reused`), with no transaction open while PKCE or ES256 is verified; RefreshNodeSession one lookup (no transaction held), one bucket count, one rotation; ReportNodeInfo one bucket count and one
-receipt transaction; SignOutNode one receipt transaction.
+receipt transaction; SignOutNode one receipt transaction; StartDeviceAuthorization its bucket counts, one read of the key's holder
+and one effect transaction (the supersession and the insert, a savepoint per user-code draw); LookupDeviceCode two reservations
+(their own transactions) and one auxiliary transaction (the review mark and the give-back); ApproveDeviceCode a receipt lookup, one
+bucket count, two reservations and the receipt's effect transaction (the evidence, the decision, the give-back, its audit), and the
+give-back in a transaction of its own after a refusal of a reviewed code or a store failure; PollDeviceAuthorization one read (no
+transaction held), the failure bucket's check and count only for a code that names nothing or a failed proof, the
+per-authorization bucket's count, then one auxiliary transaction (an expiry, SLOW_DOWN or the last poll) or one effect transaction
+(the delivery, a lapse or the reuse revocation; it is also the transaction of every answer to a poll whose unlocked read was
+APPROVED), with no transaction open while ES256 is verified.
 
 **Exchange captures.** `TestFleetExchangeCapture` records the node-facing exchanges as the binary gRPC-Web frames on the wire, with
 the request headers that matter (the bearer's placeholder, the client address): every outcome the center produces without a store
 failure of BeginNodeSignIn (success, `invalid_argument`, `rate_limited`, `already_exists` node key, `not_activated`) and
 CompleteNodeSignIn (success, `not_found`, `expired`, `code_reused`, `unauthenticated`, `invalid_argument`, `already_exists` node and
 node key, `credential_revoked`, `quota_exceeded`, `rate_limited`, `not_activated`), and the success and the refusals a node reacts to
-of RefreshNodeSession, ReportNodeInfo and SignOutNode; each file names its outcome and the test fails when one of that per-method list
+of RefreshNodeSession, ReportNodeInfo and SignOutNode, StartDeviceAuthorization (success, `invalid_argument`, `rate_limited`,
+`already_exists` node key, `not_activated`) and PollDeviceAuthorization (every state value: PENDING, SLOW_DOWN, APPROVED with the
+credentials, COMPLETED after delivery, DENIED, EXPIRED; and `not_found`, `unauthenticated`, `invalid_argument`, `rate_limited`,
+`already_exists` node and node key, `credential_revoked`, `quota_exceeded`, `not_activated`); each file names its outcome and the test fails when one of that per-method list
 has no case. Not captured: the store failures `RESOURCE/overloaded` (retry after a while, the effect did not happen) and
 `INTERNAL/internal` (effect unknown, never retried), which need fault injection and are covered at the service level by the
-fault-injection tests (E1-16, E1-17), and `RESOURCE/kill_switch_active`, which AF-CTR-04 does not produce. Only
+fault-injection tests (E1-16, E1-17), StartDeviceAuthorization's `RESOURCE/overloaded` after five live user-code collisions (a domain
+outcome, covered by `TestLiveUserCodeCollisionRetries`), `RESOURCE/kill_switch_active`, which AF-CTR-04 does not produce, and Poll's
+`invalid_argument` `node.os: mismatch` (an Enroll rule). The browser-facing LookupDeviceCode and ApproveDeviceCode are not captured. Only
 the values the center or a random source produced are normalized (correlation, flow, installation and account IDs, tokens, the
-one-use codes, the proofs, every instant as an offset), each distinct value to its own placeholder of the same shape, wherever it
+one-use codes, the device and user codes, the proofs, every instant as an offset), each distinct value to its own placeholder of the same shape, wherever it
 appears; the test's own constants stay. The files live in `center/internal/fleetapi/testdata/exchanges`; the test fails when a fresh
 capture differs and rewrites the directory with `ARCFORGES_UPDATE_EXCHANGES=1` (`ARCFORGES_CENTER_COMMIT` names the commit in the
 headers; `npx prettier --write` formats the files, and the comparison reads them as JSON). Parts N1 and N2 will copy the directory
@@ -381,3 +522,21 @@ verbatim for the ArcForges node's FakeCenter conformance test; nothing checks it
   (`http://127.0.0.1:<port>/callback?code=...`) stays in the browser's history: a later presentation of that code revokes the node's
   credential family until AF-PLAT-01's sweep removes the row (flow rows: 7 days after their end).
 - A user who approves a convincing request for an attacker's node lets it in; the remedy afterwards is revoking its device.
+- User codes are 8 letters of 20 (2.56e10 codes), stored as unsalted SHA-256: a reader of the database reverses a live one within its
+  600 seconds (SEC-22; a keyed digest needs a center secret, AF-CTR-05's custody). The same holds for the other digests that name a
+  user code: `identity.step_up_challenge.target_hash` of an approval (the SHA-256 of the class, the account and the code) and
+  `platform.command_receipt.request_sha256` of a decision (the SHA-256 of the request, which holds the code). Guessing is bounded per account and per network;
+  across networks the real limiter is the cost of an account: with 50 live codes a 1% chance in one 15-minute window takes about a
+  million accounts of 5 guesses each.
+- An account that knows a live user code (shoulder-surfed, pasted) may look it up five times, which leaves the node's own user unable
+  to review and approve it (the authorization stays PENDING until it expires and the node starts again), and may deny it, which needs
+  no step-up. It cannot approve it without a step-up of its own, and its approval would enroll the node into its own account. Each of
+  its lookups also displaces the latest review (the latest review wins), and the displaced reviewer's decision is then `not_reviewed`
+  and keeps one unit of that reviewer's budget (the F7 resolution charges every `not_reviewed`), up to four times within the code's
+  five lookups.
+- The network budget (20 per 15 minutes per /24 or /56) can be spent by any account on a shared network, which blocks code entry
+  there for the window (availability only).
+- A captured poll request replays: at APPROVED it collects the credentials, and the real node's next poll then takes the reuse path
+  and revokes them (without the node key the device code alone is useless; no log holds either).
+- A step-up of `fleet.approveDeviceCode` is bound to the user code, not to the authorization: a code drawn again after its row ended
+  could reuse evidence of the same account within the evidence's 5 minutes, which also needs that account's review.

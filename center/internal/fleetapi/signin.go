@@ -147,16 +147,21 @@ func (s *Server) completeNodeSignIn(ctx context.Context, call *ingress.Call, mes
 		response.Outcome = &fleetv1.NodeEnrollmentServiceCompleteNodeSignInResponse_Error{Error: failure}
 		return response, nil
 	}
+	response.Outcome = &fleetv1.NodeEnrollmentServiceCompleteNodeSignInResponse_Value{Value: &fleetv1.NodeEnrollmentServiceCompleteNodeSignInValue{
+		Credentials: nodeCredentials(completed)}}
+	return response, nil
+}
+
+// nodeCredentials is the node credential of a completed sign-in, either flow (NodeCredentials): the tokens, their lifetimes, the
+// account joined, the installation and the center's published keys; no entitlement token.
+func nodeCredentials(completed fleet.Completed) *fleetv1.NodeCredentials {
 	issued := completed.Enrolled.Session
 	account := &fleetv1.AccountSummary{AccountId: id(completed.Account.ID), DisplayName: proto.String(completed.Account.DisplayName)}
 	if completed.Account.EmailMasked != "" {
 		account.EmailMasked = proto.String(completed.Account.EmailMasked)
 	}
-	response.Outcome = &fleetv1.NodeEnrollmentServiceCompleteNodeSignInResponse_Value{Value: &fleetv1.NodeEnrollmentServiceCompleteNodeSignInValue{
-		Credentials: &fleetv1.NodeCredentials{RefreshToken: proto.String(issued.RefreshToken), AccessToken: proto.String(issued.AccessToken),
-			AccessExpiresAt: arc.Instant(issued.AccessExpiresAt), Account: account, CommandKeys: publicKeys(completed.Enrolled.CommandKeys),
-			EntitlementKeys: publicKeys(completed.Enrolled.EntitlementKeys), InstallationId: id(completed.Enrolled.InstallationID),
-			SessionExpiresAt: arc.Instant(issued.ExpiresAt), AccessLifetimeMs: proto.Uint64(uint64(issued.AccessExpiresAt.Sub(issued.IssuedAt).Milliseconds()))},
-	}}
-	return response, nil
+	return &fleetv1.NodeCredentials{RefreshToken: proto.String(issued.RefreshToken), AccessToken: proto.String(issued.AccessToken),
+		AccessExpiresAt: arc.Instant(issued.AccessExpiresAt), Account: account, CommandKeys: publicKeys(completed.Enrolled.CommandKeys),
+		EntitlementKeys: publicKeys(completed.Enrolled.EntitlementKeys), InstallationId: id(completed.Enrolled.InstallationID),
+		SessionExpiresAt: arc.Instant(issued.ExpiresAt), AccessLifetimeMs: proto.Uint64(uint64(issued.AccessExpiresAt.Sub(issued.IssuedAt).Milliseconds()))}
 }

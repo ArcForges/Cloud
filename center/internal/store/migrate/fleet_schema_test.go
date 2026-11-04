@@ -66,7 +66,7 @@ func TestMigration0004LandsWholeOverVersion3(t *testing.T) {
 			if !errors.As(err, &failure) || failure.Name != "0004_fleet_enrollment.sql" || failure.SQLState != "22012" {
 				t.Fatalf("the failing 0004: %v", err)
 			}
-			status, err := Inspect(ctx, conn, build)
+			status, err := Inspect(ctx, conn, build[:4])
 			var objects, reasons string
 			if err == nil {
 				err = conn.QueryRow(ctx, `SELECT coalesce(string_agg(name, ', ' ORDER BY name), '') FROM (
@@ -294,4 +294,43 @@ func TestTheFleetStoreConstraints(t *testing.T) {
 	triggerRefused(t, "UPDATE fleet.device_authorization SET lookups = 1, rev = rev + 1 WHERE authorization_id = '"+delivered+"'")
 	must(t, "UPDATE fleet.device_authorization SET reused_at = now(), rev = rev + 1 WHERE authorization_id = '"+delivered+"'")
 	triggerRefused(t, "UPDATE fleet.device_authorization SET reused_at = now(), rev = rev + 1 WHERE authorization_id = '"+delivered+"'")
+}
+
+// migration0005SHA256 pins the applied form of 0005_device_user_code_index.sql (immutable once applied, as 0004).
+const migration0005SHA256 = "f87e49f4d00167ceb7110cc571e36653bbae7a9866b9031446d6b27ed0253438"
+
+// TestMigration0005IndexesEveryUserCode rehearses 0005 over version 4 with the center's own runner and a migration role that is not
+// a superuser: it adds exactly the index device_authorization_user_code on user_code_hash, changes no grant, and a lookup of a user
+// code in a state other than PENDING (which 0004's partial unique index cannot serve) reads it through that index.
+func TestMigration0005IndexesEveryUserCode(t *testing.T) {
+	build := centerBuild(t)
+	if len(build) < 5 || build[4].Name != "0005_device_user_code_index.sql" {
+		t.Fatalf("the build has no 0005 as its fifth migration: %d migrations", len(build))
+	}
+	if build[4].SHA256 != migration0005SHA256 {
+		t.Fatalf("0005_device_user_code_index.sql has the checksum %s, pinned %s", build[4].SHA256, migration0005SHA256)
+	}
+	ctx := context.Background()
+	url, name := pgtest.Database(t)
+	conn := pgtest.Connect(t, url)
+	options := Options{Runner: "test", RuntimeRole: name + "_runtime"}
+	if fourth, err := apply(t, url, build[:4], options); err != nil || fourth.Version != 4 {
+		t.Fatalf("version 4: %+v %v", fourth, err)
+	}
+	result, err := apply(t, url, build[:5], options)
+	if err != nil || result.Version != 5 || len(result.Ran) != 1 || result.Ran[0].SHA256 != migration0005SHA256 || result.Grants != "reconciled" {
+		t.Fatalf("0005 over version 4: %+v %v", result, err)
+	}
+	var definition string
+	if err = conn.QueryRow(ctx, "SELECT indexdef FROM pg_indexes WHERE schemaname = 'fleet' AND indexname = 'device_authorization_user_code'").Scan(&definition); err != nil ||
+		definition != "CREATE INDEX device_authorization_user_code ON fleet.device_authorization USING btree (user_code_hash)" {
+		t.Fatalf("the index: %q %v", definition, err)
+	}
+	var plan string
+	if _, err = conn.Exec(ctx, "SET enable_seqscan = off"); err == nil {
+		err = conn.QueryRow(ctx, `EXPLAIN (FORMAT TEXT) SELECT authorization_id FROM fleet.device_authorization WHERE user_code_hash = '\x00'::bytea AND state <> 1`).Scan(&plan)
+	}
+	if err != nil || !strings.Contains(plan, "device_authorization_user_code") {
+		t.Fatalf("a lookup of a non-live user code does not use the index: %q %v", plan, err)
+	}
 }
