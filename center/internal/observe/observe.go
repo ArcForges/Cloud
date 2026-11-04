@@ -52,14 +52,21 @@ type Metrics struct {
 // FleetOutcomes is the closed label set of the fleet surface's events (AF-CTR-04, CR-02): the refresh of a node session (rotated,
 // a spent token's reuse, refused, rate limited), a report of node info (changed, unchanged, rate limited), an enrollment (first or
 // re-enrolled, and its refusals: the node ID live in another account, the key held live, the key retired, the node cap, an approval
-// that lapsed) and a node's sign-out. ObserveFleet counts only these pairs; any other pair is counted as unlisted, and the fleet
-// surface's integration harness (fleetapi) fails every test after which the composed center counted an unlisted pair.
+// that lapsed), a node's sign-out, and the browser sign-in (AF-CTR-04 E1b): a Begin (started, refused, rate limited), a review
+// (recorded, shown without a record, refused), a decision (approved, its code reissued, denied, refused, rate limited) and a Complete
+// (completed, refused, a correct code presented again, a failed verifier or key proof, an approval that lapsed, rate limited).
+// ObserveFleet counts only these pairs; any other pair is counted as unlisted, and the fleet surface's integration harness (fleetapi)
+// fails every test after which the composed center counted an unlisted pair.
 func FleetOutcomes() map[string][]string {
 	return map[string][]string{
 		"refresh":  {"rotated", "reused", "refused", "rate_limited"},
 		"enroll":   {"first", "reenrolled", "node_conflict", "key_registered", "key_retired", "quota", "lapsed"},
 		"report":   {"changed", "unchanged", "rate_limited"},
 		"sign_out": {"signed_out"},
+		"begin":    {"started", "refused", "rate_limited"},
+		"review":   {"reviewed", "shown", "refused"},
+		"approve":  {"approved", "reissued", "denied", "refused", "rate_limited"},
+		"complete": {"completed", "refused", "reused", "proof_failed", "lapsed", "rate_limited"},
 	}
 }
 

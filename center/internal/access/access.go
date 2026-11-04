@@ -83,6 +83,9 @@ const (
 	// EvidenceUnlessOwn: a call on the caller's own session or device needs none (sign-out and removing this phone only remove
 	// the caller's own access; decision 4.1b), any other target needs evidence.
 	EvidenceUnlessOwn
+	// EvidenceOnApprove: a call that approves needs evidence, a call that denies needs none (the node sign-in approvals, AF-CTR-04 Q1:
+	// a denial only refuses access). The handler knows which.
+	EvidenceOnApprove
 )
 
 // Audit is who appends the audit event of an operation whose effect or disclosure matters (R3 and above, and every gated one).
@@ -106,6 +109,8 @@ const (
 	TargetSession    = "session"
 	TargetCredential = "credential"
 	TargetDevice     = "device"
+	// TargetFlow is a node sign-in flow, named by its flow ID (AF-CTR-04: the approval's evidence is bound to the flow it decides).
+	TargetFlow = "flow"
 )
 
 // UpgradeClass is the center's own step-up class for a mobile.limited session that verifies only to unlock everything (android.md
@@ -249,6 +254,12 @@ func (o Operation) NeedsUpgrade(caller ingress.Caller, own bool) bool {
 // NeedsEvidence reports whether a call on a target that is (or is not) the caller's own needs step-up evidence.
 func (o Operation) NeedsEvidence(own bool) bool {
 	return o.StepUp == Evidence || o.StepUp == EvidenceUnlessOwn && !own
+}
+
+// NeedsEvidenceToDecide reports whether a decision (an approval, or a denial) needs step-up evidence: every decision of an Evidence
+// row, only an approval of an EvidenceOnApprove row.
+func (o Operation) NeedsEvidenceToDecide(approve bool) bool {
+	return o.StepUp == Evidence || o.StepUp == EvidenceOnApprove && approve
 }
 
 // Lookup is the row of a method path.

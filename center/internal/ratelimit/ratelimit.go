@@ -54,12 +54,21 @@ const (
 	NodeRefreshSession Kind = "node_refresh_session"
 	// NodeReportInstallation counts ReportNodeInfo calls per node installation.
 	NodeReportInstallation Kind = "node_report_installation"
+	// NodeFlowPrefix counts BeginNodeSignIn calls (past their validation) per client address prefix (AF-CTR-04 E1b).
+	NodeFlowPrefix Kind = "node_flow_prefix"
+	// NodeFlowNode counts BeginNodeSignIn calls per node ID.
+	NodeFlowNode Kind = "node_flow_node"
+	// NodeCompletePrefix counts, per client address prefix, the CompleteNodeSignIn calls that name no flow or present no matching code:
+	// a failure bucket, so a matching code never waits on it (protocol-1).
+	NodeCompletePrefix Kind = "node_complete_prefix"
+	// NodeApproveAccount counts an account's ApproveNodeSignIn decisions, approvals and denials.
+	NodeApproveAccount Kind = "node_approve_account"
 )
 
 // Kinds is every bucket kind.
 func Kinds() []Kind {
 	return []Kind{SignInPrefix, SignInFailuresAccount, EmailPrefix, EmailAddress, RedeemFailuresAddress, RefreshPrefix, StepUpAccount, BootstrapPrefix,
-		AnonymousFlows, NodeRefreshPrefix, NodeRefreshSession, NodeReportInstallation}
+		AnonymousFlows, NodeRefreshPrefix, NodeRefreshSession, NodeReportInstallation, NodeFlowPrefix, NodeFlowNode, NodeCompletePrefix, NodeApproveAccount}
 }
 
 // Window is the window of a bucket kind in a policy.
@@ -89,6 +98,14 @@ func Window(policy config.IdentityPolicy, kind Kind) config.Window {
 		return policy.NodeRefreshPerSession
 	case NodeReportInstallation:
 		return policy.NodeReportPerInstallation
+	case NodeFlowPrefix:
+		return policy.NodeFlowPerPrefix
+	case NodeFlowNode:
+		return policy.NodeFlowPerNode
+	case NodeCompletePrefix:
+		return policy.NodeCompletePerPrefix
+	case NodeApproveAccount:
+		return policy.NodeApprovePerAccount
 	}
 	return config.Window{}
 }
