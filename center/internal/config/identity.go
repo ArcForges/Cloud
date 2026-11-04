@@ -46,6 +46,11 @@ const SurfaceOperations Surface = "operations"
 // (part E3).
 const SurfaceFleet Surface = "fleet"
 
+// MaxFleetPublicBaseURLLength bounds the public base URL of a center that serves the fleet surface: the contract bounds every URL the
+// center derives for a node at 512 characters (fleet.v1 authorize_url, verification_uri*), and the longest suffix it appends is
+// /connect#flow= and a 36-character flow ID (50 characters).
+const MaxFleetPublicBaseURLLength = 512 - 50
+
 // KnownSurfaces is every surface name, in generated order.
 func KnownSurfaces() []Surface {
 	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet}
@@ -131,8 +136,18 @@ type IdentityPolicy struct {
 	NodeRefreshPerPrefix      Window
 	NodeRefreshPerSession     Window
 	NodeReportPerInstallation Window
+	// The browser node sign-in (AF-CTR-04 E1b): the one-use code's lifetime after an approval (never beyond the flow, whose 10 minutes
+	// the contract states and which is therefore no policy value), and the buckets of BeginNodeSignIn (per client prefix and per node
+	// ID, C0 "rate limited per IP and per node ID"), of CompleteNodeSignIn (a failure bucket per client prefix: only a presentation
+	// that names no flow or presents no matching code counts, so a matching code never waits on it) and of the approvals (per
+	// account, approvals and denials).
+	NodeCodeLifetime      time.Duration
+	NodeFlowPerPrefix     Window
+	NodeFlowPerNode       Window
+	NodeCompletePerPrefix Window
+	NodeApprovePerAccount Window
 	// AnonymousFlows is an opt-in global ceiling on the flows anonymous calls create (C1): every BeginAuthentication, of every method
-	// and purpose, counts in one bucket. A limit of 0 (the default) sets no ceiling. Only the acceptance environment sets one: it
+	// and purpose, and every BeginNodeSignIn (AF-CTR-04) counts in one bucket. A limit of 0 (the default) sets no ceiling. Only the acceptance environment sets one: it
 	// shares the production Neon project, and its flows are never deleted before AF-PLAT-01's sweeps exist. A global bucket would let
 	// anyone lock every sign-in out, so production sets none (AF-PROD-01 decides with the sweeps).
 	AnonymousFlows Window
@@ -169,6 +184,13 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		NodeRefreshPerPrefix:      Window{Limit: 120, Window: 10 * time.Minute},
 		NodeRefreshPerSession:     Window{Limit: 60, Window: 10 * time.Minute},
 		NodeReportPerInstallation: Window{Limit: 12, Window: time.Hour},
+		// AF-CTR-04 E1b: a 2-minute one-use code; 10 Begins per 10 minutes per network and per node ID, 30 failed Completes per 10
+		// minutes per network, 20 decisions per hour per account.
+		NodeCodeLifetime:      2 * time.Minute,
+		NodeFlowPerPrefix:     Window{Limit: 10, Window: 10 * time.Minute},
+		NodeFlowPerNode:       Window{Limit: 10, Window: 10 * time.Minute},
+		NodeCompletePerPrefix: Window{Limit: 30, Window: 10 * time.Minute},
+		NodeApprovePerAccount: Window{Limit: 20, Window: time.Hour},
 	}
 }
 
@@ -215,6 +237,7 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"nodeAccessLifetime":      {&p.NodeAccessLifetime, 15 * time.Minute, time.Hour},
 		"nodeRefreshIdleLifetime": {&p.NodeRefreshIdleLifetime, time.Hour, 90 * 24 * time.Hour},
 		"nodeRefreshAbsolute":     {&p.NodeRefreshAbsolute, time.Hour, 400 * 24 * time.Hour},
+		"nodeCodeLifetime":        {&p.NodeCodeLifetime, 30 * time.Second, 10 * time.Minute},
 	}
 	counts := map[string]countBound{
 		"emailCodeAttempts":   {&p.EmailCodeAttempts, 1, 10},
@@ -227,6 +250,8 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"emailPerAddress": &p.EmailPerAddress, "redeemFailuresAddress": &p.RedeemFailuresAddress, "refreshPerPrefix": &p.RefreshPerPrefix,
 		"stepUpPerAccount": &p.StepUpPerAccount, "bootstrapPerPrefix": &p.BootstrapPerPrefix,
 		"nodeRefreshPrefix": &p.NodeRefreshPerPrefix, "nodeRefreshSession": &p.NodeRefreshPerSession, "nodeReportInstallation": &p.NodeReportPerInstallation,
+		"nodeFlowPrefix": &p.NodeFlowPerPrefix, "nodeFlowNode": &p.NodeFlowPerNode, "nodeCompletePrefix": &p.NodeCompletePerPrefix,
+		"nodeApproveAccount": &p.NodeApprovePerAccount,
 	} {
 		counts[name+"Limit"] = countBound{&window.Limit, 1, 10_000}
 		durations[name+"Window"] = durationBound{&window.Window, time.Minute, 24 * time.Hour}
@@ -390,6 +415,10 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 	}
 	if identity.Enabled(SurfaceFleet) && (!identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages)) {
 		return Identity{}, invalid("the %s surface needs the %s and %s surfaces: node enrollment is approved by an account on the pages", SurfaceFleet, SurfaceIdentity, SurfacePages)
+	}
+	if identity.Enabled(SurfaceFleet) && len(publicBaseURL) > MaxFleetPublicBaseURLLength {
+		return Identity{}, invalid("the %s surface needs a public base URL of at most %d characters: every URL it derives for a node is at most 512", SurfaceFleet,
+			MaxFleetPublicBaseURLLength)
 	}
 	if identity.Enabled(SurfaceOperations) {
 		if !identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages) {

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 2,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "7c1b060",
+  "method": "ReportNodeInfo",
+  "case": "node-id-mismatch",
+  "outcome": "VALIDATION/invalid_argument",
+  "headers": {
+    "authorization": "Bearer afa1.AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "000000006e0a140a120a100202020202020202020202020202020252560a120a100303030303030303030303030303030312086275696c64626f78180220012a32302e312e302d6465762b31356436373137313434343638636530626536313565383533386638353864323962306665643764"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [
+      "00000000930a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1131a7b0a10696e76616c69645f617267756d656e7410011a216572726f722e76616c69646174696f6e2e696e76616c69645f617267756d656e7422020801280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1133a2822260a0c6e6f64652e6e6f64655f696412166e6f64652e6e6f64655f69643a206d69736d61746368"
+    ],
+    "trailers": "grpc-status: 0\r\n"
+  },
+  "normalized": [
+    "a 16-byte ID the center drew: 15 bytes of its kind (0xa1 correlation, 0xa2 flow, 0xa3 installation, 0xa4 account) and n for the n-th distinct one of the kind",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
+    "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
+    "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
+  ],
+  "sha256": "48abfc35aec2ca249eee6dbdfbcc450b81d32b22afa56eb211dfe249a46f1e79"
+}

@@ -83,6 +83,9 @@ const (
 	// EvidenceUnlessOwn: a call on the caller's own session or device needs none (sign-out and removing this phone only remove
 	// the caller's own access; decision 4.1b), any other target needs evidence.
 	EvidenceUnlessOwn
+	// EvidenceOnApprove: a call that approves needs evidence, a call that denies needs none (the node sign-in approvals, AF-CTR-04 Q1:
+	// a denial only refuses access). The handler asks the row (NeedsEvidenceToDecide) and passes the answer to the domain.
+	EvidenceOnApprove
 )
 
 // Audit is who appends the audit event of an operation whose effect or disclosure matters (R3 and above, and every gated one).
@@ -106,6 +109,8 @@ const (
 	TargetSession    = "session"
 	TargetCredential = "credential"
 	TargetDevice     = "device"
+	// TargetFlow is a node sign-in flow, named by its flow ID (AF-CTR-04: the approval's evidence is bound to the flow it decides).
+	TargetFlow = "flow"
 )
 
 // UpgradeClass is the center's own step-up class for a mobile.limited session that verifies only to unlock everything (android.md
@@ -184,6 +189,15 @@ func Operations() []Operation {
 		// The fleet surface (AF-CTR-04 E1a): the node refreshes anonymously with its refresh token (never under a receipt: it presents
 		// a one-use secret); it reports its info and signs itself out with its node credential under a receipt of principal
 		// node:<installation>. A restricted account's node may sign out (it only removes access) but not report. Never gated.
+		// The browser node sign-in (E1b): Begin and Complete are anonymous (Complete's flow-bound proof is the one-use code, the PKCE
+		// verifier and the node key proof; its effect is audited by the domain, fleet.node.enrolled); an account reviews the flow and
+		// decides it, approval with step-up evidence of class fleet.approveNodeSignIn bound to the flow ID, denial without (Q1). A
+		// restricted account cannot enroll a node (Q24) and a mobile.limited session upgrades first. None runs under a receipt.
+		{Path: fleetv1connect.NodeEnrollmentServiceBeginNodeSignInProcedure, ID: "fleet.beginNodeSignIn", Risk: "R1"},
+		{Path: fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure, ID: "fleet.getNodeSignInFlow", Risk: "R2", Session: true, MobileLimited: Upgrade},
+		{Path: fleetv1connect.NodeEnrollmentServiceApproveNodeSignInProcedure, ID: "fleet.approveNodeSignIn", Risk: "R3", Audit: AuditInTransaction, Session: true,
+			MobileLimited: Upgrade, StepUp: EvidenceOnApprove, Target: TargetFlow},
+		{Path: fleetv1connect.NodeEnrollmentServiceCompleteNodeSignInProcedure, ID: "fleet.completeNodeSignIn", Risk: "R1"},
 		{Path: fleetv1connect.NodeEnrollmentServiceRefreshNodeSessionProcedure, ID: "fleet.refreshNodeSession", Risk: "R1"},
 		{Path: fleetv1connect.NodeEnrollmentServiceReportNodeInfoProcedure, ID: "fleet.reportNodeInfo", Risk: "R1", Session: true, Scopes: []string{"node"},
 			Receipt: true},
@@ -249,6 +263,12 @@ func (o Operation) NeedsUpgrade(caller ingress.Caller, own bool) bool {
 // NeedsEvidence reports whether a call on a target that is (or is not) the caller's own needs step-up evidence.
 func (o Operation) NeedsEvidence(own bool) bool {
 	return o.StepUp == Evidence || o.StepUp == EvidenceUnlessOwn && !own
+}
+
+// NeedsEvidenceToDecide reports whether a decision (an approval, or a denial) needs step-up evidence: every decision of an Evidence
+// row, only an approval of an EvidenceOnApprove row.
+func (o Operation) NeedsEvidenceToDecide(approve bool) bool {
+	return o.StepUp == Evidence || o.StepUp == EvidenceOnApprove && approve
 }
 
 // Lookup is the row of a method path.

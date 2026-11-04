@@ -108,7 +108,8 @@ Authentication time is never evidence.
   `target_hash: not_the_session`). The target hash is canonical (`identity.TargetHash`): the lowercase hexadecimal SHA-256 of three
   lines, the class, the account ID and the target ID, the IDs in their canonical lowercase UUID text. The target is the account
   (`identity.beginPasskeyRegistration`, `identity.revokeAllSessions`), the credential (`identity.removeAuthIdentity`), the session
-  (`identity.revokeSession`, the upgrade) or the device (`device.revoke`). The method is a passkey of the account (one assertion
+  (`identity.revokeSession`, the upgrade), the device (`device.revoke`) or a node sign-in flow (`fleet.approveNodeSignIn`, its flow
+  ID; AF-CTR-04, [center fleet](center-fleet.md#browser-sign-in): an approval needs it, a denial none). The method is a passkey of the account (one assertion
   per challenge) or, when mail is enabled, an e-mail code sent to the account's address (the policy's code attempts, at most five).
   The account's `stepUpPerAccount` bucket counts each begin.
 - **Complete.** `CompleteStepUp(flow_id, proof)` checks the account's failed-proof bucket, counts the challenge's attempt, and
@@ -183,7 +184,9 @@ Authentication time is never evidence.
 - **Sessions.** `RevokeSession(session_id)` revokes an `account` or `mobile.limited` session of the account: the caller's own is a
   sign-out without evidence, another needs the session's evidence. A node, push or automation session, another account's and an
   ended one are `STATE/not_found`. `RevokeAllSessions` revokes every account session but the caller's; node and push credentials
-  stay (DC-03).
+  stay (DC-03). Since AF-CTR-04 it and `RemoveAuthIdentity` also first end the account's approved node sign-ins that no node has
+  completed (the account participants, `identity.AccountParticipant`; [center fleet](center-fleet.md#browser-sign-in)), before their
+  step-up evidence locks the account, and count them in their audit event (`participants`).
 - **Devices.** `DeviceService.Rename` names a live device by the label rule (field `name`: 1 to 64 UTF-16 units of plain text that
   is not only white space; a longer name is `name: length`, a control character or a blank name `name: pattern`). Every name it
   admits meets the contract's 256-character bound and the store's 64 code points. `DeviceService.Revoke` revokes a live

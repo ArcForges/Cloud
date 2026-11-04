@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "7c1b060",
+  "method": "BeginNodeSignIn",
+  "case": "invalid-redirect",
+  "outcome": "VALIDATION/invalid_argument",
+  "headers": {
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "00000001290a00522b4c573057374c4d6f556c45445f50325934444b754a52497a65793563494970674d3443367547515f33536b5a1f687474703a2f2f6c6f63616c686f73743a35333638322f63616c6c6261636b62560a120a106e6f64652d69642d0f1e2d3c4b5a692a12086275696c64626f78180220012a32302e312e302d6465762b313564363731373134343436386365306265363135653835333866383538643239623066656437646a226e6f64652d73746174652d32612d303132333435363738396162636465666768696a725b3059301306072a8648ce3d020106082a8648ce3d030107034200040c901d423c831ca85e27c73c263ba132721bb9d7a84c4f0380b2a6756fd601331c8870234dec878504c174144fa4b14b66a651691606d8173e55bd37e381569e"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [
+      "00000000970a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1011a7f0a10696e76616c69645f617267756d656e7410011a216572726f722e76616c69646174696f6e2e696e76616c69645f617267756d656e7422020801280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1013a2c222a0a0c72656469726563745f757269121a72656469726563745f7572693a206e6f745f61646d6974746564"
+    ],
+    "trailers": "grpc-status: 0\r\n"
+  },
+  "normalized": [
+    "a 16-byte ID the center drew: 15 bytes of its kind (0xa1 correlation, 0xa2 flow, 0xa3 installation, 0xa4 account) and n for the n-th distinct one of the kind",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
+    "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
+    "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
+  ],
+  "sha256": "fc6c78cec7ed4817278ecffebd1b1839d98b97571f8290b9f04cfdd4f2fc8aba"
+}

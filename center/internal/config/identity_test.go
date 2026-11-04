@@ -267,3 +267,51 @@ func TestTheNodePolicyHasItsDefaultsBoundsAndRelations(t *testing.T) {
 		t.Fatalf("every node key: %+v %v", policy, err)
 	}
 }
+
+// TestTheBrowserSignInPolicyHasItsDefaultsAndBounds pins the keys of the browser node sign-in (AF-CTR-04 E1b; cloud-5 item 4): a
+// 2-minute one-use code (30 seconds to 10 minutes; the flow's 10 minutes are the contract's and no key), and the four buckets with
+// the convention of the other windows; a document that sets every node key at once still fits the override bound.
+func TestTheBrowserSignInPolicyHasItsDefaultsAndBounds(t *testing.T) {
+	defaults := DefaultIdentityPolicy()
+	if defaults.NodeCodeLifetime != 2*time.Minute || defaults.NodeFlowPerPrefix != (Window{Limit: 10, Window: 10 * time.Minute}) ||
+		defaults.NodeFlowPerNode != (Window{Limit: 10, Window: 10 * time.Minute}) || defaults.NodeCompletePerPrefix != (Window{Limit: 30, Window: 10 * time.Minute}) ||
+		defaults.NodeApprovePerAccount != (Window{Limit: 20, Window: time.Hour}) {
+		t.Fatalf("browser sign-in defaults %+v", defaults)
+	}
+	for _, document := range []string{`{"nodeCodeLifetime": "29s"}`, `{"nodeCodeLifetime": "11m"}`, `{"nodeFlowPrefixLimit": 0}`, `{"nodeFlowNodeWindow": "59s"}`,
+		`{"nodeCompletePrefixLimit": 10001}`, `{"nodeApproveAccountWindow": "25h"}`, `{"nodeFlowLifetime": "20m"}`} {
+		if _, err := ParseIdentityPolicy(document); err == nil {
+			t.Errorf("%s was admitted", document)
+		}
+	}
+	every := `{"nodeAccessLifetime": "15m", "nodeRefreshIdleLifetime": "1h", "nodeRefreshAbsolute": "9600h", "maxNodesPerAccount": 1000,
+"nodeRefreshPrefixLimit": 10000, "nodeRefreshPrefixWindow": "24h", "nodeRefreshSessionLimit": 1, "nodeRefreshSessionWindow": "1m",
+"nodeReportInstallationLimit": 3, "nodeReportInstallationWindow": "2h", "nodeCodeLifetime": "30s", "nodeFlowPrefixLimit": 10000,
+"nodeFlowPrefixWindow": "24h", "nodeFlowNodeLimit": 1, "nodeFlowNodeWindow": "1m", "nodeCompletePrefixLimit": 5, "nodeCompletePrefixWindow": "3m",
+"nodeApproveAccountLimit": 2, "nodeApproveAccountWindow": "2h"}`
+	if len(every) > MaxIdentityPolicyBytes {
+		t.Fatalf("a document with every node key is %d bytes", len(every))
+	}
+	policy, err := ParseIdentityPolicy(every)
+	if err != nil || policy.NodeCodeLifetime != 30*time.Second || policy.NodeFlowPerPrefix != (Window{Limit: 10000, Window: 24 * time.Hour}) ||
+		policy.NodeFlowPerNode != (Window{Limit: 1, Window: time.Minute}) || policy.NodeCompletePerPrefix != (Window{Limit: 5, Window: 3 * time.Minute}) ||
+		policy.NodeApprovePerAccount != (Window{Limit: 2, Window: 2 * time.Hour}) {
+		t.Fatalf("every browser sign-in key: %+v %v", policy, err)
+	}
+}
+
+// TestTheFleetSurfaceRefusesABaseURLTooLongForItsURLs (OQ-13): with fleet enabled the public base URL is at most 462 characters, so
+// every URL the center derives for a node stays within the contract's 512; without fleet the longer URL still starts.
+func TestTheFleetSurfaceRefusesABaseURLTooLongForItsURLs(t *testing.T) {
+	prefix := "https://center.example.test/"
+	for length, starts := range map[int]bool{MaxFleetPublicBaseURLLength: true, MaxFleetPublicBaseURLLength + 1: false} {
+		base := prefix + strings.Repeat("a", length-len(prefix))
+		_, err := Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: "identity,pages,fleet", EnvPublicBaseURL: base})))
+		if (err == nil) != starts || !starts && !errors.Is(err, ErrInvalid) {
+			t.Errorf("a base URL of %d characters: %v", length, err)
+		}
+		if _, err = Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: "identity,pages", EnvPublicBaseURL: base}))); err != nil {
+			t.Errorf("without fleet, %d characters: %v", length, err)
+		}
+	}
+}

@@ -230,7 +230,7 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
       !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
         .split(",")
         .includes("fleet"),
-      `wrangler.json environment ${name}: the fleet surface is enabled nowhere in part E1a`,
+      `wrangler.json environment ${name}: the fleet surface is enabled nowhere in AF-CTR-04 parts E1a and E1b`,
     );
   assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("fleet"));
   for (const [name, environment] of environments)

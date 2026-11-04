@@ -141,9 +141,10 @@ func (s *Service) RenameCredential(ctx context.Context, tx pgx.Tx, caller Caller
 // RemoveCredential revokes one of the caller's credentials in the receipt's transaction (RemoveAuthIdentity, after its step-up
 // evidence was consumed): the account is locked, so concurrent removals run one after the other, and the last live credential
 // cannot be removed (STATE/invalid_state, reason last_credential; the center has no recovery path yet). The removal moves the
-// authentication epoch of the account's live sessions, so step-up evidence proved before it is spent. It returns the credential's
-// new revision.
-func (s *Service) RemoveCredential(ctx context.Context, tx pgx.Tx, caller Caller, credentialID platform.ID, now time.Time) (int64, error) {
+// authentication epoch of the account's live sessions, so step-up evidence proved before it is spent. cancelled are the approvals
+// the account participants cancelled first in the same transaction (CancelApprovals), counted in the audit event. It returns the
+// credential's new revision.
+func (s *Service) RemoveCredential(ctx context.Context, tx pgx.Tx, caller Caller, credentialID platform.ID, cancelled Cancellations, now time.Time) (int64, error) {
 	var state int16
 	if err := tx.QueryRow(ctx, "SELECT state FROM identity.user WHERE user_id = $1 FOR UPDATE", caller.UserID).Scan(&state); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -185,7 +186,7 @@ func (s *Service) RemoveCredential(ctx context.Context, tx pgx.Tx, caller Caller
 		return 0, err
 	}
 	return revision, s.audit(ctx, tx, caller.Request, Actor(caller.UserID), "identity.credential.removed", "", "credential", credentialID.String(),
-		map[string]any{"kind": Method(method).Kind(), "sessions": epochs.RowsAffected()})
+		map[string]any{"kind": Method(method).Kind(), "sessions": epochs.RowsAffected(), "participants": counts(cancelled)})
 }
 
 // RevokeSession revokes one live account session of the caller's account in the receipt's transaction (RevokeSession): the caller's
@@ -205,14 +206,16 @@ func (s *Service) RevokeSession(ctx context.Context, tx pgx.Tx, caller Caller, s
 }
 
 // RevokeAllSessions revokes every live account session of the caller's account except its own in the receipt's transaction
-// (RevokeAllSessions); node, push and automation sessions stay (DC-03). It returns how many it revoked.
-func (s *Service) RevokeAllSessions(ctx context.Context, tx pgx.Tx, caller Caller, now time.Time) (int64, error) {
+// (RevokeAllSessions); node, push and automation sessions stay (DC-03), and the approvals the account participants cancelled first
+// in the same transaction (CancelApprovals: the account's approved node sign-ins no node collected yet) are counted in the audit
+// event. It returns how many sessions it revoked.
+func (s *Service) RevokeAllSessions(ctx context.Context, tx pgx.Tx, caller Caller, cancelled Cancellations, now time.Time) (int64, error) {
 	count, err := session.RevokeAll(ctx, tx, caller.UserID, caller.SessionID, now)
 	if err != nil {
 		return 0, err
 	}
 	return count, s.audit(ctx, tx, caller.Request, Actor(caller.UserID), "identity.sessions.revoked_all", "", "account", caller.UserID.String(),
-		map[string]any{"sessions": count})
+		map[string]any{"sessions": count, "participants": counts(cancelled)})
 }
 
 // RenameDevice renames one of the caller's live devices in the receipt's transaction (DeviceService.Rename), by the label rule.
@@ -455,4 +458,12 @@ func channelName(channel Channel) string {
 		return "browser"
 	}
 	return "native"
+}
+
+// counts is the audit form of the cancellations: an object, empty when no participant is registered.
+func counts(cancelled Cancellations) map[string]int64 {
+	if cancelled == nil {
+		return map[string]int64{}
+	}
+	return cancelled
 }

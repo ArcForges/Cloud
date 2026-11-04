@@ -21,8 +21,10 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/dbtest"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
+	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/nodetest"
 	"github.com/ArcForges/Cloud/center/internal/observe"
+	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/server"
 	"github.com/ArcForges/Cloud/center/internal/session"
@@ -61,6 +63,32 @@ type harness struct {
 	logs    *lockedBuffer
 	metrics *server.Center
 	secrets []string
+	// inbox holds the messages the center sent (the e-mail step-up's code; MOCKED mail).
+	inbox *inbox
+}
+
+// inbox is the MOCKED mail sender: it keeps every message the center sends.
+type inbox struct {
+	mu      sync.Mutex
+	letters []mail.Message
+}
+
+func (i *inbox) Enabled() bool { return true }
+
+func (i *inbox) Send(_ context.Context, message mail.Message) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.letters = append(i.letters, message)
+	return nil
+}
+
+func (i *inbox) last() mail.Message {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if len(i.letters) == 0 {
+		return mail.Message{}
+	}
+	return i.letters[len(i.letters)-1]
 }
 
 type settings struct {
@@ -84,8 +112,8 @@ func newHarness(t *testing.T, options settings) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, db: db, policy: cfg.Identity.Policy, logs: &lockedBuffer{}}
-	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{})
+	h := &harness{t: t, db: db, policy: cfg.Identity.Policy, logs: &lockedBuffer{}, inbox: &inbox{}}
+	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: h.inbox, Background: func(work func()) { work() }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,4 +282,28 @@ func (h *harness) issue(user platform.ID, scope session.Scope) session.Native {
 	}
 	h.secrets = append(h.secrets, issued.AccessToken, issued.RefreshToken)
 	return issued
+}
+
+// trackStatements creates pg_stat_statements in the test's database (the test server preloads the library, as the Linux leg's does)
+// and returns a reader of the statements the server recorded for the test's own database (pg_stat_statements is cluster-wide, so the
+// reader filters on the database's dbid); a read error or an empty record fails the test, so a statement check can never pass
+// because nothing was recorded.
+func (h *harness) trackStatements() func() string {
+	h.t.Helper()
+	admin := pgtest.Connect(h.t, pgtest.WithDatabase(h.t, pgtest.ServerURL(h.t), h.db.Name))
+	if _, err := admin.Exec(context.Background(), "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"); err != nil {
+		h.t.Fatalf("the test server must preload pg_stat_statements: %v", err)
+	}
+	return func() string {
+		h.t.Helper()
+		var statements string
+		if err := admin.QueryRow(context.Background(), `SELECT coalesce(string_agg(query, E'\n'), '') FROM pg_stat_statements
+WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&statements); err != nil {
+			h.t.Fatalf("read pg_stat_statements: %v", err)
+		}
+		if statements == "" {
+			h.t.Fatal("pg_stat_statements recorded nothing for the test's database")
+		}
+		return statements
+	}
 }

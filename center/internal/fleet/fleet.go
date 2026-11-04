@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package fleet is node enrollment (AF-CTR-04; ArcForges-Design AD-0021 sections 5, 10 and 13a): the enrolled nodes of an account
-// (fleet.node), the one enrollment function both sign-in flows call (Enroll), the node's refresh, report and sign-out, and the
-// device revocation's cascade participant for nodes. Enrollment is an account and device operation and is never gated. The Connect
+// (fleet.node), the browser sign-in (signin.go), the one enrollment function both sign-in flows call (Enroll), the node's refresh,
+// report and sign-out, and the device revocation's cascade participant for nodes. Enrollment is an account and device operation and is never gated. The Connect
 // handlers (package fleetapi) and the pages call these functions in process, so the API and the pages share one set of rules,
 // buckets and audit events.
 //
@@ -16,6 +16,13 @@
 //     approval never outlives a remediation that committed first), then supersedes the installation's sessions, then locks the node
 //     row and re-reads it. A node without a live row gets new rows, inserted after the locks; their only waits are unique-index waits,
 //     answered as store contention.
+//   - The browser sign-in (signin.go): BeginNodeSignIn locks the node ID's pending flows that present its key, in flow ID order (the
+//     one order of every writer that locks several flow rows), and inserts its flow; GetNodeSignInFlow marks one PENDING flow row;
+//     ApproveNodeSignIn locks the flow row, then (approving) the account through identity.ConsumeEvidence and the proved challenge;
+//     CompleteNodeSignIn locks the flow row and then calls Enroll, whose locks follow, or (a reuse) revokes the delivered family's
+//     sessions. The foreign keys of the review mark, the approval and the denial take FOR KEY SHARE on the deciding account (and, for
+//     an approval, on its session) after the flow row; no writer that holds an account or a session FOR UPDATE then waits for a flow
+//     row, so they close no cycle.
 //   - ReportNodeInfo locks the device only when it renames it, then the installation, then the node row.
 //   - RefreshNodeSession locks the session row (session.Refresh), then updates the node row.
 //   - The account's step-up evidence path (identity.ConsumeEvidence: RevokeSession of another session, RevokeAllSessions,

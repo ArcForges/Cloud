@@ -4,7 +4,8 @@
 // registers exactly the served methods (every other method of the service stays unregistered, so the ingress answers UNIMPLEMENTED
 // and the Worker table has no row for it), authorizes each call with the operation table before anything else, maps the contract
 // messages to package fleet and answers every refusal as the reply's ArcError with the call's correlation id. Part E1a serves
-// RefreshNodeSession, ReportNodeInfo and SignOutNode; the sign-in methods follow in E1b (browser) and E2 (device code).
+// RefreshNodeSession, ReportNodeInfo and SignOutNode, part E1b the browser sign-in (BeginNodeSignIn, GetNodeSignInFlow,
+// ApproveNodeSignIn, CompleteNodeSignIn); the device-code sign-in follows in E2.
 package fleetapi
 
 import (
@@ -81,6 +82,10 @@ func method[Request any, PRequest interface {
 // Methods are exactly the served methods, in the order of routes.FleetMethods.
 func (s *Server) Methods() []connect.Method {
 	return []connect.Method{
+		method("BeginNodeSignIn", fleetv1connect.NodeEnrollmentServiceBeginNodeSignInProcedure, s.beginNodeSignIn),
+		method("GetNodeSignInFlow", fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure, s.getNodeSignInFlow),
+		method("ApproveNodeSignIn", fleetv1connect.NodeEnrollmentServiceApproveNodeSignInProcedure, s.approveNodeSignIn),
+		method("CompleteNodeSignIn", fleetv1connect.NodeEnrollmentServiceCompleteNodeSignInProcedure, s.completeNodeSignIn),
 		method("RefreshNodeSession", fleetv1connect.NodeEnrollmentServiceRefreshNodeSessionProcedure, s.refreshNodeSession),
 		method("ReportNodeInfo", fleetv1connect.NodeEnrollmentServiceReportNodeInfoProcedure, s.reportNodeInfo),
 		method("SignOutNode", fleetv1connect.NodeEnrollmentServiceSignOutNodeProcedure, s.signOutNode),

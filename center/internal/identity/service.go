@@ -54,6 +54,8 @@ type Service struct {
 	deliveries deliveries
 	// participants revoke what each holds for a device in the device revocation's transaction (DC-06).
 	participants []device.Participant
+	// accountParticipants end the account's uncollected approvals when it revokes all other sessions or removes a credential.
+	accountParticipants []AccountParticipant
 }
 
 // Options are the parts of a service.
@@ -70,13 +72,15 @@ type Options struct {
 	Background func(func())
 	// Participants are the device revocation's cascade participants (none in AF-CTR-03; tests register a stand-in).
 	Participants []device.Participant
+	// AccountParticipants are the holders of approvals an account remediation cancels (AF-CTR-04: the node sign-in flows).
+	AccountParticipants []AccountParticipant
 }
 
 // New is the service of a configuration.
 func New(options Options) *Service {
 	service := &Service{db: options.DB, policy: options.Policy, rp: options.RP, mailer: options.Mail, limits: ratelimit.New(options.DB),
 		bootstrap: options.Bootstrap, clock: options.Clock, events: options.Events, logger: options.Logger, codeSlots: make(chan struct{}, 2),
-		background: options.Background, participants: options.Participants}
+		background: options.Background, participants: options.Participants, accountParticipants: options.AccountParticipants}
 	if service.mailer == nil {
 		service.mailer = mail.Disabled{}
 	}

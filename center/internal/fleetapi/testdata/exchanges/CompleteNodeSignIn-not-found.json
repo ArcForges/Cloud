@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "7c1b060",
+  "method": "CompleteNodeSignIn",
+  "case": "not-found",
+  "outcome": "STATE/not_found",
+  "headers": {
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "00000000b20a0052120a10deadbeef0000000000000000000000005a2b77634842776348427763484277634842776348427763484277634842776348427763484277634842776345622b4b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f7240e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [
+      "00000000970a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1051a7f0a096e6f745f666f756e6410061a156572726f722e73746174652e6e6f745f666f756e6422020801280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1053a3f223d0a0c6e6f64655f7369676e5f696e12096e6f745f666f756e641a220a0c6e6f64655f7369676e5f696e12120a10deadbeef000000000000000000000000"
+    ],
+    "trailers": "grpc-status: 0\r\n"
+  },
+  "normalized": [
+    "a 16-byte ID the center drew: 15 bytes of its kind (0xa1 correlation, 0xa2 flow, 0xa3 installation, 0xa4 account) and n for the n-th distinct one of the kind",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
+    "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
+    "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
+  ],
+  "sha256": "007fc9e3bdbc1bb836e09175c688da864cfd57267c4bb60f605ab4f0a2da8dfe"
+}
