@@ -151,3 +151,37 @@ $$`, "CREATE TRIGGER refuse_device BEFORE INSERT ON audit.audit_event FOR EACH R
 		t.Fatal(err)
 	}
 }
+
+// TestAStoreFailureOfADecisionGivesTheEntryBack (OQ-8 as decided, docs N-1): a decision whose receipt transaction fails in the store
+// (RESOURCE/overloaded, nothing stored) gives the reserved units back in a transaction of its own; one whose COMMIT went unanswered
+// (INTERNAL/internal, UNKNOWN) keeps them; the identical retry then approves.
+func TestAStoreFailureOfADecisionGivesTheEntryBack(t *testing.T) {
+	h := newHarness(t, settings{})
+	owner := h.person(1)
+	d, _ := h.start()
+	code := d.authorization.GetUserCode()
+	if looked := h.lookup(owner, code); looked.GetError() != nil {
+		t.Fatal(failure(looked.GetError()))
+	}
+	h.stepUpCode(owner, code, false)
+	h.faulting("refused", "UPDATE", "fleet.device_authorization", "NEW.state = 3", func() {
+		if response := h.decideDevice(owner.bearer, command(), code, true); !undoneCommit(response.GetError()) {
+			t.Fatalf("a refused decision: %+v", response.GetError())
+		}
+	})
+	if h.entryUnits(owner.id) != 0 {
+		t.Fatalf("a refused decision kept %d units", h.entryUnits(owner.id))
+	}
+	retry := command()
+	h.faulting("lost", "UPDATE", "fleet.device_authorization", "NEW.state = 3", func() {
+		if response := h.decideDevice(owner.bearer, retry, code, true); !unknownCommit(response.GetError()) {
+			t.Fatalf("a lost decision: %+v", response.GetError())
+		}
+	})
+	if h.entryUnits(owner.id) != 1 || h.authorizationState(d) != 1 {
+		t.Fatalf("an unanswered decision's commit gave its unit back, or approved: %d units, state %d", h.entryUnits(owner.id), h.authorizationState(d))
+	}
+	if response := h.decideDevice(owner.bearer, retry, code, true); response.GetError() != nil || h.authorizationState(d) != 3 {
+		t.Fatalf("the identical retry: %s", failure(response.GetError()))
+	}
+}

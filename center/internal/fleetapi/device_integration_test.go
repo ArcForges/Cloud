@@ -4,6 +4,7 @@ package fleetapi_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/nodetest"
+	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/session"
 )
 
@@ -308,4 +310,93 @@ func TestTheDeviceDecisionRowDecidesItsEvidence(t *testing.T) {
 		return
 	}
 	t.Fatal("no ApproveDeviceCode row")
+}
+
+// entryUnits is the count of an account's device_entry_account bucket (the stored key: SHA-256 of the kind, a zero byte and the key).
+func (h *harness) entryUnits(user platform.ID) int {
+	digest := sha256.Sum256([]byte("device_entry_account\x00account:" + user.String()))
+	return h.count("SELECT coalesce(sum(count), 0) FROM platform.rate_limit WHERE bucket_hash = $1", digest[:])
+}
+
+// networkUnits is the count of the harness's network in device_entry_prefix.
+func (h *harness) networkUnits() int {
+	digest := sha256.Sum256([]byte("device_entry_prefix\x00198.51.100.0/24"))
+	return h.count("SELECT coalesce(sum(count), 0) FROM platform.rate_limit WHERE bucket_hash = $1", digest[:])
+}
+
+func limitDetail(value *foundationv1.ArcError) string {
+	limit := value.GetDetails().GetLimit()
+	if limit == nil {
+		return ""
+	}
+	available := "-"
+	if limit.GetAvailable() != nil {
+		available = limit.GetAvailable().GetValue()
+	}
+	return limit.GetLimitName() + " " + limit.GetMaximum().GetValue() + " " + available
+}
+
+// TestServedDecisionsKeepWrongEntries (F7 as the served ApproveDeviceCode applies it, security F-2; the cap's give-back over the
+// receipt, docs B-2; the wire form of code_invalid, api N-4): over the real ingress and the account's command receipt, a prober's
+// denial of a code under the owner's review (not_reviewed), of an unknown code (code_invalid) and of the owner's APPROVED code
+// (code_invalid) each keep one unit; the replay of a stored code_invalid answers the same details and counts nothing. The owner's
+// step_up_required and its approval keep none; at the node cap its approval is quota_exceeded, kept by the receipt (the replay
+// answers it again) while both units come back after the receipt commits. The prober's wrong lookups count down to available 0 on
+// the wire, then rate_limited.
+func TestServedDecisionsKeepWrongEntries(t *testing.T) {
+	h := newHarness(t, settings{policy: `{"maxNodesPerAccount": 1}`})
+	owner, prober := h.person(1), h.person(1)
+	d, _ := h.start()
+	code := d.authorization.GetUserCode()
+	if looked := h.lookup(owner, code); looked.GetError() != nil {
+		t.Fatal(failure(looked.GetError()))
+	}
+	if response := h.decideDevice(prober.bearer, command(), code, false); response.GetError().GetDetails().GetState().GetReason() != "not_reviewed" {
+		t.Fatalf("the prober's denial of a code under review: %s", failure(response.GetError()))
+	}
+	unknown := command()
+	first := h.decideDevice(prober.bearer, unknown, "BBBBBBBB", false)
+	if failure(first.GetError()) != "VALIDATION/code_invalid" || limitDetail(first.GetError()) != "device_entry_account 5 3" {
+		t.Fatalf("an unknown code: %s %s", failure(first.GetError()), limitDetail(first.GetError()))
+	}
+	if replay := h.decideDevice(prober.bearer, unknown, "BBBBBBBB", false); limitDetail(replay.GetError()) != "device_entry_account 5 3" || h.entryUnits(prober.id) != 2 {
+		t.Fatalf("the replay of a kept code_invalid: %s, %d units", limitDetail(replay.GetError()), h.entryUnits(prober.id))
+	}
+	if response := h.decideDevice(owner.bearer, command(), code, true); failure(response.GetError()) != "AUTHENTICATION/step_up_required" || h.entryUnits(owner.id) != 0 {
+		t.Fatalf("the owner's approval without evidence: %s, %d units", failure(response.GetError()), h.entryUnits(owner.id))
+	}
+	h.stepUpCode(owner, code, false)
+	if response := h.decideDevice(owner.bearer, command(), code, true); response.GetError() != nil || h.entryUnits(owner.id) != 0 {
+		t.Fatalf("the owner's approval: %s, %d units", failure(response.GetError()), h.entryUnits(owner.id))
+	}
+	if response := h.decideDevice(prober.bearer, command(), code, false); failure(response.GetError()) != "VALIDATION/code_invalid" || h.entryUnits(prober.id) != 3 {
+		t.Fatalf("the prober's denial of the owner's APPROVED code: %s, %d units", failure(response.GetError()), h.entryUnits(prober.id))
+	}
+	// The cap (1): the owner holds a node, so a second approval is quota_exceeded; the receipt keeps it, the units come back.
+	h.enrollNode(owner.id, h.db.Session(owner.id, 1), d.node)
+	capped, _ := h.start()
+	cappedCode := capped.authorization.GetUserCode()
+	if looked := h.lookup(owner, cappedCode); looked.GetError() != nil {
+		t.Fatal(failure(looked.GetError()))
+	}
+	h.stepUpCode(owner, cappedCode, false)
+	network := h.networkUnits()
+	quota := command()
+	if response := h.decideDevice(owner.bearer, quota, cappedCode, true); failure(response.GetError()) != "RESOURCE/quota_exceeded" ||
+		h.entryUnits(owner.id) != 0 || h.networkUnits() != network {
+		t.Fatalf("the cap: %s, account %d, network %d -> %d", failure(response.GetError()), h.entryUnits(owner.id), network, h.networkUnits())
+	}
+	if response := h.decideDevice(owner.bearer, quota, cappedCode, true); failure(response.GetError()) != "RESOURCE/quota_exceeded" ||
+		h.entryUnits(owner.id) != 0 || h.networkUnits() != network {
+		t.Fatalf("the replay of the kept quota_exceeded: %s", failure(response.GetError()))
+	}
+	for _, want := range []string{"device_entry_account 5 1", "device_entry_account 5 0"} {
+		if response := h.lookup(prober, "BBBBBBBB"); failure(response.GetError()) != "VALIDATION/code_invalid" || limitDetail(response.GetError()) != want {
+			t.Fatalf("a wrong lookup: %s %s, want %s", failure(response.GetError()), limitDetail(response.GetError()), want)
+		}
+	}
+	if response := h.lookup(prober, code); failure(response.GetError()) != "RESOURCE/rate_limited" ||
+		response.GetError().GetDetails().GetLimit().GetLimitName() != "device_entry_account" {
+		t.Fatalf("after the budget: %s", failure(response.GetError()))
+	}
 }
