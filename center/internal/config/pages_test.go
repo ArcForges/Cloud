@@ -13,7 +13,7 @@ func TestThePagesSurfaceNeedsTheIdentitySurface(t *testing.T) {
 	if got := KnownSurfaces(); len(got) != 4 || got[0] != SurfaceIdentity || got[1] != SurfacePages || got[2] != SurfaceOperations || got[3] != SurfaceFleet {
 		t.Fatalf("known surfaces %v", got)
 	}
-	if got := DefaultSelfHostedSurfaces(); len(got) != 2 || got[0] != SurfaceIdentity || got[1] != SurfacePages {
+	if got := DefaultSelfHostedSurfaces(); len(got) != 3 || got[0] != SurfaceIdentity || got[1] != SurfacePages || got[2] != SurfaceFleet {
 		t.Fatalf("the self-hosted default surfaces %v", got)
 	}
 	hosted := func(surfaces string) map[string]string {

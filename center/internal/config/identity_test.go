@@ -213,16 +213,16 @@ func TestTheIdentityPolicyHasDocumentedDefaultsAndBoundedOverrides(t *testing.T)
 	}
 }
 
-// TestTheFleetSurfaceNeedsIdentityAndPagesAndIsNoDefaultYet pins the staging of the fleet surface (AF-CTR-04 E1a, delivery-14): it
-// is a known name, so a list can name it and the Worker's dark rows answer for it; it needs identity and pages; and the self-hosted
-// default does not include it until its pages exist (part E3).
-func TestTheFleetSurfaceNeedsIdentityAndPagesAndIsNoDefaultYet(t *testing.T) {
-	if !slices.Contains(KnownSurfaces(), SurfaceFleet) || slices.Contains(DefaultSelfHostedSurfaces(), SurfaceFleet) {
+// TestTheFleetSurfaceNeedsIdentityAndPagesAndIsInTheSelfHostedDefault pins the fleet surface (AF-CTR-04, delivery-14): it is a known
+// name, it needs identity and pages, and since its pages exist (part E3) the self-hosted default includes it; official-hosted mode
+// enables it only where it is listed.
+func TestTheFleetSurfaceNeedsIdentityAndPagesAndIsInTheSelfHostedDefault(t *testing.T) {
+	if !slices.Contains(KnownSurfaces(), SurfaceFleet) || !slices.Contains(DefaultSelfHostedSurfaces(), SurfaceFleet) {
 		t.Fatalf("known %v, default %v", KnownSurfaces(), DefaultSelfHostedSurfaces())
 	}
 	cfg, err := Load(environment(withIdentity(SelfHosted, nil)))
-	if err != nil || cfg.Identity.Enabled(SurfaceFleet) {
-		t.Fatalf("the self-hosted default enables fleet: %+v %v", cfg.Identity, err)
+	if err != nil || !cfg.Identity.Enabled(SurfaceFleet) || !cfg.Identity.Enabled(SurfacePages) || cfg.Identity.Enabled(SurfaceOperations) {
+		t.Fatalf("the self-hosted default: %+v %v", cfg.Identity, err)
 	}
 	for _, list := range []string{"fleet", "identity,fleet", "pages,fleet"} {
 		if _, err = Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: list}))); !errors.Is(err, ErrInvalid) {

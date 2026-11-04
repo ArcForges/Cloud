@@ -42,8 +42,8 @@ const SurfaceOperations Surface = "operations"
 
 // SurfaceFleet is node enrollment (AF-CTR-04): the NodeEnrollmentService methods the center serves and, from part E3, the /connect
 // and /activate pages. It needs the identity and pages surfaces. Enrollment is an account and device operation and is never gated
-// (AD-0021 section 13a); production keeps it off until AF-PROD-01 activates it. It joins the self-hosted default only with its pages
-// (part E3).
+// (AD-0021 section 13a); production keeps it off until AF-PROD-01 activates it. It is in the self-hosted default since its pages
+// exist (part E3).
 const SurfaceFleet Surface = "fleet"
 
 // MaxFleetPublicBaseURLLength bounds the public base URL of a center that serves the fleet surface: the contract bounds every URL the
@@ -56,9 +56,9 @@ func KnownSurfaces() []Surface {
 	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet}
 }
 
-// DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces, never the
-// operations page, and not yet the fleet surface (it joins with its pages).
-func DefaultSelfHostedSurfaces() []Surface { return []Surface{SurfaceIdentity, SurfacePages} }
+// DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces and node
+// enrollment with its pages (AF-CTR-04 E3, delivery-14), never the operations page.
+func DefaultSelfHostedSurfaces() []Surface { return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet} }
 
 // ClientIPHeader is the one header the hosted Worker sets to the client's address (from cf-connecting-ip, overwriting any client
 // value); the generated Worker tables carry the same name.
@@ -470,7 +470,7 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 }
 
 // parseSurfaces reads the surface list: exact generated names, comma-separated, without whitespace or repetition. Official-hosted
-// mode enables none unless listed; self-hosted mode enables the default surfaces (identity and pages, not operations) unless listed,
+// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages and fleet, not operations) unless listed,
 // so an explicit list pins the surfaces across upgrades.
 func parseSurfaces(value string, mode Mode) ([]Surface, error) {
 	if value == "" {
