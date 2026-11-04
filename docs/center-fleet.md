@@ -56,7 +56,8 @@ loopback receiver (CTR4-FLW-01..08 as amended by the plan review's protocol-1, p
 `[A-Za-z0-9_-]`; S256 is the only method), `redirect_uri` (byte for byte `http://127.0.0.1:<port>/callback` or
 `http://[::1]:<port>/callback`, `<port>` a decimal 1024..65535 without a leading zero; anything else is `not_admitted`), the node's
 description (name, OS, architecture, SemVer version, role), `state` (16 to 128 characters of `[A-Za-z0-9._~-]`) and
-`node_public_key` (the 91-byte PKIX DER of a P-256 key). Then the client network's and the node ID's buckets are counted, and a key
+`node_public_key` (the 91-byte PKIX DER of a P-256 key). Then the client network's and the node ID's buckets are counted (and, where
+the policy sets it, the opt-in `anonymous_flows` ceiling every anonymous flow counts in), and a key
 that an installation holds or held is refused before approval with `CONFLICT/already_exists` (`state.state` `node_key`,
 `state.reason` `already_registered`); the node replaces its key once and starts again (a sign-in after a sign-out therefore brings a
 new key). A newer Begin of the same node ID and the same key expires the node's PENDING flows; a Begin of the node ID with another key
@@ -118,12 +119,16 @@ completion is `INTERNAL/internal` (effect `UNKNOWN`, retry `NEVER`) and the node
 count them in `identity.sessions.revoked_all` and `identity.credential.removed` (`participants`, `fleet.node_sign_in`). "Sign out all
 other sessions" from the approving session revokes neither that session nor its epoch, so this is what ends its pending approvals;
 the other remediations (a revocation of the approving session by another session, a credential removal, a device revocation, an
-operator's revocation, a suspension) also lapse the approval in Enroll. A step-up refusal rolls the cancellation back. An approval by
-the remediating session itself that commits after the cancellation stands (it is the user's own act); an enrolled node is removed by
+operator's revocation, a suspension) also lapse the approval in Enroll. A step-up refusal rolls the cancellation back. The
+cancellation is two statements: the first locks, in flow ID order, the account's APPROVED flows and the PENDING flows it reviewed
+last, the second denies the locked flows that are APPROVED with a snapshot taken after the locks; so an approval that holds one of
+those rows when the remediation starts commits first and is then denied, while an approval by the remediating session itself that
+reaches its row after the lock waits for the remediation and stands (it is the user's own act). An enrolled node is removed by
 revoking its device.
 
 **Buckets.** `node_flow_prefix` (10 per 10 minutes per client network) and `node_flow_node` (10 per 10 minutes per node ID; C0 "rate
-limited per IP and per node ID") count every Begin past its validation; `node_complete_prefix` (30 per 10 minutes per client network)
+limited per IP and per node ID") count every Begin past its validation (with the opt-in `anonymous_flows` ceiling where the policy
+sets one); `node_complete_prefix` (30 per 10 minutes per client network)
 counts only the Completes that name no flow or present no matching code, so a full bucket refuses junk and never a matching code;
 `node_approve_account` (20 per hour per account) counts approvals and denials. Malformed requests cost no budget. Each limit and window
 is a policy key (`nodeFlowPrefixLimit`/`Window`, `nodeFlowNodeLimit`/`Window`, `nodeCompletePrefixLimit`/`Window`,
@@ -186,8 +191,8 @@ methods answer `AUTHENTICATION/unauthenticated` when the credential's installati
 
 ## Enrollment
 
-`fleet.Enroll` is the one function both sign-in flows call in their success transaction: CompleteNodeSignIn since part E1b, part E2's
-device poll later; its own rules are also exercised by SEEDED function-level tests that call it directly. Its rules, in the order the code applies them:
+`fleet.Enroll` is the one function the sign-in flows call in their success transaction: CompleteNodeSignIn since part E1b, and part
+E2's device poll will; its own rules are also exercised by SEEDED function-level tests that call it directly. Its rules, in the order the code applies them:
 
 1. The approving account is locked and must be Active (else the approval lapses).
 2. A node ID live in another account is `CONFLICT/already_exists` (`state.state` `node`, no resource).
@@ -211,8 +216,8 @@ nothing of the enrollment remains even when the caller then commits (as a flow t
 session, superseded session or key (`TestNothingOfARefusedEnrollmentRemains`). The node session it issues gets the node lifetimes;
 `fleet.node.enrolled` (node ID, OS, architecture, canonical version, key fingerprint, flow `pkce` or `device`, `first` or
 `reenrolled`, key version) is its last statement. A concurrent enrollment of the same node ID or key is store contention, and the
-identical retry answers the rule that then applies. BeginNodeSignIn (and part E2's StartDeviceAuthorization) refuses a key an
-installation holds or held before approval, so a sign-in after a sign-out replaces the node key, and an in-place re-enrollment
+identical retry answers the rule that then applies. BeginNodeSignIn refuses a key an installation holds or held before approval
+(part E2's StartDeviceAuthorization will too), so a sign-in after a sign-out replaces the node key, and an in-place re-enrollment
 normally arrives with a new key. A caller may record its result in Enroll's transaction before `fleet.node.enrolled`
 (`EnrollRequest.Record`: the browser sign-in's COMPLETED flow).
 
@@ -242,8 +247,8 @@ take them in this order:
   (and, for an approval, on its session) after the flow row; no writer that holds an account or a session `FOR UPDATE` then waits for
   a flow row, so they close no cycle.
 - RevokeAllSessions and RemoveAuthIdentity: the account's APPROVED flows and the PENDING flows it reviewed last, in flow ID order (the
-  approval participants, `fleet.node_sign_in` first and part E2's `fleet.device_authorization` after it), then the account through
-  the step-up evidence.
+  approval participant `fleet.node_sign_in`; part E2's `fleet.device_authorization` participant will run after it), then the account
+  through the step-up evidence.
 - ReportNodeInfo: the device only when it renames it, then the installation, then the node row.
 - RefreshNodeSession: its session, then the node row.
 - The account's step-up evidence path (RevokeSession of another session, RevokeAllSessions, RemoveAuthIdentity, DeviceService.Revoke
@@ -339,16 +344,23 @@ code, verifier, proof, address or e-mail. Transactions per request: BeginNodeSig
 transaction held) and one effect transaction (the supersession and the insert); GetNodeSignInFlow one auxiliary transaction (the
 review mark); ApproveNodeSignIn one bucket count and one effect transaction (the evidence, the decision, its audit);
 CompleteNodeSignIn one read (no transaction held), the failure bucket's count only for a mismatch, then one effect transaction (the
-completion, a reuse or a lapse) or one auxiliary transaction (the failure marker), with no transaction open while PKCE or ES256 is
-verified; RefreshNodeSession one lookup (no transaction held), one bucket count, one rotation; ReportNodeInfo one bucket count and one
+completion, a reuse or a lapse) or one auxiliary transaction (the failure marker, which carries the reuse revocation when it finds
+the flow completed by a racing presentation of the code; an unanswered commit of it is then answered `RESOURCE/overloaded` although
+the revocation may have committed, and the retry answers `code_reused`), with no transaction open while PKCE or ES256 is verified; RefreshNodeSession one lookup (no transaction held), one bucket count, one rotation; ReportNodeInfo one bucket count and one
 receipt transaction; SignOutNode one receipt transaction.
 
-**Exchange captures.** `TestFleetExchangeCapture` records the node-facing exchanges (Begin, Complete, Refresh, ReportNodeInfo,
-SignOutNode, each with its success and its refusals) as the binary gRPC-Web frames on the wire, normalized (fixed placeholders for
-the correlation and flow IDs, tokens, the code, the proof and every instant as an offset), in
-`center/internal/fleetapi/testdata/exchanges`; it fails when a fresh capture differs and rewrites the directory with
-`ARCFORGES_UPDATE_EXCHANGES=1` (`ARCFORGES_CENTER_COMMIT` names the commit in the headers; `npx prettier --write` formats the files, and the comparison reads them as JSON). The ArcForges node's FakeCenter is
-checked against a verbatim copy (parts N1 and N2).
+**Exchange captures.** `TestFleetExchangeCapture` records the node-facing exchanges as the binary gRPC-Web frames on the wire, with
+the request headers that matter (the bearer's placeholder, the client address): every outcome the center produces of BeginNodeSignIn
+(success, `invalid_argument`, `rate_limited`, `already_exists` node key, `not_activated`) and CompleteNodeSignIn (success,
+`not_found`, `expired`, `code_reused`, `unauthenticated`, `invalid_argument`, `already_exists` node and node key, `credential_revoked`,
+`quota_exceeded`, `rate_limited`, `not_activated`), and the success and the refusals a node reacts to of RefreshNodeSession,
+ReportNodeInfo and SignOutNode; each file names its outcome and the test fails when one of that per-method list has no case. Only
+the values the center or a random source produced are normalized (correlation, flow, installation and account IDs, tokens, the
+one-use codes, the proofs, every instant as an offset), each distinct value to its own placeholder of the same shape, wherever it
+appears; the test's own constants stay. The files live in `center/internal/fleetapi/testdata/exchanges`; the test fails when a fresh
+capture differs and rewrites the directory with `ARCFORGES_UPDATE_EXCHANGES=1` (`ARCFORGES_CENTER_COMMIT` names the commit in the
+headers; `npx prettier --write` formats the files, and the comparison reads them as JSON). Parts N1 and N2 will copy the directory
+verbatim for the ArcForges node's FakeCenter conformance test; nothing checks it against a node yet.
 
 ## Residual risks
 
