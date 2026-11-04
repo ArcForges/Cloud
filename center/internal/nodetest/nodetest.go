@@ -2,9 +2,10 @@
 
 // Package nodetest is the MOCKED node of the center's tests (AF-CTR-04; the Plan task's fakes_allowed: "the Go node stand-ins
 // center/internal/nodetest"): a node with a software ECDSA P-256 key and its own description, and a gRPC-Web client that calls the
-// center over HTTP exactly as a node does, with a bearer credential when it has one. It is linked into test binaries only (no
-// package of the center's executable imports it) and the Docker context excludes it, so it never reaches the image. It never claims
-// an end-to-end result: the real node is the ArcForges CloudLink (parts N1, N2).
+// center over HTTP exactly as a node does, with a bearer credential when it has one. It is linked into test binaries and into the
+// development stand-in center/cmd/node-probe (part E3) only (no package of the center's executable imports it), and the Docker context
+// excludes both, so it never reaches the image. It never claims an end-to-end result: the real node is the ArcForges CloudLink (parts
+// N1, N2).
 package nodetest
 
 import (

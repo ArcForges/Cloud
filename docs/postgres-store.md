@@ -214,8 +214,10 @@ adds one `identity.spent_refresh` row, kept until the family's absolute end (365
 (an estimate of 3 MB with its indexes) until AF-PLAT-01's sweep removes them; `SELECT count(*) FROM identity.spent_refresh` measures
 it.
 
-Personal data: the node's name (it can name a person), its version, the country and network (ASN) a sign-in request came from, and
-account IDs. No token, one-use code, device code or user code is stored in clear, and no audit payload holds one. Command receipts
+Personal data: the node's name (it can name a person), its version, the country and network (ASN) a sign-in request came from
+(`begin_country`, `begin_asn`: written by Begin and Start of the official hosted center only, from the Worker's headers; a self-hosted
+center writes neither), and account IDs. Their retention (the flow rows' 7 days after the end) is a target AF-PLAT-01's sweeps will
+enforce; until then the rows stay. No token, one-use code, device code or user code is stored in clear, and no audit payload holds one. Command receipts
 of ReportNodeInfo and SignOutNode hold only the receipt (command ID and effect), under the principal `node:<installation id>`; those of
 ApproveDeviceCode hold only the receipt, under the principal `account:<account id>`.
 

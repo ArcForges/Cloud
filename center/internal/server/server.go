@@ -205,7 +205,7 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	hellov1connect.RegisterHelloServiceHandler(dispatcher, &hello.Server{Greeting: greeting})
 	pipelineOptions := ingress.Options{Routes: publicRoutes, Observe: center.observeAdmission,
 		SurfaceEnabled: func(surface string) bool { return cfg.Identity.Enabled(config.Surface(surface)) },
-		ClientIP:       ClientAddress(cfg.Mode, cfg.Identity), RequireClientIP: cfg.Mode == config.OfficialHosted}
+		ClientIP:       ClientAddress(cfg.Mode, cfg.Identity), RequireClientIP: cfg.Mode == config.OfficialHosted, ClientOrigin: ClientOrigin(cfg.Mode)}
 	// The page paths are served by the pages handler where the surface is on, and answered 404 (with the security headers) elsewhere.
 	pageHandler := pages.Disabled()
 	if cfg.Identity.Enabled(config.SurfaceIdentity) {
@@ -255,6 +255,8 @@ type composedIdentity struct {
 	authorizer *access.Authorizer
 	verifier   *session.Verifier
 	clock      func() time.Time
+	// fleet is the fleet surface's account methods in process, for its pages; nil where the fleet surface is off.
+	fleet *fleetapi.Direct
 }
 
 // composeIdentity registers the identity surface's served methods and its credential verifiers.
@@ -284,14 +286,18 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
 	dispatcher.Register(server.Methods()...)
+	var fleetDirect *fleetapi.Direct
 	if c.Config.Identity.Enabled(config.SurfaceFleet) {
 		nodes := fleet.New(fleet.Options{DB: c.Store, Policy: c.Config.Identity.Policy, Clock: clock, Events: c.Metrics, Logger: logger,
 			PublicBaseURL: c.Config.PublicBaseURL})
-		dispatcher.Register(fleetapi.New(nodes, authorizer, c.Store, clock, logger).Methods()...)
+		fleetServer := fleetapi.New(nodes, authorizer, c.Store, clock, logger)
+		dispatcher.Register(fleetServer.Methods()...)
+		// The /connect and /activate pages call the same server's account methods in process (AF-CTR-04 E3).
+		fleetDirect = fleetServer.Direct()
 	}
 	verifier := session.NewVerifier(c.Store, origin, clock)
 	pipeline.Bearer, pipeline.Browser = verifier, verifier
-	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock}, nil
+	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock, fleet: fleetDirect}, nil
 }
 
 // mailSender is the sender of the identity surface: the injected one of a test, otherwise the one the mail configuration builds (the
@@ -314,7 +320,8 @@ func (c *Center) composePages(composed composedIdentity, registry *ingress.Regis
 	return pages.New(pages.Options{
 		Origin: config.Origin(c.Config.PublicBaseURL), BasePath: config.BasePath(c.Config.PublicBaseURL),
 		Enabled: func(surface string) bool { return c.Config.Identity.Enabled(config.Surface(surface)) },
-		Policy:  c.Config.Identity.Policy, Operator: c.operator(composed.clock), Identity: composed.service, Direct: composed.server.Direct(), Access: composed.authorizer, Verifier: composed.verifier,
+		Policy:  c.Config.Identity.Policy, Operator: c.operator(composed.clock), Fleet: composed.fleet, Identity: composed.service, Direct: composed.server.Direct(),
+		Access: composed.authorizer, Verifier: composed.verifier,
 		DB: c.Store, Registry: registry, ClientIP: pipeline.ClientIP, RequireClientIP: pipeline.RequireClientIP, Clock: composed.clock, Logger: logger,
 	})
 }

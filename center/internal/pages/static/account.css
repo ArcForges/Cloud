@@ -278,3 +278,21 @@ dd {
     font-weight: 600;
   }
 }
+
+/* The fleet pages (AF-CTR-04 E3): the node a review shows, the decision forms side by side (Deny first), and codes and fingerprints in
+   a fixed-width face. A node's own text is isolated (bdi) so its direction cannot reorder what is around it. */
+.code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  letter-spacing: 0.05em;
+}
+
+.decision {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+bdi {
+  unicode-bidi: isolate;
+}

@@ -58,6 +58,7 @@ import {
   requestedDays,
   grantedFeature,
   headerProblems,
+  aboutOneDay,
   hoursUntilEnds,
   mockedLabel,
   newWorld,
@@ -407,6 +408,10 @@ test("the run fails on what a real center must never do: a missing header, the t
   const redirect = scenario({ noReturnFragment: true });
   assert.equal(await redirect.run(), 1);
   assert.match(redirect.stderr.join("\n"), /does not lead to the sign-in page/u);
+  // The sign-in page drops the return fragment from its address at once (P-16): one that keeps it fails the step.
+  const kept = scenario({ signInKeepsFragment: true });
+  assert.equal(await kept.run(), 1);
+  assert.match(kept.stderr.join("\n"), /keeps the return fragment in its address/u);
   const survives = scenario({ secondBrowserKeepsSession: true });
   assert.equal(await survives.run(), 1);
   assert.match(survives.stderr.join("\n"), /still reaches the account/u);
@@ -1902,7 +1907,7 @@ test("the operator-grant mode needs the saved credential, refuses to combine wit
   assert.equal(none.launches.length, 0, "no browser is started");
   const both = scenario();
   assert.equal(await both.run(["--operator-grant", "--real-authenticator"]), 2);
-  assert.match(both.stderr.join("\n"), /two runs; name one/u);
+  assert.match(both.stderr.join("\n"), /separate runs; name one/u);
   assert.equal(both.launches.length, 0);
   assert.equal(parse(["--operator-grant"]).operatorGrant, true);
   assert.equal(parse([]).operatorGrant, false);
@@ -2266,13 +2271,14 @@ test("the features the form lists are the development fixture catalogue, in the 
   assert(fixtureFeatures.includes(grantedFeature as never));
   assert.equal(grantedFeature, "remote.view");
   assert.equal(requestedDays, 1);
-  // The proof environment loads exactly this catalogue and the operations surface; production loads neither.
+  // The proof environment loads exactly this catalogue and the operations surface (with fleet since AF-CTR-04 E3); production loads
+  // neither.
   const wrangler = JSON.parse(readFileSync(path.join(root, "wrangler.json"), "utf8")) as {
     vars: Record<string, string>;
     env: { proof: { vars: Record<string, string> } };
   };
   assert.equal(wrangler.env.proof.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, "development-fixtures");
-  assert.equal(wrangler.env.proof.vars.FLAGSHIP_SURFACES, "identity,pages,operations");
+  assert.equal(wrangler.env.proof.vars.FLAGSHIP_SURFACES, "identity,pages,operations,fleet");
   assert.equal(wrangler.vars.FLAGSHIP_SURFACES, "");
   assert.equal(wrangler.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, undefined);
 });
@@ -2727,4 +2733,18 @@ test("the stand-in follows the center where it was found different: the audit of
     [operations.selfApproval, "x"],
   ]);
   assert.equal(center.operatorReview(session, reviewForm, new Set(["remote.view"])).status, 200);
+});
+
+// #124 carried item script-2: the review's and the done page's end is accepted from 23 to 25 hours ahead, both edges included, and
+// nothing outside (the hours are read from the page's minute, so the window allows for it).
+test("the grant's end is about one day from 23 to 25 hours, edges included", () => {
+  for (const hours of [23, 24, 25, 23.0001, 24.9999])
+    assert.equal(aboutOneDay(hours), true, String(hours));
+  for (const hours of [22.9999, 25.0001, 0, -24, 48, undefined, Number.NaN])
+    assert.equal(aboutOneDay(hours), false, String(hours));
+  const now = new Date("2026-11-02T04:10:00Z");
+  assert.equal(aboutOneDay(hoursUntilEnds("2026-11-03 03:10 UTC", now)), true);
+  assert.equal(aboutOneDay(hoursUntilEnds("2026-11-03 05:10 UTC", now)), true);
+  assert.equal(aboutOneDay(hoursUntilEnds("2026-11-03 03:09 UTC", now)), false);
+  assert.equal(aboutOneDay(hoursUntilEnds("2026-11-03 05:11 UTC", now)), false);
 });

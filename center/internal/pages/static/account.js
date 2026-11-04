@@ -172,6 +172,79 @@ export function safeReturnPath(value, origin) {
   return parsed.pathname + parsed.search;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------
+// The fleet pages' fragments (AF-CTR-04 E3): a node's browser sign-in opens <base>/connect#flow=<flow ID>, its device-code sign-in
+// <base>/activate#code=XXXX-XXXX. The fragment is never sent to a server and never in a Referer; browsers can keep it in history, so
+// the flow ID and the code are short-lived (10 minutes) and single-use, and the pages and the sign-in page drop it from the address
+// bar at once.
+
+/** The alphabet of a device user code: 20 upper-case consonants. */
+const USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
+
+/** Whether a value is a flow ID: the canonical lower-case 8-4-4-4-12 form of 16 bytes that are not all zero. */
+export function isFlowId(value) {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value) &&
+    value !== "00000000-0000-0000-0000-000000000000"
+  );
+}
+
+/**
+ * The normalized form of a user code (8 upper-case letters of the code alphabet), or null: case is ignored, as are hyphens and spaces,
+ * and at most 9 characters are read (the displayed form XXXX-XXXX).
+ */
+export function normalizeUserCode(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 9) return null;
+  const letters = value.toUpperCase().replaceAll(/[- ]/gu, "");
+  if (letters.length !== 8) return null;
+  for (const letter of letters) if (!USER_CODE_ALPHABET.includes(letter)) return null;
+  return letters;
+}
+
+/** A normalized user code as people read it: XXXX-XXXX. */
+export function displayUserCode(code) {
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+/**
+ * The return target of the sign-in page with a fleet fragment, or null: only <base>/connect#flow=<flow ID> and
+ * <base>/activate#code=XXXX-XXXX (the code in its displayed form) are followed with their fragment; every other return value is a
+ * path (safeReturnPath), which drops any fragment.
+ */
+export function safeFleetReturn(value, origin, base) {
+  if (typeof value !== "string" || value.length > MAX_RETURN_PATH) return null;
+  const hash = value.indexOf("#");
+  if (hash < 0) return null;
+  const path = value.slice(0, hash);
+  const fragment = value.slice(hash + 1);
+  if (safeReturnPath(path, origin) !== path) return null;
+  if (path === `${base}/connect` && fragment.startsWith("flow=") && isFlowId(fragment.slice(5)))
+    return value;
+  if (path === `${base}/activate` && fragment.startsWith("code=")) {
+    const code = normalizeUserCode(fragment.slice(5));
+    if (code !== null && fragment.slice(5) === displayUserCode(code)) return value;
+  }
+  return null;
+}
+
+/**
+ * Whether a URL is the link back to a node's loopback receiver that a decided browser sign-in carries: exactly the http scheme, the
+ * host 127.0.0.1 or [::1], a port that is a decimal from 1024 to 65535 without a leading zero, the path /callback,
+ * with ?code=<43 base64url characters>&state=<state> or ?error=access_denied&state=<state> (the state 16 to 128 characters of
+ * [A-Za-z0-9._~-]), and nothing else.
+ */
+export function isLoopbackResult(value) {
+  if (typeof value !== "string") return false;
+  const found =
+    /^http:\/\/(?:127\.0\.0\.1|\[::1\]):([1-9][0-9]{3,4})\/callback\?(?:code=[A-Za-z0-9_-]{43}|error=access_denied)&state=[A-Za-z0-9._~-]{16,128}$/u.exec(
+      value,
+    );
+  if (found === null) return false;
+  const port = Number(found[1]);
+  return port >= 1024 && port <= 65535;
+}
+
 /** The values of a URL fragment of the form #name=value&name=value (percent-decoded); unknown or malformed parts are ignored. */
 export function parseFragment(hash) {
   const result = {};
@@ -474,7 +547,21 @@ function go(page, path) {
   page.window.location.assign(path);
 }
 
+/** Removes the fragment from the address bar (and the history entry) at once: the first thing a page with one does. */
+function dropFragment(page) {
+  page.window.history.replaceState(
+    null,
+    "",
+    page.window.location.pathname + page.window.location.search,
+  );
+}
+
 async function signInPage(page) {
+  // The return value is read and the fragment dropped first, before any early return and any request (P-16): a return to a fleet page
+  // carries a flow ID or a code, which then stays in no history entry of this page.
+  const origin = page.window.location.origin;
+  const returned = parseFragment(page.window.location.hash).return;
+  if (page.window.location.hash) dropFragment(page);
   const button = page.document.getElementById("sign-in");
   const signedIn = page.document.getElementById("signed-in");
   if (!button) return;
@@ -482,9 +569,9 @@ async function signInPage(page) {
     showError(page.document, UNSUPPORTED_TEXT);
     return;
   }
-  const origin = page.window.location.origin;
   const target =
-    safeReturnPath(parseFragment(page.window.location.hash).return, origin) ??
+    safeFleetReturn(returned, origin, page.base) ??
+    safeReturnPath(returned, origin) ??
     `${page.base}${ACCOUNT}/passkeys`;
   try {
     const state = await page.api.bootstrap();
@@ -567,12 +654,22 @@ async function signOutPage(page) {
   );
 }
 
+/** The text of a fingerprint tail that is not four hexadecimal characters (the center checks the value). */
+const TAIL_TEXT = "Enter the last 4 characters of the fingerprint your node shows.";
+
 /** A form that needs a fresh step-up proves it first and is then submitted as it is. */
 function stepUpForms(page) {
   for (const form of page.document.querySelectorAll("form[data-step-up-class]")) {
     form.addEventListener("submit", (event) => {
       if (form.dataset.stepUpDone === "1") return;
       event.preventDefault();
+      // The /activate approval asks for the fingerprint's last group: a value of the wrong shape is refused here, before the passkey
+      // prompt, rather than after it.
+      const tail = form.elements.fingerprint_tail;
+      if (tail && !/^[0-9A-Fa-f]{4}$/u.test(tail.value.trim())) {
+        showError(page.document, TAIL_TEXT);
+        return;
+      }
       const buttons = form.querySelectorAll("button");
       for (const button of buttons) button.disabled = true;
       clearError(page.document);
@@ -637,6 +734,102 @@ function registerPage(page) {
   button.disabled = false;
 }
 
+/** The sign-in page's address with a return value. */
+function signInWithReturn(page, target) {
+  return `${page.base}${ACCOUNT}/sign-in#return=${encodeURIComponent(target)}`;
+}
+
+const INCOMPLETE_TEXT = "This link is not complete. Start the sign-in again on the node.";
+
+/**
+ * /connect: the flow ID is read from the fragment and the fragment dropped before anything else, the ID checked, and only then the
+ * center asked who is signed in; signed in, the review form is submitted, otherwise the sign-in page returns here.
+ */
+async function connectPage(page) {
+  const flow = parseFragment(page.window.location.hash).flow;
+  dropFragment(page);
+  const form = page.document.getElementById("connect-review");
+  if (!form) return;
+  if (!isFlowId(flow)) {
+    setStatus(page.document, "");
+    showError(page.document, INCOMPLETE_TEXT);
+    return;
+  }
+  let state;
+  try {
+    state = await page.api.bootstrap();
+  } catch (error) {
+    setStatus(page.document, "");
+    showError(page.document, errorText(error));
+    return;
+  }
+  if (!state.authenticated) {
+    go(page, signInWithReturn(page, `${page.base}/connect#flow=${flow}`));
+    return;
+  }
+  form.elements.csrf.value = state.csrfToken;
+  form.elements.flow_id.value = flow;
+  form.submit();
+}
+
+/**
+ * /activate: a code in the fragment is read and the fragment dropped before anything else, then the field is filled; Continue submits
+ * the review when signed in, otherwise it opens the sign-in page, which returns here with the code.
+ */
+async function activatePage(page) {
+  const fragment = parseFragment(page.window.location.hash).code;
+  if (page.window.location.hash) dropFragment(page);
+  const form = page.document.getElementById("activate-review");
+  const field = page.document.getElementById("user-code");
+  const button = page.document.getElementById("continue");
+  if (!form || !field || !button) return;
+  if (typeof fragment === "string") {
+    const code = normalizeUserCode(fragment);
+    if (code === null) showError(page.document, INCOMPLETE_TEXT);
+    else field.value = displayUserCode(code);
+  }
+  let state;
+  try {
+    state = await page.api.bootstrap();
+  } catch (error) {
+    showError(page.document, errorText(error));
+    return;
+  }
+  button.disabled = false;
+  form.addEventListener("submit", (event) => {
+    const code = normalizeUserCode(field.value.trim());
+    if (code === null) {
+      event.preventDefault();
+      showError(page.document, "Enter the 8 letters the node shows, for example BCDF-GHJK.");
+      return;
+    }
+    field.value = displayUserCode(code);
+    if (!state.authenticated) {
+      event.preventDefault();
+      go(page, signInWithReturn(page, `${page.base}/activate#code=${displayUserCode(code)}`));
+      return;
+    }
+    form.elements.csrf.value = state.csrfToken;
+  });
+}
+
+/** The page of a decided browser sign-in: the link back to the node's loopback receiver is followed once it is checked. */
+function connectDonePage(page) {
+  const link = page.document.getElementById("return-link");
+  if (!link) return;
+  const target = link.getAttribute("href");
+  if (!isLoopbackResult(target)) {
+    showError(
+      page.document,
+      "The link back to the node is not valid. Start the sign-in again on the node.",
+    );
+    link.remove();
+    return;
+  }
+  setStatus(page.document, "Handing the result back to the node.");
+  go(page, target);
+}
+
 /** Starts the script of the page the document is: pages name themselves in the body's data-page attribute. */
 export function start(window) {
   const page = context(window);
@@ -660,7 +853,15 @@ export function start(window) {
     case "sessions":
     case "devices":
     case "operations-review":
+    case "connect-review":
+    case "activate-review":
       return stepUpForms(page);
+    case "connect":
+      return connectPage(page);
+    case "activate":
+      return activatePage(page);
+    case "connect-done":
+      return connectDonePage(page);
     default:
       return undefined;
   }

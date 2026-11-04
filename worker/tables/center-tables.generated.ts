@@ -75,6 +75,9 @@ export interface PageRoute {
 export const surfaceNames: readonly Surface[] = ["identity", "pages", "operations", "fleet"];
 /** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */
 export const clientIpHeader = "x-arcforges-client-ip";
+/** The headers the Worker sets to the client's country and network (from request.cf) on every surface call. */
+export const clientCountryHeader = "x-arcforges-client-country";
+export const clientAsnHeader = "x-arcforges-client-asn";
 /** The width of the correlation id slot of the reply templates below: an Id's 16 bytes (E4-1). */
 export const replyCorrelationBytes = 16;
 /**
@@ -865,6 +868,84 @@ export const pageRoutes: readonly PageRoute[] = [
     cookie: true,
     setCookie: "none",
     redirects: true,
+  },
+  {
+    surface: "fleet",
+    method: "GET",
+    path: "/connect",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: false,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    surface: "fleet",
+    method: "POST",
+    path: "/connect/review",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    surface: "fleet",
+    method: "POST",
+    path: "/connect/decision",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    surface: "fleet",
+    method: "GET",
+    path: "/activate",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: false,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    surface: "fleet",
+    method: "POST",
+    path: "/activate/review",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    surface: "fleet",
+    method: "POST",
+    path: "/activate/decision",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
   },
 ];
 /**

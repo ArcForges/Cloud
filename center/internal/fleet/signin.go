@@ -184,8 +184,9 @@ WHERE node_id = $1 AND state = 1 AND node_public_key = $2 ORDER BY flow_id FOR U
 			return err
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO fleet.node_sign_in (flow_id, state, node_id, node_name, os, arch, version, node_public_key, code_challenge, redirect_uri,
-    client_state, created_at, expires_at, rev) VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)`, begun.FlowID, in.NodeID, in.Node.Name,
-			in.Node.Platform.OS, in.Node.Arch, in.Node.Version, in.PublicKey, in.CodeChallenge, in.RedirectURI, in.State, now, begun.ExpiresAt)
+    client_state, created_at, expires_at, begin_country, begin_asn, rev) VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 1)`, begun.FlowID,
+			in.NodeID, in.Node.Name, in.Node.Platform.OS, in.Node.Arch, in.Node.Version, in.PublicKey, in.CodeChallenge, in.RedirectURI, in.State, now, begun.ExpiresAt,
+			request.Origin.Country, request.Origin.ASN)
 		return err
 	})
 	if err != nil {
@@ -216,6 +217,8 @@ type FlowView struct {
 	State     int16
 	CreatedAt time.Time
 	ExpiresAt time.Time
+	// Origin is the request's origin as Begin recorded it (unknown on a self-hosted center).
+	Origin Origin
 }
 
 // flowRow is a flow row as the sign-in methods read it.
@@ -231,7 +234,7 @@ type flowRow struct {
 
 const flowColumns = `flow_id, node_id, node_name, os, arch, version, node_public_key, state, created_at, expires_at, code_challenge, redirect_uri,
 client_state, user_id, viewed_by, viewed_at, code_hash, code_expires_at, approver_session_id, approver_auth_method, approver_authenticated_at,
-approver_auth_epoch, approver_recovery_generation, session_id`
+approver_auth_epoch, approver_recovery_generation, session_id, begin_country, begin_asn`
 
 func scanFlow(row pgx.Row) (flowRow, error) {
 	var flow flowRow
@@ -241,7 +244,7 @@ func scanFlow(row pgx.Row) (flowRow, error) {
 	var epoch, recovery *int64
 	err := row.Scan(&flow.FlowID, &flow.NodeID, &flow.Name, &flow.OS, &flow.Arch, &flow.Version, &flow.PublicKey, &flow.State, &flow.CreatedAt,
 		&flow.ExpiresAt, &flow.codeChallenge, &flow.redirectURI, &flow.clientState, &flow.userID, &flow.viewedBy, &flow.viewedAt, &flow.codeHash,
-		&flow.codeExpiresAt, &approverSession, &method, &authenticatedAt, &epoch, &recovery, &flow.sessionID)
+		&flow.codeExpiresAt, &approverSession, &method, &authenticatedAt, &epoch, &recovery, &flow.sessionID, &flow.Origin.Country, &flow.Origin.ASN)
 	if err != nil {
 		return flowRow{}, err
 	}
@@ -356,6 +359,7 @@ func (s *Service) Decide(ctx context.Context, request Request, account Account, 
 			outcome = "denied"
 			return s.auditFlow(ctx, tx, request, actor, "fleet.node_sign_in.denied", "denied", flowID, map[string]any{"from": from}, now)
 		}
+		// evidence applies to an approval only; a denial (above) consumes none.
 		if evidence {
 			if err = identity.ConsumeEvidence(ctx, tx, account.Caller, ClassApproveNodeSignIn, flowID, now); err != nil {
 				return err
@@ -713,7 +717,22 @@ func enrollOutcome(refusal *arc.Refusal) string {
 }
 
 // summary is the account a node joined: its display name and its oldest live e-mail address, masked.
-func summary(ctx context.Context, tx pgx.Tx, userID platform.ID) (AccountSummary, error) {
+// rowQuerier is what a single-row read needs: a transaction or the pool.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// Summary is the account a node will join as the consent pages show it (the same AccountSummary a node receives): its display name
+// and its masked e-mail address (none for an account that has no e-mail identity).
+func (s *Service) Summary(ctx context.Context, userID platform.ID) (AccountSummary, error) {
+	result, err := summary(ctx, s.db.Pool(), userID)
+	if err != nil {
+		return AccountSummary{}, store.Sanitize("read the account summary", err)
+	}
+	return result, nil
+}
+
+func summary(ctx context.Context, tx rowQuerier, userID platform.ID) (AccountSummary, error) {
 	result := AccountSummary{ID: userID}
 	var email *string
 	if err := tx.QueryRow(ctx, `SELECT u.display_name, (SELECT a.subject FROM identity.auth_identity a WHERE a.user_id = u.user_id AND a.method = 2 AND

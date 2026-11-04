@@ -10,8 +10,11 @@ import test, { mock } from "node:test";
 import { correlationIdBytes, isCorrelationId } from "../../worker/ingress/correlation.ts";
 import { edgeClientKey, rateLimitedReplyAt } from "../../worker/ingress/edge-limit.ts";
 import { trailerFrame } from "../../worker/ingress/io.ts";
+import { requestOrigin } from "../../worker/ingress/pipeline.ts";
 import {
   centerSurfaces,
+  clientAsnHeader,
+  clientCountryHeader,
   clientIpHeader,
   enabledSurfaces,
   notActivatedReplies,
@@ -401,4 +404,46 @@ test("a surface method keeps the transport rules of every method", async () => {
   );
   assert.equal(large.status, 413);
   assert.equal(seen.length, 0);
+});
+
+// AF-CTR-04 E3 (protocol-17): a surface call carries the client's coarse origin from Cloudflare's request data only (request.cf), never
+// a client's header of the same name; a value Cloudflare does not supply, or one of another shape, is left out.
+test("a surface call carries the country and network from request.cf only", async () => {
+  assert.equal(clientCountryHeader, "x-arcforges-client-country");
+  assert.equal(clientAsnHeader, "x-arcforges-client-asn");
+  const { env, seen } = bindings();
+  const withCf = (headers: Record<string, string>, cf: unknown): Request => {
+    const request = call(anonymous.path, { "cf-connecting-ip": "203.0.113.7", ...headers });
+    (request as Request & { cf?: unknown }).cf = cf;
+    return request;
+  };
+  await routeRequest(
+    withCf({ [clientCountryHeader]: "XX", [clientAsnHeader]: "1" }, { country: "DE", asn: 3320 }),
+    env,
+  );
+  assert.equal(seen[0]?.headers.get(clientCountryHeader), "DE");
+  assert.equal(seen[0]?.headers.get(clientAsnHeader), "3320");
+  await routeRequest(
+    withCf({ [clientCountryHeader]: "FR", [clientAsnHeader]: "12322" }, undefined),
+    env,
+  );
+  assert.equal(
+    seen[1]?.headers.get(clientCountryHeader),
+    null,
+    "a client's header is never forwarded",
+  );
+  assert.equal(seen[1]?.headers.get(clientAsnHeader), null);
+  for (const cf of [
+    { country: "de", asn: 0 },
+    { country: "T1", asn: -1 },
+    { country: "DEU", asn: 4294967296 },
+    { country: 7, asn: "3320" },
+    null,
+    "DE",
+  ])
+    assert.deepEqual(requestOrigin(withCf({}, cf)), {}, JSON.stringify(cf));
+  assert.deepEqual(requestOrigin(withCf({}, { country: "US", asn: 4294967295 })), {
+    country: "US",
+    asn: "4294967295",
+  });
 });

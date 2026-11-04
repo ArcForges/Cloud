@@ -86,7 +86,7 @@ func (s *signIns) decide(user platform.ID, session dbtest.Session, code string, 
 		return err
 	}
 	err = s.db.Runtime.InTx(context.Background(), "decide a device code", store.TxOptions{Attempts: 1}, func(ctx context.Context, tx pgx.Tx) error {
-		return s.service.DecideDevice(ctx, tx, s.from, account, entry, code, approve, approve, s.clock.Now())
+		return s.service.DecideDevice(ctx, tx, s.from, account, entry, code, approve, approve, nil, s.clock.Now())
 	})
 	s.service.Settle(context.Background(), s.from, entry, err, "device_decide")
 	return err
@@ -629,5 +629,49 @@ func TestATerminalAuthorizationIsNeverWritten(t *testing.T) {
 	}
 	if update("UPDATE fleet.device_authorization SET reused_at = now() + interval '1 second', rev = rev + 1 WHERE authorization_id = $1") == nil {
 		t.Fatal("the reuse was recorded twice")
+	}
+}
+
+// TestTheReviewReadTellsAnUnreviewedCodeNothing (AF-CTR-04 E3, sec NB-2): ReviewedDevice answers not_reviewed for a code the account did
+// not review within the window, whatever the code's state (pending, denied, expired) or whether it exists, so the read is no state
+// oracle whichever path reaches it; a code the account reviewed is shown, and once its review window has passed (the window equals the
+// code's lifetime, so this is also after its expiry) it is not_reviewed again, not STATE/expired.
+func TestTheReviewReadTellsAnUnreviewedCodeNothing(t *testing.T) {
+	s := newSignIns(t)
+	s.wide()
+	other := s.db.Account(1)
+	otherSession := s.db.Session(other, 1)
+	ctx := context.Background()
+	account := func() Account { return accountOf(s.user, s.approver, s.clock.Now()) }
+	unreviewed := func(when string, codes map[string]string) {
+		t.Helper()
+		for name, code := range codes {
+			if _, err := s.service.ReviewedDevice(ctx, account(), code); key(err) != "STATE/invalid_state device_authorization/not_reviewed" {
+				t.Errorf("%s, %s: %v", when, name, err)
+			}
+		}
+	}
+	pending := s.mustStart(s.newNode())
+	denied := s.mustStart(s.newNode())
+	if _, err := s.lookup(other, otherSession, denied.started.UserCode); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.decide(other, otherSession, denied.started.UserCode, false); err != nil {
+		t.Fatal(err)
+	}
+	codes := map[string]string{"pending": pending.started.UserCode, "denied by another account": denied.started.UserCode, "unknown": "BCDFGHJK"}
+	unreviewed("live", codes)
+	s.clock.advance(DeviceAuthorizationLifetime + time.Minute)
+	unreviewed("expired", codes)
+	reviewed := s.mustStart(s.newNode())
+	if _, err := s.lookup(s.user, s.approver, reviewed.started.UserCode); err != nil {
+		t.Fatal(err)
+	}
+	if view, err := s.service.ReviewedDevice(ctx, account(), reviewed.started.UserCode); err != nil || view.AuthorizationID != reviewed.started.AuthorizationID {
+		t.Fatalf("a reviewed code: %+v %v", view, err)
+	}
+	s.clock.advance(DeviceAuthorizationLifetime + time.Minute)
+	if _, err := s.service.ReviewedDevice(ctx, account(), reviewed.started.UserCode); key(err) != "STATE/invalid_state device_authorization/not_reviewed" {
+		t.Fatalf("a reviewed code after the review window: %v", err)
 	}
 }

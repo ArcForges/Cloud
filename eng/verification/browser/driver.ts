@@ -20,6 +20,11 @@ export interface Navigation {
   status: number;
   /** Header names in lower case. */
   headers: Record<string, string>;
+  /**
+   * The Location of the redirect that led to this document, when one did (a protected page without a session is the center's 303 to
+   * the sign-in page with the return path in its fragment; the sign-in page drops that fragment from its own address at once).
+   */
+  redirectLocation?: string;
 }
 
 export interface CookieView {
@@ -94,6 +99,13 @@ export interface Tab {
    * so a step that ends with one of them cannot tell that nothing was changed; only a 4xx reply is a definite refusal.
    */
   unsettled(): number;
+  /**
+   * Holds the next navigation to a node's loopback receiver (http on 127.0.0.1 or [::1]): it is answered 204 inside the browser,
+   * which leaves the page as it is, and never reaches the receiver (AF-CTR-04 E3: the run then follows the page's manual link).
+   */
+  holdLoopback(): void;
+  /** How many requests to a loopback receiver the tab has made (held ones included). They are not the origin's: no budget, no count. */
+  loopbackRequests(): number;
   /** Adds a virtual authenticator; Chromium allows one `internal` authenticator per tab and several of the other transports. */
   addAuthenticator(transport: Transport): Promise<Authenticator>;
   /** Switches the virtual environment off (every virtual authenticator goes), so that the browser reaches real authenticators. */
@@ -157,10 +169,19 @@ export function refusedStatus(problem: string): number | undefined {
   return found === null ? undefined : Number(found[1]);
 }
 
-/** Whether a response is a change the center accepted: a POST that succeeded and that a step could not repeat harmlessly. */
+/**
+ * Whether a response is a change the center made: a POST that succeeded and that a step could not repeat harmlessly, or a decision
+ * of the fleet pages (AF-CTR-04 E3) that the center answered at all (any status below 500 but the edge's 429): a refused decision,
+ * such as a wrong fingerprint group's 400 or a step-up refusal, has spent an entry of the account's budget or a decision of its limit.
+ */
 export function acceptedChange(method: string, status: number, pathname: string): boolean {
-  return method === "POST" && status < 400 && !harmless.test(pathname);
+  if (method !== "POST") return false;
+  if (fleetDecision.test(pathname)) return status < 500 && status !== 429;
+  return status < 400 && !harmless.test(pathname);
 }
+
+/** The decision routes of the fleet pages: every answer of the center to them is a change (see acceptedChange). */
+const fleetDecision = /\/(?:connect|activate)\/decision$/u;
 
 /**
  * The POSTs that a step may repeat after a 429: they start a flow, prove something or review a request; nothing is changed that a
@@ -370,11 +391,22 @@ export interface PwRequest {
   redirectedFrom(): PwRequest | null;
   /** Whether the request loads a document into a frame. */
   isNavigationRequest(): boolean;
+  /** The response of the request, null where it has none (yet). */
+  response(): Promise<PwResponse | null>;
 }
 export interface PwRoute {
   request(): PwRequest;
   continue(): Promise<void>;
   abort(errorCode?: string): Promise<void>;
+  fulfill(options: { status: number; body: string }): Promise<void>;
+}
+
+/** Whether a URL is a node's loopback receiver: http on the literal 127.0.0.1 or [::1]. */
+export function isLoopback(url: string): boolean {
+  const parsed = new URL(url);
+  return (
+    parsed.protocol === "http:" && (parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]")
+  );
 }
 export interface PwLocator {
   click(): Promise<void>;
@@ -525,6 +557,10 @@ export function playwrightTab(
   // The 4xx statuses a step has said it expects the browser to report as console errors (see Tab.expectRefusal).
   const refusals: number[] = [];
   let routing: Promise<unknown> | undefined;
+  // A node's loopback receiver is not the origin: its requests take no slot of the budget and are not counted; the next navigation to
+  // it can be held (answered 204 here) so that the run follows the page's manual link instead of its script.
+  let holdNextLoopback = false;
+  let loopback = 0;
   // One DevTools session per tab: the WebAuthn environment (and its single internal authenticator) belongs to it.
   let session: PwCdpSession | undefined;
   let enabled = false;
@@ -548,7 +584,8 @@ export function playwrightTab(
   page.on("pageerror", (error) => problems.push(`page error: ${error.message.slice(0, 300)}`));
   page.on("response", (response) => {
     const status = response.status();
-    if (response.request().isNavigationRequest())
+    // A node's loopback receiver is not the center: its replies (a held navigation's 204 among them) are no document of the run.
+    if (response.request().isNavigationRequest() && !isLoopback(response.request().url()))
       latestDocument = { status, headers: response.headers() };
     if (status === 429) {
       const seconds = Number(response.headers()["retry-after"] ?? "60");
@@ -581,6 +618,16 @@ export function playwrightTab(
   const route = (): Promise<unknown> => {
     routing ??= page.route("**/*", async (intercepted) => {
       const outgoing = intercepted.request();
+      if (isLoopback(outgoing.url())) {
+        loopback += 1;
+        if (holdNextLoopback && outgoing.isNavigationRequest()) {
+          holdNextLoopback = false;
+          await intercepted.fulfill({ status: 204, body: "" });
+          return;
+        }
+        await intercepted.continue();
+        return;
+      }
       await budget?.take();
       const hooked =
         outgoing.method() === "POST" ? hooks.get(new URL(outgoing.url()).pathname) : undefined;
@@ -605,7 +652,11 @@ export function playwrightTab(
       await route();
       const response = await page.goto(url, { waitUntil: "load" });
       if (response === null) throw new Error("The navigation gave no response.");
-      return { status: response.status(), headers: response.headers() };
+      const navigation: Navigation = { status: response.status(), headers: response.headers() };
+      const hop = response.request().redirectedFrom();
+      const location = hop === null ? undefined : (await hop.response())?.headers().location;
+      if (location !== undefined) navigation.redirectLocation = location;
+      return navigation;
     },
     url: () => page.url(),
     click: (selector) => page.locator(selector).first().click(),
@@ -701,6 +752,10 @@ export function playwrightTab(
     },
     changes: () => changes,
     unsettled: () => unsettled.size,
+    holdLoopback() {
+      holdNextLoopback = true;
+    },
+    loopbackRequests: () => loopback,
     async addAuthenticator(transport) {
       const cdp = await webauthn();
       const added = (await cdp.send("WebAuthn.addVirtualAuthenticator", {

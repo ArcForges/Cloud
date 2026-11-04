@@ -1,0 +1,27 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Activate this node?</h1>
+<noscript><p>Activating a node needs JavaScript. Turn it on for this page and reload. Denying works without it.</p></noscript>
+<p id="needs-script" class="help">Activating needs this page's script. If this line stays, reload the page or allow scripts for it.</p>
+<p id="status" role="status" aria-live="polite"></p>
+<p>Code <span class="code" id="user-code-shown">{{.Fleet.Display}}</span></p>
+{{template "node" .}}
+<p>Approve only a node you started yourself. Someone who asks you to enter a code may be trying to get into your account.</p>
+<div class="decision">
+<form method="post" action="{{.Base}}/activate/decision" id="deny">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="user_code" value="{{.Fleet.UserCode}}">
+<input type="hidden" name="command_id" value="{{.Fleet.Command}}">
+<input type="hidden" name="decision" value="deny">
+<button type="submit">Deny</button>
+</form>
+<form method="post" action="{{.Base}}/activate/decision" id="approve" data-step-up-class="fleet.approveDeviceCode" data-step-up-target="{{.Fleet.Target}}">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="user_code" value="{{.Fleet.UserCode}}">
+<input type="hidden" name="command_id" value="{{.Fleet.Command}}">
+<input type="hidden" name="decision" value="approve">
+<p><label for="fingerprint-tail">Last group of the fingerprint your node shows</label>
+<input id="fingerprint-tail" name="fingerprint_tail" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" required></p>
+<button type="submit" class="primary">Approve with your passkey</button>
+</form>
+</div>
+{{end}}

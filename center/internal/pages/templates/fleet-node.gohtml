@@ -1,0 +1,12 @@
+{{define "node"}}
+<dl class="node">
+<dt>Node</dt><dd>&ldquo;<bdi id="node-name">{{.Fleet.Name}}</bdi>&rdquo;</dd>
+<dt>System</dt><dd id="node-system">{{.Fleet.OS}} {{.Fleet.Arch}}, version <bdi>{{.Fleet.Version}}</bdi></dd>
+<dt>Key fingerprint</dt><dd id="node-fingerprint" class="code">{{.Fleet.Fingerprint}}</dd>
+<dt>Requested</dt><dd><time datetime="{{.Fleet.RequestedAt}}">{{.Fleet.RequestedText}}</time> ({{.Fleet.Age}})</dd>
+<dt>Expires</dt><dd><time datetime="{{.Fleet.ExpiresAt}}">{{.Fleet.ExpiresText}}</time></dd>
+<dt>Origin</dt><dd id="node-origin">{{.Fleet.Origin}}</dd>
+<dt>Joins the account</dt><dd><bdi id="node-account">{{.Fleet.Account}}</bdi></dd>
+</dl>
+<p class="help" id="node-name-note">The name is reported by the node and is not verified.</p>
+{{end}}

@@ -20,6 +20,8 @@ export {
   type ApiRoute,
   type Surface,
   type SurfaceRoute,
+  clientAsnHeader,
+  clientCountryHeader,
   clientIpHeader,
   notActivatedReplies,
   notActivatedReplyCorrelationOffsets,

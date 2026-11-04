@@ -156,9 +156,9 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
   return [];
 }
 
-test("production enables no surface and the acceptance environment enables identity, pages and operations", () => {
+test("production enables no surface and the acceptance environment enables identity, pages, operations and fleet", () => {
   assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
-  assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity,pages,operations");
+  assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity,pages,operations,fleet");
   // C1: only the acceptance environment overrides the identity policy, and only with its anonymous-flow ceiling; production keeps
   // the defaults (no global bucket).
   assert.equal(wrangler.vars?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
@@ -219,18 +219,19 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
     surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "operations,pages,identity" }),
     [],
   );
-  // AF-CTR-04: node enrollment (fleet) needs both as well; it is a known name from part E1a and enabled nowhere yet (the
-  // acceptance environment gets it for its hosted run in part E3, production with AF-PROD-01).
+  // AF-CTR-04: node enrollment (fleet) needs both as well; it is enabled in the acceptance environment only (part E3's hosted run
+  // H1), production gets it with AF-PROD-01.
   assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,fleet" }), []);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,fleet" }).length, 1);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "fleet" }).length, 1);
   assert.deepEqual([...surfaces].sort(), ["fleet", "identity", "operations", "pages"]);
   for (const [name, environment] of environments)
-    assert(
-      !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+    assert.equal(
+      String(environment.vars?.FLAGSHIP_SURFACES ?? "")
         .split(",")
         .includes("fleet"),
-      `wrangler.json environment ${name}: the fleet surface is enabled nowhere in AF-CTR-04 parts E1a and E1b`,
+      name === "proof",
+      `wrangler.json environment ${name}: the fleet surface is enabled in the acceptance environment and nowhere else`,
     );
   assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("fleet"));
   for (const [name, environment] of environments)

@@ -426,6 +426,12 @@ nothing replays. A page never reads or writes a table.
 | `POST /session/v1/web/{authentication/begin,authentication/complete,enrollment/complete}`   | JSON | none (see CSRF)  |
 | `POST /session/v1/web/{step-up/begin,step-up/complete,logout}`                              | JSON | cookie session   |
 
+The `operations` surface adds `/operations/grant` and its two forms, the `fleet` surface the six pages `/connect`, `/connect/review`,
+`/connect/decision`, `/activate`, `/activate/review` and `/activate/decision` ([center fleet](center-fleet.md#the-pages)); the
+registration admits pages for these three surfaces only, each under its own prefixes, and every rule of this section applies to them.
+The sign-in page reads its return value from its fragment and drops the fragment from its address before anything else; it follows a
+return with a fragment only to `/connect#flow=<flow ID>` and `/activate#code=XXXX-XXXX`.
+
 All paths are below the public base URL (`/api/...` on the hosted deployments). `/account` itself, profile editing (`UpdateProfile`
 stays an API method), recovery, e-mail change and the provider callback are not pages; recovery and the callback are AF-ID-02's.
 The browser channel offers the passkey method only: e-mail (and password and OIDC) is `not_offered` on it, whether or not a mail
@@ -924,26 +930,26 @@ routes form the `pages` surface, which needs `identity` (a list with `pages` and
 self-hosted center whose base URL cannot be a relying party leaves every surface off: every surface other than `identity` needs it). The center and the generated Worker table tag them by surface
 (`surfaceRoutes`, PLT-18: `productionRoutes` stay always on); `ARCFORGES_CENTER_SURFACES` (center) and `FLAGSHIP_SURFACES`
 (Worker) list the enabled surfaces as exact generated names, comma-separated. Official-hosted mode enables none unless listed;
-self-hosted mode enables the default surfaces (`identity` and `pages`) unless listed (an explicit list pins the surfaces across
-upgrades; `none` enables none; `operations` is never a default). A disabled surface's method is answered with the domain refusal `STATE/not_activated` (`state.reason = identity`): by the
+self-hosted mode enables the default surfaces (`identity`, `pages` and `fleet`) unless listed (an explicit list pins the surfaces
+across upgrades; `none` enables none; `operations` is never a default). A disabled surface's method is answered with the domain refusal `STATE/not_activated` (`state.reason = identity`): by the
 Worker from the generated reply, before any rate limit, credential, body or Container (`tests/worker/ingress-surfaces.test.ts`), and
-by the center with the call's correlation id (logged and counted as an OK reply with that id); a disabled `pages` surface answers every
-page route with 404, the Worker's reply of a path it does not know (plain text), from the Worker's page handler before anything else is read. An enabled one passes the Worker's own
+by the center with the call's correlation id (logged and counted as an OK reply with that id); a disabled `pages` surface (and a disabled `fleet` surface, for its six pages) answers every
+page route of the surface with 404, the Worker's reply of a path it does not know (plain text), from the Worker's page handler before anything else is read. An enabled one passes the Worker's own
 edge limit `IDENTITY_RATE_LIMITER` (over it, the generated domain refusal `RESOURCE/rate_limited` with its `retry_at`: the refusal's
 time rounded up to the second plus the limiter's 60-second period) before it is forwarded. The Worker passes its parsed list to the Container as
 `ARCFORGES_CENTER_SURFACES` (`none` when the list enables nothing, so a mistyped list never stops the center) and always
 `ARCFORGES_CENTER_CLIENT_IP_HEADER`; surfaces take effect only with `ARCFORGES_HELLO_RUNTIME=go`.
 
 Production carries `"FLAGSHIP_SURFACES": ""` (pinned by `tests/worker/center-config.test.ts`: production stays dark, no page is
-served there); the acceptance environment (`proof`) carries `identity,pages,operations` and `ALLOWED_ORIGIN` = the origin of its public base
+served there); the acceptance environment (`proof`) carries `identity,pages,operations,fleet` and `ALLOWED_ORIGIN` = the origin of its public base
 URL. The `identity`, `pages`, `operations` and `fleet` surfaces exist (`operations` is described below, `fleet` in [center
-fleet](center-fleet.md#surface): enabled nowhere yet, its rows answer `state.reason = fleet`); AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
+fleet](center-fleet.md#surface): enabled on the acceptance environment, its rows answer `state.reason = fleet` where it is off); AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
 after AF-PLAT-01's retention sweeps exist ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)).
 
 The operator grant has a third surface, `operations`: the interim page `/operations/grant` of the operator grant ([center
 entitlement](center-entitlement.md#the-operations-page)). It needs `identity` and `pages`, exists only in official-hosted mode, is
 never a default of either mode (a list that names it on a self-hosted center, or without the other two, refuses to start), and
-is enabled in one checked-in environment only: the acceptance environment (`proof`) carries `identity,pages,operations` (with the
+is enabled in one checked-in environment only: the acceptance environment (`proof`) carries `identity,pages,operations,fleet` (with the
 development fixture catalogue) for the hosted proof of the grant, whose run is the [post-deploy
 checklist](center-entitlement.md#post-deploy-checklist) and whose script is the `--operator-grant` mode of [the
 acceptance](#proof-bootstrap-and-acceptance); production carries none, pinned by the same tests as before.

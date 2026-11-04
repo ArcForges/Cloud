@@ -76,7 +76,8 @@ type Module struct {
 	Policies   []ingress.Policy
 	PlainPaths []string
 	Budgets    map[string]Budget
-	// Pages are the routes of the module's account pages (the pages surface only; PageRoutes).
+	// Pages are the routes of the module's pages (only a surface of PageSurfaces declares any: PageRoutes, OperationsPageRoutes,
+	// FleetPageRoutes).
 	Pages []PageRoute
 }
 
@@ -185,7 +186,7 @@ type WorkerTable struct {
 	Production  []Row
 	Surfaces    []string
 	SurfaceRows []Row
-	// Pages are the page routes of the pages surface (PLT-1): the Worker's page handler forwards them only while their surface is
+	// Pages are the page routes of every page surface (PLT-1): the Worker's page handler forwards them only while their surface is
 	// enabled.
 	Pages []PageRoute
 	// MaxBodyBytes is the bound of a request body of a method that declares no larger one: the Hello bound, which the C#
@@ -231,8 +232,8 @@ func Table(modules []Module) (WorkerTable, error) {
 	names := map[string]bool{}
 	for _, module := range modules {
 		if len(module.Pages) > 0 {
-			if module.Surface != SurfacePages && module.Surface != SurfaceOperations {
-				return WorkerTable{}, fmt.Errorf("%w: the module %s declares pages outside the %s and %s surfaces", ErrRegistration, module.Name, SurfacePages, SurfaceOperations)
+			if !slices.Contains(PageSurfaces(), module.Surface) {
+				return WorkerTable{}, fmt.Errorf("%w: the module %s declares pages outside the page surfaces %v", ErrRegistration, module.Name, PageSurfaces())
 			}
 			for _, row := range module.Pages {
 				if row.Surface != module.Surface {

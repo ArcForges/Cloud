@@ -25,7 +25,20 @@ const (
 	PageBrowserPrefix = "/session/v1/web"
 	// PageAccountPrefix is the path of the account pages and their assets.
 	PageAccountPrefix = "/account"
+	// PageConnectPrefix and PageActivatePrefix are the paths of the fleet surface's pages (AF-CTR-04 E3): the consent page of a
+	// node's browser sign-in and the activation page of its device-code sign-in. Each is a page itself and the prefix of its forms.
+	PageConnectPrefix  = "/connect"
+	PageActivatePrefix = "/activate"
 )
+
+// PageSurfaces are the surfaces whose modules may declare page routes (cloud-13): the pages surface, the operations surface and the
+// fleet surface. Table and CheckPages read the one list.
+func PageSurfaces() []string { return []string{SurfacePages, SurfaceOperations, SurfaceFleet} }
+
+// underPrefix reports whether a path is a prefix page itself or one of its children.
+func underPrefix(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
+}
 
 // The content types the pages' replies and requests have.
 const (
@@ -222,8 +235,11 @@ func pageSurfaceRoutes() []PageRoute {
 	}
 }
 
-// AllPageRoutes are the page routes of every surface, the pages surface's first.
-func AllPageRoutes() []PageRoute { return append(PageRoutes(), OperationsPageRoutes()...) }
+// AllPageRoutes are the page routes of every surface, in registration order: the pages surface's, the operations surface's, the fleet
+// surface's.
+func AllPageRoutes() []PageRoute {
+	return append(append(PageRoutes(), OperationsPageRoutes()...), FleetPageRoutes()...)
+}
 
 // OperationsPageRoutes are the routes of the operations surface, in registration order: the page of the operator grant, its review (the
 // request normalized, and the step-up target the script proves) and its confirmation (the grant itself, which consumes the
@@ -249,7 +265,8 @@ var ErrPageRegistration = fmt.Errorf("%w: inconsistent page registration", ErrRe
 // CheckPages refuses a page registration that the Worker's handler or the center's could not serve safely: a path that is not
 // canonical (no trailing slash, query, percent-encoding or dot segment), a method other than GET and POST, a duplicate row, a body or
 // content type that does not fit the method, a bound out of range, an unknown cookie rule, a redirect on a route that is not an HTML
-// route, or a route that is neither under the account prefix nor the WebBrowserSession prefix.
+// route, a route of a surface that has no pages, or a route outside its surface's prefixes (the pages surface: the account and the
+// WebBrowserSession prefixes; the operations surface: its prefix; the fleet surface: /connect and /activate, each a page itself).
 func CheckPages(rows []PageRoute) error {
 	seen := map[string]bool{}
 	ids := map[string]bool{}
@@ -258,12 +275,14 @@ func CheckPages(rows []PageRoute) error {
 		switch {
 		case row.Method != "GET" && row.Method != "POST":
 			return fmt.Errorf("%w: %s has the method %q", ErrPageRegistration, row.ID, row.Method)
-		case row.Surface != SurfacePages && row.Surface != SurfaceOperations:
+		case !slices.Contains(PageSurfaces(), row.Surface):
 			return fmt.Errorf("%w: %s belongs to the surface %q", ErrPageRegistration, row.ID, row.Surface)
 		case row.Surface == SurfacePages && !strings.HasPrefix(row.Path, PageAccountPrefix+"/") && !strings.HasPrefix(row.Path, PageBrowserPrefix+"/"):
 			return fmt.Errorf("%w: %s is outside the page prefixes", ErrPageRegistration, row.Path)
 		case row.Surface == SurfaceOperations && !strings.HasPrefix(row.Path, PageOperationsPrefix+"/"):
 			return fmt.Errorf("%w: %s is outside the operations prefix", ErrPageRegistration, row.Path)
+		case row.Surface == SurfaceFleet && !underPrefix(row.Path, PageConnectPrefix) && !underPrefix(row.Path, PageActivatePrefix):
+			return fmt.Errorf("%w: %s is outside the fleet prefixes", ErrPageRegistration, row.Path)
 		case strings.ContainsAny(row.Path, "?#%\\ ") || strings.Contains(row.Path, "//") || strings.Contains(row.Path, "..") || strings.HasSuffix(row.Path, "/"):
 			return fmt.Errorf("%w: %s is not canonical", ErrPageRegistration, row.Path)
 		case seen[key] || ids[row.ID] || row.ID == "":

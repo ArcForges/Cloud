@@ -5,6 +5,7 @@ package access
 import (
 	"fmt"
 
+	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
 	"github.com/ArcForges/Contracts/go/arcforges/publicapi/v1/publicapiv1connect"
 
 	"github.com/ArcForges/Cloud/center/internal/routes"
@@ -75,6 +76,17 @@ func PageOperations() []PageOperation {
 		{"operations.grant", PageSession, nil, ""},
 		{"operations.review", PageSession, nil, OperatorGrantClass},
 		{"operations.confirm", PageSession, nil, OperatorGrantClass},
+		// The fleet surface (AF-CTR-04 E3): the two pages are static (their script asks the bootstrap route who is signed in); each review
+		// and decision calls the NodeEnrollmentService method it stands for, in process, with the cookie session (fleetapi.Direct). The
+		// browser sign-in's decision page shows the review again (GetNodeSignInFlow) after a refused step-up; the device-code decision
+		// page does so with a read that counts no lookup, under the decision's own row.
+		{"connect.page", PageNoCredential, nil, ""},
+		{"connect.review", PageSession, []string{fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure}, ""},
+		{"connect.decision", PageSession, []string{fleetv1connect.NodeEnrollmentServiceApproveNodeSignInProcedure,
+			fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure}, ""},
+		{"activate.page", PageNoCredential, nil, ""},
+		{"activate.review", PageSession, []string{fleetv1connect.NodeEnrollmentServiceLookupDeviceCodeProcedure}, ""},
+		{"activate.decision", PageSession, []string{fleetv1connect.NodeEnrollmentServiceApproveDeviceCodeProcedure}, ""},
 	}
 }
 

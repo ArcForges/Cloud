@@ -91,3 +91,6 @@ in Windows. Removing it is not part of AR-23, and the script never removes it.
 If you ever lose the saved virtual credential, or restore an older copy of it (the center refuses a counter that does not rise), the
 runbook's total-loss steps apply: drop `arcforges_acceptance` in the Neon Console and dispatch a new deployment with a new
 bootstrap ([proof bootstrap and acceptance](center-identity.md#proof-bootstrap-and-acceptance)).
+
+Node enrollment (AF-CTR-04 E3) changes nothing here: its hosted run (`node-approve.ts`, [center fleet](center-fleet.md#post-deploy-checklist-h1))
+uses the same saved virtual credential and is the coordinator's, not part of AR-23.

@@ -4,9 +4,11 @@ package fleet
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	fleetv1 "github.com/ArcForges/Contracts/go/arcforges/fleet/v1"
@@ -24,7 +26,7 @@ import (
 
 // The device-code sign-in (AF-CTR-04 part E2, CTR4-DEV-01..09 as amended by Q8, protocol-8, protocol-9, protocol-19, contracts-9,
 // cloud-5, cloud-10 and the C0 comments of fleet.proto). A headless node starts an authorization anonymously and shows its user code;
-// an account looks the code up (LookupDeviceCode, the review; part E3's /activate page will call these functions in process) and
+// an account looks the code up (LookupDeviceCode, the review; the /activate page calls these functions in process) and
 // approves it (ApproveDeviceCode, with step-up evidence bound to the normalized user code) or denies it; the node polls with its device
 // code and a proof by its node key and receives its node credentials from fleet.Enroll. A caller that holds the device code but not
 // the node key learns nothing of the authorization's state and writes nothing to it: every poll whose proof fails is
@@ -181,7 +183,7 @@ func (s *Service) Start(ctx context.Context, request Request, in StartRequest) (
 				return arc.Unavailable()
 			}
 			code := s.userCodes()
-			inserted, err := s.insertAuthorization(ctx, tx, started, in, deviceDigest[:], code, now)
+			inserted, err := s.insertAuthorization(ctx, tx, started, in, request.Origin, deviceDigest[:], code, now)
 			if err != nil {
 				return err
 			}
@@ -207,7 +209,8 @@ func (s *Service) Start(ctx context.Context, request Request, in StartRequest) (
 // insertAuthorization inserts a PENDING authorization with a drawn user code in a savepoint, and reports false (nothing inserted)
 // when a PENDING or APPROVED authorization holds the code (a row reaches APPROVED only from PENDING, so this check and the live
 // codes' unique index together decide every race).
-func (s *Service) insertAuthorization(ctx context.Context, tx pgx.Tx, started Started, in StartRequest, deviceDigest []byte, code string, now time.Time) (bool, error) {
+func (s *Service) insertAuthorization(ctx context.Context, tx pgx.Tx, started Started, in StartRequest, origin Origin, deviceDigest []byte, code string,
+	now time.Time) (bool, error) {
 	digest := userCodeDigest(code)
 	var holder bool
 	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM fleet.device_authorization WHERE user_code_hash = $1 AND state IN (1, 3))", digest).Scan(&holder); err != nil {
@@ -221,9 +224,9 @@ func (s *Service) insertAuthorization(ctx context.Context, tx pgx.Tx, started St
 		return false, err
 	}
 	_, err = savepoint.Exec(ctx, `INSERT INTO fleet.device_authorization (authorization_id, device_code_hash, user_code_hash, state, node_id, node_name, os, arch,
-    version, node_public_key, interval_ms, created_at, expires_at, rev) VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)`, started.AuthorizationID,
-		deviceDigest, digest, in.NodeID, in.Node.Name, in.Node.Platform.OS, in.Node.Arch, in.Node.Version, in.PublicKey, DeviceInterval.Milliseconds(), now,
-		started.ExpiresAt)
+    version, node_public_key, interval_ms, created_at, expires_at, begin_country, begin_asn, rev) VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+    $14, 1)`, started.AuthorizationID, deviceDigest, digest, in.NodeID, in.Node.Name, in.Node.Platform.OS, in.Node.Arch, in.Node.Version, in.PublicKey,
+		DeviceInterval.Milliseconds(), now, started.ExpiresAt, origin.Country, origin.ASN)
 	var failure *pgconn.PgError
 	if errors.As(err, &failure) && failure.Code == "23505" && failure.ConstraintName == "device_authorization_live_user_code" {
 		if rollbackErr := savepoint.Rollback(ctx); rollbackErr != nil {
@@ -249,7 +252,7 @@ type authorizationRow struct {
 	sessionID          *platform.ID
 }
 
-// DeviceView is an authorization as an account reviews it: the node as it described itself at Start, its key (part E3's page will show
+// DeviceView is an authorization as an account reviews it: the node as it described itself at Start, its key (the /activate page shows
 // its fingerprint), the state and the times.
 type DeviceView struct {
 	AuthorizationID platform.ID
@@ -262,11 +265,13 @@ type DeviceView struct {
 	State           int16
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
+	// Origin is the request's origin as Start recorded it (unknown on a self-hosted center).
+	Origin Origin
 }
 
 const authorizationColumns = `authorization_id, node_id, node_name, os, arch, version, node_public_key, state, created_at, expires_at, interval_ms,
 last_poll_at, lookups, user_id, viewed_by, viewed_at, approver_session_id, approver_auth_method, approver_authenticated_at, approver_auth_epoch,
-approver_recovery_generation, session_id, reused_at`
+approver_recovery_generation, session_id, reused_at, begin_country, begin_asn`
 
 func scanAuthorization(row pgx.Row) (authorizationRow, error) {
 	var a authorizationRow
@@ -277,7 +282,7 @@ func scanAuthorization(row pgx.Row) (authorizationRow, error) {
 	var epoch, recovery *int64
 	err := row.Scan(&a.AuthorizationID, &a.NodeID, &a.Name, &a.OS, &a.Arch, &a.Version, &a.PublicKey, &a.State, &a.CreatedAt, &a.ExpiresAt, &interval,
 		&a.lastPollAt, &a.lookups, &a.userID, &a.viewedBy, &a.viewedAt, &approverSession, &method, &authenticatedAt, &epoch, &recovery, &a.sessionID,
-		&a.reusedAt)
+		&a.reusedAt, &a.Origin.Country, &a.Origin.ASN)
 	if err != nil {
 		return authorizationRow{}, err
 	}
@@ -493,6 +498,52 @@ func (s *Service) Lookup(ctx context.Context, request Request, account Account, 
 	return view, nil
 }
 
+// ReviewedDevice reads the authorization a user code names for the account that reviewed it within the review window, without a
+// lock, a write or a lookup counted: the /activate decision page shows the review again with it after a decision answered
+// AUTHENTICATION/step_up_required or a fingerprint tail mismatch, both of which come only after the decision's own review check passed
+// (so the read tells the account nothing a free not_reviewed would). Anything else is refused without a count: a lapsed code
+// STATE/expired, another state STATE/invalid_state, and an unknown code, one another account decided or one this account did not review
+// in time alike as STATE/invalid_state not_reviewed (the page then asks for a fresh review, which counts as every review does).
+func (s *Service) ReviewedDevice(ctx context.Context, account Account, userCode string) (DeviceView, error) {
+	now := s.now()
+	row, err := scanAuthorization(s.db.Pool().QueryRow(ctx, `SELECT `+authorizationColumns+` FROM fleet.device_authorization WHERE user_code_hash = $1
+ORDER BY state IN (1, 3) DESC, created_at DESC, authorization_id DESC LIMIT 1`, userCodeDigest(userCode)))
+	caller := account.Caller.UserID
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return DeviceView{}, arc.InvalidState(AuthorizationKind, "not_reviewed")
+	case err != nil:
+		return DeviceView{}, store.Sanitize("read a reviewed device code", err)
+	case row.foreign(caller), !row.reviewedBy(caller, now):
+		// The review check comes first: the read tells an account that did not review the code within the window nothing of its
+		// state, whichever path reaches it (sec NB-2).
+		return DeviceView{}, arc.InvalidState(AuthorizationKind, "not_reviewed")
+	case row.lapsedAt(now):
+		return DeviceView{}, arc.Expired()
+	case row.State != AuthorizationPending:
+		return DeviceView{}, arc.InvalidState(AuthorizationKind, authorizationStateName(row.State))
+	}
+	return row.DeviceView, nil
+}
+
+// TailLength is the length of a fingerprint's last group: 4 upper-case hexadecimal characters.
+const TailLength = 4
+
+// FingerprintTail is the last group of a node key's fingerprint: the part the /activate page withholds and asks the person to type.
+func FingerprintTail(der []byte) string {
+	fingerprint := Fingerprint(der)
+	return fingerprint[len(fingerprint)-TailLength:]
+}
+
+// TailMatches reports whether a typed tail is the last group of the key's fingerprint (case-insensitive, constant time over the 4
+// characters; a value of another shape never matches).
+func TailMatches(der []byte, typed string) bool {
+	if len(typed) != TailLength {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(strings.ToUpper(typed)), []byte(FingerprintTail(der))) == 1
+}
+
 // TakeDecision counts an account's decision in node_approve_account (both sign-in flows' decisions share it) before its entry is
 // reserved; over the limit it is RESOURCE/rate_limited.
 func (s *Service) TakeDecision(ctx context.Context, request Request, account Account) error {
@@ -519,7 +570,7 @@ func (s *Service) TakeDecision(ctx context.Context, request Request, account Acc
 // the authorization row, then (approving) the account through the evidence, the approval's foreign keys (FOR KEY SHARE on the account
 // and the approving session), then the rate-limit rows.
 func (s *Service) DecideDevice(ctx context.Context, tx pgx.Tx, request Request, account Account, entry *Entry, userCode string, approve, evidence bool,
-	now time.Time) error {
+	tail *string, now time.Time) error {
 	entry.reset()
 	caller := account.Caller.UserID
 	row, err := scanAuthorization(tx.QueryRow(ctx, byUserCode, userCodeDigest(userCode)))
@@ -539,6 +590,12 @@ func (s *Service) DecideDevice(ctx context.Context, tx pgx.Tx, request Request, 
 	case !row.reviewedBy(caller, now):
 		entry.kind = "unreviewed"
 		return arc.InvalidState(AuthorizationKind, "not_reviewed")
+	case approve && tail != nil && !TailMatches(row.PublicKey, *tail):
+		// The /activate page's check (protocol-17): the person approving types the last group of the fingerprint the node prints, and
+		// the page does not show it. A mismatch is a wrong entry (the reservation is kept) and is refused before any evidence is
+		// consumed; nothing is written. The Connect method passes no tail.
+		entry.kind = "tail"
+		return arc.InvalidArgument("fingerprint_tail", "mismatch")
 	}
 	entry.right = true
 	from := authorizationStateName(row.State)

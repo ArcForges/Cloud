@@ -1,0 +1,14 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Return to your terminal</h1>
+<p id="status" role="status" aria-live="polite"></p>
+{{if .Fleet.Approved}}<p>You approved the node with code <span class="code">{{.Fleet.Display}}</span>. It finishes signing in on its own.</p>
+<p>Changed your mind? Until the node has collected its sign-in, you can still deny it.</p>
+<form method="post" action="{{.Base}}/activate/decision" id="deny">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="user_code" value="{{.Fleet.UserCode}}">
+<input type="hidden" name="command_id" value="{{.Fleet.Command}}">
+<input type="hidden" name="decision" value="deny">
+<button type="submit">Deny</button>
+</form>
+{{else}}<p>You denied the node with code <span class="code">{{.Fleet.Display}}</span>. It cannot use that code.</p>{{end}}
+{{end}}

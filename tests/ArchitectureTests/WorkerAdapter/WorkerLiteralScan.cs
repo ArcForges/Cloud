@@ -111,6 +111,8 @@ internal static partial class WorkerLiteralScan
             "RFC 4122 canonical UUID hex layout: 8-4-4-4-12 digits, so the slice offsets are 8, 12, 16 and 20"),
         new("worker/ingress/correlation.ts", "readId", ["2"], "protobuf wire type 2 (length-delimited)"),
         new("worker/ingress/correlation.ts", "readRequestCorrelation", ["2"], "protobuf wire type 2 (length-delimited)"),
+        new("worker/ingress/pipeline.ts", "requestOrigin", ["4294967295"],
+            "RFC 6793: an autonomous system number is a four-octet unsigned integer, at most 4294967295 (Cloudflare request.cf.asn)"),
         new("worker/ingress/edge-limit.ts", "ipv6Groups", ["8"], "RFC 4291 section 2.2: an IPv6 address is eight 16-bit groups"),
         new("worker/ingress/edge-limit.ts", "ipv6GroupBits", ["16"], "RFC 4291 section 2.2: an IPv6 address is eight 16-bit groups"),
         new("worker/ingress/edge-limit.ts", "millisecondsPerSecond", ["1000"], "SI unit: one second is 1000 milliseconds (ISO 80000-3); a protobuf Instant counts whole seconds"),
@@ -158,6 +160,8 @@ internal static partial class WorkerLiteralScan
     [
         new("worker/ingress/pipeline.ts", "match", IdentifierRule,
             "grpc-timeout grammar: one to eight ASCII digits and one unit letter (gRPC over HTTP/2 timeout value)"),
+        new("worker/ingress/pipeline.ts", "requestOrigin", IdentifierRule,
+            "ISO 3166-1 alpha-2: a country code is two upper-case letters (Cloudflare request.cf.country)"),
     ];
 
     private const string ModuleScope = "<module>";
@@ -725,6 +729,10 @@ internal static partial class WorkerLiteralScan
         // inside a parameter list (a destructured or typed parameter) neither takes the name nor consumes the pending declaration.
         var pendingDepth = 0;
         var depth = 0;
+
+        // The open braces of a function's return-type literal (`function f(): { a: string } { ... }`): such a brace is no body, so it
+        // neither takes nor consumes the pending name, and a `;` inside it does not end the pending declaration (AF-CTR-04 E3).
+        var typeDepth = 0;
         for (var i = 0; i < tokens.Count; i++)
         {
             var token = tokens[i];
@@ -751,6 +759,12 @@ internal static partial class WorkerLiteralScan
             if (token.Kind != TokenKind.Punct) continue;
             if (token.Value == "(") depth++;
             else if (token.Value == ")") depth--;
+            else if (token.Value == "{" && (typeDepth > 0
+                || pending is not null && pendingKind == "function" && depth == pendingDepth && i > 0 && IsPunct(tokens[i - 1], ":")))
+            {
+                typeDepth++;
+                stack.Push(stack.Peek());
+            }
             else if (token.Value == "{")
             {
                 var atPending = pending is not null && depth == pendingDepth;
@@ -761,9 +775,10 @@ internal static partial class WorkerLiteralScan
             }
             else if (token.Value == "}")
             {
+                if (typeDepth > 0) typeDepth--;
                 if (stack.Count > 1) stack.Pop();
             }
-            else if (token.Value == ";")
+            else if (token.Value == ";" && typeDepth == 0)
             {
                 pending = null;
             }

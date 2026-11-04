@@ -85,3 +85,44 @@ func FuzzClientAddressHeader(f *testing.F) {
 		}
 	})
 }
+
+// TestTheOriginIsTheHostedEdgesOnly (AF-CTR-04 E3, protocol-17, B-1): an official-hosted center reads exactly one valid value of each
+// origin header the Worker sets; a self-hosted center reads none, also from a trusted proxy, so a client cannot name its own origin.
+func TestTheOriginIsTheHostedEdgesOnly(t *testing.T) {
+	origin := func(mode config.Mode, remote string, headers map[string][]string) (string, int64) {
+		r := request(remote, "203.0.113.7")
+		for name, values := range headers {
+			for _, value := range values {
+				r.Header.Add(name, value)
+			}
+		}
+		got := ClientOrigin(mode)(r)
+		return got.Country, got.ASN
+	}
+	both := map[string][]string{config.ClientCountryHeader: {"DE"}, config.ClientASNHeader: {"3320"}}
+	if country, asn := origin(config.OfficialHosted, "10.0.0.1:443", both); country != "DE" || asn != 3320 {
+		t.Fatalf("hosted: %q %d", country, asn)
+	}
+	for _, remote := range []string{"127.0.0.1:443", "10.0.0.1:443", "[::1]:443"} {
+		if country, asn := origin(config.SelfHosted, remote, both); country != "" || asn != 0 {
+			t.Fatalf("self-hosted from %s: %q %d", remote, country, asn)
+		}
+	}
+	for _, bad := range []map[string][]string{
+		{config.ClientCountryHeader: {"de"}, config.ClientASNHeader: {"0"}},
+		{config.ClientCountryHeader: {"XX"}, config.ClientASNHeader: {"03320"}},
+		{config.ClientCountryHeader: {"T1"}, config.ClientASNHeader: {"4294967296"}},
+		{config.ClientCountryHeader: {"DEU"}, config.ClientASNHeader: {"-1"}},
+		{config.ClientCountryHeader: {"DE", "FR"}, config.ClientASNHeader: {"1", "2"}},
+		{config.ClientCountryHeader: {" DE"}, config.ClientASNHeader: {"+3320"}},
+		{config.ClientCountryHeader: {""}, config.ClientASNHeader: {"33 20"}},
+	} {
+		if country, asn := origin(config.OfficialHosted, "10.0.0.1:443", bad); country != "" || asn != 0 {
+			t.Errorf("%v: %q %d", bad, country, asn)
+		}
+	}
+	if country, asn := origin(config.OfficialHosted, "10.0.0.1:443", map[string][]string{config.ClientCountryHeader: {"US"},
+		config.ClientASNHeader: {"4294967295"}}); country != "US" || asn != 4294967295 {
+		t.Fatalf("the bounds: %q %d", country, asn)
+	}
+}

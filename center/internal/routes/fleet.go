@@ -50,9 +50,39 @@ func fleetBudget(path string) Budget {
 	return Budget{MaxFrameBytes: 65_536, MaxUnaryResponseBytes: 65_536, MaxDurationMilliseconds: deadline, Instance: HealthInstance}
 }
 
-// Fleet is the fleet surface's module.
+// FleetPageRoutes are the routes of the fleet surface's pages (AF-CTR-04 E3), in registration order: the consent page of a browser
+// sign-in (/connect, whose script reads the flow ID from the fragment), its review (GetNodeSignInFlow) and its decision
+// (ApproveNodeSignIn); the activation page of a device-code sign-in (/activate, whose script reads the code from the fragment or
+// the person types it), its review (LookupDeviceCode) and its decision (ApproveDeviceCode). No route redirects: a decision answers a
+// page (the browser sign-in's carries the loopback link), and a route without a session is answered by its script or refused. The
+// pages' script and style sheet are the pages surface's assets, which this surface needs enabled.
+func FleetPageRoutes() []PageRoute {
+	html := []string{TypeHTML}
+	page := func(path, id string) PageRoute {
+		return PageRoute{Method: "GET", Path: path, ID: id, Surface: SurfaceFleet, Kind: PageHTMLKind, ResponseTypes: html, MaxResponseBytes: pageBytesPageReply,
+			SetCookie: SetCookieNone}
+	}
+	form := func(path, id string) PageRoute {
+		return PageRoute{Method: "POST", Path: path, ID: id, Surface: SurfaceFleet, Kind: PageHTMLKind, RequestType: TypeForm, ResponseTypes: html,
+			MaxRequestBytes: pageBytesForm, MaxResponseBytes: pageBytesPageReply, Cookie: true, SetCookie: SetCookieNone}
+	}
+	return []PageRoute{
+		page(PageConnectPrefix, "connect.page"),
+		form(PageConnectPrefix+"/review", "connect.review"),
+		form(PageConnectPrefix+"/decision", "connect.decision"),
+		page(PageActivatePrefix, "activate.page"),
+		form(PageActivatePrefix+"/review", "activate.review"),
+		form(PageActivatePrefix+"/decision", "activate.decision"),
+	}
+}
+
+// Fleet is the fleet surface's module: its methods and its pages.
 func Fleet() (Module, error) {
-	module := Module{Name: "fleet", Surface: SurfaceFleet, Budgets: map[string]Budget{}}
+	rows := FleetPageRoutes()
+	if err := CheckPages(rows); err != nil {
+		return Module{}, err
+	}
+	module := Module{Name: "fleet", Surface: SurfaceFleet, Pages: rows, Budgets: map[string]Budget{}}
 	for _, method := range FleetMethods() {
 		authentication := ingress.Anonymous
 		if method.Session {

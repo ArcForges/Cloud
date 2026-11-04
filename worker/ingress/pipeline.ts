@@ -29,6 +29,8 @@ import { handlePageRequest, pageTable } from "./pages.ts";
 import { healthRoute } from "../tables/center-tables.generated.ts";
 import { bodyReadMilliseconds } from "../tables/cloud-tables.generated.ts";
 import {
+  clientAsnHeader,
+  clientCountryHeader,
   clientIpHeader,
   coldStartBudgetMs,
   enabledSurfaces,
@@ -189,6 +191,13 @@ export async function handleApiRequest(
     // The client's address keys the center's rate limits; it is set from Cloudflare's header only, never from the client's, and
     // left out when Cloudflare sent none (the hosted center then refuses the call instead of counting it in a shared bucket).
     if (surfaceRoute && client !== null) headers.set(clientIpHeader, client);
+    // The client's coarse origin (protocol-17): Cloudflare's country and network of the request, set from request.cf only, never from
+    // a client header; node enrollment records them for the review pages. A value Cloudflare does not supply is left out.
+    if (surfaceRoute) {
+      const origin = requestOrigin(request);
+      if (origin.country !== undefined) headers.set(clientCountryHeader, origin.country);
+      if (origin.asn !== undefined) headers.set(clientAsnHeader, origin.asn);
+    }
     if (route.auth === "session") {
       const credentials = edgeCredentials(request, env.ALLOWED_ORIGIN);
       if (!credentials.ok) return rpcError(credentials.code, credentials.message);
@@ -318,4 +327,19 @@ export async function handleApiRequest(
   } finally {
     if (!handedOver) cleanup();
   }
+}
+
+/**
+ * The country and network Cloudflare reports for a request (request.cf.country, request.cf.asn), as header values: the country only
+ * when it is two upper-case letters, the network only when it is a positive whole number; the center validates them again.
+ */
+export function requestOrigin(request: Request): { country?: string; asn?: string } {
+  const cf = (request as Request & { cf?: unknown }).cf;
+  if (typeof cf !== "object" || cf === null) return {};
+  const { country, asn } = cf as { country?: unknown; asn?: unknown };
+  const origin: { country?: string; asn?: string } = {};
+  if (typeof country === "string" && /^[A-Z]{2}$/u.test(country)) origin.country = country;
+  if (typeof asn === "number" && Number.isSafeInteger(asn) && asn > 0 && asn <= 4294967295)
+    origin.asn = String(asn);
+  return origin;
 }

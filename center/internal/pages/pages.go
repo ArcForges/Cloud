@@ -35,6 +35,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/entitlement"
+	"github.com/ArcForges/Cloud/center/internal/fleetapi"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identityapi"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -61,6 +62,9 @@ type Options struct {
 	DB       *store.DB
 	// Operator is the operator grant of the operations surface; nil where that surface is not composed (every route of it is then 404).
 	Operator *entitlement.Operator
+	// Fleet is the fleet surface's account methods in process (node enrollment's reviews and decisions); nil where that surface is
+	// not composed (every route of it is then 404).
+	Fleet *fleetapi.Direct
 	// Registry holds the ingress policies the calls the pages make carry.
 	Registry *ingress.Registry
 	// ClientIP extracts the client's address of a request; RequireClientIP refuses a request whose address is unknown (hosted mode).
@@ -111,6 +115,8 @@ func New(options Options) (*Handler, error) {
 		"form.removePasskey": (*exchange).removePasskey, "form.revokeSession": (*exchange).revokeSession,
 		"form.revokeAllSessions": (*exchange).revokeAllSessions, "form.renameDevice": (*exchange).renameDevice, "form.revokeDevice": (*exchange).revokeDevice,
 		"operations.grant": (*exchange).operationsGrantPage, "operations.review": (*exchange).operationsReview, "operations.confirm": (*exchange).operationsConfirm,
+		"connect.page": (*exchange).connectPage, "connect.review": (*exchange).connectReview, "connect.decision": (*exchange).connectDecision,
+		"activate.page": (*exchange).activatePage, "activate.review": (*exchange).activateReview, "activate.decision": (*exchange).activateDecision,
 	}
 	for _, row := range rows {
 		if handler.handlers[row.ID] == nil {
@@ -167,7 +173,7 @@ type exchange struct {
 // and answers every refusal as the route's kind answers: JSON on a JSON route, an HTML page elsewhere.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e := &exchange{h: h, w: w, r: r, correlation: correlation.ForRequest(r.Header.Values(ingress.TraceparentHeader), "")}
-	if surface, known := h.paths[r.URL.Path]; !known || !h.options.Enabled(surface) {
+	if surface, known := h.paths[r.URL.Path]; !known || !h.options.Enabled(surface) || surface == routes.SurfaceFleet && h.options.Fleet == nil {
 		e.notFound()
 		return
 	}

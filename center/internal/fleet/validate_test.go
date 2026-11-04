@@ -150,3 +150,29 @@ func TestParseNodeInfo(t *testing.T) {
 		}
 	}
 }
+
+// TestTheFingerprintTail (AF-CTR-04 E3, protocol-17): the tail is the fingerprint's last group; a typed tail matches in either case and
+// only in that exact shape.
+func TestTheFingerprintTail(t *testing.T) {
+	key := make([]byte, NodeKeyLength)
+	key[0] = 0x30
+	// A key whose tail has a letter, so that the lower-case form below differs from the tail (a tail of digits only proves no case rule).
+	for strings.ToLower(FingerprintTail(key)) == FingerprintTail(key) {
+		key[1]++
+	}
+	fingerprint := Fingerprint(key)
+	tail := FingerprintTail(key)
+	if len(tail) != TailLength || fingerprint[len(fingerprint)-5:] != "-"+tail {
+		t.Fatalf("%s %s", fingerprint, tail)
+	}
+	for _, typed := range []string{tail, strings.ToLower(tail)} {
+		if !TailMatches(key, typed) {
+			t.Errorf("%q does not match %s", typed, tail)
+		}
+	}
+	for _, typed := range []string{"", tail[:3], tail + "0", " " + tail[1:], fingerprint, fingerprint[:4]} {
+		if typed != tail && TailMatches(key, typed) {
+			t.Errorf("%q matches %s", typed, tail)
+		}
+	}
+}

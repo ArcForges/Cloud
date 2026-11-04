@@ -206,3 +206,80 @@ func TestTheOperationsRoutesAreTheirOwnSurface(t *testing.T) {
 		t.Fatal("a route of another surface in the operations module was admitted")
 	}
 }
+
+// TestTheFleetPagesAreTheirOwnSurface (AF-CTR-04 E3, cloud-13): the fleet module declares six page routes of its own surface under
+// /connect and /activate (each a page itself), none redirects or sets a cookie, the registry admits pages for exactly the page surfaces,
+// and the center still declares exactly one plain path.
+func TestTheFleetPagesAreTheirOwnSurface(t *testing.T) {
+	var got []string
+	for _, row := range FleetPageRoutes() {
+		got = append(got, row.Method+" "+row.Path+" "+row.ID+" "+row.Surface)
+		if row.Redirects || row.SetCookie != SetCookieNone || row.Kind != PageHTMLKind || row.Cookie != (row.Method == "POST") {
+			t.Errorf("%s: %+v", row.ID, row)
+		}
+	}
+	want := []string{"GET /connect connect.page fleet", "POST /connect/review connect.review fleet", "POST /connect/decision connect.decision fleet",
+		"GET /activate activate.page fleet", "POST /activate/review activate.review fleet", "POST /activate/decision activate.decision fleet"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("the fleet routes:\n%s", strings.Join(got, "\n"))
+	}
+	if strings.Join(PageSurfaces(), ",") != "pages,operations,fleet" {
+		t.Fatalf("the page surfaces %v", PageSurfaces())
+	}
+	for name, mutate := range map[string]func([]PageRoute) []PageRoute{
+		"a fleet route of the pages surface":       func(rows []PageRoute) []PageRoute { rows[0].Surface = SurfacePages; return rows },
+		"a fleet route outside its prefixes":       func(rows []PageRoute) []PageRoute { rows[1].Path = "/account/connect"; return rows },
+		"a fleet route under the operations path":  func(rows []PageRoute) []PageRoute { rows[1].Path = "/operations/connect"; return rows },
+		"a prefix that only starts like /connect":  func(rows []PageRoute) []PageRoute { rows[1].Path = "/connectx/review"; return rows },
+		"a prefix that only starts like /activate": func(rows []PageRoute) []PageRoute { rows[4].Path = "/activated"; return rows },
+		"a fleet route with a trailing slash":      func(rows []PageRoute) []PageRoute { rows[0].Path = "/connect/"; return rows },
+		"a fleet route of the identity surface":    func(rows []PageRoute) []PageRoute { rows[0].Surface = SurfaceIdentity; return rows },
+	} {
+		if err := CheckPages(mutate(FleetPageRoutes())); !errors.Is(err, ErrPageRegistration) {
+			t.Errorf("%s was admitted: %v", name, err)
+		}
+	}
+	// The pages surface may not use the fleet prefixes, nor the operations surface.
+	pages := PageRoutes()
+	pages[0].Path = "/connect"
+	if err := CheckPages(pages); !errors.Is(err, ErrPageRegistration) {
+		t.Errorf("a pages route at /connect was admitted: %v", err)
+	}
+	modules, err := Center()
+	if err != nil {
+		t.Fatal(err)
+	}
+	table, err := Table(modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fleetRows := 0
+	for _, row := range table.Pages {
+		if row.Surface == SurfaceFleet {
+			fleetRows++
+		}
+	}
+	if fleetRows != 6 {
+		t.Fatalf("the Worker table has %d fleet page rows", fleetRows)
+	}
+	// A module of a surface without pages may not declare one.
+	identity := append([]Module(nil), modules...)
+	identity[1].Pages = []PageRoute{{Method: "GET", Path: "/account/x", ID: "x", Surface: SurfaceIdentity, Kind: PageHTMLKind, ResponseTypes: []string{TypeHTML},
+		MaxResponseBytes: 1, SetCookie: SetCookieNone}}
+	if _, err = Table(identity); err == nil {
+		t.Fatal("pages of the identity surface were admitted")
+	}
+	// Every page path is a plain path of the pipeline, and the Worker's production table still has the one health path.
+	routes, err := Ingress(modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range FleetPageRoutes() {
+		if !routes.IsPlain(row.Path) {
+			t.Errorf("%s is no plain path of the pipeline", row.Path)
+		}
+	}
+	if table.HealthPath != APIPrefix+HealthPath {
+		t.Fatal(table.HealthPath)
+	}
+}

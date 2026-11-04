@@ -34,7 +34,7 @@
 //     stand-in looks the evidence up first and answers 403 (the script never sends an invalid request).
 //   - A replay: the real Grant applies that same check before platform.Execute answers the stored result (the end must still lie in
 //     the future); the stand-in answers the stored result before it checks the request.
-//   - The real Review performs no read (Normalize: "It performs no read"), so a well-formed account that does not exist is refused
+//   - The real Review reads only the operator role (Normalize performs no read), so a well-formed account that does not exist is refused
 //     only at the confirmation (not_found, with the consumption rolled back); the stand-in's review refuses it with a 400.
 //   - Audit of the other refusals: the real Grant audits every refusal it makes (the reasons invalid_argument, account_not_found,
 //     already_granted, a reused command, ...; only not_operator is written once per window and account); the stand-in audits only
@@ -110,6 +110,8 @@ export interface FakeOptions {
   tokenInUrl?: boolean;
   /** A protected page without a session redirects to the sign-in page without the return fragment. */
   noReturnFragment?: boolean;
+  /** The sign-in page keeps the return fragment in its address (it does not drop it, P-16). */
+  signInKeepsFragment?: boolean;
   /** Signing out of the second browser leaves its session alive. */
   secondBrowserKeepsSession?: boolean;
   /** The authenticator's export gives nothing (a save that must fail before the request leaves). */
@@ -720,6 +722,8 @@ export class FakeTab implements Tab {
   private unsettledCount = 0;
   private handle: string | undefined;
   private currentUrl = "about:blank";
+  /** The return path the sign-in page read from the redirect's fragment (and dropped from its address). */
+  private signInReturn: string | undefined;
   private page: Page = { kind: "none" };
   private readonly values = new Map<string, string>();
   private readonly hooks = new Map<string, (pathname: string) => Promise<void>>();
@@ -821,9 +825,18 @@ export class FakeTab implements Tab {
       const limited = this.center.limitsForm();
       if (limited !== undefined) return this.limited(limited);
     }
+    let redirectLocation: string | undefined;
     if (protectedPage && !this.session()) {
-      this.currentUrl = `${target.origin}${this.path(pages.signIn)}${
+      // The center's 303 names the return path in its fragment; the sign-in page reads it and drops it from its address at once (P-16),
+      // so the stand-in keeps it aside, as the page's script does.
+      redirectLocation = `${this.path(pages.signIn)}${
         options.noReturnFragment ? "" : `#return=${encodeURIComponent(target.pathname)}`
+      }`;
+      this.signInReturn = options.noReturnFragment ? undefined : target.pathname;
+      this.currentUrl = `${target.origin}${this.path(pages.signIn)}${
+        options.signInKeepsFragment && !options.noReturnFragment
+          ? `#return=${encodeURIComponent(target.pathname)}`
+          : ""
       }`;
       this.page = { kind: "sign-in" };
     } else if (kind === "ops-grant") {
@@ -839,7 +852,9 @@ export class FakeTab implements Tab {
       this.page = { kind };
     }
     if (options.problems?.length) this.seenProblems.push(...options.problems.splice(0));
-    return this.document200();
+    const navigation = this.document200();
+    if (redirectLocation !== undefined) navigation.redirectLocation = redirectLocation;
+    return navigation;
   }
 
   /** The status and headers of a page the center serves (the generated security headers, unless a test removes one). */
@@ -1080,9 +1095,9 @@ export class FakeTab implements Tab {
         for (const other of center.passkeys) if (!other.real) other.lastUsed = center.instant();
       this.handle = next("session-");
       center.sessions.set(this.handle, { revoked: false, stepUps: 0 });
-      const back = /#return=(.*)$/u.exec(this.currentUrl)?.[1];
-      const returnTo =
-        back && center.options.signInIgnoresReturn !== true ? decodeURIComponent(back) : undefined;
+      const back = this.signInReturn;
+      this.signInReturn = undefined;
+      const returnTo = back && center.options.signInIgnoresReturn !== true ? back : undefined;
       if (returnTo === this.path(pages.operationsGrant)) {
         // The sign-in page returns to the page it came from; the operator form is served as to any request.
         const gate = center.operatorGate();
@@ -1417,6 +1432,13 @@ export class FakeTab implements Tab {
 
   unsettled(): number {
     return this.unsettledCount;
+  }
+
+  /** The fake center serves no fleet page (AF-CTR-04 E3), so no navigation reaches a loopback receiver. */
+  holdLoopback(): void {}
+
+  loopbackRequests(): number {
+    return 0;
   }
 
   async cookies(): Promise<CookieView[]> {

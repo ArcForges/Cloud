@@ -83,7 +83,7 @@ export interface StepRecord {
 }
 
 export interface Report {
-  mode: "enroll" | "returning" | "real-authenticator" | "operator-grant";
+  mode: "enroll" | "returning" | "real-authenticator" | "operator-grant" | "node-approve";
   baseUrl: string;
   startedAt: string;
   finishedAt?: string;
@@ -162,7 +162,7 @@ export function newWorld(
 // ---------------------------------------------------------------------------------------------------------------------------
 // Checks
 
-function expect(condition: boolean, message: string): asserts condition {
+export function expect(condition: boolean, message: string): asserts condition {
   if (!condition) throw new AcceptanceError(message);
 }
 
@@ -199,11 +199,11 @@ export function cookieProblems(cookies: readonly CookieView[], now: Date): strin
 const maxAttempts = 3;
 const maxRateLimitWaitSeconds = 120;
 
-function basePath(world: World): string {
+export function basePath(world: World): string {
   return new URL(world.baseUrl).pathname.replace(/\/$/u, "");
 }
-const pageUrl = (world: World, pagePath: string) => `${world.baseUrl}${pagePath}`;
-const pagePathname = (world: World, pagePath: string) => `${basePath(world)}${pagePath}`;
+export const pageUrl = (world: World, pagePath: string) => `${world.baseUrl}${pagePath}`;
+export const pagePathname = (world: World, pagePath: string) => `${basePath(world)}${pagePath}`;
 
 function newProblems(world: World): string[] {
   const fresh: string[] = [];
@@ -218,13 +218,15 @@ function newProblems(world: World): string[] {
 /**
  * Runs one step. A 429 seen anywhere during an attempt (the edge limiter answers before the center sees the request) makes the
  * attempt void: the step waits for the advised time and starts again, at most three attempts; a step therefore starts from a
- * navigation. Any console error, page error or policy violation fails the step.
+ * navigation. A step that is not `restartable` (one that starts from the page an earlier step left, such as the node-approve steps
+ * after a link was opened) fails on a 429 instead. Any console error, page error or policy violation fails the step.
  */
-async function step<T>(
+export async function step<T>(
   world: World,
   name: string,
   label: Label,
   run: () => Promise<T>,
+  options: { restartable?: boolean } = {},
 ): Promise<T> {
   const started = world.now().getTime();
   const record: StepRecord = { name, label, ok: false, attempts: 0, milliseconds: 0 };
@@ -244,6 +246,16 @@ async function step<T>(
       .filter((seconds): seconds is number => seconds !== undefined);
     if (limited.length > 0) {
       newProblems(world);
+      const cause =
+        "error" in outcome && outcome.error instanceof Error ? ` ${outcome.error.message}` : "";
+      // A step without a navigation of its own cannot start again: it would not find the page it started from.
+      if (options.restartable === false) {
+        record.note = "rate limited (429) in a step that does not start again";
+        record.milliseconds = world.now().getTime() - started;
+        throw new AcceptanceError(
+          `Step "${name}" was rate limited (429); it starts from the page an earlier step left and is not repeated.${cause}`,
+        );
+      }
       // The edge limiter answers before the center sees a request, so a step may start again from its navigation, unless an
       // earlier request of the attempt already changed something: a step that removes a passkey cannot find it a second time.
       if (totalChanges(world) > changesBefore) {
@@ -251,8 +263,6 @@ async function step<T>(
         record.milliseconds = world.now().getTime() - started;
         // What the step said about its own failure comes with it: "the account may exist; do not delete the credential file" must
         // not be lost behind the 429.
-        const cause =
-          "error" in outcome && outcome.error instanceof Error ? ` ${outcome.error.message}` : "";
         throw new AcceptanceError(
           `Step "${name}" was rate limited (429) after a request of it had changed something; it is not repeated.${cause}`,
         );
@@ -306,7 +316,7 @@ async function pageReason(world: World): Promise<string> {
 }
 
 /** Polls until the check holds; the wait is counted in polls so that a fake clock needs no support. */
-async function until(
+export async function until(
   world: World,
   what: string,
   check: () => Promise<boolean>,
@@ -335,7 +345,7 @@ interface Slot {
  * share one user handle. The first credential lives on the single `internal` authenticator, every further one on its own with
  * another transport, which the saved file records.
  */
-class Actor {
+export class Actor {
   readonly world: World;
   readonly tab: Tab;
   slots: Slot[] = [];
@@ -349,6 +359,11 @@ class Actor {
   deferred: SavedCredential[] = [];
   /** The virtual environment is gone (AR-23): the saved file is no longer this tab's to write. */
   virtualGone = false;
+  /**
+   * Whether a step of this run signed the tab in (the node-approve mode reads it across its cases and its clean-up; a step that
+   * failed after the sign-in leaves it false, and the clean-up then finds out from the page it is sent to).
+   */
+  signedIn = false;
 
   constructor(world: World, tab: Tab) {
     this.world = world;
@@ -596,7 +611,7 @@ export function noFreeTransport(strays: readonly string[]): string {
 }
 
 /** The saved credential must be the one of this center: a file made for another center would only fail at the sign-in. */
-function expectSavedCenter(world: World): void {
+export function expectSavedCenter(world: World): void {
   const saved = world.store.load();
   expect(
     saved.baseUrl === world.baseUrl && saved.rpId === new URL(world.baseUrl).hostname,
@@ -684,12 +699,17 @@ export async function runAcceptance(world: World): Promise<void> {
     async () => {
       if (!returning) await a.signOutHere();
       else await a.visit(pages.signIn, "Sign in to ArcForges");
-      // A protected page without a session sends the visitor to the sign-in page and remembers where to go back to.
-      await a.tab.goto(pageUrl(world, pages.passkeys));
+      // A protected page without a session sends the visitor to the sign-in page and remembers where to go back to (the redirect's
+      // fragment), which the sign-in page reads and drops from its own address at once (P-16).
+      const redirected = await a.tab.goto(pageUrl(world, pages.passkeys));
       expect(
         new URL(a.tab.url()).pathname === pagePathname(world, pages.signIn) &&
-          a.tab.url().includes(`#return=`),
+          (redirected.redirectLocation ?? "").includes("#return="),
         "A protected page without a session does not lead to the sign-in page.",
+      );
+      expect(
+        !a.tab.url().includes("#"),
+        "The sign-in page keeps the return fragment in its address.",
       );
       expect(
         await a.hidden(`#${ids.signedIn}`),
@@ -1025,13 +1045,15 @@ export function hoursUntilEnds(ends: string | undefined, now: Date): number | un
   return Number.isFinite(end) ? (end - now.getTime()) / 3_600_000 : undefined;
 }
 
+/** Whether the hours to a grant's end are about one day: from 23 to 25 hours, both edges included. */
+export function aboutOneDay(hours: number | undefined): hours is number {
+  return hours !== undefined && hours >= endsWindowHours.min && hours <= endsWindowHours.max;
+}
+
 /** The hours a page's end lies ahead, which must be about one day. */
 function expectOneDay(world: World, ends: string | undefined, what: string): number {
   const hours = hoursUntilEnds(ends, world.now());
-  expect(
-    hours !== undefined && hours >= endsWindowHours.min && hours <= endsWindowHours.max,
-    `${what} does not end the grant about a day from now.`,
-  );
+  expect(aboutOneDay(hours), `${what} does not end the grant about a day from now.`);
   return hours;
 }
 
@@ -1087,7 +1109,7 @@ export async function awaitDocument(
 }
 
 /** What a reply of the center's pages must look like: the status, and the security headers of the generated table. */
-function expectReply(reply: Navigation, status: number, what: string): void {
+export function expectReply(reply: Navigation, status: number, what: string): void {
   expect(reply.status === status, `${what} answered ${reply.status}, not ${status}.`);
   const missing = headerProblems(reply.headers);
   expect(missing.length === 0, `${what} lacks or changes security headers: ${missing.join(", ")}.`);
@@ -1116,11 +1138,15 @@ export async function runOperatorGrant(world: World): Promise<void> {
     mockedLabel,
     async () => {
       const actor = await Actor.open(world, "owner");
-      await actor.tab.goto(pageUrl(world, pages.operationsGrant));
+      const redirected = await actor.tab.goto(pageUrl(world, pages.operationsGrant));
       expect(
         new URL(actor.tab.url()).pathname === pagePathname(world, pages.signIn) &&
-          actor.tab.url().includes("#return="),
+          (redirected.redirectLocation ?? "").includes("#return="),
         "The operator page without a session does not lead to the sign-in page.",
+      );
+      expect(
+        !actor.tab.url().includes("#"),
+        "The sign-in page keeps the return fragment in its address.",
       );
       expect(
         (await actor.tab.text(selectors.heading)) === "Sign in to ArcForges",

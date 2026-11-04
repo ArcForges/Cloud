@@ -171,6 +171,14 @@ func textID(text string) (platform.ID, bool) {
 
 func request(call *ingress.Call) fleet.Request {
 	request := fleet.Request{ClientIP: call.ClientIP}
+	if call.Origin.Country != "" {
+		country := call.Origin.Country
+		request.Origin.Country = &country
+	}
+	if call.Origin.ASN > 0 {
+		asn := call.Origin.ASN
+		request.Origin.ASN = &asn
+	}
 	if correlationID, ok := textID(call.Correlation.CorrelationID); ok {
 		request.CorrelationID = &correlationID
 	}

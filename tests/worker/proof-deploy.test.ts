@@ -54,9 +54,9 @@ test("the checked-in proof environment is the isolated acceptance center", () =>
       ARCFORGES_CENTER_MODE: "official-hosted",
       ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
       ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
-      // AF-CTR-03: the acceptance environment serves the identity, pages and operations surfaces; browser cookies are bound to its own
+      // AF-CTR-03 and AF-CTR-04 E3: the acceptance environment serves the identity, pages, operations and fleet surfaces; browser cookies are bound to its own
       // origin, and its anonymous flows have a global ceiling (C1: it shares the production Neon project until the retention sweeps exist).
-      FLAGSHIP_SURFACES: "identity,pages,operations",
+      FLAGSHIP_SURFACES: "identity,pages,operations,fleet",
       ALLOWED_ORIGIN: "https://proof.arcforges.com",
       ARCFORGES_CENTER_IDENTITY_POLICY: '{"anonymousFlowsLimit":600,"anonymousFlowsWindow":"1h"}',
     },

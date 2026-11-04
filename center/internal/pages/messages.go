@@ -4,6 +4,7 @@ package pages
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ var refusalText = map[string]string{
 	"STATE/not_activated":               "This page is not available.",
 	"RESOURCE/rate_limited":             "Too many attempts. Wait a little and try again.",
 	"RESOURCE/overloaded":               "The service is busy. Try again in a moment.",
+	"VALIDATION/code_invalid":           "That code cannot be used. Check it, or start the sign-in again on the node.",
 	"INTERNAL/internal":                 "Something went wrong on our side. The request may or may not have been completed, so check before you do it again.",
 }
 
@@ -62,6 +64,49 @@ var reasonText = map[string]string{
 	"VALIDATION/invalid_argument|name: length":                 "The name is too long. Use 64 characters or fewer.",
 	"VALIDATION/invalid_argument|name: pattern":                "The name needs at least one visible character and no control characters.",
 	"VALIDATION/invalid_argument|query: not_admitted":          "This page does not take a query string.",
+	// The fleet pages (AF-CTR-04 E3). invalid_state carries the lower-case state name of a sign-in request or not_reviewed (C0).
+	"VALIDATION/invalid_argument|flow_id: pattern":          "This link is not complete. Start the sign-in again on the node.",
+	"VALIDATION/invalid_argument|user_code: pattern":        "Enter the 8 letters the node shows, for example BCDF-GHJK.",
+	"VALIDATION/invalid_argument|decision: pattern":         "Choose to connect or to deny the node.",
+	"VALIDATION/invalid_argument|fingerprint_tail: pattern": "Enter the last 4 characters of the fingerprint your node shows.",
+	"VALIDATION/invalid_argument|fingerprint_tail: mismatch": "Those are not the last 4 characters of this node's fingerprint. Check the fingerprint your node " +
+		"shows. If it differs, deny the request.",
+	"STATE/invalid_state|not_reviewed": "This request needs a fresh review. Open it again from the start.",
+	"STATE/invalid_state|pending":      "This request is still waiting for a decision.",
+	"STATE/invalid_state|approved":     "This request is already approved.",
+	"STATE/invalid_state|denied":       "This request was denied. Start again on the node.",
+	"STATE/invalid_state|completed":    "This node already finished signing in with this request.",
+	"STATE/invalid_state|revoked":      "This request was ended. Start again on the node.",
+	"STATE/invalid_state|expired":      "This sign-in request has expired. Start again on the node.",
+	// A Restricted account is refused at the operation table with the operation's ID as the reason (a refused Origin or CSRF token
+	// names the page route instead, and keeps the generic text).
+	"AUTHORIZATION/permission_denied|fleet.getNodeSignInFlow": "This account is restricted, so it cannot connect nodes now.",
+	"AUTHORIZATION/permission_denied|fleet.approveNodeSignIn": "This account is restricted, so it cannot connect nodes now.",
+	"AUTHORIZATION/permission_denied|fleet.lookupDeviceCode":  "This account is restricted, so it cannot connect nodes now.",
+	"AUTHORIZATION/permission_denied|fleet.approveDeviceCode": "This account is restricted, so it cannot connect nodes now.",
+}
+
+// fleetText is the text of the refusals whose meaning differs on the fleet pages from the account pages'.
+var fleetText = map[string]string{
+	"STATE/expired":                   "This sign-in request has expired. Start again on the node.",
+	"STATE/not_found":                 "This sign-in request does not exist, or another account decided it. Start again on the node.",
+	"CONFLICT/command_id_reused":      "That form was already used. Open the request again from the start.",
+	"AUTHENTICATION/step_up_required": "Approving needs a passkey check. Try again and confirm with your passkey.",
+}
+
+// limitText is the text of a refusal chosen by the limit it names (E2: code_invalid tells an unknown code from one whose lookups are
+// spent), with the limit's value where the text has a %d: what is left, or the maximum.
+var limitText = map[string]struct {
+	text    string
+	none    string
+	maximum bool
+}{
+	"VALIDATION/code_invalid|device_entry_account": {text: "That code was not recognized. You can try %d more codes now; after that, wait a while before trying again.",
+		none: "That code was not recognized, and no attempts are left. Wait a while before trying again."},
+	"VALIDATION/code_invalid|device_code_lookups": {text: "This code was looked up too often. Start the sign-in again on the node.",
+		none: "This code was looked up too often. Start the sign-in again on the node."},
+	"RESOURCE/quota_exceeded|max_nodes_per_account": {text: "This account has reached its limit of %d nodes. Revoke a node on the devices page, then start " +
+		"again on the node.", maximum: true},
 }
 
 // operationsText is the text of the refusals whose meaning differs on the operations surface from the account pages'.
@@ -71,11 +116,37 @@ var operationsText = map[string]string{
 
 // messageFor is the text of a refusal for a page.
 func messageFor(value *foundationv1.ArcError, now time.Time) string {
+	return messageForSurface(value, now, false)
+}
+
+// messageForSurface is the text of a refusal, on a fleet page when fleetPage: a text chosen by the refusal's limit first, then by its
+// state reason, then the fleet's own text of the code, then the shared text of the code.
+func messageForSurface(value *foundationv1.ArcError, now time.Time, fleetPage bool) string {
 	key := strings.TrimPrefix(value.GetCategory().String(), "ERROR_CATEGORY_") + "/" + value.GetCode()
+	if limit := value.GetDetails().GetLimit(); limit != nil {
+		if row, ok := limitText[key+"|"+limit.GetLimitName()]; ok {
+			maximum, maximumOK := decimalCount(limit.GetMaximum())
+			available, availableOK := decimalCount(limit.GetAvailable())
+			switch {
+			case row.maximum && maximumOK:
+				return withRetry(fmt.Sprintf(row.text, maximum), value, now)
+			case row.maximum:
+			case availableOK && available <= 0:
+				return withRetry(row.none, value, now)
+			case strings.Contains(row.text, "%d") && availableOK:
+				return withRetry(fmt.Sprintf(row.text, available), value, now)
+			case !strings.Contains(row.text, "%d"):
+				return withRetry(row.text, value, now)
+			}
+		}
+	}
 	if reason := value.GetDetails().GetState().GetReason(); reason != "" {
 		if text, ok := reasonText[key+"|"+reason]; ok {
 			return withRetry(text, value, now)
 		}
+	}
+	if text, ok := fleetText[key]; ok && fleetPage {
+		return withRetry(text, value, now)
 	}
 	if text, ok := refusalText[key]; ok {
 		return withRetry(text, value, now)
@@ -123,4 +194,13 @@ func pageHeading(status int) string {
 		return "Try again shortly"
 	}
 	return "The request was not accepted"
+}
+
+// decimalCount reads a whole, non-negative count of a limit (foundation Decimal); anything else is no count.
+func decimalCount(value *foundationv1.Decimal) (int64, bool) {
+	if value == nil || value.Value == nil {
+		return 0, false
+	}
+	count, err := strconv.ParseInt(value.GetValue(), 10, 64)
+	return count, err == nil && count >= 0 && strconv.FormatInt(count, 10) == value.GetValue()
 }
