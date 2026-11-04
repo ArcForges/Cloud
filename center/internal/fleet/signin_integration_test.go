@@ -782,6 +782,11 @@ func TestApproverEpochsAndAccountStateLapseTheApproval(t *testing.T) {
 		if _, err := s.complete(f); key(err) != "STATE/expired" || s.state(f) != FlowExpired {
 			t.Fatalf("%s: %s", name, key(err))
 		}
+		// B-1: the matching code on the EXPIRED flow is told the expiry (only the holder of the code learns it); nothing changes.
+		before := s.snapshot(f)
+		if _, err := s.complete(f); key(err) != "STATE/expired" || s.snapshot(f) != before {
+			t.Fatalf("%s: the matching code on the expired flow: %s", name, key(err))
+		}
 	}
 }
 
