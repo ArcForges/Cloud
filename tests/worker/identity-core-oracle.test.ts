@@ -5,10 +5,10 @@
 // leakage refusals and the stale-writer races of linking and revoking. SQLite is not D1: workerd's D1 run
 // (npm run test:d1:identity:local) repeats the engine-dependent cases, and the provider's REST batch stays a deferred live check.
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import {
   addArguments,
   count,
@@ -102,6 +102,31 @@ async function revoke(
 }
 
 const refused = { ok: false, failure: "precondition" } as const;
+
+/** The scratch directories of the shared-file databases, checked by the last test of this file. */
+const scratches: string[] = [];
+
+/**
+ * A database file in a scratch directory of its own that two handles share (the stale-writer races). After the test, whether it
+ * passed or failed, every handle opened through the returned function is closed and the directory is removed.
+ */
+function sharedFile(t: TestContext, name: string): (migrate?: boolean) => Database {
+  const directory = mkdtempSync(path.join(tmpdir(), "identity-"));
+  scratches.push(directory);
+  const handles: Database[] = [];
+  t.after(() => {
+    for (const handle of handles) {
+      if (handle.database.isOpen) handle.database.close();
+    }
+    rmSync(directory, { recursive: true, force: true });
+  });
+  return (migrate = true) => {
+    const handle = openIdentityD1(path.join(directory, name), migrate);
+    handles.push(handle);
+    return handle;
+  };
+}
+
 const changesOf = (outcome: Awaited<ReturnType<typeof runPlan>>) =>
   outcome.ok ? outcome.changes : outcome.failure;
 
@@ -205,10 +230,10 @@ test("an enrollment whose user id already exists in another realm is refused, so
   assert.equal(count(db, "identity_user"), 1);
 });
 
-test("two enrollments decided from the same read of an unknown credential commit exactly once, whichever order they arrive in", async () => {
-  const file = path.join(mkdtempSync(path.join(tmpdir(), "identity-")), "race.db");
-  const first = openIdentityD1(file);
-  const second = openIdentityD1(file, false);
+test("two enrollments decided from the same read of an unknown credential commit exactly once, whichever order they arrive in", async (t) => {
+  const open = sharedFile(t, "race.db");
+  const first = open();
+  const second = open(false);
   const left = enrollInputs(realmA, "race@example.test");
   const right = enrollInputs(realmA, "race@example.test");
   const [a, b] = await Promise.all([
@@ -328,10 +353,10 @@ test("a stale user revision refuses the link; a link decided before a concurrent
   assert.equal(current.outcome.ok, true);
 });
 
-test("two links of the same credential to two users decided from the same read commit exactly once", async () => {
-  const file = path.join(mkdtempSync(path.join(tmpdir(), "identity-")), "link.db");
-  const one = openIdentityD1(file);
-  const two = openIdentityD1(file, false);
+test("two links of the same credential to two users decided from the same read commit exactly once", async (t) => {
+  const open = sharedFile(t, "link.db");
+  const one = open();
+  const two = open(false);
   const ada = await enroll(one, realmA, "ada@example.test");
   const bob = await enroll(one, realmA, "bob@example.test");
   const [a, b] = await Promise.all([
@@ -438,10 +463,10 @@ test("a consumed or invalidated recovery code is not a recovery path", async () 
   assert.deepEqual(await revoke(db, account, account.credential.credentialId, 1, 1), refused);
 });
 
-test("two revocations of a user's two credentials decided from the same read never leave the user without a credential", async () => {
-  const file = path.join(mkdtempSync(path.join(tmpdir(), "identity-")), "revoke.db");
-  const one = openIdentityD1(file);
-  const two = openIdentityD1(file, false);
+test("two revocations of a user's two credentials decided from the same read never leave the user without a credential", async (t) => {
+  const open = sharedFile(t, "revoke.db");
+  const one = open();
+  const two = open(false);
   const account = await enroll(one, realmA, "ada@example.test");
   const second = await add(one, account, "second", 1);
   assert.equal(second.outcome.ok, true);
@@ -746,4 +771,15 @@ test("every write plan leaves no guard row behind after a refusal or a commit", 
   await revoke(db, account, account.credential.credentialId, 1, 1);
   assert.equal(guards(db), 0);
   assert.equal(db.rollbacks(), 2);
+});
+
+// Runs last (node:test runs a file's top-level tests in order): each race test above that ran made one scratch directory, and its
+// clean-up removed it. A run that selects this test alone has no directory to check and skips.
+test("the shared-file race tests leave no identity-* scratch directory behind", (t) => {
+  if (scratches.length === 0) {
+    t.skip("no shared-file race test ran");
+    return;
+  }
+  for (const directory of scratches)
+    assert.equal(existsSync(directory), false, `${directory} remains`);
 });

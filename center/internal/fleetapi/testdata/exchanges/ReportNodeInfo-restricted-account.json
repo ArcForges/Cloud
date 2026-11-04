@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "2686a73",
+  "method": "ReportNodeInfo",
+  "case": "restricted-account",
+  "outcome": "AUTHORIZATION/permission_denied",
+  "headers": {
+    "authorization": "Bearer afa1.BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY",
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "000000006e0a140a120a100707070707070707070707070707070752560a120a106e6f64652d69642d0f1e2d3c4b5a695412086275696c64626f78180220012a32302e312e302d6465762b31356436373137313434343638636530626536313565383533386638353864323962306665643764"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [
+      "00000000930a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1311a7b0a117065726d697373696f6e5f64656e69656410031a256572726f722e617574686f72697a6174696f6e2e7065726d697373696f6e5f64656e69656422020801280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1313a2322210a096f7065726174696f6e1214666c6565742e7265706f72744e6f6465496e666f"
+    ],
+    "trailers": "grpc-status: 0\r\n"
+  },
+  "normalized": [
+    "a 16-byte ID the center drew: 15 bytes of its kind (0xa1 correlation, 0xa2 flow, 0xa3 installation, 0xa4 account) and n for the n-th distinct one of the kind",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
+    "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
+    "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "a device code the center drew: the canonical base64url of 32 bytes of 0xd0+n",
+    "a user code the center drew: BBBBBBB and the n-th letter of the code alphabet; verification_uri_complete carries its placeholder",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
+  ],
+  "sha256": "33ffe8081b2887fa6e038d5565ffecba298e212785f1aa0ddcd747a045f06079"
+}
