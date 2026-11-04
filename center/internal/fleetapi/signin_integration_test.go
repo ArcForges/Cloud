@@ -480,3 +480,40 @@ func hexText(data []byte) string {
 func instant(value *foundationv1.Instant) time.Time {
 	return time.Unix(value.GetUnixSeconds(), int64(value.GetNanos()))
 }
+
+// TestTheSignInRowsUpgradeAMobileLimitedSession (T-19, driven by the operation table like identityapi's TestMobileLimitedNeedsStepUp):
+// every fleet row whose mobile.limited rule is not Allowed answers a mobile.limited session AUTHENTICATION/step_up_required (retry the
+// same command) without writing anything; a fleet row without a request here fails the test.
+func TestTheSignInRowsUpgradeAMobileLimitedSession(t *testing.T) {
+	h := newHarness(t, settings{})
+	owner := h.person(1)
+	s, _ := h.begin()
+	limited := h.issue(owner.id, session.ScopeMobileLimited).AccessToken
+	flow := &foundationv1.Id{Value: s.flowID[:]}
+	requests := map[string]proto.Message{
+		reviewPath:  &fleetv1.NodeEnrollmentServiceGetNodeSignInFlowRequest{Meta: meta(), FlowId: flow},
+		approvePath: &fleetv1.NodeEnrollmentServiceApproveNodeSignInRequest{Meta: meta(), FlowId: flow, Approve: proto.Bool(true)},
+	}
+	writes := func() int { return h.count("SELECT coalesce(sum(rev), 0)::int FROM fleet.node_sign_in") }
+	for _, operation := range access.Operations() {
+		if !operation.Session || operation.MobileLimited == access.Allowed || !strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.") {
+			continue
+		}
+		request, ok := requests[operation.Path]
+		if !ok {
+			t.Errorf("%s needs a step-up of a mobile.limited session, but this test has no request for it", operation.ID)
+			continue
+		}
+		delete(requests, operation.Path)
+		before := writes()
+		response := &fleetv1.NodeEnrollmentServiceApproveNodeSignInResponse{}
+		reply := h.post(operation.Path, request, limited)
+		if reply.Body == nil || proto.Unmarshal(reply.Body, response) != nil || failure(response.GetError()) != "AUTHENTICATION/step_up_required" ||
+			response.GetError().GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND || writes() != before {
+			t.Errorf("%s from a mobile.limited session: %+v", operation.ID, response.GetError())
+		}
+	}
+	for path := range requests {
+		t.Errorf("%s has a request, but the operation table opens it to mobile.limited", path)
+	}
+}

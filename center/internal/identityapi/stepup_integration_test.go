@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -48,7 +49,9 @@ func TestMobileLimitedNeedsStepUp(t *testing.T) {
 	}
 	checked := 0
 	for _, operation := range access.Operations() {
-		if !operation.Session || operation.MobileLimited == access.Allowed {
+		// The fleet surface's rows are served by package fleetapi, which checks them the same way
+		// (TestTheSignInRowsUpgradeAMobileLimitedSession).
+		if !operation.Session || operation.MobileLimited == access.Allowed || strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.") {
 			continue
 		}
 		request, ok := requests[operation.Path]
