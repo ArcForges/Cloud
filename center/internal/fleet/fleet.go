@@ -32,7 +32,7 @@
 //     approving session; PollDeviceAuthorization locks the authorization row and then calls Enroll, whose locks follow, or (a reuse)
 //     revokes the delivered family's sessions. Lookup and Approve give the entry budgets back (the platform.rate_limit rows, the
 //     account's then the network's) after every row of the order and before the audit chain head; every other user of those rows locks
-//     one in its own transaction. No writer locks a device authorization and then a browser flow; only the account participants
+//     one in its own transaction, except the give-back of an entry outside its decision, which takes the same two in the same order. No writer locks a device authorization and then a browser flow; only the account participants
 //     lock both, the browser flows first.
 //   - ReportNodeInfo locks the device only when it renames it, then the installation, then the node row.
 //   - RefreshNodeSession locks the session row (session.Refresh), then updates the node row.

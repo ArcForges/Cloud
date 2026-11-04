@@ -269,7 +269,9 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		"decide a node sign-in": effect, "complete a node sign-in": effect,
 		// AF-CTR-04 E2: the device-code sign-in. A lookup is a review (a mark) that gives the entry reservations back; a give-back
 		// outside a decision and a poll's record (the expiry, SLOW_DOWN, the last poll) are bookkeeping; Start's insert and a poll's
-		// delivery (or the reuse revocation it detects) are effects; the decision runs under its receipt above.
+		// delivery (or the reuse revocation it detects) are effects; the decision runs under its receipt above. A poll whose unlocked
+		// read found the authorization APPROVED runs in the delivery's effect transaction whatever the lock then decides (also
+		// SLOW_DOWN, an expiry or DENIED), so an unanswered commit of it is INTERNAL/internal and the node signs in again.
 		"look up a device code": auxiliary, "give an entry reservation back": auxiliary, "record a device authorization's poll": auxiliary,
 		"start a device authorization": effect, "deliver a device authorization": effect,
 	}

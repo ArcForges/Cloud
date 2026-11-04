@@ -140,16 +140,19 @@ window are the contract's 10 minutes and no keys.
 
 ## Device-code sign-in
 
-A headless node starts an authorization and shows its user code; an account looks the code up on `/activate` (part E3's page, which
-calls the domain functions in process) and approves or denies it; the node polls with its device code and a proof by its node key
+A headless node starts an authorization and shows its user code; an account looks the code up (LookupDeviceCode) and approves or
+denies it (ApproveDeviceCode); part E3's `/activate` page will call the same domain functions in process, and until it exists the
+review and the decision are these two API methods; the node polls with its device code and a proof by its node key
 (CTR4-DEV-01..09 as amended by the plan review's Q8, protocol-8, protocol-9, protocol-19, contracts-9, cloud-5 and cloud-10, and by
-the C0 comments of `fleet.proto`). A caller that holds the device code but not the node key learns nothing and changes nothing.
+the C0 comments of `fleet.proto`). A caller that holds the device code but not the node key learns nothing of the authorization's
+state and writes nothing to it.
 
 **Start** (anonymous). The request is checked field by field before anything is counted: the node's description (as for Begin) and
 `node_public_key`. Then the client network's and the node ID's buckets, which BeginNodeSignIn counts too, are counted (with the
 opt-in `anonymous_flows` ceiling), and a key that an installation holds or held is refused before approval with
 `CONFLICT/already_exists` (`state.state` `node_key`, `state.reason` `already_registered`). A newer Start of the same node ID and the
-same key expires the node's PENDING authorizations (a browser flow of the node is left alone). The authorization is PENDING for 600
+same key expires the node's PENDING authorizations that present that key (one with another key, and a browser flow of the node,
+are left alone). The authorization is PENDING for 600
 seconds with a poll interval of 5,000 ms (the contract's values; no policy keys). The device code is 32 random bytes in 43 base64url
 characters, stored only as the SHA-256 of the bytes; the user code is 8 letters of `BCDFGHJKLMNPQRSTVWXZ` drawn without bias
 (a random byte below 240, modulo 20), returned as the 8 letters and stored as the SHA-256 of them, and no other PENDING or APPROVED
@@ -172,7 +175,8 @@ expired code (`STATE/expired`), a code in another state (`STATE/invalid_state`, 
 name), the decision of a code the caller did not review, and the sixth lookup of a live code. The center deviates here from the plan
 review's protocol-9 corrected fix item 3 on both halves: a decision of a code another account reviewed, and of a code nobody
 reviewed, is `STATE/invalid_state` `not_reviewed` and keeps the reservation, because a free `not_reviewed` would let a denial (which
-needs no step-up) probe the live codes under review. The kept unit that fills a budget is audited `identity.rate_limited`; every
+needs no step-up) probe the live codes under review. Its cost: a reviewer displaced by another account that holds the code pays
+for the `not_reviewed` it then meets (residual risks below). The kept unit that fills a budget is audited `identity.rate_limited`; every
 kept unit is counted by its kind (`entry` unknown, expired, state, unreviewed, lookups), the alert signal for guessing across
 accounts.
 
@@ -219,7 +223,11 @@ account's decisions of both sign-in flows count in `node_approve_account` (20 pe
    `node.os: mismatch`) rolls everything back and leaves it APPROVED.
 
 A store failure of the delivery leaves the authorization APPROVED (the next poll delivers); an unanswered commit of it is
-`INTERNAL/internal` (effect `UNKNOWN`, retry `NEVER`) and the node signs in again. A node never sends a poll before the reply of its
+`INTERNAL/internal` (effect `UNKNOWN`, retry `NEVER`) and the node signs in again. The transaction's kind follows the unlocked read:
+a poll that read the authorization APPROVED runs in the delivery's effect transaction whatever the lock then decides (also
+SLOW_DOWN, an expiry or a DENIED that the account's remediation set meanwhile), so an unanswered commit of such a poll is
+`INTERNAL/internal` too, and the node signs in again although nothing was issued; a poll that read another state and finds a
+delivery or a reuse to do under the lock runs again as an effect transaction. A node never sends a poll before the reply of its
 previous one: the loser of two concurrent polls of an APPROVED authorization finds it COMPLETED and takes the reuse path, which
 revokes the winner's credentials (strict, as refresh reuse). An approved authorization no poll collects within its 600 seconds ends
 EXPIRED; nothing was issued, so nothing is revoked.
@@ -353,7 +361,8 @@ take them in this order:
   the account and the approving session. PollDeviceAuthorization: the authorization row, then Enroll's locks; a reuse: the
   authorization row, then the delivered family's sessions. Lookup and Approve give the entry budgets back (the `platform.rate_limit`
   rows, the account's then the network's) after every row of the order and before the audit chain head; every other user of those
-  rows locks one row in its own transaction. No writer locks a device authorization and then a browser flow.
+  rows locks one row in its own transaction, except the give-back of an entry outside its decision, which takes the same two rows in
+  the same order. No writer locks a device authorization and then a browser flow.
 - RevokeAllSessions and RemoveAuthIdentity: the account's APPROVED flows and the PENDING flows it reviewed last, in flow ID order (the
   approval participant `fleet.node_sign_in`), then the account's APPROVED device authorizations and the PENDING ones it reviewed last,
   in authorization ID order (`fleet.device_authorization`, registered after it: the only writer that locks rows of both tables, in
@@ -363,7 +372,8 @@ take them in this order:
 - The account's step-up evidence path (RevokeSession of another session, RevokeAllSessions, RemoveAuthIdentity, DeviceService.Revoke
   of another device): the account first, then (for a device) `device.Revoke`.
 - The operator's `admin revoke-sessions` and `admin revoke-device`: the accounts first, then the sessions, or `device.Revoke`; neither
-  takes a flow or authorization row. An approval or a poll that waits for `revoke-sessions` holds only its authorization row, and an
+  takes a flow or authorization row. A poll that waits for `revoke-sessions` holds only its authorization row, an approval only its receipt row and its
+  authorization row (`revoke-sessions` takes neither), and an
   approval it overtakes lapses in Enroll (`TestOperatorRevokeSessionsRacingADeviceApprovalOrPollNeverDeadlocks`).
   `revoke-sessions` locks its account (every account in account order for `--all`) `FOR NO KEY UPDATE`; `revoke-device` locks the
   device's account `FOR UPDATE`.
@@ -472,7 +482,8 @@ bucket count, two reservations and the receipt's effect transaction (the evidenc
 give-back in a transaction of its own after a refusal of a reviewed code or a store failure; PollDeviceAuthorization one read (no
 transaction held), the failure bucket's check and count only for a code that names nothing or a failed proof, the
 per-authorization bucket's count, then one auxiliary transaction (an expiry, SLOW_DOWN or the last poll) or one effect transaction
-(the delivery, a lapse or the reuse revocation), with no transaction open while ES256 is verified.
+(the delivery, a lapse or the reuse revocation; it is also the transaction of every answer to a poll whose unlocked read was
+APPROVED), with no transaction open while ES256 is verified.
 
 **Exchange captures.** `TestFleetExchangeCapture` records the node-facing exchanges as the binary gRPC-Web frames on the wire, with
 the request headers that matter (the bearer's placeholder, the client address): every outcome the center produces without a store
@@ -485,8 +496,9 @@ credentials, COMPLETED after delivery, DENIED, EXPIRED; and `not_found`, `unauth
 `already_exists` node and node key, `credential_revoked`, `quota_exceeded`, `not_activated`); each file names its outcome and the test fails when one of that per-method list
 has no case. Not captured: the store failures `RESOURCE/overloaded` (retry after a while, the effect did not happen) and
 `INTERNAL/internal` (effect unknown, never retried), which need fault injection and are covered at the service level by the
-fault-injection tests (E1-16, E1-17), `RESOURCE/kill_switch_active`, which AF-CTR-04 does not produce, and Poll's `invalid_argument`
-`node.os: mismatch` (an Enroll rule). The browser-facing LookupDeviceCode and ApproveDeviceCode are not captured. Only
+fault-injection tests (E1-16, E1-17), StartDeviceAuthorization's `RESOURCE/overloaded` after five live user-code collisions (a domain
+outcome, covered by `TestLiveUserCodeCollisionRetries`), `RESOURCE/kill_switch_active`, which AF-CTR-04 does not produce, and Poll's
+`invalid_argument` `node.os: mismatch` (an Enroll rule). The browser-facing LookupDeviceCode and ApproveDeviceCode are not captured. Only
 the values the center or a random source produced are normalized (correlation, flow, installation and account IDs, tokens, the
 one-use codes, the device and user codes, the proofs, every instant as an offset), each distinct value to its own placeholder of the same shape, wherever it
 appears; the test's own constants stay. The files live in `center/internal/fleetapi/testdata/exchanges`; the test fails when a fresh
@@ -511,12 +523,17 @@ verbatim for the ArcForges node's FakeCenter conformance test; nothing checks it
   credential family until AF-PLAT-01's sweep removes the row (flow rows: 7 days after their end).
 - A user who approves a convincing request for an attacker's node lets it in; the remedy afterwards is revoking its device.
 - User codes are 8 letters of 20 (2.56e10 codes), stored as unsalted SHA-256: a reader of the database reverses a live one within its
-  600 seconds (SEC-22; a keyed digest needs a center secret, AF-CTR-05's custody). Guessing is bounded per account and per network;
+  600 seconds (SEC-22; a keyed digest needs a center secret, AF-CTR-05's custody). The same holds for the other digests that name a
+  user code: `identity.step_up_challenge.target_hash` of an approval (the SHA-256 of the class, the account and the code) and
+  `platform.command_receipt.request_sha256` of a decision (the SHA-256 of the request, which holds the code). Guessing is bounded per account and per network;
   across networks the real limiter is the cost of an account: with 50 live codes a 1% chance in one 15-minute window takes about a
   million accounts of 5 guesses each.
 - An account that knows a live user code (shoulder-surfed, pasted) may look it up five times, which leaves the node's own user unable
   to review and approve it (the authorization stays PENDING until it expires and the node starts again), and may deny it, which needs
-  no step-up. It cannot approve it without a step-up of its own, and its approval would enroll the node into its own account.
+  no step-up. It cannot approve it without a step-up of its own, and its approval would enroll the node into its own account. Each of
+  its lookups also displaces the latest review (the latest review wins), and the displaced reviewer's decision is then `not_reviewed`
+  and keeps one unit of that reviewer's budget (the F7 resolution charges every `not_reviewed`), up to four times within the code's
+  five lookups.
 - The network budget (20 per 15 minutes per /24 or /56) can be spent by any account on a shared network, which blocks code entry
   there for the window (availability only).
 - A captured poll request replays: at APPROVED it collects the credentials, and the real node's next poll then takes the reuse path

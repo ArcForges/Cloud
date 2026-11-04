@@ -447,6 +447,8 @@ func fixedSignIn(seed byte) nodetest.SignIn {
 // BeginNodeSignIn, CompleteNodeSignIn, StartDeviceAuthorization and PollDeviceAuthorization that the center produces, and the success
 // and the refusals a node reacts to for the E1a methods. Not captured, and so not claimed: RESOURCE/kill_switch_active (not produced
 // in AF-CTR-04), RESOURCE/overloaded and INTERNAL/internal (store failures and a lost commit; the fault-injection tests cover them),
+// StartDeviceAuthorization's RESOURCE/overloaded after five live user-code collisions (a domain outcome that
+// TestLiveUserCodeCollisionRetries covers),
 // and Poll's VALIDATION/invalid_argument node.os: mismatch (an Enroll rule the browser flow's capture does not hold either).
 var requiredOutcomes = map[string][]string{
 	"BeginNodeSignIn": {"ok", "VALIDATION/invalid_argument", "RESOURCE/rate_limited", "CONFLICT/already_exists:node_key", "STATE/not_activated"},

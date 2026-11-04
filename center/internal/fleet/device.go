@@ -24,10 +24,11 @@ import (
 
 // The device-code sign-in (AF-CTR-04 part E2, CTR4-DEV-01..09 as amended by Q8, protocol-8, protocol-9, protocol-19, contracts-9,
 // cloud-5, cloud-10 and the C0 comments of fleet.proto). A headless node starts an authorization anonymously and shows its user code;
-// an account looks the code up on /activate (the review) and approves it (with step-up evidence bound to the normalized user code)
-// or denies it; the node polls with its device code and a proof by its node key and receives its node credentials from fleet.Enroll.
-// A caller that holds the device code but not the node key learns nothing and changes nothing: every poll whose proof fails is
-// AUTHENTICATION/unauthenticated with nothing written to the authorization.
+// an account looks the code up (LookupDeviceCode, the review; part E3's /activate page will call these functions in process) and
+// approves it (ApproveDeviceCode, with step-up evidence bound to the normalized user code) or denies it; the node polls with its device
+// code and a proof by its node key and receives its node credentials from fleet.Enroll. A caller that holds the device code but not
+// the node key learns nothing of the authorization's state and writes nothing to it: every poll whose proof fails is
+// AUTHENTICATION/unauthenticated (it tells only that the code is stored) and counts only in its own network's failure bucket.
 
 // The contract values of the device-code sign-in (C0: DeviceAuthorization.interval_ms "5,000; grows by 5,000 on SLOW_DOWN",
 // expires_at "600 s"; LookupDeviceCode "5 lookups per live code"). They are no policy keys: a key would make the contract's comments
@@ -248,8 +249,8 @@ type authorizationRow struct {
 	sessionID          *platform.ID
 }
 
-// DeviceView is an authorization as an account reviews it: the node as it described itself at Start, its key (the page shows its
-// fingerprint), the state and the times.
+// DeviceView is an authorization as an account reviews it: the node as it described itself at Start, its key (part E3's page will show
+// its fingerprint), the state and the times.
 type DeviceView struct {
 	AuthorizationID platform.ID
 	NodeID          platform.ID
