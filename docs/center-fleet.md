@@ -2,8 +2,10 @@
 
 AF-CTR-04 connects an ArcForges node to an account on a center: a person approves the node's sign-in in a browser (PKCE loopback) or
 with a device code, and the node then holds a node credential that it refreshes and can sign out. This page describes what the center
-serves for it. Parts E1a, E1b and E2 (this state) serve the browser sign-in, the device-code sign-in, the node's refresh, report and
-sign-out, and hold the enrollment function both sign-in flows call; the pages `/connect` and `/activate` (part E3) follow. The node side is the ArcForges CloudLink (parts N1 and N2).
+serves for it. Parts E1a, E1b and E2 serve the browser sign-in, the device-code sign-in, the node's refresh, report and sign-out, and
+hold the enrollment function both sign-in flows call; part E3 serves the pages `/connect` and `/activate` where an account reviews and
+decides a sign-in, adds the development stand-in of a node (`center/cmd/node-probe`) and the real-browser run that drives both, and
+enables the surface on the acceptance environment. The node side is the ArcForges CloudLink (parts N1 and N2).
 
 Enrollment is an account and device operation and is never gated (AD-0021 section 13a): every fleet row of the operation table has
 no `Feature` (`TestFleetRowsCarryNoFeature`, `TestFleetRowsAreTheServedMethods`). The gated `center.nodes` key is the node's
@@ -11,10 +13,11 @@ connection, which AF-CTR-05 serves.
 
 ## Surface
 
-The methods belong to the switchable surface `fleet`. It needs `identity` and `pages` (a list without them refuses to start), it is a
-known name from part E1a, and it is enabled nowhere yet: production `FLAGSHIP_SURFACES` stays `""`, the acceptance environment keeps
-`identity,pages,operations` until part E3's hosted run, and the self-hosted default stays `identity,pages` until the pages exist
-(`TestTheFleetSurfaceNeedsIdentityAndPagesAndIsNoDefaultYet`). With the surface off, every fleet method answers `STATE/not_activated`
+The methods and the six pages belong to the switchable surface `fleet`. It needs `identity` and `pages` (a list without them refuses to
+start). Production `FLAGSHIP_SURFACES` stays `""` (AF-PROD-01 activates it); the acceptance environment (`proof`) carries
+`identity,pages,operations,fleet` (pinned by `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts`); a
+self-hosted center enables it by default together with `identity` and `pages`
+(`TestTheFleetSurfaceNeedsIdentityAndPagesAndIsInTheSelfHostedDefault`). With the surface off, every fleet method answers `STATE/not_activated`
 with `state.reason` `fleet`, from the Worker's generated reply before anything else is read, and from the center. Each method's Worker
 budget is the contract's deadline: 5 s for GetNodeSignInFlow and LookupDeviceCode, 15 s for CompleteNodeSignIn, 10 s for the others. A center that serves
 `fleet` needs a public base URL of at most 462 characters (it refuses to start otherwise), so every URL it derives for a node stays
@@ -67,7 +70,8 @@ new key). A newer Begin of the same node ID and the same key expires the node's 
 leaves them alone. The flow lives 10 minutes; `authorize_url` is `<public base URL>/connect#flow=<flow ID>`, the flow ID in its
 lower-case 8-4-4-4-12 form of the 16 bytes in order, which the node derives itself and requires to match. `meta.command_id` is
 correlation only: every call starts a new flow. `RESOURCE/kill_switch_active` is not produced in AF-CTR-04 (no kill switch exists).
-The country and network of the request (`begin_country`, `begin_asn`) are not recorded until part E3, which shows them.
+On the official hosted center Begin also records the country and the network of the request (`begin_country`, `begin_asn`; see
+"The pages": origin line); a self-hosted center records neither.
 
 **Review** (account session; `mobile.limited` upgrades first; a restricted account is refused). Reviewing a PENDING flow records the
 reviewing account and time; the latest review wins, so an account whose review another account displaced gets `not_reviewed` when it
@@ -141,8 +145,7 @@ window are the contract's 10 minutes and no keys.
 ## Device-code sign-in
 
 A headless node starts an authorization and shows its user code; an account looks the code up (LookupDeviceCode) and approves or
-denies it (ApproveDeviceCode); part E3's `/activate` page will call the same domain functions in process, and until it exists the
-review and the decision are these two API methods; the node polls with its device code and a proof by its node key
+denies it (ApproveDeviceCode), on the `/activate` page or through these two API methods; the node polls with its device code and a proof by its node key
 (CTR4-DEV-01..09 as amended by the plan review's Q8, protocol-8, protocol-9, protocol-19, contracts-9, cloud-5 and cloud-10, and by
 the C0 comments of `fleet.proto`). A caller that holds the device code but not the node key learns nothing of the authorization's
 state and writes nothing to it.
@@ -506,6 +509,139 @@ capture differs and rewrites the directory with `ARCFORGES_UPDATE_EXCHANGES=1` (
 headers; `npx prettier --write` formats the files, and the comparison reads them as JSON). Parts N1 and N2 will copy the directory
 verbatim for the ArcForges node's FakeCenter conformance test; nothing checks it against a node yet.
 
+## The pages
+
+Six page routes of the `fleet` surface (`routes.FleetPageRoutes`; the Worker's generated page table carries them, and forwards them
+only while `fleet` is enabled: otherwise both the Worker and the center answer 404 before anything else). They follow every rule of
+the center's pages ([center-identity.md](center-identity.md), "Account pages"): the seven security headers (`Cache-Control:
+no-store, no-transform` among them), no query string (400), exactly one `Origin` on a POST (403), the session's CSRF token (403),
+the form media type (415) and a 4096-byte bound (413). None of them redirects or sets a cookie.
+
+| Route                     | Credential                                                                                                     | What it calls in process (`fleetapi.Direct`, the cookie session as the caller)                    |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `GET /connect`            | none (static; the script asks the bootstrap route)                                                             | nothing                                                                                           |
+| `POST /connect/review`    | cookie session + CSRF                                                                                          | GetNodeSignInFlow                                                                                 |
+| `POST /connect/decision`  | cookie session + CSRF; step-up of `fleet.approveNodeSignIn` bound to the flow ID on approval only              | ApproveNodeSignIn (and GetNodeSignInFlow to show the review again)                                |
+| `GET /activate`           | none (static)                                                                                                  | nothing                                                                                           |
+| `POST /activate/review`   | cookie session + CSRF                                                                                          | LookupDeviceCode                                                                                  |
+| `POST /activate/decision` | cookie session + CSRF; step-up of `fleet.approveDeviceCode` bound to the normalized user code on approval only | ApproveDeviceCode under the account's command receipt (and the review read that counts no lookup) |
+
+The pages decide nothing the API does not: `fleetapi.Direct` runs the same functions as the Connect methods (the operation table, the
+domain call, the receipt and the entry choreography of a device decision), so a page and the API share the review window, the
+budgets, the receipts and the audit events.
+
+**The fragment.** A node opens `<public base URL>/connect#flow=<flow ID>` or `<public base URL>/activate#code=XXXX-XXXX`. The flow ID
+and the code travel in the URL fragment: never sent to a server (so not in a server, Worker or edge log) and never in a Referer;
+browsers can keep it in history, so the flow ID and the code are short-lived (10 minutes) and single-use, and the pages and the
+sign-in page drop it from the address bar at once. The page's script reads the fragment and calls `history.replaceState` before any
+request, then checks it (a flow ID is the canonical lower-case 8-4-4-4-12 form; a code is 8 letters of the code alphabet, case and
+separators ignored); a malformed value is never sent. Signed in, `/connect` submits its review at once and `/activate` fills the
+"Activation code" field; signed out, the script opens the sign-in page with the page and its fragment as the return value, and the
+sign-in page follows a return with a fragment only for these two exact paths and shapes.
+
+**The review page** shows the node as it described itself: its name in quotes, in its own `<bdi>` isolate, followed by the line "The
+name is reported by the node and is not verified."; its OS, architecture and version; its key's fingerprint (on `/activate` without
+the last group, which the person approving types from the node's own output; a wrong group is refused before any step-up evidence is
+consumed and counts as a wrong entry of the account's budget); when it was requested and how long ago; when it expires; the account it
+joins (display name and masked e-mail address); and the origin line. Deny comes first.
+
+**The origin line** is the country and the network (autonomous system number) Cloudflare reports for the node's Begin or Start: the
+hosted Worker sets `X-Arcforges-Client-Country` and `X-Arcforges-Client-Asn` from `request.cf` on every surface call (a client's
+header of the same name never reaches the Container), and an official-hosted center stores exactly one valid value of each
+(`begin_country`, `begin_asn`). It is a hint, without "same network" or "different network" text. A self-hosted center always stores
+neither and shows "Origin unknown", also behind a trusted proxy: a proxy configured for the client address header passes other client
+headers through, and the line would then be the node's own claim.
+
+**Decisions.** An approval needs the proved step-up; a denial needs none. A decision refused with `AUTHENTICATION/step_up_required` (or,
+on `/activate`, a wrong fingerprint group) shows the review page again with the refusal's own status: `/connect` reads it again
+through GetNodeSignInFlow, `/activate` through a read that counts no lookup and writes nothing, run only after those two refusals
+(both come after the decision's own review check), never through LookupDeviceCode. Every rendering of the `/activate` review carries a
+new command ID, and the typed group joins the receipt's request digest, so a corrected group is a new command and a command ID replayed
+with another group is `CONFLICT/command_id_reused`. The Connect method ApproveDeviceCode carries no fingerprint group (the contract has
+no field for it). The result of a `/connect` decision is a 200 page that carries the link back to the node's loopback receiver
+(`rel="noopener noreferrer"`); the script follows it only after checking its exact shape (`http://127.0.0.1:<port>/callback` or
+`http://[::1]:<port>/callback` with the code and state, or `error=access_denied` and state), and the page says that the browser must
+run on the computer that runs the node. The result of an `/activate` approval offers the denial while the node has not collected
+its credentials.
+
+**Texts** (the center never sends text to show): `VALIDATION/code_invalid` by its limit (the entries left of the account's budget, none
+left, or a code whose five lookups are spent), the node cap with its maximum (`RESOURCE/quota_exceeded`, 400 on the pages), each state
+of a request (`STATE/invalid_state` with its reason, `not_reviewed` among them, one text whether another account reviewed it later or the
+review is older than 10 minutes), a restricted account, and the fleet's own texts of `STATE/expired`, `STATE/not_found`,
+`CONFLICT/command_id_reused` and `AUTHENTICATION/step_up_required`.
+
+The devices page shows each name in an isolate and, for a node, when its credential ends at the latest (the live node session's
+absolute expiry).
+
+## node-probe and the node-approve run
+
+`center/cmd/node-probe` is a development stand-in for a node (**MOCKED**: a Go program with a software P-256 key, not the ArcForges
+node, which parts N1, N2 and X prove; never in the image). `go run ./cmd/node-probe -center <public base URL> -flow pkce|device -dir
+<handshake dir> -case <name> [-decision approve|deny] [-idle 75s] [-poll-floor 10s]` signs in over the public routes, writes
+`<case>.begin.json` (the URL, the user code, the fingerprint, the node's description; no secret) and, after the person's decision, checks
+the credentials, refreshes, waits `-idle`, refreshes again, presents the spent refresh token (a reuse: the family is revoked; a device
+sign-in also polls its device code again and gets COMPLETED without credentials) and the current one (refused), and writes
+`<case>.result.json` (each step's outcome and the instant of each request; no token, code, device code or proof). A center behind a
+throwaway certificate authority is trusted through `SSL_CERT_FILE`.
+
+`node eng/verification/browser/node-approve.ts --base-url <public base URL> --watch <handshake dir> [--cases <n>] [--negative]` (the
+browser acceptance's node-approve mode) decides those sign-ins in the pinned Chromium with the saved owner credential (**MOCKED**
+hardware: the virtual authenticator in a real browser), checks each review page against the begin file, hands a browser sign-in's
+result back to the probe's loopback receiver (the first browser sign-in of a run by the page's manual link, the others by the page's
+script), waits for each probe result, and at the end, also after a failed step, revokes the devices its approvals created. The probe
+runs on the browser's machine (its loopback receiver must be the browser's). Per step, what counts as a change (after which a 429
+fails the run instead of starting the step again): a review (on `/activate` a lookup), a decision with the step-up it proves, a wrong
+fingerprint group (`--negative`), a revocation.
+
+What a run spends:
+
+| Limit                                                       | Value                                         | A run                                                                                                                                                                                 |
+| ----------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The hosted edge (browser and probe share the machine's key) | 60 requests per 60 s per client               | the browser keeps to 36 per minute; the run fails when the browser's busiest minute and the probe's together exceed 55                                                                |
+| Step-ups per account                                        | 10 in 10 minutes                              | one per approval, one per revoked device, one for `--negative`; the returning acceptance spends 3 and `--operator-grant` 2: wait 10 minutes between those runs and a node-approve run |
+| `node_approve_account`                                      | 20 decisions an hour                          | one per decision                                                                                                                                                                      |
+| `device_entry_account`                                      | 5 wrong entries per window                    | `--negative` spends one                                                                                                                                                               |
+| `node_flow_prefix`                                          | 10 Begin and Start per 10 minutes per network | one per case, from the probe's address                                                                                                                                                |
+
+The handshake directory holds display user codes and the URLs that carry them: delete it after a run and keep it out of the evidence.
+
+## Post-deploy checklist (H1)
+
+The coordinator runs it after the merge and the `proof=deploy` dispatch. It needs the saved proof owner credential (on the Windows
+host `deku`, never copied) and the operator checkout there at the merge commit (`npm ci` in `eng/verification/browser`). Leave at least
+90 seconds between two browser runs and warm the Container with the healthz `curl` 10 to 20 seconds before each; the healthz request
+counts against the Hello limiter, not the edge limit of the pages. A 429 of the edge starts a step again from its navigation, unless a
+change was made in it (the run then fails and says so; see the Worker reply table of [center-entitlement.md](center-entitlement.md),
+"Post-deploy checklist"). REAL: the hosted Worker, Container, PostgreSQL (`arcforges_acceptance`) and Chromium. **MOCKED**: the
+authenticator (Chromium's virtual authenticator through CDP) and the node (`node-probe`, a Go stand-in, not the ArcForges node: N2, X
+and H2 prove the real node). The run shows how the one Chromium version it records treats the navigation from the hosted page to the
+loopback receiver; it proves nothing about other browsers.
+
+1. **Production stays dark.** `curl -si https://arcforges.com/api/healthz`: `revision` the merge commit, `center.surfaces` `none`;
+   `https://arcforges.com/api/connect` and `/api/activate` answer the Worker's plain 404; a fleet method answers `STATE/not_activated`
+   with `state.reason` `fleet`.
+2. **Proof carries the surface.** `curl -si https://proof.arcforges.com/api/healthz`: `center.surfaces`
+   `identity,pages,operations,fleet`, equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`; the migration gate shows
+   `arcforges_acceptance` at version 5.
+3. **The pages' replies** (from the Linux host, a key of its own): `curl -si https://proof.arcforges.com/api/connect` and `/api/activate`:
+   200, the seven security headers exactly, `Cache-Control: no-store, no-transform`, no `cloudflareinsights` and no `data-cf-beacon` in the
+   body; `curl -si -X POST https://proof.arcforges.com/api/connect/review` without an `Origin`: 403;
+   `curl -si 'https://proof.arcforges.com/api/connect?flow=x'`: 400.
+4. **Regression with `fleet` on** (`deku`): the returning acceptance (`acceptance.ts`) and then `acceptance.ts --operator-grant` print
+   PASSED (E3 changed the sign-in page's script, the devices page and the shared script both runs use). Then wait 10 minutes (step-ups).
+5. **Node approvals** (`deku`): build the probe from the operator checkout (`cd center; go build -o <tmp>/node-probe ./cmd/node-probe`;
+   if the module download fails there, the coordinator cross-compiles it on Linux from the merge commit and records its sha256), start
+   `node-probe -center https://proof.arcforges.com/api -flow pkce -case pkce-1 -dir <dir>` and `-flow device -case device-1`, then
+   `node eng/verification/browser/node-approve.ts --watch <dir> --cases 2`. The run approves one flow of each kind (the browser
+   sign-in by the page's manual link); each probe receives credentials, refreshes, refreshes again after 75 s idle (a Container that
+   slept), sees a reuse revoked, and prints PASSED; the run prints PASSED with the request counts (browser busiest minute plus the
+   probe's at most 55).
+6. **Clean-up.** The run revokes the probe devices itself, also after a failed step; it lists any device it left (`devicesLeft`): revoke
+   such a device on `/account/devices` by hand. Delete the handshake directory.
+7. **Afterwards.** Production dark and proof's `center.surfaces` as in steps 1 and 2. What stays on `arcforges_acceptance`: the flows and
+   authorizations (append-only until AF-PLAT-01's sweeps), the revoked devices, installations and nodes, the revoked node sessions, and
+   the audit events.
+
 ## Residual risks
 
 - A key replaced by a same-account re-enrollment is overwritten and no longer guarded.
@@ -540,3 +676,9 @@ verbatim for the ArcForges node's FakeCenter conformance test; nothing checks it
   and revokes them (without the node key the device code alone is useless; no log holds either).
 - A step-up of `fleet.approveDeviceCode` is bound to the user code, not to the authorization: a code drawn again after its row ended
   could reuse evidence of the same account within the evidence's 5 minutes, which also needs that account's review.
+- The origin line is a hint: a VPN, a proxy or a mobile network shows another country or network, an attacker's server in the
+  victim's country matches it, and a self-hosted center shows none. The typed fingerprint group defeats only the plain "enter this
+  code" lure: a coached victim can read the group out, and an API client of ApproveDeviceCode is asked for none.
+- `begin_country` and `begin_asn` are personal data like the client prefixes; their retention (7 days after the flow's end) is a target
+  that AF-PLAT-01's sweeps will enforce, not delivered: until then the rows stay.
+- The sign-in page's return value travels in its fragment until the page drops it; a browser's history can keep the URL a node opened.

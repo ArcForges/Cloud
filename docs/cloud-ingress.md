@@ -87,7 +87,10 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
   the Worker into the generated template: the refusal's time rounded up to the second plus the generated edge period (60 s, the
   limiter's `simple.period`). Both limiters key a client by its address, an IPv6 client by its /64 (`edgeClientKey`). A forwarded
   surface call carries `x-arcforges-client-ip` set from `cf-connecting-ip` (left out when Cloudflare sent none; a client's own value
-  is never copied). The generated replies are the center's own refusals without a `ResponseMeta`, and each carries the call's
+  is never copied), and `x-arcforges-client-country` and `x-arcforges-client-asn` set from `request.cf.country` (two upper-case
+  letters) and `request.cf.asn` (a positive whole number) (each left out when Cloudflare supplies none; a client's own value is never
+  copied: the header set is built from nothing). Only an official-hosted center reads the two (node enrollment's origin line,
+  [center fleet](center-fleet.md#the-pages)). The generated replies are the center's own refusals without a `ResponseMeta`, and each carries the call's
   correlation id in its `ArcError` (Contracts requires `ArcError.correlation_id`, E4-1): the Worker creates one identity per call
   before any refusal (`crypto.randomUUID`; the body is not read before a disabled-surface or edge-limit refusal, so these refusals
   never carry a value the client stated) and writes its 16 bytes into the template's slot at the generated offset
@@ -104,8 +107,8 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
 
 ## Page routes (PLT-1)
 
-The center's account pages and its `/session/v1/web` routes ([account pages](center-identity.md#account-pages-and-browser-sessions)) are
-not gRPC-Web calls, so they have their own handler (`worker/ingress/pages.ts`) and their own generated table
+The center's account pages, its `/session/v1/web` routes ([account pages](center-identity.md#account-pages-and-browser-sessions)), the
+operator grant's page and the six pages of node enrollment ([center fleet](center-fleet.md#the-pages)) are not gRPC-Web calls, so they have their own handler (`worker/ingress/pages.ts`) and their own generated table
 (`pageRoutes`, `pageSecurityHeaders`, `pageStatuses`, `pageCookieName`, `pageLocationPrefix`, `pageReturnFragment`, `pageInstance`,
 `pageDurationMs`, `pageUserAgentBytes`, `pageCookieMaxAgeDigits`, `pageReturnPathBytes`, from `center/internal/routes/pages.go`). The pipeline hands a request to it only when the path (below `/api`) is
 in the table. It is deny by default in both directions and decides nothing the center does not:

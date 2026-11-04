@@ -426,6 +426,12 @@ nothing replays. A page never reads or writes a table.
 | `POST /session/v1/web/{authentication/begin,authentication/complete,enrollment/complete}`   | JSON | none (see CSRF)  |
 | `POST /session/v1/web/{step-up/begin,step-up/complete,logout}`                              | JSON | cookie session   |
 
+The `operations` surface adds `/operations/grant` and its two forms, the `fleet` surface the six pages `/connect`, `/connect/review`,
+`/connect/decision`, `/activate`, `/activate/review` and `/activate/decision` ([center fleet](center-fleet.md#the-pages)); the
+registration admits pages for these three surfaces only, each under its own prefixes, and every rule of this section applies to them.
+The sign-in page reads its return value from its fragment and drops the fragment from its address before anything else; it follows a
+return with a fragment only to `/connect#flow=<flow ID>` and `/activate#code=XXXX-XXXX`.
+
 All paths are below the public base URL (`/api/...` on the hosted deployments). `/account` itself, profile editing (`UpdateProfile`
 stays an API method), recovery, e-mail change and the provider callback are not pages; recovery and the callback are AF-ID-02's.
 The browser channel offers the passkey method only: e-mail (and password and OIDC) is `not_offered` on it, whether or not a mail
@@ -924,11 +930,11 @@ routes form the `pages` surface, which needs `identity` (a list with `pages` and
 self-hosted center whose base URL cannot be a relying party leaves every surface off: every surface other than `identity` needs it). The center and the generated Worker table tag them by surface
 (`surfaceRoutes`, PLT-18: `productionRoutes` stay always on); `ARCFORGES_CENTER_SURFACES` (center) and `FLAGSHIP_SURFACES`
 (Worker) list the enabled surfaces as exact generated names, comma-separated. Official-hosted mode enables none unless listed;
-self-hosted mode enables the default surfaces (`identity` and `pages`) unless listed (an explicit list pins the surfaces across
-upgrades; `none` enables none; `operations` is never a default). A disabled surface's method is answered with the domain refusal `STATE/not_activated` (`state.reason = identity`): by the
+self-hosted mode enables the default surfaces (`identity`, `pages` and `fleet`) unless listed (an explicit list pins the surfaces
+across upgrades; `none` enables none; `operations` is never a default). A disabled surface's method is answered with the domain refusal `STATE/not_activated` (`state.reason = identity`): by the
 Worker from the generated reply, before any rate limit, credential, body or Container (`tests/worker/ingress-surfaces.test.ts`), and
-by the center with the call's correlation id (logged and counted as an OK reply with that id); a disabled `pages` surface answers every
-page route with 404, the Worker's reply of a path it does not know (plain text), from the Worker's page handler before anything else is read. An enabled one passes the Worker's own
+by the center with the call's correlation id (logged and counted as an OK reply with that id); a disabled `pages` surface (and a disabled `fleet` surface, for its six pages) answers every
+page route of the surface with 404, the Worker's reply of a path it does not know (plain text), from the Worker's page handler before anything else is read. An enabled one passes the Worker's own
 edge limit `IDENTITY_RATE_LIMITER` (over it, the generated domain refusal `RESOURCE/rate_limited` with its `retry_at`: the refusal's
 time rounded up to the second plus the limiter's 60-second period) before it is forwarded. The Worker passes its parsed list to the Container as
 `ARCFORGES_CENTER_SURFACES` (`none` when the list enables nothing, so a mistyped list never stops the center) and always
