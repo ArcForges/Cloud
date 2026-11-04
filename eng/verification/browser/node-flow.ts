@@ -182,10 +182,7 @@ async function nextBegin(
   return found as string;
 }
 
-export async function runNodeApprove(
-  world: World,
-  options: NodeApproveOptions,
-): Promise<void> {
+export async function runNodeApprove(world: World, options: NodeApproveOptions): Promise<void> {
   world.report.mode = "node-approve";
   world.write(
     `Node approvals on ${world.baseUrl}: the saved owner credential (MOCKED hardware) decides ${options.cases} sign-in(s) of node-probe (MOCKED node)`,
