@@ -3,8 +3,7 @@
 // public key, the operator signs each request, and every other request is refused the same way.
 import assert from "node:assert/strict";
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -18,6 +17,7 @@ import { handleProof } from "../../worker/foundation/proof-routes.ts";
 import type { FoundationEnv } from "../../worker/foundation/types.ts";
 import { base64UrlEncode, sha256Hex } from "../../worker/private/encoding.ts";
 import { createFakeR2 } from "./support/fake-r2.ts";
+import { scratchDirectory } from "./support/scratch.ts";
 
 const now = 1_800_000_000;
 const body = new TextEncoder().encode('{"hello":"world"}');
@@ -207,8 +207,8 @@ test("credentials are accepted only when configured, and none configured disable
   );
 });
 
-test("the operator key file is created once, kept and never overwritten", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "operator-key-"));
+test("the operator key file is created once, kept and never overwritten", (t) => {
+  const dir = scratchDirectory("operator-key-", t);
   const file = path.join(dir, "nested", "key.pem");
   const first = initOperatorKey(file);
   assert.match(first, /^[A-Za-z0-9_-]{43}$/u);

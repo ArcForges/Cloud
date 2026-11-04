@@ -3,8 +3,7 @@
 // (the module tasks append their own), so the generator, the guard primitives and the order rule are proven on this fixture, built
 // into a temporary root over the real physical manifest and run on the real migrations.
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { D1Scalar } from "@arcforges/ai-internal";
 import { base64UrlEncode } from "../../../worker/private/encoding.ts";
@@ -13,6 +12,7 @@ import { executePlan, planKey, type ExecuteDeps } from "../../../worker/storage/
 import type { PlanDefinition as WorkerPlan } from "../../../worker/storage/plan-types.ts";
 import { type PlanManifest, buildManifest } from "../../../eng/verification/storage-plans.ts";
 import { migrationsDirectory } from "../../../eng/verification/physical-schema.ts";
+import { scratchDirectory } from "./scratch.ts";
 import { repositoryRoot } from "./sqlite-d1.ts";
 
 export const fixtureFamilyId = "fixture-pair";
@@ -68,7 +68,7 @@ export function fixtureRoot(
   plans: Record<string, string> = { [`${fixtureFamilyId}.commit.sql`]: fixturePlan },
   registry: unknown = fixtureRegistry,
 ): string {
-  const root = mkdtempSync(path.join(tmpdir(), "families-"));
+  const root = scratchDirectory("families-");
   mkdirSync(path.join(root, "storage/plans/families"), { recursive: true });
   cpSync(
     path.join(repositoryRoot, "storage/plans/owners.json"),
