@@ -97,6 +97,12 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.getNodeSignInFlow":  "R2 upgrade none - no-receipt active",
 		"fleet.approveNodeSignIn":  "R3 upgrade evidence-on-approve flow no-receipt active",
 		"fleet.completeNodeSignIn": "R1 anonymous",
+		// AF-CTR-04 E2 (CTR4-DES-02 as amended by Q1, Q24 and OPS-01): the device-code sign-in rows; only the decision runs under a
+		// receipt (of the account).
+		"fleet.startDeviceAuthorization": "R1 anonymous",
+		"fleet.pollDeviceAuthorization":  "R1 anonymous",
+		"fleet.lookupDeviceCode":         "R2 upgrade none - no-receipt active",
+		"fleet.approveDeviceCode":        "R3 upgrade evidence-on-approve user_code receipt active",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
 	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own", EvidenceOnApprove: "evidence-on-approve"}
@@ -135,7 +141,7 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	want := map[string]string{"identity.beginPasskeyRegistration": TargetAccount, "identity.removeAuthIdentity": TargetCredential,
 		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession,
-		"fleet.approveNodeSignIn": TargetFlow}
+		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode}
 	if target, ok := StepUpClass("center.operatorGrant"); !ok || target != TargetRequest {
 		t.Fatalf("the operator grant class: %q %v", target, ok)
 	}
@@ -185,7 +191,8 @@ func TestFleetRowsCarryNoFeature(t *testing.T) {
 			continue
 		}
 		rows++
-		account := operation.ID == "fleet.getNodeSignInFlow" || operation.ID == "fleet.approveNodeSignIn"
+		account := operation.ID == "fleet.getNodeSignInFlow" || operation.ID == "fleet.approveNodeSignIn" || operation.ID == "fleet.lookupDeviceCode" ||
+			operation.ID == "fleet.approveDeviceCode"
 		if operation.Feature != "" || operation.Audit == AuditBeforeCall || operation.Session && !account && strings.Join(operation.Scopes, ",") != "node" ||
 			account && len(operation.Scopes) != 0 {
 			t.Errorf("%s: feature %q, audit %d, scopes %v", operation.ID, operation.Feature, operation.Audit, operation.Scopes)

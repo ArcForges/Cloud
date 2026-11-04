@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/nodetest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/session"
@@ -59,6 +60,8 @@ var normalizationRules = []string{
 	"a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
 	"a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
 	"a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+	"a device code the center drew: the canonical base64url of 32 bytes of 0xd0+n",
+	"a user code the center drew: BBBBBBB and the n-th letter of the code alphabet; verification_uri_complete carries its placeholder",
 	"every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
 	"the authorization header carries the placeholder of its token; the client address header is recorded as sent",
 }
@@ -77,6 +80,8 @@ type exchange struct {
 	Reply           wireCall          `json:"reply"`
 	Normalized      []string          `json:"normalized"`
 	SHA256          string            `json:"sha256"`
+	// state is a Poll value's state (not recorded: the reply frames hold it).
+	state fleetv1.DeviceAuthorizationState
 }
 
 // wireCall is one direction of a call: the content type, the HTTP status of a reply, the data frames and the trailer frame in hex.
@@ -177,6 +182,29 @@ func (p *placeholders) code(value string) string {
 	return placeholder
 }
 
+// deviceCode is the placeholder of a device code the center drew (registered from a Start reply).
+func (p *placeholders) deviceCode(value string) string {
+	if placeholder, ok := p.values["device "+value]; ok {
+		return placeholder
+	}
+	placeholder := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0xd0 + byte(p.next("device code"))}, 32))
+	if _, ok := session.ParseHandle(placeholder); !ok {
+		p.t.Fatal("a device code placeholder of the wrong shape")
+	}
+	p.values["device "+value] = placeholder
+	return placeholder
+}
+
+// userCode is the placeholder of a user code the center drew (registered from a Start reply).
+func (p *placeholders) userCode(value string) string {
+	if placeholder, ok := p.values["user "+value]; ok {
+		return placeholder
+	}
+	placeholder := "BBBBBBB" + string(fleet.UserCodeAlphabet[p.next("user code")%len(fleet.UserCodeAlphabet)])
+	p.values["user "+value] = placeholder
+	return placeholder
+}
+
 // proof is the placeholder of a node key proof.
 func (p *placeholders) proof(value []byte) []byte {
 	if len(value) != 64 {
@@ -227,6 +255,19 @@ func (p *placeholders) normalize(message protoreflect.Message, base time.Time) {
 			}
 		case name == "node_key_proof":
 			message.Set(field, protoreflect.ValueOfBytes(p.proof(value.Bytes())))
+		case name == "device_code":
+			if _, ok := p.values["device "+value.String()]; ok {
+				message.Set(field, protoreflect.ValueOfString(p.deviceCode(value.String())))
+			}
+		case name == "user_code" && field.ContainingMessage().FullName() == "arcforges.fleet.v1.DeviceAuthorization":
+			message.Set(field, protoreflect.ValueOfString(p.userCode(value.String())))
+		case name == "verification_uri_complete":
+			text := value.String()
+			code, found := strings.CutPrefix(text, publicBaseURL+"/activate#code=")
+			if !found || len(code) != 9 || text != nodetest.DerivedVerificationURIComplete(publicBaseURL, strings.ReplaceAll(code, "-", "")) {
+				p.t.Fatalf("verification_uri_complete %q is not the derived form", text)
+			}
+			message.Set(field, protoreflect.ValueOfString(nodetest.DerivedVerificationURIComplete(publicBaseURL, p.userCode(strings.ReplaceAll(code, "-", "")))))
 		case name == "authorize_url":
 			text := value.String()
 			flow, found := strings.CutPrefix(text, publicBaseURL+"/connect#flow=")
@@ -334,6 +375,9 @@ func capture[Response proto.Message](c *capturer, to call, method, name string, 
 		c.p.register(message.ProtoReflect())
 	}
 	result.Outcome = outcomeOf(response, result.Reply.Trailers)
+	if polled, ok := any(response).(*fleetv1.NodeEnrollmentServicePollDeviceAuthorizationResponse); ok {
+		result.state = polled.GetValue().GetState()
+	}
 	normalizedRequest := proto.Clone(request)
 	c.p.normalize(normalizedRequest.ProtoReflect(), base)
 	requestBytes, _ := proto.MarshalOptions{Deterministic: true}.Marshal(normalizedRequest)
@@ -364,6 +408,8 @@ func (p *placeholders) register(message protoreflect.Message) {
 		switch {
 		case string(field.Name()) == "flow_id" && message.Descriptor().FullName() == "arcforges.fleet.v1.NodeEnrollmentServiceBeginNodeSignInValue":
 			p.volatile[hex.EncodeToString(value.Message().Interface().(*foundationv1.Id).GetValue())] = true
+		case string(field.Name()) == "device_code" && message.Descriptor().FullName() == "arcforges.fleet.v1.DeviceAuthorization":
+			p.deviceCode(value.String())
 		case field.Kind() == protoreflect.MessageKind && !field.IsList() && !field.IsMap():
 			p.register(value.Message())
 		case string(field.Name()) == "access_token" || string(field.Name()) == "refresh_token":
@@ -397,26 +443,37 @@ func fixedSignIn(seed byte) nodetest.SignIn {
 		State: fmt.Sprintf("node-state-%02x-0123456789abcdefghij", seed)}
 }
 
-// requiredOutcomes are the outcomes the capture must hold per node-facing method: every outcome of the checkpoint's c.2 table for
-// BeginNodeSignIn and CompleteNodeSignIn that the center produces (kill_switch_active is not produced in AF-CTR-04; overloaded and
-// internal are store failures), and the success and the refusals a node reacts to for the E1a methods.
+// requiredOutcomes are the outcomes the capture must hold per node-facing method: every outcome of the checkpoints' c.2 tables for
+// BeginNodeSignIn, CompleteNodeSignIn, StartDeviceAuthorization and PollDeviceAuthorization that the center produces, and the success
+// and the refusals a node reacts to for the E1a methods. Not captured, and so not claimed: RESOURCE/kill_switch_active (not produced
+// in AF-CTR-04), RESOURCE/overloaded and INTERNAL/internal (store failures and a lost commit; the fault-injection tests cover them),
+// and Poll's VALIDATION/invalid_argument node.os: mismatch (an Enroll rule the browser flow's capture does not hold either).
 var requiredOutcomes = map[string][]string{
 	"BeginNodeSignIn": {"ok", "VALIDATION/invalid_argument", "RESOURCE/rate_limited", "CONFLICT/already_exists:node_key", "STATE/not_activated"},
 	"CompleteNodeSignIn": {"ok", "STATE/not_found", "STATE/expired", "CONFLICT/code_reused", "AUTHENTICATION/unauthenticated", "VALIDATION/invalid_argument",
 		"CONFLICT/already_exists:node", "CONFLICT/already_exists:node_key", "AUTHENTICATION/credential_revoked", "RESOURCE/quota_exceeded", "RESOURCE/rate_limited",
 		"STATE/not_activated"},
-	"RefreshNodeSession": {"ok", "AUTHENTICATION/unauthenticated", "AUTHENTICATION/credential_revoked", "AUTHORIZATION/permission_denied"},
-	"ReportNodeInfo":     {"ok", "VALIDATION/invalid_argument", "CONFLICT/command_id_reused"},
-	"SignOutNode":        {"ok", "transport:auth.credential_revoked"},
+	"RefreshNodeSession":       {"ok", "AUTHENTICATION/unauthenticated", "AUTHENTICATION/credential_revoked", "AUTHORIZATION/permission_denied"},
+	"ReportNodeInfo":           {"ok", "VALIDATION/invalid_argument", "CONFLICT/command_id_reused"},
+	"SignOutNode":              {"ok", "transport:auth.credential_revoked"},
+	"StartDeviceAuthorization": {"ok", "VALIDATION/invalid_argument", "RESOURCE/rate_limited", "CONFLICT/already_exists:node_key", "STATE/not_activated"},
+	"PollDeviceAuthorization": {"ok", "STATE/not_found", "AUTHENTICATION/unauthenticated", "VALIDATION/invalid_argument", "RESOURCE/rate_limited",
+		"CONFLICT/already_exists:node", "CONFLICT/already_exists:node_key", "AUTHENTICATION/credential_revoked", "RESOURCE/quota_exceeded", "STATE/not_activated"},
 }
 
-// TestFleetExchangeCapture (E1-25, delivery-5): captures the node-facing exchanges (Begin, Complete, Refresh, ReportNodeInfo,
-// SignOutNode) with every outcome of requiredOutcomes and compares them with the committed directory; with
+// requiredPollStates are the state values a Poll's ok cases must hold together.
+var requiredPollStates = []fleetv1.DeviceAuthorizationState{fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_PENDING,
+	fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_SLOW_DOWN, fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_APPROVED,
+	fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_DENIED, fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_EXPIRED,
+	fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_COMPLETED}
+
+// TestFleetExchangeCapture (E1-25 and E2-6, delivery-5): captures the node-facing exchanges (Begin, Complete, Start, Poll in every
+// state value, Refresh, ReportNodeInfo, SignOutNode) with every outcome of requiredOutcomes and compares them with the committed directory; with
 // ARCFORGES_UPDATE_EXCHANGES=1 it writes the directory instead (ARCFORGES_CENTER_COMMIT names the commit in the headers; npx prettier
 // --write formats the files, and the comparison reads them as JSON).
 func TestFleetExchangeCapture(t *testing.T) {
 	clear(issued)
-	h := newHarness(t, settings{policy: `{"maxNodesPerAccount": 2, "nodeCompletePrefixLimit": 3, "nodeFlowPrefixLimit": 20}`})
+	h := newHarness(t, settings{policy: `{"maxNodesPerAccount": 2, "nodeCompletePrefixLimit": 3, "nodeFlowPrefixLimit": 20, "nodePollPrefixLimit": 3}`})
 	off := newHarness(t, settings{surfaces: "identity,pages"})
 	c := &capturer{t: t, p: newPlaceholders(t), cases: map[string]exchange{}}
 	at := call{h: h}
@@ -575,6 +632,8 @@ func TestFleetExchangeCapture(t *testing.T) {
 	// The correct code again revokes the family it delivered (last: it ends the node credential).
 	complete("code-reused", s, s.code, pkce.Verifier, at)
 
+	captureDeviceSignIn(t, c, h, off, flood)
+
 	// Every required outcome of every node-facing method has a case, and every case has a required outcome.
 	for method, outcomes := range requiredOutcomes {
 		for _, outcome := range outcomes {
@@ -585,6 +644,17 @@ func TestFleetExchangeCapture(t *testing.T) {
 			if !found {
 				t.Errorf("%s has no case with the outcome %s", method, outcome)
 			}
+		}
+	}
+	states := map[fleetv1.DeviceAuthorizationState]bool{}
+	for _, captured := range c.cases {
+		if captured.Method == "PollDeviceAuthorization" && captured.Outcome == "ok" {
+			states[captured.state] = true
+		}
+	}
+	for _, state := range requiredPollStates {
+		if !states[state] {
+			t.Errorf("PollDeviceAuthorization has no case answering %s", state)
 		}
 	}
 	for name, captured := range c.cases {
@@ -661,4 +731,133 @@ func writeExchanges(t *testing.T, cases map[string]exchange) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// captureDeviceSignIn captures the device-code sign-in's node-facing exchanges (E2-6): Start (ok, invalid, a held key, the shared Begin
+// bucket full, the surface off) and Poll in every state value (PENDING, SLOW_DOWN, APPROVED with credentials, COMPLETED after
+// delivery, DENIED, EXPIRED) and each refusal a node meets. The account steps up and decides through the served API (not captured:
+// those are browser-facing). Some states are SEEDED by SQL (an expired authorization, a revoked installation).
+func captureDeviceSignIn(t *testing.T, c *capturer, h, off *harness, flood call) {
+	t.Helper()
+	at := call{h: h}
+	approver := h.person(1)
+	start := func(name string, node *nodetest.Node, to call) *deviceSignIn {
+		t.Helper()
+		response := capture(c, to, "StartDeviceAuthorization", name, node.StartRequest(), &fleetv1.NodeEnrollmentServiceStartDeviceAuthorizationResponse{})
+		return &deviceSignIn{node: node, authorization: response.GetValue().GetAuthorization()}
+	}
+	started := func(node *nodetest.Node) *deviceSignIn {
+		t.Helper()
+		response := rpc(h, startPath, node.StartRequest(), "", &fleetv1.NodeEnrollmentServiceStartDeviceAuthorizationResponse{})
+		if response.GetError() != nil {
+			t.Fatalf("start: %s", failure(response.GetError()))
+		}
+		c.p.deviceCode(response.GetValue().GetAuthorization().GetDeviceCode())
+		return &deviceSignIn{node: node, authorization: response.GetValue().GetAuthorization()}
+	}
+	decide := func(p *person, d *deviceSignIn, approve bool) {
+		t.Helper()
+		code := d.authorization.GetUserCode()
+		if looked := h.lookup(p, code); looked.GetError() != nil {
+			t.Fatalf("lookup: %s", failure(looked.GetError()))
+		}
+		if approve {
+			h.stepUpCode(p, code, false)
+		}
+		if decided := h.decideDevice(p.bearer, command(), code, approve); decided.GetError() != nil {
+			t.Fatalf("decide: %s", failure(decided.GetError()))
+		}
+	}
+	poll := func(name string, d *deviceSignIn, code string, proof []byte, to call) *fleetv1.NodeEnrollmentServicePollDeviceAuthorizationResponse {
+		t.Helper()
+		if proof == nil {
+			proof = d.node.PollProof(publicBaseURL, code)
+		}
+		response := capture(c, to, "PollDeviceAuthorization", name, d.node.PollRequest(code, proof), &fleetv1.NodeEnrollmentServicePollDeviceAuthorizationResponse{})
+		if credentials := response.GetValue().GetCredentials(); credentials != nil {
+			h.secrets = append(h.secrets, credentials.GetAccessToken(), credentials.GetRefreshToken())
+		}
+		return response
+	}
+
+	held := fixedNode(t, 0x2a) // enrolled by the browser sign-in's capture: its key is registered
+	invalid := held.StartRequest()
+	invalid.NodePublicKey = nil
+	capture(c, at, "StartDeviceAuthorization", "invalid-key", invalid, &fleetv1.NodeEnrollmentServiceStartDeviceAuthorizationResponse{})
+	capture(c, at, "StartDeviceAuthorization", "key-registered", held.StartRequest(), &fleetv1.NodeEnrollmentServiceStartDeviceAuthorizationResponse{})
+	capture(c, flood, "StartDeviceAuthorization", "rate-limited", fixedNode(t, 0x40).StartRequest(), &fleetv1.NodeEnrollmentServiceStartDeviceAuthorizationResponse{})
+	capture(c, call{h: off}, "StartDeviceAuthorization", "surface-off", fixedNode(t, 0x40).StartRequest(), &fleetv1.NodeEnrollmentServiceStartDeviceAuthorizationResponse{})
+
+	pending := start("ok", fixedNode(t, 0x41), at)
+	poll("pending", pending, pending.authorization.GetDeviceCode(), nil, at)
+	poll("slow-down", pending, pending.authorization.GetDeviceCode(), nil, at)
+	stranger := fixedNode(t, 0x42)
+	poll("unauthenticated", pending, pending.authorization.GetDeviceCode(), stranger.PollProof(publicBaseURL, pending.authorization.GetDeviceCode()), at)
+	unknown := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x79}, 32))
+	poll("not-found", pending, unknown, nil, at)
+	poll("invalid-device-code", pending, "", nil, at)
+	capture(c, call{h: off}, "PollDeviceAuthorization", "surface-off", pending.node.PollRequest(pending.authorization.GetDeviceCode(),
+		pending.node.PollProof(publicBaseURL, pending.authorization.GetDeviceCode())), &fleetv1.NodeEnrollmentServicePollDeviceAuthorizationResponse{})
+	burst := call{h: h, ip: "192.0.2.30"}
+	for range 3 {
+		client := h.client
+		client.ClientIP = burst.ip
+		if _, err := client.Post(pollPath, pending.node.PollRequest(unknown, pending.node.PollProof(publicBaseURL, unknown)), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	poll("rate-limited", pending, unknown, nil, burst)
+
+	approved := started(fixedNode(t, 0x43))
+	decide(approver, approved, true)
+	poll("approved", approved, approved.authorization.GetDeviceCode(), nil, at)
+	poll("completed", approved, approved.authorization.GetDeviceCode(), nil, at)
+	denied := started(fixedNode(t, 0x44))
+	decide(approver, denied, false)
+	poll("denied", denied, denied.authorization.GetDeviceCode(), nil, at)
+	expired := started(fixedNode(t, 0x45))
+	h.db.Exec("UPDATE fleet.device_authorization SET created_at = now() - interval '11 minutes', expires_at = now() - interval '1 minute', rev = rev + 1 WHERE node_id = '" +
+		expired.node.ID.String() + "'")
+	poll("expired", expired, expired.authorization.GetDeviceCode(), nil, at)
+
+	// Enroll's refusals at the delivering poll: the node ID live in another account, the key registered live, the key retired, the cap.
+	squatted := started(fixedNode(t, 0x46))
+	decide(approver, squatted, true)
+	squatter, err := nodetest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	squatter.ID = squatted.node.ID
+	elsewhere := h.db.Account(1)
+	h.enrollNode(elsewhere, h.db.Session(elsewhere, 1), squatter)
+	poll("node-id-of-another-account", squatted, squatted.authorization.GetDeviceCode(), nil, at)
+	keyHeld := started(fixedNode(t, 0x47))
+	decide(approver, keyHeld, true)
+	holder, err := nodetest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder.Key, holder.PublicKey = keyHeld.node.Key, keyHeld.node.PublicKey
+	keeper := h.db.Account(1)
+	h.enrollNode(keeper, h.db.Session(keeper, 1), holder)
+	poll("key-held", keyHeld, keyHeld.authorization.GetDeviceCode(), nil, at)
+	retired := started(fixedNode(t, 0x48))
+	decide(approver, retired, true)
+	former, err := nodetest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	former.Key, former.PublicKey = retired.node.Key, retired.node.PublicKey
+	retiree := h.db.Account(1)
+	formerEnrollment := h.enrollNode(retiree, h.db.Session(retiree, 1), former)
+	h.db.Exec("UPDATE device.installation SET revoked_at = now(), rev = rev + 1 WHERE installation_id = '" + formerEnrollment.InstallationID.String() + "'")
+	poll("key-retired", retired, retired.authorization.GetDeviceCode(), nil, at)
+	capped := started(fixedNode(t, 0x49))
+	decide(approver, capped, true) // the approver holds one node (0x43); a second fills the cap of 2 before the poll
+	filler, err := nodetest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.enrollNode(approver.id, h.db.Session(approver.id, 1), filler)
+	poll("quota", capped, capped.authorization.GetDeviceCode(), nil, at)
 }

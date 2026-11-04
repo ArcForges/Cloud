@@ -267,6 +267,11 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		// decision and the completion (or the reuse revocation it detects) are effects. Package oneuse opens no transaction.
 		"review a node sign-in": auxiliary, "end a node sign-in after a failed proof": auxiliary, "begin a node sign-in": effect,
 		"decide a node sign-in": effect, "complete a node sign-in": effect,
+		// AF-CTR-04 E2: the device-code sign-in. A lookup is a review (a mark) that gives the entry reservations back; a give-back
+		// outside a decision and a poll's record (the expiry, SLOW_DOWN, the last poll) are bookkeeping; Start's insert and a poll's
+		// delivery (or the reuse revocation it detects) are effects; the decision runs under its receipt above.
+		"look up a device code": auxiliary, "give an entry reservation back": auxiliary, "record a device authorization's poll": auxiliary,
+		"start a device authorization": effect, "deliver a device authorization": effect,
 	}
 	found := map[string]string{}
 	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages", "../entitlement", "../fleet",

@@ -111,6 +111,9 @@ const (
 	TargetDevice     = "device"
 	// TargetFlow is a node sign-in flow, named by its flow ID (AF-CTR-04: the approval's evidence is bound to the flow it decides).
 	TargetFlow = "flow"
+	// TargetUserCode is a device authorization, named by its normalized user code, 8 upper-case letters (AF-CTR-04 E2: the approval's
+	// evidence is bound to the code it decides; identity.TextTargetHash).
+	TargetUserCode = "user_code"
 )
 
 // UpgradeClass is the center's own step-up class for a mobile.limited session that verifies only to unlock everything (android.md
@@ -198,6 +201,15 @@ func Operations() []Operation {
 		{Path: fleetv1connect.NodeEnrollmentServiceApproveNodeSignInProcedure, ID: "fleet.approveNodeSignIn", Risk: "R3", Audit: AuditInTransaction, Session: true,
 			MobileLimited: Upgrade, StepUp: EvidenceOnApprove, Target: TargetFlow},
 		{Path: fleetv1connect.NodeEnrollmentServiceCompleteNodeSignInProcedure, ID: "fleet.completeNodeSignIn", Risk: "R1"},
+		// The device-code sign-in (E2): Start and Poll are anonymous (Poll's proof is the device code and the node key proof; its effect is
+		// audited by the domain, fleet.node.enrolled); an account looks a user code up (a review, never under a receipt) and decides it
+		// under a command receipt of the account, approval with step-up evidence of class fleet.approveDeviceCode bound to the normalized
+		// user code, denial without (Q1). A restricted account cannot enroll a node (Q24) and a mobile.limited session upgrades first.
+		{Path: fleetv1connect.NodeEnrollmentServiceStartDeviceAuthorizationProcedure, ID: "fleet.startDeviceAuthorization", Risk: "R1"},
+		{Path: fleetv1connect.NodeEnrollmentServicePollDeviceAuthorizationProcedure, ID: "fleet.pollDeviceAuthorization", Risk: "R1"},
+		{Path: fleetv1connect.NodeEnrollmentServiceLookupDeviceCodeProcedure, ID: "fleet.lookupDeviceCode", Risk: "R2", Session: true, MobileLimited: Upgrade},
+		{Path: fleetv1connect.NodeEnrollmentServiceApproveDeviceCodeProcedure, ID: "fleet.approveDeviceCode", Risk: "R3", Audit: AuditInTransaction, Session: true,
+			MobileLimited: Upgrade, StepUp: EvidenceOnApprove, Target: TargetUserCode, Receipt: true},
 		{Path: fleetv1connect.NodeEnrollmentServiceRefreshNodeSessionProcedure, ID: "fleet.refreshNodeSession", Risk: "R1"},
 		{Path: fleetv1connect.NodeEnrollmentServiceReportNodeInfoProcedure, ID: "fleet.reportNodeInfo", Risk: "R1", Session: true, Scopes: []string{"node"},
 			Receipt: true},

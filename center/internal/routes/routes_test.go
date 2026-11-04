@@ -60,11 +60,15 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.publicapi.v1.IdentityService/RevokeAllSessions session 4096",
 		"/arcforges.publicapi.v1.DeviceService/Rename session 4096",
 		"/arcforges.publicapi.v1.DeviceService/Revoke session 4096",
-		// AF-CTR-04 E1b: the browser sign-in; E1a: the node methods.
+		// AF-CTR-04 E1b: the browser sign-in; E2: the device-code sign-in; E1a: the node methods.
 		"/arcforges.fleet.v1.NodeEnrollmentService/BeginNodeSignIn anonymous 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/GetNodeSignInFlow session 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/ApproveNodeSignIn session 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/CompleteNodeSignIn anonymous 4096",
+		"/arcforges.fleet.v1.NodeEnrollmentService/StartDeviceAuthorization anonymous 4096",
+		"/arcforges.fleet.v1.NodeEnrollmentService/PollDeviceAuthorization anonymous 4096",
+		"/arcforges.fleet.v1.NodeEnrollmentService/LookupDeviceCode session 4096",
+		"/arcforges.fleet.v1.NodeEnrollmentService/ApproveDeviceCode session 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/RefreshNodeSession anonymous 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/ReportNodeInfo session 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/SignOutNode session 4096",
@@ -74,13 +78,13 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))
 	}
 	for index, row := range table.SurfaceRows {
-		// The fleet rows carry the contract's deadline of each method (F3: 5 s for GetNodeSignInFlow, 15 s for CompleteNodeSignIn,
-		// 10 s for the others); the identity rows the identity surface's 15 s.
+		// The fleet rows carry the contract's deadline of each method (F3: 5 s for GetNodeSignInFlow and LookupDeviceCode, 15 s for
+		// CompleteNodeSignIn, 10 s for the others); the identity rows the identity surface's 15 s.
 		surface, deadline := SurfaceIdentity, 15_000
 		if strings.HasPrefix(row.Path, "/arcforges.fleet.v1.") {
 			surface, deadline = SurfaceFleet, 10_000
 			switch row.Path {
-			case "/arcforges.fleet.v1.NodeEnrollmentService/GetNodeSignInFlow":
+			case "/arcforges.fleet.v1.NodeEnrollmentService/GetNodeSignInFlow", "/arcforges.fleet.v1.NodeEnrollmentService/LookupDeviceCode":
 				deadline = 5_000
 			case "/arcforges.fleet.v1.NodeEnrollmentService/CompleteNodeSignIn":
 				deadline = 15_000

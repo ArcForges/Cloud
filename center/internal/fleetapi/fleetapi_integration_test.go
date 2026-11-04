@@ -29,21 +29,22 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
-// TestFleetRowsAreTheServedMethods (E1-1, contracts-8): parts E1a and E1b serve exactly the browser sign-in (BeginNodeSignIn,
-// GetNodeSignInFlow, ApproveNodeSignIn, CompleteNodeSignIn), RefreshNodeSession, ReportNodeInfo and SignOutNode; every other
-// NodeEnrollmentService method is on the not-served list (it shrinks with E2) and answers UNIMPLEMENTED with no Worker row; each
-// served method has one operation row and no row carries a Feature (never gated, AD-0021 section 13a). With the surface off the seven
-// methods answer STATE/not_activated with state.reason fleet.
+// TestFleetRowsAreTheServedMethods (E1-1, contracts-8): parts E1a, E1b and E2 serve exactly the browser sign-in (BeginNodeSignIn,
+// GetNodeSignInFlow, ApproveNodeSignIn, CompleteNodeSignIn), the device-code sign-in (StartDeviceAuthorization,
+// PollDeviceAuthorization, LookupDeviceCode, ApproveDeviceCode), RefreshNodeSession, ReportNodeInfo and SignOutNode; every other
+// NodeEnrollmentService method is on the not-served list and answers UNIMPLEMENTED with no Worker row; each served method has one
+// operation row and no row carries a Feature (never gated, AD-0021 section 13a). With the surface off the eleven methods answer
+// STATE/not_activated with state.reason fleet.
 func TestFleetRowsAreTheServedMethods(t *testing.T) {
 	served := map[string]bool{}
 	for _, method := range routes.FleetMethods() {
 		served[method.Path] = true
 	}
-	notServed := []string{"StartDeviceAuthorization", "PollDeviceAuthorization", "LookupDeviceCode", "ApproveDeviceCode", "CreatePhonePairing", "ClaimPhonePairing", "GetPhonePairing",
+	notServed := []string{"CreatePhonePairing", "ClaimPhonePairing", "GetPhonePairing",
 		"ConfirmPhonePairing", "PollPhonePairing", "IssueNodeCertificate", "GetLanHints", "ReportLanEndpoints", "RefreshEntitlementToken",
 		"GetEntitlementKeys", "BeginSupportUpload", "CompleteSupportUpload"}
 	methods := fleetv1.File_arcforges_fleet_v1_fleet_proto.Services().ByName("NodeEnrollmentService").Methods()
-	if methods.Len() != len(served)+len(notServed) || len(served) != 7 {
+	if methods.Len() != len(served)+len(notServed) || len(served) != 11 {
 		t.Fatalf("%d descriptor methods, %d served, %d not served", methods.Len(), len(served), len(notServed))
 	}
 	for _, name := range notServed {

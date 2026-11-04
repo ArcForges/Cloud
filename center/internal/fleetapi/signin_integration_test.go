@@ -131,12 +131,18 @@ var codePattern = regexp.MustCompile(`code is ([A-Z]{4})-([A-Z]{4})\.`)
 // stepUp proves a step-up of the person's session for a class and target, by passkey or by the e-mail code the inbox received.
 func (h *harness) stepUp(p *person, class string, target platform.ID, byEmail bool) {
 	h.t.Helper()
+	h.stepUpHash(p, class, identity.TargetHash(class, p.id, target), byEmail)
+}
+
+// stepUpHash proves a step-up of the person's session for a class and a target hash as the client computes it.
+func (h *harness) stepUpHash(p *person, class, targetHash string, byEmail bool) {
+	h.t.Helper()
 	method := publicapiv1.AuthMethod_AUTH_METHOD_PASSKEY
 	if byEmail {
 		method = publicapiv1.AuthMethod_AUTH_METHOD_EMAIL
 	}
 	begun := rpc(h, "/arcforges.publicapi.v1.IdentityService/BeginStepUp", &publicapiv1.IdentityServiceBeginStepUpRequest{Meta: meta(), OperationClass: proto.String(class),
-		Method: method.Enum(), TargetHash: proto.String(identity.TargetHash(class, p.id, target))}, p.bearer, &publicapiv1.IdentityServiceBeginStepUpResponse{})
+		Method: method.Enum(), TargetHash: proto.String(targetHash)}, p.bearer, &publicapiv1.IdentityServiceBeginStepUpResponse{})
 	if begun.GetError() != nil {
 		h.t.Fatalf("begin a step-up of %s: %s", class, failure(begun.GetError()))
 	}
@@ -494,8 +500,13 @@ func TestTheSignInRowsUpgradeAMobileLimitedSession(t *testing.T) {
 	requests := map[string]proto.Message{
 		reviewPath:  &fleetv1.NodeEnrollmentServiceGetNodeSignInFlowRequest{Meta: meta(), FlowId: flow},
 		approvePath: &fleetv1.NodeEnrollmentServiceApproveNodeSignInRequest{Meta: meta(), FlowId: flow, Approve: proto.Bool(true)},
+		// AF-CTR-04 E2: the device-code sign-in's account rows.
+		lookupPath:        &fleetv1.NodeEnrollmentServiceLookupDeviceCodeRequest{Meta: meta(), UserCode: proto.String("BCDF-GHJK")},
+		approveDevicePath: &fleetv1.NodeEnrollmentServiceApproveDeviceCodeRequest{Meta: command(), UserCode: proto.String("BCDF-GHJK"), Approve: proto.Bool(true)},
 	}
-	writes := func() int { return h.count("SELECT coalesce(sum(rev), 0)::int FROM fleet.node_sign_in") }
+	writes := func() int {
+		return h.count("SELECT (SELECT coalesce(sum(rev), 0) FROM fleet.node_sign_in) + (SELECT coalesce(sum(count), 0) FROM platform.rate_limit)")
+	}
 	for _, operation := range access.Operations() {
 		if !operation.Session || operation.MobileLimited == access.Allowed || !strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.") {
 			continue
