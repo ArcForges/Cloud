@@ -516,20 +516,21 @@ verbatim for the ArcForges node's FakeCenter conformance test; nothing checks it
 
 ## Test vectors for the node
 
-Two files in `center/internal/fleet/testdata` hold the center's side of the vector lists the ArcForges node shares with it
+Two files in `center/internal/fleet/testdata` hold the center's side of the vector lists the ArcForges node is to share with it
 (protocol-4 item 3, node-13). `url-vectors.json` lists public base URLs (the official `https://arcforges.com/api`, a path prefix, a
 port, a punycode host, loopback `http`, the 462- and 463-character fleet bound, and refused forms) with the verdicts of
 `config.ParsePublicBaseURL` and of the whole configuration loader of a fleet center in both modes, the URLs a fleet center derives
 for an accepted one (`/connect#flow=`, `/activate`, `/activate#code=`) and the proof audience digest, and the loopback redirect URIs
-with the approval and denial redirects. `node-key-proof-vectors.json` holds fixed test-only P-256 keys (public keys only; the private
-scalars are SHA-256 of a public label in the generator, never a node's key) with their fingerprints, the proof message of both
-purposes byte for byte, deterministic (RFC 6979) low-S proofs (one with a leading zero byte in r, one in s, one normalized from a high
-s) and refused proofs (high-S, DER, wrong lengths, out-of-range r or s, another audience, purpose, node, flow, code or key, a
-reordered or truncated message), each with `fleet.VerifyNodeKeyProof`'s verdict. `TestFleetVectorFiles` generates both from the
-production functions and fails when a committed file differs; `ARCFORGES_UPDATE_VECTORS=1 go test -run TestFleetVectorFiles
+with the approval and denial redirects. `node-key-proof-vectors.json` holds fixed test-only keys, never a node's key, as public
+keys only (the private scalars are public test values: SHA-256 of a public label for the two P-256 test keys, the capture harness's
+32 bytes of 0x2a for the capture node's key, 48 bytes of 0x2b for a refused P-384 key) with their fingerprints, the proof message of
+both purposes byte for byte, deterministic (RFC 6979) low-S proofs (one with a leading zero byte in r, one in s, three normalized
+from a high s) and refused proofs (high-S, DER, wrong lengths, out-of-range r or s, another audience, purpose, node, flow, code or
+key, a reordered or truncated message), each with `fleet.VerifyNodeKeyProof`'s verdict. `TestFleetVectorFiles` generates both from
+the production functions and fails when a committed file differs; `ARCFORGES_UPDATE_VECTORS=1 go test -run TestFleetVectorFiles
 ./internal/fleet` rewrites them, then `npx prettier --write` formats them (the comparison reads them as JSON). They are made for the
-ArcForges node to vendor byte for byte with their source commit, as it vendors the exchange captures (AF-CTR-04 part N1); nothing
-in this repository checks a node against them.
+ArcForges node (AF-CTR-04 part N1) to vendor byte for byte with their source commit, as it is to vendor the exchange captures;
+nothing in this repository checks a node against them.
 
 ## The pages
 

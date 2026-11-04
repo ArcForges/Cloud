@@ -28,9 +28,11 @@ import (
 // verifier, node key check and fingerprint) over FIXED inputs. The signatures are made by FIXED TEST-ONLY P-256 keys (vectorKey),
 // deterministically (RFC 6979), and normalized to the lower half as a node normalizes them. Nothing here reaches a database.
 //
-// The two files are the center's side of the vector lists the ArcForges node vendors (protocol-4 item 3, node-13): the node copies
-// them byte for byte with their source commit and checks its own URL canonicalization and derivation, proof message, verifier and
-// fingerprint against them. They are generated from the production functions; a file that differs from a fresh generation fails here.
+// The two files are the center's side of the vector lists the node is to share with it (protocol-4 item 3, node-13): they are made
+// for the ArcForges node (part N1) to vendor byte for byte with their source commit, instead of a hand-made mirror of the center's
+// rules, and to check its own URL canonicalization and derivation, proof message, verifier and fingerprint against; nothing in this
+// repository checks a node against them. They are generated from the production functions; a file that differs from a fresh
+// generation fails here.
 
 // The vector files and the variable that rewrites them.
 const (
@@ -229,7 +231,7 @@ func urlVectors(t *testing.T) urlVectorFile {
 	file := urlVectorFile{
 		SchemaVersion: vectorsSchema, Source: "TestFleetVectorFiles (center/internal/fleet/vectors_test.go)",
 		Rules: []string{
-			"publicBaseUrl is config.ParsePublicBaseURL in the mode; the canonical form is the input itself, so an accepted value is never rewritten",
+			"publicBaseUrl is config.ParsePublicBaseURL in the mode; the canonical form it returns is the input itself (the generator fails otherwise), so an accepted value is never rewritten",
 			"fleetCenter is config.Load of a center of the mode that serves identity, pages and fleet: the public base URL is at most maxFleetPublicBaseUrlLength characters and its host is a domain name (passkeys), not an IP address",
 			"derived is present when a fleet center of either mode accepts the input: authorizeUrl = input + /connect#flow= + flowIdText, verificationUri = input + /activate, verificationUriComplete = input + /activate#code= + displayUserCode, each at most maxDerivedUrlLength characters; proofAudienceSha256 is the SHA-256 of the input's bytes, the audience of a node key proof",
 			"a refusal text is informative; the verdict is the accepted flag",
@@ -242,8 +244,15 @@ func urlVectors(t *testing.T) urlVectorFile {
 	}
 	for _, input := range inputs {
 		vector := baseURLVector{Name: input.name, Input: input.value, Length: len(input.value)}
+		canonical := ""
 		for _, mode := range []config.Mode{config.SelfHosted, config.OfficialHosted} {
-			_, parsed := config.ParsePublicBaseURL(input.value, mode)
+			value, parsed := config.ParsePublicBaseURL(input.value, mode)
+			if parsed == nil {
+				if value != input.value {
+					t.Fatalf("%q: ParsePublicBaseURL rewrites it to %q; the vectors assume an accepted value is its own canonical form", input.value, value)
+				}
+				canonical = value
+			}
 			verdicts := modeVerdicts{PublicBaseURL: verdictOf(parsed), FleetCenter: verdictOf(loadFleetCenter(input.value, mode))}
 			if verdicts.FleetCenter.Accepted && !verdicts.PublicBaseURL.Accepted {
 				t.Fatalf("%q: a fleet center accepts what ParsePublicBaseURL refuses", input.value)
@@ -255,9 +264,10 @@ func urlVectors(t *testing.T) urlVectorFile {
 			}
 		}
 		if vector.SelfHosted.FleetCenter.Accepted || vector.OfficialHosted.FleetCenter.Accepted {
-			audience := sha256.Sum256([]byte(input.value))
-			derived := &derivedURLs{ProofAudienceSHA256: hex.EncodeToString(audience[:]), AuthorizeURL: AuthorizeURL(input.value, vectorFlowID),
-				VerificationURI: VerificationURI(input.value), VerificationURIComplete: VerificationURIComplete(input.value, vectorUserCode)}
+			// Derived from the canonical value the center keeps (equal to the input, checked above), as the center derives them.
+			audience := sha256.Sum256([]byte(canonical))
+			derived := &derivedURLs{ProofAudienceSHA256: hex.EncodeToString(audience[:]), AuthorizeURL: AuthorizeURL(canonical, vectorFlowID),
+				VerificationURI: VerificationURI(canonical), VerificationURIComplete: VerificationURIComplete(canonical, vectorUserCode)}
 			for _, derivedURL := range []string{derived.AuthorizeURL, derived.VerificationURI, derived.VerificationURIComplete} {
 				derived.LongestLength = max(derived.LongestLength, len(derivedURL))
 			}
@@ -463,15 +473,17 @@ func proofVectors(t *testing.T) proofVectorFile {
 
 	file := proofVectorFile{
 		SchemaVersion: vectorsSchema, Source: "TestFleetVectorFiles (center/internal/fleet/vectors_test.go)",
-		TestOnly: "Every key here is a fixed TEST-ONLY key (its private scalar is the SHA-256 of a public label in the generator), never a node's " +
-			"key; the file holds public keys and signatures only.",
+		TestOnly: "Every key here is a fixed TEST-ONLY key, never a node's key, and the file holds public keys and signatures only. The private " +
+			"scalars are public test values: test-key-1 and test-key-2 are the SHA-256 of a public label in the generator; capture-node-0x2a is " +
+			"the exchange capture harness's fixed scalar, 32 bytes of 0x2a; the P-384 key (a refused key) is 48 bytes of 0x2b; the other " +
+			"refused keys are forms of test-key-1.",
 		Rules: []string{
 			"message = domain (28 bytes) || purpose (1 byte) || SHA-256(audience as UTF-8) (32 bytes) || node ID (16 bytes) || binding; every field before the binding has a fixed length",
 			"binding: purpose 0x01 (CompleteNodeSignIn) = flow ID (16 bytes) || code (UTF-8, 43 characters); purpose 0x02 (PollDeviceAuthorization) = device code (UTF-8, 43 characters)",
 			"the audience is the full canonical center URL the node is configured with; the center uses its own public base URL",
 			"proof = ES256 over SHA-256(message) as IEEE P1363 r || s, 32 bytes each, r and s in [1, n-1] and s <= n/2 (low-S); the node normalizes s, the center refuses a high-S proof",
 			"nodeKey names the key (keys[].name) whose spki (PKIX DER, 91 bytes for P-256) verifies the proof; accepted is fleet.VerifyNodeKeyProof's verdict",
-			"messageConstruction marks a message that is not ProofMessage of the vector's inputs (a negative case); otherwise message = ProofMessage(purpose, audience, nodeId, binding)",
+			"messageConstruction marks a message that is not ProofMessage of the vector's inputs (a negative case): such a vector is verified from its message alone, and its input fields name what the message was made from; otherwise message = ProofMessage(purpose, audience, nodeId, binding)",
 			"leadingZero names r or s when its first byte is 0x00 (a fixed-width encoder must keep it); rawSignatureWasHighS marks a deterministic (RFC 6979) signature whose s was normalized to n - s",
 			"fingerprint = the first 10 bytes of SHA-256(spki) in upper-case hexadecimal, five groups of four joined by '-'; fingerprintTail is the last group",
 		},
@@ -641,6 +653,7 @@ func proofVectors(t *testing.T) proofVectorFile {
 	// The same complete proof under purpose 0x02 with the same binding bytes (flow ID || code).
 	refuse("refused: the complete proof presented with purpose 0x02", "another purpose", complete, "purpose 0x02 with the complete binding",
 		ProofMessage(ProofPoll, audience, nodeID, CompleteBinding(vectorFlowID, complete.code)), completeProof, "test-key-1")
+	file.Proofs[len(file.Proofs)-1].Purpose = ProofPoll // the purpose byte of its message; flowId and code are its binding
 	refuse("refused: the poll proof presented for a complete message", "another purpose and binding", complete, "", nil, pollProof, "test-key-1")
 	message := complete.message()
 	refuse("refused: the message without its domain", "the domain is part of the message", complete, "the message without its 28-byte domain",
@@ -663,7 +676,7 @@ func proofVectors(t *testing.T) proofVectorFile {
 		}
 		seen["zero "+vector.LeadingZero] = seen["zero "+vector.LeadingZero] || !refused
 		seen["high"] = seen["high"] || !refused && vector.RawSignatureWasHighS
-		seen[fmt.Sprintf("purpose %d", vector.Purpose)] = true
+		seen[fmt.Sprintf("purpose %d", vector.Purpose)] = seen[fmt.Sprintf("purpose %d", vector.Purpose)] || !refused
 	}
 	for _, want := range []string{"zero r", "zero s", "high", "purpose 1", "purpose 2"} {
 		if !seen[want] {

@@ -773,10 +773,13 @@ test("every write plan leaves no guard row behind after a refusal or a commit", 
   assert.equal(db.rollbacks(), 2);
 });
 
-// Runs last (node:test runs a file's top-level tests in order): the three race tests above each made one scratch directory, and the
-// clean-up of each test removed it.
-test("the shared-file race tests leave no identity-* scratch directory behind", () => {
-  assert.equal(scratches.length, 3);
+// Runs last (node:test runs a file's top-level tests in order): each race test above that ran made one scratch directory, and its
+// clean-up removed it. A run that selects this test alone has no directory to check and skips.
+test("the shared-file race tests leave no identity-* scratch directory behind", (t) => {
+  if (scratches.length === 0) {
+    t.skip("no shared-file race test ran");
+    return;
+  }
   for (const directory of scratches)
     assert.equal(existsSync(directory), false, `${directory} remains`);
 });

@@ -686,9 +686,10 @@ func TestFleetExchangeCapture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var stored exchange
-		if err = json.Unmarshal(data, &stored); err != nil {
-			t.Fatal(err)
+		stored, err := decodeExchange(data)
+		if err != nil {
+			t.Errorf("%s: %v: run ARCFORGES_UPDATE_EXCHANGES=1 go test -run TestFleetExchangeCapture", file, err)
+			continue
 		}
 		captured, ok := c.cases[strings.TrimSuffix(filepath.Base(file), ".json")]
 		stored.CenterCommit, captured.CenterCommit = "", ""
@@ -706,6 +707,21 @@ func rpcFrom(h *harness, ip, path string, request proto.Message) {
 	if _, err := client.Post(path, request, ""); err != nil {
 		h.t.Fatal(err)
 	}
+}
+
+// decodeExchange reads a committed capture strictly: a key the format does not have, or anything after the object, is an error, so a
+// hand edit that decoding would drop can neither pass the comparison nor survive a rewrite.
+func decodeExchange(data []byte) (exchange, error) {
+	var stored exchange
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&stored); err != nil {
+		return exchange{}, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return exchange{}, fmt.Errorf("data after the capture object")
+	}
+	return stored, nil
 }
 
 func equalExchanges(a, b exchange) bool {
@@ -740,12 +756,10 @@ func writeExchanges(t *testing.T, cases map[string]exchange) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var stored exchange
-		if err = json.Unmarshal(data, &stored); err != nil {
-			t.Fatal(err)
-		}
+		// A file that does not decode strictly (an unknown key, trailing data) is rewritten, never kept.
+		stored, err := decodeExchange(data)
 		stored.CenterCommit, captured.CenterCommit = "", ""
-		unchanged[name] = equalExchanges(stored, captured)
+		unchanged[name] = err == nil && equalExchanges(stored, captured)
 	}
 	names := make([]string, 0, len(cases))
 	for name := range cases {

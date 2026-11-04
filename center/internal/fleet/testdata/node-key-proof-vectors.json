@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "source": "TestFleetVectorFiles (center/internal/fleet/vectors_test.go)",
-  "testOnly": "Every key here is a fixed TEST-ONLY key (its private scalar is the SHA-256 of a public label in the generator), never a node's key; the file holds public keys and signatures only.",
+  "testOnly": "Every key here is a fixed TEST-ONLY key, never a node's key, and the file holds public keys and signatures only. The private scalars are public test values: test-key-1 and test-key-2 are the SHA-256 of a public label in the generator; capture-node-0x2a is the exchange capture harness's fixed scalar, 32 bytes of 0x2a; the P-384 key (a refused key) is 48 bytes of 0x2b; the other refused keys are forms of test-key-1.",
   "rules": [
     "message = domain (28 bytes) || purpose (1 byte) || SHA-256(audience as UTF-8) (32 bytes) || node ID (16 bytes) || binding; every field before the binding has a fixed length",
     "binding: purpose 0x01 (CompleteNodeSignIn) = flow ID (16 bytes) || code (UTF-8, 43 characters); purpose 0x02 (PollDeviceAuthorization) = device code (UTF-8, 43 characters)",
     "the audience is the full canonical center URL the node is configured with; the center uses its own public base URL",
     "proof = ES256 over SHA-256(message) as IEEE P1363 r || s, 32 bytes each, r and s in [1, n-1] and s <= n/2 (low-S); the node normalizes s, the center refuses a high-S proof",
     "nodeKey names the key (keys[].name) whose spki (PKIX DER, 91 bytes for P-256) verifies the proof; accepted is fleet.VerifyNodeKeyProof's verdict",
-    "messageConstruction marks a message that is not ProofMessage of the vector's inputs (a negative case); otherwise message = ProofMessage(purpose, audience, nodeId, binding)",
+    "messageConstruction marks a message that is not ProofMessage of the vector's inputs (a negative case): such a vector is verified from its message alone, and its input fields name what the message was made from; otherwise message = ProofMessage(purpose, audience, nodeId, binding)",
     "leadingZero names r or s when its first byte is 0x00 (a fixed-width encoder must keep it); rawSignatureWasHighS marks a deterministic (RFC 6979) signature whose s was normalized to n - s",
     "fingerprint = the first 10 bytes of SHA-256(spki) in upper-case hexadecimal, five groups of four joined by '-'; fingerprintTail is the last group"
   ],
@@ -426,7 +426,7 @@
     },
     {
       "name": "refused: the complete proof presented with purpose 0x02",
-      "purpose": 1,
+      "purpose": 2,
       "audience": "https://center.example.test/api",
       "audienceSha256": "55156cbd799d474d88cfe9b1a65e06152be0f80f6b364671607be0b89d22a203",
       "nodeId": "0123456789abcdeffedcba9876543210",

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": "TestFleetVectorFiles (center/internal/fleet/vectors_test.go)",
   "rules": [
-    "publicBaseUrl is config.ParsePublicBaseURL in the mode; the canonical form is the input itself, so an accepted value is never rewritten",
+    "publicBaseUrl is config.ParsePublicBaseURL in the mode; the canonical form it returns is the input itself (the generator fails otherwise), so an accepted value is never rewritten",
     "fleetCenter is config.Load of a center of the mode that serves identity, pages and fleet: the public base URL is at most maxFleetPublicBaseUrlLength characters and its host is a domain name (passkeys), not an IP address",
     "derived is present when a fleet center of either mode accepts the input: authorizeUrl = input + /connect#flow= + flowIdText, verificationUri = input + /activate, verificationUriComplete = input + /activate#code= + displayUserCode, each at most maxDerivedUrlLength characters; proofAudienceSha256 is the SHA-256 of the input's bytes, the audience of a node key proof",
     "a refusal text is informative; the verdict is the accepted flag",
