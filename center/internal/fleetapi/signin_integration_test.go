@@ -49,6 +49,7 @@ type person struct {
 	email         string
 	emailID       platform.ID
 	bearer        string
+	refresh       string
 	sessionID     platform.ID
 }
 
@@ -109,7 +110,7 @@ VALUES ($1, $2, 2, 'email', $3, now(), 1)`, p.emailID, p.id, p.email); err != ni
 		h.t.Fatalf("sign-in: %s", failure(signedIn.GetError()))
 	}
 	native := signedIn.GetValue().GetSession()
-	p.bearer = native.GetAccessToken()
+	p.bearer, p.refresh = native.GetAccessToken(), native.GetRefreshToken()
 	copy(p.sessionID[:], native.GetSessionId().GetValue())
 	h.secrets = append(h.secrets, native.GetAccessToken(), native.GetRefreshToken())
 	if state != 1 {

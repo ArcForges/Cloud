@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "a8f4e75",
+  "method": "RefreshNodeSession",
+  "case": "account-token",
+  "outcome": "AUTHORIZATION/permission_denied",
+  "headers": {
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "00000000340a005230616672312e41774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [
+      "00000000970a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a11d1a7f0a117065726d697373696f6e5f64656e69656410031a256572726f722e617574686f72697a6174696f6e2e7065726d697373696f6e5f64656e69656422020801280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a11d3a2722250a096f7065726174696f6e1218666c6565742e726566726573684e6f646553657373696f6e"
+    ],
+    "trailers": "grpc-status: 0\r\n"
+  },
+  "normalized": [
+    "a 16-byte ID the center drew (correlation, flow, installation, account): the n-th distinct one is 15 bytes of 0xa0+n's kind byte and n",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token)",
+    "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
+    "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
+  ],
+  "sha256": "a517ff9be9d64e04f41eeee94bbc879fe66e8077880c36fa125baa1c50d57de1"
+}

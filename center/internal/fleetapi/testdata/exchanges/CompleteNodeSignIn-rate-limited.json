@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "a8f4e75",
+  "method": "CompleteNodeSignIn",
+  "case": "rate-limited",
+  "outcome": "RESOURCE/rate_limited",
+  "headers": {
+    "x-arcforges-client-ip": "192.0.2.10"
+  },
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "00000000b20a0052120a10a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2045a2b64336433643364336433643364336433643364336433643364336433643364336433643364336433643363622b4b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f7240ebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebeb"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [
+      "000000008c0a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1171a740a0c726174655f6c696d6974656410071a1b6572726f722e7265736f757263652e726174655f6c696d6974656422090803120508b0091000280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1173a2412220a146e6f64655f636f6d706c6574655f70726566697812030a0133220508b0091000"
+    ],
+    "trailers": "grpc-status: 0\r\n"
+  },
+  "normalized": [
+    "a 16-byte ID the center drew (correlation, flow, installation, account): the n-th distinct one is 15 bytes of 0xa0+n's kind byte and n",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token)",
+    "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
+    "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
+  ],
+  "sha256": "b957260cf15fc99fe66019d6171aaf797215ce1091fdf1827ab0007b838872e4"
+}

@@ -1,31 +1,35 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "source": "TestFleetExchangeCapture",
   "contractsCohort": "1.0.0-ci.424.1",
-  "centerCommit": "7706ca7",
+  "centerCommit": "a8f4e75",
   "method": "CompleteNodeSignIn",
   "case": "code-reused",
+  "outcome": "CONFLICT/code_reused",
+  "headers": {
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
   "request": {
     "contentType": "application/grpc-web+proto",
     "frames": [
-      "00000000b20a0052120a10f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f15a2b43434343434343434343434343434343434343434343434343434343434343434343434343434343434343622b64426a66744a655a344356502d6d4239324b3237756862554a55317031725f775731674657464f456a586b724050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050"
+      "00000000b20a0052120a10a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2045a2b77634842776348427763484277634842776348427763484277634842776348427763484277634842776345622b4b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f7240ecececececececececececececececececececececececececececececececececececececececececececececececececececececececececececececececec"
     ]
   },
   "reply": {
     "contentType": "application/grpc-web+proto",
     "httpStatus": 200,
     "frames": [
-      "000000005d0a1422120a10c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c01a450a0b636f64655f72657573656410051a1a6572726f722e636f6e666c6963742e636f64655f72657573656422020801280132120a10c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0"
+      "000000005d0a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1211a450a0b636f64655f72657573656410051a1a6572726f722e636f6e666c6963742e636f64655f72657573656422020801280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a121"
     ],
     "trailers": "grpc-status: 0\r\n"
   },
   "normalized": [
-    "meta.correlation_id and every ArcError.correlation_id: 16 bytes of 0xc0",
-    "flow_id (request and reply): 16 bytes of 0xf1; authorize_url is rebuilt from the public base URL and that flow ID",
-    "installation_id: 16 bytes of 0x1a; account.account_id: 16 bytes of 0xac",
-    "access_token: afa1. and 43 A; refresh_token: afr1. and 43 R (the formats of the center's tokens)",
-    "code: 43 C; node_key_proof: 64 bytes of 0x50",
-    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0"
+    "a 16-byte ID the center drew (correlation, flow, installation, account): the n-th distinct one is 15 bytes of 0xa0+n's kind byte and n",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token)",
+    "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
+    "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
   ],
-  "sha256": "93e543cfd0214db248d6aaad40b23ed0c869e236ca4610ae123202b2fe0b7ce9"
+  "sha256": "ba195d9163af0404acbd625a90da07873022eefd9194b7df9234ba667bf88131"
 }

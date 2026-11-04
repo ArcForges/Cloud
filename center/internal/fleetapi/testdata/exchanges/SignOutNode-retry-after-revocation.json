@@ -1,10 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "source": "TestFleetExchangeCapture",
   "contractsCohort": "1.0.0-ci.424.1",
-  "centerCommit": "7706ca7",
+  "centerCommit": "a8f4e75",
   "method": "SignOutNode",
   "case": "retry-after-revocation",
+  "outcome": "transport:auth.credential_revoked",
+  "headers": {
+    "authorization": "Bearer afa1.BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
   "request": {
     "contentType": "application/grpc-web+proto",
     "frames": ["00000000160a140a120a1004040404040404040404040404040404"]
@@ -16,12 +21,12 @@
     "trailers": "grpc-status: 16\r\ngrpc-message: auth.credential_revoked\r\n"
   },
   "normalized": [
-    "meta.correlation_id and every ArcError.correlation_id: 16 bytes of 0xc0",
-    "flow_id (request and reply): 16 bytes of 0xf1; authorize_url is rebuilt from the public base URL and that flow ID",
-    "installation_id: 16 bytes of 0x1a; account.account_id: 16 bytes of 0xac",
-    "access_token: afa1. and 43 A; refresh_token: afr1. and 43 R (the formats of the center's tokens)",
-    "code: 43 C; node_key_proof: 64 bytes of 0x50",
-    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0"
+    "a 16-byte ID the center drew (correlation, flow, installation, account): the n-th distinct one is 15 bytes of 0xa0+n's kind byte and n",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token)",
+    "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
+    "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
   ],
-  "sha256": "1119da91d9b1f52968295daf445a68f6c1cf071fad1ea0b68f280445f6a25f0a"
+  "sha256": "3e49e5059421195107f87bfb5953c871dc60ce0663a6d1b8191a5a80b44adbfd"
 }
