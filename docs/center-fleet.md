@@ -492,8 +492,11 @@ APPROVED), with no transaction open while ES256 is verified.
 the request headers that matter (the bearer's placeholder, the client address): every outcome the center produces without a store
 failure of BeginNodeSignIn (success, `invalid_argument`, `rate_limited`, `already_exists` node key, `not_activated`) and
 CompleteNodeSignIn (success, `not_found`, `expired`, `code_reused`, `unauthenticated`, `invalid_argument`, `already_exists` node and
-node key, `credential_revoked`, `quota_exceeded`, `rate_limited`, `not_activated`), and the success and the refusals a node reacts to
-of RefreshNodeSession, ReportNodeInfo and SignOutNode, StartDeviceAuthorization (success, `invalid_argument`, `rate_limited`,
+node key, `credential_revoked`, `quota_exceeded`, `rate_limited`, `not_activated`), RefreshNodeSession (success, `unauthenticated`,
+`credential_revoked` for a spent token and for a revoked device, `permission_denied`, `token_expired`, `rate_limited` from the
+session's own bucket), ReportNodeInfo (success, `invalid_argument`, `command_id_reused`, a restricted account's `permission_denied`,
+the ingress refusals `auth.token_expired` and `auth.credential_revoked`) and SignOutNode (success, the ingress refusal
+`auth.credential_revoked` of a retry, `unauthenticated` for a credential whose node row is not live), StartDeviceAuthorization (success, `invalid_argument`, `rate_limited`,
 `already_exists` node key, `not_activated`) and PollDeviceAuthorization (every state value: PENDING, SLOW_DOWN, APPROVED with the
 credentials, COMPLETED after delivery, DENIED, EXPIRED; and `not_found`, `unauthenticated`, `invalid_argument`, `rate_limited`,
 `already_exists` node and node key, `credential_revoked`, `quota_exceeded`, `not_activated`); each file names its outcome and the test fails when one of that per-method list
@@ -506,8 +509,27 @@ the values the center or a random source produced are normalized (correlation, f
 one-use codes, the device and user codes, the proofs, every instant as an offset), each distinct value to its own placeholder of the same shape, wherever it
 appears; the test's own constants stay. The files live in `center/internal/fleetapi/testdata/exchanges`; the test fails when a fresh
 capture differs and rewrites the directory with `ARCFORGES_UPDATE_EXCHANGES=1` (`ARCFORGES_CENTER_COMMIT` names the commit in the
-headers; `npx prettier --write` formats the files, and the comparison reads them as JSON). Parts N1 and N2 will copy the directory
+headers of the files it writes; a file whose capture is unchanged keeps its bytes and its commit, so the 46 files of commit `3ab4fe0`
+stay as they were when the seven node-credential cases of commit `2686a73` were added; `npx prettier --write` formats the files, and
+the comparison reads them as JSON). Parts N1 and N2 will copy the directory
 verbatim for the ArcForges node's FakeCenter conformance test; nothing checks it against a node yet.
+
+## Test vectors for the node
+
+Two files in `center/internal/fleet/testdata` hold the center's side of the vector lists the ArcForges node shares with it
+(protocol-4 item 3, node-13). `url-vectors.json` lists public base URLs (the official `https://arcforges.com/api`, a path prefix, a
+port, a punycode host, loopback `http`, the 462- and 463-character fleet bound, and refused forms) with the verdicts of
+`config.ParsePublicBaseURL` and of the whole configuration loader of a fleet center in both modes, the URLs a fleet center derives
+for an accepted one (`/connect#flow=`, `/activate`, `/activate#code=`) and the proof audience digest, and the loopback redirect URIs
+with the approval and denial redirects. `node-key-proof-vectors.json` holds fixed test-only P-256 keys (public keys only; the private
+scalars are SHA-256 of a public label in the generator, never a node's key) with their fingerprints, the proof message of both
+purposes byte for byte, deterministic (RFC 6979) low-S proofs (one with a leading zero byte in r, one in s, one normalized from a high
+s) and refused proofs (high-S, DER, wrong lengths, out-of-range r or s, another audience, purpose, node, flow, code or key, a
+reordered or truncated message), each with `fleet.VerifyNodeKeyProof`'s verdict. `TestFleetVectorFiles` generates both from the
+production functions and fails when a committed file differs; `ARCFORGES_UPDATE_VECTORS=1 go test -run TestFleetVectorFiles
+./internal/fleet` rewrites them, then `npx prettier --write` formats them (the comparison reads them as JSON). They are made for the
+ArcForges node to vendor byte for byte with their source commit, as it vendors the exchange captures (AF-CTR-04 part N1); nothing
+in this repository checks a node against them.
 
 ## The pages
 
