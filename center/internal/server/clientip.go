@@ -6,8 +6,10 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/ingress"
 )
 
 // ClientAddress is the client's address of a surface call, which keys the rate limits (PLT-2, PLT-16, SEC-17):
@@ -65,4 +67,32 @@ func peerAddress(remote string) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 	return address.WithZone("").Unmap(), true
+}
+
+// ClientOrigin is the coarse origin of a surface call (protocol-17): in official-hosted mode exactly one value of each of the Worker's
+// origin headers, a country that is two upper-case letters other than XX (Cloudflare's "unknown"; its T1 for Tor is no country and is
+// unknown too) and an autonomous system number of 1 to 4294967295 in canonical decimal; anything else is unknown. A self-hosted
+// center knows no origin whatever its trusted proxies (AF-CTR-04 E3, B-1): a proxy configured for the client address header passes
+// other client headers through, so the values would be the client's own claim, and the review page's origin line would be forgeable
+// by the node that asks to be approved.
+func ClientOrigin(mode config.Mode) func(*http.Request) ingress.Origin {
+	return func(request *http.Request) ingress.Origin {
+		if mode != config.OfficialHosted {
+			return ingress.Origin{}
+		}
+		var origin ingress.Origin
+		if values := request.Header.Values(config.ClientCountryHeader); len(values) == 1 && validCountry(values[0]) {
+			origin.Country = values[0]
+		}
+		if values := request.Header.Values(config.ClientASNHeader); len(values) == 1 {
+			if asn, err := strconv.ParseUint(values[0], 10, 32); err == nil && asn > 0 && strconv.FormatUint(asn, 10) == values[0] {
+				origin.ASN = int64(asn)
+			}
+		}
+		return origin
+	}
+}
+
+func validCountry(value string) bool {
+	return len(value) == 2 && value[0] >= 'A' && value[0] <= 'Z' && value[1] >= 'A' && value[1] <= 'Z' && value != "XX"
 }

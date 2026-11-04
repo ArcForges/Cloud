@@ -86,7 +86,7 @@ func (s *signIns) decide(user platform.ID, session dbtest.Session, code string, 
 		return err
 	}
 	err = s.db.Runtime.InTx(context.Background(), "decide a device code", store.TxOptions{Attempts: 1}, func(ctx context.Context, tx pgx.Tx) error {
-		return s.service.DecideDevice(ctx, tx, s.from, account, entry, code, approve, approve, s.clock.Now())
+		return s.service.DecideDevice(ctx, tx, s.from, account, entry, code, approve, approve, nil, s.clock.Now())
 	})
 	s.service.Settle(context.Background(), s.from, entry, err, "device_decide")
 	return err

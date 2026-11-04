@@ -64,6 +64,16 @@ func DefaultSelfHostedSurfaces() []Surface { return []Surface{SurfaceIdentity, S
 // value); the generated Worker tables carry the same name.
 const ClientIPHeader = "X-Arcforges-Client-Ip"
 
+// ClientCountryHeader and ClientASNHeader are the headers the hosted Worker sets on every surface call from Cloudflare's request data
+// (request.cf.country and request.cf.asn; the Worker builds the Container's header set from nothing, so a client's value never
+// arrives). Only an official-hosted center reads them: a self-hosted proxy that overwrites the client address header passes other
+// client headers through, so there they would be the client's own claim (AF-CTR-04 E3, protocol-17). The generated Worker tables
+// carry the same names.
+const (
+	ClientCountryHeader = "X-Arcforges-Client-Country"
+	ClientASNHeader     = "X-Arcforges-Client-Asn"
+)
+
 // MaxBootstrapLead bounds how far ahead a bootstrap token may expire.
 const MaxBootstrapLead = 7 * 24 * time.Hour
 

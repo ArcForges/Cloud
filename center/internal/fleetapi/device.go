@@ -11,6 +11,7 @@ import (
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	nodev1 "github.com/ArcForges/Contracts/go/arcforges/node/v1"
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
@@ -101,21 +102,7 @@ func deviceView(view fleet.DeviceView) *fleetv1.EnrollingNodeInfo {
 }
 
 func (s *Server) lookupDeviceCode(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceLookupDeviceCodeRequest) (*fleetv1.NodeEnrollmentServiceLookupDeviceCodeResponse, error) {
-	view, err := func() (fleet.DeviceView, error) {
-		_, account, err := s.account(ctx, call, message.GetMeta())
-		if err != nil {
-			return fleet.DeviceView{}, err
-		}
-		code, err := userCode(message.UserCode != nil, message.GetUserCode())
-		if err != nil {
-			return fleet.DeviceView{}, err
-		}
-		entry, err := s.fleet.ReserveEntry(ctx, request(call), account, "lookup")
-		if err != nil {
-			return fleet.DeviceView{}, err
-		}
-		return s.fleet.Lookup(ctx, request(call), account, entry, code)
-	}()
+	view, err := s.lookup(ctx, call, message)
 	response := &fleetv1.NodeEnrollmentServiceLookupDeviceCodeResponse{Meta: ingress.ResponseMeta(call.Correlation)}
 	if failure := s.failure(ctx, call, err); failure != nil {
 		response.Outcome = &fleetv1.NodeEnrollmentServiceLookupDeviceCodeResponse_Error{Error: failure}
@@ -123,6 +110,24 @@ func (s *Server) lookupDeviceCode(ctx context.Context, call *ingress.Call, messa
 	}
 	response.Outcome = &fleetv1.NodeEnrollmentServiceLookupDeviceCodeResponse_Value{Value: &fleetv1.NodeEnrollmentServiceLookupDeviceCodeValue{Node: deviceView(view)}}
 	return response, nil
+}
+
+// lookup is LookupDeviceCode's work, shared by the Connect method and the /activate pages (Direct): the operation table, the user
+// code (malformed input costs nothing), the entry's reservation, then fleet.Lookup.
+func (s *Server) lookup(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceLookupDeviceCodeRequest) (fleet.DeviceView, error) {
+	_, account, err := s.account(ctx, call, message.GetMeta())
+	if err != nil {
+		return fleet.DeviceView{}, err
+	}
+	code, err := userCode(message.UserCode != nil, message.GetUserCode())
+	if err != nil {
+		return fleet.DeviceView{}, err
+	}
+	entry, err := s.fleet.ReserveEntry(ctx, request(call), account, "lookup")
+	if err != nil {
+		return fleet.DeviceView{}, err
+	}
+	return s.fleet.Lookup(ctx, request(call), account, entry, code)
 }
 
 // accountCommand is the receipt command of an account's write: the account's principal (account:<id>), meta.command_id (required),
@@ -145,62 +150,7 @@ func accountCommand(call *ingress.Call, account fleet.Account, meta *foundationv
 // (node_approve_account) and the entry reserved; then the receipt's transaction decides (fleet.DecideDevice), and the entry is
 // settled after it. A concurrent duplicate that the receipt answered gives its reservation back (it is no new entry).
 func (s *Server) approveDeviceCode(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceApproveDeviceCodeRequest) (*fleetv1.NodeEnrollmentServiceApproveDeviceCodeResponse, error) {
-	value, err := func() (*fleetv1.NodeEnrollmentServiceApproveDeviceCodeValue, error) {
-		operation, account, err := s.account(ctx, call, message.GetMeta())
-		if err != nil {
-			return nil, err
-		}
-		receiptCommand, err := accountCommand(call, account, message.GetMeta())
-		if err != nil {
-			return nil, err
-		}
-		code, err := userCode(message.UserCode != nil, message.GetUserCode())
-		if err != nil {
-			return nil, err
-		}
-		if message.Approve == nil {
-			return nil, arc.InvalidArgument("approve", "required")
-		}
-		approve := message.GetApprove()
-		if outcome, found, err := platform.Lookup(ctx, s.db, receiptCommand); err != nil || found {
-			return decode(outcome, err, &fleetv1.NodeEnrollmentServiceApproveDeviceCodeValue{})
-		}
-		if err = s.fleet.TakeDecision(ctx, request(call), account); err != nil {
-			return nil, err
-		}
-		entry, err := s.fleet.ReserveEntry(ctx, request(call), account, "device_decide")
-		if err != nil {
-			return nil, err
-		}
-		var decided error
-		ran := false
-		outcome, err := platform.Execute(ctx, s.db, receiptCommand, store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) ([]byte, error) {
-			ran = true
-			decided = s.fleet.DecideDevice(ctx, tx, request(call), account, entry, code, approve, operation.NeedsEvidenceToDecide(approve),
-				s.clock().UTC().Truncate(time.Microsecond))
-			if decided != nil {
-				var refusal *arc.Refusal
-				if errors.As(decided, &refusal) && refusal.Final() {
-					encoded, marshalErr := proto.MarshalOptions{Deterministic: true}.Marshal(refusal.ArcError(correlation.Context{}))
-					if marshalErr != nil {
-						return nil, marshalErr
-					}
-					return nil, &platform.Refusal{Code: refusal.Key(), Result: encoded}
-				}
-				return nil, decided
-			}
-			return proto.MarshalOptions{Deterministic: true}.Marshal(&fleetv1.NodeEnrollmentServiceApproveDeviceCodeValue{Receipt: receipt(receiptCommand)})
-		})
-		switch {
-		case err == nil && outcome.Replayed, !ran && err == nil:
-			_ = s.fleet.GiveBack(ctx, entry)
-		case err != nil:
-			s.fleet.Settle(ctx, request(call), entry, err, "device_decide")
-		default:
-			s.fleet.Settle(ctx, request(call), entry, decided, "device_decide")
-		}
-		return decode(outcome, err, &fleetv1.NodeEnrollmentServiceApproveDeviceCodeValue{})
-	}()
+	value, err := s.decideDevice(ctx, call, message, nil)
 	response := &fleetv1.NodeEnrollmentServiceApproveDeviceCodeResponse{Meta: ingress.ResponseMeta(call.Correlation)}
 	if failure := s.failure(ctx, call, err); failure != nil {
 		response.Outcome = &fleetv1.NodeEnrollmentServiceApproveDeviceCodeResponse_Error{Error: failure}
@@ -208,4 +158,76 @@ func (s *Server) approveDeviceCode(ctx context.Context, call *ingress.Call, mess
 	}
 	response.Outcome = &fleetv1.NodeEnrollmentServiceApproveDeviceCodeResponse_Value{Value: value}
 	return response, nil
+}
+
+// tailDigestField is the field number under which the /activate page's typed fingerprint tail joins the receipt's request digest (it is
+// no field of the contract message: the Connect method never carries a tail, and its digest is the request as transmitted). With it a
+// command ID replayed with another tail is a reused command ID, not the first tail's stored answer.
+const tailDigestField protowire.Number = 536_870_911
+
+// decideDevice is ApproveDeviceCode's work, shared by the Connect method (tail nil) and the /activate page (Direct; the tail the user
+// typed). In this order: the operation table, meta.command_id, the user code and the presence of approve (a decision names itself: a
+// center rule) are checked before anything is counted; a replay of a committed command is answered with its receipt at once and
+// counts nothing; the decision is counted (node_approve_account) and the entry reserved; then the receipt's transaction decides
+// (fleet.DecideDevice), and the entry is settled after it. A concurrent duplicate that the receipt answered gives its reservation back
+// (it is no new entry).
+func (s *Server) decideDevice(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceApproveDeviceCodeRequest,
+	tail *string) (*fleetv1.NodeEnrollmentServiceApproveDeviceCodeValue, error) {
+	operation, account, err := s.account(ctx, call, message.GetMeta())
+	if err != nil {
+		return nil, err
+	}
+	receiptCommand, err := accountCommand(call, account, message.GetMeta())
+	if err != nil {
+		return nil, err
+	}
+	if tail != nil {
+		receiptCommand.Request = protowire.AppendBytes(protowire.AppendTag(receiptCommand.Request, tailDigestField, protowire.BytesType), []byte(*tail))
+	}
+	code, err := userCode(message.UserCode != nil, message.GetUserCode())
+	if err != nil {
+		return nil, err
+	}
+	if message.Approve == nil {
+		return nil, arc.InvalidArgument("approve", "required")
+	}
+	approve := message.GetApprove()
+	if outcome, found, err := platform.Lookup(ctx, s.db, receiptCommand); err != nil || found {
+		return decode(outcome, err, &fleetv1.NodeEnrollmentServiceApproveDeviceCodeValue{})
+	}
+	if err = s.fleet.TakeDecision(ctx, request(call), account); err != nil {
+		return nil, err
+	}
+	entry, err := s.fleet.ReserveEntry(ctx, request(call), account, "device_decide")
+	if err != nil {
+		return nil, err
+	}
+	var decided error
+	ran := false
+	outcome, err := platform.Execute(ctx, s.db, receiptCommand, store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) ([]byte, error) {
+		ran = true
+		decided = s.fleet.DecideDevice(ctx, tx, request(call), account, entry, code, approve, operation.NeedsEvidenceToDecide(approve), tail,
+			s.clock().UTC().Truncate(time.Microsecond))
+		if decided != nil {
+			var refusal *arc.Refusal
+			if errors.As(decided, &refusal) && refusal.Final() {
+				encoded, marshalErr := proto.MarshalOptions{Deterministic: true}.Marshal(refusal.ArcError(correlation.Context{}))
+				if marshalErr != nil {
+					return nil, marshalErr
+				}
+				return nil, &platform.Refusal{Code: refusal.Key(), Result: encoded}
+			}
+			return nil, decided
+		}
+		return proto.MarshalOptions{Deterministic: true}.Marshal(&fleetv1.NodeEnrollmentServiceApproveDeviceCodeValue{Receipt: receipt(receiptCommand)})
+	})
+	switch {
+	case err == nil && outcome.Replayed, !ran && err == nil:
+		_ = s.fleet.GiveBack(ctx, entry)
+	case err != nil:
+		s.fleet.Settle(ctx, request(call), entry, err, "device_decide")
+	default:
+		s.fleet.Settle(ctx, request(call), entry, decided, "device_decide")
+	}
+	return decode(outcome, err, &fleetv1.NodeEnrollmentServiceApproveDeviceCodeValue{})
 }

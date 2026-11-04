@@ -80,17 +80,7 @@ func (s *Server) beginNodeSignIn(ctx context.Context, call *ingress.Call, messag
 }
 
 func (s *Server) getNodeSignInFlow(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceGetNodeSignInFlowRequest) (*fleetv1.NodeEnrollmentServiceGetNodeSignInFlowResponse, error) {
-	view, err := func() (fleet.FlowView, error) {
-		_, account, err := s.account(ctx, call, message.GetMeta())
-		if err != nil {
-			return fleet.FlowView{}, err
-		}
-		flowID, ok := parseID(message.GetFlowId())
-		if !ok {
-			return fleet.FlowView{}, arc.InvalidArgument("flow_id", "required")
-		}
-		return s.fleet.Review(ctx, account, flowID)
-	}()
+	view, err := s.reviewFlow(ctx, call, message)
 	response := &fleetv1.NodeEnrollmentServiceGetNodeSignInFlowResponse{Meta: ingress.ResponseMeta(call.Correlation)}
 	if failure := s.failure(ctx, call, err); failure != nil {
 		response.Outcome = &fleetv1.NodeEnrollmentServiceGetNodeSignInFlowResponse_Error{Error: failure}
@@ -100,24 +90,22 @@ func (s *Server) getNodeSignInFlow(ctx context.Context, call *ingress.Call, mess
 	return response, nil
 }
 
+// reviewFlow is GetNodeSignInFlow's work, shared by the Connect method and the /connect pages (Direct): the operation table, the flow
+// ID, then fleet.Review.
+func (s *Server) reviewFlow(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceGetNodeSignInFlowRequest) (fleet.FlowView, error) {
+	_, account, err := s.account(ctx, call, message.GetMeta())
+	if err != nil {
+		return fleet.FlowView{}, err
+	}
+	flowID, ok := parseID(message.GetFlowId())
+	if !ok {
+		return fleet.FlowView{}, arc.InvalidArgument("flow_id", "required")
+	}
+	return s.fleet.Review(ctx, account, flowID)
+}
+
 func (s *Server) approveNodeSignIn(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceApproveNodeSignInRequest) (*fleetv1.NodeEnrollmentServiceApproveNodeSignInResponse, error) {
-	decision, err := func() (fleet.Decision, error) {
-		operation, account, err := s.account(ctx, call, message.GetMeta())
-		if err != nil {
-			return fleet.Decision{}, err
-		}
-		flowID, ok := parseID(message.GetFlowId())
-		if !ok {
-			return fleet.Decision{}, arc.InvalidArgument("flow_id", "required")
-		}
-		// A decision names itself: an absent approve is refused rather than read as a denial (a center rule; the contract has no
-		// validate rule on the field).
-		if message.Approve == nil {
-			return fleet.Decision{}, arc.InvalidArgument("approve", "required")
-		}
-		// The row decides whether the decision consumes step-up evidence (EvidenceOnApprove: an approval does, a denial does not).
-		return s.fleet.Decide(ctx, request(call), account, flowID, message.GetApprove(), operation.NeedsEvidenceToDecide(message.GetApprove()))
-	}()
+	decision, err := s.decideFlow(ctx, call, message)
 	response := &fleetv1.NodeEnrollmentServiceApproveNodeSignInResponse{Meta: ingress.ResponseMeta(call.Correlation)}
 	if failure := s.failure(ctx, call, err); failure != nil {
 		response.Outcome = &fleetv1.NodeEnrollmentServiceApproveNodeSignInResponse_Error{Error: failure}
@@ -126,6 +114,25 @@ func (s *Server) approveNodeSignIn(ctx context.Context, call *ingress.Call, mess
 	response.Outcome = &fleetv1.NodeEnrollmentServiceApproveNodeSignInResponse_Value{Value: &fleetv1.NodeEnrollmentServiceApproveNodeSignInValue{
 		RedirectUrl: proto.String(decision.RedirectURL), Flow: flowView(decision.Flow)}}
 	return response, nil
+}
+
+// decideFlow is ApproveNodeSignIn's work, shared by the Connect method and the /connect pages (Direct).
+func (s *Server) decideFlow(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceApproveNodeSignInRequest) (fleet.Decision, error) {
+	operation, account, err := s.account(ctx, call, message.GetMeta())
+	if err != nil {
+		return fleet.Decision{}, err
+	}
+	flowID, ok := parseID(message.GetFlowId())
+	if !ok {
+		return fleet.Decision{}, arc.InvalidArgument("flow_id", "required")
+	}
+	// A decision names itself: an absent approve is refused rather than read as a denial (a center rule; the contract has no
+	// validate rule on the field).
+	if message.Approve == nil {
+		return fleet.Decision{}, arc.InvalidArgument("approve", "required")
+	}
+	// The row decides whether the decision consumes step-up evidence (EvidenceOnApprove: an approval does, a denial does not).
+	return s.fleet.Decide(ctx, request(call), account, flowID, message.GetApprove(), operation.NeedsEvidenceToDecide(message.GetApprove()))
 }
 
 func (s *Server) completeNodeSignIn(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceCompleteNodeSignInRequest) (*fleetv1.NodeEnrollmentServiceCompleteNodeSignInResponse, error) {

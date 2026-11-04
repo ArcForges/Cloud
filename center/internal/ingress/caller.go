@@ -78,6 +78,9 @@ type Call struct {
 	// ClientIP is the client's address for a surface method (the Worker's header in hosted mode, else the TCP peer or a trusted
 	// proxy's header); it is zero when unknown. It keys rate limits and is never logged.
 	ClientIP netip.Addr
+	// Origin is the request's coarse origin (Options.ClientOrigin): the hosted edge's country and network, else unknown. Like the
+	// address it is never logged.
+	Origin Origin
 	// Message is the request message exactly as transmitted (the bytes of its one frame) for a method that reads its RequestMeta;
 	// a command receipt digests these bytes without RequestMeta.correlation_id (platform.RequestDigestInput), never a re-encoding
 	// (AD-0021 section 10). It is never logged.

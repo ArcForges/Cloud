@@ -102,6 +102,17 @@ func (s *Service) now() time.Time { return s.clock().UTC().Truncate(time.Microse
 type Request struct {
 	ClientIP      netip.Addr
 	CorrelationID *platform.ID
+	// Origin is where the request came from as the hosted edge saw it (Begin and Start record it for the review pages); the zero
+	// value is "unknown", which is every self-hosted center's.
+	Origin Origin
+}
+
+// Origin is the coarse origin of a node's Begin or Start (protocol-17): the two-letter country code and the autonomous system number
+// Cloudflare reports for the request, forwarded by the hosted Worker only (a self-hosted center never reads them). Either may be
+// unknown; the review pages say "Origin unknown" when the country is.
+type Origin struct {
+	Country *string
+	ASN     *int64
 }
 
 // Anonymous is the actor of a call without an account (a refresh).
@@ -378,4 +389,29 @@ func (s *Service) audit(ctx context.Context, tx pgx.Tx, request Request, actor, 
 	_, err = platform.AppendAudit(ctx, tx, platform.Event{EventID: platform.NewID(), OccurredAt: now, ActorRef: actor, EventType: eventType, Reason: reason,
 		CorrelationID: request.CorrelationID, TargetKind: "node", TargetID: enrollmentID.String(), Payload: data})
 	return err
+}
+
+// NodeCredentialExpiries are, for the account's live node devices, when the live node credential of each ends at the latest (its
+// identity.session expires_at, the absolute lifetime): the devices page shows it (Q4's device-list expiry, AF-CTR-04 E3). A device
+// without a live node session has no entry. It is one read, without a lock.
+func NodeCredentialExpiries(ctx context.Context, db *store.DB, userID platform.ID) (map[platform.ID]time.Time, error) {
+	rows, err := db.Pool().Query(ctx, `SELECT n.device_id, max(s.expires_at) FROM fleet.node n JOIN identity.session s ON s.installation_id = n.installation_id
+WHERE n.user_id = $1 AND n.revoked_at IS NULL AND s.user_id = $1 AND s.scope = 3 AND s.revoked_at IS NULL GROUP BY n.device_id`, userID)
+	if err != nil {
+		return nil, store.Sanitize("read the node credentials' expiry", err)
+	}
+	result := map[platform.ID]time.Time{}
+	for rows.Next() {
+		var device platform.ID
+		var expires time.Time
+		if err = rows.Scan(&device, &expires); err != nil {
+			rows.Close()
+			return nil, store.Sanitize("read the node credentials' expiry", err)
+		}
+		result[device] = expires
+	}
+	if err = rows.Err(); err != nil {
+		return nil, store.Sanitize("read the node credentials' expiry", err)
+	}
+	return result, nil
 }

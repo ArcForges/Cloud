@@ -50,6 +50,16 @@ type Options struct {
 	// RequireClientIP refuses a surface method whose client address is unknown (hosted mode: the Worker always sets it, so its
 	// absence is never counted in a shared bucket).
 	RequireClientIP bool
+	// ClientOrigin extracts the coarse origin of a surface method's request (the hosted Worker's country and network headers); nil,
+	// and every self-hosted center, knows none.
+	ClientOrigin func(*http.Request) Origin
+}
+
+// Origin is a request's coarse origin as the hosted edge saw it: the two-letter country code (empty when unknown) and the autonomous
+// system number (0 when unknown). It is personal data like the client address, never logged, and only node enrollment records it.
+type Origin struct {
+	Country string
+	ASN     int64
 }
 
 // NewPipeline is the public admission pipeline in front of next (the Connect handlers and the plain routes): a path that is not
@@ -143,6 +153,7 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var clientIP netip.Addr
+	var origin Origin
 	if policy.Surface != "" {
 		// A disabled surface is answered before any credential, body or store is read, with the same domain refusal the Worker
 		// sends (this one carries the call's correlation id).
@@ -167,6 +178,9 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 			return
 		}
 		clientIP = address
+		if p.options.ClientOrigin != nil {
+			origin = p.options.ClientOrigin(request)
+		}
 	}
 
 	caller := Caller{}
@@ -210,7 +224,7 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 	call := &Call{
 		Policy: policy, Caller: caller, Owner: owner,
 		Correlation: correlation.ForRequest(request.Header.Values(TraceparentHeader), stated),
-		ClientIP:    clientIP, Message: message,
+		ClientIP:    clientIP, Origin: origin, Message: message,
 	}
 	outcome.Call = call
 	p.observe(request, outcome)

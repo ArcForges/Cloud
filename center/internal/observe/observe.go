@@ -76,7 +76,7 @@ func FleetOutcomes() map[string][]string {
 			"rate_limited"},
 		"lookup":        {"shown", "refused", "rate_limited"},
 		"device_decide": {"approved", "denied", "refused", "rate_limited"},
-		"entry":         {"unknown", "expired", "state", "unreviewed", "lookups"},
+		"entry":         {"unknown", "expired", "state", "unreviewed", "lookups", "tail"},
 	}
 }
 
