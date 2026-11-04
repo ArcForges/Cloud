@@ -452,7 +452,7 @@ func TestNodeTextIsEscapedAndIsolatedOnTheFleetPages(t *testing.T) {
 	owner := h.seedAccount(1)
 	b := h.newBrowser()
 	b.mustSignIn(owner)
-	for _, name := range []string{`<script>alert(1)</script>`, "a‮evil‬", "ArcForges Updater (verified)", "x⁦y⁩​", `"><img src=x>`} {
+	for _, name := range []string{`<script>alert(1)</script>`, "a\u202Eevil\u202C", "ArcForges Updater (verified)", "x\u2066y\u2069\u200B", `"><img src=x>`} {
 		flow := h.beginFlow(nil)
 		if _, err := h.migration.Exec(t.Context(), "UPDATE fleet.node_sign_in SET node_name = $2 WHERE flow_id = $1", flow.flowID, name); err != nil {
 			t.Fatal(err)
