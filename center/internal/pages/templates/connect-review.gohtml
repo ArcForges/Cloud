@@ -1,0 +1,25 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Connect this node?</h1>
+<noscript><p>Connecting a node needs JavaScript. Turn it on for this page and reload. Denying works without it.</p></noscript>
+<p id="needs-script" class="help">Connecting needs this page's script. If this line stays, reload the page or allow scripts for it.</p>
+<p id="status" role="status" aria-live="polite"></p>
+{{template "node" .}}
+{{if .Fleet.State}}<p id="request-state">{{.Fleet.State}}</p>{{end}}
+{{if or .Fleet.Decide .Fleet.DenyOnly}}
+<p>Check that the fingerprint is the one your node shows. Connect only a node you started yourself, on this computer.</p>
+<div class="decision">
+<form method="post" action="{{.Base}}/connect/decision" id="deny">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="flow_id" value="{{.Fleet.FlowID}}">
+<input type="hidden" name="decision" value="deny">
+<button type="submit">Deny</button>
+</form>
+{{if .Fleet.Decide}}<form method="post" action="{{.Base}}/connect/decision" id="approve" data-step-up-class="fleet.approveNodeSignIn" data-step-up-target="{{.Fleet.Target}}">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="flow_id" value="{{.Fleet.FlowID}}">
+<input type="hidden" name="decision" value="approve">
+<button type="submit" class="primary">Connect with your passkey</button>
+</form>{{end}}
+</div>
+{{end}}
+{{end}}

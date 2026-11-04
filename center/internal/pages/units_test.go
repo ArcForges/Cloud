@@ -175,3 +175,47 @@ func TestWhatThePagesWriteStaysWithinTheBoundsTheWorkerIsGenerated(t *testing.T)
 		}
 	}
 }
+
+// TestTheFleetRefusalTexts (AF-CTR-04 E3, PAG-05, R-7): code_invalid is told by its limit (the entries left, none left, the spent
+// lookups), the node cap names its maximum in one wording, the fleet's own texts apply on its pages only, every reason a sign-in request
+// can name has a text, and quota_exceeded is a 400 a page can show (not the Worker's 503).
+func TestTheFleetRefusalTexts(t *testing.T) {
+	now := time.Now()
+	text := func(refusal *arc.Refusal, fleetPage bool) string {
+		return messageForSurface(refusal.Dated(now).ArcError(correlation.Context{}), now, fleetPage)
+	}
+	if got := text(arc.CodeInvalid("device_entry_account", 5, 3), true); !strings.Contains(got, "You can try 3 more codes now") || strings.Contains(got, "15") {
+		t.Errorf("entries left: %q", got)
+	}
+	if got := text(arc.CodeInvalid("device_entry_account", 5, 0), true); !strings.Contains(got, "no attempts are left") {
+		t.Errorf("none left: %q", got)
+	}
+	if got := text(arc.CodeInvalid("device_code_lookups", 5, 0), true); !strings.Contains(got, "looked up too often") {
+		t.Errorf("lookups: %q", got)
+	}
+	if got := text(arc.QuotaExceeded("max_nodes_per_account", 100), true); !strings.Contains(got, "limit of 100 nodes") {
+		t.Errorf("the cap: %q", got)
+	}
+	if text(arc.Expired(), true) == text(arc.Expired(), false) || !strings.Contains(text(arc.Expired(), true), "Start again on the node") {
+		t.Error("the fleet's own text of expired")
+	}
+	for _, reason := range []string{"not_reviewed", "pending", "approved", "denied", "completed", "revoked", "expired"} {
+		if got := text(arc.InvalidState("node_sign_in", reason), true); got == refusalText["STATE/invalid_state"] {
+			t.Errorf("%s has no text of its own", reason)
+		}
+	}
+	for _, operation := range []string{"fleet.getNodeSignInFlow", "fleet.approveNodeSignIn", "fleet.lookupDeviceCode", "fleet.approveDeviceCode"} {
+		if got := text(arc.PermissionDenied(operation), true); !strings.Contains(got, "restricted") {
+			t.Errorf("%s: %q", operation, got)
+		}
+	}
+	if got := text(arc.PermissionDenied("connect.review"), true); got != refusalText["AUTHORIZATION/permission_denied"] {
+		t.Errorf("a refused token: %q", got)
+	}
+	if status := statusOf(arc.QuotaExceeded("max_nodes_per_account", 100).Dated(now).ArcError(correlation.Context{})); status != 400 {
+		t.Errorf("quota_exceeded is %d", status)
+	}
+	if status := statusOf(arc.Unavailable().Dated(now).ArcError(correlation.Context{})); status != 503 {
+		t.Errorf("overloaded is %d", status)
+	}
+}

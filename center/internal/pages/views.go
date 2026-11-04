@@ -20,8 +20,10 @@ var (
 	staticFiles embed.FS
 )
 
-// pageNames are the templates; each is a content template laid out by base.html.
-var pageNames = []string{"sign-in", "bootstrap", "sign-out", "passkeys", "sessions", "devices", "register", "error", "operations-grant", "operations-review", "operations-done"}
+// pageNames are the templates; each is a content template laid out by base.html (with the fleet review pages' shared node block,
+// fleet-node.gohtml).
+var pageNames = []string{"sign-in", "bootstrap", "sign-out", "passkeys", "sessions", "devices", "register", "error", "operations-grant", "operations-review",
+	"operations-done", "connect", "connect-review", "connect-done", "activate", "activate-review", "activate-done"}
 
 // views are the parsed templates and the static files.
 type views struct {
@@ -34,7 +36,7 @@ type views struct {
 func loadViews(basePath string) (*views, error) {
 	result := &views{base: basePath, templates: map[string]*template.Template{}}
 	for _, name := range pageNames {
-		parsed, err := template.New("base").ParseFS(templateFiles, "templates/base.gohtml", "templates/"+name+".gohtml")
+		parsed, err := template.New("base").ParseFS(templateFiles, "templates/base.gohtml", "templates/fleet-node.gohtml", "templates/"+name+".gohtml")
 		if err != nil {
 			return nil, fmt.Errorf("the %s template: %w", name, err)
 		}
@@ -88,6 +90,9 @@ type pageData struct {
 
 	// The operations pages.
 	Ops operationsView
+
+	// The fleet pages.
+	Fleet fleetView
 }
 
 type profileView struct {
@@ -123,14 +128,17 @@ type sessionRow struct {
 }
 
 type deviceRow struct {
-	ID            string
-	Name          string
-	Platform      string
-	Installed     []string
-	Current       bool
-	RenameCommand string
-	RevokeCommand string
-	RevokeTarget  string
+	ID   string
+	Name string
+	// NodeExpiresAt and NodeExpiresText are when the device's node credential ends at the latest (a node device only).
+	NodeExpiresAt   string
+	NodeExpiresText string
+	Platform        string
+	Installed       []string
+	Current         bool
+	RenameCommand   string
+	RevokeCommand   string
+	RevokeTarget    string
 }
 
 // registerView is the creation options of a passkey registration, carried as data attributes of the page's form (the content

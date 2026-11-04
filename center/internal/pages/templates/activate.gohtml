@@ -1,0 +1,13 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Activate a node</h1>
+<noscript><p>Activating a node needs JavaScript. Turn it on for this page and reload.</p></noscript>
+<p id="needs-script" class="help">This page needs its script. If this line stays, reload the page or allow scripts for it.</p>
+<p id="status" role="status" aria-live="polite"></p>
+<p>Enter the code your node shows. You review the node before anything happens.</p>
+<form id="activate-review" method="post" action="{{.Base}}/activate/review">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<p><label for="user-code">Activation code</label>
+<input id="user-code" name="user_code" type="text" maxlength="9" autocomplete="off" autocapitalize="characters" spellcheck="false" required></p>
+<p><button type="submit" id="continue" class="primary" disabled>Continue</button></p>
+</form>
+{{end}}

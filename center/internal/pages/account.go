@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
+	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
@@ -77,15 +78,20 @@ func (e *exchange) serve(name string, data pageData) {
 
 // writeErrorPage answers a refusal as an HTML page with the refusal's text.
 func (e *exchange) writeErrorPage(status int, value *foundationv1.ArcError) {
-	text := messageFor(value, e.h.options.Clock())
+	text := messageForSurface(value, e.h.options.Clock(), e.route.Surface == routes.SurfaceFleet)
 	if own, ok := operationsText[strings.TrimPrefix(value.GetCategory().String(), "ERROR_CATEGORY_")+"/"+value.GetCode()]; ok && e.route.Surface == routes.SurfaceOperations {
 		text = own
 	}
 	heading := headingFor(status, value)
 	data := pageData{Title: heading, Page: "error", Error: &errorView{Text: text}, Heading: heading, Detail: text,
 		Back: routes.PageAccountPrefix + "/passkeys", BackText: "Back to your account"}
-	if e.route.Surface == routes.SurfaceOperations {
+	switch {
+	case e.route.Surface == routes.SurfaceOperations:
 		data.Back, data.BackText = routes.PageOperationsPrefix+"/grant", "Back to the grant form"
+	case e.route.Surface == routes.SurfaceFleet && strings.HasPrefix(e.route.Path, routes.PageActivatePrefix):
+		data.Back, data.BackText = routes.PageActivatePrefix, "Enter a code again"
+	case e.route.Surface == routes.SurfaceFleet:
+		data.Back, data.BackText = routes.PageAccountPrefix+"/devices", "Back to your devices"
 	}
 	body, err := e.h.views.render("error", data)
 	if err != nil {
@@ -254,6 +260,13 @@ func (e *exchange) devicesPage() {
 		return
 	}
 	data := pageData{Title: "Devices", Signed: true, CSRF: resolved.CSRF, HasMore: more}
+	// A node's credential ends at its absolute lifetime at the latest (Q4); the page shows when (one read of the account's live node
+	// sessions; the device list of the contract has no field for it).
+	expiries, err := fleet.NodeCredentialExpiries(e.r.Context(), e.h.options.DB, resolved.UserID)
+	if err != nil {
+		e.internal(err)
+		return
+	}
 	for _, item := range devices {
 		id, _ := parseUUIDBytes(item.GetDeviceId().GetValue())
 		row := deviceRow{ID: uuidText(id), Name: item.GetName(), Platform: item.GetPlatform(), Current: id == resolved.DeviceID,
@@ -261,6 +274,9 @@ func (e *exchange) devicesPage() {
 			RevokeTarget: identity.TargetHash(identity.ClassRevokeDevice, resolved.UserID, id)}
 		for _, installed := range item.GetInstalled() {
 			row.Installed = append(row.Installed, installed.GetProduct()+" "+installed.GetVersion())
+		}
+		if expires, ok := expiries[id]; ok {
+			row.NodeExpiresAt, row.NodeExpiresText = attribute(expires), timeText(expires)
 		}
 		data.Devices = append(data.Devices, row)
 	}

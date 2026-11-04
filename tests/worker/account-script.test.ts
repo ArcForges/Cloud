@@ -575,6 +575,9 @@ class Element {
   setAttribute(name: string, value: string) {
     this.attributes[name] = value;
   }
+  getAttribute(name: string) {
+    return this.attributes[name] ?? null;
+  }
   querySelector(selector: string) {
     return selector === "a" ? (this.children[0] ?? null) : null;
   }
@@ -1482,4 +1485,281 @@ test("a value the script cannot read is its own failure, not a network one (js-8
       assert.doesNotMatch(script.errorText(error), /could not be reached/u);
       return true;
     });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The fleet pages (AF-CTR-04 E3): /connect and /activate read the flow ID or the code from the fragment, drop the fragment before any
+// request, check the value and only then ask who is signed in; the sign-in page drops its return fragment first and follows a return to
+// these two pages with their exact fragment; the page of a decided browser sign-in follows only a loopback link of the exact shape.
+
+const flowId = "3f2a9c4e-1b7d-4e8a-9c3b-5d6e7f8a9b0c";
+
+test("a flow ID is the canonical lower-case UUID and a user code is 8 letters of the code alphabet", () => {
+  assert.equal(script.isFlowId(flowId), true);
+  for (const bad of [
+    flowId.toUpperCase(),
+    "00000000-0000-0000-0000-000000000000",
+    `${flowId} `,
+    flowId.replaceAll("-", ""),
+    `{${flowId}}`,
+    "3f2a9c4e-1b7d-4e8a-9c3b-5d6e7f8a9b0",
+    undefined,
+    42,
+  ])
+    assert.equal(script.isFlowId(bad), false, String(bad));
+  assert.equal(script.normalizeUserCode("bcdf-ghjk"), "BCDFGHJK");
+  assert.equal(script.normalizeUserCode("BCDF GHJK"), "BCDFGHJK");
+  assert.equal(script.normalizeUserCode("BCDFGHJK"), "BCDFGHJK");
+  for (const bad of ["BCDF-GHJA", "BCDF-GHJ", "BCDF-GHJKL", "BCDF--GHJK", "", "BCDF-GHJ1", "ÄCDF-GHJK", null])
+    assert.equal(script.normalizeUserCode(bad), null, String(bad));
+  assert.equal(script.displayUserCode("BCDFGHJK"), "BCDF-GHJK");
+});
+
+test("the sign-in page follows a return to /connect or /activate with its exact fragment, and nothing else with a fragment", () => {
+  const base = "/api";
+  assert.equal(script.safeFleetReturn(`/api/connect#flow=${flowId}`, origin, base), `/api/connect#flow=${flowId}`);
+  assert.equal(script.safeFleetReturn("/api/activate#code=BCDF-GHJK", origin, base), "/api/activate#code=BCDF-GHJK");
+  for (const hostile of [
+    `/api/connect#flow=${flowId.toUpperCase()}`,
+    `/api/connect#flow=${flowId}&x=1`,
+    `/api/connect#flow=${flowId}#x`,
+    `/api/connect%23flow=${flowId}`,
+    `/api/connect/review#flow=${flowId}`,
+    `/api/account/passkeys#flow=${flowId}`,
+    `/connect#flow=${flowId}`,
+    `//evil.example/api/connect#flow=${flowId}`,
+    `https://evil.example/api/connect#flow=${flowId}`,
+    "/api/activate#code=bcdf-ghjk",
+    "/api/activate#code=BCDFGHJK",
+    "/api/activate#code=BCDF-GHJA",
+    "/api/activate#token=x",
+    "/api/activate",
+    `/api/connect#return=${flowId}`,
+    42,
+  ])
+    assert.equal(script.safeFleetReturn(hostile, origin, base), null, String(hostile));
+  // The nested return of the sign-in page: decoded once by parseFragment; a double encoding or a split value is no fleet return.
+  const nested = script.parseFragment(`#return=${encodeURIComponent(`/api/connect#flow=${flowId}`)}`).return;
+  assert.equal(script.safeFleetReturn(nested, origin, base), `/api/connect#flow=${flowId}`);
+  const doubled = script.parseFragment(`#return=%2Fapi%2Fconnect%2523flow%3D${flowId}`).return;
+  assert.equal(script.safeFleetReturn(doubled, origin, base), null);
+  const split = script.parseFragment(`#return=%2Fapi%2Fconnect%23flow%3D${flowId}&x=1`).return;
+  assert.equal(split, `/api/connect#flow=${flowId}`, "an extra parameter is another fragment value");
+  const extra = script.parseFragment(`#return=%2Fapi%2Fconnect%23flow%3D${flowId}%26x%3D1`).return;
+  assert.equal(script.safeFleetReturn(extra, origin, base), null);
+});
+
+test("only the exact loopback link of a decided browser sign-in is followed", () => {
+  const code = "A".repeat(43);
+  const state = "s".repeat(16);
+  for (const good of [
+    `http://127.0.0.1:1024/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:65535/callback?code=${code}&state=${state}`,
+    `http://[::1]:49152/callback?code=${code}&state=${"x".repeat(128)}`,
+    `http://127.0.0.1:50000/callback?error=access_denied&state=${state}`,
+    `http://127.0.0.1:50000/callback?code=${"-_9aZ".repeat(8)}abc&state=a.b_c~d-0123456789`,
+  ])
+    assert.equal(script.isLoopbackResult(good), true, good);
+  for (const bad of [
+    `http://localhost:50000/callback?code=${code}&state=${state}`,
+    `https://127.0.0.1:50000/callback?code=${code}&state=${state}`,
+    `http://127.1:50000/callback?code=${code}&state=${state}`,
+    `http://2130706433:50000/callback?code=${code}&state=${state}`,
+    `http://0.0.0.0:50000/callback?code=${code}&state=${state}`,
+    `http://[::ffff:127.0.0.1]:50000/callback?code=${code}&state=${state}`,
+    `http://[0:0:0:0:0:0:0:1]:50000/callback?code=${code}&state=${state}`,
+    `http://user@127.0.0.1:50000/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:1023/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:65536/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:099999/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:01024/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:50000/callback/?code=${code}&state=${state}`,
+    `http://127.0.0.1:50000/Callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:50000/other?code=${code}&state=${state}`,
+    `http://127.0.0.1:50000/callback?code=${code}`,
+    `http://127.0.0.1:50000/callback?state=${state}&code=${code}`,
+    `http://127.0.0.1:50000/callback?code=${code}&state=${state}&x=1`,
+    `http://127.0.0.1:50000/callback?code=${code}&state=${state}#x`,
+    `http://127.0.0.1:50000/callback?code=${"A".repeat(42)}&state=${state}`,
+    `http://127.0.0.1:50000/callback?code=${"A".repeat(44)}&state=${state}`,
+    `http://127.0.0.1:50000/callback?code=${"A".repeat(42)}=&state=${state}`,
+    `http://127.0.0.1:50000/callback?code=${"A".repeat(42)}+&state=${state}`,
+    `http://127.0.0.1:50000/callback?code=${code}&state=${"s".repeat(15)}`,
+    `http://127.0.0.1:50000/callback?code=${code}&state=${"s".repeat(129)}`,
+    `http://127.0.0.1:50000/callback?code=${code}&state=${"s".repeat(15)}%21`,
+    `http://127.0.0.1:50000/callback?error=server_error&state=${state}`,
+    `http://127.0.0.1:50000/callback?error=access_denied&code=${code}&state=${state}`,
+    `http://127.0.0.1:50000/callback?code=${code}&state=${state} `,
+    ` http://127.0.0.1:50000/callback?code=${code}&state=${state}`,
+    `javascript:alert(1)//http://127.0.0.1:50000/callback?code=${code}&state=${state}`,
+    `HTTP://127.0.0.1:50000/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:5e4/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:+50000/callback?code=${code}&state=${state}`,
+    `http://127.0.0.1:50000/%63allback?code=${code}&state=${state}`,
+    `http://127.0.0.1:50000/callback?code=${code}&state=${state}\n`,
+    "",
+    null,
+  ])
+    assert.equal(script.isLoopbackResult(bad), false, String(bad));
+});
+
+function connectForm() {
+  const form = new Element();
+  form.elements.csrf = new Element();
+  form.elements.flow_id = new Element();
+  return form;
+}
+
+test("/connect drops the fragment before any request, refuses a malformed flow ID without a request, and reviews when signed in", async () => {
+  const ids = ["heading", "error-summary", "error-text", "status"];
+  // Signed in: the fragment is dropped first, then bootstrap, then the review form is submitted with the session's token.
+  const form = connectForm();
+  const signedIn = page("connect", ids, {
+    hash: `#flow=${flowId}`,
+    fetchImpl: async () => reply(200, { csrfToken: "S".repeat(43), authenticated: true }),
+  });
+  signedIn.elements.set("connect-review", form);
+  await script.start(signedIn.window);
+  assert.deepEqual(signedIn.events, ["replaceState", "fetch GET /api/session/v1/web/bootstrap"]);
+  assert.deepEqual(signedIn.replaced, [[null, "", "/api/account/bootstrap"]]);
+  assert.equal(form.submitted, true);
+  assert.equal(form.elements.flow_id?.value, flowId);
+  assert.equal(form.elements.csrf?.value, "S".repeat(43));
+  // Signed out: the sign-in page is opened with this page and its fragment as the return.
+  const signedOut = page("connect", ids, { hash: `#flow=${flowId}` });
+  const other = connectForm();
+  signedOut.elements.set("connect-review", other);
+  await script.start(signedOut.window);
+  assert.equal(signedOut.events[0], "replaceState");
+  assert.equal(other.submitted, false);
+  assert.deepEqual(signedOut.assigned, [
+    `/api/account/sign-in#return=${encodeURIComponent(`/api/connect#flow=${flowId}`)}`,
+  ]);
+  // A malformed or missing flow ID: the fragment is dropped, no request leaves, the text says the link is incomplete.
+  for (const hash of [`#flow=${flowId.toUpperCase()}`, "#flow=", "", `#flow=${flowId}x`]) {
+    const malformed = page("connect", ids, { hash });
+    malformed.elements.set("connect-review", connectForm());
+    await script.start(malformed.window);
+    assert.deepEqual(malformed.events, ["replaceState"], hash);
+    assert.match(malformed.elements.get("error-text")?.textContent ?? "", /not complete/u);
+    assert.deepEqual(malformed.assigned, []);
+  }
+});
+
+test("/activate fills the code from the fragment after dropping it, and Continue signs in first when there is no session", async () => {
+  const ids = ["heading", "error-summary", "error-text", "status", "user-code", "continue"];
+  const form = new Element();
+  form.elements.csrf = new Element();
+  const signedOut = page("activate", ids, { hash: "#code=bcdf-ghjk" });
+  signedOut.elements.set("activate-review", form);
+  await script.start(signedOut.window);
+  assert.deepEqual(signedOut.events, ["replaceState", "fetch GET /api/session/v1/web/bootstrap"]);
+  assert.equal(signedOut.elements.get("user-code")?.value, "BCDF-GHJK");
+  assert.equal(signedOut.elements.get("continue")?.disabled, false);
+  assert.equal(form.fire("submit"), true, "a submission without a session is held back");
+  assert.deepEqual(signedOut.assigned, [
+    `/api/account/sign-in#return=${encodeURIComponent("/api/activate#code=BCDF-GHJK")}`,
+  ]);
+  // Signed in: the form goes with the session's token; a code of the wrong shape is refused before it goes.
+  const signedForm = new Element();
+  signedForm.elements.csrf = new Element();
+  const signedIn = page("activate", ids, {
+    fetchImpl: async () => reply(200, { csrfToken: "S".repeat(43), authenticated: true }),
+  });
+  signedIn.elements.set("activate-review", signedForm);
+  await script.start(signedIn.window);
+  assert.deepEqual(signedIn.events, ["fetch GET /api/session/v1/web/bootstrap"], "no fragment, nothing to drop");
+  const field = signedIn.elements.get("user-code");
+  assert(field);
+  field.value = "BCDF-GHJA";
+  assert.equal(signedForm.fire("submit"), true);
+  assert.match(signedIn.elements.get("error-text")?.textContent ?? "", /8 letters/u);
+  field.value = "bcdfghjk";
+  assert.equal(signedForm.fire("submit"), false);
+  assert.equal(signedForm.elements.csrf?.value, "S".repeat(43));
+  assert.equal(field.value, "BCDF-GHJK");
+  // A malformed code in the fragment fills nothing and says so; the fragment is still dropped first.
+  const malformed = page("activate", ids, { hash: "#code=BCDF-GHJ1" });
+  malformed.elements.set("activate-review", new Element());
+  await script.start(malformed.window);
+  assert.equal(malformed.events[0], "replaceState");
+  assert.equal(malformed.elements.get("user-code")?.value, "");
+  assert.match(malformed.elements.get("error-text")?.textContent ?? "", /not complete/u);
+});
+
+test("the sign-in page drops its return fragment before anything else, also without passkeys or with a failing first read (P-16)", async () => {
+  const ids = ["heading", "error-summary", "error-text", "status", "sign-in", "signed-in"];
+  const nested = `#return=${encodeURIComponent(`/api/connect#flow=${flowId}`)}`;
+  for (const hash of [nested, `#return=${encodeURIComponent("/api/activate#code=BCDF-GHJK")}`, "#return=%2Fapi%2Faccount%2Fsessions"]) {
+    const working = page("sign-in", ids, { hash });
+    await script.start(working.window);
+    assert.equal(working.events[0], "replaceState", hash);
+    const unsupported = page("sign-in", ids, { hash });
+    (unsupported.window as { PublicKeyCredential?: unknown }).PublicKeyCredential = undefined;
+    await script.start(unsupported.window);
+    assert.deepEqual(unsupported.events, ["replaceState"], `${hash} without passkeys`);
+    const failing = page("sign-in", ids, { hash, fetchImpl: async () => reply(503, {}) });
+    await script.start(failing.window);
+    assert.equal(failing.events[0], "replaceState", `${hash} with a failing read`);
+  }
+  // A signed-in visitor's link returns to the fleet page with its fragment.
+  const link = new Element();
+  const signed = page("sign-in", ["heading", "error-summary", "error-text", "status", "sign-in"], {
+    hash: nested,
+    fetchImpl: async () => reply(200, { csrfToken: "S".repeat(43), authenticated: true }),
+  });
+  const holder = new Element();
+  holder.hidden = true;
+  holder.children.push(link);
+  signed.elements.set("signed-in", holder);
+  await script.start(signed.window);
+  assert.equal(link.attributes.href, `/api/connect#flow=${flowId}`);
+  // Without a fragment nothing is replaced.
+  const plain = page("sign-in", ids);
+  await script.start(plain.window);
+  assert.deepEqual(plain.replaced, []);
+});
+
+test("the page of a decided browser sign-in follows a valid loopback link and nothing else", async () => {
+  const ids = ["heading", "error-summary", "error-text", "status"];
+  const good = page("connect-done", ids);
+  const link = new Element();
+  link.attributes.href = `http://127.0.0.1:50000/callback?code=${"A".repeat(43)}&state=${"s".repeat(16)}`;
+  good.elements.set("return-link", link);
+  await script.start(good.window);
+  assert.deepEqual(good.assigned, [link.attributes.href]);
+  assert.deepEqual(good.events, [], "no request and no address change before the navigation");
+  const bad = page("connect-done", ids);
+  const hostile = new Element();
+  hostile.attributes.href = `https://evil.example/callback?code=${"A".repeat(43)}&state=${"s".repeat(16)}`;
+  bad.elements.set("return-link", hostile);
+  await script.start(bad.window);
+  assert.deepEqual(bad.assigned, []);
+  assert.equal(hostile.removed, true);
+  assert.match(bad.elements.get("error-text")?.textContent ?? "", /not valid/u);
+});
+
+test("an /activate approval with a fingerprint tail of the wrong shape is refused before the passkey prompt", async () => {
+  const form = new Element();
+  form.dataset.stepUpClass = "fleet.approveDeviceCode";
+  form.dataset.stepUpTarget = "d".repeat(64);
+  form.elements.csrf = new Element();
+  const tail = new Element();
+  form.elements.fingerprint_tail = tail;
+  form.querySelectorAll = () => [new Element()];
+  const review = page("activate-review", common, { forms: [form] });
+  review.window.document.querySelectorAll = (() => [form]) as never;
+  await script.start(review.window);
+  for (const value of ["", "AB", "ABCDE", "GHIJ", "12 4"]) {
+    tail.value = value;
+    assert.equal(form.fire("submit"), true, value);
+    await settle();
+  }
+  assert.deepEqual(review.events, [], "no step-up began");
+  assert.match(review.elements.get("error-text")?.textContent ?? "", /last 4 characters/u);
+  tail.value = "a1F9";
+  form.fire("submit");
+  await settle();
+  assert.deepEqual(review.events.slice(0, 1), ["fetch POST /api/session/v1/web/step-up/begin"]);
 });

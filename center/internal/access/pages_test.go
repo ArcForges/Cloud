@@ -39,7 +39,7 @@ func TestEveryPageRouteHasItsRowAndEveryRowItsRoute(t *testing.T) {
 // of which has a row (and so a scope rule, a restricted rule, step-up evidence and a receipt as the API has).
 func TestEveryMethodAPageCallsHasAnOperationRow(t *testing.T) {
 	calls := PageCalls()
-	if len(calls) != 17 { // the operations surface's routes call no method of the table
+	if len(calls) != 21 { // the operations surface's routes call no method of the table; the fleet surface's call its four account methods
 		t.Fatalf("the pages call %d methods: %v", len(calls), calls)
 	}
 	for _, path := range calls {
@@ -68,6 +68,29 @@ func TestEveryMethodAPageCallsHasAnOperationRow(t *testing.T) {
 		operation, _ := Lookup(row.Calls[0])
 		if operation.Receipt != want.receipt || operation.StepUp != want.stepUp {
 			t.Errorf("%s calls %s with %+v", id, operation.ID, operation)
+		}
+	}
+	// The fleet pages (AF-CTR-04 E3) call the account methods of node enrollment with their rows' rules: the device-code decision under
+	// the account's receipt, both approvals with the approval-only evidence, the reviews with neither.
+	for id, want := range map[string]struct {
+		receipt bool
+		stepUp  StepUp
+	}{
+		"connect.review": {false, NoEvidence}, "connect.decision": {false, EvidenceOnApprove}, "activate.review": {false, NoEvidence},
+		"activate.decision": {true, EvidenceOnApprove},
+	} {
+		row, ok := PageOperationOf(id)
+		if !ok || len(row.Calls) == 0 || row.Credential != PageSession || row.Center != "" {
+			t.Fatalf("%s: %+v", id, row)
+		}
+		operation, _ := Lookup(row.Calls[0])
+		if operation.Receipt != want.receipt || operation.StepUp != want.stepUp || operation.Feature != "" {
+			t.Errorf("%s calls %s with %+v", id, operation.ID, operation)
+		}
+	}
+	for _, id := range []string{"connect.page", "activate.page"} {
+		if row, ok := PageOperationOf(id); !ok || row.Credential != PageNoCredential || len(row.Calls) != 0 {
+			t.Errorf("%s: %+v", id, row)
 		}
 	}
 	if _, ok := PageOperationOf("page.unknown"); ok {

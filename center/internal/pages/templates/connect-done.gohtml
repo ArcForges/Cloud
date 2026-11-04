@@ -1,0 +1,8 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Return to your terminal</h1>
+<p id="status" role="status" aria-live="polite"></p>
+{{if .Fleet.Approved}}<p>You approved the node. It finishes signing in on its own; this browser now hands the result back to it.</p>
+{{else}}<p>You denied the node. This browser now tells it so.</p>{{end}}
+<p>The browser must run on the computer that runs the node. If nothing happens, or the browser shows a connection error, use this link on that computer, or sign the node in with a device code instead.</p>
+<p><a id="return-link" href="{{.Fleet.Redirect}}" rel="noopener noreferrer">Hand the result back to the node</a></p>
+{{end}}

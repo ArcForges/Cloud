@@ -8,15 +8,15 @@
 <thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Software</th><th scope="col">Actions</th></tr></thead>
 <tbody>
 {{range .Devices}}<tr>
-<th scope="row">{{.Name}}{{if .Current}} (this browser){{end}}</th>
+<th scope="row"><bdi>{{.Name}}</bdi>{{if .Current}} (this browser){{end}}</th>
 <td data-label="Kind">{{.Platform}}</td>
-<td data-label="Software">{{range $index, $item := .Installed}}{{if $index}}, {{end}}{{$item}}{{else}}None{{end}}</td>
+<td data-label="Software">{{range $index, $item := .Installed}}{{if $index}}, {{end}}<bdi>{{$item}}</bdi>{{else}}None{{end}}{{if .NodeExpiresText}}<br>Node sign-in valid until <time datetime="{{.NodeExpiresAt}}">{{.NodeExpiresText}}</time>{{end}}</td>
 <td class="actions" data-label="Actions">
 <form method="post" action="{{$.Base}}/account/devices/rename" class="inline">
 <input type="hidden" name="csrf" value="{{$.CSRF}}">
 <input type="hidden" name="command_id" value="{{.RenameCommand}}">
 <input type="hidden" name="device_id" value="{{.ID}}">
-<label for="device-{{.ID}}" class="visually-hidden">New name for device {{.Name}}</label>
+<label for="device-{{.ID}}" class="visually-hidden">New name for device <bdi>{{.Name}}</bdi></label>
 <input id="device-{{.ID}}" name="name" type="text" maxlength="64" required value="{{.Name}}">
 <button type="submit" aria-label="Rename device {{.Name}}">Rename</button>
 </form>

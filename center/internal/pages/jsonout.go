@@ -271,8 +271,13 @@ func statusOf(value *foundationv1.ArcError) int {
 		}
 		return 400
 	case foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE:
-		if value.GetCode() == "rate_limited" {
+		switch value.GetCode() {
+		case "rate_limited":
 			return 429
+		case "quota_exceeded":
+			// The account's own limit (the fleet approvals' node cap): a refusal of this request the page explains, not a busy service
+			// (the Worker answers every 503 with its own page, so the text would never show).
+			return 400
 		}
 		return 503
 	}

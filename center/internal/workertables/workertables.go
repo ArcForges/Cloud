@@ -152,6 +152,9 @@ func Render(table routes.WorkerTable) (string, error) {
 	text.WriteString("export const surfaceNames: readonly Surface[] = [" + joinQuoted(table.Surfaces) + "];\n")
 	text.WriteString("/** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */\n")
 	text.WriteString("export const clientIpHeader = " + quote(strings.ToLower(config.ClientIPHeader)) + ";\n")
+	text.WriteString("/** The headers the Worker sets to the client's country and network (from request.cf) on every surface call. */\n")
+	text.WriteString("export const clientCountryHeader = " + quote(strings.ToLower(config.ClientCountryHeader)) + ";\n")
+	text.WriteString("export const clientAsnHeader = " + quote(strings.ToLower(config.ClientASNHeader)) + ";\n")
 	replies, err := surfaceReplies(table.Surfaces)
 	if err != nil {
 		return "", err

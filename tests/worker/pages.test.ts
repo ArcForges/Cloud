@@ -74,7 +74,7 @@ function bindings(
   const env: CloudBindings = {
     SOURCE_REVISION: "candidate",
     ALLOWED_ORIGIN: origin,
-    FLAGSHIP_SURFACES: "identity,pages,operations",
+    FLAGSHIP_SURFACES: "identity,pages,operations,fleet",
     CLOUD_CONTAINER: {
       getByName() {
         return {
@@ -199,13 +199,13 @@ test("the generated page table is what the pages' contract names", () => {
   assert.equal(pageLocationPrefix, "/api/account/");
   const keys = new Set<string>();
   for (const row of pageRoutes) {
-    // The pages surface lives under the account and WebBrowserSession prefixes, the operations surface under its own.
-    assert(
-      row.surface === "operations"
-        ? row.path.startsWith("/operations/")
-        : row.path.startsWith("/account/") || row.path.startsWith("/session/v1/web/"),
-      row.path,
-    );
+    // The pages surface lives under the account and WebBrowserSession prefixes, the operations surface under its own, the fleet surface
+    // under /connect and /activate (each a page itself).
+    if (row.surface === "operations") assert(row.path.startsWith("/operations/"), row.path);
+    else if (row.surface === "fleet")
+      assert(/^\/(?:connect|activate)(?:\/(?:review|decision))?$/u.test(row.path), row.path);
+    else
+      assert(row.path.startsWith("/account/") || row.path.startsWith("/session/v1/web/"), row.path);
     assert(!/[?#%\\ ]|\/\/|\.\.|\/$/u.test(row.path), `canonical: ${row.path}`);
     assert(row.method === "GET" || row.method === "POST");
     assert.equal(keys.has(`${row.method} ${row.path}`), false);
@@ -265,9 +265,9 @@ test("a route belongs to its own surface: the operations page is not the pages' 
     ["GET /operations/grant", "POST /operations/grant/review", "POST /operations/grant/confirm"],
   );
   assert(operations.length < pageRoutes.length);
-  // Every other route is of the pages surface, and the methods of one path share a surface.
+  // Every other route is of the pages surface or the fleet surface, and the methods of one path share a surface.
   for (const row of pageRoutes.filter((item) => item.surface !== "operations"))
-    assert.equal(row.surface, "pages", row.path);
+    assert(row.surface === "pages" || row.surface === "fleet", row.path);
   assert.equal(pageTable.get("/api/operations/grant")?.length, 1);
   for (const flag of ["identity,pages", "pages", "identity", "operations,x"]) {
     const { env, seen, keys } = bindings(() => jsonOk(), { FLAGSHIP_SURFACES: flag });
@@ -994,4 +994,73 @@ test("no other header of the Container reaches the client", async () => {
     "vary",
   ])
     assert.equal(reply.headers.has(name), false, name);
+});
+
+// AF-CTR-04 E3: the fleet surface's six page routes, forwarded only while fleet is enabled, none of which redirects or sets a cookie;
+// and the page path forwards no origin header a client sent (the origin of a node's request is the API path's, set from request.cf).
+test("the fleet pages are six exact routes of the fleet surface, forwarded only while it is enabled", async () => {
+  const fleet = pageRoutes.filter((row) => row.surface === "fleet");
+  assert.deepEqual(
+    fleet.map((row) => `${row.method} ${row.path}`),
+    [
+      "GET /connect",
+      "POST /connect/review",
+      "POST /connect/decision",
+      "GET /activate",
+      "POST /activate/review",
+      "POST /activate/decision",
+    ],
+  );
+  for (const row of fleet) {
+    assert.equal(row.redirects, false, row.path);
+    assert.equal(row.setCookie, "none", row.path);
+    assert.equal(row.cookie, row.method === "POST", row.path);
+    assert.deepEqual([...row.responseTypes], ["text/html; charset=utf-8"], row.path);
+    assert.equal(row.requestType, row.method === "POST" ? "application/x-www-form-urlencoded" : "", row.path);
+  }
+  for (const flag of ["identity,pages", "identity,pages,operations", "", "fleet,x"]) {
+    const { env, seen, keys } = bindings(() => jsonOk(), { FLAGSHIP_SURFACES: flag });
+    for (const row of fleet) {
+      const reply = await routeRequest(call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }), env);
+      assert.equal(reply.status, 404, `${flag} ${row.path}`);
+    }
+    assert.equal(seen.length, 0, flag);
+    assert.equal(keys.length, 0, flag);
+  }
+  const { env, seen } = bindings(() => centerReply(200, { type: "text/html; charset=utf-8", body: "x" }), {
+    FLAGSHIP_SURFACES: "identity,pages,fleet",
+  });
+  for (const row of fleet) {
+    const reply = await routeRequest(call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }), env);
+    assert.equal(reply.status, 200, row.path);
+    assert.equal(reply.headers.get("cache-control"), "no-store, no-transform", row.path);
+    assert.equal(reply.headers.get("location"), null, row.path);
+    assert.equal(reply.headers.get("set-cookie"), null, row.path);
+  }
+  assert.equal(seen.length, fleet.length);
+  // A query string is refused before the Container, as on every page.
+  const { env: queried, seen: queriedSeen } = bindings(() => jsonOk());
+  const connect = route("GET", "/connect");
+  assert.equal((await routeRequest(call(connect, { suffix: "?flow=x" }), queried)).status, 400);
+  assert.equal(queriedSeen.length, 0);
+});
+
+test("the page path forwards no client-sent origin header (R-6): only what the Worker builds reaches the Container", async () => {
+  const review = route("POST", "/activate/review");
+  const { env, seen } = bindings(() => centerReply(200, { type: "text/html; charset=utf-8", body: "x" }));
+  const request = call(review, {
+    headers: {
+      "cf-connecting-ip": "203.0.113.7",
+      "x-arcforges-client-country": "DE",
+      "x-arcforges-client-asn": "3320",
+      "x-arcforges-client-ip": "198.51.100.9",
+    },
+  });
+  (request as Request & { cf?: unknown }).cf = { country: "FR", asn: 12322 };
+  assert.equal((await routeRequest(request, env)).status, 200);
+  assert.equal(seen.length, 1);
+  const forwarded = seen[0]?.request.headers;
+  assert.equal(forwarded?.get("x-arcforges-client-country"), null);
+  assert.equal(forwarded?.get("x-arcforges-client-asn"), null);
+  assert.equal(forwarded?.get("x-arcforges-client-ip"), "203.0.113.7");
 });
