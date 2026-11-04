@@ -302,6 +302,45 @@ func TestOperatorRevocationDuringReenrollmentNeverDeadlocks(t *testing.T) {
 	}
 }
 
+// TestOperatorRevocationTakesTheAccountLocksFirst (SEC-1) pins the order deterministically: while a third transaction holds the
+// account row (as Enroll does from its first lock on), the operator's revocation, of that account and of every account, waits for
+// it and holds no session row yet; released, it revokes every session of the account.
+func TestOperatorRevocationTakesTheAccountLocksFirst(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	for _, all := range []bool{false, true} {
+		user, approver := r.account(1)
+		target := &user
+		if all {
+			target = nil
+		}
+		release := r.hold(t, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", user)
+		done := make(chan error, 1)
+		go func() {
+			done <- r.db.Runtime.InTx(ctx, "revoke sessions", store.TxOptions{Attempts: 1}, func(ctx context.Context, tx pgx.Tx) error {
+				_, err := session.RevokeByOperator(ctx, tx, target, time.Now())
+				return err
+			})
+		}()
+		r.waitBlocked(t)
+		select {
+		case err := <-done:
+			t.Fatalf("all %v: the revocation did not wait for the account lock (%v)", all, err)
+		default:
+		}
+		if !r.free(t, "SELECT 1 FROM identity.session WHERE session_id = $1", approver.ID) {
+			t.Errorf("all %v: the revocation holds a session while it waits for the account", all)
+		}
+		release(false)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if live := r.count("SELECT count(*) FROM identity.session WHERE user_id = $1 AND revoked_at IS NULL", user); live != 0 {
+			t.Fatalf("all %v: %d live sessions after the revocation", all, live)
+		}
+	}
+}
+
 // TestNothingOfARefusedEnrollmentRemains (SEC-2): Enroll rolls its savepoint back on a lapse and on every refusal, so a caller that
 // commits its transaction afterwards (as a flow that ends EXPIRED will) keeps no device, installation, session or key: the lapse of a
 // new node's approval after its device and installation were inserted, the lapse and the OS refusal of a re-enrollment; the key then

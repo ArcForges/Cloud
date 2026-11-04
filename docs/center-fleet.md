@@ -152,8 +152,8 @@ The writers that lock fewer rows skip slots and never go back: SignOutNode, a si
 session's renewal lock one session row; the own-device DeviceService.Revoke takes no account lock and starts at the device; a sign-in
 (`device.EnsureNative`, `EnsureBrowser`) locks its own installation and device and then inserts its session; a step-up proof and the
 session upgrade lock the proving session. In every transaction a command receipt is the first row written and the audit chain head the
-last. `TestEnrollTakesItsLocksInTheGlobalOrder` and `TestReportNodeInfoAndRevokeNeverDeadlock` hold one row at a time and check which
-rows the waiting transaction already holds. The race tests (enrollment, refresh, report and the operator's revoke-sessions against
+last. `TestEnrollTakesItsLocksInTheGlobalOrder`, `TestReportNodeInfoAndRevokeNeverDeadlock` and
+`TestOperatorRevocationTakesTheAccountLocksFirst` hold one row at a time and check which rows the waiting transaction already holds. The race tests (enrollment, refresh, report and the operator's revoke-sessions against
 revocation and re-enrollment) run every transaction with one attempt (the refresh through `fleet.Options.RefreshAttempts`), so a
 deadlock is an error of the round and fails them.
 
