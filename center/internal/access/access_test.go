@@ -90,9 +90,14 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.refreshNodeSession": "R1 anonymous",
 		"fleet.reportNodeInfo":     "R1 allowed none - receipt active node",
 		"fleet.signOutNode":        "R2 allowed none - receipt restricted node",
+		// AF-CTR-04 E1b (CTR4-DES-02 as amended by Q1 and Q24): the browser sign-in rows.
+		"fleet.beginNodeSignIn":    "R1 anonymous",
+		"fleet.getNodeSignInFlow":  "R2 upgrade none - no-receipt active",
+		"fleet.approveNodeSignIn":  "R3 upgrade evidence-on-approve flow no-receipt active",
+		"fleet.completeNodeSignIn": "R1 anonymous",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
-	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own"}
+	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own", EvidenceOnApprove: "evidence-on-approve"}
 	seen := map[string]bool{}
 	for _, operation := range Operations() {
 		got := operation.Risk + " anonymous"
@@ -127,7 +132,8 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 // request.
 func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	want := map[string]string{"identity.beginPasskeyRegistration": TargetAccount, "identity.removeAuthIdentity": TargetCredential,
-		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession}
+		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession,
+		"fleet.approveNodeSignIn": TargetFlow}
 	if target, ok := StepUpClass("center.operatorGrant"); !ok || target != TargetRequest {
 		t.Fatalf("the operator grant class: %q %v", target, ok)
 	}
@@ -162,13 +168,19 @@ func TestTheMobileLimitedRules(t *testing.T) {
 			if operation.NeedsEvidence(own) != wantEvidence {
 				t.Errorf("%s own=%v: evidence", operation.ID, own)
 			}
+			// A decision (own reads as approve here) needs evidence on every Evidence row and, on an EvidenceOnApprove row, only to
+			// approve (Q1: a denial needs none).
+			if operation.NeedsEvidenceToDecide(own) != (operation.StepUp == Evidence || operation.StepUp == EvidenceOnApprove && own) {
+				t.Errorf("%s approve=%v: evidence to decide", operation.ID, own)
+			}
 		}
 	}
 }
 
 // TestFleetRowsCarryNoFeature (E1-2, CTR4-DES-03): node enrollment is an account and device operation and is never gated (AD-0021
 // section 13a), so no fleet row of the table carries a Feature or is audited before the call; the node rows admit the node scope
-// only. A gated fleet row would first need the prerequisites of docs/center-entitlement.md ("What waits for later tasks").
+// only, and the sign-in's account rows (the review and the decision) are HUMAN rows. A gated fleet row would first need the
+// prerequisites of docs/center-entitlement.md ("What waits for later tasks").
 func TestFleetRowsCarryNoFeature(t *testing.T) {
 	rows := 0
 	for _, operation := range Operations() {
@@ -176,7 +188,9 @@ func TestFleetRowsCarryNoFeature(t *testing.T) {
 			continue
 		}
 		rows++
-		if operation.Feature != "" || operation.Audit == AuditBeforeCall || operation.Session && strings.Join(operation.Scopes, ",") != "node" {
+		account := operation.ID == "fleet.getNodeSignInFlow" || operation.ID == "fleet.approveNodeSignIn"
+		if operation.Feature != "" || operation.Audit == AuditBeforeCall || operation.Session && !account && strings.Join(operation.Scopes, ",") != "node" ||
+			account && len(operation.Scopes) != 0 {
 			t.Errorf("%s: feature %q, audit %d, scopes %v", operation.ID, operation.Feature, operation.Audit, operation.Scopes)
 		}
 	}

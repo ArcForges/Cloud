@@ -276,13 +276,16 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	// revoked while fleet is off still ends its nodes (AF-CTR-04).
 	participants := append([]device.Participant{fleet.NodeParticipant{}}, options.Participants...)
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: sender, Bootstrap: c.Config.Identity.Bootstrap,
-		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: participants})
+		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: participants,
+		// The approvals of the node sign-in are cancelled by the account's remediations wherever identity runs (protocol-6).
+		AccountParticipants: []identity.AccountParticipant{fleet.ApprovalParticipant{}}})
 	c.drain = service.Drain
 	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
 	dispatcher.Register(server.Methods()...)
 	if c.Config.Identity.Enabled(config.SurfaceFleet) {
-		nodes := fleet.New(fleet.Options{DB: c.Store, Policy: c.Config.Identity.Policy, Clock: clock, Events: c.Metrics, Logger: logger})
+		nodes := fleet.New(fleet.Options{DB: c.Store, Policy: c.Config.Identity.Policy, Clock: clock, Events: c.Metrics, Logger: logger,
+			PublicBaseURL: c.Config.PublicBaseURL})
 		dispatcher.Register(fleetapi.New(nodes, authorizer, c.Store, clock, logger).Methods()...)
 	}
 	verifier := session.NewVerifier(c.Store, origin, clock)

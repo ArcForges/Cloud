@@ -189,6 +189,15 @@ func Operations() []Operation {
 		// The fleet surface (AF-CTR-04 E1a): the node refreshes anonymously with its refresh token (never under a receipt: it presents
 		// a one-use secret); it reports its info and signs itself out with its node credential under a receipt of principal
 		// node:<installation>. A restricted account's node may sign out (it only removes access) but not report. Never gated.
+		// The browser node sign-in (E1b): Begin and Complete are anonymous (Complete's flow-bound proof is the one-use code, the PKCE
+		// verifier and the node key proof; its effect is audited by the domain, fleet.node.enrolled); an account reviews the flow and
+		// decides it, approval with step-up evidence of class fleet.approveNodeSignIn bound to the flow ID, denial without (Q1). A
+		// restricted account cannot enroll a node (Q24) and a mobile.limited session upgrades first. None runs under a receipt.
+		{Path: fleetv1connect.NodeEnrollmentServiceBeginNodeSignInProcedure, ID: "fleet.beginNodeSignIn", Risk: "R1"},
+		{Path: fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure, ID: "fleet.getNodeSignInFlow", Risk: "R2", Session: true, MobileLimited: Upgrade},
+		{Path: fleetv1connect.NodeEnrollmentServiceApproveNodeSignInProcedure, ID: "fleet.approveNodeSignIn", Risk: "R3", Audit: AuditInTransaction, Session: true,
+			MobileLimited: Upgrade, StepUp: EvidenceOnApprove, Target: TargetFlow},
+		{Path: fleetv1connect.NodeEnrollmentServiceCompleteNodeSignInProcedure, ID: "fleet.completeNodeSignIn", Risk: "R1"},
 		{Path: fleetv1connect.NodeEnrollmentServiceRefreshNodeSessionProcedure, ID: "fleet.refreshNodeSession", Risk: "R1"},
 		{Path: fleetv1connect.NodeEnrollmentServiceReportNodeInfoProcedure, ID: "fleet.reportNodeInfo", Risk: "R1", Session: true, Scopes: []string{"node"},
 			Receipt: true},
