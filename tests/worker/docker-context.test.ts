@@ -117,6 +117,8 @@ test("every package of the Go center and its embedded migrations are admitted to
   // The MOCKED node of the center's tests (AF-CTR-04) sits under center/internal/*/, which the rules admit; its closing exclusion
   // comes after them.
   assert(rules.indexOf("center/internal/nodetest/") > rules.indexOf("!center/internal/*/*.go"));
+  // The development stand-in of a node (AF-CTR-04 E3) is excluded by name as well as by the closing rules, as center-gen is.
+  assert(rules.includes("center/cmd/node-probe/"));
 });
 
 test("a rule never admits tests, the Worker, the plan files, build output or a stray file", () => {
@@ -209,6 +211,8 @@ test("the matcher of the Docker context follows the rules the file states", () =
     ["center/cmd/arcforges-center/operator.go", true],
     ["center/cmd/arcforges-center/operator_test.go", false],
     ["center/cmd/center-gen/main.go", false],
+    // AF-CTR-04 E3: the development stand-in of a node is never in the image.
+    ["center/cmd/node-probe/main.go", false],
     ["center/internal/entitlement/operator.go", true],
     ["center/internal/entitlement/operator_test.go", false],
     ["center/internal/entitlement/testdata/csharp-resolver-vectors.json", false],
