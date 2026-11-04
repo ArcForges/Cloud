@@ -580,18 +580,39 @@ func TestCodesOfOneFlowKindNeverWorkInTheOther(t *testing.T) {
 	}
 }
 
-// TestATerminalAuthorizationIsNeverWritten (cloud-10 item 4): 0004's trigger refuses every change of a DENIED, EXPIRED or COMPLETED
-// authorization except recording the reuse once; APPROVED to COMPLETED is a permitted change.
+// TestATerminalAuthorizationIsNeverWritten (cloud-10 item 4): 0004's trigger refuses every change of a DENIED or EXPIRED
+// authorization, and every change of a COMPLETED one except recording the reuse once; APPROVED to COMPLETED is a permitted change.
 func TestATerminalAuthorizationIsNeverWritten(t *testing.T) {
 	s := newSignIns(t)
 	s.wide()
+	ctx := context.Background()
+	denied := s.mustStart(s.newNode())
+	if _, err := s.lookup(s.user, s.approver, denied.started.UserCode); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.decide(s.user, s.approver, denied.started.UserCode, false); err != nil {
+		t.Fatal(err)
+	}
+	expired := s.mustStart(s.newNode())
+	s.clock.advance(600 * time.Second)
+	if _, err := s.poll(expired); err != nil || s.authorizationState(expired) != AuthorizationExpired {
+		t.Fatalf("the expiry: %s", key(err))
+	}
+	for _, final := range []*authorization{denied, expired} {
+		for _, statement := range []string{"UPDATE fleet.device_authorization SET last_poll_at = now(), rev = rev + 1 WHERE authorization_id = $1",
+			"UPDATE fleet.device_authorization SET state = 1, rev = rev + 1 WHERE authorization_id = $1",
+			"UPDATE fleet.device_authorization SET reused_at = now(), rev = rev + 1 WHERE authorization_id = $1"} {
+			if _, err := s.db.Runtime.Pool().Exec(ctx, statement, final.started.AuthorizationID); err == nil {
+				t.Fatalf("a final authorization (state %d) took %s", s.authorizationState(final), statement)
+			}
+		}
+	}
 	a := s.mustStart(s.newNode())
 	s.approveCode(s.user, s.approver, a)
 	s.clock.advance(5 * time.Second)
 	if _, err := s.poll(a); err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
 	update := func(statement string) error {
 		_, err := s.db.Runtime.Pool().Exec(ctx, statement, a.started.AuthorizationID)
 		return err

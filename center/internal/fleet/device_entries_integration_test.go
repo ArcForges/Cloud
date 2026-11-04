@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/identity"
+	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
 // EVIDENCE: as device_integration_test.go: REAL PostgreSQL and the real fleet service; the accounts, sessions and evidence SEEDED; the
@@ -98,11 +99,15 @@ func TestTheNetworkRefusalGivesTheAccountReservationBack(t *testing.T) {
 }
 
 // TestExpiredOtherStateAndUnreviewedEntriesCountAgainstTheBudget (F7, decided in e2-decisions.md): an entry naming an expired code
-// (STATE/expired), a code in another state (STATE/invalid_state), the approval of a code this account did not review, also one another
-// account reviewed (STATE/invalid_state not_reviewed: the deliberate override of protocol-9 corrected fix item 3), and a code another
-// account decided (VALIDATION/code_invalid) each keep the account's unit; a step-up refusal of a reviewed code gives it back.
+// (STATE/expired), a code in another state (STATE/invalid_state: a lookup of a code this account denied, a second approval of its
+// APPROVED code), the decision of a code this account did not review, also one another account reviewed (STATE/invalid_state
+// not_reviewed: the deliberate override of protocol-9 corrected fix item 3), and a code another account decided
+// (VALIDATION/code_invalid) each keep the account's unit, with the exact refusal; a step-up refusal of a reviewed code gives it back.
+// The account's budget is 7 here, so the six kept units and one more wrong entry spend it exactly.
 func TestExpiredOtherStateAndUnreviewedEntriesCountAgainstTheBudget(t *testing.T) {
 	s := newSignIns(t)
+	s.policy.DeviceEntryPerAccount.Limit = 7
+	s.renew()
 	other, otherSession := s.account(1)
 	expired := s.mustStart(s.newNode())
 	approvedByOther := s.mustStart(s.newNode())
@@ -112,6 +117,15 @@ func TestExpiredOtherStateAndUnreviewedEntriesCountAgainstTheBudget(t *testing.T
 		t.Fatal(err)
 	}
 	unreviewed := s.mustStart(s.newNode())
+	approvedByMe := s.mustStart(s.newNode())
+	s.approveCode(s.user, s.approver, approvedByMe)
+	deniedByMe := s.mustStart(s.newNode())
+	if _, err := s.lookup(s.user, s.approver, deniedByMe.started.UserCode); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.decide(s.user, s.approver, deniedByMe.started.UserCode, false); err != nil {
+		t.Fatal(err)
+	}
 	mine := s.mustStart(s.newNode())
 	if _, err := s.lookup(s.user, s.approver, mine.started.UserCode); err != nil {
 		t.Fatal(err)
@@ -122,28 +136,42 @@ func TestExpiredOtherStateAndUnreviewedEntriesCountAgainstTheBudget(t *testing.T
 	s.db.Exec(fmt.Sprintf("UPDATE fleet.device_authorization SET expires_at = created_at + interval '1 microsecond', rev = rev + 1 WHERE authorization_id = '%s'",
 		expired.started.AuthorizationID))
 	s.clock.advance(time.Second)
-	for name, entry := range map[string]func() error{
-		"expired":           func() error { _, err := s.lookup(s.user, s.approver, expired.started.UserCode); return err },
-		"decided elsewhere": func() error { _, err := s.lookup(s.user, s.approver, approvedByOther.started.UserCode); return err },
-		"reviewed elsewhere": func() error {
+	for _, entry := range []struct {
+		name, want string
+		enter      func() error
+	}{
+		{"expired", "STATE/expired", func() error { _, err := s.lookup(s.user, s.approver, expired.started.UserCode); return err }},
+		{"decided elsewhere", "VALIDATION/code_invalid", func() error { _, err := s.lookup(s.user, s.approver, approvedByOther.started.UserCode); return err }},
+		{"reviewed elsewhere", "STATE/invalid_state device_authorization/not_reviewed", func() error {
 			return s.decide(s.user, s.approver, reviewedByOther.started.UserCode, false)
-		},
-		"never reviewed": func() error { return s.decide(s.user, s.approver, unreviewed.started.UserCode, false) },
+		}},
+		{"never reviewed", "STATE/invalid_state device_authorization/not_reviewed", func() error {
+			return s.decide(s.user, s.approver, unreviewed.started.UserCode, false)
+		}},
+		{"denied by me, looked up", "STATE/invalid_state device_authorization/denied", func() error {
+			_, err := s.lookup(s.user, s.approver, deniedByMe.started.UserCode)
+			return err
+		}},
+		{"approved by me, approved again", "STATE/invalid_state device_authorization/approved", func() error {
+			return s.decide(s.user, s.approver, approvedByMe.started.UserCode, true)
+		}},
 	} {
-		before := s.count("SELECT coalesce(sum(count), 0) FROM platform.rate_limit WHERE bucket_hash = $1", hashOf(s.service.bucket("device_entry_account", "account:"+s.user.String())))
-		err := entry()
-		after := s.count("SELECT coalesce(sum(count), 0) FROM platform.rate_limit WHERE bucket_hash = $1", hashOf(s.service.bucket("device_entry_account", "account:"+s.user.String())))
-		if err == nil || after != before+1 {
-			t.Fatalf("%s: %s, the account's count %d -> %d", name, key(err), before, after)
+		before := s.entryCount(s.user)
+		err := entry.enter()
+		if after := s.entryCount(s.user); key(err) != entry.want || after != before+1 {
+			t.Fatalf("%s: %s, the account's count %d -> %d", entry.name, key(err), before, after)
 		}
 	}
 	if s.count(`SELECT count(*) FROM fleet.device_authorization WHERE authorization_id = ANY($1::uuid[]) AND state = 1`,
 		[]string{reviewedByOther.started.AuthorizationID.String(), unreviewed.started.AuthorizationID.String(), mine.started.AuthorizationID.String()}) != 3 {
 		t.Fatal("a refused decision changed an authorization")
 	}
-	// Four kept units and none for the step-up refusal: the fifth wrong entry leaves 0.
+	if s.authorizationState(approvedByMe) != AuthorizationApproved || s.authorizationState(deniedByMe) != AuthorizationDenied {
+		t.Fatal("a refused entry changed this account's own authorizations")
+	}
+	// Six kept units and none for the step-up refusal: the seventh wrong entry leaves 0.
 	if _, _, available := limitOf(func() error { _, err := s.lookup(s.user, s.approver, unknownCode); return err }()); available != 0 {
-		t.Fatalf("the fifth wrong entry leaves %d", available)
+		t.Fatalf("the seventh wrong entry leaves %d", available)
 	}
 }
 
@@ -314,7 +342,8 @@ AND convert_from(payload, 'UTF8')::jsonb->>'from' = 'approved'`, a.started.Autho
 	if _, err = s.lookup(s.user, s.approver, b.started.UserCode); key(err) != "VALIDATION/code_invalid" {
 		t.Fatalf("an expired code another account decided: %s", key(err))
 	}
-	// The node cap: an approval that would add a node past maxNodesPerAccount is quota_exceeded, and the reservation is given back.
+	// The node cap: an approval that would add a node past maxNodesPerAccount is quota_exceeded, and both reservations are given back
+	// (OQ-3: the code is right and reviewed): the account's and the network's counts are those before the decision.
 	s.policy.MaxNodesPerAccount = 1
 	s.renew()
 	s.mustEnroll(s.request(s.newNode().ID, nodeKey(t)))
@@ -323,8 +352,12 @@ AND convert_from(payload, 'UTF8')::jsonb->>'from' = 'approved'`, a.started.Autho
 		t.Fatal(err)
 	}
 	s.proveCode(s.user, s.approver, c.started.UserCode)
+	accountBefore, networkBefore := s.entryCount(s.user), s.networkCount()
 	if err = s.decide(s.user, s.approver, c.started.UserCode, true); key(err) != "RESOURCE/quota_exceeded" || s.authorizationState(c) != AuthorizationPending {
 		t.Fatalf("the cap: %s", key(err))
+	}
+	if s.entryCount(s.user) != accountBefore || s.networkCount() != networkBefore {
+		t.Fatalf("the cap's refusal kept units: account %d -> %d, network %d -> %d", accountBefore, s.entryCount(s.user), networkBefore, s.networkCount())
 	}
 }
 
@@ -334,6 +367,15 @@ func lower(code string) string {
 		out[i] = c + ('a' - 'A')
 	}
 	return string(out)
+}
+
+// entryCount is the count of an account's device_entry_account bucket; networkCount that of the rig's network in device_entry_prefix.
+func (s *signIns) entryCount(user platform.ID) int {
+	return s.count("SELECT coalesce(sum(count), 0) FROM platform.rate_limit WHERE bucket_hash = $1", hashOf(s.service.bucket("device_entry_account", "account:"+user.String())))
+}
+
+func (s *signIns) networkCount() int {
+	return s.count("SELECT coalesce(sum(count), 0) FROM platform.rate_limit WHERE bucket_hash = $1", hashOf(s.service.bucket("device_entry_prefix", "203.0.113.0/24")))
 }
 
 // hashOf is the stored key of a bucket.

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Cloud/center/internal/identity"
+	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
@@ -457,6 +458,144 @@ func TestRevokeDuringPollLeavesNoLiveSession(t *testing.T) {
 		if live := s.count(`SELECT count(*) FROM identity.session s JOIN device.device d ON d.device_id = s.device_id
 WHERE d.revoked_at IS NOT NULL AND s.revoked_at IS NULL`); live != 0 {
 			t.Fatalf("round %d: %d live sessions on a revoked device", round, live)
+		}
+	}
+}
+
+// copyPending inserts another PENDING authorization of the same node and key as a, with the given ID (its own codes' digests).
+func (s *signIns) copyPending(a *authorization, id platform.ID) {
+	s.t.Helper()
+	if _, err := s.db.Migration.Exec(context.Background(), `INSERT INTO fleet.device_authorization (authorization_id, device_code_hash, user_code_hash, state,
+    node_id, node_name, os, arch, version, node_public_key, interval_ms, created_at, expires_at, rev)
+SELECT $2::uuid, sha256(convert_to('device ' || $2::uuid::text, 'UTF8')), sha256(convert_to('user ' || $2::uuid::text, 'UTF8')), 1, node_id, node_name, os, arch, version,
+    node_public_key, interval_ms, created_at, expires_at, 1 FROM fleet.device_authorization WHERE authorization_id = $1`, a.started.AuthorizationID, id); err != nil {
+		s.t.Fatal(err)
+	}
+}
+
+// TestStartLocksThePendingAuthorizationsInIDOrder (docs N-6: "the one order of every writer that locks several authorization rows"):
+// with two more PENDING authorizations of one node and key, the higher ID inserted first, a third transaction holds the higher one;
+// the superseding Start then waits for it while it already holds the lower one.
+func TestStartLocksThePendingAuthorizationsInIDOrder(t *testing.T) {
+	s := newSignIns(t)
+	s.watchDeadlocks(t)
+	node := s.newNode()
+	a := s.mustStart(node)
+	low, high := platform.ID{0x00, 0x00, 0x00, 0x01}, platform.ID{0xff, 0xff, 0xff, 0xff}
+	s.copyPending(a, high)
+	s.copyPending(a, low)
+	release := s.hold(t, "SELECT 1 FROM fleet.device_authorization WHERE authorization_id = $1 FOR UPDATE", high)
+	done := make(chan error, 1)
+	go func() { _, err := s.start(node); done <- err }()
+	s.waitBlocked(t)
+	if s.free(t, "SELECT 1 FROM fleet.device_authorization WHERE authorization_id = $1", low) {
+		t.Fatal("the Start waits for the higher ID without holding the lower one")
+	}
+	release(false)
+	if err := <-done; err != nil {
+		t.Fatal(key(err))
+	}
+	if s.count("SELECT count(*) FROM fleet.device_authorization WHERE node_id = $1 AND state = 1", node.ID) != 1 {
+		t.Fatal("the Start did not supersede the node's pending authorizations")
+	}
+}
+
+// TestLookupTakesTheAuthorizationBeforeItsBuckets (c.1, security F-3): the entry is reserved first in transactions of their own (a held
+// bucket row makes the lookup wait holding no authorization row); the review then locks the authorization row and gives the entry back
+// after it (a held authorization row makes the lookup wait holding no bucket row).
+func TestLookupTakesTheAuthorizationBeforeItsBuckets(t *testing.T) {
+	s := newSignIns(t)
+	s.watchDeadlocks(t)
+	a := s.mustStart(s.newNode())
+	account := hashOf(s.service.bucket("device_entry_account", "account:"+s.user.String()))
+	if _, err := s.lookup(s.user, s.approver, a.started.UserCode); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	release := s.hold(t, "SELECT 1 FROM platform.rate_limit WHERE bucket_hash = $1 FOR UPDATE", account)
+	go func() { _, err := s.lookup(s.user, s.approver, a.started.UserCode); done <- err }()
+	s.waitBlocked(t)
+	if !s.free(t, "SELECT 1 FROM fleet.device_authorization WHERE authorization_id = $1", a.started.AuthorizationID) {
+		t.Fatal("the lookup took the authorization before its reservation")
+	}
+	release(false)
+	if err := <-done; err != nil {
+		t.Fatal(key(err))
+	}
+	release = s.hold(t, "SELECT 1 FROM fleet.device_authorization WHERE authorization_id = $1 FOR UPDATE", a.started.AuthorizationID)
+	go func() { _, err := s.lookup(s.user, s.approver, a.started.UserCode); done <- err }()
+	s.waitBlocked(t)
+	if !s.free(t, "SELECT 1 FROM platform.rate_limit WHERE bucket_hash = $1", account) {
+		t.Fatal("the lookup holds a bucket row while it waits for the authorization")
+	}
+	release(false)
+	if err := <-done; err != nil {
+		t.Fatal(key(err))
+	}
+}
+
+// TestConcurrentLookupsOfTwoCodesByOneAccountNeverDeadlock (c.1, security F-3): one account looks two codes up and approves them at
+// once (each transaction gives the same two bucket rows back, account then network); 50 rounds, never a deadlock, both approved.
+func TestConcurrentLookupsOfTwoCodesByOneAccountNeverDeadlock(t *testing.T) {
+	s := newSignIns(t)
+	s.wide()
+	s.watchDeadlocks(t)
+	for round := range rounds {
+		codes := []*authorization{s.mustStart(s.newNode()), s.mustStart(s.newNode())}
+		for _, a := range codes {
+			s.proveCode(s.user, s.approver, a.started.UserCode)
+		}
+		var start, done sync.WaitGroup
+		start.Add(1)
+		done.Add(2)
+		errs := make([]error, 2)
+		for i, a := range codes {
+			go func() {
+				defer done.Done()
+				start.Wait()
+				if _, errs[i] = s.lookup(s.user, s.approver, a.started.UserCode); errs[i] == nil {
+					errs[i] = s.decide(s.user, s.approver, a.started.UserCode, true)
+				}
+			}()
+		}
+		start.Done()
+		done.Wait()
+		for i, err := range errs {
+			if deadlocked(err) || err != nil {
+				t.Fatalf("round %d: entry %d: %s", round, i, key(err))
+			}
+		}
+		if s.authorizationState(codes[0]) != AuthorizationApproved || s.authorizationState(codes[1]) != AuthorizationApproved {
+			t.Fatalf("round %d: not both approved", round)
+		}
+	}
+}
+
+// TestConcurrentStartsOfOneNodeNeverDeadlock (c.1, security F-3): four Starts of one node and key, released together while two
+// PENDING authorizations of it exist; 50 rounds, every transaction with one attempt: never a deadlock, one PENDING authorization left.
+func TestConcurrentStartsOfOneNodeNeverDeadlock(t *testing.T) {
+	s := newSignIns(t)
+	s.watchDeadlocks(t)
+	for round := range rounds {
+		node := s.newNode()
+		a := s.mustStart(node)
+		s.copyPending(a, platform.NewID())
+		var start, done sync.WaitGroup
+		start.Add(1)
+		done.Add(4)
+		errs := make([]error, 4)
+		for i := range 4 {
+			go func() { defer done.Done(); start.Wait(); _, errs[i] = s.start(node) }()
+		}
+		start.Done()
+		done.Wait()
+		for i, err := range errs {
+			if deadlocked(err) {
+				t.Fatalf("round %d: Start %d deadlocked", round, i)
+			}
+		}
+		if pending := s.count("SELECT count(*) FROM fleet.device_authorization WHERE node_id = $1 AND state = 1", node.ID); pending < 1 {
+			t.Fatalf("round %d: %d pending authorizations", round, pending)
 		}
 	}
 }
