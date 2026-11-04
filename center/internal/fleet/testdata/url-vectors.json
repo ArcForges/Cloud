@@ -1,0 +1,1148 @@
+{
+  "schemaVersion": 1,
+  "source": "TestFleetVectorFiles (center/internal/fleet/vectors_test.go)",
+  "rules": [
+    "publicBaseUrl is config.ParsePublicBaseURL in the mode; the canonical form is the input itself, so an accepted value is never rewritten",
+    "fleetCenter is config.Load of a center of the mode that serves identity, pages and fleet: the public base URL is at most maxFleetPublicBaseUrlLength characters and its host is a domain name (passkeys), not an IP address",
+    "derived is present when a fleet center of either mode accepts the input: authorizeUrl = input + /connect#flow= + flowIdText, verificationUri = input + /activate, verificationUriComplete = input + /activate#code= + displayUserCode, each at most maxDerivedUrlLength characters; proofAudienceSha256 is the SHA-256 of the input's bytes, the audience of a node key proof",
+    "a refusal text is informative; the verdict is the accepted flag",
+    "redirects: the loopback redirect URI a node sends (fleet.ValidLoopbackRedirect) and, when accepted, the redirect of an approval (fleet.CodeRedirect) and of a denial (fleet.DenyRedirect) with loopbackCode and loopbackState"
+  ],
+  "flowId": "f10e2d3c4b5a69788796a5b4c3d2e10f",
+  "flowIdText": "f10e2d3c-4b5a-6978-8796-a5b4c3d2e10f",
+  "userCode": "BCDFGHJK",
+  "displayUserCode": "BCDF-GHJK",
+  "loopbackCode": "xcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcU",
+  "loopbackState": "node-state-0123456789abcdefghij",
+  "maxDerivedUrlLength": 512,
+  "maxFleetPublicBaseUrlLength": 462,
+  "maxPublicBaseUrlLength": 2048,
+  "baseUrls": [
+    {
+      "name": "the official center: a host and the path prefix /api",
+      "input": "https://arcforges.com/api",
+      "byteLength": 25,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "derived": {
+        "proofAudienceSha256": "3367e6f8dca35fdf193eb2ca864cca6c18b8bf638c6fd79872a4bdf2c0e2e03f",
+        "authorizeUrl": "https://arcforges.com/api/connect#flow=f10e2d3c-4b5a-6978-8796-a5b4c3d2e10f",
+        "verificationUri": "https://arcforges.com/api/activate",
+        "verificationUriComplete": "https://arcforges.com/api/activate#code=BCDF-GHJK",
+        "longestLength": 75
+      }
+    },
+    {
+      "name": "a host without a path",
+      "input": "https://center.example.test",
+      "byteLength": 27,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "derived": {
+        "proofAudienceSha256": "ca3a233438a3c897c27e198129a7b11ab900254c9e883632937276e0601cec42",
+        "authorizeUrl": "https://center.example.test/connect#flow=f10e2d3c-4b5a-6978-8796-a5b4c3d2e10f",
+        "verificationUri": "https://center.example.test/activate",
+        "verificationUriComplete": "https://center.example.test/activate#code=BCDF-GHJK",
+        "longestLength": 77
+      }
+    },
+    {
+      "name": "a port and a path prefix",
+      "input": "https://center.example.test:8443/api",
+      "byteLength": 36,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "derived": {
+        "proofAudienceSha256": "9ae82905403991e28fe59b691a5025c577d1a5e5972a9eff63a36be3f35f886f",
+        "authorizeUrl": "https://center.example.test:8443/api/connect#flow=f10e2d3c-4b5a-6978-8796-a5b4c3d2e10f",
+        "verificationUri": "https://center.example.test:8443/api/activate",
+        "verificationUriComplete": "https://center.example.test:8443/api/activate#code=BCDF-GHJK",
+        "longestLength": 86
+      }
+    },
+    {
+      "name": "the local official-hosted rehearsal (localhost, a port, /api)",
+      "input": "https://localhost:28443/api",
+      "byteLength": 27,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "derived": {
+        "proofAudienceSha256": "d2f3a8cd2e88b1337f56947aae2c2ef9aaa66fc8d04441cd91826464b749c3d0",
+        "authorizeUrl": "https://localhost:28443/api/connect#flow=f10e2d3c-4b5a-6978-8796-a5b4c3d2e10f",
+        "verificationUri": "https://localhost:28443/api/activate",
+        "verificationUriComplete": "https://localhost:28443/api/activate#code=BCDF-GHJK",
+        "longestLength": 77
+      }
+    },
+    {
+      "name": "a deeper path of every admitted character class",
+      "input": "https://center.example.test/a-b/c_d/e.f/g~h/IJ09",
+      "byteLength": 48,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "derived": {
+        "proofAudienceSha256": "afaf9e3dd6e7bb4888cc071d25e690c1b5d2067360935a365e842cbd3b6e97f3",
+        "authorizeUrl": "https://center.example.test/a-b/c_d/e.f/g~h/IJ09/connect#flow=f10e2d3c-4b5a-6978-8796-a5b4c3d2e10f",
+        "verificationUri": "https://center.example.test/a-b/c_d/e.f/g~h/IJ09/activate",
+        "verificationUriComplete": "https://center.example.test/a-b/c_d/e.f/g~h/IJ09/activate#code=BCDF-GHJK",
+        "longestLength": 98
+      }
+    },
+    {
+      "name": "an internationalized host in its punycode form",
+      "input": "https://xn--bcher-kva.example/api",
+      "byteLength": 33,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "derived": {
+        "proofAudienceSha256": "4a3b953cbd69ddb3a82f16413e28ab5508fe46eef3c29404a11fcd29529fb086",
+        "authorizeUrl": "https://xn--bcher-kva.example/api/connect#flow=f10e2d3c-4b5a-6978-8796-a5b4c3d2e10f",
+        "verificationUri": "https://xn--bcher-kva.example/api/activate",
+        "verificationUriComplete": "https://xn--bcher-kva.example/api/activate#code=BCDF-GHJK",
+        "longestLength": 83
+      }
+    },
+    {
+      "name": "http for localhost (self-hosted only)",
+      "input": "http://localhost:8080/api",
+      "byteLength": 25,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "must use https (http only for a loopback host in self-hosted mode)"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: must use https (http only for a loopback host in self-hosted mode)"
+        }
+      },
+      "derived": {
+        "proofAudienceSha256": "82af95de8f8876e6c0b3e0f9f468b11e0f526936ce7ea481d6c054bd93d4a01e",
+        "authorizeUrl": "http://localhost:8080/api/connect#flow=f10e2d3c-4b5a-6978-8796-a5b4c3d2e10f",
+        "verificationUri": "http://localhost:8080/api/activate",
+        "verificationUriComplete": "http://localhost:8080/api/activate#code=BCDF-GHJK",
+        "longestLength": 75
+      }
+    },
+    {
+      "name": "http for the IPv4 loopback (self-hosted only; an IP address is no passkey relying party)",
+      "input": "http://127.0.0.1:8080",
+      "byteLength": 21,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the identity surface is listed in ARCFORGES_CENTER_SURFACES: passkeys need a domain name as the public base URL's host, not an IP address"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "must use https (http only for a loopback host in self-hosted mode)"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: must use https (http only for a loopback host in self-hosted mode)"
+        }
+      }
+    },
+    {
+      "name": "http for the IPv6 loopback (self-hosted only; an IP address is no passkey relying party)",
+      "input": "http://[::1]:8080",
+      "byteLength": 17,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the identity surface is listed in ARCFORGES_CENTER_SURFACES: passkeys need a domain name as the public base URL's host, not an IP address"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "must use https (http only for a loopback host in self-hosted mode)"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: must use https (http only for a loopback host in self-hosted mode)"
+        }
+      }
+    },
+    {
+      "name": "https for an IP address (no passkey relying party)",
+      "input": "https://192.0.2.10/api",
+      "byteLength": 22,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the identity surface is listed in ARCFORGES_CENTER_SURFACES: passkeys need a domain name as the public base URL's host, not an IP address"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the identity surface is listed in ARCFORGES_CENTER_SURFACES: passkeys need a domain name as the public base URL's host, not an IP address"
+        }
+      }
+    },
+    {
+      "name": "the longest fleet public base URL: 462 characters",
+      "input": "https://center.example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "byteLength": 462,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": true
+        }
+      },
+      "derived": {
+        "proofAudienceSha256": "dd4330e716dd43e5cf2451a40c3da41129cafbc084ead8f31fa52190b6045780",
+        "authorizeUrl": "https://center.example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/connect#flow=f10e2d3c-4b5a-6978-8796-a5b4c3d2e10f",
+        "verificationUri": "https://center.example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/activate",
+        "verificationUriComplete": "https://center.example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/activate#code=BCDF-GHJK",
+        "longestLength": 512
+      }
+    },
+    {
+      "name": "one character over the fleet bound: 463 characters",
+      "input": "https://center.example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "byteLength": 463,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the fleet surface needs a public base URL of at most 462 characters: every URL it derives for a node is at most 512"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the fleet surface needs a public base URL of at most 462 characters: every URL it derives for a node is at most 512"
+        }
+      }
+    },
+    {
+      "name": "the node's own bound: 512 characters",
+      "input": "https://center.example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "byteLength": 512,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the fleet surface needs a public base URL of at most 462 characters: every URL it derives for a node is at most 512"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the fleet surface needs a public base URL of at most 462 characters: every URL it derives for a node is at most 512"
+        }
+      }
+    },
+    {
+      "name": "the configuration bound: 2048 characters",
+      "input": "https://center.example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "byteLength": 2048,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the fleet surface needs a public base URL of at most 462 characters: every URL it derives for a node is at most 512"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": true
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: the fleet surface needs a public base URL of at most 462 characters: every URL it derives for a node is at most 512"
+        }
+      }
+    },
+    {
+      "name": "over the configuration bound: 2049 characters",
+      "input": "https://center.example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "byteLength": 2049,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "longer than 2048 bytes"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: longer than 2048 bytes"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "longer than 2048 bytes"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: longer than 2048 bytes"
+        }
+      }
+    },
+    {
+      "name": "the internationalized host as Unicode",
+      "input": "https://bücher.example/api",
+      "byteLength": 27,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "contains a space, a control character or a non-ASCII byte"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: contains a space, a control character or a non-ASCII byte"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "contains a space, a control character or a non-ASCII byte"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: contains a space, a control character or a non-ASCII byte"
+        }
+      }
+    },
+    {
+      "name": "an upper-case host",
+      "input": "https://Center.example.test/api",
+      "byteLength": 31,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the host is missing or not in lowercase canonical form"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the host is missing or not in lowercase canonical form"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the host is missing or not in lowercase canonical form"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the host is missing or not in lowercase canonical form"
+        }
+      }
+    },
+    {
+      "name": "an upper-case scheme",
+      "input": "HTTPS://center.example.test/api",
+      "byteLength": 31,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not in canonical form (lowercase scheme, no trailing slash)"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not in canonical form (lowercase scheme, no trailing slash)"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not in canonical form (lowercase scheme, no trailing slash)"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not in canonical form (lowercase scheme, no trailing slash)"
+        }
+      }
+    },
+    {
+      "name": "a trailing slash",
+      "input": "https://center.example.test/api/",
+      "byteLength": 32,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has an empty segment or a trailing slash"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has an empty segment or a trailing slash"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has an empty segment or a trailing slash"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has an empty segment or a trailing slash"
+        }
+      }
+    },
+    {
+      "name": "a lone slash as the path",
+      "input": "https://center.example.test/",
+      "byteLength": 28,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has an empty segment or a trailing slash"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has an empty segment or a trailing slash"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has an empty segment or a trailing slash"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has an empty segment or a trailing slash"
+        }
+      }
+    },
+    {
+      "name": "the default https port",
+      "input": "https://center.example.test:443/api",
+      "byteLength": 35,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is the scheme's default and is left out"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is the scheme's default and is left out"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is the scheme's default and is left out"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is the scheme's default and is left out"
+        }
+      }
+    },
+    {
+      "name": "the default http port of localhost",
+      "input": "http://localhost:80/api",
+      "byteLength": 23,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is the scheme's default and is left out"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is the scheme's default and is left out"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is the scheme's default and is left out"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is the scheme's default and is left out"
+        }
+      }
+    },
+    {
+      "name": "an empty port",
+      "input": "https://center.example.test:/api",
+      "byteLength": 32,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is empty"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is empty"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is empty"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is empty"
+        }
+      }
+    },
+    {
+      "name": "port 0",
+      "input": "https://center.example.test:0/api",
+      "byteLength": 33,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is not a number from 1 to 65535"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is not a number from 1 to 65535"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is not a number from 1 to 65535"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is not a number from 1 to 65535"
+        }
+      }
+    },
+    {
+      "name": "port 65536",
+      "input": "https://center.example.test:65536/api",
+      "byteLength": 37,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is not a number from 1 to 65535"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is not a number from 1 to 65535"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is not a number from 1 to 65535"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is not a number from 1 to 65535"
+        }
+      }
+    },
+    {
+      "name": "a port with a leading zero",
+      "input": "https://center.example.test:08443/api",
+      "byteLength": 37,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is not a number from 1 to 65535"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is not a number from 1 to 65535"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the port is not a number from 1 to 65535"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the port is not a number from 1 to 65535"
+        }
+      }
+    },
+    {
+      "name": "a host with a trailing dot",
+      "input": "https://center.example.test./api",
+      "byteLength": 32,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the host is missing or not in lowercase canonical form"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the host is missing or not in lowercase canonical form"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the host is missing or not in lowercase canonical form"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the host is missing or not in lowercase canonical form"
+        }
+      }
+    },
+    {
+      "name": "http for a host that is not a loopback",
+      "input": "http://center.example.test/api",
+      "byteLength": 30,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "must use https (http only for a loopback host in self-hosted mode)"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: must use https (http only for a loopback host in self-hosted mode)"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "must use https (http only for a loopback host in self-hosted mode)"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: must use https (http only for a loopback host in self-hosted mode)"
+        }
+      }
+    },
+    {
+      "name": "another scheme",
+      "input": "ftp://center.example.test/api",
+      "byteLength": 29,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "must use https"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: must use https"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "must use https"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: must use https"
+        }
+      }
+    },
+    {
+      "name": "a query",
+      "input": "https://center.example.test/api?x=1",
+      "byteLength": 35,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      }
+    },
+    {
+      "name": "an empty query",
+      "input": "https://center.example.test/api?",
+      "byteLength": 32,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      }
+    },
+    {
+      "name": "a fragment",
+      "input": "https://center.example.test/api#top",
+      "byteLength": 35,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      }
+    },
+    {
+      "name": "user information",
+      "input": "https://user@center.example.test/api",
+      "byteLength": 36,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      }
+    },
+    {
+      "name": "percent-encoding",
+      "input": "https://center.example.test/%61pi",
+      "byteLength": 33,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      }
+    },
+    {
+      "name": "a dot segment",
+      "input": "https://center.example.test/a/../api",
+      "byteLength": 36,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has a dot segment"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has a dot segment"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has a dot segment"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has a dot segment"
+        }
+      }
+    },
+    {
+      "name": "an empty path segment",
+      "input": "https://center.example.test//api",
+      "byteLength": 32,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has an empty segment or a trailing slash"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has an empty segment or a trailing slash"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has an empty segment or a trailing slash"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has an empty segment or a trailing slash"
+        }
+      }
+    },
+    {
+      "name": "a character outside the path classes",
+      "input": "https://center.example.test/a+b",
+      "byteLength": 31,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has a character outside letters, digits and -._~"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has a character outside letters, digits and -._~"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the path has a character outside letters, digits and -._~"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the path has a character outside letters, digits and -._~"
+        }
+      }
+    },
+    {
+      "name": "a space",
+      "input": "https://center.example.test/a b",
+      "byteLength": 31,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "contains a space, a control character or a non-ASCII byte"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: contains a space, a control character or a non-ASCII byte"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "contains a space, a control character or a non-ASCII byte"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: contains a space, a control character or a non-ASCII byte"
+        }
+      }
+    },
+    {
+      "name": "a backslash",
+      "input": "https://center.example.test\\api",
+      "byteLength": 31,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "not an absolute URL without user information, query, fragment or percent-encoding"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: not an absolute URL without user information, query, fragment or percent-encoding"
+        }
+      }
+    },
+    {
+      "name": "no scheme",
+      "input": "center.example.test/api",
+      "byteLength": 23,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the host is missing or not in lowercase canonical form"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the host is missing or not in lowercase canonical form"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "the host is missing or not in lowercase canonical form"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: the host is missing or not in lowercase canonical form"
+        }
+      }
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "byteLength": 0,
+      "selfHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "required: the absolute URL under which clients reach this center"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: required: the absolute URL under which clients reach this center"
+        }
+      },
+      "officialHosted": {
+        "publicBaseUrl": {
+          "accepted": false,
+          "refusal": "required: the absolute URL under which clients reach this center"
+        },
+        "fleetCenter": {
+          "accepted": false,
+          "refusal": "invalid center configuration: ARCFORGES_CENTER_PUBLIC_BASE_URL: required: the absolute URL under which clients reach this center"
+        }
+      }
+    }
+  ],
+  "redirects": [
+    {
+      "name": "IPv4 loopback",
+      "input": "http://127.0.0.1:53682/callback",
+      "accepted": true,
+      "codeRedirect": "http://127.0.0.1:53682/callback?code=xcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcU&state=node-state-0123456789abcdefghij",
+      "denyRedirect": "http://127.0.0.1:53682/callback?error=access_denied&state=node-state-0123456789abcdefghij"
+    },
+    {
+      "name": "IPv6 loopback",
+      "input": "http://[::1]:53682/callback",
+      "accepted": true,
+      "codeRedirect": "http://[::1]:53682/callback?code=xcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcU&state=node-state-0123456789abcdefghij",
+      "denyRedirect": "http://[::1]:53682/callback?error=access_denied&state=node-state-0123456789abcdefghij"
+    },
+    {
+      "name": "the lowest port",
+      "input": "http://127.0.0.1:1024/callback",
+      "accepted": true,
+      "codeRedirect": "http://127.0.0.1:1024/callback?code=xcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcU&state=node-state-0123456789abcdefghij",
+      "denyRedirect": "http://127.0.0.1:1024/callback?error=access_denied&state=node-state-0123456789abcdefghij"
+    },
+    {
+      "name": "the highest port",
+      "input": "http://[::1]:65535/callback",
+      "accepted": true,
+      "codeRedirect": "http://[::1]:65535/callback?code=xcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcU&state=node-state-0123456789abcdefghij",
+      "denyRedirect": "http://[::1]:65535/callback?error=access_denied&state=node-state-0123456789abcdefghij"
+    },
+    {
+      "name": "a port under 1024",
+      "input": "http://127.0.0.1:1023/callback",
+      "accepted": false
+    },
+    {
+      "name": "a port over 65535",
+      "input": "http://127.0.0.1:65536/callback",
+      "accepted": false
+    },
+    {
+      "name": "a port with a leading zero",
+      "input": "http://127.0.0.1:01024/callback",
+      "accepted": false
+    },
+    {
+      "name": "localhost",
+      "input": "http://localhost:53682/callback",
+      "accepted": false
+    },
+    {
+      "name": "https",
+      "input": "https://127.0.0.1:53682/callback",
+      "accepted": false
+    },
+    {
+      "name": "another path",
+      "input": "http://127.0.0.1:53682/cb",
+      "accepted": false
+    },
+    {
+      "name": "a trailing slash",
+      "input": "http://127.0.0.1:53682/callback/",
+      "accepted": false
+    },
+    {
+      "name": "a query",
+      "input": "http://127.0.0.1:53682/callback?x=1",
+      "accepted": false
+    },
+    {
+      "name": "no port",
+      "input": "http://127.0.0.1/callback",
+      "accepted": false
+    },
+    {
+      "name": "a short IPv4 form",
+      "input": "http://127.1:53682/callback",
+      "accepted": false
+    },
+    {
+      "name": "an IPv6 zone",
+      "input": "http://[::1%25lo]:53682/callback",
+      "accepted": false
+    }
+  ]
+}
