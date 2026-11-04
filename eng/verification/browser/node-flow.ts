@@ -7,7 +7,7 @@
 // browser, signs in when it has to (the sign-in page returns to the fleet page with its fragment), checks the review page against the
 // begin file, decides (an approval proves the step-up; on /activate it types the fingerprint's last group the review withholds), and
 // for a browser sign-in hands the result back to the probe's loopback receiver, by the page's script or (the first browser sign-in of
-// a run) by its manual link. It then waits for the probe's result. At the end, also after a failed step, it revokes on the devices page
+// a run, approved or denied) by its manual link. It then waits for the probe's result. At the end, also after a failed step, it revokes on the devices page
 // every device the run's approvals created.
 //
 // What counts as a change for step() (a 429 before a change starts the step again from its navigation, after one it fails the run): a
@@ -26,6 +26,7 @@ import {
   expectReply,
   expectSavedCenter,
   mockedLabel,
+  plainLabel,
   pagePathname,
   step,
   until,
@@ -71,10 +72,7 @@ export interface NodeApproveOptions {
   waitMs: number;
   /** Also submits a wrong fingerprint tail once on /activate (the local rehearsal: it spends an entry and a step-up). */
   negative: boolean;
-}
-
-/** What the run learned about the probe's requests: the instants (milliseconds), for the run's request bound. */
-export interface NodeApproveOutcome {
+  /** Receives the instants (milliseconds) of node-probe's requests as its result files name them, also when a later step fails. */
   probeRequests: number[];
 }
 
@@ -187,7 +185,7 @@ async function nextBegin(
 export async function runNodeApprove(
   world: World,
   options: NodeApproveOptions,
-): Promise<NodeApproveOutcome> {
+): Promise<void> {
   world.report.mode = "node-approve";
   world.write(
     `Node approvals on ${world.baseUrl}: the saved owner credential (MOCKED hardware) decides ${options.cases} sign-in(s) of node-probe (MOCKED node)`,
@@ -195,7 +193,6 @@ export async function runNodeApprove(
   expect(world.store.exists(), "There is no saved owner credential; run the acceptance first.");
   expectSavedCenter(world);
   world.store.prepare();
-  const outcome: NodeApproveOutcome = { probeRequests: [] };
   const handled = new Set<string>();
   const approvedNames: string[] = [];
   let signedIn = false;
@@ -211,8 +208,7 @@ export async function runNodeApprove(
       const begin = parseBegin(options.handshake.read(file), world.baseUrl);
       if (begin.userCode) world.redactor.add(begin.userCode);
       world.write(`case ${begin.case}: ${begin.kind}, ${begin.decision}`);
-      const manual =
-        begin.kind === "pkce" && begin.decision === "approve" && browserSignIns++ === 0;
+      const manual = begin.kind === "pkce" && browserSignIns++ === 0;
       if (begin.kind === "pkce") signedIn = await connectCase(world, a, begin, signedIn, manual);
       else signedIn = await activateCase(world, a, begin, signedIn, options.negative);
       if (begin.decision === "approve") approvedNames.push(begin.name);
@@ -220,12 +216,12 @@ export async function runNodeApprove(
         `${begin.case}.approved.json`,
         `${JSON.stringify({ case: begin.case, decision: begin.decision, via: manual ? "link" : "script", at: world.now().toISOString() }, null, 2)}\n`,
       );
-      await step(world, `${begin.case}: node-probe finished its checks`, mockedLabel, async () => {
+      await step(world, `${begin.case}: node-probe finished its checks`, plainLabel, async () => {
         const result = JSON.parse(
           await waitForFile(world, options.handshake, `${begin.case}.result.json`, options.waitMs),
         ) as ProbeResult;
         for (const instant of result.requests ?? [])
-          outcome.probeRequests.push(new Date(instant).getTime());
+          options.probeRequests.push(new Date(instant).getTime());
         const failed = (result.steps ?? []).filter((item) => !item.ok).map((item) => item.name);
         expect(
           result.passed === true,
@@ -246,7 +242,6 @@ export async function runNodeApprove(
     }
   }
   if (failure !== undefined) throw failure;
-  return outcome;
 }
 
 /**
@@ -326,7 +321,7 @@ async function connectCase(
   );
   const name =
     begin.decision === "deny"
-      ? `${begin.case}: deny; the page hands the denial back to the node`
+      ? `${begin.case}: deny; ${manual ? "the manual link" : "the page's script"} hands the denial back`
       : `${begin.case}: approve with the step-up; ${manual ? "the manual link" : "the page's script"} hands the code back`;
   await step(world, name, mockedLabel, async () => {
     const before = a.tab.loopbackRequests();
@@ -334,19 +329,18 @@ async function connectCase(
     if (manual) a.tab.holdLoopback();
     await a.tab.click(begin.decision === "deny" ? fleet.deny : fleet.approve);
     if (manual) {
-      const reply = await awaitDocument(
-        world,
-        a.tab,
-        previous,
-        "the result page",
-        async () => (await a.tab.text(selectors.heading)) === "Return to your terminal",
-      );
-      expectReply(reply, 200, "The decision");
+      // The page's script tries the link at once; the held navigation leaves the page as it is (its load never completes, so the step
+      // waits for the page's text and the held request, not for a load).
       await until(
         world,
-        "the page's script to try the loopback link",
-        async () => a.tab.loopbackRequests() > before,
+        "the result page and its held navigation",
+        async () =>
+          a.tab.loopbackRequests() > before &&
+          (await a.tab.text(selectors.heading)) === "Return to your terminal",
       );
+      const reply = a.tab.document();
+      expect(reply !== null && reply !== previous, "The decision gave no new document.");
+      expectReply(reply, 200, "The decision");
       expect(
         new URL(a.tab.url()).pathname === pagePathname(world, "/connect/decision"),
         "The held navigation left the page.",

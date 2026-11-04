@@ -47,6 +47,7 @@ function standIn() {
     url: () => url,
     redirectedFrom: () => from,
     isNavigationRequest: () => navigations.has(`${method} ${url}`),
+    response: async () => null,
   });
   // A response belongs to the very request object the page announced (Playwright's response.request() is that object).
   const announced = new Map<string, PwRequest>();

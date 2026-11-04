@@ -408,6 +408,10 @@ test("the run fails on what a real center must never do: a missing header, the t
   const redirect = scenario({ noReturnFragment: true });
   assert.equal(await redirect.run(), 1);
   assert.match(redirect.stderr.join("\n"), /does not lead to the sign-in page/u);
+  // The sign-in page drops the return fragment from its address at once (P-16): one that keeps it fails the step.
+  const kept = scenario({ signInKeepsFragment: true });
+  assert.equal(await kept.run(), 1);
+  assert.match(kept.stderr.join("\n"), /keeps the return fragment in its address/u);
   const survives = scenario({ secondBrowserKeepsSession: true });
   assert.equal(await survives.run(), 1);
   assert.match(survives.stderr.join("\n"), /still reaches the account/u);

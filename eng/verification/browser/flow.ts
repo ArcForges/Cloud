@@ -684,12 +684,17 @@ export async function runAcceptance(world: World): Promise<void> {
     async () => {
       if (!returning) await a.signOutHere();
       else await a.visit(pages.signIn, "Sign in to ArcForges");
-      // A protected page without a session sends the visitor to the sign-in page and remembers where to go back to.
-      await a.tab.goto(pageUrl(world, pages.passkeys));
+      // A protected page without a session sends the visitor to the sign-in page and remembers where to go back to (the redirect's
+      // fragment), which the sign-in page reads and drops from its own address at once (P-16).
+      const redirected = await a.tab.goto(pageUrl(world, pages.passkeys));
       expect(
         new URL(a.tab.url()).pathname === pagePathname(world, pages.signIn) &&
-          a.tab.url().includes(`#return=`),
+          (redirected.redirectLocation ?? "").includes("#return="),
         "A protected page without a session does not lead to the sign-in page.",
+      );
+      expect(
+        !a.tab.url().includes("#"),
+        "The sign-in page keeps the return fragment in its address.",
       );
       expect(
         await a.hidden(`#${ids.signedIn}`),
@@ -1118,11 +1123,15 @@ export async function runOperatorGrant(world: World): Promise<void> {
     mockedLabel,
     async () => {
       const actor = await Actor.open(world, "owner");
-      await actor.tab.goto(pageUrl(world, pages.operationsGrant));
+      const redirected = await actor.tab.goto(pageUrl(world, pages.operationsGrant));
       expect(
         new URL(actor.tab.url()).pathname === pagePathname(world, pages.signIn) &&
-          actor.tab.url().includes("#return="),
+          (redirected.redirectLocation ?? "").includes("#return="),
         "The operator page without a session does not lead to the sign-in page.",
+      );
+      expect(
+        !actor.tab.url().includes("#"),
+        "The sign-in page keeps the return fragment in its address.",
       );
       expect(
         (await actor.tab.text(selectors.heading)) === "Sign in to ArcForges",

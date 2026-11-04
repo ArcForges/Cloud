@@ -20,6 +20,11 @@ export interface Navigation {
   status: number;
   /** Header names in lower case. */
   headers: Record<string, string>;
+  /**
+   * The Location of the redirect that led to this document, when one did (a protected page without a session is the center's 303 to
+   * the sign-in page with the return path in its fragment; the sign-in page drops that fragment from its own address at once).
+   */
+  redirectLocation?: string;
 }
 
 export interface CookieView {
@@ -377,6 +382,8 @@ export interface PwRequest {
   redirectedFrom(): PwRequest | null;
   /** Whether the request loads a document into a frame. */
   isNavigationRequest(): boolean;
+  /** The response of the request, null where it has none (yet). */
+  response(): Promise<PwResponse | null>;
 }
 export interface PwRoute {
   request(): PwRequest;
@@ -568,7 +575,8 @@ export function playwrightTab(
   page.on("pageerror", (error) => problems.push(`page error: ${error.message.slice(0, 300)}`));
   page.on("response", (response) => {
     const status = response.status();
-    if (response.request().isNavigationRequest())
+    // A node's loopback receiver is not the center: its replies (a held navigation's 204 among them) are no document of the run.
+    if (response.request().isNavigationRequest() && !isLoopback(response.request().url()))
       latestDocument = { status, headers: response.headers() };
     if (status === 429) {
       const seconds = Number(response.headers()["retry-after"] ?? "60");
@@ -635,7 +643,11 @@ export function playwrightTab(
       await route();
       const response = await page.goto(url, { waitUntil: "load" });
       if (response === null) throw new Error("The navigation gave no response.");
-      return { status: response.status(), headers: response.headers() };
+      const navigation: Navigation = { status: response.status(), headers: response.headers() };
+      const hop = response.request().redirectedFrom();
+      const location = hop === null ? undefined : (await hop.response())?.headers().location;
+      if (location !== undefined) navigation.redirectLocation = location;
+      return navigation;
     },
     url: () => page.url(),
     click: (selector) => page.locator(selector).first().click(),

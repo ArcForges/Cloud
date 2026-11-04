@@ -444,19 +444,18 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
     `playwright-core ${requiredPlaywrightCore}, Chromium ${world.report.browserVersion} (revision ${requiredChromiumRevision}), ${options.headed ? "headed" : "headless"}`,
   );
   let exitCode = 0;
-  let probeRequests: number[] = [];
+  const probeRequests: number[] = [];
   try {
     if (options.realAuthenticator) await runRealAuthenticator(world);
     else if (options.operatorGrant) await runOperatorGrant(world);
     else if (options.nodeApprove)
-      probeRequests = (
-        await runNodeApprove(world, {
-          handshake: (deps.handshake ?? fileHandshake)(options.watch),
-          cases: options.cases,
-          waitMs: options.waitMs,
-          negative: options.negative,
-        })
-      ).probeRequests;
+      await runNodeApprove(world, {
+        handshake: (deps.handshake ?? fileHandshake)(options.watch),
+        cases: options.cases,
+        waitMs: options.waitMs,
+        negative: options.negative,
+        probeRequests,
+      });
     else await runAcceptance(world);
     world.report.result = "passed";
   } catch (error) {
