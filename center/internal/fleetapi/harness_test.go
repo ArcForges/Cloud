@@ -285,8 +285,9 @@ func (h *harness) issue(user platform.ID, scope session.Scope) session.Native {
 }
 
 // trackStatements creates pg_stat_statements in the test's database (the test server preloads the library, as the Linux leg's does)
-// and returns a reader of the statements it recorded since; a read error fails the test, so a statement check can never pass because
-// nothing was recorded.
+// and returns a reader of the statements the server recorded for the test's own database (pg_stat_statements is cluster-wide, so the
+// reader filters on the database's dbid); a read error or an empty record fails the test, so a statement check can never pass
+// because nothing was recorded.
 func (h *harness) trackStatements() func() string {
 	h.t.Helper()
 	admin := pgtest.Connect(h.t, pgtest.WithDatabase(h.t, pgtest.ServerURL(h.t), h.db.Name))
@@ -296,11 +297,12 @@ func (h *harness) trackStatements() func() string {
 	return func() string {
 		h.t.Helper()
 		var statements string
-		if err := admin.QueryRow(context.Background(), "SELECT coalesce(string_agg(query, E'\\n'), '') FROM pg_stat_statements").Scan(&statements); err != nil {
+		if err := admin.QueryRow(context.Background(), `SELECT coalesce(string_agg(query, E'\n'), '') FROM pg_stat_statements
+WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&statements); err != nil {
 			h.t.Fatalf("read pg_stat_statements: %v", err)
 		}
 		if statements == "" {
-			h.t.Fatal("pg_stat_statements recorded nothing")
+			h.t.Fatal("pg_stat_statements recorded nothing for the test's database")
 		}
 		return statements
 	}

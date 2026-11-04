@@ -1006,3 +1006,41 @@ func TestForeignFlowsLookUnknownAlsoAfterTheirExpiry(t *testing.T) {
 		t.Fatalf("the approving account's decision on its expired flow: %s", key(err))
 	}
 }
+
+// TestTheCorrectCodeLoserRevokesTheWinner (C-1, FLW-08, cloud-2 item 7; the twin of
+// TestAFailureMarkerThatFindsTheFlowCompletedRevokesTheFamily, with no wrong-verifier racer): the correct presentation holds the
+// flow row and waits for the account (held by a third transaction); a second presentation of the same correct code, also pre-read
+// APPROVED with both proofs good, waits for the flow row; the account is released, the winner completes, and the loser, deciding
+// under the lock, finds the flow COMPLETED and takes the reuse path: CONFLICT/code_reused, the flow REVOKED, the winner's family
+// revoked with reason 8, one code_reused audit.
+func TestTheCorrectCodeLoserRevokesTheWinner(t *testing.T) {
+	s := newSignIns(t)
+	s.watchDeadlocks(t)
+	f := s.mustBegin(s.newNode())
+	s.approve(f)
+	release := s.hold(t, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", s.user)
+	won, lost := make(chan error, 1), make(chan error, 1)
+	go func() { _, err := s.complete(f); won <- err }()
+	s.waitBlocked(t)
+	go func() { _, err := s.complete(f); lost <- err }()
+	deadline := time.Now().Add(5 * time.Second)
+	for s.count(`SELECT count(DISTINCT l.pid) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+WHERE NOT l.granted AND a.datname = current_database()`) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("the second presentation never waited for the flow row")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	release(false)
+	if err := <-won; err != nil {
+		t.Fatalf("the winner: %s", key(err))
+	}
+	if err := <-lost; key(err) != "CONFLICT/code_reused" {
+		t.Fatalf("the loser: %s", key(err))
+	}
+	live := s.count(`SELECT count(*) FROM identity.session s JOIN fleet.node_sign_in f ON f.session_id = s.session_id WHERE f.flow_id = $1 AND s.revoked_at IS NULL`, f.id)
+	if s.state(f) != FlowRevoked || live != 0 || s.count(`SELECT count(*) FROM identity.session s JOIN fleet.node_sign_in f ON f.session_id = s.session_id
+WHERE f.flow_id = $1 AND s.revoke_reason = 8`, f.id) != 1 || s.count("SELECT count(*) FROM audit.audit_event WHERE event_type = 'fleet.node_sign_in.code_reused'") != 1 {
+		t.Fatalf("the loser did not revoke the winner: state %d, %d live", s.state(f), live)
+	}
+}

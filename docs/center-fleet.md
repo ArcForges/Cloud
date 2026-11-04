@@ -350,11 +350,14 @@ the revocation may have committed, and the retry answers `code_reused`), with no
 receipt transaction; SignOutNode one receipt transaction.
 
 **Exchange captures.** `TestFleetExchangeCapture` records the node-facing exchanges as the binary gRPC-Web frames on the wire, with
-the request headers that matter (the bearer's placeholder, the client address): every outcome the center produces of BeginNodeSignIn
-(success, `invalid_argument`, `rate_limited`, `already_exists` node key, `not_activated`) and CompleteNodeSignIn (success,
-`not_found`, `expired`, `code_reused`, `unauthenticated`, `invalid_argument`, `already_exists` node and node key, `credential_revoked`,
-`quota_exceeded`, `rate_limited`, `not_activated`), and the success and the refusals a node reacts to of RefreshNodeSession,
-ReportNodeInfo and SignOutNode; each file names its outcome and the test fails when one of that per-method list has no case. Only
+the request headers that matter (the bearer's placeholder, the client address): every outcome the center produces without a store
+failure of BeginNodeSignIn (success, `invalid_argument`, `rate_limited`, `already_exists` node key, `not_activated`) and
+CompleteNodeSignIn (success, `not_found`, `expired`, `code_reused`, `unauthenticated`, `invalid_argument`, `already_exists` node and
+node key, `credential_revoked`, `quota_exceeded`, `rate_limited`, `not_activated`), and the success and the refusals a node reacts to
+of RefreshNodeSession, ReportNodeInfo and SignOutNode; each file names its outcome and the test fails when one of that per-method list
+has no case. Not captured: the store failures `RESOURCE/overloaded` (retry after a while, the effect did not happen) and
+`INTERNAL/internal` (effect unknown, never retried), which need fault injection and are covered at the service level by the
+fault-injection tests (E1-16, E1-17), and `RESOURCE/kill_switch_active`, which AF-CTR-04 does not produce. Only
 the values the center or a random source produced are normalized (correlation, flow, installation and account IDs, tokens, the
 one-use codes, the proofs, every instant as an offset), each distinct value to its own placeholder of the same shape, wherever it
 appears; the test's own constants stay. The files live in `center/internal/fleetapi/testdata/exchanges`; the test fails when a fresh
