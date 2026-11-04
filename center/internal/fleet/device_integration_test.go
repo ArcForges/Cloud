@@ -634,7 +634,8 @@ func TestATerminalAuthorizationIsNeverWritten(t *testing.T) {
 
 // TestTheReviewReadTellsAnUnreviewedCodeNothing (AF-CTR-04 E3, sec NB-2): ReviewedDevice answers not_reviewed for a code the account did
 // not review within the window, whatever the code's state (pending, denied, expired) or whether it exists, so the read is no state
-// oracle whichever path reaches it; a code the account reviewed is shown, and after its expiry it is STATE/expired.
+// oracle whichever path reaches it; a code the account reviewed is shown, and once its review window has passed (the window equals the
+// code's lifetime, so this is also after its expiry) it is not_reviewed again, not STATE/expired.
 func TestTheReviewReadTellsAnUnreviewedCodeNothing(t *testing.T) {
 	s := newSignIns(t)
 	s.wide()

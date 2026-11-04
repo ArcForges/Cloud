@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A stand-in for the center's fleet pages (AF-CTR-04 E3) and a browser tab on them, for the node-approve flow of the browser
 // acceptance: /connect and /activate with their reviews and decisions, the sign-in page they send a signed-out visitor to, the
-// devices page the clean-up revokes on, the node's loopback receiver, and the edge's 429. It keeps what a run spent (step-ups,
+// devices page the clean-up revokes on, the node's loopback receiver, and the edge's 429. As in the center, an approval enrolls no
+// device: the device appears when the node's poll collects the approval (poll()), at least the probe's poll floor after the decision.
+// Each simulated POST is counted as the real tab counts it, through the driver's acceptedChange. It keeps what a run spent (step-ups,
 // wrong entries, decisions, devices) so that a test can say what a step must never send twice. It checks the script's logic, never
 // the center: the center's own pages are tested in center/internal/pages.
 import { pageSecurityHeaders } from "../../../worker/tables/center-tables.generated.ts";
@@ -9,13 +11,14 @@ import type {
   Transport,
   VirtualCredential,
 } from "../../../eng/verification/browser/credentials.ts";
-import type {
-  Authenticator,
-  Browser,
-  CookieView,
-  Navigation,
-  RequestCounts,
-  Tab,
+import {
+  type Authenticator,
+  type Browser,
+  type CookieView,
+  type Navigation,
+  type RequestCounts,
+  type Tab,
+  acceptedChange,
 } from "../../../eng/verification/browser/driver.ts";
 import { fleet, pages, selectors } from "../../../eng/verification/browser/selectors.ts";
 
@@ -56,8 +59,13 @@ export class FleetCenter {
   readonly baseUrl: string;
   readonly options: FleetFakeOptions;
   readonly nodes = new Map<string, FleetNode>();
-  /** The names of the devices the approvals created and no revocation removed. */
+  /** The names of the devices the nodes' polls enrolled and no revocation removed. */
   devices: string[] = [];
+  /** Approved nodes whose poll has not collected the approval yet, with the instant of the approval. */
+  readonly approvals = new Map<string, number>();
+  /** The node names whose poll enrolled a device, and those that were decided at all (deny included). */
+  readonly polled = new Set<string>();
+  readonly decided = new Set<string>();
   session = false;
   stepUps = 0;
   wrongEntries = 0;
@@ -73,7 +81,20 @@ export class FleetCenter {
   add(node: FleetNode): void {
     this.nodes.set(node.key, node);
   }
+
+  /** The nodes' polls: each approval at least the probe's poll floor (10 s) old enrolls its device now. */
+  poll(): void {
+    for (const [name, at] of [...this.approvals]) {
+      if (this.clockMs - at < pollFloorMs) continue;
+      this.approvals.delete(name);
+      this.polled.add(name);
+      this.devices.push(name);
+    }
+  }
 }
+
+/** node-probe's -poll-floor default. */
+const pollFloorMs = 10_000;
 
 class StubAuthenticator implements Authenticator {
   readonly transport: Transport;
@@ -102,6 +123,7 @@ export class FleetTab implements Tab {
   private errorText = "";
   private limited: number | undefined;
   private changeCount = 0;
+  private readonly basePath: string;
   private refusals = 0;
   private hold = false;
   private loopbacks = 0;
@@ -109,6 +131,12 @@ export class FleetTab implements Tab {
 
   constructor(center: FleetCenter) {
     this.center = center;
+    this.basePath = new URL(center.baseUrl).pathname.replace(/\/$/u, "");
+  }
+
+  /** A POST of the page and the center's answer, counted as the real tab counts it. */
+  private post(route: string, status: number): void {
+    if (acceptedChange("POST", status, `${this.basePath}${route}`)) this.changeCount += 1;
   }
 
   private path(page: string): string {
@@ -141,7 +169,7 @@ export class FleetTab implements Tab {
 
   /** The consent page's script with a session: it posts the review (a change: the center records the reviewer). */
   private connectReview(): void {
-    this.changeCount += 1;
+    this.post(fleet.connectReview, 200);
     this.show("connect-review", this.path(fleet.connectReview));
   }
 
@@ -177,9 +205,10 @@ export class FleetTab implements Tab {
   /** A decision the center accepted: the result page, and on /connect the page's script (or held navigation) to the receiver. */
   private decided(approve: boolean): void {
     this.center.decisions += 1;
-    this.changeCount += 1;
+    this.post(this.node?.kind === "pkce" ? "/connect/decision" : "/activate/decision", 200);
     this.approved = approve;
-    if (approve && this.node) this.center.devices.push(this.node.name);
+    if (this.node) this.center.decided.add(this.node.name);
+    if (approve && this.node) this.center.approvals.set(this.node.name, this.center.clockMs);
     if (this.center.options.sessionEndsAfterDecision) this.center.session = false;
     if (this.node?.kind === "pkce") {
       this.show("connect-done", this.path("/connect/decision"));
@@ -193,10 +222,12 @@ export class FleetTab implements Tab {
   private provedThenLimited(): boolean {
     this.center.stepUps += 1;
     this.request(2);
+    this.post("/session/v1/web/step-up/complete", 200);
     if (!this.center.options.limitAfterStepUp) return false;
     this.limited = 30;
     this.latest = { status: 429, headers: { "retry-after": "30" } };
     this.request();
+    this.post(this.node?.kind === "pkce" ? "/connect/decision" : "/activate/decision", 429);
     return true;
   }
 
@@ -204,7 +235,7 @@ export class FleetTab implements Tab {
     const { center } = this;
     if (this.page === "sign-in" && selector === selectors.signIn) {
       center.session = true;
-      this.changeCount += 1;
+      this.post("/session/v1/web/authentication/complete", 200);
       this.request(2);
       if (this.returnTo === "connect") this.connectReview();
       else if (this.returnTo === "activate") this.show("activate", this.path(fleet.activate));
@@ -214,7 +245,7 @@ export class FleetTab implements Tab {
     if (this.page === "activate" && selector === fleet.continueButton) {
       // A signed-out visitor goes to the sign-in only now; with a session the lookup is a review (a change).
       if (!center.session) return this.signInPage("activate");
-      this.changeCount += 1;
+      this.post(fleet.activateReview, 200);
       this.show("activate-review", this.path(fleet.activateReview));
       return;
     }
@@ -232,7 +263,7 @@ export class FleetTab implements Tab {
       if (this.tail.toUpperCase() !== this.node?.fingerprint.slice(-4)) {
         // The center refuses the wrong group before the evidence is consumed: one entry of the account's budget, a 400 page.
         center.wrongEntries += 1;
-        this.changeCount += 1;
+        this.post("/activate/decision", 400);
         this.errorText = "That is not the last 4 characters of the node's key fingerprint.";
         this.show("activate-review", this.path("/activate/decision"), 400);
         if (this.refusals > 0) this.refusals -= 1;
@@ -252,7 +283,7 @@ export class FleetTab implements Tab {
         center.stepUps += 1;
         center.revocations += 1;
         center.devices.splice(center.devices.indexOf(name), 1);
-        this.changeCount += 1;
+        this.post("/account/devices/revoke", 303);
         this.request(2);
         this.show("devices", this.path(pages.devices));
         return;

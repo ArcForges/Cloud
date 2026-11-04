@@ -8,9 +8,12 @@
 // begin file, decides (an approval proves the step-up; on /activate it types the fingerprint's last group the review withholds), and
 // for a browser sign-in hands the result back to the probe's loopback receiver, by the page's script or (the first browser sign-in of
 // a run, approved or denied) by its manual link. It then waits for the probe's result. At the end, also after a failed step, it revokes on the devices page
-// every device the run's approvals may have created: an approval's node name is recorded before its decision is sent, so an approval
-// the center committed before a later check failed is revoked too, and the report always says how many such devices are left
-// (`devicesLeft`, "unknown" when the clean-up could not look).
+// every device the run's approvals may have created. An approval's node name is recorded before its decision is sent. The center
+// creates the device only when the node's next poll collects the approval (Enroll), seconds after the decision, so before the clean-up
+// reads the devices page it waits (bounded by --wait-ms in all) for the result of every case whose approval was sent and whose result
+// it has not read: node-probe writes it after its poll and its checks. The report always says how many such devices are left
+// (`devicesLeft`): "unknown" when the clean-up could not look, or when a probe never answered; the run then names the cases to check on
+// /account/devices by hand.
 //
 // 429s (of the edge, or of a center limit): only the steps that open a link (and the clean-up's visit of the devices page) start again
 // from their navigation after a 429; every other step starts from the page an earlier step left and fails on a 429 (step()'s
@@ -222,6 +225,10 @@ export async function runNodeApprove(world: World, options: NodeApproveOptions):
   // The node names of the approvals the run has sent or is about to send, recorded BEFORE the decision: the center may commit an
   // approval whose result page the browser never checks.
   const approvedNames: string[] = [];
+  // The cases whose approval POST was sent, and those whose node-probe result was read: a device can exist only for the first, and the
+  // clean-up must not look before the probe of each of them has answered.
+  const approvalsSent: string[] = [];
+  const resultsRead = new Set<string>();
   let browserSignIns = 0;
   let actor: Actor | undefined;
   let failure: unknown;
@@ -236,18 +243,19 @@ export async function runNodeApprove(world: World, options: NodeApproveOptions):
       world.write(`case ${begin.case}: ${begin.kind}, ${begin.decision}`);
       const manual = begin.kind === "pkce" && browserSignIns++ === 0;
       if (begin.decision === "approve") approvedNames.push(begin.name);
-      if (begin.kind === "pkce") await connectCase(world, a, begin, manual);
-      else await activateCase(world, a, begin, options.negative);
+      const sent = () => approvalsSent.push(begin.case);
+      if (begin.kind === "pkce") await connectCase(world, a, begin, manual, sent);
+      else await activateCase(world, a, begin, options.negative, sent);
       options.handshake.write(
         `${begin.case}.approved.json`,
         `${JSON.stringify({ case: begin.case, decision: begin.decision, via: manual ? "link" : "script", at: world.now().toISOString() }, null, 2)}\n`,
       );
       await step(world, `${begin.case}: node-probe finished its checks`, plainLabel, async () => {
-        const result = JSON.parse(
+        const result = readResult(
           await waitForFile(world, options.handshake, `${begin.case}.result.json`, options.waitMs),
-        ) as ProbeResult;
-        for (const instant of result.requests ?? [])
-          options.probeRequests.push(new Date(instant).getTime());
+          options.probeRequests,
+        );
+        resultsRead.add(begin.case);
         const failed = (result.steps ?? []).filter((item) => !item.ok).map((item) => item.name);
         expect(
           result.passed === true,
@@ -262,6 +270,11 @@ export async function runNodeApprove(world: World, options: NodeApproveOptions):
   // The clean-up runs after a failed step too: every device this run's approvals may have created is revoked, and the report says how
   // many are left.
   world.report.facts.devicesLeft = approvedNames.length === 0 ? 0 : "unknown";
+  const unanswered = await awaitProbes(
+    world,
+    options,
+    approvalsSent.filter((name) => !resultsRead.has(name)),
+  );
   if (actor !== undefined && approvedNames.length > 0) {
     try {
       await cleanUp(world, actor, approvedNames);
@@ -269,7 +282,50 @@ export async function runNodeApprove(world: World, options: NodeApproveOptions):
       failure ??= error;
     }
   }
+  if (unanswered.length > 0) {
+    // The probe of such a case may still poll and enroll its device after the clean-up looked.
+    world.report.facts.devicesLeft = "unknown";
+    world.report.facts.casesToCheckByHand = unanswered.join(",");
+    world.write(
+      `  devicesLeft unknown: node-probe never answered for ${unanswered.join(", ")}; once the probes have exited, check /account/devices for their node-probe devices and revoke them by hand`,
+    );
+  }
   if (failure !== undefined) throw failure;
+}
+
+/** Reads a probe's result file and adds the instants of its requests to the run's. */
+function readResult(text: string, probeRequests: number[]): ProbeResult {
+  const result = JSON.parse(text) as ProbeResult;
+  for (const instant of result.requests ?? []) probeRequests.push(new Date(instant).getTime());
+  return result;
+}
+
+/**
+ * Waits, within --wait-ms in all, for the result of each case whose approval was sent and whose result was not read (the step that
+ * reads it failed or never ran), so that the device its poll may enroll exists before the clean-up looks. Returns the cases whose probe
+ * never answered.
+ */
+async function awaitProbes(
+  world: World,
+  options: NodeApproveOptions,
+  cases: readonly string[],
+): Promise<string[]> {
+  const unanswered: string[] = [];
+  if (cases.length === 0) return unanswered;
+  world.write(`  waiting for node-probe's result of ${cases.join(", ")} before the clean-up`);
+  const deadline = world.now().getTime() + options.waitMs;
+  for (const name of cases) {
+    try {
+      const left = Math.max(deadline - world.now().getTime(), 0);
+      readResult(
+        await waitForFile(world, options.handshake, `${name}.result.json`, left),
+        options.probeRequests,
+      );
+    } catch {
+      unanswered.push(name);
+    }
+  }
+  return unanswered;
 }
 
 /**
@@ -322,6 +378,7 @@ async function connectCase(
   a: Actor,
   begin: BeginFile,
   manual: boolean,
+  sent: () => void,
 ): Promise<void> {
   await step(world, `${begin.case}: open the consent link`, mockedLabel, async () => {
     await open(world, a, begin.url, true);
@@ -354,6 +411,7 @@ async function connectCase(
       const before = a.tab.loopbackRequests();
       const previous = a.tab.document();
       if (manual) a.tab.holdLoopback();
+      if (begin.decision === "approve") sent();
       await a.tab.click(begin.decision === "deny" ? fleet.deny : fleet.approve);
       if (manual) {
         // The page's script tries the link at once; the held navigation leaves the page as it is (its load never completes, so the step
@@ -388,6 +446,7 @@ async function activateCase(
   a: Actor,
   begin: BeginFile,
   negative: boolean,
+  sent: () => void,
 ): Promise<void> {
   await step(
     world,
@@ -470,8 +529,10 @@ async function activateCase(
     mockedLabel,
     async () => {
       const previous = a.tab.document();
-      if (begin.decision === "approve")
+      if (begin.decision === "approve") {
         await a.tab.setValue(fleet.tailField, begin.fingerprint.slice(-4).toLowerCase());
+        sent();
+      }
       await a.tab.click(begin.decision === "deny" ? fleet.deny : fleet.approve);
       const reply = await awaitDocument(
         world,

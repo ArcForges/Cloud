@@ -589,10 +589,13 @@ throwaway certificate authority is trusted through `SSL_CERT_FILE`.
 browser acceptance's node-approve mode) decides those sign-ins in the pinned Chromium with the saved owner credential (**MOCKED**
 hardware: the virtual authenticator in a real browser), checks each review page against the begin file, hands a browser sign-in's
 result back to the probe's loopback receiver (the first browser sign-in of a run by the page's manual link, the others by the page's
-script), waits for each probe result, and at the end, also after a failed step, revokes the devices its approvals may have created:
-each approval's node name is recorded before its decision is sent, so an approval the center committed before a later check failed is
-revoked too, and the report always carries `devicesLeft` (0, the count, or `unknown` when the clean-up could not look). The probe runs
-on the browser's machine (its loopback receiver must be the browser's).
+script), waits for each probe result, and at the end, also after a failed step, revokes the devices its approvals may have created.
+Each approval's node name is recorded before its decision is sent. An approval enrolls no device: the device appears when the node's
+next poll collects the approval (Enroll), seconds after the decision. So before the clean-up reads the devices page it waits, within
+`--wait-ms` in all, for the result of every case whose approval was sent and whose result it has not read (node-probe writes it after
+its poll and its checks). The report always carries `devicesLeft`: 0 or the count, or `unknown` when the clean-up could not look or a
+probe never answered; the run then names those cases (`casesToCheckByHand`). The probe runs on the browser's machine (its loopback
+receiver must be the browser's).
 
 A 429 during a run: only the steps that open a link, and the clean-up's visit of the devices page, start again from their navigation
 after a 429. Every other step starts from the page an earlier step left (a review, a lookup, a decision with its step-up proof, a wrong
@@ -651,8 +654,9 @@ loopback receiver; it proves nothing about other browsers.
    request counts (browser busiest minute plus the probe's at most 55). What it spends: 6 step-ups (3 approvals, 3 revocations; 10 in
    10 minutes allowed), 3 decisions of `node_approve_account` (20 an hour), no wrong entry, 3 Begin/Start of `node_flow_prefix` (10 in
    10 minutes); about 75 browser requests and 20 probe requests over the run.
-6. **Clean-up.** The run revokes the probe devices itself, also after a failed step; it lists any device it left (`devicesLeft`): revoke
-   such a device on `/account/devices` by hand. Delete the handshake directory.
+6. **Clean-up.** The run revokes the probe devices itself, also after a failed step, once each approved case's probe has answered; it
+   lists any device it left (`devicesLeft`). After any failed run, or a `devicesLeft` other than 0, wait until the probes have exited,
+   then check `/account/devices` for `node-probe-*` devices of the run's cases and revoke them by hand. Delete the handshake directory.
 7. **Afterwards.** Production dark and proof's `center.surfaces` as in steps 1 and 2. What stays on `arcforges_acceptance`: the flows and
    authorizations (append-only until AF-PLAT-01's sweeps), the revoked devices, installations and nodes, the revoked node sessions,
    the account's command receipts of the device approval (ApproveDeviceCode), the `identity.spent_refresh` rows of the probes'

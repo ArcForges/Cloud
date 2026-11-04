@@ -156,18 +156,33 @@ interface NodeRun {
   center: FleetCenter;
   exitCode: number;
   stderr: string[];
+  stdout: string[];
   report: Report;
   everything: string;
   begins: BeginFile[];
 }
 
+/** The stand-in node-probes. */
+interface Probes {
+  /** Cases whose probe polls (and so enrolls its device) but never writes its result. */
+  silent?: string[];
+  /** How many requests each probe's result lists, one a second from its poll (default 1). */
+  requests?: number;
+}
+
+/**
+ * A run of main() against the fleet fake. The handshake directory is the probes' side: a probe's result appears only once its node
+ * polled (an approval at least the poll floor old: FleetCenter.poll) or its sign-in was denied.
+ */
 async function nodeRun(
   cases: readonly Case[],
   options: FleetFakeOptions = {},
   argv: readonly string[] = [],
+  probes: Probes = {},
 ): Promise<NodeRun> {
   const center = new FleetCenter(base, options);
   const files = new Map<string, string>();
+  const results = new Map<string, () => string | undefined>();
   const begins: BeginFile[] = [];
   cases.forEach((item, index) => {
     const key =
@@ -192,17 +207,31 @@ async function nodeRun(
     };
     begins.push(begin);
     files.set(`${item.case}.begin.json`, JSON.stringify(begin));
-    files.set(
-      `${item.case}.result.json`,
-      JSON.stringify({
+    results.set(`${item.case}.result.json`, () => {
+      const answered =
+        item.decision === "deny" ? center.decided.has(name) : center.polled.has(name);
+      if (!answered || probes.silent?.includes(item.case)) return undefined;
+      return JSON.stringify({
         case: item.case,
         kind: item.kind,
         passed: true,
         steps: [{ name: "begin", ok: true, outcome: "ok" }],
-        requests: [new Date(center.clockMs).toISOString()],
-      }),
-    );
+        requests: Array.from({ length: probes.requests ?? 1 }, (_, second) =>
+          new Date(center.clockMs + second * 1000).toISOString(),
+        ),
+      });
+    });
   });
+  // A result, once written, stays as it was.
+  const visible = () => {
+    center.poll();
+    for (const [file, result] of results) {
+      if (files.has(file)) continue;
+      const text = result();
+      if (text !== undefined) files.set(file, text);
+    }
+    return [...files.keys()];
+  };
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "af-node-approve-"));
   scratches.push(stateDir);
   new CredentialStore(stateDir).create(
@@ -264,7 +293,7 @@ async function nodeRun(
       read: () => JSON.stringify({ browsers: [{ name: "chromium", revision: "1243" }] }),
       writeReport: (_file, text) => reports.push(text),
       handshake: () => ({
-        list: () => [...files.keys()],
+        list: visible,
         read: (name) => files.get(name) ?? "",
         write: (name, text) => {
           files.set(name, text);
@@ -277,6 +306,7 @@ async function nodeRun(
     center,
     exitCode,
     stderr,
+    stdout,
     report: JSON.parse(reportText) as Report,
     everything: [...stdout, ...stderr, reportText].join("\n"),
     begins,
@@ -318,13 +348,49 @@ test("an approval the center committed before a later check failed is still revo
   });
   assert.equal(run.exitCode, 1);
   assert.match(run.stderr.join("\n"), /approve with the step-up" failed/u);
-  // The clean-up found the tab signed out (the devices page sent it to the sign-in), signed in and revoked the device.
+  // The device exists only once the probe polled, after the step failed: the clean-up waited for the probe's result, found the tab
+  // signed out (the devices page sent it to the sign-in), signed in and revoked the device. A later poll enrolls nothing more.
+  run.center.clockMs += 60_000;
+  run.center.poll();
   assert.deepEqual(run.center.devices, []);
   assert.equal(run.center.revocations, 1);
   assert.equal(run.report.facts.devicesRevoked, 1);
   assert.equal(run.report.facts.devicesLeft, 0);
   assert(
     run.report.steps.some((step) => step.name === "clean-up: open the devices page" && step.ok),
+  );
+});
+
+test("a probe that never answers after an approval makes devicesLeft unknown and names the case to check by hand", async () => {
+  const run = await nodeRun(
+    [{ case: "device-1", kind: "device", decision: "approve" }],
+    { resultCheckFails: true },
+    [],
+    { silent: ["device-1"] },
+  );
+  assert.equal(run.exitCode, 1);
+  assert.equal(run.report.facts.devicesLeft, "unknown");
+  assert.equal(run.report.facts.casesToCheckByHand, "device-1");
+  assert.match(
+    run.stdout.join("\n"),
+    /node-probe never answered for device-1; .*check \/account\/devices/u,
+  );
+  // The clean-up still revoked what it found once it had waited.
+  assert.deepEqual(run.center.devices, []);
+});
+
+test("the browser's and node-probe's busiest minutes together over 55 fail the run, though each alone is under", async () => {
+  const run = await nodeRun([{ case: "pkce-1", kind: "pkce", decision: "approve" }], {}, [], {
+    requests: 40,
+  });
+  assert.equal(run.exitCode, 1, run.everything);
+  const browserBusiest = Number(run.report.facts.requestsBusiest60s);
+  assert(browserBusiest <= 55 && 40 <= 55, String(browserBusiest));
+  assert.equal(run.report.facts.probeBusiest60s, 40);
+  assert(Number(run.report.facts.requestsBusiest60sBound) > 55);
+  assert.match(
+    run.stderr.join("\n"),
+    /The browser and node-probe sent up to \d+ requests inside one minute/u,
   );
 });
 
@@ -383,7 +449,8 @@ test("a 429 after a step-up proof fails the decision step: no second step-up", a
     assert.match(run.stderr.join("\n"), /rate limited \(429\)/u);
     assert.equal(run.center.stepUps, 1, kind);
     assert.equal(run.center.decisions, 0, kind);
-    assert.equal(run.report.facts.devicesLeft, 0, kind);
+    // The approval POST left the browser, so the run waits for the probe, which never answers: the device is unknown, not 0.
+    assert.equal(run.report.facts.devicesLeft, "unknown", kind);
   }
 });
 
