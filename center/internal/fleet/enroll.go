@@ -52,6 +52,10 @@ type EnrollRequest struct {
 	PublicKey     []byte
 	Flow          string
 	CorrelationID *platform.ID
+	// Record, when set, is the caller's write of the enrollment's result in the same transaction (a sign-in flow becomes COMPLETED
+	// with the new session and enrollment): it runs after the node session is issued and the published keys are read, and before
+	// fleet.node.enrolled, so the audit chain head stays the last write; inside Enroll's savepoint, so any later error undoes it too.
+	Record func(ctx context.Context, tx pgx.Tx, enrolled Enrolled) error
 }
 
 // Enrolled is the result: the node's enrollment, device and installation, its new node session (the tokens shown to the node once),
@@ -299,6 +303,11 @@ func issue(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, request
 	}
 	if enrolled.EntitlementKeys, err = platform.PublishedKeys(ctx, tx, platform.EntitlementToken, now); err != nil {
 		return Enrolled{}, err
+	}
+	if request.Record != nil {
+		if err = request.Record(ctx, tx, enrolled); err != nil {
+			return Enrolled{}, err
+		}
 	}
 	kind := "first"
 	if enrolled.Reenrolled {

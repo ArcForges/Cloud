@@ -38,14 +38,17 @@ func (noEvents) ObserveFleet(string, string) {}
 // marks the node seen and reads the published keys. ReportNodeInfo counts its installation's bucket, then runs under its command
 // receipt. SignOutNode runs under its command receipt.
 type Service struct {
-	// attempts bounds the refresh rotation's retries (Options.RefreshAttempts).
-	attempts int
-	db       *store.DB
-	policy   config.IdentityPolicy
-	limits   *ratelimit.Limiter
-	clock    func() time.Time
-	events   Events
-	logger   *slog.Logger
+	// attempts bounds the refresh rotation's retries (Options.RefreshAttempts), signInAttempts the sign-in transactions'.
+	attempts       int
+	signInAttempts int
+	db             *store.DB
+	policy         config.IdentityPolicy
+	limits         *ratelimit.Limiter
+	clock          func() time.Time
+	events         Events
+	logger         *slog.Logger
+	// publicBaseURL is the center's public base URL: the base of the URLs it derives for a node and the audience of a node key proof.
+	publicBaseURL string
 }
 
 // Options configure a Service.
@@ -58,12 +61,18 @@ type Options struct {
 	// RefreshAttempts bounds the refresh rotation's retries of a deadlock or serialization failure; 0 is the store's default. The
 	// race tests set 1, so a deadlock fails them.
 	RefreshAttempts int
+	// PublicBaseURL is the center's canonical public base URL (config.Config.PublicBaseURL): the sign-in builds the consent URL from
+	// it and verifies a node key proof with its SHA-256 as the audience, never with a request's Host or Origin.
+	PublicBaseURL string
+	// SignInAttempts bounds the retries of the sign-in transactions (the supersession and insert of a Begin, a decision, a
+	// completion) on a deadlock or serialization failure; 0 is the store's default. The race tests set 1.
+	SignInAttempts int
 }
 
 // New is the fleet service of a store.
 func New(options Options) *Service {
 	service := &Service{attempts: options.RefreshAttempts, db: options.DB, policy: options.Policy, limits: ratelimit.New(options.DB), clock: options.Clock, events: options.Events,
-		logger: options.Logger}
+		logger: options.Logger, publicBaseURL: options.PublicBaseURL, signInAttempts: options.SignInAttempts}
 	if service.clock == nil {
 		service.clock = time.Now
 	}
