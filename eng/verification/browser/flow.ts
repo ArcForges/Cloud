@@ -83,7 +83,7 @@ export interface StepRecord {
 }
 
 export interface Report {
-  mode: "enroll" | "returning" | "real-authenticator" | "operator-grant";
+  mode: "enroll" | "returning" | "real-authenticator" | "operator-grant" | "node-approve";
   baseUrl: string;
   startedAt: string;
   finishedAt?: string;
@@ -162,7 +162,7 @@ export function newWorld(
 // ---------------------------------------------------------------------------------------------------------------------------
 // Checks
 
-function expect(condition: boolean, message: string): asserts condition {
+export function expect(condition: boolean, message: string): asserts condition {
   if (!condition) throw new AcceptanceError(message);
 }
 
@@ -199,11 +199,11 @@ export function cookieProblems(cookies: readonly CookieView[], now: Date): strin
 const maxAttempts = 3;
 const maxRateLimitWaitSeconds = 120;
 
-function basePath(world: World): string {
+export function basePath(world: World): string {
   return new URL(world.baseUrl).pathname.replace(/\/$/u, "");
 }
-const pageUrl = (world: World, pagePath: string) => `${world.baseUrl}${pagePath}`;
-const pagePathname = (world: World, pagePath: string) => `${basePath(world)}${pagePath}`;
+export const pageUrl = (world: World, pagePath: string) => `${world.baseUrl}${pagePath}`;
+export const pagePathname = (world: World, pagePath: string) => `${basePath(world)}${pagePath}`;
 
 function newProblems(world: World): string[] {
   const fresh: string[] = [];
@@ -220,7 +220,7 @@ function newProblems(world: World): string[] {
  * attempt void: the step waits for the advised time and starts again, at most three attempts; a step therefore starts from a
  * navigation. Any console error, page error or policy violation fails the step.
  */
-async function step<T>(
+export async function step<T>(
   world: World,
   name: string,
   label: Label,
@@ -306,7 +306,7 @@ async function pageReason(world: World): Promise<string> {
 }
 
 /** Polls until the check holds; the wait is counted in polls so that a fake clock needs no support. */
-async function until(
+export async function until(
   world: World,
   what: string,
   check: () => Promise<boolean>,
@@ -335,7 +335,7 @@ interface Slot {
  * share one user handle. The first credential lives on the single `internal` authenticator, every further one on its own with
  * another transport, which the saved file records.
  */
-class Actor {
+export class Actor {
   readonly world: World;
   readonly tab: Tab;
   slots: Slot[] = [];
@@ -596,7 +596,7 @@ export function noFreeTransport(strays: readonly string[]): string {
 }
 
 /** The saved credential must be the one of this center: a file made for another center would only fail at the sign-in. */
-function expectSavedCenter(world: World): void {
+export function expectSavedCenter(world: World): void {
   const saved = world.store.load();
   expect(
     saved.baseUrl === world.baseUrl && saved.rpId === new URL(world.baseUrl).hostname,
@@ -1025,13 +1025,15 @@ export function hoursUntilEnds(ends: string | undefined, now: Date): number | un
   return Number.isFinite(end) ? (end - now.getTime()) / 3_600_000 : undefined;
 }
 
+/** Whether the hours to a grant's end are about one day: from 23 to 25 hours, both edges included. */
+export function aboutOneDay(hours: number | undefined): hours is number {
+  return hours !== undefined && hours >= endsWindowHours.min && hours <= endsWindowHours.max;
+}
+
 /** The hours a page's end lies ahead, which must be about one day. */
 function expectOneDay(world: World, ends: string | undefined, what: string): number {
   const hours = hoursUntilEnds(ends, world.now());
-  expect(
-    hours !== undefined && hours >= endsWindowHours.min && hours <= endsWindowHours.max,
-    `${what} does not end the grant about a day from now.`,
-  );
+  expect(aboutOneDay(hours), `${what} does not end the grant about a day from now.`);
   return hours;
 }
 
@@ -1087,7 +1089,7 @@ export async function awaitDocument(
 }
 
 /** What a reply of the center's pages must look like: the status, and the security headers of the generated table. */
-function expectReply(reply: Navigation, status: number, what: string): void {
+export function expectReply(reply: Navigation, status: number, what: string): void {
   expect(reply.status === status, `${what} answered ${reply.status}, not ${status}.`);
   const missing = headerProblems(reply.headers);
   expect(missing.length === 0, `${what} lacks or changes security headers: ${missing.join(", ")}.`);

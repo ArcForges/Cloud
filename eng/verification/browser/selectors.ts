@@ -110,3 +110,28 @@ export const stepUpAttribute = "data-step-up-class";
 
 /** The cookie of a session, and the rules the browser must have applied to it. */
 export const sessionCookie = { name: "__Host-af_session", path: "/", sameSite: "Strict" } as const;
+
+/**
+ * The fleet surface's pages (AF-CTR-04 E3): the consent page of a node's browser sign-in, the activation page of its device-code
+ * sign-in, their reviews and their results (the templates connect*, activate* and fleet-node).
+ */
+export const fleet = {
+  connect: "/connect",
+  activate: "/activate",
+  connectReview: "/connect/review",
+  activateReview: "/activate/review",
+  codeField: "#user-code",
+  continueButton: "#continue",
+  nodeName: "#node-name",
+  nodeSystem: "#node-system",
+  nodeFingerprint: "#node-fingerprint",
+  nodeOrigin: "#node-origin",
+  nodeNameNote: "#node-name-note",
+  tailField: "#fingerprint-tail",
+  approve: '#approve button[type="submit"]',
+  deny: '#deny button[type="submit"]',
+  returnLink: "#return-link",
+  /** The revoke button of the devices page's row of a device, by the device's name. */
+  revokeDevice: (name: string) =>
+    `tr:has(th bdi:text-is(${JSON.stringify(name)})) form[action$="/account/devices/revoke"] button`,
+} as const;

@@ -17,6 +17,7 @@ import {
   RequestMeter,
   acceptedChange,
   defaultRequestsPerMinute,
+  isLoopback,
   playwrightBrowser,
   playwrightTab,
   refusedStatus,
@@ -125,6 +126,10 @@ function standIn() {
       abort: async () => {
         outcome = "aborted";
         events.push(`abort ${method} ${new URL(url).pathname}`);
+      },
+      fulfill: async ({ status }) => {
+        outcome = "aborted";
+        events.push(`fulfill ${status} ${method} ${new URL(url).pathname}`);
       },
     };
     if (routeHandler === undefined) throw new Error("the page has no route");
@@ -659,4 +664,40 @@ test("a budget charged for a hop that left in the past still spaces the requests
   for (let hop = 0; hop < 4; hop += 1) budget.charge();
   await budget.take();
   assert.deepEqual(waits, [1000], "four hops used the burst; the next request waits one interval");
+});
+
+// AF-CTR-04 E3: a node's loopback receiver is not the origin. Its requests take no slot of the budget, and the run can hold the next
+// navigation to it (answered 204 inside the browser, which leaves the page as it is) to follow the page's manual link instead.
+test("a loopback receiver's requests take no slot, and the next navigation to one can be held", async () => {
+  const world = standIn();
+  const budget = new RequestBudget(
+    45,
+    () => 0,
+    async () => {},
+  );
+  const counted = Object.create(budget) as RequestBudget;
+  counted.take = async () => {
+    world.events.push("take");
+  };
+  const tab = playwrightTab(world.context, world.page, counted);
+  await tab.goto(`${origin}/api/connect`);
+  world.events.length = 0;
+  const callback = "http://127.0.0.1:50000/callback?code=x&state=y";
+  world.document("GET", callback);
+  tab.holdLoopback();
+  assert.equal(await world.request("GET", callback), "aborted");
+  assert.equal(await world.request("GET", callback), "continued");
+  assert.equal(await world.request("GET", "http://[::1]:50001/callback"), "continued");
+  assert.deepEqual(world.events, [
+    "fulfill 204 GET /callback",
+    "continue GET /callback",
+    "continue GET /callback",
+  ]);
+  assert.equal(tab.loopbackRequests(), 3);
+  // Another host on the http scheme is the origin's business: it takes its slot.
+  await world.request("GET", "http://localhost:50000/callback");
+  assert.equal(world.events.at(-2), "take");
+  assert.equal(isLoopback("http://127.0.0.1:1/x"), true);
+  assert.equal(isLoopback("https://127.0.0.1:1/x"), false);
+  assert.equal(isLoopback("http://127.0.0.2:1/x"), false);
 });

@@ -13,7 +13,14 @@
 // (it registers no passkey) and drives the operations page of the center: review, a refused step-up, the confirmed grant, its
 // replay and a refused reuse. Nothing the run prints, reports or throws holds a token, a key, a cookie value, an account
 // identifier or a page's request token, and tracing, screenshots and videos are never switched on.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,6 +51,7 @@ import {
   runOperatorGrant,
   runRealAuthenticator,
 } from "./flow.ts";
+import { type Handshake, busiestOf, runNodeApprove } from "./node-flow.ts";
 
 export const defaultBaseUrl = "https://proof.arcforges.com/api";
 /** The only hosts the script drives: the acceptance environment, or a center on this machine. Production is never a target. */
@@ -65,6 +73,12 @@ export interface Options {
   headed: boolean;
   realAuthenticator: boolean;
   operatorGrant: boolean;
+  /** The node-approve mode (AF-CTR-04 E3): the handshake directory node-probe writes into, the number of cases, the waits. */
+  nodeApprove: boolean;
+  watch: string;
+  cases: number;
+  waitMs: number;
+  negative: boolean;
   report: string;
   paceMs: number;
   timeoutMs: number;
@@ -105,11 +119,19 @@ export function baseUrlProblem(value: string): string | undefined {
 export const defaultReportName = {
   acceptance: "browser-acceptance.json",
   operatorGrant: "browser-operator-grant.json",
+  nodeApprove: "browser-node-approve.json",
 };
+
+/**
+ * The request bound of the node-approve mode against the hosted edge: node-probe runs on the same machine as the browser (its loopback
+ * receiver must be the browser's), so its requests count against the same edge limit; the browser keeps to fewer.
+ */
+export const nodeApproveRequestsPerMinute = 36;
 
 const usage = `Usage: node eng/verification/browser/acceptance.ts [--base-url <url>] [--chromium <path>] [--state-dir <dir>]
   [--bootstrap-file <file>] [--display-name <text>] [--headed] [--real-authenticator | --operator-grant] [--report <file>]
   [--pace-ms <n>] [--timeout-ms <n>] [--real-timeout-ms <n>] [--requests-per-minute <n>] [--help]
+  node-approve: [--node-approve] --watch <dir> [--cases <n>] [--wait-ms <n>] [--negative]
 Without --real-authenticator or --operator-grant the run enrolls the owner (the first run, with the bootstrap file) or signs in
 with the saved credential (every later run).
 --operator-grant needs the saved owner credential. It signs in with the MOCKED authenticator, then on the operations page reviews
@@ -120,6 +142,13 @@ Edge limit: the hosted edge counts the requests of a client over 60 seconds. Lea
 Step-up limit: apart from the edge, the center allows 10 step-ups per account in 10 minutes. --operator-grant spends 2 step-ups,
   a returning run 3, and a restarted step one more: wait ten minutes between repeated attempts, or a 429 of the center looks like
   the edge's.
+--node-approve (node-approve.ts) needs the saved owner credential. It decides the sign-ins that center/cmd/node-probe (MOCKED node)
+  starts and announces in the --watch directory, --cases of them (default 2), on /connect and /activate, then revokes the devices
+  its approvals created. node-probe runs on the same machine (its loopback receiver must be the browser's), and its requests count
+  against the same edge limit: the browser keeps to ${nodeApproveRequestsPerMinute} requests a minute there, and the run fails when the
+  browser's busiest minute and the probe's together exceed ${maxRequestsPerWindow}. --negative also submits one wrong fingerprint tail
+  (one more step-up and one entry of the account's budget): for the local rehearsal. Its report defaults to
+  artifacts/${defaultReportName.nodeApprove}.
 Exit codes: 0 passed, 1 failed, 2 not started (usage, missing browser, credential or bootstrap file).`;
 
 function whole(value: string | undefined, flag: string, min: number, max: number): number {
@@ -143,6 +172,11 @@ export function parseArguments(
     headed: false,
     realAuthenticator: false,
     operatorGrant: false,
+    nodeApprove: false,
+    watch: "",
+    cases: 2,
+    waitMs: 600_000,
+    negative: false,
     report: path.resolve("artifacts", defaultReportName.acceptance),
     paceMs: 750,
     timeoutMs: 30_000,
@@ -151,6 +185,7 @@ export function parseArguments(
   };
   let headless = false;
   let reportNamed = false;
+  let rateNamed = false;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -192,6 +227,23 @@ export function parseArguments(
       case "--operator-grant":
         options.operatorGrant = true;
         break;
+      case "--node-approve":
+        options.nodeApprove = true;
+        break;
+      case "--watch":
+        options.watch = path.resolve(text());
+        break;
+      case "--cases":
+        options.cases = whole(value, flag, 1, 8);
+        index += 1;
+        break;
+      case "--wait-ms":
+        options.waitMs = whole(value, flag, 10_000, 900_000);
+        index += 1;
+        break;
+      case "--negative":
+        options.negative = true;
+        break;
       case "--pace-ms":
         options.paceMs = whole(value, flag, 0, 60_000);
         index += 1;
@@ -206,16 +258,29 @@ export function parseArguments(
         break;
       case "--requests-per-minute":
         options.requestsPerMinute = whole(value, flag, 0, 600);
+        rateNamed = true;
         index += 1;
         break;
       default:
         throw new UsageError(`Unknown argument.\n${usage}`);
     }
   }
-  if (options.realAuthenticator && options.operatorGrant)
-    throw new UsageError("--real-authenticator and --operator-grant are two runs; name one.");
+  if (
+    [options.realAuthenticator, options.operatorGrant, options.nodeApprove].filter(Boolean).length >
+    1
+  )
+    throw new UsageError(
+      "--real-authenticator, --operator-grant and --node-approve are separate runs; name one.",
+    );
   if (options.operatorGrant && !reportNamed)
     options.report = path.resolve("artifacts", defaultReportName.operatorGrant);
+  if (options.nodeApprove && !reportNamed)
+    options.report = path.resolve("artifacts", defaultReportName.nodeApprove);
+  if (options.nodeApprove && options.watch === "")
+    throw new UsageError("--node-approve needs --watch <dir>.");
+  if (!options.nodeApprove && (options.watch !== "" || options.negative))
+    throw new UsageError("--watch and --negative belong to --node-approve.");
+  if (options.nodeApprove && !rateNamed) options.requestsPerMinute = nodeApproveRequestsPerMinute;
   if (options.realAuthenticator) {
     // Windows Hello needs a window the owner can see and answer.
     if (headless)
@@ -255,6 +320,21 @@ export interface Dependencies {
   exists(file: string): boolean;
   read(file: string): string;
   writeReport(file: string, text: string): void;
+  /** The handshake directory of the node-approve mode (absent: the file system). */
+  handshake?: (directory: string) => Handshake;
+}
+
+/** The handshake directory on the file system: node-probe's files are read as they are, the flow's are written whole (rename). */
+export function fileHandshake(directory: string): Handshake {
+  return {
+    list: () => (existsSync(directory) ? readdirSync(directory) : []),
+    read: (name) => readFileSync(path.join(directory, name), "utf8"),
+    write: (name, text) => {
+      const temporary = path.join(directory, `.${name}.tmp`);
+      writeFileSync(temporary, text, { mode: 0o600 });
+      renameSync(temporary, path.join(directory, name));
+    },
+  };
 }
 
 export function realDependencies(): Dependencies {
@@ -312,13 +392,14 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
   const store = new CredentialStore(options.stateDir, deps.machine);
   let bootstrap: ReturnType<typeof readBootstrapFile> | undefined;
   try {
-    if ((options.realAuthenticator || options.operatorGrant) && !store.exists()) {
+    const needsSaved = options.realAuthenticator || options.operatorGrant || options.nodeApprove;
+    if (needsSaved && !store.exists()) {
       deps.writeError(
-        `${options.realAuthenticator ? "--real-authenticator" : "--operator-grant"} needs the saved owner credential; run the acceptance once first.`,
+        `${options.realAuthenticator ? "--real-authenticator" : options.operatorGrant ? "--operator-grant" : "--node-approve"} needs the saved owner credential; run the acceptance once first.`,
       );
       return 2;
     }
-    if (!options.realAuthenticator && !options.operatorGrant && !store.exists()) {
+    if (!needsSaved && !store.exists()) {
       bootstrap = readBootstrapFile(options.bootstrapFile, deps.machine);
       if (new Date(bootstrap.expiresAt).getTime() <= deps.now().getTime()) {
         deps.writeError(
@@ -353,17 +434,29 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
       ? "real-authenticator"
       : options.operatorGrant
         ? "operator-grant"
-        : bootstrap
-          ? "enroll"
-          : "returning",
+        : options.nodeApprove
+          ? "node-approve"
+          : bootstrap
+            ? "enroll"
+            : "returning",
   });
   world.write(
     `playwright-core ${requiredPlaywrightCore}, Chromium ${world.report.browserVersion} (revision ${requiredChromiumRevision}), ${options.headed ? "headed" : "headless"}`,
   );
   let exitCode = 0;
+  let probeRequests: number[] = [];
   try {
     if (options.realAuthenticator) await runRealAuthenticator(world);
     else if (options.operatorGrant) await runOperatorGrant(world);
+    else if (options.nodeApprove)
+      probeRequests = (
+        await runNodeApprove(world, {
+          handshake: (deps.handshake ?? fileHandshake)(options.watch),
+          cases: options.cases,
+          waitMs: options.waitMs,
+          negative: options.negative,
+        })
+      ).probeRequests;
     else await runAcceptance(world);
     world.report.result = "passed";
   } catch (error) {
@@ -388,11 +481,18 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
   world.report.facts.requestsBusiest60s = sent.busiest;
   const bounded =
     options.requestsPerMinute >= 1 && options.requestsPerMinute <= defaultRequestsPerMinute;
-  if (exitCode === 0 && bounded && sent.busiest > maxRequestsPerWindow) {
+  // node-probe's requests share the browser's edge key: the two busiest minutes together bound the busiest minute of both.
+  if (options.nodeApprove) {
+    world.report.facts.probeRequests = probeRequests.length;
+    world.report.facts.probeBusiest60s = busiestOf(probeRequests);
+    world.report.facts.requestsBusiest60sBound = sent.busiest + busiestOf(probeRequests);
+  }
+  const busiest = options.nodeApprove ? sent.busiest + busiestOf(probeRequests) : sent.busiest;
+  if (exitCode === 0 && bounded && busiest > maxRequestsPerWindow) {
     world.report.result = "failed";
     exitCode = 1;
     deps.writeError(
-      `The browser sent ${sent.busiest} requests inside one minute, more than the ${maxRequestsPerWindow} a run may send (the edge limit of the proof environment is ${edgeLimitPerMinute} per minute): it would be answered with 429. The run is failed.`,
+      `The browser${options.nodeApprove ? " and node-probe" : ""} sent up to ${busiest} requests inside one minute, more than the ${maxRequestsPerWindow} a run may send (the edge limit of the proof environment is ${edgeLimitPerMinute} per minute): it would be answered with 429. The run is failed.`,
     );
   }
   // The report holds steps, counts and flags; if anything secret is in it, it is not written.

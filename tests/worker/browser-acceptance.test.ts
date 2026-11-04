@@ -58,6 +58,7 @@ import {
   requestedDays,
   grantedFeature,
   headerProblems,
+  aboutOneDay,
   hoursUntilEnds,
   mockedLabel,
   newWorld,
@@ -1902,7 +1903,7 @@ test("the operator-grant mode needs the saved credential, refuses to combine wit
   assert.equal(none.launches.length, 0, "no browser is started");
   const both = scenario();
   assert.equal(await both.run(["--operator-grant", "--real-authenticator"]), 2);
-  assert.match(both.stderr.join("\n"), /two runs; name one/u);
+  assert.match(both.stderr.join("\n"), /separate runs; name one/u);
   assert.equal(both.launches.length, 0);
   assert.equal(parse(["--operator-grant"]).operatorGrant, true);
   assert.equal(parse([]).operatorGrant, false);
@@ -2727,4 +2728,18 @@ test("the stand-in follows the center where it was found different: the audit of
     [operations.selfApproval, "x"],
   ]);
   assert.equal(center.operatorReview(session, reviewForm, new Set(["remote.view"])).status, 200);
+});
+
+// #124 carried item script-2: the review's and the done page's end is accepted from 23 to 25 hours ahead, both edges included, and
+// nothing outside (the hours are read from the page's minute, so the window allows for it).
+test("the grant's end is about one day from 23 to 25 hours, edges included", () => {
+  for (const hours of [23, 24, 25, 23.0001, 24.9999])
+    assert.equal(aboutOneDay(hours), true, String(hours));
+  for (const hours of [22.9999, 25.0001, 0, -24, 48, undefined, Number.NaN])
+    assert.equal(aboutOneDay(hours), false, String(hours));
+  const now = new Date("2026-11-02T04:10:00Z");
+  assert.equal(aboutOneDay(hoursUntilEnds("2026-11-03 03:10 UTC", now)), true);
+  assert.equal(aboutOneDay(hoursUntilEnds("2026-11-03 05:10 UTC", now)), true);
+  assert.equal(aboutOneDay(hoursUntilEnds("2026-11-03 03:09 UTC", now)), false);
+  assert.equal(aboutOneDay(hoursUntilEnds("2026-11-03 05:11 UTC", now)), false);
 });

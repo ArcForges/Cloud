@@ -34,7 +34,7 @@
 //     stand-in looks the evidence up first and answers 403 (the script never sends an invalid request).
 //   - A replay: the real Grant applies that same check before platform.Execute answers the stored result (the end must still lie in
 //     the future); the stand-in answers the stored result before it checks the request.
-//   - The real Review performs no read (Normalize: "It performs no read"), so a well-formed account that does not exist is refused
+//   - The real Review reads only the operator role (Normalize performs no read), so a well-formed account that does not exist is refused
 //     only at the confirmation (not_found, with the consumption rolled back); the stand-in's review refuses it with a 400.
 //   - Audit of the other refusals: the real Grant audits every refusal it makes (the reasons invalid_argument, account_not_found,
 //     already_granted, a reused command, ...; only not_operator is written once per window and account); the stand-in audits only
@@ -1417,6 +1417,13 @@ export class FakeTab implements Tab {
 
   unsettled(): number {
     return this.unsettledCount;
+  }
+
+  /** The fake center serves no fleet page (AF-CTR-04 E3), so no navigation reaches a loopback receiver. */
+  holdLoopback(): void {}
+
+  loopbackRequests(): number {
+    return 0;
   }
 
   async cookies(): Promise<CookieView[]> {

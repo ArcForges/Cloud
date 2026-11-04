@@ -94,6 +94,13 @@ export interface Tab {
    * so a step that ends with one of them cannot tell that nothing was changed; only a 4xx reply is a definite refusal.
    */
   unsettled(): number;
+  /**
+   * Holds the next navigation to a node's loopback receiver (http on 127.0.0.1 or [::1]): it is answered 204 inside the browser,
+   * which leaves the page as it is, and never reaches the receiver (AF-CTR-04 E3: the run then follows the page's manual link).
+   */
+  holdLoopback(): void;
+  /** How many requests to a loopback receiver the tab has made (held ones included). They are not the origin's: no budget, no count. */
+  loopbackRequests(): number;
   /** Adds a virtual authenticator; Chromium allows one `internal` authenticator per tab and several of the other transports. */
   addAuthenticator(transport: Transport): Promise<Authenticator>;
   /** Switches the virtual environment off (every virtual authenticator goes), so that the browser reaches real authenticators. */
@@ -375,6 +382,15 @@ export interface PwRoute {
   request(): PwRequest;
   continue(): Promise<void>;
   abort(errorCode?: string): Promise<void>;
+  fulfill(options: { status: number; body: string }): Promise<void>;
+}
+
+/** Whether a URL is a node's loopback receiver: http on the literal 127.0.0.1 or [::1]. */
+export function isLoopback(url: string): boolean {
+  const parsed = new URL(url);
+  return (
+    parsed.protocol === "http:" && (parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]")
+  );
 }
 export interface PwLocator {
   click(): Promise<void>;
@@ -525,6 +541,10 @@ export function playwrightTab(
   // The 4xx statuses a step has said it expects the browser to report as console errors (see Tab.expectRefusal).
   const refusals: number[] = [];
   let routing: Promise<unknown> | undefined;
+  // A node's loopback receiver is not the origin: its requests take no slot of the budget and are not counted; the next navigation to
+  // it can be held (answered 204 here) so that the run follows the page's manual link instead of its script.
+  let holdNextLoopback = false;
+  let loopback = 0;
   // One DevTools session per tab: the WebAuthn environment (and its single internal authenticator) belongs to it.
   let session: PwCdpSession | undefined;
   let enabled = false;
@@ -581,6 +601,16 @@ export function playwrightTab(
   const route = (): Promise<unknown> => {
     routing ??= page.route("**/*", async (intercepted) => {
       const outgoing = intercepted.request();
+      if (isLoopback(outgoing.url())) {
+        loopback += 1;
+        if (holdNextLoopback && outgoing.isNavigationRequest()) {
+          holdNextLoopback = false;
+          await intercepted.fulfill({ status: 204, body: "" });
+          return;
+        }
+        await intercepted.continue();
+        return;
+      }
       await budget?.take();
       const hooked =
         outgoing.method() === "POST" ? hooks.get(new URL(outgoing.url()).pathname) : undefined;
@@ -701,6 +731,10 @@ export function playwrightTab(
     },
     changes: () => changes,
     unsettled: () => unsettled.size,
+    holdLoopback() {
+      holdNextLoopback = true;
+    },
+    loopbackRequests: () => loopback,
     async addAuthenticator(transport) {
       const cdp = await webauthn();
       const added = (await cdp.send("WebAuthn.addVirtualAuthenticator", {
