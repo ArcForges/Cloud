@@ -34,7 +34,6 @@ var refusalText = map[string]string{
 	"STATE/not_activated":               "This page is not available.",
 	"RESOURCE/rate_limited":             "Too many attempts. Wait a little and try again.",
 	"RESOURCE/overloaded":               "The service is busy. Try again in a moment.",
-	"RESOURCE/quota_exceeded":           "This account has reached its node limit. Revoke a node on the devices page, then start again on the node.",
 	"VALIDATION/code_invalid":           "That code cannot be used. Check it, or start the sign-in again on the node.",
 	"INTERNAL/internal":                 "Something went wrong on our side. The request may or may not have been completed, so check before you do it again.",
 }

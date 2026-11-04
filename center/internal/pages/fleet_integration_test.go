@@ -326,8 +326,10 @@ func TestTheActivateDecisionNeverLooksTheCodeUpAgain(t *testing.T) {
 	}
 }
 
-// TestOtherDecisionRefusalsShowNoReview (R-2): only a refused step-up and a tail mismatch show the review again; a decision on a code
-// this account did not review, and a malformed code, answer the error page and read nothing.
+// TestOtherDecisionRefusalsShowNoReview (R-2): only a refused step-up and a tail mismatch show the review again. A decision on a code
+// this account did not review and a malformed code answer the error page (the unreviewed decision keeps its entry, so nothing answered
+// it before the decision); a code this account reviewed that the decision refuses for another reason (a command ID used for another
+// request) answers the error page too, not the review.
 func TestOtherDecisionRefusalsShowNoReview(t *testing.T) {
 	h := fleetHarness(t, false)
 	owner := h.seedAccount(1)
@@ -351,6 +353,20 @@ func TestOtherDecisionRefusalsShowNoReview(t *testing.T) {
 	// read before the decision answered it for free; the malformed code cost nothing: a wrong code now leaves 3 of the 5.
 	if wrong := b.postForm("/activate/review", url.Values{"user_code": {"BCDF-GHJK"}}); !strings.Contains(wrong.text(), "You can try 3 more codes now") {
 		t.Fatalf("the entries after an unreviewed decision: %d %s", wrong.status, wrong.text())
+	}
+	reviewed := h.startCode(nil)
+	h.remember(reviewed.code)
+	review := b.postForm("/activate/review", url.Values{"user_code": {reviewed.code}})
+	command := field(t, review, commandPattern)
+	other := h.startCode(nil)
+	h.remember(other.code)
+	b.postForm("/activate/review", url.Values{"user_code": {other.code}})
+	if first := b.postForm("/activate/decision", url.Values{"user_code": {other.code}, "command_id": {command}, "decision": {"deny"}}); first.status != 200 {
+		t.Fatalf("the first use of the command ID: %d %s", first.status, first.text())
+	}
+	reused := b.postForm("/activate/decision", url.Values{"user_code": {reviewed.code}, "command_id": {command}, "decision": {"deny"}})
+	if reused.status != http.StatusBadRequest || strings.Contains(reused.text(), `data-page="activate-review"`) || !strings.Contains(reused.text(), "That form was already used") {
+		t.Fatalf("a reviewed code refused for another reason: %d %s", reused.status, reused.text())
 	}
 }
 

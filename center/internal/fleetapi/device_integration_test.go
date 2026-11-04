@@ -67,8 +67,8 @@ func (h *harness) decideDevice(bearer string, metaValue *foundationv1.RequestMet
 		bearer, &fleetv1.NodeEnrollmentServiceApproveDeviceCodeResponse{})
 }
 
-// stepUpCode proves a step-up of class fleet.approveDeviceCode bound to a normalized user code, the target hash a client computes (part
-// E3's page will compute it the same way).
+// stepUpCode proves a step-up of class fleet.approveDeviceCode bound to a normalized user code, the target hash a client computes (the
+// /activate page computes it the same way).
 func (h *harness) stepUpCode(p *person, code string, byEmail bool) {
 	h.t.Helper()
 	h.stepUpHash(p, fleet.ClassApproveDeviceCode, identity.TextTargetHash(fleet.ClassApproveDeviceCode, p.id, code), byEmail)

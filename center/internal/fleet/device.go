@@ -26,7 +26,7 @@ import (
 
 // The device-code sign-in (AF-CTR-04 part E2, CTR4-DEV-01..09 as amended by Q8, protocol-8, protocol-9, protocol-19, contracts-9,
 // cloud-5, cloud-10 and the C0 comments of fleet.proto). A headless node starts an authorization anonymously and shows its user code;
-// an account looks the code up (LookupDeviceCode, the review; part E3's /activate page will call these functions in process) and
+// an account looks the code up (LookupDeviceCode, the review; the /activate page calls these functions in process) and
 // approves it (ApproveDeviceCode, with step-up evidence bound to the normalized user code) or denies it; the node polls with its device
 // code and a proof by its node key and receives its node credentials from fleet.Enroll. A caller that holds the device code but not
 // the node key learns nothing of the authorization's state and writes nothing to it: every poll whose proof fails is
@@ -252,7 +252,7 @@ type authorizationRow struct {
 	sessionID          *platform.ID
 }
 
-// DeviceView is an authorization as an account reviews it: the node as it described itself at Start, its key (part E3's page will show
+// DeviceView is an authorization as an account reviews it: the node as it described itself at Start, its key (the /activate page shows
 // its fingerprint), the state and the times.
 type DeviceView struct {
 	AuthorizationID platform.ID
@@ -514,14 +514,14 @@ ORDER BY state IN (1, 3) DESC, created_at DESC, authorization_id DESC LIMIT 1`, 
 		return DeviceView{}, arc.InvalidState(AuthorizationKind, "not_reviewed")
 	case err != nil:
 		return DeviceView{}, store.Sanitize("read a reviewed device code", err)
-	case row.foreign(caller):
+	case row.foreign(caller), !row.reviewedBy(caller, now):
+		// The review check comes first: the read tells an account that did not review the code within the window nothing of its
+		// state, whichever path reaches it (sec NB-2).
 		return DeviceView{}, arc.InvalidState(AuthorizationKind, "not_reviewed")
 	case row.lapsedAt(now):
 		return DeviceView{}, arc.Expired()
 	case row.State != AuthorizationPending:
 		return DeviceView{}, arc.InvalidState(AuthorizationKind, authorizationStateName(row.State))
-	case !row.reviewedBy(caller, now):
-		return DeviceView{}, arc.InvalidState(AuthorizationKind, "not_reviewed")
 	}
 	return row.DeviceView, nil
 }
