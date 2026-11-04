@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -17,7 +18,7 @@ import (
 // EVIDENCE: REAL PostgreSQL, the real identity service with the fleet's account participant, the real sign-in service; the
 // remediation runs the statements of identityapi's RevokeAllSessions run in its order (the participants, the evidence, the
 // revocation) in one transaction without retries; the approver and its evidence are SEEDED; the node is MOCKED (nodetest). The served
-// path is fleetapi's TestApprovalDoesNotOutliveRevokeAllSessionsFromTheApprovingSession.
+// path is fleetapi's TestApprovalDoesNotOutliveTheAccountsRemediation.
 
 // identityService is the identity service with the fleet's account participant, as server.New composes it.
 func (s *signIns) identityService() *identity.Service {
@@ -142,9 +143,10 @@ func TestTheApprovalHookTakesTheFlowsBeforeTheAccount(t *testing.T) {
 
 // TestRevokeAllSessionsRacingAnApprovalOrACompleteNeverDeadlocks (E1-14, SEC-24, N-4): the remediation from the approving session
 // races the completion of an approved flow and the approval of a reviewed one. There is never a deadlock; the approved flow is either
-// COMPLETED (its completion committed first; the remedy is then revoking the device) or DENIED with no node session; the reviewed
-// flow is DENIED when its approval committed first, and an approval by the remediating session itself that commits after the hook's
-// scan stands (the user's own act).
+// COMPLETED (its completion committed first; the remedy is then revoking the device) or DENIED with no node session; the approval of
+// the reviewed flow always succeeds, and the flow is DENIED when that approval committed before the remediation and APPROVED when it
+// committed after it (an approval by the remediating session itself that reaches its row after the hook's lock waits and stands: the
+// user's own act, N-4), told apart by the order of their audit events.
 func TestRevokeAllSessionsRacingAnApprovalOrACompleteNeverDeadlocks(t *testing.T) {
 	s := newSignIns(t)
 	s.watchDeadlocks(t)
@@ -171,7 +173,7 @@ func TestRevokeAllSessionsRacingAnApprovalOrACompleteNeverDeadlocks(t *testing.T
 		go func() {
 			defer done.Done()
 			start.Wait()
-			_, errs[2] = s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), reviewed.id, true)
+			_, errs[2] = s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), reviewed.id, true, true)
 		}()
 		start.Done()
 		done.Wait()
@@ -195,8 +197,67 @@ func TestRevokeAllSessionsRacingAnApprovalOrACompleteNeverDeadlocks(t *testing.T
 		default:
 			t.Fatalf("round %d: the approved flow is %d", round, s.state(approved))
 		}
-		if state := s.state(reviewed); state != FlowDenied && state != FlowApproved && state != FlowPending {
-			t.Fatalf("round %d: the reviewed flow is %d", round, state)
+		approvedAt := s.count("SELECT sequence FROM audit.audit_event WHERE event_type = 'fleet.node_sign_in.approved' AND target_id = $1", reviewed.id.String())
+		revokedAt := s.count("SELECT max(sequence) FROM audit.audit_event WHERE event_type = 'identity.sessions.revoked_all'")
+		switch state := s.state(reviewed); {
+		case errs[2] != nil:
+			t.Fatalf("round %d: the approval of the reviewed flow: %s", round, key(errs[2]))
+		case state == FlowDenied && approvedAt < revokedAt, state == FlowApproved && approvedAt > revokedAt:
+		default:
+			t.Fatalf("round %d: the reviewed flow is %d, approved at %d, revoked at %d", round, state, approvedAt, revokedAt)
 		}
+	}
+}
+
+// waitBlockedBy waits until n backends of the test's database wait for a lock, and fails the test after five seconds.
+func (s *signIns) waitBlockedBy(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.count(`SELECT count(DISTINCT l.pid) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+WHERE NOT l.granted AND a.datname = current_database()`) >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("%d transactions never waited", n)
+}
+
+// TestAnApprovalThatHoldsItsFlowWhenTheHookStartsIsDenied (F-1, protocol-6 finding A, d.2): the approval of a reviewed flow holds the
+// flow row (it waits for the account the third transaction holds); the remediation from the same session starts and waits for that
+// row; the account is released, the approval commits first, and the hook's second statement sees it APPROVED and denies it.
+func TestAnApprovalThatHoldsItsFlowWhenTheHookStartsIsDenied(t *testing.T) {
+	s := newSignIns(t)
+	s.watchDeadlocks(t)
+	service := s.identityService()
+	f := s.mustBegin(s.newNode())
+	if _, err := s.review(s.user, s.approver, f); err != nil {
+		t.Fatal(err)
+	}
+	s.prove(s.user, s.approver, f.id)
+	target, err := hex.DecodeString(identity.TargetHash(identity.ClassRevokeAllSessions, s.user, s.user))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.db.ProveStepUp(s.approver, identity.ClassRevokeAllSessions, target, s.clock.Now())
+	release := s.hold(t, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", s.user)
+	approved, remediated := make(chan error, 1), make(chan error, 1)
+	go func() {
+		_, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), f.id, true, true)
+		approved <- err
+	}()
+	s.waitBlockedBy(t, 1)
+	go func() { remediated <- s.revokeAllSessions(service, false) }()
+	s.waitBlockedBy(t, 2)
+	release(false)
+	if err = <-approved; err != nil {
+		t.Fatalf("the approval: %s", key(err))
+	}
+	if err = <-remediated; err != nil {
+		t.Fatalf("the remediation: %v", err)
+	}
+	if s.state(f) != FlowDenied || s.count(`SELECT count(*) FROM audit.audit_event WHERE event_type = 'identity.sessions.revoked_all'
+AND (convert_from(payload, 'UTF8')::jsonb->'participants'->>'fleet.node_sign_in')::int = 1`) != 1 {
+		t.Fatalf("the approval that held its flow survived: state %d", s.state(f))
 	}
 }

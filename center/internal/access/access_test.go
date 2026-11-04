@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
+
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 )
@@ -168,11 +170,6 @@ func TestTheMobileLimitedRules(t *testing.T) {
 			if operation.NeedsEvidence(own) != wantEvidence {
 				t.Errorf("%s own=%v: evidence", operation.ID, own)
 			}
-			// A decision (own reads as approve here) needs evidence on every Evidence row and, on an EvidenceOnApprove row, only to
-			// approve (Q1: a denial needs none).
-			if operation.NeedsEvidenceToDecide(own) != (operation.StepUp == Evidence || operation.StepUp == EvidenceOnApprove && own) {
-				t.Errorf("%s approve=%v: evidence to decide", operation.ID, own)
-			}
 		}
 	}
 }
@@ -196,5 +193,19 @@ func TestFleetRowsCarryNoFeature(t *testing.T) {
 	}
 	if rows == 0 {
 		t.Fatal("no fleet row: the test is vacuous")
+	}
+}
+
+// TestTheApprovalRowDecidesTheEvidenceOfADecision (Q1; NB-4): the ApproveNodeSignIn row needs evidence to approve and none to deny,
+// and the handler asks the row: the same decision on an Evidence row needs evidence either way, on a row without evidence never.
+func TestTheApprovalRowDecidesTheEvidenceOfADecision(t *testing.T) {
+	row, ok := Lookup(fleetv1connect.NodeEnrollmentServiceApproveNodeSignInProcedure)
+	if !ok || row.StepUp != EvidenceOnApprove || !row.NeedsEvidenceToDecide(true) || row.NeedsEvidenceToDecide(false) {
+		t.Fatalf("the approval row: %+v", row)
+	}
+	strict, none := row, row
+	strict.StepUp, none.StepUp, none.Target = Evidence, NoEvidence, ""
+	if !strict.NeedsEvidenceToDecide(false) || none.NeedsEvidenceToDecide(true) {
+		t.Fatal("NeedsEvidenceToDecide does not follow the row")
 	}
 }

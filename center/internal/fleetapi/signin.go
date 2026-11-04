@@ -102,7 +102,7 @@ func (s *Server) getNodeSignInFlow(ctx context.Context, call *ingress.Call, mess
 
 func (s *Server) approveNodeSignIn(ctx context.Context, call *ingress.Call, message *fleetv1.NodeEnrollmentServiceApproveNodeSignInRequest) (*fleetv1.NodeEnrollmentServiceApproveNodeSignInResponse, error) {
 	decision, err := func() (fleet.Decision, error) {
-		_, account, err := s.account(ctx, call, message.GetMeta())
+		operation, account, err := s.account(ctx, call, message.GetMeta())
 		if err != nil {
 			return fleet.Decision{}, err
 		}
@@ -115,7 +115,8 @@ func (s *Server) approveNodeSignIn(ctx context.Context, call *ingress.Call, mess
 		if message.Approve == nil {
 			return fleet.Decision{}, arc.InvalidArgument("approve", "required")
 		}
-		return s.fleet.Decide(ctx, request(call), account, flowID, message.GetApprove())
+		// The row decides whether the decision consumes step-up evidence (EvidenceOnApprove: an approval does, a denial does not).
+		return s.fleet.Decide(ctx, request(call), account, flowID, message.GetApprove(), operation.NeedsEvidenceToDecide(message.GetApprove()))
 	}()
 	response := &fleetv1.NodeEnrollmentServiceApproveNodeSignInResponse{Meta: ingress.ResponseMeta(call.Correlation)}
 	if failure := s.failure(ctx, call, err); failure != nil {

@@ -262,8 +262,9 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		// session's rotation above, and the report and the sign-out run under their receipts.
 		"audit a fleet refusal": auxiliary,
 		// AF-CTR-04 E1b: the browser sign-in. The review is a mark, not an effect; the end of a flow after a failed verifier or key
-		// proof is bookkeeping around a refusal; the Begin, the decision and the completion (or the reuse revocation it detects) are
-		// effects. Package oneuse opens no transaction.
+		// proof is bookkeeping around a refusal (it can carry the reuse revocation when it finds the flow completed by a racing
+		// presentation; its unanswered commit is then answered overloaded and the retry converges on code_reused); the Begin, the
+		// decision and the completion (or the reuse revocation it detects) are effects. Package oneuse opens no transaction.
 		"review a node sign-in": auxiliary, "end a node sign-in after a failed proof": auxiliary, "begin a node sign-in": effect,
 		"decide a node sign-in": effect, "complete a node sign-in": effect,
 	}

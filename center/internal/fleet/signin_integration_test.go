@@ -157,7 +157,7 @@ func (s *signIns) approveBy(user platform.ID, session dbtest.Session, f *flow) {
 		s.t.Fatal(err)
 	}
 	s.prove(user, session, f.id)
-	decision, err := s.service.Decide(context.Background(), s.from, accountOf(user, session, s.clock.Now()), f.id, true)
+	decision, err := s.service.Decide(context.Background(), s.from, accountOf(user, session, s.clock.Now()), f.id, true, true)
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestApprovalRules(t *testing.T) {
 	s := newSignIns(t)
 	ctx := context.Background()
 	decide := func(user platform.ID, session dbtest.Session, f *flow, approve bool) error {
-		_, err := s.service.Decide(ctx, s.from, accountOf(user, session, s.clock.Now()), f.id, approve)
+		_, err := s.service.Decide(ctx, s.from, accountOf(user, session, s.clock.Now()), f.id, approve, approve)
 		return err
 	}
 	other, otherSession := s.account(1)
@@ -388,7 +388,7 @@ func TestApprovalRules(t *testing.T) {
 	if err := decide(s.user, s.approver, g, true); key(err) != "STATE/invalid_state node_sign_in/denied" {
 		t.Fatalf("a denied flow: %s", key(err))
 	}
-	// Another account's decided flow looks unknown (N-1), also once it expired.
+	// Another account's decided flow looks unknown (N-1); TestForeignFlowsLookUnknownAlsoAfterTheirExpiry pins it past the expiry.
 	if err := decide(other, otherSession, g, false); key(err) != "STATE/not_found node_sign_in/not_found" {
 		t.Fatalf("another account's flow: %s", key(err))
 	}
@@ -401,7 +401,7 @@ func TestApprovalRules(t *testing.T) {
 	s.approve(h)
 	oldCode := h.code
 	s.prove(s.user, s.approver, h.id)
-	decision, err := s.service.Decide(ctx, s.from, accountOf(s.user, s.approver, s.clock.Now()), h.id, true)
+	decision, err := s.service.Decide(ctx, s.from, accountOf(s.user, s.approver, s.clock.Now()), h.id, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,12 +460,12 @@ func TestDecisionsAreCounted(t *testing.T) {
 		if _, err := s.review(s.user, s.approver, f); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), f.id, false); err != nil {
+		if _, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), f.id, false, false); err != nil {
 			t.Fatal(err)
 		}
 	}
 	f := s.mustBegin(s.newNode())
-	if _, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), f.id, false); key(err) != "RESOURCE/rate_limited" {
+	if _, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), f.id, false, false); key(err) != "RESOURCE/rate_limited" {
 		t.Fatalf("a third decision: %s", key(err))
 	}
 }
@@ -487,7 +487,7 @@ func TestCompleteWithoutTheCodeNeverChangesAFlow(t *testing.T) {
 	if _, err := s.review(s.user, s.approver, denied); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), denied.id, false); err != nil {
+	if _, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), denied.id, false, false); err != nil {
 		t.Fatal(err)
 	}
 	revoked := s.mustBegin(s.newNode())
@@ -641,16 +641,30 @@ func TestConcurrentCompletesEnrollOnce(t *testing.T) {
 		live := s.count(`SELECT count(*) FROM identity.session s JOIN fleet.node_sign_in f ON f.session_id = s.session_id WHERE f.flow_id = $1 AND s.revoked_at IS NULL`, f.id)
 		winners := 0
 		for _, result := range results[:2] {
-			switch result {
-			case "":
+			if result == "" {
 				winners++
-			case "CONFLICT/code_reused", "AUTHENTICATION/unauthenticated":
-			default:
-				t.Fatalf("round %d: %v", round, results)
 			}
 		}
-		if results[2] != "AUTHENTICATION/unauthenticated" && results[2] != "CONFLICT/code_reused" || winners > 1 || enrolled > 1 ||
-			winners == 1 && (enrolled != 1 || live != 0 && s.state(f) != FlowCompleted) {
+		// Every racer presents the correct code, so every round ends REVOKED. With a winner, both others take the reuse path
+		// (the wrong-verifier racer too, whose failure marker finds the flow COMPLETED: N-6) and the winner's family is revoked.
+		// Without one, the wrong verifier locked first (the failure marker) and the two correct presentations are reuses of a
+		// REVOKED flow.
+		ok := s.state(f) == FlowRevoked && live == 0
+		switch winners {
+		case 1:
+			reused := 0
+			for _, result := range results {
+				if result == "CONFLICT/code_reused" {
+					reused++
+				}
+			}
+			ok = ok && enrolled == 1 && reused == 2
+		case 0:
+			ok = ok && enrolled == 0 && results[0] == "CONFLICT/code_reused" && results[1] == "CONFLICT/code_reused" && results[2] == "AUTHENTICATION/unauthenticated"
+		default:
+			ok = false
+		}
+		if !ok {
 			t.Fatalf("round %d: %v, %d enrolled, %d live, state %d", round, results, enrolled, live, s.state(f))
 		}
 	}
@@ -814,7 +828,7 @@ func TestApproveTakesTheFlowBeforeTheAccount(t *testing.T) {
 	}
 	s.prove(s.user, s.approver, f.id)
 	approve := func(done chan<- error) {
-		_, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), f.id, true)
+		_, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), f.id, true, true)
 		done <- err
 	}
 	done := make(chan error, 1)
@@ -922,5 +936,68 @@ func TestACodeReplacedByReapprovalIsNotRedeemedByAnEarlierProof(t *testing.T) {
 	}
 	if s.count("SELECT count(*) FROM fleet.node_sign_in WHERE flow_id = $1 AND state = 2 AND code_redeemed_at IS NULL", f.id) != 1 || s.count("SELECT count(*) FROM fleet.node") != 0 {
 		t.Fatal("the replaced code was redeemed")
+	}
+}
+
+// TestAFailureMarkerThatFindsTheFlowCompletedRevokesTheFamily (N-6, B5): the correct presentation holds the flow row and waits for
+// the account (held by a third transaction); a presentation of the same code with a wrong verifier is verified as a failure outside
+// any transaction and waits for the flow row; the account is released, the completion commits, and the failure marker, deciding
+// under the lock, finds the flow COMPLETED and takes the reuse path: CONFLICT/code_reused, the flow REVOKED, the winner's family
+// revoked with reason 8, one code_reused audit.
+func TestAFailureMarkerThatFindsTheFlowCompletedRevokesTheFamily(t *testing.T) {
+	s := newSignIns(t)
+	s.watchDeadlocks(t)
+	f := s.mustBegin(s.newNode())
+	s.approve(f)
+	release := s.hold(t, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", s.user)
+	completed, marked := make(chan error, 1), make(chan error, 1)
+	go func() { _, err := s.complete(f); completed <- err }()
+	s.waitBlocked(t)
+	go func() {
+		_, err := s.completeWith(f, f.code, nodetest.NewSignIn().Verifier, f.node.CompleteProof(audience, f.id, f.code))
+		marked <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for s.count(`SELECT count(DISTINCT l.pid) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+WHERE NOT l.granted AND a.datname = current_database()`) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("the failure marker never waited for the flow row")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	release(false)
+	if err := <-completed; err != nil {
+		t.Fatalf("the completion: %s", key(err))
+	}
+	if err := <-marked; key(err) != "CONFLICT/code_reused" {
+		t.Fatalf("the failure marker on a completed flow: %s", key(err))
+	}
+	if s.state(f) != FlowRevoked || s.count(`SELECT count(*) FROM identity.session s JOIN fleet.node_sign_in f ON f.session_id = s.session_id
+WHERE f.flow_id = $1 AND s.revoke_reason = 8`, f.id) != 1 || s.count("SELECT count(*) FROM audit.audit_event WHERE event_type = 'fleet.node_sign_in.code_reused'") != 1 ||
+		s.count("SELECT count(*) FROM audit.audit_event WHERE event_type = 'fleet.node_sign_in.verifier_failed'") != 0 {
+		t.Fatalf("the reuse path was not taken: state %d", s.state(f))
+	}
+}
+
+// TestForeignFlowsLookUnknownAlsoAfterTheirExpiry (N-1, B2): a flow another account approved is STATE/not_found to this account's
+// review and decision also after the flow's expiry (the foreign check comes before the expiry check), while the approving account
+// itself is told STATE/expired.
+func TestForeignFlowsLookUnknownAlsoAfterTheirExpiry(t *testing.T) {
+	s := newSignIns(t)
+	other, otherSession := s.account(1)
+	f := s.mustBegin(s.newNode())
+	s.approve(f)
+	s.clock.advance(FlowLifetime)
+	if _, err := s.review(other, otherSession, f); key(err) != "STATE/not_found node_sign_in/not_found" {
+		t.Fatalf("another account's review of an expired flow: %s", key(err))
+	}
+	if _, err := s.service.Decide(context.Background(), s.from, accountOf(other, otherSession, s.clock.Now()), f.id, false, false); key(err) != "STATE/not_found node_sign_in/not_found" {
+		t.Fatalf("another account's decision on an expired flow: %s", key(err))
+	}
+	if _, err := s.review(s.user, s.approver, f); key(err) != "STATE/expired" {
+		t.Fatalf("the approving account's review of its expired flow: %s", key(err))
+	}
+	if _, err := s.service.Decide(context.Background(), s.from, accountOf(s.user, s.approver, s.clock.Now()), f.id, false, false); key(err) != "STATE/expired" {
+		t.Fatalf("the approving account's decision on its expired flow: %s", key(err))
 	}
 }

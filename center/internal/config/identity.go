@@ -147,7 +147,7 @@ type IdentityPolicy struct {
 	NodeCompletePerPrefix Window
 	NodeApprovePerAccount Window
 	// AnonymousFlows is an opt-in global ceiling on the flows anonymous calls create (C1): every BeginAuthentication, of every method
-	// and purpose, counts in one bucket. A limit of 0 (the default) sets no ceiling. Only the acceptance environment sets one: it
+	// and purpose, and every BeginNodeSignIn (AF-CTR-04) counts in one bucket. A limit of 0 (the default) sets no ceiling. Only the acceptance environment sets one: it
 	// shares the production Neon project, and its flows are never deleted before AF-PLAT-01's sweeps exist. A global bucket would let
 	// anyone lock every sign-in out, so production sets none (AF-PROD-01 decides with the sweeps).
 	AnonymousFlows Window

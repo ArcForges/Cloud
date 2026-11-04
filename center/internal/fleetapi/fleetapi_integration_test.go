@@ -449,6 +449,7 @@ func TestJunkRefreshesDoNotLockOutAPrefix(t *testing.T) {
 // or in pg_stat_statements; only their digests are stored.
 func TestNoGeneratedSecretIsStoredLoggedOrAudited(t *testing.T) {
 	h := newHarness(t, settings{})
+	readStatements := h.trackStatements()
 	node := h.enroll(1)
 	value, _ := h.refresh(node.refresh)
 	_, _ = h.refresh(node.refresh)
@@ -467,8 +468,7 @@ func TestNoGeneratedSecretIsStoredLoggedOrAudited(t *testing.T) {
     UNION ALL SELECT t::text FROM platform.rate_limit t) rows`).Scan(&dump); err != nil {
 		t.Fatal(err)
 	}
-	var statements string
-	_ = h.db.Migration.QueryRow(ctx, "SELECT coalesce(string_agg(query, E'\n'), '') FROM pg_stat_statements").Scan(&statements)
+	statements := readStatements()
 	for _, secret := range h.secrets {
 		body := strings.SplitN(secret, ".", 2)[1]
 		for name, text := range map[string]string{"store": dump, "log": h.logs.String(), "statements": statements} {

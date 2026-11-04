@@ -313,8 +313,10 @@ type Decision struct {
 // none. While the flow is APPROVED and its code unredeemed, the approving account may deny it, or approve it again, which replaces
 // the code. An approval stores the approving session and its epochs (protocol-6), draws a fresh one-use code that lives
 // nodeCodeLifetime and never past the flow, and checks the node cap early (Enroll enforces it). The account's decisions are counted
-// first. Locks: the flow row, then (approving) the account through the evidence (the global order).
-func (s *Service) Decide(ctx context.Context, request Request, account Account, flowID platform.ID, approve bool) (Decision, error) {
+// first. evidence is whether this decision consumes step-up evidence: the operation row decides it
+// (access.Operation.NeedsEvidenceToDecide: an approval of ApproveNodeSignIn's EvidenceOnApprove row, never a denial). Locks: the
+// flow row, then (with evidence) the account through the evidence (the global order).
+func (s *Service) Decide(ctx context.Context, request Request, account Account, flowID platform.ID, approve, evidence bool) (Decision, error) {
 	actor := identity.Actor(account.Caller.UserID)
 	bucket := s.bucket(ratelimit.NodeApproveAccount, "account:"+account.Caller.UserID.String())
 	decision, err := s.limits.Take(ctx, bucket, s.now())
@@ -354,8 +356,10 @@ func (s *Service) Decide(ctx context.Context, request Request, account Account, 
 			outcome = "denied"
 			return s.auditFlow(ctx, tx, request, actor, "fleet.node_sign_in.denied", "denied", flowID, map[string]any{"from": from}, now)
 		}
-		if err = identity.ConsumeEvidence(ctx, tx, account.Caller, ClassApproveNodeSignIn, flowID, now); err != nil {
-			return err
+		if evidence {
+			if err = identity.ConsumeEvidence(ctx, tx, account.Caller, ClassApproveNodeSignIn, flowID, now); err != nil {
+				return err
+			}
 		}
 		// The cap's early refusal: a node ID that is not live in this account would add a node.
 		var live bool
@@ -531,7 +535,9 @@ func (s *Service) Complete(ctx context.Context, request Request, in CompleteRequ
 	}
 	// The transaction's kind follows what the pre-read found (the completion and the reuse are effects, the failure marker an
 	// auxiliary end of the flow); the locked row decides the outcome, so a marker that finds the flow completed by a racing
-	// presentation of the code takes the reuse path in its own transaction.
+	// presentation of the code takes the reuse path in its own (auxiliary) transaction (N-6). An unanswered commit of that
+	// transaction is answered RESOURCE/overloaded although the family's revocation may have committed; the retry then finds the flow
+	// REVOKED and answers code_reused.
 	var completed Completed
 	var outcome error
 	metric := ""
@@ -585,7 +591,6 @@ func (s *Service) Complete(ctx context.Context, request Request, in CompleteRequ
 				return err
 			}}, now)
 		if errors.Is(err, ErrApprovalLapsed) {
-			s.events.ObserveFleet("enroll", "lapsed")
 			if _, err = tx.Exec(ctx, "UPDATE fleet.node_sign_in SET state = 5, rev = rev + 1 WHERE flow_id = $1", in.FlowID); err != nil {
 				return err
 			}
@@ -619,6 +624,9 @@ func (s *Service) Complete(ctx context.Context, request Request, in CompleteRequ
 		}
 		return completed, nil
 	case err == nil:
+		if metric == "lapsed" {
+			s.events.ObserveFleet("enroll", "lapsed")
+		}
 		s.events.ObserveFleet("complete", metric)
 		return Completed{}, outcome
 	case errors.As(err, &refusal):

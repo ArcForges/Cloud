@@ -427,6 +427,7 @@ func mustJSON(value any) []byte {
 // pg_stat_statements.
 func TestTheSignInStoresNoSecret(t *testing.T) {
 	h := newHarness(t, settings{})
+	readStatements := h.trackStatements()
 	owner := h.person(1)
 	s, _ := h.begin()
 	h.approve(owner, s, false)
@@ -456,8 +457,7 @@ func TestTheSignInStoresNoSecret(t *testing.T) {
     UNION ALL SELECT t::text FROM identity.step_up_challenge t UNION ALL SELECT t::text FROM platform.command_receipt t) rows`).Scan(&dump); err != nil {
 		t.Fatal(err)
 	}
-	var statements string
-	_ = h.db.Migration.QueryRow(ctx, "SELECT coalesce(string_agg(query, E'\\n'), '') FROM pg_stat_statements").Scan(&statements)
+	statements := readStatements()
 	for _, secret := range secrets {
 		for name, text := range map[string]string{"store": dump, "log": h.logs.String(), "statements": statements} {
 			if secret != "" && strings.Contains(text, secret) {
@@ -515,5 +515,26 @@ func TestTheSignInRowsUpgradeAMobileLimitedSession(t *testing.T) {
 	}
 	for path := range requests {
 		t.Errorf("%s has a request, but the operation table opens it to mobile.limited", path)
+	}
+}
+
+// TestAStepUpRefusalOfTheServedRemediationCancelsNothing (NB-2): RevokeAllSessions without its step-up evidence is refused
+// (step_up_required) by the served handler, and the cancellation that ran first in its receipt's run is rolled back with it: the
+// approval stands and completes.
+func TestAStepUpRefusalOfTheServedRemediationCancelsNothing(t *testing.T) {
+	h := newHarness(t, settings{})
+	owner := h.person(1)
+	s, _ := h.begin()
+	h.approve(owner, s, false)
+	response := rpc(h, "/arcforges.publicapi.v1.IdentityService/RevokeAllSessions", &publicapiv1.IdentityServiceRevokeAllSessionsRequest{Meta: command()},
+		owner.bearer, &publicapiv1.IdentityServiceRevokeAllSessionsResponse{})
+	if failure(response.GetError()) != "AUTHENTICATION/step_up_required" {
+		t.Fatalf("a remediation without evidence: %s", failure(response.GetError()))
+	}
+	if h.state(s) != 2 || h.audits("identity.sessions.revoked_all") != 0 {
+		t.Fatal("a refused remediation cancelled the approval")
+	}
+	if completed := h.complete(s); completed.GetError() != nil {
+		t.Fatalf("the approval after a refused remediation: %s", failure(completed.GetError()))
 	}
 }

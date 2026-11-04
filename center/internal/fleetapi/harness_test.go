@@ -24,6 +24,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/nodetest"
 	"github.com/ArcForges/Cloud/center/internal/observe"
+	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/server"
 	"github.com/ArcForges/Cloud/center/internal/session"
@@ -281,4 +282,26 @@ func (h *harness) issue(user platform.ID, scope session.Scope) session.Native {
 	}
 	h.secrets = append(h.secrets, issued.AccessToken, issued.RefreshToken)
 	return issued
+}
+
+// trackStatements creates pg_stat_statements in the test's database (the test server preloads the library, as the Linux leg's does)
+// and returns a reader of the statements it recorded since; a read error fails the test, so a statement check can never pass because
+// nothing was recorded.
+func (h *harness) trackStatements() func() string {
+	h.t.Helper()
+	admin := pgtest.Connect(h.t, pgtest.WithDatabase(h.t, pgtest.ServerURL(h.t), h.db.Name))
+	if _, err := admin.Exec(context.Background(), "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"); err != nil {
+		h.t.Fatalf("the test server must preload pg_stat_statements: %v", err)
+	}
+	return func() string {
+		h.t.Helper()
+		var statements string
+		if err := admin.QueryRow(context.Background(), "SELECT coalesce(string_agg(query, E'\\n'), '') FROM pg_stat_statements").Scan(&statements); err != nil {
+			h.t.Fatalf("read pg_stat_statements: %v", err)
+		}
+		if statements == "" {
+			h.t.Fatal("pg_stat_statements recorded nothing")
+		}
+		return statements
+	}
 }

@@ -84,7 +84,7 @@ const (
 	// the caller's own access; decision 4.1b), any other target needs evidence.
 	EvidenceUnlessOwn
 	// EvidenceOnApprove: a call that approves needs evidence, a call that denies needs none (the node sign-in approvals, AF-CTR-04 Q1:
-	// a denial only refuses access). The handler knows which.
+	// a denial only refuses access). The handler asks the row (NeedsEvidenceToDecide) and passes the answer to the domain.
 	EvidenceOnApprove
 )
 
