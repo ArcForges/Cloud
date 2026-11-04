@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "2686a73",
+  "method": "RefreshNodeSession",
+  "case": "rate-limited",
+  "outcome": "RESOURCE/rate_limited",
+  "headers": {
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "00000000340a005230616672312e42675947426759474267594742675947426759474267594742675947426759474267594742675947426759"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [
+      "000000008c0a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a12f1a740a0c726174655f6c696d6974656410071a1b6572726f722e7265736f757263652e726174655f6c696d6974656422090803120508b0091000280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a12f3a2412220a146e6f64655f726566726573685f73657373696f6e12030a0132220508b0091000"
+    ],
+    "trailers": "grpc-status: 0\r\n"
+  },
+  "normalized": [
+    "a 16-byte ID the center drew: 15 bytes of its kind (0xa1 correlation, 0xa2 flow, 0xa3 installation, 0xa4 account) and n for the n-th distinct one of the kind",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
+    "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
+    "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "a device code the center drew: the canonical base64url of 32 bytes of 0xd0+n",
+    "a user code the center drew: BBBBBBB and the n-th letter of the code alphabet; verification_uri_complete carries its placeholder",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
+  ],
+  "sha256": "a3b80538bbd7eaa09e49bd459182da98dbad0e62a1426338a5b49ae7637757ed"
+}

@@ -449,15 +449,18 @@ func fixedSignIn(seed byte) nodetest.SignIn {
 // in AF-CTR-04), RESOURCE/overloaded and INTERNAL/internal (store failures and a lost commit; the fault-injection tests cover them),
 // StartDeviceAuthorization's RESOURCE/overloaded after five live user-code collisions (a domain outcome that
 // TestLiveUserCodeCollisionRetries covers),
-// and Poll's VALIDATION/invalid_argument node.os: mismatch (an Enroll rule the browser flow's capture does not hold either).
+// and Poll's VALIDATION/invalid_argument node.os: mismatch (an Enroll rule the browser flow's capture does not hold either). The node
+// credential's refusals that part N1 asked for (G-5) are captured by captureCredentialGaps.
 var requiredOutcomes = map[string][]string{
 	"BeginNodeSignIn": {"ok", "VALIDATION/invalid_argument", "RESOURCE/rate_limited", "CONFLICT/already_exists:node_key", "STATE/not_activated"},
 	"CompleteNodeSignIn": {"ok", "STATE/not_found", "STATE/expired", "CONFLICT/code_reused", "AUTHENTICATION/unauthenticated", "VALIDATION/invalid_argument",
 		"CONFLICT/already_exists:node", "CONFLICT/already_exists:node_key", "AUTHENTICATION/credential_revoked", "RESOURCE/quota_exceeded", "RESOURCE/rate_limited",
 		"STATE/not_activated"},
-	"RefreshNodeSession":       {"ok", "AUTHENTICATION/unauthenticated", "AUTHENTICATION/credential_revoked", "AUTHORIZATION/permission_denied"},
-	"ReportNodeInfo":           {"ok", "VALIDATION/invalid_argument", "CONFLICT/command_id_reused"},
-	"SignOutNode":              {"ok", "transport:auth.credential_revoked"},
+	"RefreshNodeSession": {"ok", "AUTHENTICATION/unauthenticated", "AUTHENTICATION/credential_revoked", "AUTHORIZATION/permission_denied",
+		"AUTHENTICATION/token_expired", "RESOURCE/rate_limited"},
+	"ReportNodeInfo": {"ok", "VALIDATION/invalid_argument", "CONFLICT/command_id_reused", "transport:auth.token_expired", "transport:auth.credential_revoked",
+		"AUTHORIZATION/permission_denied"},
+	"SignOutNode":              {"ok", "transport:auth.credential_revoked", "AUTHENTICATION/unauthenticated"},
 	"StartDeviceAuthorization": {"ok", "VALIDATION/invalid_argument", "RESOURCE/rate_limited", "CONFLICT/already_exists:node_key", "STATE/not_activated"},
 	"PollDeviceAuthorization": {"ok", "STATE/not_found", "AUTHENTICATION/unauthenticated", "VALIDATION/invalid_argument", "RESOURCE/rate_limited",
 		"CONFLICT/already_exists:node", "CONFLICT/already_exists:node_key", "AUTHENTICATION/credential_revoked", "RESOURCE/quota_exceeded", "STATE/not_activated"},
@@ -469,13 +472,15 @@ var requiredPollStates = []fleetv1.DeviceAuthorizationState{fleetv1.DeviceAuthor
 	fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_DENIED, fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_EXPIRED,
 	fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_COMPLETED}
 
-// TestFleetExchangeCapture (E1-25 and E2-6, delivery-5): captures the node-facing exchanges (Begin, Complete, Start, Poll in every
-// state value, Refresh, ReportNodeInfo, SignOutNode) with every outcome of requiredOutcomes and compares them with the committed directory; with
-// ARCFORGES_UPDATE_EXCHANGES=1 it writes the directory instead (ARCFORGES_CENTER_COMMIT names the commit in the headers; npx prettier
-// --write formats the files, and the comparison reads them as JSON).
+// TestFleetExchangeCapture (E1-25 and E2-6, delivery-5; N1 G-5): captures the node-facing exchanges (Begin, Complete, Start, Poll in
+// every state value, Refresh, ReportNodeInfo, SignOutNode) with every outcome of requiredOutcomes and compares them with the committed
+// directory; with ARCFORGES_UPDATE_EXCHANGES=1 it writes the directory instead (ARCFORGES_CENTER_COMMIT names the commit in the headers
+// of the files it writes; a file whose capture is unchanged is left as it is, with its commit; npx prettier --write formats the files,
+// and the comparison reads them as JSON).
 func TestFleetExchangeCapture(t *testing.T) {
 	clear(issued)
-	h := newHarness(t, settings{policy: `{"maxNodesPerAccount": 2, "nodeCompletePrefixLimit": 3, "nodeFlowPrefixLimit": 20, "nodePollPrefixLimit": 3}`})
+	h := newHarness(t, settings{policy: `{"maxNodesPerAccount": 2, "nodeCompletePrefixLimit": 3, "nodeFlowPrefixLimit": 20, "nodePollPrefixLimit": 3,
+		"nodeRefreshSessionLimit": 2}`})
 	off := newHarness(t, settings{surfaces: "identity,pages"})
 	c := &capturer{t: t, p: newPlaceholders(t), cases: map[string]exchange{}}
 	at := call{h: h}
@@ -635,6 +640,7 @@ func TestFleetExchangeCapture(t *testing.T) {
 	complete("code-reused", s, s.code, pkce.Verifier, at)
 
 	captureDeviceSignIn(t, c, h, off, flood)
+	captureCredentialGaps(t, c, h)
 
 	// Every required outcome of every node-facing method has a case, and every case has a required outcome.
 	for method, outcomes := range requiredOutcomes {
@@ -708,14 +714,38 @@ func equalExchanges(a, b exchange) bool {
 	return bytes.Equal(left, right)
 }
 
-// writeExchanges replaces the committed directory with the captures.
+// writeExchanges makes the committed directory hold the captures: a file whose capture is unchanged (all but its centerCommit) is left
+// as it is, byte for byte and with the commit it names (copies made from it stay valid); a new or changed capture is written with
+// ARCFORGES_CENTER_COMMIT; a file no case names is removed.
 func writeExchanges(t *testing.T, cases map[string]exchange) {
 	t.Helper()
-	if err := os.RemoveAll(exchangesDirectory); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.MkdirAll(exchangesDirectory, 0o755); err != nil {
 		t.Fatal(err)
+	}
+	committed, err := filepath.Glob(filepath.Join(exchangesDirectory, "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unchanged := map[string]bool{}
+	for _, file := range committed {
+		name := strings.TrimSuffix(filepath.Base(file), ".json")
+		captured, ok := cases[name]
+		if !ok {
+			if err = os.Remove(file); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stored exchange
+		if err = json.Unmarshal(data, &stored); err != nil {
+			t.Fatal(err)
+		}
+		stored.CenterCommit, captured.CenterCommit = "", ""
+		unchanged[name] = equalExchanges(stored, captured)
 	}
 	names := make([]string, 0, len(cases))
 	for name := range cases {
@@ -723,6 +753,9 @@ func writeExchanges(t *testing.T, cases map[string]exchange) {
 	}
 	slices.Sort(names)
 	for _, name := range names {
+		if unchanged[name] {
+			continue
+		}
 		value := cases[name]
 		value.CenterCommit = os.Getenv("ARCFORGES_CENTER_COMMIT")
 		data, err := json.MarshalIndent(value, "", "  ")
@@ -862,4 +895,84 @@ func captureDeviceSignIn(t *testing.T, c *capturer, h, off *harness, flood call)
 	}
 	h.enrollNode(approver.id, h.db.Session(approver.id, 1), filler)
 	poll("quota", capped, capped.authorization.GetDeviceCode(), nil, at)
+}
+
+// captureCredentialGaps captures the node credential's refusals that part N1 asked for (G-5) and the cases above do not hold:
+// RefreshNodeSession AUTHENTICATION/token_expired (SEEDED: the family's expiry in the past), RESOURCE/rate_limited (the session's own
+// bucket node_refresh_session, whose limit is 2 in this harness's policy: two uncaptured rotations, then the third presentation of the
+// current token) and a revoked device (the account revokes it through DeviceService.Revoke, not captured); ReportNodeInfo refused at
+// the ingress with auth.credential_revoked (the revoked device's access token) and auth.token_expired (SEEDED: the access expiry in the
+// past while the family lives), and the domain AUTHORIZATION/permission_denied of a restricted account's node (SEEDED: the account
+// restricted after the enrollment); SignOutNode's domain AUTHENTICATION/unauthenticated of a credential whose node row is not live
+// (SEEDED: the node row revoked under a live session, C0 E-14). Each case is a fixed node enrolled through fleet.Enroll (SEEDED, as
+// the harness enrolls) in an account of its own.
+func captureCredentialGaps(t *testing.T, c *capturer, h *harness) {
+	t.Helper()
+	at := call{h: h}
+	enroll := func(seed byte) *enrolled {
+		t.Helper()
+		node := fixedNode(t, seed)
+		user := h.db.Account(1)
+		approver := h.db.Session(user, 1)
+		result := h.enrollNode(user, approver, node)
+		issued[result.Session.AccessToken], issued[result.Session.RefreshToken] = true, true
+		return &enrolled{node: node, user: user, approver: approver, result: result, access: result.Session.AccessToken, refresh: result.Session.RefreshToken}
+	}
+	refresh := func(token string) *fleetv1.NodeEnrollmentServiceRefreshNodeSessionRequest {
+		return &fleetv1.NodeEnrollmentServiceRefreshNodeSessionRequest{Meta: &foundationv1.RequestMeta{}, RefreshToken: proto.String(token)}
+	}
+	report := func(node *enrolled, commandID byte) *fleetv1.NodeEnrollmentServiceReportNodeInfoRequest {
+		return &fleetv1.NodeEnrollmentServiceReportNodeInfoRequest{Meta: &foundationv1.RequestMeta{CommandId: &foundationv1.Id{Value: bytes.Repeat([]byte{commandID}, 16)}},
+			Node: node.node.Info()}
+	}
+	expect := func(name, outcome string) {
+		t.Helper()
+		if captured := c.cases[name]; captured.Outcome != outcome {
+			t.Errorf("%s: the outcome %q, want %q", name, captured.Outcome, outcome)
+		}
+	}
+
+	expired := enroll(0x50)
+	h.db.Exec("UPDATE identity.session SET expires_at = now() - interval '1 second', refresh_expires_at = now() - interval '1 second', access_expires_at = " +
+		"now() - interval '1 second', issued_at = now() - interval '1 hour', authenticated_at = now() - interval '1 hour' WHERE session_id = '" +
+		expired.result.Session.SessionID.String() + "'")
+	capture(c, at, "RefreshNodeSession", "token-expired", refresh(expired.refresh), &fleetv1.NodeEnrollmentServiceRefreshNodeSessionResponse{})
+	expect("RefreshNodeSession-token-expired", "AUTHENTICATION/token_expired")
+
+	limited := enroll(0x51)
+	current := limited.refresh
+	for range 2 {
+		value, refusal := h.refresh(current)
+		if refusal != nil {
+			t.Fatalf("a rotation before the session bucket is full: %s", failure(refusal))
+		}
+		issued[value.GetAccessToken()], issued[value.GetRefreshToken()] = true, true
+		current = value.GetRefreshToken()
+	}
+	capture(c, at, "RefreshNodeSession", "rate-limited", refresh(current), &fleetv1.NodeEnrollmentServiceRefreshNodeSessionResponse{})
+	expect("RefreshNodeSession-rate-limited", "RESOURCE/rate_limited")
+
+	revoked := enroll(0x52)
+	h.revokeDevice(revoked)
+	capture(c, call{h: h, bearer: revoked.access}, "ReportNodeInfo", "credential-revoked", report(revoked, 0x05), &fleetv1.NodeEnrollmentServiceReportNodeInfoResponse{})
+	expect("ReportNodeInfo-credential-revoked", "transport:auth.credential_revoked")
+	capture(c, at, "RefreshNodeSession", "device-revoked", refresh(revoked.refresh), &fleetv1.NodeEnrollmentServiceRefreshNodeSessionResponse{})
+	expect("RefreshNodeSession-device-revoked", "AUTHENTICATION/credential_revoked")
+
+	stale := enroll(0x53)
+	h.db.Exec("UPDATE identity.session SET access_expires_at = now() - interval '1 second' WHERE session_id = '" + stale.result.Session.SessionID.String() + "'")
+	capture(c, call{h: h, bearer: stale.access}, "ReportNodeInfo", "token-expired", report(stale, 0x06), &fleetv1.NodeEnrollmentServiceReportNodeInfoResponse{})
+	expect("ReportNodeInfo-token-expired", "transport:auth.token_expired")
+
+	restricted := enroll(0x54)
+	h.db.Exec("UPDATE identity.user SET state = 2 WHERE user_id = '" + restricted.user.String() + "'")
+	capture(c, call{h: h, bearer: restricted.access}, "ReportNodeInfo", "restricted-account", report(restricted, 0x07),
+		&fleetv1.NodeEnrollmentServiceReportNodeInfoResponse{})
+	expect("ReportNodeInfo-restricted-account", "AUTHORIZATION/permission_denied")
+
+	orphan := enroll(0x55)
+	h.db.Exec("UPDATE fleet.node SET revoked_at = now(), revoke_reason = 1 WHERE enrollment_id = '" + orphan.result.EnrollmentID.String() + "'")
+	signOut := &fleetv1.NodeEnrollmentServiceSignOutNodeRequest{Meta: &foundationv1.RequestMeta{CommandId: &foundationv1.Id{Value: bytes.Repeat([]byte{0x08}, 16)}}}
+	capture(c, call{h: h, bearer: orphan.access}, "SignOutNode", "node-not-live", signOut, &fleetv1.NodeEnrollmentServiceSignOutNodeResponse{})
+	expect("SignOutNode-node-not-live", "AUTHENTICATION/unauthenticated")
 }
