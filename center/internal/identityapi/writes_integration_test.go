@@ -463,7 +463,9 @@ func TestNoReceiptHoldsAnAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, operation := range access.Operations() {
-		if !operation.Receipt {
+		// The fleet surface's receipts (AF-CTR-04) hold no address by construction (a node's receipt is its command ID and effect) and
+		// are tested in fleetapi.
+		if !operation.Receipt || strings.HasPrefix(operation.ID, "fleet.") {
 			continue
 		}
 		if !operations[operation.Path] {

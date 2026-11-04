@@ -140,3 +140,41 @@ func Rename(ctx context.Context, tx pgx.Tx, userID, deviceID platform.ID, name s
 	}
 	return view, nil
 }
+
+// ValidNodeName is the name a node reports for itself (AF-CTR-04, protocol-11): stricter than ValidName because the approval and
+// device pages show it to a person deciding whether to trust the node. It is valid UTF-8 of 1 to 64 UTF-16 units made only of letters,
+// marks, numbers, punctuation, symbols and the single space U+0020 (no control, format, private-use, unassigned, line or paragraph
+// separator, and no other space character), without a leading, trailing or doubled space, with at most three consecutive combining
+// marks, without the braille blank U+2800, and with at least one letter or number that is not one of the blank-looking fillers
+// U+115F, U+1160, U+3164 and U+FFA0. Look-alike letters of other scripts stay possible (a residual the pages address with a label
+// that the name is the node's own). The name is not normalized.
+func ValidNodeName(name string) bool {
+	if name == "" || !utf8.ValidString(name) || nameUnits(name) > MaxNameUnits || name[0] == ' ' || name[len(name)-1] == ' ' ||
+		strings.Contains(name, "  ") {
+		return false
+	}
+	marks, visible := 0, false
+	for _, r := range name {
+		switch {
+		case r == ' ':
+			marks = 0
+		case r == 0x2800:
+			return false
+		case unicode.Is(unicode.M, r):
+			if marks++; marks > 3 {
+				return false
+			}
+		case unicode.In(r, unicode.L, unicode.N, unicode.P, unicode.S):
+			marks = 0
+			if (unicode.IsLetter(r) || unicode.IsNumber(r)) && r != 0x115F && r != 0x1160 && r != 0x3164 && r != 0xFFA0 {
+				visible = true
+			}
+		default:
+			return false
+		}
+	}
+	return visible
+}
+
+// NameTooLong reports a name beyond MaxNameUnits UTF-16 units (the length rule of a refusal, as opposed to its pattern).
+func NameTooLong(name string) bool { return nameUnits(name) > MaxNameUnits }

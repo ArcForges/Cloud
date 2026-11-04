@@ -75,6 +75,44 @@ ORDER BY not_before DESC, kid`, purpose, at)
 	return keys, store.Sanitize("read the signing keys", err)
 }
 
+// PublishedKeys returns the keys of a purpose that a node is given with its credentials (AF-CTR-04, CTR4-KEY-03): every key that is
+// neither retired nor expired at the instant, including a registered successor whose not_before lies ahead, so a node holds it before
+// the center signs with it. A key retired at a later instant is published with that instant as its not_after, so a node stops
+// trusting it then. Oldest first. ValidKeys stays the signing and verification set.
+func PublishedKeys(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+}, purpose KeyPurpose, at time.Time) ([]SigningKey, error) {
+	rows, err := q.Query(ctx, `SELECT kid, purpose, algorithm, public_key, secret_binding, not_before, least(not_after, coalesce(retired_at, not_after)),
+    retired_at FROM fleet.signing_key
+WHERE purpose = $1 AND not_after > $2 AND (retired_at IS NULL OR retired_at > $2)
+ORDER BY not_before, kid`, purpose, at)
+	if err != nil {
+		return nil, store.Sanitize("read the published keys", err)
+	}
+	keys, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (SigningKey, error) {
+		var key SigningKey
+		err := row.Scan(&key.KID, &key.Purpose, &key.Algorithm, &key.PublicKey, &key.SecretBinding, &key.NotBefore, &key.NotAfter, &key.RetiredAt)
+		return key, err
+	})
+	return keys, store.Sanitize("read the published keys", err)
+}
+
+// ErrKeyNotRetirable refuses the retirement of a key that does not exist or is already retired.
+var ErrKeyNotRetirable = errors.New("no unretired key has this key ID")
+
+// RetireKey retires a key at an instant (with the migration role; AF-CTR-04 `admin retire-signing-key`, Q6): from then on it is
+// neither published nor valid. An emergency retirement may leave a purpose without a valid key; the caller reports it.
+func RetireKey(ctx context.Context, tx pgx.Tx, kid string, at time.Time) (SigningKey, error) {
+	var key SigningKey
+	err := tx.QueryRow(ctx, `UPDATE fleet.signing_key SET retired_at = $2 WHERE kid = $1 AND retired_at IS NULL
+RETURNING kid, purpose, algorithm, public_key, secret_binding, not_before, not_after, retired_at`, kid, at).
+		Scan(&key.KID, &key.Purpose, &key.Algorithm, &key.PublicKey, &key.SecretBinding, &key.NotBefore, &key.NotAfter, &key.RetiredAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SigningKey{}, ErrKeyNotRetirable
+	}
+	return key, store.Sanitize("retire a signing key", err)
+}
+
 // RegisterKey records a new key's metadata (with the migration role; the runtime role can only read). It refuses an invalid
 // key, a validity longer than MaxKeyValidity, and a rotation gap: while keys of the purpose are valid, the new key must become
 // valid at least MinKeyOverlap before the latest of them expires and must outlive it.

@@ -32,6 +32,8 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/entitlement"
 	"github.com/ArcForges/Cloud/center/internal/feature"
+	"github.com/ArcForges/Cloud/center/internal/fleet"
+	"github.com/ArcForges/Cloud/center/internal/fleetapi"
 	"github.com/ArcForges/Cloud/center/internal/hello"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
@@ -106,8 +108,8 @@ type Options struct {
 	Clock func() time.Time
 	// Background runs the identity surface's deliveries after a response; nil runs each on a new goroutine.
 	Background func(func())
-	// Participants are the device revocation's cascade participants (DC-06): none in AF-CTR-03 (agent grants arrive with
-	// AF-CTR-07 and push with AF-CLD-06); the tests register a stand-in.
+	// Participants are further device revocation cascade participants (DC-06): the center always registers fleet.NodeParticipant
+	// (AF-CTR-04); agent grants arrive with AF-CTR-07 and push with AF-CLD-06; the tests register a stand-in.
 	Participants []device.Participant
 	// catalogue replaces the plan catalogue with a document under a classification: TESTS ONLY (DC-12). It is unexported, so no other
 	// package (the executable included) can set it, and no environment variable, file or configuration reaches it: a running center
@@ -270,12 +272,19 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	if err != nil {
 		return composedIdentity{}, err
 	}
+	// The node cascade participant is registered wherever the identity surface runs, whether or not the fleet surface is on: a device
+	// revoked while fleet is off still ends its nodes (AF-CTR-04).
+	participants := append([]device.Participant{fleet.NodeParticipant{}}, options.Participants...)
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: sender, Bootstrap: c.Config.Identity.Bootstrap,
-		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: options.Participants})
+		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: participants})
 	c.drain = service.Drain
 	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
 	dispatcher.Register(server.Methods()...)
+	if c.Config.Identity.Enabled(config.SurfaceFleet) {
+		nodes := fleet.New(fleet.Options{DB: c.Store, Policy: c.Config.Identity.Policy, Clock: clock, Events: c.Metrics, Logger: logger})
+		dispatcher.Register(fleetapi.New(nodes, authorizer, c.Store, clock, logger).Methods()...)
+	}
 	verifier := session.NewVerifier(c.Store, origin, clock)
 	pipeline.Bearer, pipeline.Browser = verifier, verifier
 	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock}, nil
@@ -315,12 +324,12 @@ func (c *Center) operator(clock func() time.Time) *entitlement.Operator {
 	return entitlement.NewOperator(c.Store, c.Entitlements, c.FeatureConfiguration.OperatorGrants, clock)
 }
 
-// checkIdentityComposition fails closed when the identity surface's registrations, its served Connect methods and the operation
-// table disagree (SEC-01, F13): every method of the surface is served and has exactly one operation row, and nothing else is.
+// checkIdentityComposition fails closed when the identity and fleet surfaces' registrations, their served Connect methods and the
+// operation table disagree (SEC-01, F13): every method of the surfaces is served and has exactly one operation row, and nothing else is.
 func checkIdentityComposition(modules []routes.Module) error {
 	var policies []ingress.Policy
 	for _, module := range modules {
-		if module.Surface == routes.SurfaceIdentity {
+		if module.Surface == routes.SurfaceIdentity || module.Surface == routes.SurfaceFleet {
 			policies = append(policies, module.Policies...)
 		}
 	}
@@ -329,6 +338,9 @@ func checkIdentityComposition(modules []routes.Module) error {
 	}
 	served := map[string]bool{}
 	for _, method := range identityapi.New(nil, nil, nil, nil, nil).Methods() {
+		served[method.Spec.Procedure] = true
+	}
+	for _, method := range fleetapi.New(nil, nil, nil, nil, nil).Methods() {
 		served[method.Spec.Procedure] = true
 	}
 	if len(served) != len(policies) {

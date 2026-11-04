@@ -148,3 +148,4 @@ center/cmd/center-gen/
 center/**/testdata/
 center/**/*_test.go
 center/internal/mail/mailtest/
+center/internal/nodetest/

@@ -54,3 +54,35 @@ func TestLogsAreJSONLinesOfTheCenter(t *testing.T) {
 		t.Fatalf("line: %v", line)
 	}
 }
+
+// TestFleetMetricLabelsAreClosed (CR-02): every listed fleet pair is exposed as itself, and a pair outside the closed list is never a
+// label: it is counted as unlisted, so request content can never become a label value.
+func TestFleetMetricLabelsAreClosed(t *testing.T) {
+	metrics := NewMetrics()
+	listed := 0
+	for event, outcomes := range FleetOutcomes() {
+		for _, outcome := range outcomes {
+			metrics.ObserveFleet(event, outcome)
+			listed++
+		}
+	}
+	metrics.ObserveFleet("refresh", "afr1.secret")
+	metrics.ObserveFleet("node-name", "rotated")
+	var text strings.Builder
+	if err := metrics.WritePrometheus(&text); err != nil {
+		t.Fatal(err)
+	}
+	lines := 0
+	for line := range strings.SplitSeq(text.String(), "\n") {
+		if !strings.HasPrefix(line, "arcforges_center_fleet_events_total{") {
+			continue
+		}
+		lines++
+		if strings.Contains(line, "secret") || strings.Contains(line, "node-name") {
+			t.Fatalf("a request value became a label: %s", line)
+		}
+	}
+	if lines != listed+1 || !strings.Contains(text.String(), `arcforges_center_fleet_events_total{event="unlisted",outcome="unlisted"} 2`) {
+		t.Fatalf("fleet lines %d of %d listed:\n%s", lines, listed, text.String())
+	}
+}

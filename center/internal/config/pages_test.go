@@ -10,7 +10,7 @@ import (
 // TestThePagesSurfaceNeedsTheIdentitySurface (PLT-12): FLAGSHIP_SURFACES-style lists name pages only with identity; a self-hosted
 // default enables both, and loses both when identity cannot be a relying party.
 func TestThePagesSurfaceNeedsTheIdentitySurface(t *testing.T) {
-	if got := KnownSurfaces(); len(got) != 3 || got[0] != SurfaceIdentity || got[1] != SurfacePages || got[2] != SurfaceOperations {
+	if got := KnownSurfaces(); len(got) != 4 || got[0] != SurfaceIdentity || got[1] != SurfacePages || got[2] != SurfaceOperations || got[3] != SurfaceFleet {
 		t.Fatalf("known surfaces %v", got)
 	}
 	if got := DefaultSelfHostedSurfaces(); len(got) != 2 || got[0] != SurfaceIdentity || got[1] != SurfacePages {

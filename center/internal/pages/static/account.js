@@ -39,6 +39,7 @@ const ERROR_TEXT = {
   expired: "This step took too long. Start again.",
   not_activated: "This page is not available.",
   rate_limited: "Too many attempts. Wait a little and try again.",
+  quota_exceeded: "This account has reached its limit. Remove an item, then try again.",
   overloaded: "The service is busy. Try again in a moment.",
   internal:
     "Something went wrong on our side. The request may or may not have been completed, so check before you do it again.",

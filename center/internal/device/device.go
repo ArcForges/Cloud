@@ -429,3 +429,34 @@ LIMIT $5`, userID, now, after, afterID, request.Limit+1)
 	}
 	return views, next, nil
 }
+
+// Node is what fleet.Enroll creates for a node that has no live device (AF-CTR-04): its device (named by the node, of the node's
+// platform, untrusted, remote control off) and its arcforges-node installation, which holds the node's public key at version 1.
+type Node struct {
+	UserID       platform.ID
+	Name         string
+	Platform     Platform
+	PlatformText string
+	AppVersion   string
+	PublicKey    []byte
+}
+
+// CreateNode creates a node's device and installation in the caller's transaction and returns their IDs. A concurrent enrollment
+// that registered the same key first is a store contention (the unique index of the key refuses this one; the identical retry then
+// meets the key as held).
+func CreateNode(ctx context.Context, tx pgx.Tx, node Node, now time.Time) (deviceID, installationID platform.ID, err error) {
+	deviceID, installationID = platform.NewID(), platform.NewID()
+	if _, err = tx.Exec(ctx, `INSERT INTO device.device (device_id, user_id, display_name, platform, trust_level, remote_enabled, first_seen_at,
+    last_seen_at, rev) VALUES ($1, $2, $3, $4, 1, false, $5, $5, 1)`, deviceID, node.UserID, node.Name, int16(node.Platform), now); err != nil {
+		return platform.ID{}, platform.ID{}, store.Sanitize("create a node device", err)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO device.installation (installation_id, device_id, user_id, product_id, app_version, platform, public_key,
+    key_version, installed_at, last_active_at, rev) VALUES ($1, $2, $3, 'arcforges-node', $4, $5, $6, 1, $7, $7, 1)`,
+		installationID, deviceID, node.UserID, node.AppVersion, node.PlatformText, node.PublicKey, now); err != nil {
+		if errors.Is(store.Sanitize("create a node installation", err), store.ErrConflict) {
+			return platform.ID{}, platform.ID{}, &store.Error{Operation: "create a node installation", SQLState: "23505", Kind: store.ErrContention}
+		}
+		return platform.ID{}, platform.ID{}, store.Sanitize("create a node installation", err)
+	}
+	return deviceID, installationID, nil
+}

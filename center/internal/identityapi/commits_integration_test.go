@@ -258,9 +258,13 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		// refused grant, the role and snapshot reads are reads, and the snapshot's store is the read's own effect.
 		"read the operator role": read, "load the entitlement state": read, "read the entitlement snapshot": read,
 		"store the entitlement snapshot": effect, "audit an operator grant refusal": auxiliary,
+		// AF-CTR-04 E1a: the fleet surface (packages fleet and fleetapi). A refusal's audit is bookkeeping; the refresh is the
+		// session's rotation above, and the report and the sign-out run under their receipts.
+		"audit a fleet refusal": auxiliary,
 	}
 	found := map[string]string{}
-	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages", "../entitlement"} {
+	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages", "../entitlement", "../fleet",
+		"../fleetapi"} {
 		files, err := filepath.Glob(filepath.Join(directory, "*.go"))
 		if err != nil {
 			t.Fatal(err)

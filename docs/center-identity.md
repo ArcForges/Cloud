@@ -80,10 +80,15 @@ anything is written; signing itself out and removing its own phone stay open to 
 walks the table and fails for a row it has no request for). Proving any step-up upgrades the session to `account`; the center's
 own class `identity.upgradeSession` exists for a phone that only wants to unlock everything.
 
+The same table holds the fleet surface's node rows since AF-CTR-04 ([center fleet](center-fleet.md#served-methods)); its composition
+check covers both surfaces. An AGENT row names the exact credential scopes it admits (`Operation.Scopes`): a node row admits a `node`
+credential and refuses an `automation` one with the audit reason `scope`, and an AGENT row may be a security row a restricted
+account's node still reaches (the node's own sign-out).
+
 Since AF-CTR-03 part B `Authorize` decides a session call in seven ordered stages, and a stage that refuses ends the decision:
 authentication, ownership of the object the call addresses (another account's object is `STATE/not_found`; a row names an `Object`
 and the handler hands `AuthorizeSubject` its owner), scope and risk (known scope, restricted account, session upgrade),
-AGENT/HUMAN separation, the resource controls (a hook for the quotas and budgets of AF-CTR-04, DC-07), the audit that comes before
+AGENT/HUMAN separation, the resource controls (a hook for the quotas and budgets of the first gated operation, AF-CTR-05, DC-07), the audit that comes before
 the call (`access.authorized`, a failed append refuses the call) and the feature gate (`ENTITLEMENT/feature_not_entitled`,
 `state.reason` = the feature key, audited as `access.gated`). A row carries the gate's key as `Feature`; every identity row is an
 essential operation with none, so nothing here is gated, and the R3 rows keep appending their audit event in the transaction of
@@ -369,7 +374,11 @@ bearer or a cookie against the store on every call: a revoked session, device or
 `auth.credential_revoked`, an expired access token `auth.token_expired` (the client refreshes and retries), anything unknown
 `auth.unauthenticated`. A cookie needs the exact Origin of the public base URL and that session's own CSRF token.
 
-**Refresh rotation and reuse** (n3). `RefreshSession(refresh_token, installation_id)` locks the session by the token's digest,
+**Refresh rotation and reuse** (n3). One function rotates both kinds of native session: RefreshSession admits the account-session
+scopes with the request's installation, RefreshNodeSession (AF-CTR-04, [center fleet](center-fleet.md#node-credentials)) the `node`
+scope without one, and each session's new tokens get the lifetimes of its scope. A live token of a scope the method does not serve is
+`AUTHORIZATION/permission_denied` with nothing rotated or spent (the method's bucket count stays); revocation and expiry are checked before the scope, and a spent token of any
+scope takes the reuse path. `RefreshSession(refresh_token, installation_id)` locks the session by the token's digest,
 checks revocation and expiry, then the installation, the scope (`account` and `mobile.limited` only) and the account, records the
 presented digest as spent and issues the next generation, and reads the session's device for the reply in the same transaction, so a
 reply that cannot be built leaves the token unspent. A spent digest presented again is a reuse: every live session of its family is
@@ -771,6 +780,11 @@ sets it: only the acceptance environment does, with its anonymous-flow ceiling (
 | `stepUpPerAccount` (A1b)                                       | 10 per 10m           | as above                     |
 | `bootstrapPerPrefix` (refused bootstraps)                      | 10 per h             | as above                     |
 | `anonymousFlows` (every flow an anonymous call creates)        | none (limit 0) per h | limit 0–10000, window 1m–24h |
+| `nodeAccessLifetime` (AF-CTR-04)                               | 60m                  | 15m to 60m                   |
+| `nodeRefreshIdleLifetime` / `nodeRefreshAbsolute`              | 2160h / 8760h        | 1h to 2160h / 1h to 9600h    |
+| `maxNodesPerAccount`                                           | 100                  | 1–1000                       |
+| `nodeRefreshPrefix` / `nodeRefreshSession`                     | 120 / 60 per 10m     | limit 1–10000, window 1m–24h |
+| `nodeReportInstallation`                                       | 12 per h             | as above                     |
 
 A prefix is the client address's /24 (IPv4) or /56 (IPv6) network; an IPv4-mapped address counts as IPv4. A bucket is the
 SHA-256 of its kind and key in `platform.rate_limit`, counted in its own short transaction before the work it guards. A refusal is
@@ -900,7 +914,7 @@ runtime pool stays four connections ([PostgreSQL store](postgres-store.md#connec
 
 The identity methods form the `identity` surface; the [account pages](#account-pages-and-browser-sessions) and the browser session
 routes form the `pages` surface, which needs `identity` (a list with `pages` and without `identity` refuses to start, and a
-self-hosted center whose base URL cannot be a relying party leaves both off). The center and the generated Worker table tag them by surface
+self-hosted center whose base URL cannot be a relying party leaves every surface off: every surface other than `identity` needs it). The center and the generated Worker table tag them by surface
 (`surfaceRoutes`, PLT-18: `productionRoutes` stay always on); `ARCFORGES_CENTER_SURFACES` (center) and `FLAGSHIP_SURFACES`
 (Worker) list the enabled surfaces as exact generated names, comma-separated. Official-hosted mode enables none unless listed;
 self-hosted mode enables the default surfaces (`identity` and `pages`) unless listed (an explicit list pins the surfaces across
@@ -915,7 +929,8 @@ time rounded up to the second plus the limiter's 60-second period) before it is 
 
 Production carries `"FLAGSHIP_SURFACES": ""` (pinned by `tests/worker/center-config.test.ts`: production stays dark, no page is
 served there); the acceptance environment (`proof`) carries `identity,pages,operations` and `ALLOWED_ORIGIN` = the origin of its public base
-URL. The `identity`, `pages` and `operations` surfaces exist (the last is described below); AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
+URL. The `identity`, `pages`, `operations` and `fleet` surfaces exist (`operations` is described below, `fleet` in [center
+fleet](center-fleet.md#surface): enabled nowhere yet, its rows answer `state.reason = fleet`); AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
 after AF-PLAT-01's retention sweeps exist ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)).
 
 The operator grant has a third surface, `operations`: the interim page `/operations/grant` of the operator grant ([center

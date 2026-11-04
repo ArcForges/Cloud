@@ -72,6 +72,10 @@ const (
 	RevokedRefreshReused int16 = 4
 	RevokedDevice        int16 = 5
 	RevokedOperator      int16 = 6
+	// RevokedSuperseded is a node session replaced by a re-enrollment of its node (AF-CTR-04, migration 0004).
+	RevokedSuperseded int16 = 7
+	// RevokedEnrollmentCodeReused is a node session whose one-use enrollment code was presented again (AF-CTR-04).
+	RevokedEnrollmentCodeReused int16 = 8
 )
 
 // PolicyVersion is the stored session_policy_version of the sessions this build issues.
@@ -92,7 +96,10 @@ type Grant struct {
 
 // Native is an issued (or rotated) native session: its tokens, shown to the client once, and their expiries.
 type Native struct {
-	SessionID        platform.ID
+	SessionID platform.ID
+	// IssuedAt is when these tokens were issued (the rotation instant of a refresh); AccessExpiresAt minus IssuedAt is the access
+	// token's lifetime as issued.
+	IssuedAt         time.Time
 	UserID           platform.ID
 	DeviceID         platform.ID
 	AccessToken      string
@@ -122,14 +129,25 @@ func earliest(first time.Time, others ...time.Time) time.Time {
 	return result
 }
 
-// IssueNative creates a native bearer session in the caller's transaction: a new family whose first refresh generation is 1.
+// LifetimesOf are the lifetimes of a session scope's native tokens: a node session's are the node policy's (nodeAccessLifetime,
+// nodeRefreshIdleLifetime, nodeRefreshAbsolute; AF-CTR-04), every other scope's the account policy's.
+func LifetimesOf(policy config.IdentityPolicy, scope Scope) config.Lifetimes {
+	if scope == ScopeNode {
+		return policy.NodeLifetimes()
+	}
+	return policy.AccountLifetimes()
+}
+
+// IssueNative creates a native bearer session in the caller's transaction: a new family whose first refresh generation is 1, with
+// the lifetimes of its scope (LifetimesOf).
 func IssueNative(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, grant Grant, now time.Time) (Native, error) {
 	now = now.UTC().Truncate(time.Microsecond)
+	lifetimes := LifetimesOf(policy, grant.Scope)
 	access, refresh := NewSecret(), NewSecret()
 	issued := Native{SessionID: platform.NewID(), UserID: grant.UserID, DeviceID: grant.DeviceID, AccessToken: access.Token(AccessPrefix),
-		RefreshToken: refresh.Token(RefreshPrefix), ExpiresAt: now.Add(policy.RefreshAbsolute), Purpose: grant.Purpose}
-	issued.RefreshExpiresAt = earliest(now.Add(policy.RefreshIdleLifetime), issued.ExpiresAt)
-	issued.AccessExpiresAt = earliest(now.Add(policy.AccessTokenLifetime), issued.RefreshExpiresAt)
+		RefreshToken: refresh.Token(RefreshPrefix), ExpiresAt: now.Add(lifetimes.RefreshAbsolute), Purpose: grant.Purpose, IssuedAt: now}
+	issued.RefreshExpiresAt = earliest(now.Add(lifetimes.RefreshIdle), issued.ExpiresAt)
+	issued.AccessExpiresAt = earliest(now.Add(lifetimes.Access), issued.RefreshExpiresAt)
 	accessDigest, refreshDigest := access.Digest(), refresh.Digest()
 	_, err := tx.Exec(ctx, `INSERT INTO identity.session (session_id, user_id, device_id, installation_id, family_id, credential_kind, scope, product_id,
     purpose, auth_method, authenticated_at, issued_at, expires_at, last_activity_at, access_token_hash, access_expires_at, refresh_token_hash,
@@ -169,18 +187,89 @@ type Reuse struct {
 	UserID   platform.ID
 	FamilyID platform.ID
 	Revoked  int64
+	// Scope is the family's session scope (the audit payload names it).
+	Scope Scope
 }
 
-// Refresh rotates a native session's tokens (RefreshSession): in one transaction it locks the session by the presented token's
-// digest, checks it and records the presented digest as spent before it issues the next generation. A digest that is already
-// spent is a reuse: every live session of its family is revoked, the reuse is audited when it revoked one (a later presentation of
-// the family's spent tokens is only counted by the caller's metric) and the call answers credential_revoked,
-// also for a client that lost the response to its previous refresh (strict rotation, no grace window). Two concurrent refreshes
-// with one token serialize on the row: the second finds the token spent and revokes the family. The checks run in this order:
-// the digest, then revocation (session, device, installation) and expiry, then the installation, the scope and the account.
-// within runs in the rotating transaction after the rotation and before the commit (the caller's reads for its reply), so a
-// failure of it rolls the rotation back and the presented token stays valid; nil runs nothing.
-func Refresh(ctx context.Context, db *store.DB, policy config.IdentityPolicy, token string, installationID platform.ID, now time.Time,
+// Admission is what a refresh method admits: the session scopes it serves, and the installation the request names (nil when the
+// method's request names none: the node's refresh token is bound to its row). Operation is the operation ID a live token of another
+// scope is refused with (permission_denied).
+type Admission struct {
+	Scopes       []Scope
+	Installation *platform.ID
+	Operation    string
+	// Attempts bounds the rotation's retries of a serialization failure or deadlock (0 is the store's default); a race test sets 1, so
+	// a deadlock is its error instead of being retried away.
+	Attempts int
+}
+
+// AccountRefresh is IdentityService.RefreshSession's admission: the account-session scopes, with the request's installation.
+func AccountRefresh(installationID platform.ID) Admission {
+	return Admission{Scopes: []Scope{ScopeAccount, ScopeMobileLimited}, Installation: &installationID, Operation: "identity.refreshSession"}
+}
+
+// NodeRefresh is NodeEnrollmentService.RefreshNodeSession's admission: the node scope, without an installation (AF-CTR-04).
+func NodeRefresh() Admission {
+	return Admission{Scopes: []Scope{ScopeNode}, Operation: "fleet.refreshNodeSession"}
+}
+
+func (a Admission) admits(scope Scope) bool {
+	for _, admitted := range a.Scopes {
+		if admitted == scope {
+			return true
+		}
+	}
+	return false
+}
+
+// Presented is what a presented refresh token names, read without a lock before any rate limit decides (protocol-8): the session
+// whose current refresh token it is, a spent token of a family (whose presentation is a reuse that must always run), or nothing.
+type Presented struct {
+	// Current is the session whose current refresh digest the token is; nil otherwise.
+	Current *platform.ID
+	// Spent is true for the digest of an already rotated refresh token.
+	Spent bool
+}
+
+// Known reports a token that names a session, current or spent.
+func (p Presented) Known() bool { return p.Current != nil || p.Spent }
+
+// Lookup reads what a refresh token names, by its digest, with one point read of each table and no lock; a malformed token names
+// nothing. It decides nothing: Refresh re-reads the row under its lock.
+func Lookup(ctx context.Context, q interface {
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+}, token string) (Presented, error) {
+	secret, ok := ParseToken(RefreshPrefix, token)
+	if !ok {
+		return Presented{}, nil
+	}
+	digest := secret.Digest()
+	var current platform.ID
+	var spent bool
+	err := q.QueryRow(ctx, `SELECT coalesce((SELECT session_id FROM identity.session WHERE refresh_token_hash = $1 AND credential_kind = 1),
+    '00000000-0000-0000-0000-000000000000'::uuid), EXISTS (SELECT 1 FROM identity.spent_refresh WHERE token_hash = $1)`, digest[:]).Scan(&current, &spent)
+	if err != nil {
+		return Presented{}, store.Sanitize("look up a refresh token", err)
+	}
+	presented := Presented{Spent: spent}
+	if current != (platform.ID{}) {
+		presented.Current = &current
+	}
+	return presented, nil
+}
+
+// Refresh rotates a native session's tokens (RefreshSession, RefreshNodeSession): in one transaction it locks the session by the
+// presented token's digest, checks it and records the presented digest as spent before it issues the next generation. A digest that
+// is already spent is a reuse: every live session of its family is revoked, the reuse is audited when it revoked one (a later
+// presentation of the family's spent tokens is only counted by the caller's metric) and the call answers credential_revoked, also
+// for a client that lost the response to its previous refresh (strict rotation, no grace window), whatever the family's scope. Two
+// concurrent refreshes with one token serialize on the row: the second finds the token spent and revokes the family. The checks run
+// in this order: the digest, then revocation (session, device, installation) and expiry, then the installation (only when the
+// admission names one), the scope (a live token of a scope the admission does not serve is permission_denied, with nothing written)
+// and the account. The new tokens get the lifetimes of the session's scope (LifetimesOf). within runs in the rotating transaction
+// after the rotation and before the commit (the caller's reads and writes for its reply), so a failure of it rolls the rotation back
+// and the presented token stays valid; nil runs nothing.
+func Refresh(ctx context.Context, db *store.DB, policy config.IdentityPolicy, token string, admission Admission, now time.Time,
 	correlationID *platform.ID, within func(ctx context.Context, tx pgx.Tx, issued Native) error) (Native, *Reuse, error) {
 	now = now.UTC().Truncate(time.Microsecond)
 	secret, ok := ParseToken(RefreshPrefix, token)
@@ -190,7 +279,7 @@ func Refresh(ctx context.Context, db *store.DB, policy config.IdentityPolicy, to
 	digest := secret.Digest()
 	var issued Native
 	var reuse *Reuse
-	err := db.InTx(ctx, "refresh a session", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+	err := db.InTx(ctx, "refresh a session", store.TxOptions{Attempts: admission.Attempts}, func(ctx context.Context, tx pgx.Tx) error {
 		issued, reuse = Native{}, nil
 		var row struct {
 			sessionID, userID, deviceID, installationID, familyID platform.ID
@@ -228,10 +317,10 @@ FOR UPDATE OF s`, digest[:]).Scan(&row.sessionID, &row.userID, &row.deviceID, &r
 			return arc.CredentialRevoked()
 		case !now.Before(row.expiresAt) || !now.Before(row.refreshExpiresAt):
 			return arc.TokenExpired()
-		case row.installationID != installationID:
+		case admission.Installation != nil && row.installationID != *admission.Installation:
 			return arc.Unauthenticated()
-		case !Scope(row.scope).IsAccountSession():
-			return arc.PermissionDenied("identity.refreshSession")
+		case !admission.admits(Scope(row.scope)):
+			return arc.PermissionDenied(admission.Operation)
 		case row.state != 1 && row.state != 2:
 			return arc.Unauthenticated()
 		}
@@ -239,11 +328,12 @@ FOR UPDATE OF s`, digest[:]).Scan(&row.sessionID, &row.userID, &row.deviceID, &r
 VALUES ($1, $2, $3, $4, $5, $6)`, digest[:], row.sessionID, row.familyID, row.generation, now, row.expiresAt); err != nil {
 			return err
 		}
+		lifetimes := LifetimesOf(policy, Scope(row.scope))
 		access, refresh := NewSecret(), NewSecret()
 		issued = Native{SessionID: row.sessionID, UserID: row.userID, DeviceID: row.deviceID, AccessToken: access.Token(AccessPrefix),
-			RefreshToken: refresh.Token(RefreshPrefix), ExpiresAt: row.expiresAt, Purpose: Purpose(row.purpose)}
-		issued.RefreshExpiresAt = earliest(now.Add(policy.RefreshIdleLifetime), row.expiresAt)
-		issued.AccessExpiresAt = earliest(now.Add(policy.AccessTokenLifetime), issued.RefreshExpiresAt)
+			RefreshToken: refresh.Token(RefreshPrefix), ExpiresAt: row.expiresAt, Purpose: Purpose(row.purpose), IssuedAt: now}
+		issued.RefreshExpiresAt = earliest(now.Add(lifetimes.RefreshIdle), row.expiresAt)
+		issued.AccessExpiresAt = earliest(now.Add(lifetimes.Access), issued.RefreshExpiresAt)
 		accessDigest, refreshDigest := access.Digest(), refresh.Digest()
 		_, err = tx.Exec(ctx, `UPDATE identity.session SET access_token_hash = $2, access_expires_at = $3, refresh_token_hash = $4,
     refresh_generation = refresh_generation + 1, refresh_expires_at = $5, last_activity_at = $6, rev = rev + 1
@@ -272,14 +362,16 @@ WHERE session_id = $1`, row.sessionID, accessDigest[:], issued.AccessExpiresAt, 
 func revokeReusedFamily(ctx context.Context, tx pgx.Tx, digest [32]byte, now time.Time, correlationID *platform.ID) (*Reuse, error) {
 	var reuse Reuse
 	var generation int64
-	err := tx.QueryRow(ctx, `SELECT s.user_id, r.family_id, r.generation FROM identity.spent_refresh r
-JOIN identity.session s ON s.session_id = r.session_id WHERE r.token_hash = $1`, digest[:]).Scan(&reuse.UserID, &reuse.FamilyID, &generation)
+	var scope int16
+	err := tx.QueryRow(ctx, `SELECT s.user_id, r.family_id, r.generation, s.scope FROM identity.spent_refresh r
+JOIN identity.session s ON s.session_id = r.session_id WHERE r.token_hash = $1`, digest[:]).Scan(&reuse.UserID, &reuse.FamilyID, &generation, &scope)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	reuse.Scope = Scope(scope)
 	tag, err := tx.Exec(ctx, `UPDATE identity.session SET revoked_at = $2, revoke_reason = $3, rev = rev + 1
 WHERE family_id = $1 AND revoked_at IS NULL`, reuse.FamilyID, now, RevokedRefreshReused)
 	if err != nil {
@@ -289,7 +381,7 @@ WHERE family_id = $1 AND revoked_at IS NULL`, reuse.FamilyID, now, RevokedRefres
 	if reuse.Revoked == 0 {
 		return &reuse, nil
 	}
-	payload, err := json.Marshal(map[string]any{"generation": generation, "revokedSessions": reuse.Revoked})
+	payload, err := json.Marshal(map[string]any{"generation": generation, "revokedSessions": reuse.Revoked, "scope": reuse.Scope.String()})
 	if err != nil {
 		return nil, err
 	}

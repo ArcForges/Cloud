@@ -186,6 +186,9 @@ func TestTheSurfaceRepliesAreTheCentersRefusals(t *testing.T) {
 	}{
 		"identity": {arc.NotActivated("identity"), generatedConstant(t, generated, "notActivatedReplies: Readonly<Record<Surface, string>> = {\n  identity:"),
 			generatedNumber(t, generated, "notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, number>> = {\n  identity:")},
+		// AF-CTR-04: the fleet surface's own reply names it.
+		"fleet": {arc.NotActivated("fleet"), generatedConstant(t, generated, "\n  fleet:\n"),
+			generatedNumber(t, generated, "operations: 61,\n  fleet:")},
 		"rateLimitedReply": {arc.RateLimited("edge", 0, time.Unix(1<<33, 0)), generatedConstant(t, generated, "export const rateLimitedReply"),
 			generatedNumber(t, generated, "export const rateLimitedReplyCorrelationOffset =")},
 	} {
@@ -222,9 +225,9 @@ func TestTheSurfaceRepliesAreTheCentersRefusals(t *testing.T) {
 			t.Fatal("the template marker does not round trip")
 		}
 	}
-	if !strings.Contains(generated, `export const surfaceNames: readonly Surface[] = ["identity", "pages", "operations"];`) ||
+	if !strings.Contains(generated, `export const surfaceNames: readonly Surface[] = ["identity", "pages", "operations", "fleet"];`) ||
 		!strings.Contains(generated, `export const clientIpHeader = "x-arcforges-client-ip";`) ||
-		!strings.Contains(generated, `export type Surface = "identity" | "pages" | "operations";`) {
+		!strings.Contains(generated, `export type Surface = "identity" | "pages" | "operations" | "fleet";`) {
 		t.Fatal("the surface constants changed")
 	}
 }

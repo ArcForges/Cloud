@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -85,8 +86,19 @@ func TestAnAddressHostOrAMissingStoreKeepsIdentityOff(t *testing.T) {
 	values := withIdentity(SelfHosted, nil)
 	values[EnvPublicBaseURL] = "http://127.0.0.1:8080/api"
 	cfg, err := Load(environment(values))
-	if err != nil || cfg.Identity.Enabled(SurfaceIdentity) || !strings.Contains(cfg.Identity.Disabled, "domain name") {
+	if err != nil || cfg.Identity.Enabled(SurfaceIdentity) || len(cfg.Identity.Surfaces) != 0 || cfg.Identity.Enabled(SurfaceFleet) ||
+		!strings.Contains(cfg.Identity.Disabled, "domain name") {
 		t.Fatalf("the default with an IP host: %+v %v", cfg.Identity, err)
+	}
+	// cloud-6: the fallback clears the default's surfaces (the code clears the whole list, so a later default that adds a surface is
+	// cleared too; the server's TestASelfHostedCenterOnAnAddressServesNoSurface shows the composed result).
+	values[EnvPublicBaseURL] = "https://192.168.1.10:8443"
+	if cfg, err = Load(environment(values)); err != nil || len(cfg.Identity.Surfaces) != 0 || cfg.Identity.Enabled(SurfaceFleet) {
+		t.Fatalf("the default with a private IP host: %+v %v", cfg.Identity, err)
+	}
+	values[EnvSurfaces] = "fleet,identity,pages"
+	if _, err = Load(environment(values)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("an explicit fleet list with an IP host starts: %v", err)
 	}
 	values[EnvSurfaces] = "identity"
 	if _, err = Load(environment(values)); !errors.Is(err, ErrInvalid) {
@@ -94,7 +106,7 @@ func TestAnAddressHostOrAMissingStoreKeepsIdentityOff(t *testing.T) {
 	}
 	noStore := minimal(SelfHosted)
 	cfg, err = Load(environment(noStore))
-	if err != nil || cfg.Identity.Enabled(SurfaceIdentity) || !strings.Contains(cfg.Identity.Disabled, EnvDatabaseURL) {
+	if err != nil || cfg.Identity.Enabled(SurfaceIdentity) || len(cfg.Identity.Surfaces) != 0 || !strings.Contains(cfg.Identity.Disabled, EnvDatabaseURL) {
 		t.Fatalf("the default without a store: %+v %v", cfg.Identity, err)
 	}
 	noStore[EnvSurfaces] = "identity"
@@ -198,5 +210,60 @@ func TestTheIdentityPolicyHasDocumentedDefaultsAndBoundedOverrides(t *testing.T)
 	if _, err = Load(environment(withIdentity(SelfHosted, map[string]string{EnvIdentityPolicy: `{"unknown": 1}`}))); !errors.Is(err, ErrInvalid) ||
 		!strings.Contains(err.Error(), EnvIdentityPolicy) {
 		t.Fatalf("an invalid override starts: %v", err)
+	}
+}
+
+// TestTheFleetSurfaceNeedsIdentityAndPagesAndIsNoDefaultYet pins the staging of the fleet surface (AF-CTR-04 E1a, delivery-14): it
+// is a known name, so a list can name it and the Worker's dark rows answer for it; it needs identity and pages; and the self-hosted
+// default does not include it until its pages exist (part E3).
+func TestTheFleetSurfaceNeedsIdentityAndPagesAndIsNoDefaultYet(t *testing.T) {
+	if !slices.Contains(KnownSurfaces(), SurfaceFleet) || slices.Contains(DefaultSelfHostedSurfaces(), SurfaceFleet) {
+		t.Fatalf("known %v, default %v", KnownSurfaces(), DefaultSelfHostedSurfaces())
+	}
+	cfg, err := Load(environment(withIdentity(SelfHosted, nil)))
+	if err != nil || cfg.Identity.Enabled(SurfaceFleet) {
+		t.Fatalf("the self-hosted default enables fleet: %+v %v", cfg.Identity, err)
+	}
+	for _, list := range []string{"fleet", "identity,fleet", "pages,fleet"} {
+		if _, err = Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: list}))); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s starts: %v", list, err)
+		}
+	}
+	if cfg, err = Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: "identity,pages,fleet"}))); err != nil || !cfg.Identity.Enabled(SurfaceFleet) {
+		t.Fatalf("identity,pages,fleet: %+v %v", cfg.Identity, err)
+	}
+}
+
+// TestTheNodePolicyHasItsDefaultsBoundsAndRelations pins the node keys of the identity policy (AF-CTR-04: D CR-06, Q4, Q5, cloud-5):
+// 60-minute access tokens (15 to 60 minutes), 90 days idle, 365 days absolute, 100 nodes per account (1 to 1000), and the three
+// buckets with the convention of the other windows; a document that sets every key fits the override bound.
+func TestTheNodePolicyHasItsDefaultsBoundsAndRelations(t *testing.T) {
+	defaults := DefaultIdentityPolicy()
+	if defaults.NodeAccessLifetime != time.Hour || defaults.NodeRefreshIdleLifetime != 90*24*time.Hour || defaults.NodeRefreshAbsolute != 365*24*time.Hour ||
+		defaults.MaxNodesPerAccount != 100 || defaults.NodeRefreshPerPrefix != (Window{Limit: 120, Window: 10 * time.Minute}) ||
+		defaults.NodeRefreshPerSession != (Window{Limit: 60, Window: 10 * time.Minute}) || defaults.NodeReportPerInstallation != (Window{Limit: 12, Window: time.Hour}) {
+		t.Fatalf("node defaults %+v", defaults)
+	}
+	if lifetimes := defaults.NodeLifetimes(); lifetimes != (Lifetimes{Access: time.Hour, RefreshIdle: 90 * 24 * time.Hour, RefreshAbsolute: 365 * 24 * time.Hour}) {
+		t.Fatalf("node lifetimes %+v", lifetimes)
+	}
+	if lifetimes := defaults.AccountLifetimes(); lifetimes != (Lifetimes{Access: 15 * time.Minute, RefreshIdle: 30 * 24 * time.Hour, RefreshAbsolute: 90 * 24 * time.Hour}) {
+		t.Fatalf("account lifetimes %+v", lifetimes)
+	}
+	for _, document := range []string{`{"nodeAccessLifetime": "14m"}`, `{"nodeAccessLifetime": "61m"}`, `{"nodeRefreshIdleLifetime": "2161h"}`,
+		`{"nodeRefreshAbsolute": "9601h"}`, `{"maxNodesPerAccount": 0}`, `{"maxNodesPerAccount": 1001}`, `{"nodeRefreshPrefixLimit": 0}`,
+		`{"nodeRefreshSessionWindow": "30s"}`, `{"nodeReportInstallationWindow": "25h"}`, `{"nodeRefreshAbsolute": "24h", "nodeRefreshIdleLifetime": "25h"}`,
+		`{"nodeRefreshIdleLifetime": "30m"}`} {
+		if _, err := ParseIdentityPolicy(document); err == nil {
+			t.Errorf("%s was admitted", document)
+		}
+	}
+	every := `{"nodeAccessLifetime": "15m", "nodeRefreshIdleLifetime": "1h", "nodeRefreshAbsolute": "9600h", "maxNodesPerAccount": 1000,
+"nodeRefreshPrefixLimit": 10000, "nodeRefreshPrefixWindow": "24h", "nodeRefreshSessionLimit": 1, "nodeRefreshSessionWindow": "1m",
+"nodeReportInstallationLimit": 3, "nodeReportInstallationWindow": "2h"}`
+	policy, err := ParseIdentityPolicy(every)
+	if err != nil || policy.NodeAccessLifetime != 15*time.Minute || policy.MaxNodesPerAccount != 1000 || policy.NodeRefreshPerSession != (Window{Limit: 1, Window: time.Minute}) ||
+		policy.NodeReportPerInstallation != (Window{Limit: 3, Window: 2 * time.Hour}) {
+		t.Fatalf("every node key: %+v %v", policy, err)
 	}
 }

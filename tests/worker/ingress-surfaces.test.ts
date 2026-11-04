@@ -137,7 +137,8 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
   assert.equal(centerSurfaces("identity"), "identity");
   assert.equal(centerSurfaces("identity,pages"), "identity,pages");
   assert.equal(centerSurfaces("identity,pages,operations"), "identity,pages,operations");
-  assert.deepEqual([...surfaceNames], ["identity", "pages", "operations"]);
+  assert.equal(centerSurfaces("identity,pages,fleet"), "identity,pages,fleet");
+  assert.deepEqual([...surfaceNames], ["identity", "pages", "operations", "fleet"]);
   assert.equal(surfaceTable.size, surfaceRoutes.length);
   for (const route of surfaceRoutes) {
     assert.equal(route.instance, "hello");
@@ -155,12 +156,14 @@ function slotId(body: Uint8Array, offset: number): string {
 }
 
 test("a disabled surface is answered with the generated not_activated reply and wakes nothing", async () => {
-  const offset = notActivatedReplyCorrelationOffsets.identity;
-  const template = decode(notActivatedReplies.identity);
   const seenIds = new Set<string>();
   for (const flag of [undefined, "", "Identity", "identity "]) {
     const { env, seen, keys } = bindings({ FLAGSHIP_SURFACES: flag });
     for (const route of surfaceRoutes) {
+      // Each route is answered with its own surface's reply (state.reason names the surface: identity, or fleet for AF-CTR-04's
+      // node enrollment rows).
+      const offset = notActivatedReplyCorrelationOffsets[route.surface];
+      const template = decode(notActivatedReplies[route.surface]);
       const response = await routeRequest(
         call(route.path, { authorization: "Bearer afa1.not-checked-at-all" }),
         env,

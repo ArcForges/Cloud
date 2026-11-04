@@ -176,6 +176,40 @@ audit trail of what an account was entitled to and are kept; the append-only tri
 (AF-PLAT-01, H-07) adds its own migration. The snapshot may be dropped only as described above. Command receipts of the operator grant
 (`center.operatorGrant`) hold the granted keys, the ids and the expiry, under the receipts' own retention.
 
+### Fleet (AF-CTR-04)
+
+The fourth migration (`center/internal/schema/migrations/0004_fleet_enrollment.sql`, sha256
+`babcd36d812138e688183501c0e9bd87aee9d9d0bcb6c6158a7b03c1226fe101`) lands the three tables of node enrollment whole; the logic is
+described in [center fleet](center-fleet.md). The runtime role has SELECT, INSERT and UPDATE on each, never DELETE:
+
+- `fleet.node`: one row per enrollment of a node ID in an account, bound to the node's device and `arcforges-node` installation; a
+  node ID is live in at most one row (`node_live_node_id`), a revoked row is history (`revoke_reason` 1: the device was revoked).
+  `version` is SemVer 2.0.0 without build metadata; `os` is the OsFamily number (1 windows, 2 linux), which the device platform maps
+  by name (`device.device.platform` 1 and 3).
+- `fleet.node_sign_in` (browser sign-in flows, written from part E1b) and `fleet.device_authorization` (device-code authorizations,
+  written from part E2): the node as it described itself (91-byte key), the approval with the approving session and its epochs, the
+  code digests and the result. There is no per-flow attempt counter; an authorization counts at most five lookups of its user code. A
+  terminal row is final (a trigger refuses every change) except COMPLETED to REVOKED once, and an authorization's reuse mark once.
+- Two statements change 0002 objects: `identity.session.revoke_reason` admits 7 (superseded by a re-enrollment) and 8 (an
+  enrollment code reused), and `installation_public_key` makes a public key unique over live and revoked installations, so a key is
+  registered once ever (a key replaced by a same-account re-enrollment is overwritten and no longer guarded).
+
+Every foreign key has an index (`TestEveryFleetForeignKeyHasAnIndex`), the constraints and triggers are pinned case by case
+(`TestTheFleetStoreConstraints`) and the migration is rehearsed whole over version 3 (`TestMigration0004LandsWholeOverVersion3`).
+The hosted deployment applies it while production is dark: the tables exist and stay empty.
+
+Retention: the sweeps are AF-PLAT-01's and each period is a maximum (flow rows 7 days after their end, a node row until revoked plus
+30 days, with its device); until the sweeps exist the fleet tables only grow, and AF-PROD-01's gate for enabling production covers
+the fleet surface. The flow tables are children of sessions, nodes and users (`NO ACTION`): a sweep or an account purge deletes them
+first, then the node rows, then the sessions, installations and devices. A node refreshes about 36 times a day, and every refresh
+adds one `identity.spent_refresh` row, kept until the family's absolute end (365 days by default): about 13,140 rows per node-year
+(an estimate of 3 MB with its indexes) until AF-PLAT-01's sweep removes them; `SELECT count(*) FROM identity.spent_refresh` measures
+it.
+
+Personal data: the node's name (it can name a person), its version, the country and network (ASN) a sign-in request came from, and
+account IDs. No token, one-use code, device code or user code is stored in clear, and no audit payload holds one. Command receipts
+of ReportNodeInfo and SignOutNode hold only the receipt (command ID and effect), under the principal `node:<installation id>`.
+
 ## Guarantees
 
 `center/internal/platform` re-implements the guarantees of the D1 storage plans with native transactions, constraints and row

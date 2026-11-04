@@ -40,11 +40,19 @@ const SurfacePages Surface = "pages"
 // default: it is on only where FLAGSHIP_SURFACES names it.
 const SurfaceOperations Surface = "operations"
 
+// SurfaceFleet is node enrollment (AF-CTR-04): the NodeEnrollmentService methods the center serves and, from part E3, the /connect
+// and /activate pages. It needs the identity and pages surfaces. Enrollment is an account and device operation and is never gated
+// (AD-0021 section 13a); production keeps it off until AF-PROD-01 activates it. It joins the self-hosted default only with its pages
+// (part E3).
+const SurfaceFleet Surface = "fleet"
+
 // KnownSurfaces is every surface name, in generated order.
-func KnownSurfaces() []Surface { return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations} }
+func KnownSurfaces() []Surface {
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet}
+}
 
 // DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces, never the
-// operations page.
+// operations page, and not yet the fleet surface (it joins with its pages).
 func DefaultSelfHostedSurfaces() []Surface { return []Surface{SurfaceIdentity, SurfacePages} }
 
 // ClientIPHeader is the one header the hosted Worker sets to the client's address (from cf-connecting-ip, overwriting any client
@@ -112,6 +120,17 @@ type IdentityPolicy struct {
 	RefreshPerPrefix      Window
 	StepUpPerAccount      Window
 	BootstrapPerPrefix    Window
+	// The node credentials (AF-CTR-04): a node session's access lifetime (refreshed at two thirds of it), its sliding refresh idle
+	// limit and its absolute end, the abuse cap of live enrolled nodes per account, and the buckets of RefreshNodeSession (a failure
+	// bucket per client prefix for tokens that name nothing, a request bucket per session for its current token) and ReportNodeInfo
+	// (per installation).
+	NodeAccessLifetime        time.Duration
+	NodeRefreshIdleLifetime   time.Duration
+	NodeRefreshAbsolute       time.Duration
+	MaxNodesPerAccount        int
+	NodeRefreshPerPrefix      Window
+	NodeRefreshPerSession     Window
+	NodeReportPerInstallation Window
 	// AnonymousFlows is an opt-in global ceiling on the flows anonymous calls create (C1): every BeginAuthentication, of every method
 	// and purpose, counts in one bucket. A limit of 0 (the default) sets no ceiling. Only the acceptance environment sets one: it
 	// shares the production Neon project, and its flows are never deleted before AF-PLAT-01's sweeps exist. A global bucket would let
@@ -142,7 +161,33 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		StepUpPerAccount:      Window{Limit: 10, Window: 10 * time.Minute},
 		BootstrapPerPrefix:    Window{Limit: 10, Window: time.Hour},
 		AnonymousFlows:        Window{Limit: 0, Window: time.Hour},
+		// AF-CTR-04: 60-minute node access tokens (36 refreshes a day), 90 days idle, 365 days absolute, 100 nodes per account.
+		NodeAccessLifetime:        time.Hour,
+		NodeRefreshIdleLifetime:   90 * 24 * time.Hour,
+		NodeRefreshAbsolute:       365 * 24 * time.Hour,
+		MaxNodesPerAccount:        100,
+		NodeRefreshPerPrefix:      Window{Limit: 120, Window: 10 * time.Minute},
+		NodeRefreshPerSession:     Window{Limit: 60, Window: 10 * time.Minute},
+		NodeReportPerInstallation: Window{Limit: 12, Window: time.Hour},
 	}
+}
+
+// Lifetimes are the lifetimes of a native session's tokens: the access token, the sliding refresh idle limit and the absolute end of
+// the family.
+type Lifetimes struct {
+	Access          time.Duration
+	RefreshIdle     time.Duration
+	RefreshAbsolute time.Duration
+}
+
+// AccountLifetimes are the lifetimes of an account (or mobile.limited) session.
+func (p IdentityPolicy) AccountLifetimes() Lifetimes {
+	return Lifetimes{Access: p.AccessTokenLifetime, RefreshIdle: p.RefreshIdleLifetime, RefreshAbsolute: p.RefreshAbsolute}
+}
+
+// NodeLifetimes are the lifetimes of a node session (AF-CTR-04).
+func (p IdentityPolicy) NodeLifetimes() Lifetimes {
+	return Lifetimes{Access: p.NodeAccessLifetime, RefreshIdle: p.NodeRefreshIdleLifetime, RefreshAbsolute: p.NodeRefreshAbsolute}
 }
 
 type durationBound struct {
@@ -166,16 +211,22 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"passkeyFlowLifetime": {&p.PasskeyFlowLifetime, time.Minute, 15 * time.Minute},
 		"emailCodeLifetime":   {&p.EmailCodeLifetime, time.Minute, 30 * time.Minute},
 		"stepUpEvidenceTtl":   {&p.StepUpEvidenceTTL, time.Minute, 5 * time.Minute},
+		// AF-CTR-04 node credentials.
+		"nodeAccessLifetime":      {&p.NodeAccessLifetime, 15 * time.Minute, time.Hour},
+		"nodeRefreshIdleLifetime": {&p.NodeRefreshIdleLifetime, time.Hour, 90 * 24 * time.Hour},
+		"nodeRefreshAbsolute":     {&p.NodeRefreshAbsolute, time.Hour, 400 * 24 * time.Hour},
 	}
 	counts := map[string]countBound{
 		"emailCodeAttempts":   {&p.EmailCodeAttempts, 1, 10},
 		"emailCodeSends":      {&p.EmailCodeSends, 1, 3},
 		"emailCodeIterations": {&p.EmailCodeIterations, 10_000, 600_000},
+		"maxNodesPerAccount":  {&p.MaxNodesPerAccount, 1, 1000},
 	}
 	for name, window := range map[string]*Window{
 		"signInPerPrefix": &p.SignInPerPrefix, "signInFailuresAccount": &p.SignInFailuresAccount, "emailPerPrefix": &p.EmailPerPrefix,
 		"emailPerAddress": &p.EmailPerAddress, "redeemFailuresAddress": &p.RedeemFailuresAddress, "refreshPerPrefix": &p.RefreshPerPrefix,
 		"stepUpPerAccount": &p.StepUpPerAccount, "bootstrapPerPrefix": &p.BootstrapPerPrefix,
+		"nodeRefreshPrefix": &p.NodeRefreshPerPrefix, "nodeRefreshSession": &p.NodeRefreshPerSession, "nodeReportInstallation": &p.NodeReportPerInstallation,
 	} {
 		counts[name+"Limit"] = countBound{&window.Limit, 1, 10_000}
 		durations[name+"Window"] = durationBound{&window.Window, time.Minute, 24 * time.Hour}
@@ -206,6 +257,10 @@ func (p IdentityPolicy) Validate() error {
 		return errors.New("browserIdle must not exceed browserAbsolute")
 	case p.AccessTokenLifetime > p.RefreshIdleLifetime:
 		return errors.New("accessTokenLifetime must not exceed refreshIdleLifetime")
+	case p.NodeRefreshIdleLifetime > p.NodeRefreshAbsolute:
+		return errors.New("nodeRefreshIdleLifetime must not exceed nodeRefreshAbsolute")
+	case p.NodeAccessLifetime > p.NodeRefreshIdleLifetime:
+		return errors.New("nodeAccessLifetime must not exceed nodeRefreshIdleLifetime")
 	}
 	return nil
 }
@@ -333,6 +388,9 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 	if identity.Enabled(SurfacePages) && !identity.Enabled(SurfaceIdentity) {
 		return Identity{}, invalid("the %s surface needs the %s surface: the pages call its domain functions", SurfacePages, SurfaceIdentity)
 	}
+	if identity.Enabled(SurfaceFleet) && (!identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages)) {
+		return Identity{}, invalid("the %s surface needs the %s and %s surfaces: node enrollment is approved by an account on the pages", SurfaceFleet, SurfaceIdentity, SurfacePages)
+	}
 	if identity.Enabled(SurfaceOperations) {
 		if !identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages) {
 			return Identity{}, invalid("the %s surface needs the %s and %s surfaces: its page proves a step-up through the pages' routes", SurfaceOperations, SurfaceIdentity, SurfacePages)
@@ -346,11 +404,14 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 			if get(EnvSurfaces) != "" {
 				return Identity{}, invalid("the identity surface is listed in %s: %v", EnvSurfaces, err)
 			}
-			// The self-hosted default never refuses to start: identity stays off, and so do the pages that need it, and the start-up
-			// log says why (PLT-16).
-			identity.Surfaces = slices.DeleteFunc(identity.Surfaces, func(s Surface) bool { return s == SurfaceIdentity || s == SurfacePages || s == SurfaceOperations })
+			// The self-hosted default never refuses to start: identity stays off, and so does every other surface, because every
+			// surface other than identity needs identity (cloud-6); the start-up log says why (PLT-16).
+			identity.Surfaces = nil
 			identity.Disabled = err.Error()
 		}
+	}
+	if !identity.Enabled(SurfaceIdentity) && len(identity.Surfaces) > 0 {
+		return Identity{}, invalid("every surface other than %s needs the %s surface", SurfaceIdentity, SurfaceIdentity)
 	}
 	return identity, nil
 }

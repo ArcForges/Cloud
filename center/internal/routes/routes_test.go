@@ -5,6 +5,7 @@ package routes
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -59,14 +60,24 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.publicapi.v1.IdentityService/RevokeAllSessions session 4096",
 		"/arcforges.publicapi.v1.DeviceService/Rename session 4096",
 		"/arcforges.publicapi.v1.DeviceService/Revoke session 4096",
+		// AF-CTR-04 E1a: the fleet surface's node methods.
+		"/arcforges.fleet.v1.NodeEnrollmentService/RefreshNodeSession anonymous 4096",
+		"/arcforges.fleet.v1.NodeEnrollmentService/ReportNodeInfo session 4096",
+		"/arcforges.fleet.v1.NodeEnrollmentService/SignOutNode session 4096",
 	}
-	if len(table.Surfaces) != 3 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations || len(table.SurfaceRows) != len(served) {
+	if len(table.Surfaces) != 4 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
+		table.Surfaces[3] != SurfaceFleet || len(table.SurfaceRows) != len(served) {
 		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))
 	}
 	for index, row := range table.SurfaceRows {
-		if got := fmt.Sprintf("%s %s %d", row.Path, row.Auth, row.MaxRequestBytes); got != served[index] || row.Surface != SurfaceIdentity ||
+		// The fleet rows carry the contract's 10 s deadline (F3); the identity rows the identity surface's 15 s.
+		surface, deadline := SurfaceIdentity, 15_000
+		if strings.HasPrefix(row.Path, "/arcforges.fleet.v1.") {
+			surface, deadline = SurfaceFleet, 10_000
+		}
+		if got := fmt.Sprintf("%s %s %d", row.Path, row.Auth, row.MaxRequestBytes); got != served[index] || row.Surface != surface ||
 			!row.RequestMeta || row.Instance != HealthInstance || row.Kind != "unary" || row.MaxFrameBytes != 65_536 ||
-			row.MaxUnaryResponseBytes != 65_536 || row.MaxDurationMilliseconds != 15_000 {
+			row.MaxUnaryResponseBytes != 65_536 || row.MaxDurationMilliseconds != deadline {
 			t.Fatalf("surface row %d: %+v", index, row)
 		}
 	}
@@ -80,7 +91,7 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 	}
 	for _, row := range table.SurfaceRows {
 		policy, ok := routes.Registry.Lookup(row.Path)
-		if !ok || policy.Surface != SurfaceIdentity || !policy.ReadsRequestMeta() || policy.MaxRequestBytes != row.MaxRequestBytes {
+		if !ok || policy.Surface != row.Surface || !policy.ReadsRequestMeta() || policy.MaxRequestBytes != row.MaxRequestBytes {
 			t.Fatalf("the ingress registry differs from the surface row %s", row.Path)
 		}
 	}
