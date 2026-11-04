@@ -141,18 +141,9 @@ func AuthorizeURL(publicBaseURL string, flowID platform.ID) string {
 	return publicBaseURL + "/connect#flow=" + flowID.String()
 }
 
-// MaxDerivedURLLength bounds every URL the center derives for a node (C0: "<= 512 chars").
+// MaxDerivedURLLength bounds every URL the center derives for a node (C0: "<= 512 chars"); the configuration refuses a fleet center
+// whose public base URL would exceed it (config.MaxFleetPublicBaseURLLength).
 const MaxDerivedURLLength = 512
-
-// longestDerivedSuffix is the longest path and fragment the center appends to its public base URL for a node: /connect#flow= and a
-// 36-character flow ID (50 characters; /activate#code=XXXX-XXXX of part E2 is 24).
-const longestDerivedSuffix = len("/connect#flow=") + 36
-
-// ValidSignInBaseURL reports whether every URL the fleet surface derives from a public base URL stays within the contract's 512
-// characters: a base URL of at most 462 characters.
-func ValidSignInBaseURL(publicBaseURL string) bool {
-	return len(publicBaseURL)+longestDerivedSuffix <= MaxDerivedURLLength
-}
 
 // Begin starts a browser sign-in (BeginNodeSignIn): the client prefix's and the node ID's buckets (and the opt-in anonymous-flow
 // ceiling) are counted, a key that an installation holds or held is refused before approval (CONFLICT/already_exists, node_key /
@@ -541,14 +532,10 @@ func (s *Service) Complete(ctx context.Context, request Request, in CompleteRequ
 	// The transaction's kind follows what the pre-read found (the completion and the reuse are effects, the failure marker an
 	// auxiliary end of the flow); the locked row decides the outcome, so a marker that finds the flow completed by a racing
 	// presentation of the code takes the reuse path in its own transaction.
-	options := store.TxOptions{Attempts: s.signInAttempts}
-	if kind == completionMarker {
-		options.Auxiliary = true
-	}
 	var completed Completed
 	var outcome error
 	metric := ""
-	err = s.db.InTx(ctx, "complete a node sign-in", options, func(ctx context.Context, tx pgx.Tx) error {
+	decide := func(ctx context.Context, tx pgx.Tx) error {
 		completed, outcome, metric = Completed{}, nil, ""
 		now := s.now()
 		locked, err := scanFlow(tx.QueryRow(ctx, "SELECT "+flowColumns+" FROM fleet.node_sign_in WHERE flow_id = $1 FOR UPDATE", in.FlowID))
@@ -615,7 +602,12 @@ func (s *Service) Complete(ctx context.Context, request Request, in CompleteRequ
 		completed = Completed{Enrolled: enrolled, Account: account}
 		metric = "completed"
 		return nil
-	})
+	}
+	if kind == completionMarker {
+		err = s.db.InTx(ctx, "end a node sign-in after a failed proof", store.TxOptions{Attempts: s.signInAttempts, Auxiliary: true}, decide)
+	} else {
+		err = s.db.InTx(ctx, "complete a node sign-in", store.TxOptions{Attempts: s.signInAttempts}, decide)
+	}
 	var refusal *arc.Refusal
 	switch {
 	case err == nil && outcome == nil:

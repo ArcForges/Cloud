@@ -11,6 +11,7 @@ import (
 	nodev1 "github.com/ArcForges/Contracts/go/arcforges/node/v1"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/nodetest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
@@ -105,8 +106,8 @@ func TestCompleteShapeChecks(t *testing.T) {
 
 // TestTheFleetURLsStayWithinTheContract (OQ-13): a public base URL of up to 462 characters keeps every derived URL within 512.
 func TestTheFleetURLsStayWithinTheContract(t *testing.T) {
-	base := "https://center.example.test/" + strings.Repeat("a", 462-len("https://center.example.test/"))
-	if !ValidSignInBaseURL(base) || ValidSignInBaseURL(base+"a") || len(AuthorizeURL(base, platform.NewID())) != MaxDerivedURLLength {
+	base := "https://center.example.test/" + strings.Repeat("a", config.MaxFleetPublicBaseURLLength-len("https://center.example.test/"))
+	if config.MaxFleetPublicBaseURLLength != 462 || len(AuthorizeURL(base, platform.NewID())) != MaxDerivedURLLength {
 		t.Fatalf("the bound is off: %d", len(AuthorizeURL(base, platform.NewID())))
 	}
 }

@@ -299,3 +299,19 @@ func TestTheBrowserSignInPolicyHasItsDefaultsAndBounds(t *testing.T) {
 		t.Fatalf("every browser sign-in key: %+v %v", policy, err)
 	}
 }
+
+// TestTheFleetSurfaceRefusesABaseURLTooLongForItsURLs (OQ-13): with fleet enabled the public base URL is at most 462 characters, so
+// every URL the center derives for a node stays within the contract's 512; without fleet the longer URL still starts.
+func TestTheFleetSurfaceRefusesABaseURLTooLongForItsURLs(t *testing.T) {
+	prefix := "https://center.example.test/"
+	for length, starts := range map[int]bool{MaxFleetPublicBaseURLLength: true, MaxFleetPublicBaseURLLength + 1: false} {
+		base := prefix + strings.Repeat("a", length-len(prefix))
+		_, err := Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: "identity,pages,fleet", EnvPublicBaseURL: base})))
+		if (err == nil) != starts || !starts && !errors.Is(err, ErrInvalid) {
+			t.Errorf("a base URL of %d characters: %v", length, err)
+		}
+		if _, err = Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: "identity,pages", EnvPublicBaseURL: base}))); err != nil {
+			t.Errorf("without fleet, %d characters: %v", length, err)
+		}
+	}
+}

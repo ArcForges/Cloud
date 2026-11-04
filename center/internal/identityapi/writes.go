@@ -416,12 +416,18 @@ func (s *Server) removeAuthIdentity(ctx context.Context, call *ingress.Call, req
 		}
 		return execute(ctx, s, receiptCommand, &publicapiv1.IdentityServiceRemoveAuthIdentityValue{},
 			func(ctx context.Context, tx pgx.Tx, now time.Time) (*publicapiv1.IdentityServiceRemoveAuthIdentityValue, error) {
+				// The account's approved node sign-ins are cancelled first: their flow rows precede the account in the global lock
+				// order (AF-CTR-04 protocol-6), and the evidence below locks the account.
+				cancelled, err := s.identity.CancelApprovals(ctx, tx, caller.UserID, now)
+				if err != nil {
+					return nil, err
+				}
 				if operation.NeedsEvidence(false) {
 					if err := identity.ConsumeEvidence(ctx, tx, caller, identity.ClassRemoveCredential, credentialID, now); err != nil {
 						return nil, err
 					}
 				}
-				revision, err := s.identity.RemoveCredential(ctx, tx, caller, credentialID, now)
+				revision, err := s.identity.RemoveCredential(ctx, tx, caller, credentialID, cancelled, now)
 				if err != nil {
 					return nil, err
 				}
@@ -490,12 +496,19 @@ func (s *Server) revokeAllSessions(ctx context.Context, call *ingress.Call, requ
 		}
 		return execute(ctx, s, receiptCommand, &publicapiv1.IdentityServiceRevokeAllSessionsValue{},
 			func(ctx context.Context, tx pgx.Tx, now time.Time) (*publicapiv1.IdentityServiceRevokeAllSessionsValue, error) {
+				// The account's approved node sign-ins are cancelled first (their flow rows precede the account in the global lock
+				// order; the evidence below locks the account): "sign out all other sessions" is the remediation the approving session
+				// itself performs, which revokes neither that session nor its epoch (AF-CTR-04 protocol-6).
+				cancelled, err := s.identity.CancelApprovals(ctx, tx, caller.UserID, now)
+				if err != nil {
+					return nil, err
+				}
 				if operation.NeedsEvidence(false) {
 					if err := identity.ConsumeEvidence(ctx, tx, caller, identity.ClassRevokeAllSessions, caller.UserID, now); err != nil {
 						return nil, err
 					}
 				}
-				if _, err := s.identity.RevokeAllSessions(ctx, tx, caller, now); err != nil {
+				if _, err := s.identity.RevokeAllSessions(ctx, tx, caller, cancelled, now); err != nil {
 					return nil, err
 				}
 				return &publicapiv1.IdentityServiceRevokeAllSessionsValue{Receipt: receipt(receiptCommand, nil)}, nil

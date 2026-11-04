@@ -46,6 +46,11 @@ const SurfaceOperations Surface = "operations"
 // (part E3).
 const SurfaceFleet Surface = "fleet"
 
+// MaxFleetPublicBaseURLLength bounds the public base URL of a center that serves the fleet surface: the contract bounds every URL the
+// center derives for a node at 512 characters (fleet.v1 authorize_url, verification_uri*), and the longest suffix it appends is
+// /connect#flow= and a 36-character flow ID (50 characters).
+const MaxFleetPublicBaseURLLength = 512 - 50
+
 // KnownSurfaces is every surface name, in generated order.
 func KnownSurfaces() []Surface {
 	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet}
@@ -410,6 +415,10 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 	}
 	if identity.Enabled(SurfaceFleet) && (!identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages)) {
 		return Identity{}, invalid("the %s surface needs the %s and %s surfaces: node enrollment is approved by an account on the pages", SurfaceFleet, SurfaceIdentity, SurfacePages)
+	}
+	if identity.Enabled(SurfaceFleet) && len(publicBaseURL) > MaxFleetPublicBaseURLLength {
+		return Identity{}, invalid("the %s surface needs a public base URL of at most %d characters: every URL it derives for a node is at most 512", SurfaceFleet,
+			MaxFleetPublicBaseURLLength)
 	}
 	if identity.Enabled(SurfaceOperations) {
 		if !identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages) {
