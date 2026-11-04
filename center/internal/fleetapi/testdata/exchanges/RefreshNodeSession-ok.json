@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "7706ca7",
+  "method": "RefreshNodeSession",
+  "case": "ok",
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "00000000340a005230616672312e52525252525252525252525252525252525252525252525252525252525252525252525252525252525252"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [
+      "00000000920a1422120a10c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0127a5230616672312e525252525252525252525252525252525252525252525252525252525252525252525252525252525252525a30616661312e41414141414141414141414141414141414141414141414141414141414141414141414141414141414141620508a03810007a070880ce891e1000800180dddb01"
+    ],
+    "trailers": "grpc-status: 0\r\n"
+  },
+  "normalized": [
+    "meta.correlation_id and every ArcError.correlation_id: 16 bytes of 0xc0",
+    "flow_id (request and reply): 16 bytes of 0xf1; authorize_url is rebuilt from the public base URL and that flow ID",
+    "installation_id: 16 bytes of 0x1a; account.account_id: 16 bytes of 0xac",
+    "access_token: afa1. and 43 A; refresh_token: afr1. and 43 R (the formats of the center's tokens)",
+    "code: 43 C; node_key_proof: 64 bytes of 0x50",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0"
+  ],
+  "sha256": "fc8e69a03d488537a53000dea833daa480206aad93dccf9956aea01c590aca48"
+}

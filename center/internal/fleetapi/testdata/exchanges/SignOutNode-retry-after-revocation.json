@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "7706ca7",
+  "method": "SignOutNode",
+  "case": "retry-after-revocation",
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "00000000160a140a120a1004040404040404040404040404040404"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [],
+    "trailers": "grpc-status: 16\r\ngrpc-message: auth.credential_revoked\r\n"
+  },
+  "normalized": [
+    "meta.correlation_id and every ArcError.correlation_id: 16 bytes of 0xc0",
+    "flow_id (request and reply): 16 bytes of 0xf1; authorize_url is rebuilt from the public base URL and that flow ID",
+    "installation_id: 16 bytes of 0x1a; account.account_id: 16 bytes of 0xac",
+    "access_token: afa1. and 43 A; refresh_token: afr1. and 43 R (the formats of the center's tokens)",
+    "code: 43 C; node_key_proof: 64 bytes of 0x50",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0"
+  ],
+  "sha256": "1119da91d9b1f52968295daf445a68f6c1cf071fad1ea0b68f280445f6a25f0a"
+}

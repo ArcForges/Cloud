@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "source": "TestFleetExchangeCapture",
+  "contractsCohort": "1.0.0-ci.424.1",
+  "centerCommit": "7706ca7",
+  "method": "CompleteNodeSignIn",
+  "case": "unauthenticated",
+  "request": {
+    "contentType": "application/grpc-web+proto",
+    "frames": [
+      "00000000b20a0052120a10f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f15a2b43434343434343434343434343434343434343434343434343434343434343434343434343434343434343622b64426a66744a655a344356502d6d4239324b3237756862554a55317031725f775731674657464f456a586b724050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050"
+    ]
+  },
+  "reply": {
+    "contentType": "application/grpc-web+proto",
+    "httpStatus": 200,
+    "frames": [
+      "000000006b0a1422120a10c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c01a530a0f756e61757468656e7469636174656410021a246572726f722e61757468656e7469636174696f6e2e756e61757468656e7469636174656422020801280132120a10c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0"
+    ],
+    "trailers": "grpc-status: 0\r\n"
+  },
+  "normalized": [
+    "meta.correlation_id and every ArcError.correlation_id: 16 bytes of 0xc0",
+    "flow_id (request and reply): 16 bytes of 0xf1; authorize_url is rebuilt from the public base URL and that flow ID",
+    "installation_id: 16 bytes of 0x1a; account.account_id: 16 bytes of 0xac",
+    "access_token: afa1. and 43 A; refresh_token: afr1. and 43 R (the formats of the center's tokens)",
+    "code: 43 C; node_key_proof: 64 bytes of 0x50",
+    "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0"
+  ],
+  "sha256": "1eb62485cb2e8cc7897834a6fb08091aaa7778fa4838ac22668269ae9ec52edb"
+}
