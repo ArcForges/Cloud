@@ -8,8 +8,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
+
+// AccountParticipants are the fleet's account participants in their registration order, which is the lock order between their two
+// tables: the browser sign-in's flows, then the device-code sign-in's authorizations. The identity composition registers exactly
+// these, wherever the identity surface is composed.
+func AccountParticipants() []identity.AccountParticipant {
+	return []identity.AccountParticipant{ApprovalParticipant{}, DeviceApprovalParticipant{}}
+}
 
 // ApprovalParticipant is the account participant of the browser node sign-in (protocol-6; identity.AccountParticipant): when the
 // account revokes all its other sessions or removes a credential, its APPROVED flows, whose code no node redeemed (an APPROVED flow's

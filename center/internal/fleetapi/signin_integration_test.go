@@ -396,6 +396,9 @@ func TestApprovalDoesNotOutliveTheAccountsRemediation(t *testing.T) {
 		owner := h.person(1)
 		s, _ := h.begin()
 		h.approve(owner, s, false)
+		// AF-CTR-04 E2: an approved device authorization of the account is cancelled by the same remediation.
+		d, _ := h.start()
+		h.approveDeviceSignIn(owner, d)
 		eventType := "identity.sessions.revoked_all"
 		if remediation == "revoke all sessions" {
 			h.stepUp(owner, identity.ClassRevokeAllSessions, owner.id, false)
@@ -417,8 +420,12 @@ func TestApprovalDoesNotOutliveTheAccountsRemediation(t *testing.T) {
 		if h.count("SELECT count(*) FROM fleet.node_sign_in WHERE flow_id = $1 AND state = 4", s.flowID) != 1 || h.count("SELECT count(*) FROM fleet.node") != 0 {
 			t.Fatalf("%s: the flow is not denied", remediation)
 		}
+		if polled := h.poll(d); polled.GetValue().GetState() != fleetv1.DeviceAuthorizationState_DEVICE_AUTHORIZATION_STATE_DENIED || polled.GetValue().GetCredentials() != nil {
+			t.Fatalf("%s: the device authorization afterwards: %s %+v", remediation, failure(polled.GetError()), polled.GetValue())
+		}
 		var participants map[string]int64
-		if err := json.Unmarshal(mustJSON(h.payload(eventType)["participants"]), &participants); err != nil || participants["fleet.node_sign_in"] != 1 {
+		if err := json.Unmarshal(mustJSON(h.payload(eventType)["participants"]), &participants); err != nil || participants["fleet.node_sign_in"] != 1 ||
+			participants["fleet.device_authorization"] != 1 {
 			t.Fatalf("%s: participants %v %v", remediation, participants, err)
 		}
 	}
