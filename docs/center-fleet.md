@@ -100,8 +100,8 @@ exercised by SEEDED function-level tests that call it directly. Its rules, in th
 
 1. The approving account is locked and must be Active (else the approval lapses).
 2. A node ID live in another account is `CONFLICT/already_exists` (`state.state` `node`, no resource).
-3. A node ID live in this account on another OS is `VALIDATION/invalid_argument` (`node.os: mismatch`): another OS is another
-   machine, which signs in under a node ID of its own.
+3. A node ID live in this account on another OS is `VALIDATION/invalid_argument` (`node.os: mismatch`), after the account lock and
+   before the device lock and any write: another OS is another machine, which signs in under a node ID of its own.
 4. A key an installation holds is registered once ever: held by a live installation (other than the node's own, re-used in rule 6)
    it is `CONFLICT/already_exists` (`state.state` `node_key`, `state.reason` `already_registered`); held by a revoked one (the key was
    retired) it is `AUTHENTICATION/credential_revoked`, and the node deletes its key and starts again. For a new node, the cap must
@@ -145,17 +145,41 @@ take them in this order:
 - RefreshNodeSession: its session, then the node row.
 - The account's step-up evidence path (RevokeSession of another session, RevokeAllSessions, RemoveAuthIdentity, DeviceService.Revoke
   of another device): the account first, then (for a device) `device.Revoke`.
-- The operator's `admin revoke-sessions` and `admin revoke-device`: the accounts first (in account order for `revoke-sessions
---all`), then the sessions, or `device.Revoke`.
+- The operator's `admin revoke-sessions` and `admin revoke-device`: the accounts first, then the sessions, or `device.Revoke`.
+  `revoke-sessions` locks its account (every account in account order for `--all`) `FOR NO KEY UPDATE`; `revoke-device` locks the
+  device's account `FOR UPDATE`.
 
-The writers that lock fewer rows skip slots and never go back: SignOutNode, a sign-out of the caller's own session and a browser
-session's renewal lock one session row; the own-device DeviceService.Revoke takes no account lock and starts at the device; a sign-in
-(`device.EnsureNative`, `EnsureBrowser`) locks its own installation and device and then inserts its session; a step-up proof and the
-session upgrade lock the proving session. In every transaction a command receipt is the first row written and the audit chain head the
-last. `TestEnrollTakesItsLocksInTheGlobalOrder`, `TestReportNodeInfoAndRevokeNeverDeadlock` and
-`TestOperatorRevocationTakesTheAccountLocksFirst` hold one row at a time and check which rows the waiting transaction already holds. The race tests (enrollment, refresh, report and the operator's revoke-sessions against
-revocation and re-enrollment) run every transaction with one attempt (the refresh through `fleet.Options.RefreshAttempts`), so a
-deadlock is an error of the round and fails them.
+**The `identity.user` rows.** Every writer that locks an account row locks one account, its own or its caller's: Enroll and the
+step-up evidence path (`FOR UPDATE`), the profile and credential commands (`identity` manage), the operator role commands
+(`entitlement` role, `FOR UPDATE`), `admin revoke-device`, and the sign-in and the passkey registration (`FOR SHARE`). Two
+transactions touch two or more accounts:
+
+- `admin revoke-sessions --all` locks every account in account order, `FOR NO KEY UPDATE`.
+- The AF-CTR-03 operator grant (OperatorService, `entitlement.Operator`) locks its caller's account `FOR UPDATE` and then inserts the
+  target account's entitlement rows; each insert's foreign key takes `FOR KEY SHARE` on the target's row, as every insert of a row
+  that references an account does.
+
+`FOR KEY SHARE` conflicts only with `FOR UPDATE`, so the grant's insert never waits for revoke-sessions' lock, and the two never close
+a cycle whichever account sorts first (`TestOperatorRevocationOfEveryAccountAndAnOperatorGrantNeverDeadlock`). `FOR NO KEY UPDATE`
+still conflicts with Enroll's `FOR UPDATE` and the sign-in's `FOR SHARE`, so an enrollment and the tool still wait for each other.
+
+The writers that lock fewer rows skip slots: SignOutNode, a sign-out of the caller's own session and a browser session's renewal lock
+one session row; the own-device DeviceService.Revoke takes no account lock and starts at the device; a step-up proof and the session
+upgrade lock the proving session. One writer goes back in the order: a sign-in (`device.EnsureNative`, `EnsureBrowser`, AF-CTR-03
+code) locks its installation and its device in one statement, the installation first, and then inserts its session. It meets a
+writer of the order only on the same installation: `device.Revoke` of its device, or Enroll and ReportNodeInfo when a native claim
+names a node's installation ID (refused after the lock). PostgreSQL breaks such a deadlock: the sign-in, DeviceService.Revoke and
+ReportNodeInfo retry it as store contention (default attempts; Enroll's sign-in flows, parts E1b and E2, will too); the operator's `admin revoke-device` runs once and reports the
+failure, and the operator runs it again. Reordering the statement is routed to a later Cloud change of the device package. In every
+transaction a command receipt is the first row written and the audit chain head the last.
+
+`TestEnrollTakesItsLocksInTheGlobalOrder`, `TestReportNodeInfoAndRevokeNeverDeadlock` and
+`TestOperatorRevocationTakesTheAccountLocksFirst` hold one row at a time and check which rows the waiting transaction already holds;
+`TestAnOSMismatchIsRefusedBeforeTheDeviceLock` holds the node's device and expects the OS refusal at once. In the race tests
+(enrollment, refresh, report and the operator's revoke-sessions against revocation and re-enrollment) every transaction that locks rows
+of the order runs with one attempt (the refresh through `fleet.Options.RefreshAttempts`; the rate-limit, audit and lookup
+transactions, which lock no row of the order, keep the default), so a deadlock is an error of the round, and each race test also
+fails when `pg_stat_database.deadlocks` of its database grew.
 
 ## Revocation
 

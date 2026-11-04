@@ -58,6 +58,7 @@ func TestAThousandJunkRefreshesThenAValidOne(t *testing.T) {
 // refresh is credential_revoked.
 func TestEnrollAndRefreshOfTheSupersededSessionNeverDeadlock(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	r.policy.NodeRefreshPerSession.Limit = 10_000
 	service := r.service()
 	for round := range rounds {
@@ -103,6 +104,7 @@ func (r *rig) report(service *Service, enrolled Enrolled, nodeID platform.ID, in
 // node row already holds the device and the installation.
 func TestReportNodeInfoAndRevokeNeverDeadlock(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	service := r.service()
 	ctx := context.Background()
 	for round := range rounds {
@@ -212,6 +214,7 @@ $$`, "CREATE TRIGGER refuse_fleet BEFORE INSERT ON audit.audit_event FOR EACH RO
 // session on the revoked device afterwards, and a token the refresh rotated is refused once the revocation committed.
 func TestRevokeDuringRefreshRefusesTheRefresh(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	r.policy.NodeRefreshPerSession.Limit = 10_000
 	service := r.service()
 	ctx := context.Background()
@@ -252,11 +255,14 @@ func TestRevokeDuringRefreshRefusesTheRefresh(t *testing.T) {
 }
 
 // TestOperatorRevocationDuringReenrollmentNeverDeadlocks (SEC-1): the operator's incident tool (admin revoke-sessions, for one account
-// and for every account) races a re-enrollment approved by a session newer than the node's, both without retries. The tool locks the
-// accounts first, so neither deadlocks, and afterwards no session of the account is live: either the enrollment committed first and
-// the tool revoked its new session, or the tool came first and the enrollment lapsed on its revoked approving session.
+// and for every account) races a re-enrollment approved by a session newer than the node's, both without retries. What the race
+// proves: no round deadlocks or fails, and afterwards no session of the account is live (either the enrollment committed first and
+// the tool revoked its new session, or the tool came first and the enrollment lapsed on its revoked approving session). The rounds
+// do not reliably meet the interleaving that deadlocked when the tool took no account lock, so this race also passes on that code;
+// TestOperatorRevocationTakesTheAccountLocksFirst is the deterministic test that fails on it.
 func TestOperatorRevocationDuringReenrollmentNeverDeadlocks(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	ctx := context.Background()
 	for round := range rounds {
 		for _, all := range []bool{false, true} {
@@ -307,6 +313,7 @@ func TestOperatorRevocationDuringReenrollmentNeverDeadlocks(t *testing.T) {
 // it and holds no session row yet; released, it revokes every session of the account.
 func TestOperatorRevocationTakesTheAccountLocksFirst(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	ctx := context.Background()
 	for _, all := range []bool{false, true} {
 		user, approver := r.account(1)

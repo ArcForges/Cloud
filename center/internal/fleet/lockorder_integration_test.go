@@ -14,6 +14,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
@@ -43,6 +44,21 @@ WHERE NOT l.granted AND a.datname = current_database()`) > 0 {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("the enrollment never waited for the held lock")
+}
+
+// watchDeadlocks fails the test at its end when PostgreSQL detected a deadlock in the test's database (pg_stat_database.deadlocks,
+// E1-14), in addition to the 40P01 that every one-attempt transaction of a race test returns. A backend reports its count when it
+// goes idle, at most a second later, so the check waits that long first.
+func (r *rig) watchDeadlocks(t *testing.T) {
+	t.Helper()
+	const query = "SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()"
+	before := r.count(query)
+	t.Cleanup(func() {
+		time.Sleep(1500 * time.Millisecond)
+		if after := r.count(query); after != before {
+			t.Errorf("PostgreSQL detected %d deadlocks in the test's database", after-before)
+		}
+	})
 }
 
 // free reports whether a row lock can be taken at once (FOR UPDATE NOWAIT in a transaction that is rolled back).
@@ -93,6 +109,7 @@ func (r *rig) hold(t *testing.T, query string, arguments ...any) func(commit boo
 // none after it. The approving session is locked in the session slot (B-1): a plain read would not wait.
 func TestEnrollTakesItsLocksInTheGlobalOrder(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	nodeID, key := platform.NewID(), nodeKey(t)
 	enrolled := r.mustEnroll(r.request(nodeID, key))
 	const (
@@ -157,6 +174,7 @@ func TestEnrollTakesItsLocksInTheGlobalOrder(t *testing.T) {
 // a deadlock.
 func TestOwnDeviceRevocationOfTheApproverDuringEnrollmentLapses(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	ctx := context.Background()
 	revoke := func(approver platform.ID, deviceID platform.ID) (func(commit bool), error) {
 		tx, err := r.db.Runtime.Pool().Begin(ctx)
@@ -230,6 +248,7 @@ func TestOwnDeviceRevocationOfTheApproverDuringEnrollmentLapses(t *testing.T) {
 // its retired key (credential_revoked).
 func TestRevokeDuringEnrollmentLeavesNoLiveSession(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	ctx := context.Background()
 	for round := range rounds {
 		nodeID, key := platform.NewID(), nodeKey(t)
@@ -274,6 +293,7 @@ func keyOf(err error) string { return key(err) }
 // admit exactly two, round after round: the cap is counted under the account lock.
 func TestConcurrentEnrollmentsNeverPassTheCap(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	r.policy.MaxNodesPerAccount = 2
 	for round := range rounds {
 		user, approver := r.account(1)
@@ -312,6 +332,7 @@ func TestConcurrentEnrollmentsNeverPassTheCap(t *testing.T) {
 // retry then answers that rule.
 func TestConcurrentEnrollmentsOfOneNodeIDOrOneKeyEnrollOnce(t *testing.T) {
 	r := newRig(t)
+	r.watchDeadlocks(t)
 	for round := range rounds {
 		first, firstApprover := r.account(1)
 		second, secondApprover := r.account(1)
@@ -361,5 +382,81 @@ func TestConcurrentEnrollmentsOfOneNodeIDOrOneKeyEnrollOnce(t *testing.T) {
 			r.count("SELECT count(*) FROM device.installation WHERE public_key = $1", sharedKey) != 1 {
 			t.Fatalf("round %d: duplicates", round)
 		}
+	}
+}
+
+// TestAnOSMismatchIsRefusedBeforeTheDeviceLock (C-3) makes the place of the OS rule observable: it is answered after the account lock
+// and before the node's device is locked or anything is written, so with the device row held by another transaction a re-enrollment
+// on another OS answers at once instead of waiting for the device.
+func TestAnOSMismatchIsRefusedBeforeTheDeviceLock(t *testing.T) {
+	r := newRig(t)
+	r.watchDeadlocks(t)
+	nodeID, nodeKeyBytes := platform.NewID(), nodeKey(t)
+	enrolled := r.mustEnroll(r.request(nodeID, nodeKeyBytes))
+	release := r.hold(t, "SELECT 1 FROM device.device WHERE device_id = $1 FOR UPDATE", enrolled.DeviceID)
+	windows := r.request(nodeID, nodeKeyBytes)
+	windows.Node.Platform, _ = PlatformOf(1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.enroll(windows)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if key(err) != "VALIDATION/invalid_argument node.os/node.os: mismatch" {
+			t.Fatalf("another OS: %v", key(err))
+		}
+	case <-time.After(3 * time.Second):
+		release(false)
+		t.Fatalf("the re-enrollment on another OS waited for the node's device (then answered %v)", key(<-done))
+	}
+	release(false)
+}
+
+// TestOperatorRevocationOfEveryAccountAndAnOperatorGrantNeverDeadlock (C-1): admin revoke-sessions --all locks every account in
+// account order FOR NO KEY UPDATE. The AF-CTR-03 operator grant locks its caller's account FOR UPDATE and then inserts rows of its
+// target account, whose foreign keys take FOR KEY SHARE on the target's row. With the target sorting before the caller, the tool
+// holds the target and waits for the caller while the grant inserts for the target: under FOR UPDATE that is a cycle (40P01, and the
+// incident tool, which runs once, can be the victim); FOR NO KEY UPDATE does not conflict with the insert, so the grant commits and
+// the tool follows. Both run with one attempt.
+func TestOperatorRevocationOfEveryAccountAndAnOperatorGrantNeverDeadlock(t *testing.T) {
+	r := newRig(t)
+	r.watchDeadlocks(t)
+	ctx := context.Background()
+	target, _ := r.account(1)
+	caller, _ := r.account(1)
+	if caller.String() < target.String() {
+		target, caller = caller, target
+	}
+	grant, err := r.db.Runtime.Pool().Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = grant.Rollback(ctx) })
+	// entitlement.Operator.write: the caller's account first.
+	if _, err = grant.Exec(ctx, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", caller); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- r.db.Runtime.InTx(ctx, "revoke every account's sessions", store.TxOptions{Attempts: 1}, func(ctx context.Context, tx pgx.Tx) error {
+			_, err := session.RevokeByOperator(ctx, tx, nil, time.Now())
+			return err
+		})
+	}()
+	// The tool holds every account before the caller's, the target's among them, and waits for the caller's.
+	r.waitBlocked(t)
+	// entitlement.Commit's first insert for the target account (its revision fence row), with its foreign key.
+	if _, err = grant.Exec(ctx, "INSERT INTO entitlement.revision (account_id, rev, updated_at) VALUES ($1, 1, now())", target); err != nil {
+		t.Fatalf("the grant's insert for the target account: %v", err)
+	}
+	if err = grant.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-done; err != nil {
+		t.Fatalf("revoke-sessions --all: %v", err)
+	}
+	if live := r.count("SELECT count(*) FROM identity.session WHERE revoked_at IS NULL"); live != 0 {
+		t.Fatalf("%d live sessions after revoke-sessions --all", live)
 	}
 }

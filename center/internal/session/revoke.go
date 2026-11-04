@@ -47,9 +47,12 @@ WHERE user_id = $1 AND session_id <> $2 AND `+replaceNow(liveAccountSession, "$3
 // role), and counts them per scope. Every credential is refused at its next call. It locks the accounts first, in account order,
 // before any session row (the center's global lock order, docs/center-fleet.md): a node enrollment that holds an account (and the
 // approving session it reads) is waited for instead of deadlocking with it, and the revocation's own statement then sees the
-// sessions such an enrollment committed; an enrollment that comes second finds its approving session revoked and lapses.
+// sessions such an enrollment committed; an enrollment that comes second finds its approving session revoked and lapses. The lock is
+// FOR NO KEY UPDATE: it conflicts with every account lock (FOR UPDATE, FOR SHARE) but not with the FOR KEY SHARE that a foreign key
+// takes when another transaction inserts a row of an account, so an operator grant (which holds its caller's account and then inserts
+// rows of its target account) cannot close a cycle with revoke-sessions --all.
 func RevokeByOperator(ctx context.Context, tx pgx.Tx, userID *platform.ID, now time.Time) (map[string]int64, error) {
-	if _, err := tx.Exec(ctx, "SELECT 1 FROM identity.user WHERE ($1::uuid IS NULL OR user_id = $1) ORDER BY user_id FOR UPDATE", userID); err != nil {
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM identity.user WHERE ($1::uuid IS NULL OR user_id = $1) ORDER BY user_id FOR NO KEY UPDATE", userID); err != nil {
 		return nil, err
 	}
 	rows, err := tx.Query(ctx, `UPDATE identity.session SET revoked_at = $2, revoke_reason = $3, rev = rev + 1

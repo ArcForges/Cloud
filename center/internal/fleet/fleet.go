@@ -21,12 +21,22 @@
 //   - The account's step-up evidence path (identity.ConsumeEvidence: RevokeSession of another session, RevokeAllSessions,
 //     RemoveAuthIdentity, DeviceService.Revoke of another device) locks the account first; device.Revoke then takes the device,
 //     installations, sessions and, through the participant, the node rows.
-//   - The operator's admin revoke-sessions and admin revoke-device lock the accounts first.
+//   - The operator's admin revoke-sessions and admin revoke-device lock the accounts first (revoke-sessions FOR NO KEY UPDATE, every
+//     account in account order for --all).
 //
-// The writers that lock fewer rows skip slots but never go back: SignOutNode, a sign-out of the caller's own session and a browser
-// session's renewal touch one session row; the own-device DeviceService.Revoke takes no account lock and starts at the device; a
-// sign-in (device.EnsureNative, EnsureBrowser) locks its own installation and device and then inserts a session; a step-up proof and
-// the session upgrade lock the proving session. docs/center-fleet.md lists them.
+// Two accounts in one transaction: the AF-CTR-03 operator grant (entitlement.Operator) locks its caller's account FOR UPDATE and
+// then inserts rows of the target account, whose foreign keys take FOR KEY SHARE on the target's row; that lock conflicts only with
+// FOR UPDATE, which no multi-account writer takes, so it never closes a cycle with revoke-sessions --all. Every other writer of
+// identity.user rows locks one account (see docs/center-fleet.md).
+//
+// The writers that lock fewer rows skip slots: SignOutNode, a sign-out of the caller's own session and a browser session's renewal
+// touch one session row; the own-device DeviceService.Revoke takes no account lock and starts at the device; a step-up proof and the
+// session upgrade lock the proving session. One writer goes back: a sign-in (device.EnsureNative, EnsureBrowser, AF-CTR-03 code)
+// locks its installation and its device in one statement, the installation first, and then inserts a session. It meets a writer of
+// the order only on the same installation (device.Revoke of its device; Enroll or ReportNodeInfo only when a native claim names a
+// node's installation ID, refused after the lock); PostgreSQL breaks such a deadlock, the services retry it as contention (the
+// operator's revoke-device runs once and is run again). Reordering it is routed to a later Cloud change of the device package.
+// docs/center-fleet.md lists them.
 //
 // In every transaction a command receipt (when there is one) is the first row written and the audit chain head the last.
 package fleet
