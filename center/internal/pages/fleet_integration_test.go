@@ -237,7 +237,8 @@ func TestTheActivatePagesApproveADeviceCode(t *testing.T) {
 	full := fleet.Fingerprint(started.node.PublicKey)
 	tail := fleet.FingerprintTail(started.node.PublicKey)
 	if review.status != 200 || !strings.Contains(review.text(), full[:len(full)-4]+"????") || strings.Contains(review.text(), full) ||
-		!strings.Contains(review.text(), `name="fingerprint_tail"`) || !strings.Contains(review.text(), `data-step-up-class="fleet.approveDeviceCode"`) {
+		!strings.Contains(review.text(), `name="fingerprint_tail"`) || !strings.Contains(review.text(), `data-step-up-class="fleet.approveDeviceCode"`) ||
+		!strings.Contains(review.text(), `data-step-up-target="`+identity.TextTargetHash(fleet.ClassApproveDeviceCode, owner.id, started.code)+`"`) {
 		t.Fatalf("the review: %d %s", review.status, review.text())
 	}
 	if h.codeLookups(started.code) != 1 {
@@ -306,9 +307,11 @@ func TestTheActivateDecisionNeverLooksTheCodeUpAgain(t *testing.T) {
 	if h.codeState(started.code) != int(fleet.AuthorizationPending) {
 		t.Fatal("the wrong tail changed the code")
 	}
-	// The second command ID answered the wrong tail; the right tail with it is another request: a reused command ID.
+	// The second command ID answered the wrong tail; the right tail with it is another request: a reused command ID (not the stored
+	// answer of the wrong tail, which would show the review again).
 	reused := b.postForm("/activate/decision", url.Values{"user_code": {started.code}, "command_id": {second}, "decision": {"approve"}, "fingerprint_tail": {tail}})
-	if reused.status != http.StatusBadRequest || h.codeState(started.code) != int(fleet.AuthorizationPending) {
+	if reused.status != http.StatusBadRequest || h.codeState(started.code) != int(fleet.AuthorizationPending) ||
+		strings.Contains(reused.text(), `data-page="activate-review"`) || !strings.Contains(reused.text(), "That form was already used") {
 		t.Fatalf("the second command with another tail: %d %s", reused.status, reused.text())
 	}
 	third := field(t, mismatch, commandPattern)
@@ -343,6 +346,11 @@ func TestOtherDecisionRefusalsShowNoReview(t *testing.T) {
 	}
 	if h.codeLookups(started.code) != 0 || h.codeState(started.code) != int(fleet.AuthorizationPending) {
 		t.Fatal("a refused decision looked the code up or changed it")
+	}
+	// The decision of the unreviewed code was counted as a wrong entry (E2's F7 resolution: a not_reviewed keeps its unit), so no
+	// read before the decision answered it for free; the malformed code cost nothing: a wrong code now leaves 3 of the 5.
+	if wrong := b.postForm("/activate/review", url.Values{"user_code": {"BCDF-GHJK"}}); !strings.Contains(wrong.text(), "You can try 3 more codes now") {
+		t.Fatalf("the entries after an unreviewed decision: %d %s", wrong.status, wrong.text())
 	}
 }
 
@@ -418,6 +426,13 @@ func TestTheFleetPagesKeepTheBrowserProtocol(t *testing.T) {
 		}
 		if reply := h.do(request{method: http.MethodPost, path: path, contentType: "application/json", body: []byte("{}"), cookie: b.cookie}); reply.status != http.StatusUnsupportedMediaType {
 			t.Errorf("media %s: %d", path, reply.status)
+		}
+	}
+	// A flow ID of another shape is refused by its own pattern before any call (upper case, braces, all zero).
+	for _, bad := range []string{strings.ToUpper(uuid(flow.flowID)), "{" + uuid(flow.flowID) + "}", "00000000-0000-0000-0000-000000000000"} {
+		reply := b.postForm("/connect/review", url.Values{"flow_id": {bad}})
+		if reply.status != http.StatusBadRequest || !strings.Contains(reply.text(), "This link is not complete") {
+			t.Errorf("flow_id %q: %d", bad, reply.status)
 		}
 	}
 	for _, path := range []string{"/connect", "/activate"} {
