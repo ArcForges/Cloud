@@ -2271,13 +2271,14 @@ test("the features the form lists are the development fixture catalogue, in the 
   assert(fixtureFeatures.includes(grantedFeature as never));
   assert.equal(grantedFeature, "remote.view");
   assert.equal(requestedDays, 1);
-  // The proof environment loads exactly this catalogue and the operations surface; production loads neither.
+  // The proof environment loads exactly this catalogue and the operations surface (with fleet since AF-CTR-04 E3); production loads
+  // neither.
   const wrangler = JSON.parse(readFileSync(path.join(root, "wrangler.json"), "utf8")) as {
     vars: Record<string, string>;
     env: { proof: { vars: Record<string, string> } };
   };
   assert.equal(wrangler.env.proof.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, "development-fixtures");
-  assert.equal(wrangler.env.proof.vars.FLAGSHIP_SURFACES, "identity,pages,operations");
+  assert.equal(wrangler.env.proof.vars.FLAGSHIP_SURFACES, "identity,pages,operations,fleet");
   assert.equal(wrangler.vars.FLAGSHIP_SURFACES, "");
   assert.equal(wrangler.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, undefined);
 });

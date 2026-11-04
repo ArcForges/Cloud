@@ -143,10 +143,10 @@ The interim page is the `operations` surface: `GET /operations/grant` (the form)
 checked and normalized exactly as a grant would, nothing written, with the step-up target) and `POST /operations/grant/confirm`
 (the grant). The script of the pages proves the passkey step-up for the review's target before the confirmation form is submitted.
 The surface needs `identity` and `pages`, exists only in official-hosted mode and is never a default. Of the checked-in environments
-only the acceptance environment enables it (`proof` carries `identity,pages,operations` and the development fixture catalogue,
+only the acceptance environment enables it (`proof` carries `identity,pages,operations,fleet` and the development fixture catalogue,
 **MOCKED**, illustrative); production carries no surface and no catalogue, and `tests/worker/center-config.test.ts` and
 `tests/worker/proof-deploy.test.ts` pin both. Where it is off, the Worker answers its plain 404 "Unknown API method." before anything is
-read, as for the pages surface (the center's own 404, where it did not compose the surface, carries the seven security headers); a signed-in account that is no operator (or whose account is not active) gets 403, audited as above. Every reply of the center carries the seven page security headers byte for byte, `Cache-Control: no-store,
+read, as for the pages surface (the center's own 404, where it did not compose the surface, carries the seven security headers); a signed-in account that is no operator (or whose account is not active) gets 403, audited as above. Every reply of the center's page handler carries the seven page security headers byte for byte, `Cache-Control: no-store,
 no-transform` included, and the Worker's page handler checks the surface of each route before anything else.
 
 ## The gate
@@ -228,12 +228,13 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
 1. **Production stays dark.** `curl -si https://arcforges.com/api/healthz` says `center.surfaces` is `none` and `revision` (or the
    `x-arcforges-worker-revision` header) is the merge commit (after the Container has
    rolled over, which takes several minutes after the deploy job: stop requesting for 60 to 90 seconds before reading it);
-   `ARCFORGES_CENTER_PLAN_CONFIGURATION` is unset in production; `/api/operations/grant` and `/api/account/sign-in` answer the Worker's
+   production's `wrangler.json` sets no `ARCFORGES_CENTER_PLAN_CONFIGURATION` (pinned by `tests/worker/center-config.test.ts`; no
+   `curl` shows it); `/api/operations/grant` and `/api/account/sign-in` answer the Worker's
    plain 404 "Unknown API method."; the migration gate applied `0003` to the production database (the gate's log shows it); no gated
    feature is reachable.
 2. **The acceptance database** (`arcforges_acceptance`) is migrated to version 3 with the pinned checksum above.
 3. **The surface is enabled on proof, by the change that rewrote this checklist.** The proof environment's `FLAGSHIP_SURFACES` is
-   `identity,pages,operations` (`wrangler.json`; the plan catalogue of proof was already `development-fixtures`, six capabilities and two
+   `identity,pages,operations` (`wrangler.json`; `identity,pages,operations,fleet` since AF-CTR-04 part E3; the plan catalogue of proof was already `development-fixtures`, six capabilities and two
    illustrative plans, **MOCKED**: no page shows a price). The pins that guard against enabling it by accident are
    `tests/worker/center-config.test.ts` (proof enables the surface and no other environment does), `tests/worker/proof-deploy.test.ts`,
    the dependency policy (`wrangler.json` is an input of it, bound in two places, with the successor receipt `af-ctr-03-r16`, its
@@ -241,7 +242,7 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
    `tests/worker/provenance.test.ts` and the entry of `eng/provenance/files.json`); changing it again takes the same set. **No
    `grant-operator` and no migration-role credential are needed:** the proof owner (the bootstrap owner) counts as operator through
    `identity.bootstrap`, so `identity.operator` stays empty. After the proof dispatch, `curl -si https://proof.arcforges.com/api/healthz`
-   says `center.surfaces` is `identity,pages,operations`, equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`
+   says `center.surfaces` is `identity,pages,operations,fleet` (since AF-CTR-04 part E3), equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`
    (which also records `planConfiguration` `development-fixtures`); a stale value after 90 seconds is diagnosed, not redeployed.
 4. **The page by `curl`**, before any browser: `curl -si https://proof.arcforges.com/api/operations/grant` is `303` to
    `/api/account/sign-in#return=%2Fapi%2Foperations%2Fgrant` with the seven page security headers (the Security headers paragraph of
