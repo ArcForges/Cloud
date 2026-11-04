@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package fleet is node enrollment (AF-CTR-04; ArcForges-Design AD-0021 sections 5, 10 and 13a): the enrolled nodes of an account
-// (fleet.node), the browser sign-in (signin.go), the one enrollment function both sign-in flows call (Enroll), the node's refresh,
+// (fleet.node), the browser sign-in (signin.go), the device-code sign-in (device.go), the one enrollment function both sign-in flows call (Enroll), the node's refresh,
 // report and sign-out, and the device revocation's cascade participant for nodes. Enrollment is an account and device operation and is never gated. The Connect
 // handlers (package fleetapi) and the pages call these functions in process, so the API and the pages share one set of rules,
 // buckets and audit events.
 //
-// One global lock order (cloud-1, SEC-12): a sign-in flow row (taken by the flow's own transaction, E1b and E2), identity.user,
+// One global lock order (cloud-1, SEC-12): a sign-in flow row (a browser flow, fleet.node_sign_in, or a device authorization,
+// fleet.device_authorization; taken by the flow's own transaction, E1b and E2), identity.user,
 // device.device, device.installation, the identity.session rows, fleet.node. It is device.Revoke's order (device, installation,
 // sessions, then the participants, so fleet.node last) with the flow row and the account in front. The writers of these rows that
 // lock more than one of them take them in this order:
@@ -23,8 +24,20 @@
 //     sessions. The foreign keys of the review mark, the approval and the denial take FOR KEY SHARE on the deciding account (and, for
 //     an approval, on its session) after the flow row; no writer that holds an account or a session FOR UPDATE then waits for a flow
 //     row, so they close no cycle.
+//   - The device-code sign-in (device.go): StartDeviceAuthorization locks the node ID's pending authorizations that present its key,
+//     in authorization ID order (the one order of every writer that locks several authorization rows), and inserts its
+//     authorization; LookupDeviceCode locks one authorization row (its review's foreign key then takes FOR KEY SHARE on the account);
+//     ApproveDeviceCode, after its command receipt row, locks the authorization row, then (approving) the account through
+//     identity.ConsumeEvidenceFor and the proved challenge, and its update's foreign keys take FOR KEY SHARE on the account and the
+//     approving session; PollDeviceAuthorization locks the authorization row and then calls Enroll, whose locks follow, or (a reuse)
+//     revokes the delivered family's sessions. Lookup and Approve give the entry budgets back (the platform.rate_limit rows, the
+//     account's then the network's) after every row of the order and before the audit chain head; every other user of those rows locks
+//     one in its own transaction. No writer locks a device authorization and then a browser flow; only the account participants
+//     lock both, the browser flows first.
 //   - ReportNodeInfo locks the device only when it renames it, then the installation, then the node row.
 //   - RefreshNodeSession locks the session row (session.Refresh), then updates the node row.
+//   - RevokeAllSessions and RemoveAuthIdentity run the account participants first: ApprovalParticipant locks the account's browser
+//     flows, then DeviceApprovalParticipant its device authorizations (each in ID order), before the evidence locks the account.
 //   - The account's step-up evidence path (identity.ConsumeEvidence: RevokeSession of another session, RevokeAllSessions,
 //     RemoveAuthIdentity, DeviceService.Revoke of another device) locks the account first; device.Revoke then takes the device,
 //     installations, sessions and, through the participant, the node rows.

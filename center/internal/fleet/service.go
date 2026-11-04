@@ -36,7 +36,12 @@ func (noEvents) ObserveFleet(string, string) {}
 // held), counts one bucket in its own short transaction (the per-session bucket for a current token, the prefix failure bucket for a
 // token that names nothing; a spent token counts in neither, so its reuse always runs), then rotates in one transaction that also
 // marks the node seen and reads the published keys. ReportNodeInfo counts its installation's bucket, then runs under its command
-// receipt. SignOutNode runs under its command receipt.
+// receipt. SignOutNode runs under its command receipt. The device-code sign-in's transactions: StartDeviceAuthorization counts its
+// buckets (own short transactions) and inserts (with the supersession) in one transaction; LookupDeviceCode reserves its entry (two
+// short transactions) and reviews in one auxiliary transaction that gives the entry back; ApproveDeviceCode counts its decision,
+// reserves its entry and decides in its receipt's transaction (a refusal of a reviewed code gives the entry back in a transaction of
+// its own); PollDeviceAuthorization reads the authorization (no transaction held), counts a bucket, then records the poll (auxiliary)
+// or delivers or records the reuse (an effect) in one transaction.
 type Service struct {
 	// attempts bounds the refresh rotation's retries (Options.RefreshAttempts), signInAttempts the sign-in transactions'.
 	attempts       int
@@ -49,6 +54,8 @@ type Service struct {
 	logger         *slog.Logger
 	// publicBaseURL is the center's public base URL: the base of the URLs it derives for a node and the audience of a node key proof.
 	publicBaseURL string
+	// userCodes draws a device authorization's user code (NewUserCode; the package's collision test replaces it).
+	userCodes func() string
 }
 
 // Options configure a Service.
@@ -73,6 +80,7 @@ type Options struct {
 func New(options Options) *Service {
 	service := &Service{attempts: options.RefreshAttempts, db: options.DB, policy: options.Policy, limits: ratelimit.New(options.DB), clock: options.Clock, events: options.Events,
 		logger: options.Logger, publicBaseURL: options.PublicBaseURL, signInAttempts: options.SignInAttempts}
+	service.userCodes = NewUserCode
 	if service.clock == nil {
 		service.clock = time.Now
 	}

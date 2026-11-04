@@ -277,8 +277,9 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	participants := append([]device.Participant{fleet.NodeParticipant{}}, options.Participants...)
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: sender, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: participants,
-		// The approvals of the node sign-in are cancelled by the account's remediations wherever identity runs (protocol-6).
-		AccountParticipants: []identity.AccountParticipant{fleet.ApprovalParticipant{}}})
+		// The approvals of the node sign-in are cancelled by the account's remediations wherever identity runs (protocol-6): the browser
+		// flows first, then the device authorizations (the registration order is the lock order between the two tables).
+		AccountParticipants: []identity.AccountParticipant{fleet.ApprovalParticipant{}, fleet.DeviceApprovalParticipant{}}})
 	c.drain = service.Drain
 	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)

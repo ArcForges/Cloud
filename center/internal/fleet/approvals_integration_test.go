@@ -23,7 +23,7 @@ import (
 // identityService is the identity service with the fleet's account participant, as server.New composes it.
 func (s *signIns) identityService() *identity.Service {
 	return identity.New(identity.Options{DB: s.db.Runtime, Policy: s.policy, Clock: s.clock.Now,
-		AccountParticipants: []identity.AccountParticipant{ApprovalParticipant{}}})
+		AccountParticipants: []identity.AccountParticipant{ApprovalParticipant{}, DeviceApprovalParticipant{}}})
 }
 
 // revokeAllSessions is RevokeAllSessions from the approving session itself, with its step-up evidence seeded (prove), in the order
