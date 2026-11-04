@@ -102,11 +102,12 @@ func TestTheNetworkRefusalGivesTheAccountReservationBack(t *testing.T) {
 // (STATE/expired), a code in another state (STATE/invalid_state: a lookup of a code this account denied, a second approval of its
 // APPROVED code), the decision of a code this account did not review, also one another account reviewed (STATE/invalid_state
 // not_reviewed: the deliberate override of protocol-9 corrected fix item 3), and a code another account decided
-// (VALIDATION/code_invalid) each keep the account's unit, with the exact refusal; a step-up refusal of a reviewed code gives it back.
-// The account's budget is 7 here, so the six kept units and one more wrong entry spend it exactly.
+// (VALIDATION/code_invalid) each keep the account's unit, with the exact refusal, also a decision naming the expired code; a step-up
+// refusal of a reviewed code gives it back. The account's budget is 8 here, so the seven kept units and one more wrong entry spend it
+// exactly.
 func TestExpiredOtherStateAndUnreviewedEntriesCountAgainstTheBudget(t *testing.T) {
 	s := newSignIns(t)
-	s.policy.DeviceEntryPerAccount.Limit = 7
+	s.policy.DeviceEntryPerAccount.Limit = 8
 	s.renew()
 	other, otherSession := s.account(1)
 	expired := s.mustStart(s.newNode())
@@ -141,6 +142,7 @@ func TestExpiredOtherStateAndUnreviewedEntriesCountAgainstTheBudget(t *testing.T
 		enter      func() error
 	}{
 		{"expired", "STATE/expired", func() error { _, err := s.lookup(s.user, s.approver, expired.started.UserCode); return err }},
+		{"expired, decided", "STATE/expired", func() error { return s.decide(s.user, s.approver, expired.started.UserCode, false) }},
 		{"decided elsewhere", "VALIDATION/code_invalid", func() error { _, err := s.lookup(s.user, s.approver, approvedByOther.started.UserCode); return err }},
 		{"reviewed elsewhere", "STATE/invalid_state device_authorization/not_reviewed", func() error {
 			return s.decide(s.user, s.approver, reviewedByOther.started.UserCode, false)
@@ -169,15 +171,15 @@ func TestExpiredOtherStateAndUnreviewedEntriesCountAgainstTheBudget(t *testing.T
 	if s.authorizationState(approvedByMe) != AuthorizationApproved || s.authorizationState(deniedByMe) != AuthorizationDenied {
 		t.Fatal("a refused entry changed this account's own authorizations")
 	}
-	// Six kept units and none for the step-up refusal: the seventh wrong entry leaves 0.
+	// Seven kept units and none for the step-up refusal: the eighth wrong entry leaves 0.
 	if _, _, available := limitOf(func() error { _, err := s.lookup(s.user, s.approver, unknownCode); return err }()); available != 0 {
-		t.Fatalf("the seventh wrong entry leaves %d", available)
+		t.Fatalf("the eighth wrong entry leaves %d", available)
 	}
 }
 
 // TestTheSixthLookupOfALiveCodeIsRefusedAndTheAuthorizationStaysPending (C0 Q8): five lookups of one live code are admitted (also the
-// same account's again); the sixth and later are VALIDATION/code_invalid naming device_code_lookups with available 0, nothing is
-// written, the authorization stays PENDING (the node keeps polling PENDING), and an approval by an account whose review was displaced
+// same account's again); the sixth and later are VALIDATION/code_invalid naming device_code_lookups with available 0, each keeps the
+// account's entry unit (F7), nothing else is written, the authorization stays PENDING (the node keeps polling PENDING), and an approval by an account whose review was displaced
 // is not_reviewed. The fifth lookup is audited once.
 func TestTheSixthLookupOfALiveCodeIsRefusedAndTheAuthorizationStaysPending(t *testing.T) {
 	s := newSignIns(t)
@@ -194,9 +196,13 @@ func TestTheSixthLookupOfALiveCodeIsRefusedAndTheAuthorizationStaysPending(t *te
 	}
 	before := s.authorizationSnapshot(a)
 	for i := range 2 {
+		count := s.entryCount(s.user)
 		_, err := s.lookup(s.user, s.approver, a.started.UserCode)
 		if name, maximum, available := limitOf(err); key(err) != "VALIDATION/code_invalid" || name != "device_code_lookups" || maximum != 5 || available != 0 {
 			t.Fatalf("lookup %d: %s %s %d %d", 6+i, key(err), name, maximum, available)
+		}
+		if kept := s.entryCount(s.user); kept != count+1 {
+			t.Fatalf("lookup %d kept no unit: %d -> %d", 6+i, count, kept)
 		}
 	}
 	if s.authorizationSnapshot(a) != before || s.authorizationState(a) != AuthorizationPending ||

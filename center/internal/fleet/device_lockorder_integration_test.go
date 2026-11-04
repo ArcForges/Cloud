@@ -571,6 +571,46 @@ func TestConcurrentLookupsOfTwoCodesByOneAccountNeverDeadlock(t *testing.T) {
 	}
 }
 
+// TestAnApprovalAndALookupOfOneAccountNeverDeadlock (N-1 of the confirmation review): an approval of code A (looked up and proved
+// beforehand) released together with a lookup of code B by the same account, 50 rounds, every transaction with one attempt: the two
+// writers of the account's entry bucket take the account before the bucket, so neither deadlocks and both succeed.
+func TestAnApprovalAndALookupOfOneAccountNeverDeadlock(t *testing.T) {
+	s := newSignIns(t)
+	s.wide()
+	s.watchDeadlocks(t)
+	for round := range rounds {
+		approved, looked := s.mustStart(s.newNode()), s.mustStart(s.newNode())
+		if _, err := s.lookup(s.user, s.approver, approved.started.UserCode); err != nil {
+			t.Fatal(err)
+		}
+		s.proveCode(s.user, s.approver, approved.started.UserCode)
+		var start, done sync.WaitGroup
+		start.Add(1)
+		done.Add(2)
+		errs := make([]error, 2)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			errs[0] = s.decide(s.user, s.approver, approved.started.UserCode, true)
+		}()
+		go func() {
+			defer done.Done()
+			start.Wait()
+			_, errs[1] = s.lookup(s.user, s.approver, looked.started.UserCode)
+		}()
+		start.Done()
+		done.Wait()
+		for i, err := range errs {
+			if deadlocked(err) || err != nil {
+				t.Fatalf("round %d: %s: %s", round, []string{"the approval", "the lookup"}[i], key(err))
+			}
+		}
+		if s.authorizationState(approved) != AuthorizationApproved || s.authorizationState(looked) != AuthorizationPending {
+			t.Fatalf("round %d: the approval or the lookup did not hold", round)
+		}
+	}
+}
+
 // TestConcurrentStartsOfOneNodeNeverDeadlock (c.1, security F-3): four Starts of one node and key, released together while two
 // PENDING authorizations of it exist; 50 rounds, every transaction with one attempt: never a deadlock, one PENDING authorization left.
 func TestConcurrentStartsOfOneNodeNeverDeadlock(t *testing.T) {
