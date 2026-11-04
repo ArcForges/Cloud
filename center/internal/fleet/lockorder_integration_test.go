@@ -29,12 +29,15 @@ func deadlocked(err error) bool {
 	return errors.As(err, &failure) && failure.SQLState == "40P01" || errors.As(err, &pgError) && pgError.Code == "40P01"
 }
 
-// waitBlocked waits until a backend waits for a lock (pg_locks, which every role may read), and fails the test after five seconds.
+// waitBlocked waits until a backend of the test's own database waits for a lock, and fails the test after five seconds. pg_locks and
+// the pid and datname of pg_stat_activity are readable by every role; pg_locks covers the whole cluster, so a lock wait of another
+// package's test (go test runs packages in parallel against one server) must not count.
 func (r *rig) waitBlocked(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if r.count("SELECT count(*) FROM pg_locks WHERE NOT granted") > 0 {
+		if r.count(`SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+WHERE NOT l.granted AND a.datname = current_database()`) > 0 {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
