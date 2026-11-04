@@ -2,8 +2,8 @@
 
 AF-CTR-04 connects an ArcForges node to an account on a center: a person approves the node's sign-in in a browser (PKCE loopback) or
 with a device code, and the node then holds a node credential that it refreshes and can sign out. This page describes what the center
-serves for it. Part E1a (this state) serves the node's refresh, report and sign-out and holds the enrollment function both sign-in
-flows call; the browser sign-in (part E1b), the device-code sign-in (part E2) and the pages `/connect` and `/activate` (part E3)
+serves for it. Parts E1a and E1b (this state) serve the browser sign-in, the node's refresh, report and sign-out, and hold the
+enrollment function both sign-in flows call; the device-code sign-in (part E2) and the pages `/connect` and `/activate` (part E3)
 follow. The node side is the ArcForges CloudLink (parts N1 and N2).
 
 Enrollment is an account and device operation and is never gated (AD-0021 section 13a): every fleet row of the operation table has
@@ -16,20 +16,27 @@ The methods belong to the switchable surface `fleet`. It needs `identity` and `p
 known name from part E1a, and it is enabled nowhere yet: production `FLAGSHIP_SURFACES` stays `""`, the acceptance environment keeps
 `identity,pages,operations` until part E3's hosted run, and the self-hosted default stays `identity,pages` until the pages exist
 (`TestTheFleetSurfaceNeedsIdentityAndPagesAndIsNoDefaultYet`). With the surface off, every fleet method answers `STATE/not_activated`
-with `state.reason` `fleet`, from the Worker's generated reply before anything else is read, and from the center. The three methods' Worker budget is the contract's 10 s deadline. A self-hosted center whose base URL cannot be a WebAuthn relying
+with `state.reason` `fleet`, from the Worker's generated reply before anything else is read, and from the center. Each method's Worker
+budget is the contract's deadline: 5 s for GetNodeSignInFlow, 15 s for CompleteNodeSignIn, 10 s for the others. A center that serves
+`fleet` needs a public base URL of at most 462 characters (it refuses to start otherwise), so every URL it derives for a node stays
+within the contract's 512 (`TestTheFleetSurfaceRefusesABaseURLTooLongForItsURLs`). A self-hosted center whose base URL cannot be a WebAuthn relying
 party clears the default surfaces and serves none (`TestASelfHostedCenterOnAnAddressServesNoSurface`); a list that names a surface
 refuses to start there.
 
 ## Served methods
 
-| Method                                   | Operation ID               | Risk | Credential                | Restricted account's node | Receipt                        |
-| ---------------------------------------- | -------------------------- | ---- | ------------------------- | ------------------------- | ------------------------------ |
-| NodeEnrollmentService.RefreshNodeSession | `fleet.refreshNodeSession` | R1   | anonymous (refresh token) | allowed                   | never                          |
-| NodeEnrollmentService.ReportNodeInfo     | `fleet.reportNodeInfo`     | R1   | node credential           | refused                   | yes (`node:<installation id>`) |
-| NodeEnrollmentService.SignOutNode        | `fleet.signOutNode`        | R2   | node credential           | allowed                   | yes (`node:<installation id>`) |
+| Method                                   | Operation ID               | Risk | Credential                          | Restricted account's node | Receipt                                       |
+| ---------------------------------------- | -------------------------- | ---- | ----------------------------------- | ------------------------- | --------------------------------------------- |
+| NodeEnrollmentService.BeginNodeSignIn    | `fleet.beginNodeSignIn`    | R1   | anonymous                           | (no credential)           | never (`meta.command_id` is correlation only) |
+| NodeEnrollmentService.GetNodeSignInFlow  | `fleet.getNodeSignInFlow`  | R2   | account session                     | refused (the account)     | never (a mark)                                |
+| NodeEnrollmentService.ApproveNodeSignIn  | `fleet.approveNodeSignIn`  | R3   | account session, step-up to approve | refused (the account)     | never (the reply holds the code)              |
+| NodeEnrollmentService.CompleteNodeSignIn | `fleet.completeNodeSignIn` | R1   | anonymous (the flow-bound proof)    | (no credential)           | never (a one-use code)                        |
+| NodeEnrollmentService.RefreshNodeSession | `fleet.refreshNodeSession` | R1   | anonymous (refresh token)           | allowed                   | never                                         |
+| NodeEnrollmentService.ReportNodeInfo     | `fleet.reportNodeInfo`     | R1   | node credential                     | refused                   | yes (`node:<installation id>`)                |
+| NodeEnrollmentService.SignOutNode        | `fleet.signOutNode`        | R2   | node credential                     | allowed                   | yes (`node:<installation id>`)                |
 
 con-07 names no fleet operation, so the IDs are the center's own (`fleet.<method>`). Every other `NodeEnrollmentService` method stays
-unregistered (`UNIMPLEMENTED`, no Worker row): the browser and device-code sign-in methods until parts E1b and E2, and the phone
+unregistered (`UNIMPLEMENTED`, no Worker row): the device-code sign-in methods until part E2, and the phone
 pairing, certificate, LAN, entitlement-token, entitlement-key and support-upload methods of later tasks. `GetEntitlementKeys` is not
 used to deliver the center's keys: a node needs the next key at every refresh without a second round trip, and that method is
 anonymous.
@@ -38,6 +45,90 @@ An AGENT row of the operation table names the exact credential scopes it admits:
 An account or `mobile.limited` session is refused with `AUTHORIZATION/permission_denied` and audited `access.refused` with the reason
 `principal`; an `automation` or `push` credential with the reason `scope` (`TestScopeMatrixOverFleetRows`). The reply is always
 `state.state` `operation`, `state.reason` the operation ID; `restricted`, `scope` and `principal` are audit reasons only.
+
+## Browser sign-in
+
+The node starts a flow, an account reviews and decides it in a browser, and the node completes it with what the browser brought to its
+loopback receiver (CTR4-FLW-01..08 as amended by the plan review's protocol-1, protocol-4 and protocol-6 and by the C0 comments of
+`fleet.proto`). A caller that holds only the flow ID can neither revoke a node nor end an approved flow.
+
+**Begin** (anonymous). The request is checked field by field before anything is counted: `code_challenge` (43 characters of
+`[A-Za-z0-9_-]`; S256 is the only method), `redirect_uri` (byte for byte `http://127.0.0.1:<port>/callback` or
+`http://[::1]:<port>/callback`, `<port>` a decimal 1024..65535 without a leading zero; anything else is `not_admitted`), the node's
+description (name, OS, architecture, SemVer version, role), `state` (16 to 128 characters of `[A-Za-z0-9._~-]`) and
+`node_public_key` (the 91-byte PKIX DER of a P-256 key). Then the client network's and the node ID's buckets are counted, and a key
+that an installation holds or held is refused before approval with `CONFLICT/already_exists` (`state.state` `node_key`,
+`state.reason` `already_registered`); the node replaces its key once and starts again (a sign-in after a sign-out therefore brings a
+new key). A newer Begin of the same node ID and the same key expires the node's PENDING flows; a Begin of the node ID with another key
+leaves them alone. The flow lives 10 minutes; `authorize_url` is `<public base URL>/connect#flow=<flow ID>`, the flow ID in its
+lower-case 8-4-4-4-12 form of the 16 bytes in order, which the node derives itself and requires to match. `meta.command_id` is
+correlation only: every call starts a new flow. `RESOURCE/kill_switch_active` is not produced in AF-CTR-04 (no kill switch exists).
+The country and network of the request (`begin_country`, `begin_asn`) are not recorded until part E3, which shows them.
+
+**Review** (account session; `mobile.limited` upgrades first; a restricted account is refused). Reviewing a PENDING flow records the
+reviewing account and time; the latest review wins, so an account whose review another account displaced gets `not_reviewed` when it
+decides. Any other flow is shown with its state and records nothing; an unknown flow and a flow another account decided are
+`STATE/not_found` alike, an expired one `STATE/expired`.
+
+**Decision** (account session). Only a flow this account reviewed within the last 10 minutes can be decided (`STATE/invalid_state`
+reason `not_reviewed`; with the flow's 10-minute life every review of a live flow is younger, so this is the contract's guard). An
+approval needs a proved step-up (passkey or e-mail code) of class `fleet.approveNodeSignIn` bound to the flow ID, consumed in the
+approval's transaction; a denial needs none. While the flow is APPROVED and its code unredeemed, the approving account may deny it, or
+approve it again, which replaces the code. An approval checks the node cap early (`RESOURCE/quota_exceeded`, `max_nodes_per_account`;
+Enroll enforces it), stores the approving session, its authentication method and time and its epochs, and draws a one-use code
+(32 random bytes in 43 base64url characters, stored only as the SHA-256 of the bytes) that lives `nodeCodeLifetime` (2 minutes) and
+never past the flow. The reply is the redirect `<stored redirect_uri>?code=<code>&state=<state>` (a denial:
+`?error=access_denied&state=<state>`); the center never takes a redirect target from the request. An absent `approve` is refused
+(`approve: required`): a decision names itself.
+
+**Completion** (anonymous). The shape of `flow_id`, `code_verifier` and `node_key_proof` is checked first (`VALIDATION/
+invalid_argument`); a malformed code is a failed proof like a wrong one. Then, in this order: an unknown flow is `STATE/not_found`; a
+PENDING or APPROVED flow past its expiry, or an APPROVED flow whose code expired, is `STATE/expired` (a correct code presented after
+its lifetime consumes nothing and leaves the flow APPROVED); the presented code is compared with the flow's digest in constant time,
+against a fixed dummy when the flow has none, and any mismatch, in every state, is `AUTHENTICATION/unauthenticated` with nothing
+written, so the flow's state is never visible to a caller who does not hold the code. With the matching code: a DENIED flow is
+`unauthenticated`, an EXPIRED one (superseded, or an approval that lapsed) `STATE/expired`, a REVOKED one `CONFLICT/code_reused`. On an
+APPROVED flow the PKCE verifier (`BASE64URL(SHA-256(verifier)) = code_challenge`) and the node key proof are verified outside any
+transaction: ES256 in IEEE P1363 form, 64 bytes, r and s in [1, n-1], low-S (a high-S proof is refused), over `"ArcForges
+node-key-proof v1\n" || 0x01 || SHA-256(public base URL) || node ID || flow ID || code`. The audience is the center's own public base
+URL, never a request's host: a self-hosted center's `ARCFORGES_CENTER_PUBLIC_BASE_URL` must equal the URL its nodes are configured
+with, or every sign-in answers `unauthenticated`. One transaction then locks the flow row and decides again under the lock:
+
+- both proofs held: `fleet.Enroll` runs in this transaction and the flow becomes COMPLETED with its session and enrollment (written
+  before `fleet.node.enrolled`, the transaction's last statement); the reply is the node credential (`NodeCredentials`: tokens, the
+  access lifetime, the family's absolute end, the installation, the account's ID, display name and masked e-mail address, the
+  published keys; no entitlement token);
+- a failed verifier or key proof: the flow becomes REVOKED with its code redeemed (the code may have been intercepted), audited
+  `fleet.node_sign_in.verifier_failed`, and the reply is `unauthenticated` like any failed proof;
+- the matching code on a COMPLETED flow is a reuse: the flow becomes REVOKED and the credential family it delivered is revoked
+  (session revoke reason 8), audited `fleet.node_sign_in.code_reused` once; the reply is `CONFLICT/code_reused`. The loser of two
+  concurrent presentations of the correct code takes this path and revokes the winner's credentials, so a node never resends a
+  Complete whose body was sent;
+- an approval that lapsed (`fleet.ErrApprovalLapsed`: the approving session revoked by the account, by revoking all sessions, with
+  its device or by an operator, an epoch moved, or the account not Active) ends the flow EXPIRED in the same transaction (Enroll rolled
+  its savepoint back), audited `fleet.node_sign_in.approval_lapsed`, and answers `STATE/expired`;
+- any other refusal of Enroll (`already_exists` for the node ID or the key, `credential_revoked`, `quota_exceeded`, `node.os:
+mismatch`) rolls everything back: the flow stays APPROVED with its code unredeemed and the identical retry answers the same rule.
+
+A store failure leaves the code unredeemed (`RESOURCE/overloaded`, and the identical retry succeeds); an unanswered commit of the
+completion is `INTERNAL/internal` (effect `UNKNOWN`, retry `NEVER`) and the node signs in again.
+
+**Approvals end with the account's remediation.** RevokeAllSessions and RemoveAuthIdentity first deny the account's APPROVED flows
+(an APPROVED flow's code is always unredeemed), in their own transaction and before their step-up evidence locks the account, and
+count them in `identity.sessions.revoked_all` and `identity.credential.removed` (`participants`, `fleet.node_sign_in`). "Sign out all
+other sessions" from the approving session revokes neither that session nor its epoch, so this is what ends its pending approvals;
+the other remediations (a revocation of the approving session by another session, a credential removal, a device revocation, an
+operator's revocation, a suspension) also lapse the approval in Enroll. A step-up refusal rolls the cancellation back. An approval by
+the remediating session itself that commits after the cancellation stands (it is the user's own act); an enrolled node is removed by
+revoking its device.
+
+**Buckets.** `node_flow_prefix` (10 per 10 minutes per client network) and `node_flow_node` (10 per 10 minutes per node ID; C0 "rate
+limited per IP and per node ID") count every Begin past its validation; `node_complete_prefix` (30 per 10 minutes per client network)
+counts only the Completes that name no flow or present no matching code, so a full bucket refuses junk and never a matching code;
+`node_approve_account` (20 per hour per account) counts approvals and denials. Malformed requests cost no budget. Each limit and window
+is a policy key (`nodeFlowPrefixLimit`/`Window`, `nodeFlowNodeLimit`/`Window`, `nodeCompletePrefixLimit`/`Window`,
+`nodeApproveAccountLimit`/`Window`; counts 1..10000, windows 1m..24h; `nodeCodeLifetime` 30s..10m). The flow lifetime and the review
+window are the contract's 10 minutes and no keys.
 
 ## Node credentials
 
@@ -95,8 +186,8 @@ methods answer `AUTHENTICATION/unauthenticated` when the credential's installati
 
 ## Enrollment
 
-`fleet.Enroll` is the one function both sign-in flows will call in their success transaction (parts E1b and E2); until then it is
-exercised by SEEDED function-level tests that call it directly. Its rules, in the order the code applies them:
+`fleet.Enroll` is the one function both sign-in flows call in their success transaction: CompleteNodeSignIn since part E1b, part E2's
+device poll later; its own rules are also exercised by SEEDED function-level tests that call it directly. Its rules, in the order the code applies them:
 
 1. The approving account is locked and must be Active (else the approval lapses).
 2. A node ID live in another account is `CONFLICT/already_exists` (`state.state` `node`, no resource).
@@ -120,9 +211,10 @@ nothing of the enrollment remains even when the caller then commits (as a flow t
 session, superseded session or key (`TestNothingOfARefusedEnrollmentRemains`). The node session it issues gets the node lifetimes;
 `fleet.node.enrolled` (node ID, OS, architecture, canonical version, key fingerprint, flow `pkce` or `device`, `first` or
 `reenrolled`, key version) is its last statement. A concurrent enrollment of the same node ID or key is store contention, and the
-identical retry answers the rule that then applies. The sign-in methods will refuse a key an installation holds or held before
-approval (parts E1b and E2), so a sign-in after a sign-out will replace the node key, and an in-place re-enrollment will normally
-arrive with a new key.
+identical retry answers the rule that then applies. BeginNodeSignIn (and part E2's StartDeviceAuthorization) refuses a key an
+installation holds or held before approval, so a sign-in after a sign-out replaces the node key, and an in-place re-enrollment
+normally arrives with a new key. A caller may record its result in Enroll's transaction before `fleet.node.enrolled`
+(`EnrollRequest.Record`: the browser sign-in's COMPLETED flow).
 
 **Node names and versions.** A node name is 1 to 64 UTF-16 units of letters, marks, numbers, punctuation, symbols and the single
 space, without a leading, trailing or doubled space, at most three combining marks in a row, no braille blank and at least one
@@ -141,6 +233,17 @@ take them in this order:
 - Enroll: the account, then for a node live in the account its device (re-checking that it is not revoked) and installation, then
   the approving session `FOR SHARE`, then the supersession of the installation's sessions, then the node row (locked and re-read);
   new rows are inserted after the locks, and their only waits are unique-index waits.
+- BeginNodeSignIn: the node ID's PENDING flows that present its key, in flow ID order (the one order of every writer that locks several
+  flow rows), then its insert.
+- GetNodeSignInFlow: one PENDING flow row (its review mark). ApproveNodeSignIn: the flow row, then (approving) the account through
+  the step-up evidence and the proved challenge. CompleteNodeSignIn: the flow row, then Enroll's locks (the account, the device and
+  installation, the approving session `FOR SHARE`, the superseded sessions, the node row); a reuse: the flow row, then the delivered
+  family's sessions. The foreign keys of the review mark, the approval and the denial take `FOR KEY SHARE` on the deciding account
+  (and, for an approval, on its session) after the flow row; no writer that holds an account or a session `FOR UPDATE` then waits for
+  a flow row, so they close no cycle.
+- RevokeAllSessions and RemoveAuthIdentity: the account's APPROVED flows and the PENDING flows it reviewed last, in flow ID order (the
+  approval participants, `fleet.node_sign_in` first and part E2's `fleet.device_authorization` after it), then the account through
+  the step-up evidence.
 - ReportNodeInfo: the device only when it renames it, then the installation, then the node row.
 - RefreshNodeSession: its session, then the node row.
 - The account's step-up evidence path (RevokeSession of another session, RevokeAllSessions, RemoveAuthIdentity, DeviceService.Revoke
@@ -173,6 +276,7 @@ ReportNodeInfo retry it as store contention (default attempts; Enroll's sign-in 
 failure, and the operator runs it again. Reordering the statement is routed to a later Cloud change of the device package. In every
 transaction a command receipt is the first row written and the audit chain head the last.
 
+`TestCompleteTakesItsLocksInTheGlobalOrder`, `TestApproveTakesTheFlowBeforeTheAccount`, `TestTheApprovalHookTakesTheFlowsBeforeTheAccount`,
 `TestEnrollTakesItsLocksInTheGlobalOrder`, `TestReportNodeInfoAndRevokeNeverDeadlock` and
 `TestOperatorRevocationTakesTheAccountLocksFirst` hold one row at a time and check which rows the waiting transaction already holds;
 `TestAnOSMismatchIsRefusedBeforeTheDeviceLock` holds the node's device and expects the OS refusal at once. In the race tests
@@ -223,12 +327,28 @@ estimate of 3 MB with its indexes), removed at the family's absolute end by AF-P
 ## Metrics, audit and transactions
 
 `arcforges_center_fleet_events_total{event,outcome}` counts closed pairs (`refresh` rotated, reused, refused, rate_limited; `report`
-changed, unchanged, rate_limited; `sign_out` signed_out; `enroll` outcomes once the sign-in methods call it); any other pair is counted as `unlisted`, and the fleet integration harness fails
-a test after which the composed center counted one. Audit events: `fleet.node.enrolled`,
-`fleet.node.info_reported`, `fleet.node.signed_out`, `fleet.signing_key.registered`, `fleet.signing_key.retired`, `device.revoked`
-(with the participant count), `identity.session.refresh_reused` (with the scope), `access.refused`, `identity.rate_limited`; no
-payload holds a token, code, address or e-mail. Transactions per request: RefreshNodeSession one lookup (no transaction held), one
-bucket count, one rotation; ReportNodeInfo one bucket count and one receipt transaction; SignOutNode one receipt transaction.
+changed, unchanged, rate_limited; `sign_out` signed_out; `enroll` first, reenrolled, node_conflict, key_registered, key_retired,
+quota, lapsed; `begin` started, refused, rate_limited; `review` reviewed, shown, refused; `approve` approved, reissued, denied,
+refused, rate_limited; `complete` completed, refused, reused, proof_failed, lapsed, rate_limited); any other pair is counted as
+`unlisted`, and the fleet integration harness fails a test after which the composed center counted one. Audit events:
+`fleet.node.enrolled`, `fleet.node_sign_in.approved`, `.code_reissued`, `.denied`, `.verifier_failed`, `.code_reused`,
+`.approval_lapsed`, `fleet.node.info_reported`, `fleet.node.signed_out`, `fleet.signing_key.registered`, `fleet.signing_key.retired`,
+`device.revoked` (with the participant count), `identity.session.refresh_reused` (with the scope), `identity.sessions.revoked_all` and
+`identity.credential.removed` (with the cancelled approvals), `access.refused`, `identity.rate_limited`; no payload holds a token,
+code, verifier, proof, address or e-mail. Transactions per request: BeginNodeSignIn its bucket counts, one read of the key's holder (no
+transaction held) and one effect transaction (the supersession and the insert); GetNodeSignInFlow one auxiliary transaction (the
+review mark); ApproveNodeSignIn one bucket count and one effect transaction (the evidence, the decision, its audit);
+CompleteNodeSignIn one read (no transaction held), the failure bucket's count only for a mismatch, then one effect transaction (the
+completion, a reuse or a lapse) or one auxiliary transaction (the failure marker), with no transaction open while PKCE or ES256 is
+verified; RefreshNodeSession one lookup (no transaction held), one bucket count, one rotation; ReportNodeInfo one bucket count and one
+receipt transaction; SignOutNode one receipt transaction.
+
+**Exchange captures.** `TestFleetExchangeCapture` records the node-facing exchanges (Begin, Complete, Refresh, ReportNodeInfo,
+SignOutNode, each with its success and its refusals) as the binary gRPC-Web frames on the wire, normalized (fixed placeholders for
+the correlation and flow IDs, tokens, the code, the proof and every instant as an offset), in
+`center/internal/fleetapi/testdata/exchanges`; it fails when a fresh capture differs and rewrites the directory with
+`ARCFORGES_UPDATE_EXCHANGES=1` (`ARCFORGES_CENTER_COMMIT` names the commit in the headers; `npx prettier --write` formats the files, and the comparison reads them as JSON). The ArcForges node's FakeCenter is
+checked against a verbatim copy (parts N1 and N2).
 
 ## Residual risks
 
@@ -239,3 +359,10 @@ bucket count, one rotation; ReportNodeInfo one bucket count and one receipt tran
 - The prefix buckets are per /24 or /56: a co-tenant can spend the failure bucket of a network, which delays only tokens that name
   nothing.
 - Unsalted digests (client prefixes in rate-limit keys) are reversible by trying values within their short lives.
+- A flow ID is not a secret (it is in the URL the node opens): any account that holds it may review a PENDING flow, displacing an
+  earlier review, and deny it; the node then starts again. It can neither revoke a node nor end an APPROVED flow.
+- A party that knows a node ID can spend that node ID's Begin bucket and delay the node's next sign-in by one window.
+- A completed or revoked flow is decided by its state and its code with no time limit, and the approval's redirect
+  (`http://127.0.0.1:<port>/callback?code=...`) stays in the browser's history: a later presentation of that code revokes the node's
+  credential family until AF-PLAT-01's sweep removes the row (flow rows: 7 days after their end).
+- A user who approves a convincing request for an attacker's node lets it in; the remedy afterwards is revoking its device.

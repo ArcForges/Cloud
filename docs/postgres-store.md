@@ -186,7 +186,8 @@ described in [center fleet](center-fleet.md). The runtime role has SELECT, INSER
   node ID is live in at most one row (`node_live_node_id`), a revoked row is history (`revoke_reason` 1: the device was revoked).
   `version` is SemVer 2.0.0 without build metadata; `os` is the OsFamily number (1 windows, 2 linux), which the device platform maps
   by name (`device.device.platform` 1 and 3).
-- `fleet.node_sign_in` (browser sign-in flows, written from part E1b) and `fleet.device_authorization` (device-code authorizations,
+- `fleet.node_sign_in` (browser sign-in flows, written by BeginNodeSignIn, GetNodeSignInFlow, ApproveNodeSignIn, CompleteNodeSignIn
+  and the account's remediations, [center fleet](center-fleet.md#browser-sign-in)) and `fleet.device_authorization` (device-code authorizations,
   written from part E2): the node as it described itself (91-byte key), the approval with the approving session and its epochs, the
   code digests and the result. There is no per-flow attempt counter; an authorization counts at most five lookups of its user code. A
   terminal row is final (a trigger refuses every change) except COMPLETED to REVOKED once, and an authorization's reuse mark once.

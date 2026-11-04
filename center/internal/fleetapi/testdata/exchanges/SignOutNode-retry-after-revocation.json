@@ -7,9 +7,7 @@
   "case": "retry-after-revocation",
   "request": {
     "contentType": "application/grpc-web+proto",
-    "frames": [
-      "00000000160a140a120a1004040404040404040404040404040404"
-    ]
+    "frames": ["00000000160a140a120a1004040404040404040404040404040404"]
   },
   "reply": {
     "contentType": "application/grpc-web+proto",
