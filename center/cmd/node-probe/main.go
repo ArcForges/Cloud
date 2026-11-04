@@ -72,7 +72,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	set.StringVar(&o.flow, "flow", "", "pkce (the browser sign-in) or device (the device-code sign-in)")
 	set.StringVar(&o.dir, "dir", "", "the handshake directory shared with node-approve")
 	set.StringVar(&o.caseName, "case", "", "the case name: lower-case letters, digits and hyphens")
-	set.StringVar(&o.name, "name", "", "the node's name (default node-probe-<time>)")
+	set.StringVar(&o.name, "name", "", "the node's name (default node-probe-<time>-<case>)")
 	set.StringVar(&o.decision, "decision", "approve", "what the browser is asked to decide: approve or deny")
 	set.DurationVar(&o.idle, "idle", 75*time.Second, "the wait between the two refreshes (over a minute lets a hosted Container sleep)")
 	set.DurationVar(&o.pollFloor, "poll-floor", 10*time.Second, "the shortest wait between two polls of a device sign-in")
@@ -97,7 +97,11 @@ func parse(args []string, stderr io.Writer) (options, error) {
 		return options{}, errors.New("-poll-floor is at least 1s, -idle not negative, -timeout at least 1m")
 	}
 	if o.name == "" {
-		o.name = "node-probe-" + time.Now().UTC().Format("150405")
+		// One name per case and run: the run's clean-up finds each probe's device by its name.
+		o.name = "node-probe-" + time.Now().UTC().Format("150405") + "-" + o.caseName
+		if len(o.name) > 64 {
+			o.name = o.name[:64]
+		}
 	}
 	return o, nil
 }

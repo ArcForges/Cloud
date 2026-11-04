@@ -467,20 +467,25 @@ async function cleanUp(
     expect(signedIn, "The run never signed in, so it cannot revoke anything.");
     await a.visit(pages.devices, "Devices");
     let revoked = 0;
+    // Each probe device is found by its name; a name two devices share (two probes started in one second without their own names) is
+    // revoked once per device, up to the number of approvals.
     for (const name of names) {
-      if ((await a.tab.count(fleet.revokeDevice(name))) === 0) continue;
-      const previous = a.tab.document();
-      await a.tab.click(fleet.revokeDevice(name));
-      await awaitDocument(
-        world,
-        a.tab,
-        previous,
-        "the devices page after a revocation",
-        async () =>
-          (await a.tab.count(fleet.revokeDevice(name))) === 0 &&
-          (await a.tab.text(selectors.heading)) === "Devices",
-      );
-      revoked += 1;
+      for (let round = 0; round < names.length; round += 1) {
+        if ((await a.tab.count(fleet.revokeDevice(name))) === 0) break;
+        const before = await a.tab.count(fleet.revokeDevice(name));
+        const previous = a.tab.document();
+        await a.tab.click(fleet.revokeDevice(name));
+        await awaitDocument(
+          world,
+          a.tab,
+          previous,
+          "the devices page after a revocation",
+          async () =>
+            (await a.tab.text(selectors.heading)) === "Devices" &&
+            (await a.tab.count(fleet.revokeDevice(name))) < before,
+        );
+        revoked += 1;
+      }
     }
     world.report.facts.devicesRevoked = revoked;
     world.report.facts.devicesLeft = (
