@@ -4,9 +4,9 @@
 // 43 canonical unpadded base64url characters and stored only as the SHA-256 of those bytes (session.Secret), the constant-time compare
 // of a presented code with a stored digest, the S256 verification of a PKCE verifier against its challenge, and the character
 // classes of the challenge, the verifier and a client state. It opens no transaction and reads no store. The browser node sign-in
-// (package fleet) uses it; the device-code sign-in (part E2) will reuse it, and the mobile native authorization (part M) will reuse
-// the pure functions with redirect rules of its own: the loopback redirect admission and the query-form delivery are the fleet
-// package's (delivery-16).
+// and the device-code sign-in (package fleet; a device code is a one-use code) use it, and the mobile native authorization (part
+// M) will reuse the pure functions with redirect rules of its own: the loopback redirect admission and the query-form delivery are
+// the fleet package's (delivery-16).
 package oneuse
 
 import (

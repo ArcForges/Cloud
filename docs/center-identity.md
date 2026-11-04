@@ -109,7 +109,10 @@ Authentication time is never evidence.
   lines, the class, the account ID and the target ID, the IDs in their canonical lowercase UUID text. The target is the account
   (`identity.beginPasskeyRegistration`, `identity.revokeAllSessions`), the credential (`identity.removeAuthIdentity`), the session
   (`identity.revokeSession`, the upgrade), the device (`device.revoke`) or a node sign-in flow (`fleet.approveNodeSignIn`, its flow
-  ID; AF-CTR-04, [center fleet](center-fleet.md#browser-sign-in): an approval needs it, a denial none). The method is a passkey of the account (one assertion
+  ID; AF-CTR-04, [center fleet](center-fleet.md#browser-sign-in): an approval needs it, a denial none). A device-code approval
+  (`fleet.approveDeviceCode`, [center fleet](center-fleet.md#device-code-sign-in)) names its target by a text, the normalized user
+  code (8 upper-case letters), and its hash is `identity.TextTargetHash`: the SHA-256 of the class, the account ID and that text,
+  each on its own line. The method is a passkey of the account (one assertion
   per challenge) or, when mail is enabled, an e-mail code sent to the account's address (the policy's code attempts, at most five).
   The account's `stepUpPerAccount` bucket counts each begin.
 - **Complete.** `CompleteStepUp(flow_id, proof)` checks the account's failed-proof bucket, counts the challenge's attempt, and
@@ -185,7 +188,8 @@ Authentication time is never evidence.
   sign-out without evidence, another needs the session's evidence. A node, push or automation session, another account's and an
   ended one are `STATE/not_found`. `RevokeAllSessions` revokes every account session but the caller's; node and push credentials
   stay (DC-03). Since AF-CTR-04 it and `RemoveAuthIdentity` also first end the account's approved node sign-ins that no node has
-  completed (the account participants, `identity.AccountParticipant`; [center fleet](center-fleet.md#browser-sign-in)), before their
+  completed (the account participants, `identity.AccountParticipant`: the browser sign-in's flows, then the device-code sign-in's
+  approved authorizations; [center fleet](center-fleet.md#browser-sign-in)), before their
   step-up evidence locks the account, and count them in their audit event (`participants`).
 - **Devices.** `DeviceService.Rename` names a live device by the label rule (field `name`: 1 to 64 UTF-16 units of plain text that
   is not only white space; a longer name is `name: length`, a control character or a blank name `name: pattern`). Every name it

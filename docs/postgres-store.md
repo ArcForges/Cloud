@@ -188,7 +188,8 @@ described in [center fleet](center-fleet.md). The runtime role has SELECT, INSER
   by name (`device.device.platform` 1 and 3).
 - `fleet.node_sign_in` (browser sign-in flows, written by BeginNodeSignIn, GetNodeSignInFlow, ApproveNodeSignIn, CompleteNodeSignIn
   and the account's remediations, [center fleet](center-fleet.md#browser-sign-in)) and `fleet.device_authorization` (device-code authorizations,
-  written from part E2): the node as it described itself (91-byte key), the approval with the approving session and its epochs, the
+  written by StartDeviceAuthorization, LookupDeviceCode, ApproveDeviceCode, PollDeviceAuthorization and the account's remediations,
+  [center fleet](center-fleet.md#device-code-sign-in)): the node as it described itself (91-byte key), the approval with the approving session and its epochs, the
   code digests and the result. There is no per-flow attempt counter; an authorization counts at most five lookups of its user code. A
   terminal row is final (a trigger refuses every change) except COMPLETED to REVOKED once, and an authorization's reuse mark once.
 - Two statements change 0002 objects: `identity.session.revoke_reason` admits 7 (superseded by a re-enrollment) and 8 (an
@@ -198,6 +199,12 @@ described in [center fleet](center-fleet.md). The runtime role has SELECT, INSER
 Every foreign key has an index (`TestEveryFleetForeignKeyHasAnIndex`), the constraints and triggers are pinned case by case
 (`TestTheFleetStoreConstraints`) and the migration is rehearsed whole over version 3 (`TestMigration0004LandsWholeOverVersion3`).
 The hosted deployment applies it while production is dark: the tables exist and stay empty.
+
+The fifth migration (`center/internal/schema/migrations/0005_device_user_code_index.sql`, sha256
+`f87e49f4d00167ceb7110cc571e36653bbae7a9866b9031446d6b27ed0253438`, AF-CTR-04 part E2) adds one index,
+`device_authorization_user_code` on `fleet.device_authorization (user_code_hash)`, and changes no grant: 0004 indexes the user code
+only for PENDING rows (its partial unique index), and a lookup or a decision also finds an expired authorization, one in another
+state, or the approver's APPROVED one by its user code. It is rehearsed over version 4 (`TestMigration0005IndexesEveryUserCode`).
 
 Retention: the sweeps are AF-PLAT-01's and each period is a maximum (flow rows 7 days after their end, a node row until revoked plus
 30 days, with its device); until the sweeps exist the fleet tables only grow, and AF-PROD-01's gate for enabling production covers
@@ -209,7 +216,8 @@ it.
 
 Personal data: the node's name (it can name a person), its version, the country and network (ASN) a sign-in request came from, and
 account IDs. No token, one-use code, device code or user code is stored in clear, and no audit payload holds one. Command receipts
-of ReportNodeInfo and SignOutNode hold only the receipt (command ID and effect), under the principal `node:<installation id>`.
+of ReportNodeInfo and SignOutNode hold only the receipt (command ID and effect), under the principal `node:<installation id>`; those of
+ApproveDeviceCode hold only the receipt, under the principal `account:<account id>`.
 
 ## Guarantees
 
