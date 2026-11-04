@@ -156,6 +156,10 @@ func TestParseNodeInfo(t *testing.T) {
 func TestTheFingerprintTail(t *testing.T) {
 	key := make([]byte, NodeKeyLength)
 	key[0] = 0x30
+	// A key whose tail has a letter, so that the lower-case form below differs from the tail (a tail of digits only proves no case rule).
+	for strings.ToLower(FingerprintTail(key)) == FingerprintTail(key) {
+		key[1]++
+	}
 	fingerprint := Fingerprint(key)
 	tail := FingerprintTail(key)
 	if len(tail) != TailLength || fingerprint[len(fingerprint)-5:] != "-"+tail {
