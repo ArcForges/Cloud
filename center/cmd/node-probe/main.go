@@ -13,7 +13,7 @@
 // refreshes again (a center that slept answers it), presents the spent refresh token (a reuse: the center revokes the family) and the
 // current one (refused as revoked); a device sign-in also polls its device code again (COMPLETED without credentials).
 //
-//	go run ./cmd/node-probe -center https://proof.arcforges.com/api -flow pkce|device -dir <handshake dir> -case <name>
+//	go run ./cmd/node-probe -center <public base URL> -flow pkce|device -dir <handshake dir> -case <name>
 //	    [-name <node name>] [-decision approve|deny] [-idle 75s] [-poll-floor 10s] [-timeout 9m]
 //
 // A center behind a throwaway certificate authority (the local rehearsal) is trusted through SSL_CERT_FILE.
@@ -68,7 +68,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	set := flag.NewFlagSet("node-probe", flag.ContinueOnError)
 	set.SetOutput(stderr)
 	var o options
-	set.StringVar(&o.center, "center", "", "the center's public base URL, e.g. https://proof.arcforges.com/api")
+	set.StringVar(&o.center, "center", "", "the center's public base URL (https; http only on this machine)")
 	set.StringVar(&o.flow, "flow", "", "pkce (the browser sign-in) or device (the device-code sign-in)")
 	set.StringVar(&o.dir, "dir", "", "the handshake directory shared with node-approve")
 	set.StringVar(&o.caseName, "case", "", "the case name: lower-case letters, digits and hyphens")
