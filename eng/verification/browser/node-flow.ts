@@ -8,15 +8,20 @@
 // begin file, decides (an approval proves the step-up; on /activate it types the fingerprint's last group the review withholds), and
 // for a browser sign-in hands the result back to the probe's loopback receiver, by the page's script or (the first browser sign-in of
 // a run, approved or denied) by its manual link. It then waits for the probe's result. At the end, also after a failed step, it revokes on the devices page
-// every device the run's approvals created.
+// every device the run's approvals may have created: an approval's node name is recorded before its decision is sent, so an approval
+// the center committed before a later check failed is revoked too, and the report always says how many such devices are left
+// (`devicesLeft`, "unknown" when the clean-up could not look).
 //
-// What counts as a change for step() (a 429 before a change starts the step again from its navigation, after one it fails the run): a
-// review (it records the reviewer; on /activate it spends one of the code's five lookups and an entry), a decision, a revocation; a
-// step-up proof is in the same step as the decision it is for, and a wrong fingerprint tail (the --negative check) in a step of its own.
+// 429s (of the edge, or of a center limit): only the steps that open a link (and the clean-up's visit of the devices page) start again
+// from their navigation after a 429; every other step starts from the page an earlier step left and fails on a 429 (step()'s
+// `restartable: false`), so no review, lookup, step-up proof, wrong fingerprint group, decision or revocation is ever sent twice. What the
+// driver counts as a change besides (acceptedChange): every POST the center accepted (below 400) other than a flow's begin, a step-up
+// proof and the operator grant's review, and every decision POST on /connect or /activate the center answered below 500 (the wrong
+// group's 400 and a step-up refusal included).
 // The center's own limits a run spends (center-fleet.md "Post-deploy checklist"): step-ups 10 per account in 10 minutes (one per
-// approval and one per revoked device, one more for --negative), node_approve_account 20 decisions an hour, device_entry_account 5
-// wrong entries in its window (--negative spends one), node_flow_prefix 10 Begin/Start in 10 minutes (one per case, on the probe's
-// address).
+// approval and one per revoked device, one more for --negative; acceptance.ts refuses a --cases that could spend more), node_approve_account
+// 20 decisions an hour, device_entry_account 5 wrong entries in its window (--negative spends one), node_flow_prefix 10 Begin/Start in 10
+// minutes (one per case, on the probe's address).
 import {
   AcceptanceError,
   Actor,
@@ -28,6 +33,7 @@ import {
   mockedLabel,
   plainLabel,
   pagePathname,
+  pageUrl,
   step,
   until,
 } from "./flow.ts";
@@ -80,6 +86,28 @@ const casePattern = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 const fingerprintPattern = /^[0-9A-F]{4}(?:-[0-9A-F]{4}){4}$/u;
 const flowFragment = /^#flow=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const codeFragment = /^#code=[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/u;
+
+/** The center's step-up limit: 10 per account in 10 minutes. */
+export const stepUpsPerTenMinutes = 10;
+
+/**
+ * The most step-ups a node-approve run of `cases` cases can spend: one per approval and one per device its clean-up revokes (every
+ * case may be an approval), one more for --negative.
+ */
+export function stepUpsAtMost(cases: number, negative: boolean): number {
+  return 2 * cases + (negative ? 1 : 0);
+}
+
+/**
+ * What of a begin file must stay out of every output: the flow ID of a browser sign-in (the URL's fragment) and the user code of a
+ * device sign-in, also without its hyphen (the form the center normalizes it to).
+ */
+export function beginSecrets(begin: BeginFile): string[] {
+  if (begin.kind === "pkce")
+    return [begin.url.slice(begin.url.indexOf("#flow=") + "#flow=".length)];
+  const code = begin.userCode ?? "";
+  return [code, code.replace("-", "")];
+}
 
 /** Reads and checks a begin file: its URL must be this center's /connect or /activate with the exact fragment. */
 export function parseBegin(text: string, baseUrl: string): BeginFile {
@@ -191,8 +219,9 @@ export async function runNodeApprove(world: World, options: NodeApproveOptions):
   expectSavedCenter(world);
   world.store.prepare();
   const handled = new Set<string>();
+  // The node names of the approvals the run has sent or is about to send, recorded BEFORE the decision: the center may commit an
+  // approval whose result page the browser never checks.
   const approvedNames: string[] = [];
-  let signedIn = false;
   let browserSignIns = 0;
   let actor: Actor | undefined;
   let failure: unknown;
@@ -203,12 +232,12 @@ export async function runNodeApprove(world: World, options: NodeApproveOptions):
       const file = await nextBegin(world, options.handshake, handled, options.waitMs);
       handled.add(file);
       const begin = parseBegin(options.handshake.read(file), world.baseUrl);
-      if (begin.userCode) world.redactor.add(begin.userCode);
+      world.redactor.add(...beginSecrets(begin));
       world.write(`case ${begin.case}: ${begin.kind}, ${begin.decision}`);
       const manual = begin.kind === "pkce" && browserSignIns++ === 0;
-      if (begin.kind === "pkce") signedIn = await connectCase(world, a, begin, signedIn, manual);
-      else signedIn = await activateCase(world, a, begin, signedIn, options.negative);
       if (begin.decision === "approve") approvedNames.push(begin.name);
+      if (begin.kind === "pkce") await connectCase(world, a, begin, manual);
+      else await activateCase(world, a, begin, options.negative);
       options.handshake.write(
         `${begin.case}.approved.json`,
         `${JSON.stringify({ case: begin.case, decision: begin.decision, via: manual ? "link" : "script", at: world.now().toISOString() }, null, 2)}\n`,
@@ -230,10 +259,12 @@ export async function runNodeApprove(world: World, options: NodeApproveOptions):
   } catch (error) {
     failure = error;
   }
-  // The clean-up runs after a failed step too: every device this run's approvals created is revoked.
+  // The clean-up runs after a failed step too: every device this run's approvals may have created is revoked, and the report says how
+  // many are left.
+  world.report.facts.devicesLeft = approvedNames.length === 0 ? 0 : "unknown";
   if (actor !== undefined && approvedNames.length > 0) {
     try {
-      await cleanUp(world, actor, approvedNames, signedIn);
+      await cleanUp(world, actor, approvedNames);
     } catch (error) {
       failure ??= error;
     }
@@ -245,13 +276,7 @@ export async function runNodeApprove(world: World, options: NodeApproveOptions):
  * Opens a fleet URL and checks the page's reply. The consent page's script moves on at once (to the sign-in page without a session,
  * whose own address keeps no fragment, or to the review), so only the activation page's heading is read here.
  */
-async function open(
-  world: World,
-  a: Actor,
-  url: string,
-  consent: boolean,
-  signedIn: boolean,
-): Promise<void> {
+async function open(world: World, a: Actor, url: string, consent: boolean): Promise<void> {
   const reply = await a.tab.goto(url);
   expectReply(reply, 200, new URL(url).pathname);
   if (!consent) {
@@ -261,7 +286,7 @@ async function open(
     );
     return;
   }
-  if (!signedIn) {
+  if (!a.signedIn) {
     await a.tab.waitForPath(pagePathname(world, pages.signIn), world.timeoutMs);
     expect(!a.tab.url().includes("#"), "The sign-in page kept the return fragment in its address.");
   }
@@ -296,77 +321,83 @@ async function connectCase(
   world: World,
   a: Actor,
   begin: BeginFile,
-  signedIn: boolean,
   manual: boolean,
-): Promise<boolean> {
+): Promise<void> {
   await step(world, `${begin.case}: open the consent link`, mockedLabel, async () => {
-    await open(world, a, begin.url, true, signedIn);
+    await open(world, a, begin.url, true);
   });
   await step(
     world,
-    `${begin.case}: ${signedIn ? "" : "sign in and "}review the node`,
+    `${begin.case}: ${a.signedIn ? "" : "sign in and "}review the node`,
     mockedLabel,
     async () => {
-      if (!signedIn) {
+      if (!a.signedIn) {
         await a.enabled(selectors.signIn);
         await a.tab.click(selectors.signIn);
       }
       await a.tab.waitForPath(pagePathname(world, fleet.connectReview), world.timeoutMs);
+      a.signedIn = true;
       await a.tab.waitForSelector(selectors.heading, world.timeoutMs);
       await checkReview(world, a, begin, "Connect this node?", false);
     },
+    { restartable: false },
   );
   const name =
     begin.decision === "deny"
       ? `${begin.case}: deny; ${manual ? "the manual link" : "the page's script"} hands the denial back`
       : `${begin.case}: approve with the step-up; ${manual ? "the manual link" : "the page's script"} hands the code back`;
-  await step(world, name, mockedLabel, async () => {
-    const before = a.tab.loopbackRequests();
-    const previous = a.tab.document();
-    if (manual) a.tab.holdLoopback();
-    await a.tab.click(begin.decision === "deny" ? fleet.deny : fleet.approve);
-    if (manual) {
-      // The page's script tries the link at once; the held navigation leaves the page as it is (its load never completes, so the step
-      // waits for the page's text and the held request, not for a load).
-      await until(
-        world,
-        "the result page and its held navigation",
-        async () =>
-          a.tab.loopbackRequests() > before &&
-          (await a.tab.text(selectors.heading)) === "Return to your terminal",
+  await step(
+    world,
+    name,
+    mockedLabel,
+    async () => {
+      const before = a.tab.loopbackRequests();
+      const previous = a.tab.document();
+      if (manual) a.tab.holdLoopback();
+      await a.tab.click(begin.decision === "deny" ? fleet.deny : fleet.approve);
+      if (manual) {
+        // The page's script tries the link at once; the held navigation leaves the page as it is (its load never completes, so the step
+        // waits for the page's text and the held request, not for a load).
+        await until(
+          world,
+          "the result page and its held navigation",
+          async () =>
+            a.tab.loopbackRequests() > before &&
+            (await a.tab.text(selectors.heading)) === "Return to your terminal",
+        );
+        const reply = a.tab.document();
+        expect(reply !== null && reply !== previous, "The decision gave no new document.");
+        expectReply(reply, 200, "The decision");
+        expect(
+          new URL(a.tab.url()).pathname === pagePathname(world, "/connect/decision"),
+          "The held navigation left the page.",
+        );
+        await a.tab.click(fleet.returnLink);
+      }
+      await until(world, "the browser at the node's loopback receiver", async () =>
+        a.tab.url().startsWith("http://127.0.0.1:"),
       );
-      const reply = a.tab.document();
-      expect(reply !== null && reply !== previous, "The decision gave no new document.");
-      expectReply(reply, 200, "The decision");
-      expect(
-        new URL(a.tab.url()).pathname === pagePathname(world, "/connect/decision"),
-        "The held navigation left the page.",
-      );
-      await a.tab.click(fleet.returnLink);
-    }
-    await until(world, "the browser at the node's loopback receiver", async () =>
-      a.tab.url().startsWith("http://127.0.0.1:"),
-    );
-    world.report.facts[`${begin.case}Via`] = manual ? "manual link" : "script";
-  });
-  return true;
+      world.report.facts[`${begin.case}Via`] = manual ? "manual link" : "script";
+    },
+    { restartable: false },
+  );
 }
 
 async function activateCase(
   world: World,
   a: Actor,
   begin: BeginFile,
-  signedIn: boolean,
   negative: boolean,
-): Promise<boolean> {
+): Promise<void> {
   await step(
     world,
-    `${begin.case}: open the activation link${signedIn ? "" : " and go to the sign-in"}`,
+    `${begin.case}: open the activation link${a.signedIn ? "" : " and go to the sign-in"}`,
     mockedLabel,
     async () => {
-      await open(world, a, begin.url, false, true);
+      await open(world, a, begin.url, false);
       expect(!a.tab.url().includes("#"), "The activation page kept the code in its address.");
-      if (!signedIn) {
+      // A signed-out visitor reaches the sign-in only through Continue (the page waits for it).
+      if (!a.signedIn) {
         await a.enabled(fleet.continueButton);
         await a.tab.click(fleet.continueButton);
         await a.tab.waitForPath(pagePathname(world, pages.signIn), world.timeoutMs);
@@ -379,13 +410,14 @@ async function activateCase(
   );
   await step(
     world,
-    `${begin.case}: ${signedIn ? "" : "sign in, "}look the code up and review the node`,
+    `${begin.case}: ${a.signedIn ? "" : "sign in, "}look the code up and review the node`,
     mockedLabel,
     async () => {
-      if (!signedIn) {
+      if (!a.signedIn) {
         await a.enabled(selectors.signIn);
         await a.tab.click(selectors.signIn);
         await a.tab.waitForPath(pagePathname(world, fleet.activate), world.timeoutMs);
+        a.signedIn = true;
       }
       await a.enabled(fleet.continueButton);
       await a.tab.click(fleet.continueButton);
@@ -397,6 +429,7 @@ async function activateCase(
       );
       await checkReview(world, a, begin, "Activate this node?", true);
     },
+    { restartable: false },
   );
   if (negative && begin.decision === "approve") {
     await step(
@@ -428,6 +461,7 @@ async function activateCase(
           async () => a.tab.refusalsPending() === 0,
         );
       },
+      { restartable: false },
     );
   }
   await step(
@@ -452,45 +486,67 @@ async function activateCase(
         "The result page does not offer the denial exactly after an approval.",
       );
     },
+    { restartable: false },
   );
-  return true;
 }
 
-/** Revokes, on the devices page, every device named by an approval of this run (each revocation proves a step-up). */
-async function cleanUp(
-  world: World,
-  a: Actor,
-  names: readonly string[],
-  signedIn: boolean,
-): Promise<void> {
-  await step(world, "clean-up: revoke the devices the approvals created", mockedLabel, async () => {
-    expect(signedIn, "The run never signed in, so it cannot revoke anything.");
-    await a.visit(pages.devices, "Devices");
-    let revoked = 0;
-    // Each probe device is found by its name; a name two devices share (two probes started in one second without their own names) is
-    // revoked once per device, up to the number of approvals.
-    for (const name of names) {
-      for (let round = 0; round < names.length; round += 1) {
-        if ((await a.tab.count(fleet.revokeDevice(name))) === 0) break;
-        const before = await a.tab.count(fleet.revokeDevice(name));
-        const previous = a.tab.document();
-        await a.tab.click(fleet.revokeDevice(name));
-        await awaitDocument(
-          world,
-          a.tab,
-          previous,
-          "the devices page after a revocation",
-          async () =>
-            (await a.tab.text(selectors.heading)) === "Devices" &&
-            (await a.tab.count(fleet.revokeDevice(name))) < before,
-        );
-        revoked += 1;
-      }
+/**
+ * Revokes, on the devices page, every device named by an approval of this run (each revocation proves a step-up). The devices page
+ * sends a tab without a session to the sign-in, which signs in first (a run whose first step failed after the sign-in, or before it).
+ */
+async function cleanUp(world: World, a: Actor, names: readonly string[]): Promise<void> {
+  const count = async () =>
+    (await Promise.all(names.map(async (name) => a.tab.count(fleet.revokeDevice(name))))).reduce(
+      (sum, found) => sum + found,
+      0,
+    );
+  await step(world, "clean-up: open the devices page", mockedLabel, async () => {
+    const reply = await a.tab.goto(pageUrl(world, pages.devices));
+    expectReply(reply, 200, pages.devices);
+    if (new URL(a.tab.url()).pathname === pagePathname(world, pages.signIn)) {
+      await a.enabled(selectors.signIn);
+      await a.tab.click(selectors.signIn);
+      await a.tab.waitForPath(pagePathname(world, pages.devices), world.timeoutMs);
+      a.signedIn = true;
     }
-    world.report.facts.devicesRevoked = revoked;
-    world.report.facts.devicesLeft = (
-      await Promise.all(names.map(async (name) => a.tab.count(fleet.revokeDevice(name))))
-    ).reduce((sum, count) => sum + count, 0);
-    expect(world.report.facts.devicesLeft === 0, "A device of the run is still listed.");
+    await a.tab.waitForSelector(selectors.heading, world.timeoutMs);
+    expect(
+      (await a.tab.text(selectors.heading)) === "Devices",
+      "The devices page has another heading.",
+    );
+    world.report.facts.devicesLeft = await count();
   });
+  await step(
+    world,
+    "clean-up: revoke the devices the approvals created",
+    mockedLabel,
+    async () => {
+      let revoked = 0;
+      // Each probe device is found by its name; a name two devices share (two probes started in one second without their own
+      // names) is revoked once per device, up to the number of approvals.
+      for (const name of names) {
+        for (let round = 0; round < names.length; round += 1) {
+          const before = await a.tab.count(fleet.revokeDevice(name));
+          if (before === 0) break;
+          const previous = a.tab.document();
+          await a.tab.click(fleet.revokeDevice(name));
+          await awaitDocument(
+            world,
+            a.tab,
+            previous,
+            "the devices page after a revocation",
+            async () =>
+              (await a.tab.text(selectors.heading)) === "Devices" &&
+              (await a.tab.count(fleet.revokeDevice(name))) < before,
+          );
+          revoked += 1;
+          world.report.facts.devicesLeft = await count();
+        }
+      }
+      world.report.facts.devicesRevoked = revoked;
+      world.report.facts.devicesLeft = await count();
+      expect(world.report.facts.devicesLeft === 0, "A device of the run is still listed.");
+    },
+    { restartable: false },
+  );
 }

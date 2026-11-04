@@ -169,10 +169,19 @@ export function refusedStatus(problem: string): number | undefined {
   return found === null ? undefined : Number(found[1]);
 }
 
-/** Whether a response is a change the center accepted: a POST that succeeded and that a step could not repeat harmlessly. */
+/**
+ * Whether a response is a change the center made: a POST that succeeded and that a step could not repeat harmlessly, or a decision
+ * of the fleet pages (AF-CTR-04 E3) that the center answered at all (any status below 500 but the edge's 429): a refused decision,
+ * such as a wrong fingerprint group's 400 or a step-up refusal, has spent an entry of the account's budget or a decision of its limit.
+ */
 export function acceptedChange(method: string, status: number, pathname: string): boolean {
-  return method === "POST" && status < 400 && !harmless.test(pathname);
+  if (method !== "POST") return false;
+  if (fleetDecision.test(pathname)) return status < 500 && status !== 429;
+  return status < 400 && !harmless.test(pathname);
 }
+
+/** The decision routes of the fleet pages: every answer of the center to them is a change (see acceptedChange). */
+const fleetDecision = /\/(?:connect|activate)\/decision$/u;
 
 /**
  * The POSTs that a step may repeat after a 429: they start a flow, prove something or review a request; nothing is changed that a

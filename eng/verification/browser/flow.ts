@@ -218,13 +218,15 @@ function newProblems(world: World): string[] {
 /**
  * Runs one step. A 429 seen anywhere during an attempt (the edge limiter answers before the center sees the request) makes the
  * attempt void: the step waits for the advised time and starts again, at most three attempts; a step therefore starts from a
- * navigation. Any console error, page error or policy violation fails the step.
+ * navigation. A step that is not `restartable` (one that starts from the page an earlier step left, such as the node-approve steps
+ * after a link was opened) fails on a 429 instead. Any console error, page error or policy violation fails the step.
  */
 export async function step<T>(
   world: World,
   name: string,
   label: Label,
   run: () => Promise<T>,
+  options: { restartable?: boolean } = {},
 ): Promise<T> {
   const started = world.now().getTime();
   const record: StepRecord = { name, label, ok: false, attempts: 0, milliseconds: 0 };
@@ -244,6 +246,16 @@ export async function step<T>(
       .filter((seconds): seconds is number => seconds !== undefined);
     if (limited.length > 0) {
       newProblems(world);
+      const cause =
+        "error" in outcome && outcome.error instanceof Error ? ` ${outcome.error.message}` : "";
+      // A step without a navigation of its own cannot start again: it would not find the page it started from.
+      if (options.restartable === false) {
+        record.note = "rate limited (429) in a step that does not start again";
+        record.milliseconds = world.now().getTime() - started;
+        throw new AcceptanceError(
+          `Step "${name}" was rate limited (429); it starts from the page an earlier step left and is not repeated.${cause}`,
+        );
+      }
       // The edge limiter answers before the center sees a request, so a step may start again from its navigation, unless an
       // earlier request of the attempt already changed something: a step that removes a passkey cannot find it a second time.
       if (totalChanges(world) > changesBefore) {
@@ -251,8 +263,6 @@ export async function step<T>(
         record.milliseconds = world.now().getTime() - started;
         // What the step said about its own failure comes with it: "the account may exist; do not delete the credential file" must
         // not be lost behind the 429.
-        const cause =
-          "error" in outcome && outcome.error instanceof Error ? ` ${outcome.error.message}` : "";
         throw new AcceptanceError(
           `Step "${name}" was rate limited (429) after a request of it had changed something; it is not repeated.${cause}`,
         );
@@ -349,6 +359,11 @@ export class Actor {
   deferred: SavedCredential[] = [];
   /** The virtual environment is gone (AR-23): the saved file is no longer this tab's to write. */
   virtualGone = false;
+  /**
+   * Whether a step of this run signed the tab in (the node-approve mode reads it across its cases and its clean-up; a step that
+   * failed after the sign-in leaves it false, and the clean-up then finds out from the page it is sent to).
+   */
+  signedIn = false;
 
   constructor(world: World, tab: Tab) {
     this.world = world;

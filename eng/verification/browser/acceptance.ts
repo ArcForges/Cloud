@@ -39,6 +39,7 @@ import {
   launchPlaywright,
   maxRequestsPerWindow,
   preflight,
+  requestBurst,
   requiredChromiumRevision,
   requiredPlaywrightCore,
 } from "./driver.ts";
@@ -51,7 +52,13 @@ import {
   runOperatorGrant,
   runRealAuthenticator,
 } from "./flow.ts";
-import { type Handshake, busiestOf, runNodeApprove } from "./node-flow.ts";
+import {
+  type Handshake,
+  busiestOf,
+  runNodeApprove,
+  stepUpsAtMost,
+  stepUpsPerTenMinutes,
+} from "./node-flow.ts";
 
 export const defaultBaseUrl = "https://proof.arcforges.com/api";
 /** The only hosts the script drives: the acceptance environment, or a center on this machine. Production is never a target. */
@@ -124,9 +131,18 @@ export const defaultReportName = {
 
 /**
  * The request bound of the node-approve mode against the hosted edge: node-probe runs on the same machine as the browser (its loopback
- * receiver must be the browser's), so its requests count against the same edge limit; the browser keeps to fewer.
+ * receiver must be the browser's), so its requests count against the same edge limit; the browser keeps to fewer. The budget paces the
+ * browser at this rate after a burst of `requestBurst` (4): at most 40 requests in any minute.
  */
 export const nodeApproveRequestsPerMinute = 36;
+
+/**
+ * The busiest minute of a node-approve run against the edge: the browser's busiest minute plus node-probe's (the two share the
+ * machine's edge key, so their sum bounds the busiest minute of both). The run fails when it exceeds maxRequestsPerWindow.
+ */
+export function combinedBusiest(browserBusiest: number, probeRequests: readonly number[]): number {
+  return browserBusiest + busiestOf(probeRequests);
+}
 
 const usage = `Usage: node eng/verification/browser/acceptance.ts [--base-url <url>] [--chromium <path>] [--state-dir <dir>]
   [--bootstrap-file <file>] [--display-name <text>] [--headed] [--real-authenticator | --operator-grant] [--report <file>]
@@ -145,10 +161,12 @@ Step-up limit: apart from the edge, the center allows 10 step-ups per account in
 --node-approve (node-approve.ts) needs the saved owner credential. It decides the sign-ins that center/cmd/node-probe (MOCKED node)
   starts and announces in the --watch directory, --cases of them (default 2), on /connect and /activate, then revokes the devices
   its approvals created. node-probe runs on the same machine (its loopback receiver must be the browser's), and its requests count
-  against the same edge limit: the browser keeps to ${nodeApproveRequestsPerMinute} requests a minute there, and the run fails when the
-  browser's busiest minute and the probe's together exceed ${maxRequestsPerWindow}. --negative also submits one wrong fingerprint tail
-  (one more step-up and one entry of the account's budget): for the local rehearsal. Its report defaults to
-  artifacts/${defaultReportName.nodeApprove}.
+  against the same edge limit: the browser paces itself at ${nodeApproveRequestsPerMinute} requests a minute after a burst of
+  ${requestBurst} (at most ${nodeApproveRequestsPerMinute + requestBurst} in any minute), and the run fails when the browser's busiest
+  minute and the probe's together exceed ${maxRequestsPerWindow}. Each case may spend 2 step-ups (its approval and its device's
+  revocation), so --cases refuses a set that could spend more than the center's ${stepUpsPerTenMinutes} in 10 minutes. --negative also
+  submits one wrong fingerprint tail (one more step-up and one entry of the account's budget): for the local rehearsal. Its report
+  defaults to artifacts/${defaultReportName.nodeApprove}.
 Exit codes: 0 passed, 1 failed, 2 not started (usage, missing browser, credential or bootstrap file).`;
 
 function whole(value: string | undefined, flag: string, min: number, max: number): number {
@@ -281,6 +299,10 @@ export function parseArguments(
   if (!options.nodeApprove && (options.watch !== "" || options.negative))
     throw new UsageError("--watch and --negative belong to --node-approve.");
   if (options.nodeApprove && !rateNamed) options.requestsPerMinute = nodeApproveRequestsPerMinute;
+  if (options.nodeApprove && stepUpsAtMost(options.cases, options.negative) > stepUpsPerTenMinutes)
+    throw new UsageError(
+      `--cases ${options.cases}${options.negative ? " with --negative" : ""} could spend ${stepUpsAtMost(options.cases, options.negative)} step-ups (one per approval and one per revoked device${options.negative ? ", one for --negative" : ""}), more than the ${stepUpsPerTenMinutes} per account in 10 minutes the center allows.`,
+    );
   if (options.realAuthenticator) {
     // Windows Hello needs a window the owner can see and answer.
     if (headless)
@@ -484,9 +506,9 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
   if (options.nodeApprove) {
     world.report.facts.probeRequests = probeRequests.length;
     world.report.facts.probeBusiest60s = busiestOf(probeRequests);
-    world.report.facts.requestsBusiest60sBound = sent.busiest + busiestOf(probeRequests);
+    world.report.facts.requestsBusiest60sBound = combinedBusiest(sent.busiest, probeRequests);
   }
-  const busiest = options.nodeApprove ? sent.busiest + busiestOf(probeRequests) : sent.busiest;
+  const busiest = options.nodeApprove ? combinedBusiest(sent.busiest, probeRequests) : sent.busiest;
   if (exitCode === 0 && bounded && busiest > maxRequestsPerWindow) {
     world.report.result = "failed";
     exitCode = 1;
