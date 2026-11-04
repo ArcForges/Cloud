@@ -536,8 +536,9 @@ browsers can keep it in history, so the flow ID and the code are short-lived (10
 sign-in page drop it from the address bar at once. The page's script reads the fragment and calls `history.replaceState` before any
 request, then checks it (a flow ID is the canonical lower-case 8-4-4-4-12 form; a code is 8 letters of the code alphabet, case and
 separators ignored); a malformed value is never sent. Signed in, `/connect` submits its review at once and `/activate` fills the
-"Activation code" field; signed out, the script opens the sign-in page with the page and its fragment as the return value, and the
-sign-in page follows a return with a fragment only for these two exact paths and shapes.
+"Activation code" field. Signed out, `/connect`'s script opens the sign-in page at once, while `/activate` fills the field and opens the
+sign-in page only when the person presses Continue; either way the return value is the page and its fragment, and the sign-in page
+follows a return with a fragment only for these two exact paths and shapes.
 
 **The review page** shows the node as it described itself: its name in quotes, in its own `<bdi>` isolate, followed by the line "The
 name is reported by the node and is not verified."; its OS, architecture and version; its key's fingerprint (on `/activate` without
@@ -588,20 +589,29 @@ throwaway certificate authority is trusted through `SSL_CERT_FILE`.
 browser acceptance's node-approve mode) decides those sign-ins in the pinned Chromium with the saved owner credential (**MOCKED**
 hardware: the virtual authenticator in a real browser), checks each review page against the begin file, hands a browser sign-in's
 result back to the probe's loopback receiver (the first browser sign-in of a run by the page's manual link, the others by the page's
-script), waits for each probe result, and at the end, also after a failed step, revokes the devices its approvals created. The probe
-runs on the browser's machine (its loopback receiver must be the browser's). Per step, what counts as a change (after which a 429
-fails the run instead of starting the step again): a review (on `/activate` a lookup), a decision with the step-up it proves, a wrong
-fingerprint group (`--negative`), a revocation.
+script), waits for each probe result, and at the end, also after a failed step, revokes the devices its approvals may have created:
+each approval's node name is recorded before its decision is sent, so an approval the center committed before a later check failed is
+revoked too, and the report always carries `devicesLeft` (0, the count, or `unknown` when the clean-up could not look). The probe runs
+on the browser's machine (its loopback receiver must be the browser's).
+
+A 429 during a run: only the steps that open a link, and the clean-up's visit of the devices page, start again from their navigation
+after a 429. Every other step starts from the page an earlier step left (a review, a lookup, a decision with its step-up proof, a wrong
+fingerprint group, a revocation) and fails the run on a 429 instead, so none of them is ever sent twice. Besides, the driver counts as a
+change (after which even a restartable step fails on a 429) every POST the center accepted below 400 other than a flow's begin, a
+step-up proof and the operator grant's review, and every `/connect/decision` or `/activate/decision` POST the center answered below 500
+(the wrong group's 400 and a step-up refusal included; the edge's 429 is no change). A 429 on a run may be the edge's or one of the
+center's limits below (`step_up` of the account, `node_approve_account`, `device_entry_account`): the center's come from regression runs
+less than 10 minutes earlier, from a repeated attempt, or from a `--cases` larger than the checklist's.
 
 What a run spends:
 
-| Limit                                                       | Value                                         | A run                                                                                                                                                                                 |
-| ----------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The hosted edge (browser and probe share the machine's key) | 60 requests per 60 s per client               | the browser keeps to 36 per minute; the run fails when the browser's busiest minute and the probe's together exceed 55                                                                |
-| Step-ups per account                                        | 10 in 10 minutes                              | one per approval, one per revoked device, one for `--negative`; the returning acceptance spends 3 and `--operator-grant` 2: wait 10 minutes between those runs and a node-approve run |
-| `node_approve_account`                                      | 20 decisions an hour                          | one per decision                                                                                                                                                                      |
-| `device_entry_account`                                      | 5 wrong entries per window                    | `--negative` spends one                                                                                                                                                               |
-| `node_flow_prefix`                                          | 10 Begin and Start per 10 minutes per network | one per case, from the probe's address                                                                                                                                                |
+| Limit                                                       | Value                                         | A run                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The hosted edge (browser and probe share the machine's key) | 60 requests per 60 s per client               | the browser paces itself at 36 requests a minute after a burst of 4 (at most 40 in any minute); the run fails when the browser's busiest minute and the probe's together exceed 55                                                                                            |
+| Step-ups per account                                        | 10 in 10 minutes                              | one per approval, one per revoked device, one for `--negative`; `--cases` refuses a set that could spend more than 10 (2 per case, 1 for `--negative`); the returning acceptance spends 3 and `--operator-grant` 2: wait 10 minutes between those runs and a node-approve run |
+| `node_approve_account`                                      | 20 decisions an hour                          | one per decision                                                                                                                                                                                                                                                              |
+| `device_entry_account`                                      | 5 wrong entries per window                    | `--negative` spends one                                                                                                                                                                                                                                                       |
+| `node_flow_prefix`                                          | 10 Begin and Start per 10 minutes per network | one per case, from the probe's address                                                                                                                                                                                                                                        |
 
 The handshake directory holds display user codes and the URLs that carry them: delete it after a run and keep it out of the evidence.
 
@@ -610,9 +620,11 @@ The handshake directory holds display user codes and the URLs that carry them: d
 The coordinator runs it after the merge and the `proof=deploy` dispatch. It needs the saved proof owner credential (on the Windows
 host `deku`, never copied) and the operator checkout there at the merge commit (`npm ci` in `eng/verification/browser`). Leave at least
 90 seconds between two browser runs and warm the Container with the healthz `curl` 10 to 20 seconds before each; the healthz request
-counts against the Hello limiter, not the edge limit of the pages. A 429 of the edge starts a step again from its navigation, unless a
-change was made in it (the run then fails and says so; see the Worker reply table of [center-entitlement.md](center-entitlement.md),
-"Post-deploy checklist"). REAL: the hosted Worker, Container, PostgreSQL (`arcforges_acceptance`) and Chromium. **MOCKED**: the
+counts against the Hello limiter, not the edge limit of the pages. In the regression runs of step 4 a 429 of the edge starts a step
+again from its navigation, unless a change was made in it (the run then fails and says so; see the Worker reply table of
+[center-entitlement.md](center-entitlement.md), "Post-deploy checklist"). In the node-approve run of step 5 only the steps that open a
+link start again; every later step fails on a 429, and a 429 there may also be a limit of the center (see "node-probe and the
+node-approve run" above): do not repeat the run within 10 minutes. REAL: the hosted Worker, Container, PostgreSQL (`arcforges_acceptance`) and Chromium. **MOCKED**: the
 authenticator (Chromium's virtual authenticator through CDP) and the node (`node-probe`, a Go stand-in, not the ArcForges node: N2, X
 and H2 prove the real node). The run shows how the one Chromium version it records treats the navigation from the hosted page to the
 loopback receiver; it proves nothing about other browsers.
@@ -631,16 +643,31 @@ loopback receiver; it proves nothing about other browsers.
    PASSED (E3 changed the sign-in page's script, the devices page and the shared script both runs use). Then wait 10 minutes (step-ups).
 5. **Node approvals** (`deku`): build the probe from the operator checkout (`cd center; go build -o <tmp>/node-probe ./cmd/node-probe`;
    if the module download fails there, the coordinator cross-compiles it on Linux from the merge commit and records its sha256), start
-   `node-probe -center https://proof.arcforges.com/api -flow pkce -case pkce-1 -dir <dir>` and `-flow device -case device-1`, then
-   `node eng/verification/browser/node-approve.ts --watch <dir> --cases 2`. The run approves one flow of each kind (the browser
-   sign-in by the page's manual link); each probe receives credentials, refreshes, refreshes again after 75 s idle (a Container that
-   slept), sees a reuse revoked, and prints PASSED; the run prints PASSED with the request counts (browser busiest minute plus the
-   probe's at most 55).
+   `node-probe -center https://proof.arcforges.com/api -flow pkce -case pkce-1 -dir <dir>`, `-flow device -case device-1` and
+   `-flow pkce -case pkce-2`, then `node eng/verification/browser/node-approve.ts --watch <dir> --cases 3`. The run approves all three
+   (the first browser sign-in, `pkce-1`, hands the code back by the page's manual link; `pkce-2` by the page's own script, the
+   navigation from the hosted page to the loopback receiver an owner normally sees); each probe receives credentials, refreshes,
+   refreshes again after 75 s idle (a Container that slept), sees a reuse revoked, and prints PASSED; the run prints PASSED with the
+   request counts (browser busiest minute plus the probe's at most 55). What it spends: 6 step-ups (3 approvals, 3 revocations; 10 in
+   10 minutes allowed), 3 decisions of `node_approve_account` (20 an hour), no wrong entry, 3 Begin/Start of `node_flow_prefix` (10 in
+   10 minutes); about 75 browser requests and 20 probe requests over the run.
 6. **Clean-up.** The run revokes the probe devices itself, also after a failed step; it lists any device it left (`devicesLeft`): revoke
    such a device on `/account/devices` by hand. Delete the handshake directory.
 7. **Afterwards.** Production dark and proof's `center.surfaces` as in steps 1 and 2. What stays on `arcforges_acceptance`: the flows and
-   authorizations (append-only until AF-PLAT-01's sweeps), the revoked devices, installations and nodes, the revoked node sessions, and
-   the audit events.
+   authorizations (append-only until AF-PLAT-01's sweeps), the revoked devices, installations and nodes, the revoked node sessions,
+   the account's command receipts of the device approval (ApproveDeviceCode), the `identity.spent_refresh` rows of the probes'
+   refreshes (kept to their family's absolute end), the rate-limit rows of the run (step-ups, decisions, flows), the step-up challenges,
+   the run's browser session (it ends by itself), and the audit events.
+
+**What is proven, and how.**
+
+| Evidence                                                                                                                              | Label                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The pages, `fleetapi.Direct`, the origin columns, the tail check and the review read                                                  | REAL in the Go integration tests (real ingress, cookie session, PostgreSQL); the authenticator is **MOCKED** (a virtual one)                                                                        |
+| The node-approve flow (`runNodeApprove`) against the pages and node-probe (E3-11)                                                     | exercised by the local rehearsal only (below); its logic (clean-up, restarts, redaction, budgets) by unit tests against a fleet stand-in                                                            |
+| node-probe (E3-12)                                                                                                                    | unit tests only (flags, begin and result files, the loopback receiver); its run against a center in the local rehearsal                                                                             |
+| The local official-hosted rehearsal                                                                                                   | REAL browser (the pinned Chromium), center binary, PostgreSQL and the Worker's page code on this machine; **MOCKED** edge (country `DE`, ASN 64496, a documentation number), authenticator and node |
+| The hosted behaviour: the origin headers from `request.cf`, the fleet pages through the real Worker, the proof-to-loopback navigation | **NOT PROVEN** until H1 (above) passes                                                                                                                                                              |
 
 ## Residual risks
 
