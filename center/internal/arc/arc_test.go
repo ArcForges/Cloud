@@ -50,6 +50,8 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		{RateLimited("sign_in_prefix", 30, at), "RESOURCE/rate_limited", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
 		{KeyAlreadyRegistered(), "CONFLICT/already_exists", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{QuotaExceeded("max_nodes_per_account", 100), "RESOURCE/quota_exceeded", foundationv1.RetryMode_RETRY_MODE_NEVER},
+		{CodeInvalid("device_entry_account", 5, 3), "VALIDATION/code_invalid", foundationv1.RetryMode_RETRY_MODE_NEVER},
+		{CodeInvalid("device_code_lookups", 5, 0), "VALIDATION/code_invalid", foundationv1.RetryMode_RETRY_MODE_NEVER},
 		{Unavailable(), "RESOURCE/overloaded", foundationv1.RetryMode_RETRY_MODE_AFTER_TIME},
 		{Internal(), "INTERNAL/internal", foundationv1.RetryMode_RETRY_MODE_NEVER},
 	}
@@ -76,7 +78,7 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 		case "VALIDATION/invalid_argument", "AUTHORIZATION/permission_denied", "ENTITLEMENT/feature_not_entitled", "STATE/invalid_state", "STATE/not_activated", "STATE/not_found",
 			"CONFLICT/already_exists":
 			detail = "state"
-		case "RESOURCE/rate_limited", "RESOURCE/quota_exceeded":
+		case "RESOURCE/rate_limited", "RESOURCE/quota_exceeded", "VALIDATION/code_invalid":
 			detail = "limit"
 		case "CONFLICT/revision_conflict":
 			detail = "revision"
@@ -143,6 +145,30 @@ func TestEveryRefusalIsAnErrorsRow(t *testing.T) {
 	if capped := QuotaExceeded("max_nodes_per_account", 100).ArcError(call); capped.GetDetails().GetLimit().GetLimitName() != "max_nodes_per_account" ||
 		capped.GetDetails().GetLimit().GetMaximum().GetValue() != "100" || capped.GetRetry().GetRetryAt() != nil {
 		t.Fatalf("quota details %v", capped)
+	}
+	// AF-CTR-04 E2: code_invalid names its counter, its maximum and what is left; a stated 0 is the decimal 0, not an absent field
+	// (contracts-9); a refusal that states nothing left out has no available.
+	for _, item := range []struct {
+		name               string
+		maximum, available int64
+		want               string
+	}{{"device_entry_account", 5, 3, "3"}, {"device_code_lookups", 5, 0, "0"}} {
+		limit := CodeInvalid(item.name, item.maximum, item.available).ArcError(call).GetDetails().GetLimit()
+		if limit.GetLimitName() != item.name || limit.GetMaximum().GetValue() != "5" || limit.GetAvailable() == nil ||
+			limit.GetAvailable().GetValue() != item.want || limit.GetRecoveryAt() != nil {
+			t.Fatalf("code_invalid details %v", limit)
+		}
+	}
+	if CodeInvalid("device_entry_account", 5, 0).Retry != foundationv1.RetryMode_RETRY_MODE_UNSPECIFIED || !CodeInvalid("device_entry_account", 5, 0).Final() {
+		t.Fatal("code_invalid is final (NEVER, known effect)")
+	}
+	if RateLimited("device_entry_account", 5, at).ArcError(call).GetDetails().GetLimit().GetAvailable() != nil {
+		t.Fatal("a rate limit states no available")
+	}
+	bad := CodeInvalid("device_entry_account", 5, 1).ArcError(call)
+	bad.Details.GetLimit().Available = &foundationv1.Decimal{Value: proto.String("01")}
+	if len(arctest.Violations(bad)) != 1 {
+		t.Fatalf("the foundation check admits a non-canonical available: %v", arctest.Violations(bad))
 	}
 	stale := RevisionConflict(3, 4).ArcError(call).GetDetails().GetRevision()
 	if stale.GetExpected().GetValue() != 3 || stale.GetActual().GetValue() != 4 {

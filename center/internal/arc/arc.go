@@ -66,7 +66,10 @@ type Limit struct {
 	Name string
 	// Maximum is the limit's maximum; zero when the refusing layer does not state it (the edge limiter's configuration is the
 	// platform's).
-	Maximum    int64
+	Maximum int64
+	// Available is LimitFailure.available when the refusing layer states how much is left (VALIDATION/code_invalid: the entries left,
+	// or 0 for a live code's sixth lookup); nil states nothing. A stated 0 is rendered as the decimal 0.
+	Available  *int64
 	RecoveryAt time.Time
 }
 
@@ -126,6 +129,9 @@ func (r *Refusal) ArcError(call correlation.Context) *foundationv1.ArcError {
 		limit := &foundationv1.LimitFailure{LimitName: proto.String(r.Limit.Name)}
 		if r.Limit.Maximum > 0 {
 			limit.Maximum = Decimal(r.Limit.Maximum)
+		}
+		if r.Limit.Available != nil {
+			limit.Available = Decimal(*r.Limit.Available)
 		}
 		if !r.Limit.RecoveryAt.IsZero() {
 			limit.RecoveryAt = Instant(r.Limit.RecoveryAt)
@@ -255,6 +261,15 @@ func KeyAlreadyRegistered() *Refusal {
 // cap and its maximum (AF-CTR-04: max_nodes_per_account). Retrying does not help until the account frees one.
 func QuotaExceeded(name string, maximum int64) *Refusal {
 	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE, Code: "quota_exceeded", Limit: &Limit{Name: name, Maximum: maximum}}
+}
+
+// CodeInvalid is VALIDATION/code_invalid (errors.md: NEVER, the remaining attempts in limit): a device user code that names no live
+// code this account may use (AF-CTR-04 E2). The limit names the counter that refused it and states its maximum and what is left:
+// device_entry_account (the account's wrong-entry budget: maximum the window's cap, available the entries left) or
+// device_code_lookups (a live code's lookups: maximum 5, available 0).
+func CodeInvalid(name string, maximum, available int64) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_VALIDATION, Code: "code_invalid",
+		Limit: &Limit{Name: name, Maximum: maximum, Available: &available}}
 }
 
 // RevisionConflict is CONFLICT/revision_conflict: meta.expected_rev differs from the object's current revision (re-read, merge).

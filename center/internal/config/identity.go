@@ -146,8 +146,16 @@ type IdentityPolicy struct {
 	NodeFlowPerNode       Window
 	NodeCompletePerPrefix Window
 	NodeApprovePerAccount Window
+	// The device-code sign-in (AF-CTR-04 E2): the failure bucket of PollDeviceAuthorization per client prefix (a device code that names
+	// nothing or a failed node key proof; a proved poll never waits on it) and the user-code entry budgets of an account and of a
+	// client prefix (reserved before the code is read, given back by an entry that names a live code the caller may act on). The
+	// poll interval, its step and cap, the authorization's 600 seconds and the 5 lookups of a live code are contract values and no
+	// policy keys.
+	NodePollPerPrefix     Window
+	DeviceEntryPerAccount Window
+	DeviceEntryPerPrefix  Window
 	// AnonymousFlows is an opt-in global ceiling on the flows anonymous calls create (C1): every BeginAuthentication, of every method
-	// and purpose, and every BeginNodeSignIn (AF-CTR-04) counts in one bucket. A limit of 0 (the default) sets no ceiling. Only the acceptance environment sets one: it
+	// and purpose, and every BeginNodeSignIn and StartDeviceAuthorization (AF-CTR-04) counts in one bucket. A limit of 0 (the default) sets no ceiling. Only the acceptance environment sets one: it
 	// shares the production Neon project, and its flows are never deleted before AF-PLAT-01's sweeps exist. A global bucket would let
 	// anyone lock every sign-in out, so production sets none (AF-PROD-01 decides with the sweeps).
 	AnonymousFlows Window
@@ -191,6 +199,11 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		NodeFlowPerNode:       Window{Limit: 10, Window: 10 * time.Minute},
 		NodeCompletePerPrefix: Window{Limit: 30, Window: 10 * time.Minute},
 		NodeApprovePerAccount: Window{Limit: 20, Window: time.Hour},
+		// AF-CTR-04 E2: 120 failed polls per 10 minutes per network; 5 wrong user-code entries per 15 minutes per account and 20 per
+		// network.
+		NodePollPerPrefix:     Window{Limit: 120, Window: 10 * time.Minute},
+		DeviceEntryPerAccount: Window{Limit: 5, Window: 15 * time.Minute},
+		DeviceEntryPerPrefix:  Window{Limit: 20, Window: 15 * time.Minute},
 	}
 }
 
@@ -251,7 +264,8 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"stepUpPerAccount": &p.StepUpPerAccount, "bootstrapPerPrefix": &p.BootstrapPerPrefix,
 		"nodeRefreshPrefix": &p.NodeRefreshPerPrefix, "nodeRefreshSession": &p.NodeRefreshPerSession, "nodeReportInstallation": &p.NodeReportPerInstallation,
 		"nodeFlowPrefix": &p.NodeFlowPerPrefix, "nodeFlowNode": &p.NodeFlowPerNode, "nodeCompletePrefix": &p.NodeCompletePerPrefix,
-		"nodeApproveAccount": &p.NodeApprovePerAccount,
+		"nodeApproveAccount": &p.NodeApprovePerAccount, "nodePollPrefix": &p.NodePollPerPrefix, "deviceEntryAccount": &p.DeviceEntryPerAccount,
+		"deviceEntryPrefix": &p.DeviceEntryPerPrefix,
 	} {
 		counts[name+"Limit"] = countBound{&window.Limit, 1, 10_000}
 		durations[name+"Window"] = durationBound{&window.Window, time.Minute, 24 * time.Hour}

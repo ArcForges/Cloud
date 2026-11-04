@@ -15,6 +15,9 @@ import (
 // LimitFailure.limit_name.
 var pattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]{1,128}$`)
 
+// countPattern is a canonical non-negative integer decimal (the center states only integer counts in LimitFailure.available).
+var countPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+
 // The Instant bounds of foundation-baseline.json: 0001-01-01T00:00:00Z to 9999-12-31T23:59:59Z, nanos below one second.
 const (
 	InstantMinSeconds = -62135596800
@@ -33,11 +36,11 @@ const (
 //   - Instant (retry_at, LimitFailure.recovery_at): unix_seconds and nanos are required and within their bounds;
 //   - ErrorDetails holds one detail; StateFailure requires its state (pattern) and reason; an AggregateRef requires its kind
 //     (pattern) and an Id of 16 bytes that are not all zero; LimitFailure requires its limit name (pattern); a Revision's value is
-//     at least 0.
+//     at least 0; a LimitFailure's available, when present, is a canonical non-negative integer decimal.
 //
 // It leaves out: the arcError rule's code-specific clauses, which name only the node catalogue's dotted codes
 // that no center code matches; Decimal's canonicalDecimal rule (LimitFailure.maximum) and the valid-Unicode check of strings; and
-// the details the center never emits (UpgradeRequired, StateFailure.native, LimitFailure.available, RevisionConflict.conflict_id).
+// the details the center never emits (UpgradeRequired, StateFailure.native, RevisionConflict.conflict_id).
 func Violations(value *foundationv1.ArcError) []string {
 	var found []string
 	check := func(ok bool, rule string) {
@@ -91,6 +94,9 @@ func Violations(value *foundationv1.ArcError) []string {
 		check(limit.LimitName != nil && pattern.MatchString(limit.GetLimitName()), "LimitFailure.limit_name is required and matches the pattern")
 		if at := limit.GetRecoveryAt(); at != nil {
 			instant(at, "LimitFailure.recovery_at")
+		}
+		if available := limit.GetAvailable(); available != nil {
+			check(available.Value != nil && countPattern.MatchString(available.GetValue()), "LimitFailure.available is a canonical non-negative integer")
 		}
 	}
 	if revision := details.GetRevision(); revision != nil {

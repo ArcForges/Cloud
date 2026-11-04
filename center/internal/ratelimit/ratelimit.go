@@ -63,12 +63,28 @@ const (
 	NodeCompletePrefix Kind = "node_complete_prefix"
 	// NodeApproveAccount counts an account's ApproveNodeSignIn decisions, approvals and denials.
 	NodeApproveAccount Kind = "node_approve_account"
+	// NodePollPrefix counts, per client address prefix, the PollDeviceAuthorization calls whose device code names no authorization or
+	// whose node key proof fails (AF-CTR-04 E2): a failure bucket, so a proved poll never waits on it (protocol-8).
+	NodePollPrefix Kind = "node_poll_prefix"
+	// NodePollAuthorization counts the proved polls of one device authorization, in a constant window (PollAuthorizationWindow; no
+	// policy key: cloud-5).
+	NodePollAuthorization Kind = "node_poll_authorization"
+	// DeviceEntryAccount and DeviceEntryPrefix are the device user-code entry budgets of an account and of a client network: every
+	// entry that is not malformed (a LookupDeviceCode, an ApproveDeviceCode) reserves one unit of each before the code is read, and
+	// only an entry that names a live code the caller may act on gives them back (Reserve, Release; AF-CTR-04 E2, Q8).
+	DeviceEntryAccount Kind = "device_entry_account"
+	DeviceEntryPrefix  Kind = "device_entry_prefix"
 )
+
+// PollAuthorizationWindow is the window of NodePollAuthorization: 6 proved polls per 10 seconds (two intervals of the contract's
+// 5-second poll interval), a constant that no policy overrides.
+var PollAuthorizationWindow = config.Window{Limit: 6, Window: 10 * time.Second}
 
 // Kinds is every bucket kind.
 func Kinds() []Kind {
 	return []Kind{SignInPrefix, SignInFailuresAccount, EmailPrefix, EmailAddress, RedeemFailuresAddress, RefreshPrefix, StepUpAccount, BootstrapPrefix,
-		AnonymousFlows, NodeRefreshPrefix, NodeRefreshSession, NodeReportInstallation, NodeFlowPrefix, NodeFlowNode, NodeCompletePrefix, NodeApproveAccount}
+		AnonymousFlows, NodeRefreshPrefix, NodeRefreshSession, NodeReportInstallation, NodeFlowPrefix, NodeFlowNode, NodeCompletePrefix, NodeApproveAccount,
+		NodePollPrefix, NodePollAuthorization, DeviceEntryAccount, DeviceEntryPrefix}
 }
 
 // Window is the window of a bucket kind in a policy.
@@ -106,6 +122,14 @@ func Window(policy config.IdentityPolicy, kind Kind) config.Window {
 		return policy.NodeCompletePerPrefix
 	case NodeApproveAccount:
 		return policy.NodeApprovePerAccount
+	case NodePollPrefix:
+		return policy.NodePollPerPrefix
+	case NodePollAuthorization:
+		return PollAuthorizationWindow
+	case DeviceEntryAccount:
+		return policy.DeviceEntryPerAccount
+	case DeviceEntryPrefix:
+		return policy.DeviceEntryPerPrefix
 	}
 	return config.Window{}
 }

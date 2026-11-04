@@ -307,3 +307,22 @@ func TestTheStepUpTargetHashIsCanonical(t *testing.T) {
 		t.Fatal("the hash does not bind the order of its IDs or its class")
 	}
 }
+
+// TestTheTextStepUpTargetHashIsCanonical pins the text form of the step-up target (AF-CTR-04 E2: the device-code approval names the
+// normalized user code): the SHA-256 of the class, the account ID and the text, each on its own line. The expected value was computed
+// outside the center (Python's hashlib) from fleet.approveDeviceCode, 0190a5f2-7c1e-7b3a-9d2e-3f4a5b6c7d8e and BCDFGHJK.
+func TestTheTextStepUpTargetHashIsCanonical(t *testing.T) {
+	account := platform.ID{0x01, 0x90, 0xa5, 0xf2, 0x7c, 0x1e, 0x7b, 0x3a, 0x9d, 0x2e, 0x3f, 0x4a, 0x5b, 0x6c, 0x7d, 0x8e}
+	const want = "f0dfd1cbf6cfd33dd0cb7d078c846908a7edbecdf1265cbae71333b8db11f5cf"
+	if got := TextTargetHash("fleet.approveDeviceCode", account, "BCDFGHJK"); got != want {
+		t.Fatalf("TextTargetHash = %s, want %s", got, want)
+	}
+	for _, other := range []string{"BCDF-GHJK", "bcdfghjk", "BCDFGHJL"} {
+		if TextTargetHash("fleet.approveDeviceCode", account, other) == want {
+			t.Fatalf("%s hashes like the normalized code", other)
+		}
+	}
+	if TextTargetHash("fleet.approveNodeSignIn", account, "BCDFGHJK") == want {
+		t.Fatal("the hash does not bind its class")
+	}
+}
