@@ -1510,15 +1510,30 @@ test("a flow ID is the canonical lower-case UUID and a user code is 8 letters of
   assert.equal(script.normalizeUserCode("bcdf-ghjk"), "BCDFGHJK");
   assert.equal(script.normalizeUserCode("BCDF GHJK"), "BCDFGHJK");
   assert.equal(script.normalizeUserCode("BCDFGHJK"), "BCDFGHJK");
-  for (const bad of ["BCDF-GHJA", "BCDF-GHJ", "BCDF-GHJKL", "BCDF--GHJK", "", "BCDF-GHJ1", "ÄCDF-GHJK", null])
+  for (const bad of [
+    "BCDF-GHJA",
+    "BCDF-GHJ",
+    "BCDF-GHJKL",
+    "BCDF--GHJK",
+    "",
+    "BCDF-GHJ1",
+    "ÄCDF-GHJK",
+    null,
+  ])
     assert.equal(script.normalizeUserCode(bad), null, String(bad));
   assert.equal(script.displayUserCode("BCDFGHJK"), "BCDF-GHJK");
 });
 
 test("the sign-in page follows a return to /connect or /activate with its exact fragment, and nothing else with a fragment", () => {
   const base = "/api";
-  assert.equal(script.safeFleetReturn(`/api/connect#flow=${flowId}`, origin, base), `/api/connect#flow=${flowId}`);
-  assert.equal(script.safeFleetReturn("/api/activate#code=BCDF-GHJK", origin, base), "/api/activate#code=BCDF-GHJK");
+  assert.equal(
+    script.safeFleetReturn(`/api/connect#flow=${flowId}`, origin, base),
+    `/api/connect#flow=${flowId}`,
+  );
+  assert.equal(
+    script.safeFleetReturn("/api/activate#code=BCDF-GHJK", origin, base),
+    "/api/activate#code=BCDF-GHJK",
+  );
   for (const hostile of [
     `/api/connect#flow=${flowId.toUpperCase()}`,
     `/api/connect#flow=${flowId}&x=1`,
@@ -1539,12 +1554,18 @@ test("the sign-in page follows a return to /connect or /activate with its exact 
   ])
     assert.equal(script.safeFleetReturn(hostile, origin, base), null, String(hostile));
   // The nested return of the sign-in page: decoded once by parseFragment; a double encoding or a split value is no fleet return.
-  const nested = script.parseFragment(`#return=${encodeURIComponent(`/api/connect#flow=${flowId}`)}`).return;
+  const nested = script.parseFragment(
+    `#return=${encodeURIComponent(`/api/connect#flow=${flowId}`)}`,
+  ).return;
   assert.equal(script.safeFleetReturn(nested, origin, base), `/api/connect#flow=${flowId}`);
   const doubled = script.parseFragment(`#return=%2Fapi%2Fconnect%2523flow%3D${flowId}`).return;
   assert.equal(script.safeFleetReturn(doubled, origin, base), null);
   const split = script.parseFragment(`#return=%2Fapi%2Fconnect%23flow%3D${flowId}&x=1`).return;
-  assert.equal(split, `/api/connect#flow=${flowId}`, "an extra parameter is another fragment value");
+  assert.equal(
+    split,
+    `/api/connect#flow=${flowId}`,
+    "an extra parameter is another fragment value",
+  );
   const extra = script.parseFragment(`#return=%2Fapi%2Fconnect%23flow%3D${flowId}%26x%3D1`).return;
   assert.equal(script.safeFleetReturn(extra, origin, base), null);
 });
@@ -1669,7 +1690,11 @@ test("/activate fills the code from the fragment after dropping it, and Continue
   });
   signedIn.elements.set("activate-review", signedForm);
   await script.start(signedIn.window);
-  assert.deepEqual(signedIn.events, ["fetch GET /api/session/v1/web/bootstrap"], "no fragment, nothing to drop");
+  assert.deepEqual(
+    signedIn.events,
+    ["fetch GET /api/session/v1/web/bootstrap"],
+    "no fragment, nothing to drop",
+  );
   const field = signedIn.elements.get("user-code");
   assert(field);
   field.value = "BCDF-GHJA";
@@ -1691,7 +1716,11 @@ test("/activate fills the code from the fragment after dropping it, and Continue
 test("the sign-in page drops its return fragment before anything else, also without passkeys or with a failing first read (P-16)", async () => {
   const ids = ["heading", "error-summary", "error-text", "status", "sign-in", "signed-in"];
   const nested = `#return=${encodeURIComponent(`/api/connect#flow=${flowId}`)}`;
-  for (const hash of [nested, `#return=${encodeURIComponent("/api/activate#code=BCDF-GHJK")}`, "#return=%2Fapi%2Faccount%2Fsessions"]) {
+  for (const hash of [
+    nested,
+    `#return=${encodeURIComponent("/api/activate#code=BCDF-GHJK")}`,
+    "#return=%2Fapi%2Faccount%2Fsessions",
+  ]) {
     const working = page("sign-in", ids, { hash });
     await script.start(working.window);
     assert.equal(working.events[0], "replaceState", hash);

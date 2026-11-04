@@ -58,7 +58,9 @@ func KnownSurfaces() []Surface {
 
 // DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces and node
 // enrollment with its pages (AF-CTR-04 E3, delivery-14), never the operations page.
-func DefaultSelfHostedSurfaces() []Surface { return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet} }
+func DefaultSelfHostedSurfaces() []Surface {
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet}
+}
 
 // ClientIPHeader is the one header the hosted Worker sets to the client's address (from cf-connecting-ip, overwriting any client
 // value); the generated Worker tables carry the same name.

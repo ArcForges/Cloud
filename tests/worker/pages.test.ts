@@ -1016,22 +1016,35 @@ test("the fleet pages are six exact routes of the fleet surface, forwarded only 
     assert.equal(row.setCookie, "none", row.path);
     assert.equal(row.cookie, row.method === "POST", row.path);
     assert.deepEqual([...row.responseTypes], ["text/html; charset=utf-8"], row.path);
-    assert.equal(row.requestType, row.method === "POST" ? "application/x-www-form-urlencoded" : "", row.path);
+    assert.equal(
+      row.requestType,
+      row.method === "POST" ? "application/x-www-form-urlencoded" : "",
+      row.path,
+    );
   }
   for (const flag of ["identity,pages", "identity,pages,operations", "", "fleet,x"]) {
     const { env, seen, keys } = bindings(() => jsonOk(), { FLAGSHIP_SURFACES: flag });
     for (const row of fleet) {
-      const reply = await routeRequest(call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }), env);
+      const reply = await routeRequest(
+        call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }),
+        env,
+      );
       assert.equal(reply.status, 404, `${flag} ${row.path}`);
     }
     assert.equal(seen.length, 0, flag);
     assert.equal(keys.length, 0, flag);
   }
-  const { env, seen } = bindings(() => centerReply(200, { type: "text/html; charset=utf-8", body: "x" }), {
-    FLAGSHIP_SURFACES: "identity,pages,fleet",
-  });
+  const { env, seen } = bindings(
+    () => centerReply(200, { type: "text/html; charset=utf-8", body: "x" }),
+    {
+      FLAGSHIP_SURFACES: "identity,pages,fleet",
+    },
+  );
   for (const row of fleet) {
-    const reply = await routeRequest(call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }), env);
+    const reply = await routeRequest(
+      call(row, { headers: { "cf-connecting-ip": "203.0.113.7" } }),
+      env,
+    );
     assert.equal(reply.status, 200, row.path);
     assert.equal(reply.headers.get("cache-control"), "no-store, no-transform", row.path);
     assert.equal(reply.headers.get("location"), null, row.path);
@@ -1047,7 +1060,9 @@ test("the fleet pages are six exact routes of the fleet surface, forwarded only 
 
 test("the page path forwards no client-sent origin header (R-6): only what the Worker builds reaches the Container", async () => {
   const review = route("POST", "/activate/review");
-  const { env, seen } = bindings(() => centerReply(200, { type: "text/html; charset=utf-8", body: "x" }));
+  const { env, seen } = bindings(() =>
+    centerReply(200, { type: "text/html; charset=utf-8", body: "x" }),
+  );
   const request = call(review, {
     headers: {
       "cf-connecting-ip": "203.0.113.7",

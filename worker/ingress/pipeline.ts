@@ -339,6 +339,7 @@ export function requestOrigin(request: Request): { country?: string; asn?: strin
   const { country, asn } = cf as { country?: unknown; asn?: unknown };
   const origin: { country?: string; asn?: string } = {};
   if (typeof country === "string" && /^[A-Z]{2}$/u.test(country)) origin.country = country;
-  if (typeof asn === "number" && Number.isSafeInteger(asn) && asn > 0 && asn <= 4294967295) origin.asn = String(asn);
+  if (typeof asn === "number" && Number.isSafeInteger(asn) && asn > 0 && asn <= 4294967295)
+    origin.asn = String(asn);
   return origin;
 }

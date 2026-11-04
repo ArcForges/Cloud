@@ -819,7 +819,10 @@ function connectDonePage(page) {
   if (!link) return;
   const target = link.getAttribute("href");
   if (!isLoopbackResult(target)) {
-    showError(page.document, "The link back to the node is not valid. Start the sign-in again on the node.");
+    showError(
+      page.document,
+      "The link back to the node is not valid. Start the sign-in again on the node.",
+    );
     link.remove();
     return;
   }

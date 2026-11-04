@@ -417,13 +417,33 @@ test("a surface call carries the country and network from request.cf only", asyn
     (request as Request & { cf?: unknown }).cf = cf;
     return request;
   };
-  await routeRequest(withCf({ [clientCountryHeader]: "XX", [clientAsnHeader]: "1" }, { country: "DE", asn: 3320 }), env);
+  await routeRequest(
+    withCf({ [clientCountryHeader]: "XX", [clientAsnHeader]: "1" }, { country: "DE", asn: 3320 }),
+    env,
+  );
   assert.equal(seen[0]?.headers.get(clientCountryHeader), "DE");
   assert.equal(seen[0]?.headers.get(clientAsnHeader), "3320");
-  await routeRequest(withCf({ [clientCountryHeader]: "FR", [clientAsnHeader]: "12322" }, undefined), env);
-  assert.equal(seen[1]?.headers.get(clientCountryHeader), null, "a client's header is never forwarded");
+  await routeRequest(
+    withCf({ [clientCountryHeader]: "FR", [clientAsnHeader]: "12322" }, undefined),
+    env,
+  );
+  assert.equal(
+    seen[1]?.headers.get(clientCountryHeader),
+    null,
+    "a client's header is never forwarded",
+  );
   assert.equal(seen[1]?.headers.get(clientAsnHeader), null);
-  for (const cf of [{ country: "de", asn: 0 }, { country: "T1", asn: -1 }, { country: "DEU", asn: 4294967296 }, { country: 7, asn: "3320" }, null, "DE"])
+  for (const cf of [
+    { country: "de", asn: 0 },
+    { country: "T1", asn: -1 },
+    { country: "DEU", asn: 4294967296 },
+    { country: 7, asn: "3320" },
+    null,
+    "DE",
+  ])
     assert.deepEqual(requestOrigin(withCf({}, cf)), {}, JSON.stringify(cf));
-  assert.deepEqual(requestOrigin(withCf({}, { country: "US", asn: 4294967295 })), { country: "US", asn: "4294967295" });
+  assert.deepEqual(requestOrigin(withCf({}, { country: "US", asn: 4294967295 })), {
+    country: "US",
+    asn: "4294967295",
+  });
 });
