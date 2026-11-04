@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestFleetExchangeCapture",
   "contractsCohort": "1.0.0-ci.424.1",
-  "centerCommit": "a8f4e75",
+  "centerCommit": "7c1b060",
   "method": "CompleteNodeSignIn",
   "case": "ok",
   "outcome": "ok",
@@ -12,24 +12,24 @@
   "request": {
     "contentType": "application/grpc-web+proto",
     "frames": [
-      "00000000b20a0052120a10a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2045a2b77634842776348427763484277634842776348427763484277634842776348427763484277634842776345622b4b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f7240e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4"
+      "00000000b20a0052120a10a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2015a2b77634842776348427763484277634842776348427763484277634842776348427763484277634842776345622b4b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f714b696f7240e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4"
     ]
   },
   "reply": {
     "contentType": "application/grpc-web+proto",
     "httpStatus": 200,
     "frames": [
-      "00000000d90a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a10812c00152bd010a30616672312e415145424151454241514542415145424151454241514542415145424151454241514542415145424151451230616661312e416749434167494341674943416749434167494341674943416749434167494341674943416749434167491a0508a0381000222e0a120a10a4a4a4a4a4a4a4a4a4a4a4a4a4a4a40912054f776e65721a116f2a2a2a406578616d706c652e746573744a120a10a3a3a3a3a3a3a3a3a3a3a3a3a3a3a30a52070880ce891e10005880dddb01"
+      "00000000d90a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a10712c00152bd010a30616672312e415145424151454241514542415145424151454241514542415145424151454241514542415145424151451230616661312e415145424151454241514542415145424151454241514542415145424151454241514542415145424151451a0508a0381000222e0a120a10a4a4a4a4a4a4a4a4a4a4a4a4a4a4a40112054f776e65721a116f2a2a2a406578616d706c652e746573744a120a10a3a3a3a3a3a3a3a3a3a3a3a3a3a3a30152070880ce891e10005880dddb01"
     ],
     "trailers": "grpc-status: 0\r\n"
   },
   "normalized": [
-    "a 16-byte ID the center drew (correlation, flow, installation, account): the n-th distinct one is 15 bytes of 0xa0+n's kind byte and n",
-    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token)",
+    "a 16-byte ID the center drew: 15 bytes of its kind (0xa1 correlation, 0xa2 flow, 0xa3 installation, 0xa4 account) and n for the n-th distinct one of the kind",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
     "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
     "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
     "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
     "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
   ],
-  "sha256": "e23e2784d64c9d00013d1314705eb3fd53c99b2c6419c0052d678c56c1b86ae7"
+  "sha256": "9d4c68aeea49fcd57968c11eed523445d3ce1eb6d7312f71f10c94490e3e4cab"
 }

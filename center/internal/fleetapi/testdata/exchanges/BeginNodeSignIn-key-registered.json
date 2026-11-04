@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestFleetExchangeCapture",
   "contractsCohort": "1.0.0-ci.424.1",
-  "centerCommit": "a8f4e75",
+  "centerCommit": "7c1b060",
   "method": "BeginNodeSignIn",
   "case": "key-registered",
   "outcome": "CONFLICT/already_exists:node_key",
@@ -19,17 +19,17 @@
     "contentType": "application/grpc-web+proto",
     "httpStatus": 200,
     "frames": [
-      "00000000850a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a10b1a6d0a0e616c72656164795f65786973747310051a1d6572726f722e636f6e666c6963742e616c72656164795f65786973747322020801280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a10b3a20221e0a086e6f64655f6b65791212616c72656164795f72656769737465726564"
+      "00000000850a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1081a6d0a0e616c72656164795f65786973747310051a1d6572726f722e636f6e666c6963742e616c72656164795f65786973747322020801280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1083a20221e0a086e6f64655f6b65791212616c72656164795f72656769737465726564"
     ],
     "trailers": "grpc-status: 0\r\n"
   },
   "normalized": [
-    "a 16-byte ID the center drew (correlation, flow, installation, account): the n-th distinct one is 15 bytes of 0xa0+n's kind byte and n",
-    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token)",
+    "a 16-byte ID the center drew: 15 bytes of its kind (0xa1 correlation, 0xa2 flow, 0xa3 installation, 0xa4 account) and n for the n-th distinct one of the kind",
+    "a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
     "a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
     "a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
     "every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
     "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
   ],
-  "sha256": "e90ee8ec48585d19a04333771a017c71e4221d8ae869549b7a88e342be0ea759"
+  "sha256": "2b3a6bfcee9968f4a0a75c683e09b0c80551c182a6627830c882dbb943f09bc5"
 }

@@ -55,8 +55,8 @@ const exchangeSchemaVersion = 2
 
 // normalizationRules describe the placeholders, recorded in every file.
 var normalizationRules = []string{
-	"a 16-byte ID the center drew (correlation, flow, installation, account): the n-th distinct one is 15 bytes of 0xa0+n's kind byte and n",
-	"a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token)",
+	"a 16-byte ID the center drew: 15 bytes of its kind (0xa1 correlation, 0xa2 flow, 0xa3 installation, 0xa4 account) and n for the n-th distinct one of the kind",
+	"a token the center issued: its prefix (afa1. or afr1.) and the canonical base64url of 32 bytes of n (the n-th distinct token of that format)",
 	"a one-use code the center drew: the canonical base64url of 32 bytes of 0xc0+n",
 	"a node key proof (ES256 draws a nonce): 64 bytes of 0xe0+n",
 	"every Instant: unix_seconds is the offset from the harness clock at the call, rounded to 5 seconds; nanos 0",
@@ -129,8 +129,9 @@ func (p *placeholders) id(value []byte, kind byte) []byte {
 	if placeholder, ok := p.ids[key]; ok {
 		return placeholder
 	}
+	// One counter per kind: the n-th distinct ID of a kind is the same placeholder whatever order a message's fields are visited in.
 	placeholder := bytes.Repeat([]byte{kind}, 16)
-	placeholder[15] = byte(p.next("id"))
+	placeholder[15] = byte(p.next(fmt.Sprintf("id-%x", kind)))
 	p.ids[key] = placeholder
 	return placeholder
 }
@@ -151,7 +152,8 @@ func (p *placeholders) token(value string) string {
 	if _, ok := session.ParseToken(prefix, value); !ok {
 		p.t.Fatal("a token that is not canonical")
 	}
-	placeholder := prefix + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{byte(p.next("token"))}, 32))
+	// One counter per format, so the numbering does not depend on the order a message's fields are visited in.
+	placeholder := prefix + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{byte(p.next("token " + prefix))}, 32))
 	if _, ok := session.ParseToken(prefix, placeholder); !ok {
 		p.t.Fatal("a token placeholder of the wrong shape")
 	}
