@@ -222,12 +222,6 @@ func (r *recorder) record(fromCenter bool, data []byte) {
 	}
 }
 
-func (r *recorder) stop() {
-	r.mu.Lock()
-	r.on = false
-	r.mu.Unlock()
-}
-
 type channelCapturer struct {
 	t     *testing.T
 	cases map[string]channelExchange

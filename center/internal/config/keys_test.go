@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,7 +72,11 @@ func TestACommandKeyNeverPrintsItsPrivateHalf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secret := private.D.String()
+	raw, err := private.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := hex.EncodeToString(raw)
 	var logged bytes.Buffer
 	slog.New(slog.NewJSONHandler(&logged, nil)).Info("loaded", "key", key, "keys", []CommandKey{key})
 	data, _ := json.Marshal(struct{ Key CommandKey }{key})

@@ -228,7 +228,7 @@ func TestStartRefusesAMismatchedOrMissingCommandKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = relayCenter(t, db, io.Discard, mismatched).CheckCommandKeys(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "ARCFORGES_CENTER_KEY_MAIN") || !strings.Contains(err.Error(), kid) || strings.Contains(err.Error(), other.Signer().D.String()) {
+	if err == nil || !strings.Contains(err.Error(), "ARCFORGES_CENTER_KEY_MAIN") || !strings.Contains(err.Error(), kid) || strings.Contains(err.Error(), scalarHex(t, other)) {
 		t.Fatalf("a key whose row registers another public half: %v", err)
 	}
 	// The matching key.
@@ -254,7 +254,7 @@ func TestTheCommandKeyNeverAppearsInLogsOrHealth(t *testing.T) {
 	}
 	health, _ := json.Marshal(center.Health)
 	for _, text := range []string{logs.String(), string(health), fmt.Sprintf("%+v", center.Config)} {
-		for _, secret := range []string{key.Signer().D.String(), base64.StdEncoding.EncodeToString(der), hex.EncodeToString(der)} {
+		for _, secret := range []string{scalarHex(t, key), base64.StdEncoding.EncodeToString(der), hex.EncodeToString(der)} {
 			if strings.Contains(text, secret) {
 				t.Fatal("the command key's private half appears in a log line, the health document or the configuration's formatting")
 			}
@@ -263,4 +263,14 @@ func TestTheCommandKeyNeverAppearsInLogsOrHealth(t *testing.T) {
 	if !strings.Contains(logs.String(), "command keys loaded") {
 		t.Fatalf("the start does not say which kids it holds: %s", logs.String())
 	}
+}
+
+// scalarHex is the hex of a command key's private scalar, a form the private half must never appear in.
+func scalarHex(t *testing.T, key config.CommandKey) string {
+	t.Helper()
+	raw, err := key.Signer().Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hex.EncodeToString(raw)
 }
