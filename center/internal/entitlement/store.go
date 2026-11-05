@@ -468,6 +468,29 @@ func LoadCurrentDefinitions(ctx context.Context, tx pgx.Tx) (string, error) {
 	return version, nil
 }
 
+// LoadFloor reads the newest instant the account holds (State.Floor) in one statement, for the validity check of the gate's fast path
+// (N-2 of the review of Cloud #143): the stored snapshot's computation, the revision's last commit, the creation of every record and
+// every definitions activation. False when the account holds nothing.
+func LoadFloor(ctx context.Context, tx pgx.Tx, account string) (Micros, bool, error) {
+	var floor *time.Time
+	err := tx.QueryRow(ctx, `SELECT greatest(
+    (SELECT computed_at FROM entitlement.snapshot WHERE account_id = $1::uuid),
+    (SELECT updated_at FROM entitlement.revision WHERE account_id = $1::uuid),
+    (SELECT max(created_at) FROM entitlement.grant WHERE account_id = $1::uuid),
+    (SELECT max(created_at) FROM entitlement.revocation WHERE account_id = $1::uuid),
+    (SELECT max(created_at) FROM entitlement.service_term WHERE account_id = $1::uuid),
+    (SELECT max(recorded_at) FROM entitlement.service_term_action WHERE account_id = $1::uuid),
+    (SELECT max(recorded_at) FROM entitlement.account_status_fact WHERE account_id = $1::uuid),
+    (SELECT max(activated_at) FROM entitlement.definitions_activation WHERE account_id = $1::uuid))`, account).Scan(&floor)
+	if err != nil {
+		return 0, false, store.Sanitize("read the entitlement floor", err)
+	}
+	if floor == nil {
+		return 0, false, nil
+	}
+	return FromTime(*floor), true, nil
+}
+
 // LoadSnapshot reads only the stored snapshot of an account (the gate's fast path: no record is read when the snapshot is valid) and
 // its revision.
 func LoadSnapshot(ctx context.Context, tx pgx.Tx, account string) (*StoredSnapshot, error) {
@@ -489,7 +512,21 @@ func LoadSnapshot(ctx context.Context, tx pgx.Tx, account string) (*StoredSnapsh
 // Commit appends the records and replaces the snapshot as one unit of work within the caller's transaction, guarded by the account's
 // revision: it returns RevisionConflict, having written nothing, when the account is no longer at the revision the caller loaded.
 // A constraint refusal or any other store failure is an error and the caller's transaction must roll back.
+//
+// The deploy-level fact (store-1) is read again under a share lock in the commit's own transaction: a snapshot computed under
+// definitions that are no longer the fact's is refused with ErrDefinitionsSuperseded, having written nothing, so a replica that loaded
+// just before a version switch cannot write after it; RecordDefinitions' update waits for the commits that hold the lock (N-1 of the
+// review of Cloud #143).
 func Commit(ctx context.Context, tx pgx.Tx, account string, expected int64, add Append, snapshot Snapshot, at time.Time) (CommitOutcome, error) {
+	var current string
+	err := tx.QueryRow(ctx, "SELECT definitions_version FROM entitlement.definitions_current WHERE singleton FOR SHARE").Scan(&current)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return 0, store.Sanitize("read the current definitions version", err)
+	case current != snapshot.Content.DefinitionsVersion:
+		return 0, ErrDefinitionsSuperseded
+	}
 	if expected == 0 {
 		// The first commit of an account creates its fence row; of two simultaneous first commits the second finds the row and writes nothing.
 		tag, err := tx.Exec(ctx, "INSERT INTO entitlement.revision (account_id, rev, updated_at) VALUES ($1::uuid, 1, $2) ON CONFLICT (account_id) DO NOTHING", account, at)

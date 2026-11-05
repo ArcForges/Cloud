@@ -229,22 +229,36 @@ the personal data and the retention are in [PostgreSQL store](postgres-store.md#
 **The definitions fact (store-1, AF-CTR-05 part E0).** Migration `0007_entitlement_definitions_current.sql` adds
 `entitlement.definitions_current`, one row holding the definitions version of the revision that started last
 ([PostgreSQL store](postgres-store.md#definitions-fact-af-ctr-05-part-e0)). An official hosted center with a valid catalogue
-records its version once at its start, before its listeners open (`Service.RecordDefinitions`; retried in the background while the
-store does not answer); a start with the version already recorded writes nothing, and production (no catalogue) records nothing. A
-replica whose version differs from the row neither recomputes an account against its own version nor writes one: a read returns the
-stored snapshot as it is while it is valid; a read that needs a recompute, and every write (an issue, a revocation, an operator
-grant), is `entitlement.ErrDefinitionsSuperseded`, which the gate answers `RESOURCE/overloaded` (`definitions_superseded`) and the
-operator grant as an unavailable store. During a rolling deploy the older revision therefore serves the snapshots the newer one
-computed, and its reads of an account whose snapshot expired are refused as overloaded until it is replaced; the newer revision raises
-each account's version once. The number of activations an account can gain is bounded by the starts that change the version, not by
-its reads (`TestRollingDeployReadsNeverRaiseTheSnapshotVersion`: two services with different versions, 200 alternating reads, and the
-same reads without the fact as the control case that wedges). A database the center never started on holds no row, and every replica
-may compute there.
+records its version at its start, before its listeners open (`Service.RecordDefinitions`), stamped with its process start instant,
+which it captures once before the first attempt; while the store does not answer it retries in the background with the same
+instant, logging each failure with its sanitized cause. The row is replaced only by another version from a newer start: a start with
+the version already recorded writes nothing, and a retry of an older start that lands after a newer revision recorded writes
+nothing either, reports itself superseded and stops retrying (`TestALateRetryOfAnOlderStartNeverDisplacesTheNewerFact`). A replica
+whose version differs from the row neither recomputes an account against its own version nor writes one: a read returns a valid
+stored snapshot as it is, from the fast path (whatever definitions it was computed under, without loading the account's records); a
+read that needs a recompute, and every write (an issue, a revocation, an operator grant), is `entitlement.ErrDefinitionsSuperseded`,
+which the gate answers `RESOURCE/overloaded` (`definitions_superseded`) and the operator grant as an unavailable store. Every commit
+reads the fact again under a share lock in its own transaction, so a replica that loaded an account just before a version switch
+cannot write after it (`TestACommitRereadsTheFactUnderALock`). During a rolling deploy the older revision therefore serves the
+snapshots the newer one computed, and its reads of an account whose snapshot expired are refused as overloaded until it is replaced;
+the newer revision raises each account's version once. The number of activations an account can gain is bounded by the starts that
+change the version, not by its reads (`TestRollingDeployReadsNeverRaiseTheSnapshotVersion`: two services with different versions,
+200 alternating reads, and the same reads without the fact as the control case that wedges).
+
+One hazard stays in the design: an older revision that restarts during the rollout is a newer start, so it records its version again,
+and the newer revision is then superseded (its expired snapshots answer overloaded and it writes nothing). The recovery is to restart
+the newer revision, whose start records its version once more. Start instants come from each process's clock, so the order of two
+starts within the clock skew of the hosts is not decided by the row.
+
+Only an official hosted center with a valid catalogue records the row (the only centers that compute snapshots); until its first
+record succeeds, and on production and self-hosted databases, there is none, and every replica may compute there.
 
 **The clock floor (AF-CTR-05 part E0).** Every computation floors its instant at the newest instant the account holds: the stored
 snapshot's `computed_at`, the creation of every grant, revocation, term, term action and status fact, every definitions activation
 and the revision's `updated_at` (`State.Floor`); a write admits its records strictly after it. A snapshot dropped while a replica's
-clock is behind the newest record is recomputed at that record's instant (`TestAComputationNeverGoesBehindTheNewestRecord`).
+clock is behind the newest record is recomputed at that record's instant (`TestAComputationNeverGoesBehindTheNewestRecord`), and the
+gate's fast path checks a stored snapshot's validity at the same floor (`LoadFloor`, one statement), so a snapshot whose validity
+ended before the newest record is recomputed rather than served (`TestTheFastPathChecksValidityAtTheFloor`).
 
 ## Post-deploy checklist
 
@@ -381,8 +395,9 @@ term, no `identity.operator` row, and the audit events `issued` once and `refuse
 - **Delivered by AF-CTR-05 part E0 (the prerequisites of the first gated operation; Plan #80 moved them from AF-CTR-04).** The six
   items this list carried are done, and only these: AF-CTR-05 E0 serves no gated operation, adds no surface and changes neither
   production's nor proof's surfaces.
-  - **store-1**: the deploy-level definitions fact (`entitlement.definitions_current`, migration 0007), written once by the
-    revision that starts with it; a replica of another version neither recomputes nor writes (see the store, above).
+  - **store-1**: the deploy-level definitions fact (`entitlement.definitions_current`, migration 0007), written by the revision
+    that starts with it and stamped with its start instant, so a late retry of an older start never displaces it; a replica of
+    another version neither recomputes nor writes, and every commit re-reads the fact under a share lock (see the store, above).
   - **The clock floor**: every computation floors its instant at the newest record or activation instant of the account, not only
     at the stored snapshot's `computed_at` (see the store, above).
   - **gate-3**: a gate that cannot decide wraps its cause, is logged with the correlation ID by the failure paths of `identityapi`,

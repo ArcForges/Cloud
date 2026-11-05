@@ -179,6 +179,7 @@ func TestTheAuthorizerIsComposedWithThePerAccountControls(t *testing.T) {
 // records its definitions version once; production (no catalogue) and a self-hosted center record nothing; Run calls the record.
 func TestTheStartRecordsTheDefinitionsVersion(t *testing.T) {
 	hosted, db := hostedCenter(t, config.PlanDevelopmentFixtures, withOperations, Options{})
+	hosted.startedAt = time.Now()
 	if !hosted.recordsDefinitions() {
 		t.Fatal("the hosted center with the development fixtures does not record its definitions")
 	}

@@ -62,7 +62,7 @@ func TestEachGateFailureCauseIsLoggedAndAudited(t *testing.T) {
 			func() feature.Gate {
 				// A newer revision started with other definitions and recorded them; this replica's service may not compute.
 				newer := entitlement.NewService(r.db.Runtime, otherDefinitions{inner: r.conf, version: "dev-next"}, nil, nil)
-				if _, err := newer.RecordDefinitions(context.Background()); err != nil {
+				if _, err := newer.RecordDefinitions(context.Background(), time.Now()); err != nil {
 					t.Fatal(err)
 				}
 				return feature.NewGate(r.conf, r.service)

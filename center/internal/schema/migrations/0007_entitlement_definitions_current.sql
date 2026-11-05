@@ -6,14 +6,16 @@
 -- The activation of definitions is per account and keyed by the version of the replica that reads. Two revisions with different
 -- definitions versions running side by side (a rolling deploy) would each recompute and append an activation at every read of an
 -- account whose last activation is the other's, so the snapshot version would climb by one per read and the 2000-record bound would
--- wedge the account. This table holds one row: the definitions version of the revision that started last, written once by that
--- revision at its start (entitlement.Service.RecordDefinitions). A replica whose version differs from the row neither recomputes an
+-- wedge the account. This table holds one row: the definitions version of the revision that started last, written by that revision
+-- at its start (entitlement.Service.RecordDefinitions) and stamped with its start instant, so a delayed retry of an older start can
+-- never displace a newer start's version. A replica whose version differs from the row neither recomputes an
 -- account against its own version nor writes one: it reads a valid snapshot as stored, and answers RESOURCE/overloaded where a
 -- recompute is needed (access.gate_failure, definitions_superseded). The number of activations an account gains is so bounded by the
 -- starts that change the version, never by its reads.
 --
--- The row is written only where it changes: a start with the version already recorded writes nothing, and the trigger refuses an
--- update that keeps the version (the one write per version) or a deletion. Personal data: none (a version text and an instant).
+-- The row only moves forward: a start with the version already recorded writes nothing, and the trigger refuses an update that keeps
+-- the version (the one write per version), one whose start instant is not newer than the stored one, and a deletion. Personal data:
+-- none (a version text and an instant).
 -- Retention: one row, kept.
 
 CREATE TABLE entitlement.definitions_current (
@@ -32,6 +34,9 @@ BEGIN
     END IF;
     IF NEW.definitions_version = OLD.definitions_version OR NEW.singleton IS DISTINCT FROM OLD.singleton THEN
         RAISE EXCEPTION 'entitlement.definitions_current is written once per definitions version' USING ERRCODE = '55000';
+    END IF;
+    IF NEW.recorded_at <= OLD.recorded_at THEN
+        RAISE EXCEPTION 'entitlement.definitions_current is replaced only by a newer start' USING ERRCODE = '55000';
     END IF;
     RETURN NEW;
 END;

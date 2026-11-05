@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
@@ -177,6 +178,8 @@ type settings struct {
 	selfHostedOperations bool
 	// extra are further configuration values (the mobile surface's Android app identity and debug scheme, AF-CTR-04 part M).
 	extra map[string]string
+	// controls are further resource controls of the composition (server.Options.Controls).
+	controls []access.Control
 }
 
 const writePolicy = `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000}`
@@ -239,7 +242,8 @@ func newHarness(t *testing.T, options settings) *harness {
 	if options.selfHostedOperations {
 		cfg.Identity.Surfaces = append(cfg.Identity.Surfaces, config.SurfaceOperations)
 	}
-	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: h.mail, Clock: h.clock.Now, Background: func(work func()) { work() }})
+	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: h.mail, Clock: h.clock.Now, Background: func(work func()) { work() },
+		Controls: options.controls})
 	if err != nil {
 		t.Fatal(err)
 	}

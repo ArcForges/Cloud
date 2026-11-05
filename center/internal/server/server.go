@@ -87,6 +87,9 @@ type Center struct {
 	// buildVersion the number of migrations of this build.
 	schemaVersion atomic.Int64
 	buildVersion  int
+	// startedAt is the process start instant the definitions fact is stamped with (store-1), captured once by Run before the first
+	// attempt and used unchanged by every retry, so a late retry never displaces a newer start's fact.
+	startedAt time.Time
 }
 
 type namedPool struct {
@@ -113,6 +116,10 @@ type Options struct {
 	// Participants are further device revocation cascade participants (DC-06): the center always registers fleet.NodeParticipant
 	// (AF-CTR-04); agent grants arrive with AF-CTR-07 and push with AF-CLD-06; the tests register a stand-in.
 	Participants []device.Participant
+	// Controls are further resource controls, run after the center's own (package quota): the tests register a control that holds a
+	// slot for the call's duration, to pin that every call releases it when it ends. A running center registers none (Run composes the
+	// center with Options{}).
+	Controls []access.Control
 	// catalogue replaces the plan catalogue with a document under a classification: TESTS ONLY (DC-12). It is unexported, so no other
 	// package (the executable included) can set it, and no environment variable, file or configuration reaches it: a running center
 	// has the catalogue of its plan configuration or none. TestNoCodeOfTheRunningCenterInjectsACatalogue parses the non-test sources of the
@@ -290,7 +297,8 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	c.drain = service.Drain
 	// The per-account resource controls stand in front of every gated row (AF-CTR-05 E0, CTR5-GATE-05): a gated row without one
 	// refuses the composition.
-	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features), access.WithControls(quota.Controls(c.Store, c.Config.Identity.Policy, clock)...))
+	controls := append(quota.Controls(c.Store, c.Config.Identity.Policy, clock), options.Controls...)
+	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features), access.WithControls(controls...))
 	if err := authorizer.CheckComposition(); err != nil {
 		return composedIdentity{}, err
 	}
@@ -388,20 +396,27 @@ func (c *Center) recordsDefinitions() bool {
 	return c.Entitlements != nil && c.Config.Mode == config.OfficialHosted && c.FeatureConfiguration.State == feature.StateValid
 }
 
-// recordDefinitions writes the fact once (entitlement.Service.RecordDefinitions) within five seconds and logs the version it recorded.
+// recordDefinitions writes the fact of this start (entitlement.Service.RecordDefinitions, stamped with startedAt) within five seconds
+// and logs what it found: the version recorded, already recorded, or a newer start's fact, which makes this revision superseded (it
+// then neither recomputes nor writes an entitlement, and stops trying to record). An error is the store's: the caller retries.
 func (c *Center) recordDefinitions(ctx context.Context) error {
 	attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	changed, err := c.Entitlements.RecordDefinitions(attempt)
+	recording, err := c.Entitlements.RecordDefinitions(attempt, c.startedAt)
 	if err != nil {
 		return err
 	}
-	c.Logger.Info("definitions version recorded", "definitionsVersion", c.Entitlements.DefinitionsVersion(), "changed", changed)
+	if recording == entitlement.Superseded {
+		c.Logger.Warn("a newer revision recorded its definitions version; this revision is superseded and neither recomputes nor writes an entitlement",
+			"definitionsVersion", c.Entitlements.DefinitionsVersion())
+		return nil
+	}
+	c.Logger.Info("definitions version recorded", "definitionsVersion", c.Entitlements.DefinitionsVersion(), "changed", recording == entitlement.Recorded)
 	return nil
 }
 
-// keepRecordingDefinitions retries the fact every interval until it is written or the center stops (a store that did not answer at
-// the start).
+// keepRecordingDefinitions retries the fact of this start every interval until the store answers (a store that did not answer at the
+// start), or the center stops; each failed attempt is logged with its sanitized store error.
 func (c *Center) keepRecordingDefinitions(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -410,9 +425,11 @@ func (c *Center) keepRecordingDefinitions(ctx context.Context, interval time.Dur
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if c.recordDefinitions(ctx) == nil {
+			err := c.recordDefinitions(ctx)
+			if err == nil {
 				return
 			}
+			c.Logger.Warn("the definitions version could not be recorded yet; retrying", "error", err.Error())
 		}
 	}
 }
@@ -649,9 +666,10 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	defer center.Close()
 	// store-1: the revision that starts with a definitions version records it before it serves; a replica of another version then
 	// neither recomputes nor writes an account (AF-CTR-05 E0).
+	center.startedAt = time.Now()
 	if center.recordsDefinitions() {
 		if err := center.recordDefinitions(ctx); err != nil {
-			logger.Warn("the definitions version could not be recorded yet; retrying")
+			logger.Warn("the definitions version could not be recorded yet; retrying", "error", err.Error())
 			go center.keepRecordingDefinitions(ctx, 10*time.Second)
 		}
 	}

@@ -218,7 +218,13 @@ func (r *rig) handle(writer http.ResponseWriter, request *http.Request) {
 // call sends one request through the pipeline and reports what the handler said; a request the pipeline refused never reaches it.
 func (r *rig) call(operation string, token string, header map[string]string) (answer, *httptest.ResponseRecorder) {
 	r.t.Helper()
-	request := httptest.NewRequest(http.MethodPost, probePrefix+operation, bytes.NewReader(nil))
+	return r.callContext(context.Background(), operation, token, header)
+}
+
+// callContext is call with the request's context.
+func (r *rig) callContext(ctx context.Context, operation string, token string, header map[string]string) (answer, *httptest.ResponseRecorder) {
+	r.t.Helper()
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, probePrefix+operation, bytes.NewReader(nil))
 	request.Header.Set("Content-Type", "application/grpc-web+proto")
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)

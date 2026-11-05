@@ -14,13 +14,14 @@ import (
 )
 
 // migration0007SHA256 pins the applied form of 0007_entitlement_definitions_current.sql (immutable once applied).
-const migration0007SHA256 = "5fa106a23788c7f5600c538177e5bbbcc8f549e7df47bfcfff53ca9aa1ed7530"
+const migration0007SHA256 = "63db966843f8f9e6d44ab2268009dd22f39705c8a762ba53d983a000813a044b"
 
 // TestMigration0007LandsOverVersion6 is E0-8 (AF-CTR-05 part E0, store-1; EVIDENCE: REAL PostgreSQL, REAL runner): a database at
 // version 6, owned by a migration role that is not a superuser, receives 0007 from the center's own runner; its checksum is the pinned
 // one; the runtime role holds exactly select, insert and update on entitlement.definitions_current (no delete); the table holds one
-// row with a well-formed version; and the row is written once per version: an update that keeps the version and any deletion are
-// refused by its trigger, while an update to another version is the one change it admits.
+// row with a well-formed version; and the row only moves forward: an update that keeps the version, an update whose start instant is
+// not newer than the stored one, and any deletion are refused by its trigger, while another version from a newer start is the one
+// change it admits.
 func TestMigration0007LandsOverVersion6(t *testing.T) {
 	build := centerBuild(t)
 	if len(build) < 7 || build[6].Name != "0007_entitlement_definitions_current.sql" {
@@ -69,6 +70,9 @@ func TestMigration0007LandsOverVersion6(t *testing.T) {
 	// The one write per version: rewriting the same version (even its instant alone) and deleting the row are refused.
 	refusedBy(t, "55000", "", "UPDATE entitlement.definitions_current SET recorded_at = $1", at.Add(time.Hour))
 	refusedBy(t, "55000", "", "DELETE FROM entitlement.definitions_current")
+	// Another version only from a newer start: an older or the same start instant is refused (a late retry of an older revision).
+	refusedBy(t, "55000", "", "UPDATE entitlement.definitions_current SET definitions_version = 'dev-2', recorded_at = $1", at)
+	refusedBy(t, "55000", "", "UPDATE entitlement.definitions_current SET definitions_version = 'dev-2', recorded_at = $1", at.Add(-time.Hour))
 	if err = exec("UPDATE entitlement.definitions_current SET definitions_version = 'dev-2', recorded_at = $1", at.Add(time.Hour)); err != nil {
 		t.Fatalf("a start with another version: %v", err)
 	}

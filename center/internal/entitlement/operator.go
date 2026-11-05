@@ -475,6 +475,9 @@ func (o *Operator) write(ctx context.Context, tx pgx.Tx, call GrantCall, request
 		return GrantResult{}, arc.InvalidState("operator_grant", "history")
 	}
 	outcome, err := Commit(ctx, tx, request.Account, state.Revision, add, snapshot, now)
+	if errors.Is(err, ErrDefinitionsSuperseded) {
+		return GrantResult{}, fmt.Errorf("%w: %w", &store.Error{Operation: "grant features", Kind: store.ErrUnavailable}, ErrDefinitionsSuperseded)
+	}
 	if err != nil {
 		var stored *store.Error
 		if errors.As(err, &stored) && stored.SQLState == "23505" && (stored.Constraint == "service_term_period" || stored.Constraint == "grant_source_ref_once") {
