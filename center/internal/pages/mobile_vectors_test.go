@@ -36,6 +36,9 @@ const (
 	vectorsFile    = "../mobileauth/testdata/mobile-native-vectors.json"
 	documentFile   = "../mobileauth/testdata/mobile-native.schema.json"
 	officialIssuer = "https://arcforges.com/api"
+	// vectorsSHA256 is the SHA-256 of the vendored vectors file itself: the fixture digest it records is the upstream file's, which
+	// is not here, so a local edit that flips a verdict and keeps the count would otherwise pass the pin.
+	vectorsSHA256 = "7c73c9b325b198b1c855e683686c337ae57b6495edfc1f3819e21c3e66d6d55c"
 )
 
 type mobileVector struct {
@@ -72,6 +75,9 @@ func loadVendored(t *testing.T) (vendored, map[string]any) {
 	data, err := os.ReadFile(vectorsFile)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if digest := sha256.Sum256(data); hex.EncodeToString(digest[:]) != vectorsSHA256 {
+		t.Fatalf("the vendored vectors file changed: %x", digest)
 	}
 	var result vendored
 	if err = json.Unmarshal(data, &result); err != nil {
