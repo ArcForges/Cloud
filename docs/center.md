@@ -39,6 +39,7 @@ Go center as the acceptance environment since part B.
 | `center/internal/provision`                                                                                  | Database creation and the runtime credential rotation                                                                                                                                                                                                                                                                                                                                              |
 | `center/internal/pgtest`                                                                                     | Integration test support: an isolated database on a real PostgreSQL                                                                                                                                                                                                                                                                                                                                |
 | `center/internal/feature`, `entitlement`, `dbtest`                                                           | Feature availability and entitlements (AF-CTR-03 B): the gate, the plan catalogue, the resolver port, the store, the operator grant, and the test database support ([center entitlement](center-entitlement.md))                                                                                                                                                                                   |
+| `center/internal/quota`                                                                                      | The per-account resource controls of the gated rows (AF-CTR-05 E0): the routed calls' rate and in-flight bounds and the node channel's upgrade rate ([routed task control](#routed-task-control))                                                                                                                                                                                                  |
 | `center/internal/identity`, `session`, `device`, `access`, `identityapi`, `ratelimit`, `page`, `mail`, `arc` | The identity surface (AF-CTR-03): [accounts, sessions and devices](center-identity.md)                                                                                                                                                                                                                                                                                                             |
 | `center/internal/pages`                                                                                      | The pages surface (AF-CTR-03 A2): the account pages, their script and style sheet and the `/session/v1/web` routes ([account pages](center-identity.md#account-pages-and-browser-sessions))                                                                                                                                                                                                        |
 | `center/internal/mobileauth`, `mobiletest`                                                                   | The mobile surface (AF-CTR-04 part M): the mobile app's native authorization, and MobileProbe's library (**MOCKED** app, test and probe use only) ([center mobile](center-mobile.md))                                                                                                                                                                                                              |
@@ -288,23 +289,36 @@ controls and audit, in that order and last ([the gate](center-entitlement.md#the
 
 ### Routed task control
 
-The operations that later tasks serve (AF-CTR-05 on; AF-CTR-04's node enrollment is essential and carries none) carry these keys. The table is `feature.OperationKeys`, the policy a gated row
-of the operation table of `internal/access` follows (nothing links the two in code: `access.CheckRow` checks only that a `Feature` is
-a gated key; the task that serves the first gated row registers each row with the key of its group and tests every row that carries a
-`Feature` against this table, see [what waits](center-entitlement.md#what-waits-for-later-tasks)), and
-`TestTheCenterDocumentPrintsTheRoutedTaskControlTable` fails when this table and the code differ:
+The operations that later tasks serve (AF-CTR-05 on; AF-CTR-04's node enrollment is essential and carries none) carry these keys. The
+table is `feature.OperationKeys`, and the operation table of `internal/access` is linked to it in code (AF-CTR-05 part E0): a row
+that carries a `Feature` names its `Group`, and `access.CheckRow` refuses the row, and with it the composition, unless its key is the
+key this table names for that group; a row without a `Feature` names no group (`TestEveryFeatureRowCarriesTheKeyOfItsGroup`, with a
+table-driven negative over every group and key; no served row carries a `Feature` yet). `TestTheCenterDocumentPrintsTheRoutedTaskControlTable`
+fails when this table and the code differ:
 
-| Key              | Gates                                               |
-| ---------------- | --------------------------------------------------- |
-| `remote.control` | control of existing tasks (cancel, retry, priority) |
-| `center.execute` | submission, and file and workspace operations       |
-| `remote.view`    | status and output                                   |
-| `center.nodes`   | node connection                                     |
-| `center.mcp`     | MCP                                                 |
-| `push`           | push                                                |
+| Key              | Group               | Gates                                               |
+| ---------------- | ------------------- | --------------------------------------------------- |
+| `remote.control` | `control`           | control of existing tasks (cancel, retry, priority) |
+| `center.execute` | `submission`        | submission, and file and workspace operations       |
+| `remote.view`    | `status_and_output` | status and output                                   |
+| `center.nodes`   | `node_connection`   | node connection                                     |
+| `center.mcp`     | `mcp`               | MCP                                                 |
+| `push`           | `push`              | push                                                |
 
-Resource limits (quotas, budgets, concurrency) are enforced by the tasks whose operations they bound, from AF-CTR-05 on, through
-the resource-control stage of `Authorize`; the entitlement layer decides whether a feature is available, not how much of it.
+Resource limits are enforced through the resource-control stage of `Authorize` by the per-account controls of `internal/quota`
+(AF-CTR-05 part E0), which the composition registers with `access.WithControls`; a gated row that no control covers stops the
+composition (`access.CheckControls`). The entitlement layer decides whether a feature is available, not how much of it. Every number
+of the controls is a policy key whose default is an owner placeholder (H-07, illustrative), never a plan limit, and no refusal of
+them says `plan_limit_reached`:
+
+| Control                        | Covers                                       | Policy keys (default)                                                      | Refusal                                              |
+| ------------------------------ | -------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `routed_calls_per_account`     | the gated rows of the three routed groups    | `routedCallsAccountLimit` / `routedCallsAccountWindow` (3600 per hour)     | `RESOURCE/rate_limited`, `retry_at` the window's end |
+| `routed_in_flight_per_account` | the gated rows of the three routed groups    | `routedInFlightPerAccount` (64 at once, per center process)                | `RESOURCE/rate_limited`, `retry_at` one second later |
+| `channel_upgrades_per_account` | the gated node channel row (node connection) | `channelUpgradeAccount` (600 per hour), `channelUpgradeNode` (60 per hour) | `RESOURCE/rate_limited`, `retry_at` the window's end |
+
+There is no connected-node cap (AF-CTR-05 Q21): the enrollment cap (`maxNodesPerAccount`) governs how many nodes an account has.
+The MCP and push rows (AF-CTR-07, AF-CLD-06) bring their own controls with them.
 
 ## Self-hosted mode
 

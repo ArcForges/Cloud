@@ -177,12 +177,15 @@ type exchange struct {
 	resolved    *session.BrowserSession
 	resolvedSet bool
 	written     bool
+	// calls are the calls the exchange built for the API methods it calls (call); the exchange finishes them when it ends.
+	calls []*ingress.Call
 }
 
 // ServeHTTP routes one request by its exact method and path, checks everything the browser protocol asks before any route runs,
 // and answers every refusal as the route's kind answers: JSON on a JSON route, an HTML page elsewhere.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e := &exchange{h: h, w: w, r: r, correlation: correlation.ForRequest(r.Header.Values(ingress.TraceparentHeader), "")}
+	defer e.finish()
 	if surface, known := h.paths[r.URL.Path]; !known || !h.options.Enabled(surface) || surface == routes.SurfaceFleet && h.options.Fleet == nil ||
 		surface == routes.SurfaceMobile && h.options.Mobile == nil {
 		e.notFound()
@@ -371,7 +374,15 @@ func (e *exchange) call(path string, resolved *session.BrowserSession, message [
 	if resolved != nil {
 		call.Caller = resolved.Credential.Caller
 	}
+	e.calls = append(e.calls, call)
 	return call, nil
+}
+
+// finish ends every call the exchange built (ingress.Call.Finish): a resource control's release runs when the exchange ends.
+func (e *exchange) finish() {
+	for _, call := range e.calls {
+		call.Finish()
+	}
 }
 
 // refusalWithStatus is a refusal of the browser protocol with the HTTP status it takes.

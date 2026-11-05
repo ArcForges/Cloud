@@ -41,26 +41,52 @@ func IsGated(key Key) bool {
 	return false
 }
 
+// Group names one group of the center's routed operations in the routed task control table: an operation row that carries a Feature
+// names its group, and its key must be the key of that group (access.CheckRow, AF-CTR-05 E0, CTR5-GATE-06). The value is a closed
+// vocabulary, never request text.
+type Group string
+
+// The groups of the routed task control table.
+const (
+	GroupControl         Group = "control"
+	GroupSubmission      Group = "submission"
+	GroupStatusAndOutput Group = "status_and_output"
+	GroupNodeConnection  Group = "node_connection"
+	GroupMCP             Group = "mcp"
+	GroupPush            Group = "push"
+)
+
 // OperationKey is one row of the routed task control table (plan section (g)): the key that gates a group of the center's routed
 // operations once AF-CTR-05 (node connection, the first gated operation) and later tasks serve them; AF-CTR-04's node enrollment is
-// essential and carries no key. The table is the policy; docs/center.md prints it and a test compares the two. No code links the
-// operation table of package access to it yet: the author of the first gated operation registers a gated row with the key this
-// table names for its group, and adds a test over every row that carries a Feature once such rows exist.
+// essential and carries no key. The table is the policy; docs/center.md prints it and a test compares the two. The operation table of
+// package access is linked to it in code (AF-CTR-05 E0): a row that carries a Feature names its Group, and access.CheckRow refuses the
+// row unless its key is the key this table names for that group.
 type OperationKey struct {
 	Key   Key
+	Group Group
 	Gates string
 }
 
 // OperationKeys is the routed task control table.
 func OperationKeys() []OperationKey {
 	return []OperationKey{
-		{RemoteControl, "control of existing tasks (cancel, retry, priority)"},
-		{CenterExecute, "submission, and file and workspace operations"},
-		{RemoteView, "status and output"},
-		{CenterNodes, "node connection"},
-		{CenterMCP, "MCP"},
-		{Push, "push"},
+		{RemoteControl, GroupControl, "control of existing tasks (cancel, retry, priority)"},
+		{CenterExecute, GroupSubmission, "submission, and file and workspace operations"},
+		{RemoteView, GroupStatusAndOutput, "status and output"},
+		{CenterNodes, GroupNodeConnection, "node connection"},
+		{CenterMCP, GroupMCP, "MCP"},
+		{Push, GroupPush, "push"},
 	}
+}
+
+// KeyOfGroup is the key the routed task control table names for a group, and false for a group the table does not name.
+func KeyOfGroup(group Group) (Key, bool) {
+	for _, row := range OperationKeys() {
+		if row.Group == group {
+			return row.Key, true
+		}
+	}
+	return "", false
 }
 
 // Reason explains a decision; it is a closed vocabulary, never request text.

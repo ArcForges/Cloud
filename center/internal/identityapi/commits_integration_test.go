@@ -274,6 +274,8 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		// SLOW_DOWN, an expiry or DENIED), so an unanswered commit of it is INTERNAL/internal and the node signs in again.
 		"look up a device code": auxiliary, "give an entry reservation back": auxiliary, "record a device authorization's poll": auxiliary,
 		"start a device authorization": effect, "deliver a device authorization": effect,
+		// AF-CTR-05 E0: the start's record of the current definitions version (store-1) is its own effect, outside any call.
+		"record the current definitions version": effect,
 	}
 	found := map[string]string{}
 	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages", "../entitlement", "../fleet",

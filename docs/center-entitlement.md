@@ -162,15 +162,21 @@ reaches a later one, and the gate is the last:
 | 2   | Ownership of the object | `STATE/not_found` for another account's object or none (a row names an `Object`; the handler supplies its owner); a subject of another kind, or for a row that names no `Object`, is a handler defect: `permission_denied` (audited `access.refused`: `subject`); an owner that cannot be read is the store failure |
 | 3   | Scope and risk          | `permission_denied` (audited `access.refused`: `scope`, `restricted`), `step_up_required` (the session upgrade)                                                                                                                                                                                                     |
 | 4   | AGENT/HUMAN separation  | `permission_denied` (audited `access.refused`: `principal`)                                                                                                                                                                                                                                                         |
-| 5   | Resource controls       | the refusal of a registered control (none is composed yet: the hook for the quotas and budgets of the first gated operation, AF-CTR-05, DC-07)                                                                                                                                                                      |
+| 5   | Resource controls       | the refusal of a registered control: the per-account controls of `internal/quota` (AF-CTR-05 E0) stand in front of the gated rows of their groups, `RESOURCE/rate_limited` with `retry_at`; a gated row without a control stops the composition                                                                     |
 | 6   | Audit before the call   | the store failure when `access.authorized` cannot be appended (the call is refused)                                                                                                                                                                                                                                 |
 | 7   | The gate                | `ENTITLEMENT/feature_not_entitled`, `state.reason` = the feature key, audited `access.gated` with the gate's reason; a gate that cannot decide is the answer below                                                                                                                                                  |
 
 An essential operation (sign-in, account, billing, security, recovery) has no `Feature` and is never gated; a gated row is audited
 before the call (`access.CheckRow`). A gate that cannot decide is never a refusal that says the
 plan lacks the feature, and nothing is audited as `access.gated` for it: a commit whose outcome is unknown, a refresh that lost its
-race on every attempt and a center without an entitlement store are `RESOURCE/overloaded` (`access.gateFailure`: the call did not
-happen, retry later; the gate runs before the handler, so the call's own effect is untouched); a store failure keeps its own class
+race on every attempt, a center without an entitlement store and a replica whose definitions are superseded (store-1, below) are
+`RESOURCE/overloaded` (the call did not happen, retry later; the gate runs before the handler, so the call's own effect is
+untouched). Since AF-CTR-05 part E0 that answer wraps its cause (`access.GateFailure`, as `fmt.Errorf("%w: %w", arc.Unavailable(),
+cause)` would), is audited as `access.gate_failure` (written in lower case: the audit store admits lower-case event types only)
+with the closed reason `commit_unknown`, `refresh_contended`, `no_entitlement_store` or `definitions_superseded` and a payload of
+the operation, the feature and the reason (no request text), and is logged with the method, the correlation ID, the reason and the
+cause by the failure paths of `identityapi`, `fleetapi` and the pages (`access.LogGateFailure`;
+`TestEachGateFailureCauseIsLoggedAndAudited` and one test per failure path). A store failure keeps its own class
 for the transport (an unreachable store, a timeout and a context that ended are `RESOURCE/overloaded` too); anything else is a
 defect and is `INTERNAL/internal`, as everywhere in the center. An authorizer composed without a gate refuses every gated row
 (`mode_invalid`), and a hosted gate without an entitlement reader answers no availability with `ErrNoEntitlementStore`. The context carries the caller's account
@@ -219,6 +225,40 @@ an ordinary source and text that is not valid UTF-8 (in an actor, a reason, a so
 `Read`, `Refresh` and `IssueGrant` answer `InvalidRequest` ("The account does not exist."), `RevokeGrant` answers `UnknownGrant`
 (it finds no grant) and `VerifyRebuild` reports an account without history (no snapshot). The details,
 the personal data and the retention are in [PostgreSQL store](postgres-store.md#entitlement-af-ctr-03-b).
+
+**The definitions fact (store-1, AF-CTR-05 part E0).** Migration `0007_entitlement_definitions_current.sql` adds
+`entitlement.definitions_current`, one row holding the definitions version of the revision that started last
+([PostgreSQL store](postgres-store.md#definitions-fact-af-ctr-05-part-e0)). An official hosted center with a valid catalogue
+records its version at its start, before its listeners open (`Service.RecordDefinitions`), stamped with its process start instant,
+which it captures once before the first attempt; while the store does not answer it retries in the background with the same
+instant, logging each failure with its sanitized cause. The row is replaced only by another version from a newer start: a start with
+the version already recorded writes nothing, and a retry of an older start that lands after a newer revision recorded writes
+nothing either, reports itself superseded and stops retrying (`TestALateRetryOfAnOlderStartNeverDisplacesTheNewerFact`). A replica
+whose version differs from the row neither recomputes an account against its own version nor writes one: a read returns a valid
+stored snapshot as it is, from the fast path (whatever definitions it was computed under, without loading the account's records); a
+read that needs a recompute, and every write (an issue, a revocation, an operator grant), is `entitlement.ErrDefinitionsSuperseded`,
+which the gate answers `RESOURCE/overloaded` (`definitions_superseded`) and the operator grant as an unavailable store. Every commit
+reads the fact again under a share lock in its own transaction, so a replica that loaded an account just before a version switch
+cannot write after it (`TestACommitRereadsTheFactUnderALock`). During a rolling deploy the older revision therefore serves the
+snapshots the newer one computed, and its reads of an account whose snapshot expired are refused as overloaded until it is replaced;
+the newer revision raises each account's version once. The number of activations an account can gain is bounded by the starts that
+change the version, not by its reads (`TestRollingDeployReadsNeverRaiseTheSnapshotVersion`: two services with different versions,
+200 alternating reads, and the same reads without the fact as the control case that wedges).
+
+One hazard stays in the design: an older revision that restarts during the rollout is a newer start, so it records its version again,
+and the newer revision is then superseded (its expired snapshots answer overloaded and it writes nothing). The recovery is to restart
+the newer revision, whose start records its version once more. Start instants come from each process's clock, so the order of two
+starts within the clock skew of the hosts is not decided by the row.
+
+Only an official hosted center with a valid catalogue records the row (the only centers that compute snapshots); until its first
+record succeeds, and on production and self-hosted databases, there is none, and every replica may compute there.
+
+**The clock floor (AF-CTR-05 part E0).** Every computation floors its instant at the newest instant the account holds: the stored
+snapshot's `computed_at`, the creation of every grant, revocation, term, term action and status fact, every definitions activation
+and the revision's `updated_at` (`State.Floor`); a write admits its records strictly after it. A snapshot dropped while a replica's
+clock is behind the newest record is recomputed at that record's instant (`TestAComputationNeverGoesBehindTheNewestRecord`), and the
+gate's fast path checks a stored snapshot's validity at the same floor (`LoadFloor`, one statement), so a snapshot whose validity
+ended before the newest record is recomputed rather than served (`TestTheFastPathChecksValidityAtTheFloor`).
 
 ## Post-deploy checklist
 
@@ -352,25 +392,30 @@ term, no `identity.operator` row, and the audit events `issued` once and `refuse
   each refusal its own text (deferred in fix round 1, `page-3`: unreachable in production, where the surface is off and the catalogue
   is empty).
 - **H-07**: the approved prices, limits and the Neon plan and retention; until then the production catalogue is empty.
-- **Before the first gated operation (AF-CTR-05's node connection; AF-CTR-04 serves none) and before H-07**: the activation of definitions is per account and
-  keyed by the version of the replica that reads. Two revisions with different definitions versions running side by side (a rolling
-  deploy) each recompute and append an activation at every read of an account whose last activation is the other's, so the snapshot
-  version climbs by one per read and the 2000-record bound (activations count) wedges the account for good. Unreachable today
-  (production is dark, its catalogue empty, and no gated operation reads a snapshot); the fix is a deploy-level fact, a single row
-  of the current definitions version written once by the revision that starts with it, which a replica whose version differs
-  neither recomputes against nor writes (deferred in fix round 1, `store-1`).
-- **Composition wirings pinned by name or in one mode only** (deferred in fix round 2, `gate-2`). The removal of each wire of the
-  composition is killed by a test, but three variants are not: the authorizer's gate built apart from the center's (the self-hosted
-  composed test has no database and so no authorizer, and the hosted one has no disabled key), a nil operator handed to the pages
-  while `composePages` still calls `c.operator` (pinned by name), and an operator built over an entitlement service with other
-  definitions (its snapshots would carry another version). Follow-up before the first gated operation: compose a self-hosted center
-  over a database and run the disabled-key table through its authorizer's gate, request `/operations/grant` from the composed hosted
-  center, and compare the operator's snapshot version with the gate's.
-- **The cause of a gate failure is neither logged nor audited** (deferred, `gate-3`; a prerequisite of the first gated operation). `gateFailure`
-  answers a commit without an answer, a refresh that lost its race and a missing entitlement store as a bare `RESOURCE/overloaded`
-  and writes no `access.gated` row, so an operator cannot tell it from load. Follow-up: wrap the cause (`fmt.Errorf("%w: %w",
-arc.Unavailable(), err)`) and log it with the correlation id in `identityapi.failure` and the pages' failure path, with a test that
-  the line exists. Unreachable today: no gated operation is served.
+- **Delivered by AF-CTR-05 part E0 (the prerequisites of the first gated operation; Plan #80 moved them from AF-CTR-04).** The six
+  items this list carried are done, and only these: AF-CTR-05 E0 serves no gated operation, adds no surface and changes neither
+  production's nor proof's surfaces.
+  - **store-1**: the deploy-level definitions fact (`entitlement.definitions_current`, migration 0007), written by the revision
+    that starts with it and stamped with its start instant, so a late retry of an older start never displaces it; a replica of
+    another version neither recomputes nor writes, and every commit re-reads the fact under a share lock (see the store, above).
+  - **The clock floor**: every computation floors its instant at the newest record or activation instant of the account, not only
+    at the stored snapshot's `computed_at` (see the store, above).
+  - **gate-3**: a gate that cannot decide wraps its cause, is logged with the correlation ID by the failure paths of `identityapi`,
+    `fleetapi` and the pages, and is audited as `access.gate_failure` with a closed reason; the answer is still
+    `RESOURCE/overloaded` (see the gate, above).
+  - **gate-2**: the three composition pins: a self-hosted center composed over a database runs the disabled-key table through its
+    authorizer's gate (`TestSelfHostedComposedOverADatabaseHonoursDisabledKeys`); `/operations/grant` is requested from the composed
+    hosted center (`TestTheComposedHostedCenterServesTheOperationsPage`); the operator's definitions version is the gate's, and the
+    gate's read leaves the operator's snapshot as it is (`TestOperatorAndGateShareTheDefinitionsVersion`).
+  - **The per-account resource controls**: the `access.Control` framework (`WithControls`, a control that runs before the audit and
+    the gate, and the composition rule that every gated row has at least one control, `access.CheckControls`) with the controls of
+    `internal/quota`: `routed_calls_per_account` (a rate bucket), `routed_in_flight_per_account` and the node channel's upgrade
+    rate, ready for E1 ([routed task control](center.md#routed-task-control)). Every number is a policy key whose default is an owner
+    placeholder (H-07, illustrative), never a plan limit; there is no connected-node cap (Q21: the enrollment cap governs).
+  - **The `OperationKeys` row check**: a row that carries a `Feature` names its group of `feature.OperationKeys` and must carry that
+    group's key (`access.CheckRow`); the set of gated rows is empty today, and a table-driven negative test refuses every wrong key.
+- **AF-CTR-05 E1 and E2** serve the first gated rows (the node channel, the routed methods) on these prerequisites; until then no route
+  serves a gated call, and the controls and the row check stand in front of an empty set of rows.
 - **The Docker-context test models the file rules** (`worker-1`). `tests/worker/docker-context.test.ts` decides what the context
   carries from the include rules of `.dockerignore` and the closing exclusions of the center, as the other tests of that file do; a
   real build carries every `center/` file those exclusions do not remove (`!center/` re-includes the tree), so a stray file such as
@@ -380,21 +425,5 @@ arc.Unavailable(), err)`) and log it with the correlation id in `identityapi.fai
   namespace, optional chaining, destructuring, bracket access or a helper that receives the namespace is not seen, and the stub-only
   check names the variable `stub`. The five sites are checked; a sixth in an unusual spelling is not. Follow-up: one helper that builds
   the request with `redirect: "manual"`, and a test that the namespace is named only in its module.
-- **The clock floor lives only in the snapshot.** A computation never goes back past the stored one, but that floor is the stored
-  snapshot's `computed_at`; the records carry their own creation instants and the revision its `updated_at`, and the service does not
-  floor against them. A snapshot dropped while a replica's clock is behind the newest record is recomputed in the past. Follow-up
-  (before the snapshot is ever dropped by an operation): floor every instant at the newest record creation or activation instant.
-  (The comment of migration `0003` says the same as this paragraph since fix round 2; its checksum changed with it, while the
-  migration was still unmerged.)
-- **AF-CTR-05 and later**: the gated operations (node connection, task control, MCP), their quotas and budgets through the
-  resource-control stage, and the rows of the operation table that carry a `Feature` (AF-CTR-04's fleet rows carry none, and its
-  mobile operation is a center-defined operation, whose type has no `Feature` field). The
-  production `Authorizer` is composed with **no resource control** today, so a gated call is not rate limited: the task that serves
-  the first gated row must register a per-account control before it does,
-  and must check every row that carries a `Feature` against `feature.OperationKeys` (`CheckRow` checks that the key is a gated key,
-  not that it is the key of the row's group; nothing links the table to the operation table in code). Until a per-account control
-  stands in front of it, a gated call appends up to two audit rows (`access.authorized`, and `access.gated` when refused) and
-  serializes with every other audit writer on the single `audit.chain_head` row, entitled or not: that is the cost of the audit that
-  comes before the call, and the reason the control comes first.
 - **AF-CTR-07** (MCP, agent grants) keeps the feature keys and the `feature.Gate` interface as they are; **AF-CLD-06** brings the
   push sender; **AF-PLAT-01** the retention sweeps and the erasure of an account's records.

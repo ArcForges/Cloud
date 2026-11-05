@@ -109,6 +109,9 @@ func (s *Server) failure(ctx context.Context, call *ingress.Call, err error) *fo
 	if err == nil {
 		return nil
 	}
+	// A gate that could not decide is answered RESOURCE/overloaded by its wrapped refusal below; its cause is logged here, with the
+	// correlation ID (AF-CTR-05 E0, gate-3: the fleet handlers that serve a gated row answer through this path).
+	access.LogGateFailure(ctx, s.logger, call.Policy.FullName, call.Correlation.CorrelationID, err)
 	var refusal *arc.Refusal
 	var stored *storedRefusal
 	switch {

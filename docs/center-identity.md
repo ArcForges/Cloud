@@ -88,7 +88,7 @@ account's node still reaches (the node's own sign-out).
 Since AF-CTR-03 part B `Authorize` decides a session call in seven ordered stages, and a stage that refuses ends the decision:
 authentication, ownership of the object the call addresses (another account's object is `STATE/not_found`; a row names an `Object`
 and the handler hands `AuthorizeSubject` its owner), scope and risk (known scope, restricted account, session upgrade),
-AGENT/HUMAN separation, the resource controls (a hook for the quotas and budgets of the first gated operation, AF-CTR-05, DC-07), the audit that comes before
+AGENT/HUMAN separation, the resource controls (DC-07: the per-account controls of `internal/quota`, AF-CTR-05 E0, in front of the gated rows of their groups), the audit that comes before
 the call (`access.authorized`, a failed append refuses the call) and the feature gate (`ENTITLEMENT/feature_not_entitled`,
 `state.reason` = the feature key, audited as `access.gated`). A row carries the gate's key as `Feature`; every identity row is an
 essential operation with none, so nothing here is gated, and the R3 rows keep appending their audit event in the transaction of
@@ -806,6 +806,14 @@ sets it: only the acceptance environment does, with its anonymous-flow ceiling (
 | `mobileCodeLifetime` (AF-CTR-04 part M)                        | 2m                   | 30s to 2m                    |
 | `mobileBeginPrefix` / `mobileTokenPrefix`                      | 30 / 30 per 10m      | limit 1–10000, window 1m–24h |
 | `mobileApproveAccount`                                         | 20 per h             | as above                     |
+| `routedCallsAccount` (AF-CTR-05 E0, owner placeholder H-07)    | 3600 per h           | limit 1–10000, window 1m–24h |
+| `routedInFlightPerAccount` (owner placeholder H-07)            | 64                   | 1–1024                       |
+| `channelUpgradeAccount` / `channelUpgradeNode` (H-07)          | 600 / 60 per h       | limit 1–10000, window 1m–24h |
+
+The four AF-CTR-05 E0 settings are the per-account resource controls of the gated rows ([routed task control](center.md#routed-task-control)):
+their defaults are owner placeholders under H-07 (illustrative), not plan limits, and a refusal of them is `RESOURCE/rate_limited` with
+`retry_at`, never `plan_limit_reached`. They run before the audit and the gate, so an exhausted account appends no `access.authorized`
+row; they are not audited as `identity.rate_limited` either.
 
 A prefix is the client address's /24 (IPv4) or /56 (IPv6) network; an IPv4-mapped address counts as IPv4. A bucket is the
 SHA-256 of its kind and key in `platform.rate_limit`, counted in its own short transaction before the work it guards. A refusal is

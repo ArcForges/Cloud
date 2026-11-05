@@ -94,6 +94,8 @@ type Service struct {
 	clock       func() time.Time
 	// beforeCommit runs after a load and before the commit decision, to interleave another writer deterministically in a test.
 	beforeCommit func()
+	// onLoad runs before every load of an account's whole state (tests count the slow path with it).
+	onLoad func()
 }
 
 // NewService is the service over a store. A nil clock reads the system clock; a nil id source draws random uuids.
@@ -106,6 +108,9 @@ func NewService(db *store.DB, definitions DefinitionSource, ids IDSource, clock 
 	}
 	return &Service{db: db, definitions: definitions, ids: ids, clock: clock}
 }
+
+// DefinitionsVersion is the version of the service's active definitions.
+func (s *Service) DefinitionsVersion() string { return s.definitions.Current().Version }
 
 // Clock is the service's time source.
 func (s *Service) Clock() time.Time { return s.clock() }
@@ -133,6 +138,9 @@ func wellFormed(texts ...string) bool {
 }
 
 func (s *Service) load(ctx context.Context, account string) (State, error) {
+	if s.onLoad != nil {
+		s.onLoad()
+	}
 	var state State
 	err := s.db.InTx(ctx, "load the entitlement state", store.TxOptions{ReadOnly: true, Isolation: pgx.RepeatableRead}, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -142,26 +150,107 @@ func (s *Service) load(ctx context.Context, account string) (State, error) {
 	return state, err
 }
 
+// ErrDefinitionsSuperseded is why a replica neither recomputes nor writes an account (AF-CTR-05 E0, store-1): its definitions version
+// is not the deploy-level fact's (entitlement.definitions_current), which the revision that started last recorded. Two revisions with
+// different definitions versions running side by side (a rolling deploy) would otherwise each recompute and append an activation at
+// every read of an account whose last activation is the other's, and the 2000-record bound would wedge the account. A read of such a
+// replica returns the stored snapshot as it is while it is valid; a read that needs a recompute, and every write, is this error, which
+// the gate answers as RESOURCE/overloaded (access.gate_failure, definitions_superseded).
+var ErrDefinitionsSuperseded = errors.New("the definitions version of this replica is not the deploy's current one")
+
+// mayCompute reports whether the service may recompute or write an account of the state: no center recorded a current definitions
+// version yet, or it recorded the service's own.
+func mayCompute(state State, definitions Definitions) bool {
+	return state.CurrentDefinitions == "" || state.CurrentDefinitions == definitions.Version
+}
+
+// Recording is what RecordDefinitions found.
+type Recording int
+
+// The recordings.
+const (
+	// Recorded: the fact now holds the service's version from this start (it was absent, or held another version from an older start).
+	Recorded Recording = iota + 1
+	// AlreadyRecorded: the fact held the service's version already; nothing was written (the row keeps its instant).
+	AlreadyRecorded
+	// Superseded: the fact holds another version, recorded by a start at or after this one's (a newer revision started while this one
+	// could not record): nothing was written, and this replica neither recomputes nor writes from now on.
+	Superseded
+)
+
+// RecordDefinitions records the service's definitions version as the deploy-level fact (store-1): the revision that starts with a
+// version writes it at its start, before it serves, stamped with its start instant (startedAt, captured once before the first
+// attempt and passed unchanged to every retry). The row is replaced only by another version from a newer start (the trigger refuses
+// anything else): a retry of an older revision that lands after a newer revision recorded writes nothing and reports Superseded, so a
+// late retry never displaces the newer fact (B-1 of the review of Cloud #143). The same version is never written twice. A replica
+// whose version is not the fact's neither recomputes nor writes, so the activations an account can gain are bounded by the starts
+// that change the version, never by its reads. An older revision that restarts during a rolling deploy is a newer start and records
+// its version again; restarting the newer revision recovers (docs/center-entitlement.md).
+func (s *Service) RecordDefinitions(ctx context.Context, startedAt time.Time) (Recording, error) {
+	version := s.definitions.Current().Version
+	at := FromTime(startedAt).Time()
+	var recording Recording
+	err := s.db.InTx(ctx, "record the current definitions version", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `INSERT INTO entitlement.definitions_current AS c (singleton, definitions_version, recorded_at) VALUES (true, $1, $2)
+ON CONFLICT (singleton) DO UPDATE SET definitions_version = excluded.definitions_version, recorded_at = excluded.recorded_at
+WHERE c.definitions_version <> excluded.definitions_version AND c.recorded_at < excluded.recorded_at`, version, at)
+		if err != nil {
+			return store.Sanitize("record the current definitions version", err)
+		}
+		if tag.RowsAffected() == 1 {
+			recording = Recorded
+			return nil
+		}
+		current, err := LoadCurrentDefinitions(ctx, tx)
+		if err != nil {
+			return err
+		}
+		recording = Superseded
+		if current == version {
+			recording = AlreadyRecorded
+		}
+		return nil
+	})
+	return recording, err
+}
+
 // Read is the current snapshot of an account. A stored snapshot is returned while its validity holds; otherwise it is recomputed and
 // stored. A snapshot computed under other definitions than the active ones is recomputed too.
 func (s *Service) Read(ctx context.Context, account string) (StoredSnapshot, error) {
 	if !validAccount(account) {
 		return StoredSnapshot{}, refuse(RefusedInvalidRequest, "The workspace identifier is malformed.")
 	}
-	// The fast path reads the snapshot row alone: the records are read only when the snapshot has to be recomputed.
+	// The fast path reads the snapshot row, the deploy-level fact and the account's floor in one read-only transaction: the records are
+	// read only when the snapshot has to be recomputed. Its validity is checked at the floor (State.Floor: never behind the newest
+	// record, N-2 of the review of Cloud #143), and a replica whose definitions are superseded returns a valid stored snapshot from
+	// here, whatever definitions it was computed under, instead of loading every record on every read (N-5): it may not recompute it
+	// anyway (store-1).
 	var stored *StoredSnapshot
+	var current string
+	var floor Micros
+	var held bool
 	err := s.db.InTx(ctx, "read the entitlement snapshot", store.TxOptions{ReadOnly: true}, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		stored, err = LoadSnapshot(ctx, tx, account)
+		if stored, err = LoadSnapshot(ctx, tx, account); err != nil || stored == nil {
+			return err
+		}
+		if current, err = LoadCurrentDefinitions(ctx, tx); err != nil {
+			return err
+		}
+		floor, held, err = LoadFloor(ctx, tx, account)
 		return err
 	})
 	if err != nil {
 		return StoredSnapshot{}, err
 	}
 	if stored != nil {
-		now := FromTime(s.clock())
-		now = maxMicros(now, stored.ComputedAt)
-		if stored.DefinitionsVersion == s.definitions.Current().Version && (stored.ValidUntil == nil || now < *stored.ValidUntil) {
+		now := maxMicros(FromTime(s.clock()), stored.ComputedAt)
+		if held {
+			now = maxMicros(now, floor)
+		}
+		version := s.definitions.Current().Version
+		superseded := current != "" && current != version
+		if (stored.DefinitionsVersion == version || superseded) && (stored.ValidUntil == nil || now < *stored.ValidUntil) {
 			return *stored, nil
 		}
 	}
@@ -179,6 +268,17 @@ func (s *Service) Refresh(ctx context.Context, account string) (StoredSnapshot, 
 			return StoredSnapshot{}, err
 		}
 		definitions := s.definitions.Current()
+		if !mayCompute(state, definitions) {
+			// store-1: a replica of superseded definitions reads the snapshot as stored while it is valid, and never recomputes it.
+			now, err := s.instant(state, false)
+			if err != nil {
+				return StoredSnapshot{}, err
+			}
+			if state.Snapshot != nil && (state.Snapshot.ValidUntil == nil || now < *state.Snapshot.ValidUntil) {
+				return *state.Snapshot, nil
+			}
+			return StoredSnapshot{}, ErrDefinitionsSuperseded
+		}
 		now, err := s.instant(state, needsActivation(state.Records, definitions))
 		if err != nil {
 			return StoredSnapshot{}, err
@@ -231,6 +331,9 @@ func (s *Service) IssueGrant(ctx context.Context, request IssueGrantRequest) (Gr
 			}
 		}
 		definitions := s.definitions.Current()
+		if !mayCompute(state, definitions) {
+			return Grant{}, false, ErrDefinitionsSuperseded
+		}
 		now, err := s.instant(state, true)
 		if err != nil {
 			return Grant{}, false, err
@@ -283,6 +386,9 @@ func (s *Service) RevokeGrant(ctx context.Context, request RevokeGrantRequest) (
 		}
 		if version != request.ExpectedSnapshotVersion {
 			return Revocation{}, false, refuse(RefusedStaleVersion, "The entitlement version changed since the caller decided.")
+		}
+		if !mayCompute(state, s.definitions.Current()) {
+			return Revocation{}, false, ErrDefinitionsSuperseded
 		}
 		now, err := s.instant(state, true)
 		if err != nil {
@@ -429,21 +535,24 @@ func contains(lines []string, line string) bool {
 	return false
 }
 
-// instant is the instant a call computes at. A read that only checks validity uses Now (the clock, never behind the stored
-// computation); a call that writes uses WriteNow: strictly after the stored computation, so no two admissions of one account share an
-// instant and the version, which counts changes across instants, can never collapse or fall because two records arrived together.
+// instant is the instant a call computes at, floored at the newest instant the account holds (State.Floor: the stored computation,
+// every record's creation, every activation and the revision's last commit; AF-CTR-05 E0, CTR5-GATE-02). A read that only checks
+// validity uses Now, never behind the floor; a call that writes uses WriteNow: strictly after the floor, so no two admissions of one
+// account share an instant and the version, which counts changes across instants, can never collapse or fall because two records
+// arrived together.
 func (s *Service) instant(state State, write bool) (Micros, error) {
 	now := FromTime(s.clock())
-	if state.Snapshot == nil {
+	floor, found := state.Floor()
+	if !found {
 		return now, nil
 	}
 	if !write {
-		return maxMicros(now, state.Snapshot.ComputedAt), nil
+		return maxMicros(now, floor), nil
 	}
-	if state.Snapshot.ComputedAt == MaxMicros {
+	if floor == MaxMicros {
 		return 0, ErrOverflow
 	}
-	return maxMicros(now, state.Snapshot.ComputedAt+1), nil
+	return maxMicros(now, floor+1), nil
 }
 
 func needsActivation(records RecordSet, definitions Definitions) bool {

@@ -50,16 +50,30 @@ func method(key feature.Key) string {
 func probeRows() []Operation {
 	var rows []Operation
 	for _, key := range feature.Gated() {
-		rows = append(rows, Operation{Path: probePrefix + method(key), ID: "probe." + string(key), Risk: "R2", Session: true, Feature: key, Audit: AuditBeforeCall})
+		rows = append(rows, Operation{Path: probePrefix + method(key), ID: "probe." + string(key), Risk: "R2", Session: true, Feature: key, Group: groupOf(key),
+			Audit: AuditBeforeCall})
 	}
 	return append(rows,
-		Operation{Path: probePrefix + "Agent", ID: "probe.agent", Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes, Audit: AuditBeforeCall},
-		Operation{Path: probePrefix + "Device", ID: "probe.device", Risk: "R2", Session: true, Object: "device", Feature: feature.RemoteView, Audit: AuditBeforeCall},
-		Operation{Path: probePrefix + "Upgrade", ID: "probe.upgrade", Risk: "R2", Session: true, MobileLimited: Upgrade, Feature: feature.CenterExecute, Audit: AuditBeforeCall},
+		Operation{Path: probePrefix + "Agent", ID: "probe.agent", Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes,
+			Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
+		Operation{Path: probePrefix + "Device", ID: "probe.device", Risk: "R2", Session: true, Object: "device", Feature: feature.RemoteView,
+			Group: feature.GroupStatusAndOutput, Audit: AuditBeforeCall},
+		Operation{Path: probePrefix + "Upgrade", ID: "probe.upgrade", Risk: "R2", Session: true, MobileLimited: Upgrade, Feature: feature.CenterExecute,
+			Group: feature.GroupSubmission, Audit: AuditBeforeCall},
 		Operation{Path: probePrefix + "Essential", ID: "probe.essential", Risk: "R1", Session: true},
 		// A high-risk essential row is audited by its own handler, in the transaction of its effect: Authorize appends nothing for it.
 		Operation{Path: probePrefix + "Sensitive", ID: "probe.sensitive", Risk: "R3", Session: true, Audit: AuditInTransaction},
 	)
+}
+
+// groupOf is the group the routed task control table names for a key.
+func groupOf(key feature.Key) feature.Group {
+	for _, row := range feature.OperationKeys() {
+		if row.Key == key {
+			return row.Group
+		}
+	}
+	return ""
 }
 
 // spy delegates to the real gate and remembers every question, and what had been audited when it was asked.
@@ -106,6 +120,8 @@ type rig struct {
 	conf       feature.Configuration
 	handled    int
 	controls   *[]Control
+	// lastErr is what Authorize returned to the probe handler's last call.
+	lastErr error
 }
 
 func newRig(t *testing.T, settings feature.Settings) *rig {
@@ -115,14 +131,17 @@ func newRig(t *testing.T, settings feature.Settings) *rig {
 	service := entitlement.NewService(db.Runtime, conf, nil, nil)
 	gate := &spy{inner: feature.NewGate(conf, service), db: db}
 	controls := &[]Control{}
-	authorizer := NewAuthorizer(db.Runtime, nil, WithGate(gate), WithControls(func(ctx context.Context, call *ingress.Call, operation Operation) error {
+	authorizer := NewAuthorizer(db.Runtime, nil, WithGate(gate), WithControls(ControlFunc{Key: "probe", Check: func(ctx context.Context, call *ingress.Call, operation Operation) error {
 		for _, control := range *controls {
-			if err := control(ctx, call, operation); err != nil {
+			if !control.Covers(operation) {
+				continue
+			}
+			if err := control.Admit(ctx, call, operation); err != nil {
 				return err
 			}
 		}
 		return nil
-	}))
+	}}))
 	rows := map[string]Operation{}
 	for _, row := range probeRows() {
 		if err := CheckRow(row); err != nil {
@@ -183,6 +202,7 @@ func (r *rig) handle(writer http.ResponseWriter, request *http.Request) {
 		}}
 	}
 	_, err := r.authorizer.AuthorizeSubject(request.Context(), call, subject)
+	r.lastErr = err
 	var refusal *arc.Refusal
 	switch {
 	case err == nil:
@@ -198,7 +218,13 @@ func (r *rig) handle(writer http.ResponseWriter, request *http.Request) {
 // call sends one request through the pipeline and reports what the handler said; a request the pipeline refused never reaches it.
 func (r *rig) call(operation string, token string, header map[string]string) (answer, *httptest.ResponseRecorder) {
 	r.t.Helper()
-	request := httptest.NewRequest(http.MethodPost, probePrefix+operation, bytes.NewReader(nil))
+	return r.callContext(context.Background(), operation, token, header)
+}
+
+// callContext is call with the request's context.
+func (r *rig) callContext(ctx context.Context, operation string, token string, header map[string]string) (answer, *httptest.ResponseRecorder) {
+	r.t.Helper()
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, probePrefix+operation, bytes.NewReader(nil))
 	request.Header.Set("Content-Type", "application/grpc-web+proto")
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
@@ -453,9 +479,9 @@ func TestTheGateIsNeverReachedByACallAnEarlierStageRefuses(t *testing.T) {
 	got, _ = r.call("Agent", human, nil)
 	refused("an account session on an AGENT operation", got, "AUTHORIZATION/permission_denied", "probe.agent")
 	// 5. Resource controls.
-	*r.controls = []Control{func(context.Context, *ingress.Call, Operation) error {
+	*r.controls = []Control{ControlFunc{Key: "probe", Check: func(context.Context, *ingress.Call, Operation) error {
 		return arc.RateLimited("probe", 1, time.Now().Add(time.Minute))
-	}}
+	}}}
 	got, _ = r.call("RemoteView", human, nil)
 	refused("an exhausted resource", got, "RESOURCE/rate_limited", "")
 	*r.controls = nil
@@ -534,12 +560,14 @@ func TestAGateIsRequiredForAGatedRow(t *testing.T) {
 }
 
 func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
-	good := Operation{Path: probePrefix + "RemoteView", ID: "probe.remote.view", Risk: "R2", Session: true, Feature: feature.RemoteView, Audit: AuditBeforeCall}
+	good := Operation{Path: probePrefix + "RemoteView", ID: "probe.remote.view", Risk: "R2", Session: true, Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput,
+		Audit: AuditBeforeCall}
 	if err := CheckRow(good); err != nil {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*Operation){
 		"a feature that is not gated":                     func(o *Operation) { o.Feature = "billing" },
+		"a gated row without its group":                   func(o *Operation) { o.Group = "" },
 		"a gated row that is not audited":                 func(o *Operation) { o.Audit = NoAudit },
 		"a gated row audited in its transaction":          func(o *Operation) { o.Audit = AuditInTransaction },
 		"an anonymous gated row":                          func(o *Operation) { o.Session = false },

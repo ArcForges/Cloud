@@ -43,6 +43,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/mobileauth"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/pages"
+	"github.com/ArcForges/Cloud/center/internal/quota"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/ArcForges/Cloud/center/internal/session"
@@ -86,6 +87,9 @@ type Center struct {
 	// buildVersion the number of migrations of this build.
 	schemaVersion atomic.Int64
 	buildVersion  int
+	// startedAt is the process start instant the definitions fact is stamped with (store-1), captured once by Run before the first
+	// attempt and used unchanged by every retry, so a late retry never displaces a newer start's fact.
+	startedAt time.Time
 }
 
 type namedPool struct {
@@ -112,6 +116,10 @@ type Options struct {
 	// Participants are further device revocation cascade participants (DC-06): the center always registers fleet.NodeParticipant
 	// (AF-CTR-04); agent grants arrive with AF-CTR-07 and push with AF-CLD-06; the tests register a stand-in.
 	Participants []device.Participant
+	// Controls are further resource controls, run after the center's own (package quota): the tests register a control that holds a
+	// slot for the call's duration, to pin that every call releases it when it ends. A running center registers none (Run composes the
+	// center with Options{}).
+	Controls []access.Control
 	// catalogue replaces the plan catalogue with a document under a classification: TESTS ONLY (DC-12). It is unexported, so no other
 	// package (the executable included) can set it, and no environment variable, file or configuration reaches it: a running center
 	// has the catalogue of its plan configuration or none. TestNoCodeOfTheRunningCenterInjectsACatalogue parses the non-test sources of the
@@ -287,7 +295,13 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 		// is the lock order between the tables).
 		AccountParticipants: append(fleet.AccountParticipants(), mobileauth.ApprovalParticipant{})})
 	c.drain = service.Drain
-	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
+	// The per-account resource controls stand in front of every gated row (AF-CTR-05 E0, CTR5-GATE-05): a gated row without one
+	// refuses the composition.
+	controls := append(quota.Controls(c.Store, c.Config.Identity.Policy, clock), options.Controls...)
+	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features), access.WithControls(controls...))
+	if err := authorizer.CheckComposition(); err != nil {
+		return composedIdentity{}, err
+	}
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
 	dispatcher.Register(server.Methods()...)
 	var fleetDirect *fleetapi.Direct
@@ -374,6 +388,50 @@ func checkIdentityComposition(modules []routes.Module) error {
 		}
 	}
 	return nil
+}
+
+// recordsDefinitions reports whether this center records the deploy-level fact of its definitions version (store-1): it reads
+// entitlements, so it is an official hosted center with a valid catalogue and a store. Production, without a catalogue, records nothing.
+func (c *Center) recordsDefinitions() bool {
+	return c.Entitlements != nil && c.Config.Mode == config.OfficialHosted && c.FeatureConfiguration.State == feature.StateValid
+}
+
+// recordDefinitions writes the fact of this start (entitlement.Service.RecordDefinitions, stamped with startedAt) within five seconds
+// and logs what it found: the version recorded, already recorded, or a newer start's fact, which makes this revision superseded (it
+// then neither recomputes nor writes an entitlement, and stops trying to record). An error is the store's: the caller retries.
+func (c *Center) recordDefinitions(ctx context.Context) error {
+	attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	recording, err := c.Entitlements.RecordDefinitions(attempt, c.startedAt)
+	if err != nil {
+		return err
+	}
+	if recording == entitlement.Superseded {
+		c.Logger.Warn("a newer revision recorded its definitions version; this revision is superseded and neither recomputes nor writes an entitlement",
+			"definitionsVersion", c.Entitlements.DefinitionsVersion())
+		return nil
+	}
+	c.Logger.Info("definitions version recorded", "definitionsVersion", c.Entitlements.DefinitionsVersion(), "changed", recording == entitlement.Recorded)
+	return nil
+}
+
+// keepRecordingDefinitions retries the fact of this start every interval until the store answers (a store that did not answer at the
+// start), or the center stops; each failed attempt is logged with its sanitized store error.
+func (c *Center) keepRecordingDefinitions(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			err := c.recordDefinitions(ctx)
+			if err == nil {
+				return
+			}
+			c.Logger.Warn("the definitions version could not be recorded yet; retrying", "error", err.Error())
+		}
+	}
 }
 
 // Public is the handler of the public listeners.
@@ -606,6 +664,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	defer center.Close()
+	// store-1: the revision that starts with a definitions version records it before it serves; a replica of another version then
+	// neither recomputes nor writes an account (AF-CTR-05 E0).
+	center.startedAt = time.Now()
+	if center.recordsDefinitions() {
+		if err := center.recordDefinitions(ctx); err != nil {
+			logger.Warn("the definitions version could not be recorded yet; retrying", "error", err.Error())
+			go center.keepRecordingDefinitions(ctx, 10*time.Second)
+		}
+	}
 	type plan struct {
 		name, address string
 		handler       http.Handler
