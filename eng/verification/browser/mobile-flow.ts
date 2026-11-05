@@ -141,6 +141,20 @@ export function parseMobileBegin(text: string, baseUrl: string): MobileBeginFile
   return value as MobileBeginFile;
 }
 
+/**
+ * The review page's hidden flow_id input of the begin file's flow: the review the wait found must be of this case's flow, not of
+ * another case's (every case reports the same platform and version). The flow ID is the fragment parseMobileBegin checked.
+ */
+export function reviewFlowSelector(begin: MobileBeginFile): string {
+  const [flow] = mobileBeginSecrets(begin);
+  expect(
+    flow !== undefined &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(flow),
+    "A begin file's flow ID is not a canonical UUID.",
+  );
+  return `input[type="hidden"][name="flow_id"][value="${flow}"]`;
+}
+
 /** What of a begin file must stay out of every output: the flow ID (the URL's fragment). */
 export function mobileBeginSecrets(begin: MobileBeginFile): string[] {
   return [begin.authorizeUrl.slice(begin.authorizeUrl.indexOf("#flow=") + "#flow=".length)];
@@ -282,6 +296,10 @@ export async function runMobileApprove(world: World, options: MobileApproveOptio
             waitMs,
           );
           a.signedIn = true;
+          expect(
+            (await a.tab.count(reviewFlowSelector(begin))) > 0,
+            "The review page is of another flow than the begin file's.",
+          );
           await a.tab.waitForSelector(selectors.heading, waitMs);
           expect(
             (await a.tab.text(selectors.heading)) === "Sign in to the ArcForges app?",
