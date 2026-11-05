@@ -91,6 +91,19 @@ export function mobileStepUpsAtMost(cases: number): number {
   return 2 * cases;
 }
 
+/**
+ * The wait for the review page after the authorization link: with a sign-in on the way (a passkey ceremony, the sign-in page's
+ * return and the review's POST), the real-network budget (--real-timeout-ms, 180 s by default), as the acceptance's own sign-ins
+ * take; otherwise --timeout-ms. Neither is less than --timeout-ms. The wait is for the review's elements, not for a load event: on
+ * proof the review page was in the tab while its load event had not fired after 30 s.
+ */
+export function reviewWaitMs(
+  world: { timeoutMs: number; realTimeoutMs: number },
+  signingIn: boolean,
+): number {
+  return signingIn ? Math.max(world.timeoutMs, world.realTimeoutMs) : world.timeoutMs;
+}
+
 /** Reads and checks a begin file: its URL must be this center's /mobile/authorize with the exact fragment. */
 export function parseMobileBegin(text: string, baseUrl: string): MobileBeginFile {
   let value: Partial<MobileBeginFile>;
@@ -248,13 +261,28 @@ export async function runMobileApprove(world: World, options: MobileApproveOptio
         `${begin.case}: ${a.signedIn ? "" : "sign in and "}review the app`,
         mockedLabel,
         async () => {
+          const waitMs = reviewWaitMs(world, !a.signedIn);
           if (!a.signedIn) {
             await a.enabled(selectors.signIn);
             await a.tab.click(selectors.signIn);
           }
-          await a.tab.waitForPath(pagePathname(world, mobile.review), world.timeoutMs);
+          // The review page's own element, not its load event (see reviewWaitMs).
+          const review = pagePathname(world, mobile.review);
+          await until(
+            world,
+            "the review page",
+            async () => {
+              if (new URL(a.tab.url()).pathname !== review) return false;
+              try {
+                return (await a.tab.count(mobile.platform)) > 0;
+              } catch {
+                return false; // the document is still being replaced
+              }
+            },
+            waitMs,
+          );
           a.signedIn = true;
-          await a.tab.waitForSelector(selectors.heading, world.timeoutMs);
+          await a.tab.waitForSelector(selectors.heading, waitMs);
           expect(
             (await a.tab.text(selectors.heading)) === "Sign in to the ArcForges app?",
             "The review has another heading.",

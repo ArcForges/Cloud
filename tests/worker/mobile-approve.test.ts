@@ -19,6 +19,7 @@ import {
   parseMobileBegin,
   probeDeviceIds,
   revokeDeviceSelector,
+  reviewWaitMs,
 } from "../../eng/verification/browser/mobile-flow.ts";
 import { mobile } from "../../eng/verification/browser/selectors.ts";
 
@@ -144,4 +145,39 @@ test("the clean-up revokes exactly the devices mobile-probe names, found by the 
     template,
     /<form method="post" action="\{\{\$\.Base\}\}\/account\/devices\/revoke"[^>]*>\n<input type="hidden" name="csrf" value="\{\{\$\.CSRF\}\}">\n<input type="hidden" name="command_id" value="\{\{\.RevokeCommand\}\}">\n<input type="hidden" name="device_id" value="\{\{\.ID\}\}">/u,
   );
+});
+
+test("the review wait: the real-network budget with a sign-in on the way, --timeout-ms otherwise, never less than --timeout-ms", () => {
+  const defaults = parseArguments(
+    ["--mobile-approve", "--watch", "/tmp/h"],
+    {},
+    "linux",
+    "/home/x",
+  );
+  assert.equal(defaults.timeoutMs, 30_000);
+  assert.equal(reviewWaitMs(defaults, true), 180_000);
+  assert.equal(reviewWaitMs(defaults, false), 30_000);
+  const longer = parseArguments(
+    [
+      "--mobile-approve",
+      "--watch",
+      "/tmp/h",
+      "--timeout-ms",
+      "240000",
+      "--real-timeout-ms",
+      "60000",
+    ],
+    {},
+    "linux",
+    "/home/x",
+  );
+  assert.equal(reviewWaitMs(longer, true), 240_000);
+  assert.equal(reviewWaitMs(longer, false), 240_000);
+  // The step waits for the review's own element, never for a load event of the review page.
+  const source = readFileSync(
+    path.join(import.meta.dirname, "../../eng/verification/browser/mobile-flow.ts"),
+    "utf8",
+  );
+  assert.equal(source.includes("waitForPath(pagePathname(world, mobile.review)"), false);
+  assert.match(source, /const waitMs = reviewWaitMs\(world, !a\.signedIn\);/u);
 });
