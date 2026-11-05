@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"strings"
@@ -127,7 +128,8 @@ func loadMobile(lookup func(string) (string, bool), mode Mode) (Mobile, error) {
 
 // ParseAndroidApps reads the Android app identity document: empty or [] is none; otherwise a JSON array of 1 to 4 objects with exactly
 // the keys packageName (an Android application ID), sha256CertFingerprints (1 to 4 distinct fingerprints) and optionally testOnly
-// (true only). Unknown or repeated keys, a repeated package and anything else refuse.
+// (true only: false, null or any other value refuses). Unknown or repeated keys, a repeated package, anything after the array (even a
+// lone ] or }) and anything else refuse.
 func ParseAndroidApps(document string) ([]AndroidApp, error) {
 	if document == "" || document == "[]" {
 		return nil, nil
@@ -138,7 +140,11 @@ func ParseAndroidApps(document string) ([]AndroidApp, error) {
 	decoder := json.NewDecoder(bytes.NewReader([]byte(document)))
 	decoder.DisallowUnknownFields()
 	var raw []json.RawMessage
-	if err := decoder.Decode(&raw); err != nil || decoder.More() {
+	if err := decoder.Decode(&raw); err != nil {
+		return nil, errors.New("not one JSON array")
+	}
+	// Decoder.More reports false before a ] or }, so the end of the document is required explicitly.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("not one JSON array")
 	}
 	if len(raw) > MaxAndroidApps {
@@ -150,9 +156,9 @@ func ParseAndroidApps(document string) ([]AndroidApp, error) {
 			return nil, fmt.Errorf("app %d: %v", index, err)
 		}
 		var entry struct {
-			PackageName  *string  `json:"packageName"`
-			Fingerprints []string `json:"sha256CertFingerprints"`
-			TestOnly     *bool    `json:"testOnly"`
+			PackageName  *string         `json:"packageName"`
+			Fingerprints []string        `json:"sha256CertFingerprints"`
+			TestOnly     json.RawMessage `json:"testOnly"`
 		}
 		strict := json.NewDecoder(bytes.NewReader(item))
 		strict.DisallowUnknownFields()
@@ -164,7 +170,7 @@ func ParseAndroidApps(document string) ([]AndroidApp, error) {
 			return nil, fmt.Errorf("app %d: packageName is not an Android application ID", index)
 		case len(entry.Fingerprints) < 1 || len(entry.Fingerprints) > MaxAndroidFingerprints:
 			return nil, fmt.Errorf("app %d: sha256CertFingerprints needs 1 to %d fingerprints", index, MaxAndroidFingerprints)
-		case entry.TestOnly != nil && !*entry.TestOnly:
+		case entry.TestOnly != nil && string(entry.TestOnly) != "true":
 			return nil, fmt.Errorf("app %d: testOnly is true or absent", index)
 		}
 		for _, fingerprint := range entry.Fingerprints {
@@ -180,7 +186,7 @@ func ParseAndroidApps(document string) ([]AndroidApp, error) {
 		if slices.ContainsFunc(apps, func(app AndroidApp) bool { return app.PackageName == *entry.PackageName }) {
 			return nil, fmt.Errorf("app %d: the package is listed twice", index)
 		}
-		apps = append(apps, AndroidApp{PackageName: *entry.PackageName, Fingerprints: slices.Clone(entry.Fingerprints), TestOnly: entry.TestOnly != nil})
+		apps = append(apps, AndroidApp{PackageName: *entry.PackageName, Fingerprints: slices.Clone(entry.Fingerprints), TestOnly: string(entry.TestOnly) == "true"})
 	}
 	if len(apps) == 0 {
 		return nil, nil
