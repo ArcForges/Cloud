@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The node-approve flow (AF-CTR-04 E3): the saved owner credential (MOCKED hardware: Chromium's virtual authenticator in a real
-// browser) approves or denies the sign-ins a node stand-in starts, on the center's /connect and /activate pages. The node is
-// center/cmd/node-probe (MOCKED: a Go stand-in, not the ArcForges node), which writes <case>.begin.json into the handshake directory
+// browser) approves or denies the sign-ins a node starts, on the center's /connect and /activate pages. The node is whatever writes
+// the handshake files: center/cmd/node-probe (MOCKED: a Go stand-in, not the ArcForges node), or the ArcForges node under its own
+// end-to-end test (CloudSignInTests: a REAL node); the flow cannot tell them apart and labels neither. It writes <case>.begin.json into the handshake directory
 // (the URL to open, the user code, the key's fingerprint and the node's description, none of them secret) and later
 // <case>.result.json (each of its steps and the instant of each of its requests). For each begin file the flow opens the URL in the
 // browser, signs in when it has to (the sign-in page returns to the fleet page with its fragment), checks the review page against the
@@ -216,7 +217,7 @@ async function nextBegin(
 export async function runNodeApprove(world: World, options: NodeApproveOptions): Promise<void> {
   world.report.mode = "node-approve";
   world.write(
-    `Node approvals on ${world.baseUrl}: the saved owner credential (MOCKED hardware) decides ${options.cases} sign-in(s) of node-probe (MOCKED node)`,
+    `Node approvals on ${world.baseUrl}: the saved owner credential (MOCKED hardware) decides ${options.cases} sign-in(s) of the node that writes the handshake directory (center/cmd/node-probe is a MOCKED node; the ArcForges node's end-to-end test is the real one)`,
   );
   expect(world.store.exists(), "There is no saved owner credential; run the acceptance first.");
   expectSavedCenter(world);

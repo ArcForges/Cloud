@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  boundCovers,
   combinedBusiest,
   defaultReportName,
   main,
@@ -388,6 +389,8 @@ test("the browser's and node-probe's busiest minutes together over 55 fail the r
   assert(browserBusiest <= 55 && 40 <= 55, String(browserBusiest));
   assert.equal(run.report.facts.probeBusiest60s, 40);
   assert(Number(run.report.facts.requestsBusiest60sBound) > 55);
+  // The bound says what it covers: the browser and the requests the node's result files list (a real node's later calls are not in it).
+  assert.equal(run.report.facts.requestsBusiest60sBoundCovers, boundCovers);
   assert.match(
     run.stderr.join("\n"),
     /The browser and node-probe sent up to \d+ requests inside one minute/u,
