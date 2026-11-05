@@ -52,6 +52,9 @@ type Center struct {
 	Mode          string `json:"mode,omitempty"`
 	PublicBaseURL string `json:"publicBaseUrl,omitempty"`
 	Surfaces      string `json:"surfaces,omitempty"`
+	// SigningKid is the kid of the command key the center signs routed calls with now (AF-CTR-05 E1b, Plan CTR5-SIG-02): absent
+	// without the relay surface or without a valid held key. It names the key; nothing of the key's material is ever in the document.
+	SigningKid string `json:"signingKid,omitempty"`
 }
 
 // Health is the health document. It keeps the fields the Worker and the release tooling read (service, revision, nativeAot,

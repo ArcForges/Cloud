@@ -415,6 +415,11 @@ func (c *Center) CheckCommandKeys(ctx context.Context) error {
 		return fmt.Errorf("the relay surface needs a valid command key whose private half is loaded; loaded bindings: %v", bindings)
 	}
 	c.Hub.UseSigningKids(usable)
+	// The hub signs routed calls with the newest of them valid at each call (AF-CTR-05 E1b), re-reading the rows every minute.
+	c.Hub.UseCommandKeys(c.Config.CommandKeys)
+	if err := c.Hub.RefreshKeys(check, time.Now()); err != nil {
+		return errors.New("the command keys could not be read: the relay surface needs a valid command key")
+	}
 	c.Logger.Info("command keys loaded", "kids", usable)
 	return nil
 }
@@ -675,7 +680,12 @@ func (c *Center) serveHealth(writer http.ResponseWriter, request *http.Request) 
 	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(writer).Encode(c.Health)
+	health := c.Health
+	if c.Hub != nil {
+		// The kid of the command key routed calls are signed with now (CTR5-SIG-02), never key material.
+		health.Center.SigningKid, _ = c.Hub.SigningKID(time.Now())
+	}
+	_ = json.NewEncoder(writer).Encode(health)
 }
 
 // Readiness is the readiness report of the admin listener: the state of each configured dependency, separate from health

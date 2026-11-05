@@ -18,8 +18,8 @@ const FrameVersion = 1
 
 // RelayCodec is the relay.v1 codec of the channel (Contracts relay.proto, AF-CTR-05 C2): one RelayFrame per binary message, with
 // frame_version 1 and frame_seq per connection and direction. On this channel a node sends node_hello, heartbeat, token_refresh,
-// close and relay_nonce_request; the center sends challenge, accepted, heartbeat and close (and, from AF-CTR-05 E1b, call and
-// relay_nonce). Every other member belongs to the unserved FleetHub relay of AD-0009.
+// close, relay_nonce_request and call_result; the center sends challenge, accepted, heartbeat, close, call and relay_nonce. Every
+// other member belongs to the unserved FleetHub relay of AD-0009.
 type RelayCodec struct{}
 
 // maxTokenBytes bounds a TokenRefresh token before it is verified (the ingress's bearer bound).
@@ -55,8 +55,14 @@ func (RelayCodec) Decode(data []byte) (inbound, error) {
 	case *relayv1.RelayFrame_Close:
 		return inbound{kind: inboundClose, closeCode: member.Close.GetCode()}, nil
 	case *relayv1.RelayFrame_RelayNonceRequest:
-		// Relay nonces are AF-CTR-05 E2's (the routed API's relay assertions): until then a request gets no answer.
-		return inbound{kind: inboundNonceRequest}, nil
+		requestID, ok := idOf(member.RelayNonceRequest.GetRequestId())
+		return inbound{kind: inboundNonceRequest, requestID: requestID, requestOK: ok && validRelayNonceRequest(member.RelayNonceRequest)}, nil
+	case *relayv1.RelayFrame_CallResult:
+		value := member.CallResult
+		callID, ok := idOf(value.GetCallId())
+		header := value.GetHeader()
+		return inbound{kind: inboundResult, result: resultFrame{CallID: callID, CallOK: ok, Header: header.GetHeader(), Signature: header.GetSignature(),
+			HasKid: header.Kid != nil, Algorithm: header.GetAlgorithm(), Payload: value.GetPayload(), Shaped: validChannelResult(value)}}, nil
 	case nil:
 		return inbound{}, errFrame
 	}
@@ -97,6 +103,18 @@ func (RelayCodec) Close(seq uint64, code uint32, reason string, reconnectAfter t
 	return marshal(seq, &relayv1.RelayFrame_Close{Close: value})
 }
 
+// Call is ChannelCall (Plan CTR5-SIG-01): the call ID, the SignedHeader of the CallHeader bytes (with the command key's kid and
+// "ES256") and the payload, as given.
+func (RelayCodec) Call(seq uint64, callID platform.ID, header, signature []byte, kid string, payload []byte) ([]byte, error) {
+	return marshal(seq, &relayv1.RelayFrame_Call{Call: &relayv1.ChannelCall{CallId: idValue(callID), Header: &relayv1.SignedHeader{Header: header,
+		Signature: signature, Kid: proto.String(kid), Algorithm: proto.String("ES256")}, Payload: payload}})
+}
+
+// RelayNonce is RelayNonce (Plan addendum C-N2): the request ID it answers, the nonce and its expiry.
+func (RelayCodec) RelayNonce(seq uint64, requestID platform.ID, nonce []byte, expires time.Time) ([]byte, error) {
+	return marshal(seq, &relayv1.RelayFrame_RelayNonce{RelayNonce: &relayv1.RelayNonce{RequestId: idValue(requestID), Nonce: nonce, ExpiresAt: instant(expires)}})
+}
+
 func marshal(seq uint64, member any) ([]byte, error) {
 	frame := &relayv1.RelayFrame{FrameVersion: proto.Uint32(FrameVersion), FrameSeq: proto.Uint64(seq)}
 	switch value := member.(type) {
@@ -107,6 +125,10 @@ func marshal(seq uint64, member any) ([]byte, error) {
 	case *relayv1.RelayFrame_Heartbeat:
 		frame.Frame = value
 	case *relayv1.RelayFrame_Close:
+		frame.Frame = value
+	case *relayv1.RelayFrame_Call:
+		frame.Frame = value
+	case *relayv1.RelayFrame_RelayNonce:
 		frame.Frame = value
 	default:
 		return nil, errFrame

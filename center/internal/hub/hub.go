@@ -85,12 +85,15 @@ type Settings struct {
 	InboundFramesPerSecond int
 	// TokenRefreshInterval is the least time between two TokenRefresh frames of a connection after its first (review A B-1).
 	TokenRefreshInterval time.Duration
-	// MaxInFlightCalls and MaxRelayNonces are what ChannelAccepted states for the calls (E1b) and the relay nonces (E2) of a
-	// connection: 8 each (Plan C.9).
-	MaxInFlightCalls int
-	MaxRelayNonces   int
-	SendQueueFrames  int
-	SendQueueBytes   int
+	// MaxInFlightCalls and MaxRelayNonces are what ChannelAccepted states for the calls and the relay nonces of a connection: 8 each
+	// (Plan C.9; routedInFlightPerNode bounds the first). MaxInFlightPerCenter bounds the calls the whole process waits for (1024,
+	// routedInFlightPerCenter; CTR5-HUB-10). RelayNonceLifetime is how long a relay nonce may be spent (at most an assertion's 120 s).
+	MaxInFlightCalls     int
+	MaxRelayNonces       int
+	MaxInFlightPerCenter int
+	RelayNonceLifetime   time.Duration
+	SendQueueFrames      int
+	SendQueueBytes       int
 	// WriteTimeout bounds one write to a node; a node that stops reading is closed when it passes.
 	WriteTimeout time.Duration
 	// LeaseTTL and LeaseRenew are the hub lease's time to live and renewal interval (PB-5: 30 s and 10 s).
@@ -107,7 +110,8 @@ func SettingsOf(policy config.IdentityPolicy) Settings {
 		HelloDeadline: 10 * time.Second, Heartbeat: policy.ChannelHeartbeat, HeartbeatDeadline: policy.ChannelHeartbeatDeadline,
 		PresenceInterval: time.Minute, SessionRecheck: policy.ChannelSessionRecheck, LapseRecheck: policy.ChannelLapseRecheck,
 		TokenGrace: policy.ChannelTokenGrace, MaxFrameBytes: routes.NodeChannelMaxFrameBytes, InboundFramesPerSecond: policy.ChannelInboundFramesPerSecond,
-		MaxInFlightCalls: 8, MaxRelayNonces: 8, TokenRefreshInterval: DefaultTokenRefreshInterval,
+		MaxInFlightCalls: policy.RoutedInFlightPerNode, MaxRelayNonces: 8, MaxInFlightPerCenter: policy.RoutedInFlightPerCenter,
+		RelayNonceLifetime: AssertionWindowSeconds * time.Second, TokenRefreshInterval: DefaultTokenRefreshInterval,
 		SendQueueFrames: policy.ChannelSendQueueFrames, SendQueueBytes: policy.ChannelSendQueueBytes, WriteTimeout: 10 * time.Second,
 		LeaseTTL: DefaultLeaseTTL, LeaseRenew: DefaultLeaseRenew, ReconnectMin: time.Second, ReconnectMax: 30 * time.Second,
 	}
@@ -166,10 +170,13 @@ type Hub struct {
 	heldElsewhere atomic.Bool
 	nodeLocks     [nodeLockStripes]chan struct{} // one-slot accept locks (lockNode)
 	lockSeed      maphash.Seed
+	inFlight      int // the calls this process waits for (MaxInFlightPerCenter)
 	wg            sync.WaitGroup
+	keys          keyring
 
 	stop    context.CancelFunc
 	done    chan struct{}
+	keyed   chan struct{} // closed when the command keys' loop ends
 	unlisen func()
 }
 
@@ -211,10 +218,11 @@ func (h *Hub) Lease() *Lease { return h.lease }
 func (h *Hub) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	h.stop = cancel
-	h.done = make(chan struct{})
+	h.done, h.keyed = make(chan struct{}), make(chan struct{})
 	h.unlisen = session.ListenRevocations(h.revoked)
 	h.acquire(ctx)
 	go h.leaseLoop(ctx)
+	go h.keyLoop(ctx)
 }
 
 // acquire tries to take the lease once, and clears what a previous holder left recorded. A lease held elsewhere is logged once until
@@ -323,6 +331,7 @@ func (h *Hub) Stop(ctx context.Context) {
 	if h.stop != nil {
 		h.stop()
 		<-h.done
+		<-h.keyed
 	}
 	release, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()

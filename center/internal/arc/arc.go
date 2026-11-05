@@ -358,6 +358,61 @@ func Internal() *Refusal {
 		Retry: foundationv1.RetryMode_RETRY_MODE_NEVER, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN}
 }
 
+// The refusals of the node channel's routed calls (AF-CTR-05 E1b; ArcForges-Design errors.md "Center-routed calls", AD-0021 section 11).
+
+// NodeOffline is STATE/node_offline (errors.md): a routed call names a live node of the account that has no open channel to this center
+// process, or the process does not hold the hub lease. The call was not delivered and the center queues nothing: AFTER_TIME with
+// retry_at 5 s plus up to a second of jitter, DID_NOT_HAPPEN; state.resource is the node the caller named.
+func NodeOffline(nodeID []byte, now time.Time) *Refusal {
+	retryAt := now.Add(nodeOfflineDelay + rand.N(retryJitter))
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "node_offline", Retry: foundationv1.RetryMode_RETRY_MODE_AFTER_TIME,
+		RetryAt: retryAt, State: "node", Reason: "node_offline", Resource: resource("node", nodeID)}
+}
+
+// nodeOfflineDelay is node_offline's retry delay before its jitter.
+const nodeOfflineDelay = 5 * time.Second
+
+// The reasons of STATE/node_unreachable (errors.md): the channel closed or was replaced, the call's deadline passed, or the node's
+// result failed verification (replay_digest_differs is the routing record's, AF-CTR-05 E2).
+const (
+	UnreachableChannelClosed = "channel_closed"
+	UnreachableDeadline      = "deadline_passed"
+	UnreachableUnverifiable  = "result_unverifiable"
+)
+
+// NodeUnreachable is STATE/node_unreachable (errors.md): a routed call has no verified result. Its pair is the call's: unknown (a
+// delivered SubmitNodeTask or CancelNodeTask, idempotent by command_id) is UNKNOWN with SAME_COMMAND; otherwise (a call not yet
+// delivered, every read) DID_NOT_HAPPEN with AFTER_TIME (Dated gives its retry_at). state.resource is the node.
+func NodeUnreachable(nodeID []byte, reason string, unknown bool) *Refusal {
+	refusal := &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "node_unreachable", Retry: foundationv1.RetryMode_RETRY_MODE_AFTER_TIME,
+		State: "node", Reason: reason, Resource: resource("node", nodeID)}
+	if unknown {
+		refusal.Retry, refusal.Effect = foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND, foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN
+	}
+	return refusal
+}
+
+// The reasons of a refused relay assertion (errors.md AUTHENTICATION/unauthenticated, Plan addendum D0-B1, C-N1, C-N4).
+const (
+	RelayMissing            = "missing"
+	RelaySignatureInvalid   = "signature_invalid"
+	RelayCredentialMismatch = "credential_mismatch"
+	RelayExpired            = "expired"
+	RelayNonceReused        = "nonce_reused"
+	RelayRequestMismatch    = "request_mismatch"
+)
+
+// RelayAssertionRefused is AUTHENTICATION/unauthenticated for a node-relayed call whose relay assertion is missing or invalid, with
+// state.state "relay_assertion" and the closed reason; nothing is served or routed. For expired and nonce_reused the relaying node signs a
+// new assertion with a fresh relay nonce and resends with the same command_id (SAME_COMMAND, no sign-in, C-N4); otherwise NEVER.
+func RelayAssertionRefused(reason string) *Refusal {
+	refusal := &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_AUTHENTICATION, Code: "unauthenticated", State: "relay_assertion", Reason: reason}
+	if reason == RelayExpired || reason == RelayNonceReused {
+		refusal.Retry = foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND
+	}
+	return refusal
+}
+
 // Instant is a contract instant (UTC seconds and nanoseconds, truncated to microseconds as the store keeps them).
 func Instant(at time.Time) *foundationv1.Instant {
 	at = at.UTC().Truncate(time.Microsecond)

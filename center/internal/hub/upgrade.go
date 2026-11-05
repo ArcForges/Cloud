@@ -148,7 +148,8 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	ws.SetReadLimit(-1)
 	c := &conn{hub: h, ws: ws, sessionID: parseID(caller.SessionID), userID: parseID(caller.UserID), deviceID: parseID(caller.DeviceID),
 		installationID: parseID(caller.InstallationID), nodeID: node.nodeID, enrollmentID: node.enrollmentID, publicKey: node.publicKey,
-		connectionID: platform.NewID(), fence: fence, accessExpires: expires, tokenDigest: sha256.Sum256([]byte(token)), queue: make(chan []byte, h.settings.SendQueueFrames),
+		connectionID: platform.NewID(), fence: fence, accessExpires: expires, tokenDigest: sha256.Sum256([]byte(token)), queue: make(chan outbound, h.settings.SendQueueFrames),
+		calls:    map[platform.ID]*pending{},
 		finished: make(chan struct{})}
 	if raw := correlation.IDBytes(call.CorrelationID); len(raw) == 16 {
 		var id platform.ID

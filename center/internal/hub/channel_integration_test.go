@@ -461,14 +461,14 @@ func TestAnOversizedFrameClosesTheChannel(t *testing.T) {
 	if closed := text.AwaitClose(ctx, false); closed.Code != hub.CloseRefused {
 		t.Fatalf("a text frame: %+v", closed)
 	}
-	// A relay nonce request is not answered in E1a, and closes nothing.
+	// A relay nonce request without its request ID is a frame the hub does not accept (AF-CTR-05 E1b; a valid one is answered,
+	// TestARelayNonceIsOneUseAndVoidAtClose).
 	nonce := h.connect(h.enroll())
-	nonceClosed := answer(nonce)
 	if err := nonce.Send(ctx, &relayv1.RelayFrame{Frame: &relayv1.RelayFrame_RelayNonceRequest{RelayNonceRequest: &relayv1.RelayNonceRequest{}}}); err != nil {
 		t.Fatal(err)
 	}
-	if !stillOpen(nonceClosed, 500*time.Millisecond) {
-		t.Fatal("a relay nonce request closed the channel")
+	if closed := nonce.AwaitClose(ctx, false); closed.Code != hub.CloseRefused || closed.Reason != "nonce_request_malformed" {
+		t.Fatalf("a malformed relay nonce request: %+v", closed)
 	}
 }
 

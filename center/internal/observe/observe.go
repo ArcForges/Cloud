@@ -52,6 +52,7 @@ type Metrics struct {
 	// connected is the node channel's accepted connections (a gauge); superseded is 1 while this revision's definitions version is
 	// not the deploy's current one (E0 C-N2), set by the server at every scrape.
 	connected  int
+	inFlight   int
 	superseded int
 }
 
@@ -112,10 +113,17 @@ func ChannelOutcomes() map[string][]string {
 		"closed":    {"4401", "4403", "4408", "4409", "4413", "4429", "4500", "4503", "normal", "abnormal"},
 		"heartbeat": {"missed"},
 		"violation": {"too_large", "rate", "write_timeout", "text_frame", "unreadable_frame", "before_hello", "unexpected_frame", "hello_without_nonce",
-			"hello_malformed", "hello_signature", "hello_mismatch"},
-		"token": {"rebound", "unchanged", "rate"},
-		"lapse": {"closed", "undecided"},
-		"lease": {"acquired", "held_elsewhere", "renewal_failed", "lost", "released"},
+			"hello_malformed", "hello_signature", "hello_mismatch", "result_malformed", "result_signature", "result_other_call", "result_mismatch",
+			"nonce_request_malformed"},
+		// AF-CTR-05 E1b: routed calls (sent, the outcome of a verified result, a late result dropped, the refusals before sending, and
+		// the reasons of node_unreachable), relay nonces and relay assertions (verified, or the closed reason of the refusal).
+		"call": {"sent", "executed", "refused_by_policy", "refused_verification", "expired", "late", "offline", "no_key", "center_bound", "node_bound",
+			"queue_full", "channel_closed", "deadline_passed", "result_unverifiable"},
+		"relay_nonce": {"issued", "spent", "unknown"},
+		"assertion":   {"verified", "missing", "signature_invalid", "credential_mismatch", "expired", "nonce_reused", "request_mismatch"},
+		"token":       {"rebound", "unchanged", "rate"},
+		"lapse":       {"closed", "undecided"},
+		"lease":       {"acquired", "held_elsewhere", "renewal_failed", "lost", "released"},
 	}
 }
 
@@ -216,6 +224,13 @@ func (m *Metrics) SetChannelConnected(count int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.connected = count
+}
+
+// SetChannelInFlight sets the gauge of the routed calls this process waits for (AF-CTR-05 E1b).
+func (m *Metrics) SetChannelInFlight(count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inFlight = count
 }
 
 // SetDefinitionsSuperseded sets the gauge of a revision whose definitions version is not the deploy's current one (E0 C-N2).
@@ -331,6 +346,9 @@ func (m *Metrics) WritePrometheus(writer io.Writer) error {
 	text.WriteString("# HELP arcforges_center_channel_connected_nodes Node channel connections accepted in this process.\n")
 	text.WriteString("# TYPE arcforges_center_channel_connected_nodes gauge\n")
 	fmt.Fprintf(&text, "arcforges_center_channel_connected_nodes %d\n", m.connected)
+	text.WriteString("# HELP arcforges_center_channel_calls_in_flight Routed calls this process waits for.\n")
+	text.WriteString("# TYPE arcforges_center_channel_calls_in_flight gauge\n")
+	fmt.Fprintf(&text, "arcforges_center_channel_calls_in_flight %d\n", m.inFlight)
 	text.WriteString("# HELP arcforges_center_definitions_superseded 1 while this revision's definitions version is not the deploy's current one.\n")
 	text.WriteString("# TYPE arcforges_center_definitions_superseded gauge\n")
 	fmt.Fprintf(&text, "arcforges_center_definitions_superseded %d\n", m.superseded)

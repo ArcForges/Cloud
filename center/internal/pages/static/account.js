@@ -41,6 +41,9 @@ const ERROR_TEXT = {
   rate_limited: "Too many attempts. Wait a little and try again.",
   quota_exceeded: "This account has reached its limit. Remove an item, then try again.",
   code_invalid: "That code cannot be used. Check it, or start the sign-in again on the device.",
+  node_offline: "That node is not connected to the center now. Try again when it is online.",
+  node_unreachable:
+    "The node did not answer in time. The request may or may not have reached it, so check before you do it again.",
   overloaded: "The service is busy. Try again in a moment.",
   internal:
     "Something went wrong on our side. The request may or may not have been completed, so check before you do it again.",
