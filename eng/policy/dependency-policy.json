@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f",
+  "sourceCommit": "b56702c6590a19f8baeb5fdb12c03fdd19a23340",
   "manifests": ["package.json"],
   "inputs": {
-    ".github/workflows/ci.yml": "b33caae6a44337ec33d8cf6d66df7b700cabf03f6ad0592919f184ed89d7e63a",
+    ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
     ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
     ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
     "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
@@ -222,11 +222,11 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "Claude, maintainer-authorized source and dependency review (CI proof deployment gate delegated author); PR review is recorded separately",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (CI proof deployment gate delegated author, review fix round 1); PR review is recorded separately",
     "date": "2026-11-05",
-    "rationale": "CI proof deployment gate (owner decision of 2026-11-04, CI simplification after N1), after af-ctr-04-r8 (AF-CTR-04 part E3). Nothing is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records, the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0), package-lock.json, the NuGet locks, the Dockerfile, the base images, the toolchains and every pinned action stay as af-ctr-04-r8 admitted them; the new proof-gate job reuses the pinned actions/checkout and actions/setup-node and adds no action, package or tool (it reads the GitHub API with the runner's gh, and the deploy-proof job unpacks the candidate archive with the runner's unzip). The bound inputs that change are .github/workflows/ci.yml (a proof=deploy dispatch runs no hosted validation and builds no candidate: its proof-gate job, read-only and without secrets, proves that both host legs verified the merged tree and finds the candidate of the successful main-push run of the same commit, and deploy-proof fetches that candidate by run and artifact ID and checks its digest and sealed manifest instead of downloading a candidate of its own run; the main-push path, pull-request validation, dependency review, the schedule and the other proof actions are unchanged) and the root package.json (the test list gains tests/worker/proof-gate.test.ts). No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-first exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
+    "rationale": "CI proof deployment gate, review fix round 1 (Cloud #138), after af-ctr-04-r9. Nothing is admitted and nothing is corrected in the dependencies: everything af-ctr-04-r9 admitted stays as it is, and no action, package or tool is added. The one bound input that changes is .github/workflows/ci.yml: the clause that skips the hosted validation (Source, quality, CodeQL, the candidate and Verify) for the proof deployment now also requires github.ref == refs/heads/main, so a proof=deploy dispatch on any other ref runs the full hosted validation exactly as before the gate; the main-push path, the gate and the proof deployment are unchanged. No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-second exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
     "inputs": {
-      ".github/workflows/ci.yml": "b33caae6a44337ec33d8cf6d66df7b700cabf03f6ad0592919f184ed89d7e63a",
+      ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
       ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
       "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
@@ -451,9 +451,9 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "CI proof deployment gate (owner decision of 2026-11-04, CI simplification after N1), after af-ctr-04-r8 (AF-CTR-04 part E3). Nothing is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records, the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0), package-lock.json, the NuGet locks, the Dockerfile, the base images, the toolchains and every pinned action stay as af-ctr-04-r8 admitted them; the new proof-gate job reuses the pinned actions/checkout and actions/setup-node and adds no action, package or tool (it reads the GitHub API with the runner's gh, and the deploy-proof job unpacks the candidate archive with the runner's unzip). The bound inputs that change are .github/workflows/ci.yml (a proof=deploy dispatch runs no hosted validation and builds no candidate: its proof-gate job, read-only and without secrets, proves that both host legs verified the merged tree and finds the candidate of the successful main-push run of the same commit, and deploy-proof fetches that candidate by run and artifact ID and checks its digest and sealed manifest instead of downloading a candidate of its own run; the main-push path, pull-request validation, dependency review, the schedule and the other proof actions are unchanged) and the root package.json (the test list gains tests/worker/proof-gate.test.ts). No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-first exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
+    "runtimeAssessment": "CI proof deployment gate, review fix round 1 (Cloud #138), after af-ctr-04-r9. Nothing is admitted and nothing is corrected in the dependencies: everything af-ctr-04-r9 admitted stays as it is, and no action, package or tool is added. The one bound input that changes is .github/workflows/ci.yml: the clause that skips the hosted validation (Source, quality, CodeQL, the candidate and Verify) for the proof deployment now also requires github.ref == refs/heads/main, so a proof=deploy dispatch on any other ref runs the full hosted validation exactly as before the gate; the main-push path, the gate and the proof deployment are unchanged. No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-second exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-04-r8.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-04-r9.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-11-05",
     "decision": "approved"
@@ -1253,7 +1253,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-04-r9.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-04-r10.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

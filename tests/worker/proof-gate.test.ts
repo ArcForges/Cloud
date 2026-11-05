@@ -338,6 +338,12 @@ test("1d: the candidate is the artifact of the successful main-push run of the s
     assert.ok(job);
     job.conclusion = "failure";
   }, /The candidate job of run 41866820816 did not succeed/u);
+  refused((r) => {
+    const jobs = field(r[key.jobs]).jobs as Mutable[];
+    const job = jobs.find((entry) => entry.name === "Native AOT image and Worker build");
+    assert.ok(job);
+    job.head_sha = head;
+  }, /the candidate job does not belong to run 41866820816 of 9085b12/u);
   const candidate = (r: Responses) => {
     const found = (field(r[key.artifacts]).artifacts as Mutable[]).find(
       (entry) => entry.name === candidateArtifactName(runId, 1),
@@ -351,6 +357,10 @@ test("1d: the candidate is the artifact of the successful main-push run of the s
   refused((r) => {
     field(candidate(r), "workflow_run").id = 41835733994;
   }, /was not uploaded by the main-push run/u);
+  for (const name of ["repository_id", "head_repository_id"])
+    refused((r) => {
+      field(candidate(r), "workflow_run")[name] = 1;
+    }, /was not uploaded by the main-push run/u);
   refused((r) => {
     candidate(r).expired = true;
   }, /has expired/u);
@@ -534,6 +544,28 @@ test("the fetch refuses another digest, a changed artifact, a non-flat archive a
     }),
     /is not the successful main push of 9085b12/u,
   );
+  // Re-run between the gate and the fetch: the run must still be the completed, successful main push.
+  for (const edit of [
+    (run: Mutable) => {
+      run.status = "in_progress";
+    },
+    (run: Mutable) => {
+      run.conclusion = "failure";
+    },
+  ])
+    refusedFetch(
+      fetchWith(t, sealed(), {
+        responses: (r) => {
+          edit(field(r[key.run]));
+        },
+      }),
+      /is not the successful main push of 9085b12/u,
+    );
+  // A candidate directory that exists before the fetch (another source of bytes) is refused.
+  const occupied = fetchWith(t, sealed());
+  mkdirSync(path.join(occupied.directory, "artifacts", "candidate"), { recursive: true });
+  refusedFetch(occupied, /artifacts\/candidate exists before the gated candidate was fetched/u);
+  assert.equal(occupied.extracted(), false);
   for (const entry of ["../worker.js", "nested/worker.js", ".hidden", "/etc/passwd"]) {
     const nested = fetchWith(t, sealed(), { entries: [...Object.keys(sealed()), entry] });
     refusedFetch(nested, /not a plain file name/u);
@@ -882,12 +914,12 @@ test("the proof deployment dispatch runs only the gate, the access job and the d
   const deploy = jobs.get("deploy-proof") ?? "";
   assert.ok(needsOf(deploy).includes("proof-gate"), "deploy-proof needs the gate");
   assert.match(condition(deploy) ?? "", /&& needs\.proof-gate\.result == 'success'/u);
-  // Off main nothing of the proof environment runs.
-  for (const job of ["deploy-proof", "proof-access", "proof-gate"])
-    assert.ok(
-      !ran({ event: "workflow_dispatch", ref: "refs/heads/task/x", proof: "deploy" }).includes(job),
-      job,
-    );
+  // Off main nothing of the proof environment runs, and the full hosted validation runs exactly as before the gate: a dispatch
+  // can never put a skipped (passing) Verify on a branch head.
+  assert.deepEqual(
+    ran({ event: "workflow_dispatch", ref: "refs/heads/task/x", proof: "deploy" }),
+    validation,
+  );
 });
 
 test("every other event keeps its jobs: main push delivery, PR validation, schedule security, other dispatches", () => {

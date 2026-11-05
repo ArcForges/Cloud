@@ -57,7 +57,7 @@ jobs:
     if: >-
       github.event_name != 'push' && github.event_name != 'schedule'
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
-      && !(github.event_name == 'workflow_dispatch' && inputs.proof == 'deploy')
+      && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
     strategy:
       fail-fast: false
       matrix:
@@ -115,7 +115,7 @@ jobs:
     if: >-
       github.event_name != 'push'
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
-      && !(github.event_name == 'workflow_dispatch' && inputs.proof == 'deploy')
+      && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -173,7 +173,7 @@ jobs:
     if: >-
       github.event_name != 'push'
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
-      && !(github.event_name == 'workflow_dispatch' && inputs.proof == 'deploy')
+      && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -238,7 +238,7 @@ jobs:
     if: >-
       !cancelled() && (github.event_name == 'push' || (github.event_name != 'schedule'
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
-      && !(github.event_name == 'workflow_dispatch' && inputs.proof == 'deploy')
+      && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
       && needs.source.result == 'success' && needs.quality.result == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -273,7 +273,7 @@ jobs:
     if: >-
       always() && github.event_name != 'push' && github.event_name != 'schedule'
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
-      && !(github.event_name == 'workflow_dispatch' && inputs.proof == 'deploy')
+      && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
     needs: [source, quality, dependency-review, codeql, candidate]
     runs-on: ubuntu-latest
     timeout-minutes: 2
