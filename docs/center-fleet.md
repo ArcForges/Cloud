@@ -15,7 +15,7 @@ connection, which AF-CTR-05 serves.
 
 The methods and the six pages belong to the switchable surface `fleet`. It needs `identity` and `pages` (a list without them refuses to
 start). Production `FLAGSHIP_SURFACES` stays `""` (AF-PROD-01 activates it); the acceptance environment (`proof`) carries
-`identity,pages,operations,fleet` (pinned by `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts`); a
+`identity,pages,operations,fleet,mobile` (`mobile` since AF-CTR-04 part M; pinned by `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts`); a
 self-hosted center enables it by default together with `identity` and `pages`
 (`TestTheFleetSurfaceNeedsIdentityAndPagesAndIsInTheSelfHostedDefault`). With the surface off, every fleet method answers `STATE/not_activated`
 with `state.reason` `fleet`, from the Worker's generated reply before anything else is read, and from the center. Each method's Worker
@@ -659,8 +659,8 @@ loopback receiver; it proves nothing about other browsers.
    `https://arcforges.com/api/connect` and `/api/activate` answer the Worker's plain 404; a fleet method answers `STATE/not_activated`
    with `state.reason` `fleet`.
 2. **Proof carries the surface.** `curl -si https://proof.arcforges.com/api/healthz`: `center.surfaces`
-   `identity,pages,operations,fleet`, equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`; the migration gate shows
-   `arcforges_acceptance` at version 5.
+   `identity,pages,operations,fleet` (`identity,pages,operations,fleet,mobile` since AF-CTR-04 part M), equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`; the migration gate shows
+   `arcforges_acceptance` at version 5 (6 since AF-CTR-04 part M).
 3. **The pages' replies** (from the Linux host, a key of its own): `curl -si https://proof.arcforges.com/api/connect` and `/api/activate`:
    200, the seven security headers exactly, `Cache-Control: no-store, no-transform`, no `cloudflareinsights` and no `data-cf-beacon` in the
    body; `curl -si -X POST https://proof.arcforges.com/api/connect/review` without an `Origin`: 403;

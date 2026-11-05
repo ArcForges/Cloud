@@ -158,7 +158,7 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
   return [];
 }
 
-test("production enables no surface and the acceptance environment enables identity, pages, operations and fleet", () => {
+test("production enables no surface and the acceptance environment enables identity, pages, operations, fleet and mobile", () => {
   assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
   assert.equal(
     wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES,

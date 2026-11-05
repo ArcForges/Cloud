@@ -143,7 +143,7 @@ The interim page is the `operations` surface: `GET /operations/grant` (the form)
 checked and normalized exactly as a grant would, nothing written, with the step-up target) and `POST /operations/grant/confirm`
 (the grant). The script of the pages proves the passkey step-up for the review's target before the confirmation form is submitted.
 The surface needs `identity` and `pages`, exists only in official-hosted mode and is never a default. Of the checked-in environments
-only the acceptance environment enables it (`proof` carries `identity,pages,operations,fleet` and the development fixture catalogue,
+only the acceptance environment enables it (`proof` carries `identity,pages,operations,fleet,mobile` and the development fixture catalogue,
 **MOCKED**, illustrative); production carries no surface and no catalogue, and `tests/worker/center-config.test.ts` and
 `tests/worker/proof-deploy.test.ts` pin both. Where it is off, the Worker answers its plain 404 "Unknown API method." before anything is
 read, as for the pages surface (the center's own 404, where it did not compose the surface, carries the seven security headers); a signed-in account that is no operator (or whose account is not active) gets 403, audited as above. Every reply of the center's page handler carries the seven page security headers byte for byte, `Cache-Control: no-store,
@@ -243,7 +243,8 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
    `tests/worker/provenance.test.ts` and the entry of `eng/provenance/files.json`); changing it again takes the same set. **No
    `grant-operator` and no migration-role credential are needed:** the proof owner (the bootstrap owner) counts as operator through
    `identity.bootstrap`, so `identity.operator` stays empty. After the proof dispatch, `curl -si https://proof.arcforges.com/api/healthz`
-   says `center.surfaces` is `identity,pages,operations,fleet` (since AF-CTR-04 part E3), equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`
+   says `center.surfaces` is `identity,pages,operations,fleet,mobile` (since AF-CTR-04 part M; `identity,pages,operations,fleet` from part
+   E3), equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`
    (which also records `planConfiguration` `development-fixtures`); a stale value after 90 seconds is diagnosed, not redeployed.
 4. **The page by `curl`**, before any browser: `curl -si https://proof.arcforges.com/api/operations/grant` is `303` to
    `/api/account/sign-in#return=%2Fapi%2Foperations%2Fgrant` with the seven page security headers (the Security headers paragraph of

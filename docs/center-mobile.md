@@ -18,9 +18,9 @@ AR-08, H-02).
 letters, digits, hyphens and dots, or http for a loopback host; at most 453 characters). A list that names it without them, or with
 a base URL that is no issuer, refuses to start; the self-hosted default enables it and leaves it out for such a base URL (and turns
 it off with every other surface when its base URL cannot be a relying party). Production keeps it off (`FLAGSHIP_SURFACES` empty, no
-route change); the acceptance environment (`proof`) enables it for H3. While it is off every row below is 404, at the Worker and
-at the center, with no body (the contract's `STATE/not_activated` of begin and token is answered as the Worker's 404 of a path it
-does not know, as for the fleet pages).
+route change); the acceptance environment (`proof`) enables it for H3. While it is off every row below is 404: the Worker's
+plain-text reply of a path it does not know (`Unknown API method.`) and the center's empty 404 (the contract's `STATE/not_activated`
+of begin and token is answered as that 404, as for the fleet pages).
 
 ## Routes
 
@@ -62,9 +62,15 @@ CORS preflight, which no route answers.
    the platform and the app version "as the app reports it" (HTML-escaped), the times, the account it signs in and the begin
    request's origin (official-hosted only), and, before any step-up, "This phone is signed in to another account. Sign out in the app
    first." or "This app installation was removed from your account." when the claimed installation cannot be this account's (Q-7);
-   only the denial is then offered.
+   only the denial is then offered. A review that shows one of these two texts is counted in the account's `mobile_approve_account`
+   bucket, as a decision is (an exhausted bucket refuses it `RESOURCE/rate_limited`), so the text is no unbounded oracle; it needs a
+   known installation ID in any case (a random 122-bit UUID), and each probe also costs a begin in `mobile_begin_prefix`.
 3. **Decision** (`identity.authorizeMobile`, a center-defined operation: R3, audited in its transaction, target the flow, evidence
-   on approve only, restricted accounts admitted, Q-8). In the order of fleet's Decide (MB-4): `mobile_approve_account`; the flow row
+   on approve only, restricted accounts admitted, Q-8). The review and the decision admit only a cookie session of scope `account`
+   issued to sign in (purpose `authenticate`), because an approval issues a mobile session of scope `account`: a narrower session
+   (`mobile.limited`, or another purpose) is `AUTHORIZATION/permission_denied` before anything is read, counted or written. The page
+   takes the evidence rule from the operation's row and refuses the decision when the row is missing (fail closed). In the order of
+   fleet's Decide (MB-4): `mobile_approve_account`; the flow row
    FOR UPDATE; foreign or unknown `not_found`, lapsed `expired`, final `invalid_state` (its state's name), not reviewed by this
    account within 10 minutes `invalid_state not_reviewed`. A denial needs no evidence: DENIED, and the callback
    `<redirect>#error=access_denied&state=<state>&iss=<issuer>`. An approval refuses a foreign installation (`permission_denied`) or a
@@ -106,7 +112,8 @@ device list.
 
 Policy keys of `ARCFORGES_CENTER_IDENTITY_POLICY` ([identity policy](center-identity.md#identity-policy)): `mobileCodeLifetime` 2m
 (30s to 2m), `mobileBeginPrefix` 30 per 10m, `mobileTokenPrefix` 30 per 10m (failures only: an unknown flow or a code that does not
-match; a matching code never waits on it), `mobileApproveAccount` 20 per hour. The step-up bucket (10 per account in 10 minutes)
+match; a matching code never waits on it), `mobileApproveAccount` 20 per hour (every decision, and every review that shows a foreign
+or revoked installation). The step-up bucket (10 per account in 10 minutes)
 bounds the approvals; the flow lifetime (10 minutes) and the review window (10 minutes) are contract values. There is no
 per-installation bucket (Q21).
 
@@ -118,8 +125,9 @@ per-installation bucket (Q21).
   `AUTHORIZATION/permission_denied`, `AUTHENTICATION/credential_revoked`, `RESOURCE/rate_limited`, `RESOURCE/overloaded`.
 - pages: the fleet pages' texts in the app's words, and the two installation texts above.
 - Audit: `identity.mobile_authorization.{approved,denied,code_reissued,completed,code_reused,verifier_failed,approval_lapsed}` (target
-  the flow), `identity.rate_limited`. No code, verifier, state or token is stored, logged or audited
-  (`TestNoMobileSecretIsStoredLoggedOrAudited`).
+  the flow), `identity.rate_limited`. No code, verifier or token is stored in clear (the code only as its SHA-256), and none of
+  them, nor the client state, is logged or audited. The client state is stored only to return it in the callback
+  (`identity.mobile_authorization.client_state`; `TestNoMobileSecretIsStoredLoggedOrAudited`).
 - Metrics: `arcforges_center_mobile_events_total{event,outcome}`, closed labels (`observe.MobileOutcomes`).
 
 ## Configuration
@@ -185,7 +193,8 @@ such a code is useless without the verifier and dies in at most 2 minutes.
 ## Expected divergences from the contract
 
 `center/internal/pages/mobile_vectors_test.go` replays the 120 vendored vectors (`center/internal/mobileauth/testdata`, pinned to the
-cohort, its commit and the SHA-256 of the document and the fixture): requests through the route bound and the center's parsers,
+cohort, its commit, the SHA-256 of the document and of the upstream fixture, and the SHA-256 of the vendored vectors file itself):
+requests through the route bound and the center's parsers,
 callbacks and begin replies through MobileProbe's checks and the center's builders, token replies through the center's closed reply
 type. Every verdict is the contract's; the patterns the parsers use are the document's, character for character. The rows below are
 where the center's behaviour differs, each pinned by `TestTheExpectedMobileDivergences`:
@@ -202,7 +211,8 @@ where the center's behaviour differs, each pinned by `TestTheExpectedMobileDiver
 
 MobileProbe is the MOCKED development stand-in of the Android app (the Plan's `fakes_allowed`): `center/internal/mobiletest` (fresh
 verifier and state, begin with the derived-URL check, the callback's state and issuer checked before any request, token) and
-`center/cmd/mobile-probe` (a handshake directory with the browser flow). Both are kept out of the Docker context
+`center/cmd/mobile-probe` (a handshake directory with the browser flow; its result file names the device ID of each session it was
+delivered, which is not secret, so the clean-up revokes exactly those devices). Both are kept out of the Docker context
 (`.dockerignore`, pinned by `tests/worker/docker-context.test.ts`). The browser flow is `eng/verification/browser/mobile-approve.ts`
 (`acceptance.ts --mobile-approve`).
 
@@ -219,13 +229,14 @@ verifier and state, begin with the derived-URL check, the callback's state and i
 <case> -scenario <scenario>` for the cases approve, deny, reuse and wrong-verifier, and `node eng/verification/browser/mobile-approve.ts
 --watch <dir> --cases 4`. Each case signs in when needed, steps up, decides, hands the done page's link to the probe and taps it
    (the fallback page loads without the fragment). Budget: 4 cases spend at most 8 step-ups (one per approval and one per revoked
-   phone; the center allows 10 per 10 minutes), 4 of the 20 decisions per hour, 4 of the 30 begins per 10 minutes, and the browser and
+   device; the center allows 10 per 10 minutes), 4 of the 20 decisions per hour, 4 of the 30 begins per 10 minutes, and the browser and
    the probe together stay within the edge minute (`acceptance.ts` fails a run that would not).
 5. The approve case refreshes once through `IdentityService.RefreshSession`; the devices page lists the session's device as an
    "Android phone".
 6. Optional, read-only, outward: Google's Digital Asset Links API `statements:list` for `https://proof.arcforges.com`.
-7. Clean-up, also after a failure: the flow revokes the phones its approvals created; revoke the browser's web device by hand if it is
-   new; record what stays on `arcforges_acceptance`.
+7. Clean-up, also after a failure: the flow revokes exactly the devices the probe's results name, by device ID (no other phone of the
+   account is touched); a case whose result never arrived names none, and the report counts such cases (`casesWithoutResult`):
+   revoke its device by hand. Revoke the browser's web device by hand if it is new; record what stays on `arcforges_acceptance`.
 
 REAL: proof, Neon, the Worker, the Container, Chromium. MOCKED: the authenticator and the app. Not covered and carried to AF-AND-01
 (emulator checks: (a) a tap from the same-host Custom Tab page opens the app through the verified link; (b) a script navigation does
@@ -237,7 +248,9 @@ in Chrome for Android and the release fingerprint).
 - The real app identity (package and release and upload fingerprints) for `ARCFORGES_CENTER_ANDROID_APP`: AR-08 and H-02, owner only.
 - No real phone, emulator, Play account or app signing key is used by this part; the proof statement is a labelled test value.
 - AF-AND-01 carries: the app rules of the contract (derive `authorizeUrl`, check `iss` and `state`, one pending attempt, one token
-  request per code, a new installation ID after `credential_revoked`, no cookie jar on the native client, no ephemeral Custom Tab),
+  request per code, a new installation ID after `credential_revoked`, no cookie jar on the native client: the native rows refuse any
+  Cookie, including a cookie the zone sets on its own such as Cloudflare's `__cf_bm`, so the client must not keep or send cookies
+  the edge set; no ephemeral Custom Tab),
   the emulator checks above, and a Design change of the callback host only if a tap does not open the app (Q-5).
 - AF-PROD-01: the two production zone routes and their precedence over the `arcforges-web` Custom Domain, the zone bot settings for
   Google's fetcher, and the retention sweep of `identity.mobile_authorization` (AF-PLAT-01).
