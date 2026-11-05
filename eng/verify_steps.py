@@ -14,7 +14,7 @@ two native machines (eng/verify.py; AGENTS.md):
   `quality`; then
   `candidate` (`npm run candidate`: the Linux Native AOT image in the Linux host's Docker, both Worker bundles, the sealed tool and the
   manifest, verified). Everything that runs dotnet or npm in the clone is in this lane: concurrent restores or builds of
-  shared projects in one checkout would race.
+  shared projects in one checkout would race. `linux-center` runs in its own lane `center` beside it (Go and Docker only).
 - lane `scan`: the whitespace check of the commits since the merge base (`git diff --check`) and the secret
   scan of `quality` (the pinned gitleaks image digest, .gitleaks.toml) over the same range ({range}), in Docker
   without network and with a read-only mount of the clone; lane `actionlint` only when .github/workflows/** changed.
@@ -181,7 +181,10 @@ STEPS = [
     # the bundle the source builds fails here, before the candidate is built.
     linux("worker-provenance", "npm run test:artifact", 600),
     # The Go center (AF-CTR-02): the Windows controls plus the race detector, the fuzz targets and the image target.
-    linux("linux-center", "python eng/center.py check", 900),
+    # Its own lane: center.py runs only Go and Docker (its own
+    # PostgreSQL container, govulncheck, the image target), never npm or dotnet, and reads nothing the other Linux steps write, so it
+    # cannot race the restores and builds of the `linux` lane; fresh-intermediates touches only C# obj directories.
+    linux("linux-center", "python eng/center.py check", 900, lane="center"),
     linux("licence-evaluated", "node tooling/project.ts licence-evaluated", 300),
     linux("candidate", CANDIDATE, 900),
     # the whitespace check and quality's secret scan over the commits since the merge base; actionlint when a workflow changed

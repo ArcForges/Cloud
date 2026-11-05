@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "b56702c6590a19f8baeb5fdb12c03fdd19a23340",
+  "sourceCommit": "86efeee801c26e27296d5c91d3d473aa487dab6b",
   "manifests": ["package.json"],
   "inputs": {
     ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
@@ -160,7 +160,7 @@
     "eng/verification/browser/.npmrc": "60770e22445108eaa57402f7db7da86228dd8a283fc07c30a0074ddcfadc453f",
     "eng/verification/browser/package-lock.json": "4911f025c2108ddc34ac165f8ea8dfd4ae267f21b19b750d5b8bcd33613ca1e1",
     "eng/verification/browser/package.json": "9ed662c14cd50463a7ff8d71368caf6f5416f0e4425bec99d3402ec1dc63749b",
-    "eng/verify_steps.py": "e1dabc35c9c9aea9f820ca126e38ed2b8deb3e7dead4273ebc1378cfdb6e3a70",
+    "eng/verify_steps.py": "9584fddcd913fa27d94441d79a758093cd33fb18730bb092ef0be9d31064c74d",
     "global.json": "e5a8e714f4feef6cef607d06ef5fa62f65679fc29ab232cae9ea7955f6984f2e",
     "package-lock.json": "9c97c1a409c01c0a705ad32139f4806cfd31f9729dcd62e84015389cfea5248a",
     "package.json": "7b4c15a36c05b202b0efe35f07df4ba348f29a044cef70e1587879fbb77cabdb",
@@ -222,9 +222,9 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "Claude, maintainer-authorized source and dependency review (CI proof deployment gate delegated author, review fix round 1); PR review is recorded separately",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (verification lanes delegated author); PR review is recorded separately",
     "date": "2026-11-05",
-    "rationale": "CI proof deployment gate, review fix round 1 (Cloud #138), after af-ctr-04-r9. Nothing is admitted and nothing is corrected in the dependencies: everything af-ctr-04-r9 admitted stays as it is, and no action, package or tool is added. The one bound input that changes is .github/workflows/ci.yml: the clause that skips the hosted validation (Source, quality, CodeQL, the candidate and Verify) for the proof deployment now also requires github.ref == refs/heads/main, so a proof=deploy dispatch on any other ref runs the full hosted validation exactly as before the gate; the main-push path, the gate and the proof deployment are unchanged. No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-second exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
+    "rationale": "Verification lanes, after af-ctr-04-r10 (the CI proof deployment gate, review fix round 1). Nothing is admitted and nothing is corrected in the dependencies: everything af-ctr-04-r10 admitted stays as it is, and no action, package or tool is added. The one bound input that changes is eng/verify_steps.py: the Linux leg's Go center controls (linux-center, python eng/center.py check with the race detector, the fuzz targets and govulncheck) move from the linux lane to a lane of their own, center; the step, its command and the tools it runs are unchanged. No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-third exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
     "inputs": {
       ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -382,7 +382,7 @@
       "eng/verification/browser/.npmrc": "60770e22445108eaa57402f7db7da86228dd8a283fc07c30a0074ddcfadc453f",
       "eng/verification/browser/package-lock.json": "4911f025c2108ddc34ac165f8ea8dfd4ae267f21b19b750d5b8bcd33613ca1e1",
       "eng/verification/browser/package.json": "9ed662c14cd50463a7ff8d71368caf6f5416f0e4425bec99d3402ec1dc63749b",
-      "eng/verify_steps.py": "e1dabc35c9c9aea9f820ca126e38ed2b8deb3e7dead4273ebc1378cfdb6e3a70",
+      "eng/verify_steps.py": "9584fddcd913fa27d94441d79a758093cd33fb18730bb092ef0be9d31064c74d",
       "global.json": "e5a8e714f4feef6cef607d06ef5fa62f65679fc29ab232cae9ea7955f6984f2e",
       "package-lock.json": "9c97c1a409c01c0a705ad32139f4806cfd31f9729dcd62e84015389cfea5248a",
       "package.json": "7b4c15a36c05b202b0efe35f07df4ba348f29a044cef70e1587879fbb77cabdb",
@@ -451,9 +451,9 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "CI proof deployment gate, review fix round 1 (Cloud #138), after af-ctr-04-r9. Nothing is admitted and nothing is corrected in the dependencies: everything af-ctr-04-r9 admitted stays as it is, and no action, package or tool is added. The one bound input that changes is .github/workflows/ci.yml: the clause that skips the hosted validation (Source, quality, CodeQL, the candidate and Verify) for the proof deployment now also requires github.ref == refs/heads/main, so a proof=deploy dispatch on any other ref runs the full hosted validation exactly as before the gate; the main-push path, the gate and the proof deployment are unchanged. No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-second exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
+    "runtimeAssessment": "Verification lanes, after af-ctr-04-r10 (the CI proof deployment gate, review fix round 1). Nothing is admitted and nothing is corrected in the dependencies: everything af-ctr-04-r10 admitted stays as it is, and no action, package or tool is added. The one bound input that changes is eng/verify_steps.py: the Linux leg's Go center controls (linux-center, python eng/center.py check with the race detector, the fuzz targets and govulncheck) move from the linux lane to a lane of their own, center; the step, its command and the tools it runs are unchanged. No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-third exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-04-r9.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-04-r10.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-11-05",
     "decision": "approved"
@@ -1253,7 +1253,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-04-r10.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-04-r11.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
