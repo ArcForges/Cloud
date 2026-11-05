@@ -280,7 +280,8 @@ test("the Go center gets the identity policy override only where an environment 
 });
 
 test("the Go center gets the Android app identity only where an environment sets one (AF-CTR-04 part M)", () => {
-  const identity = '[{"packageName":"com.arcforges.prooftest","sha256CertFingerprints":["AB"],"testOnly":true}]';
+  const identity =
+    '[{"packageName":"com.arcforges.prooftest","sha256CertFingerprints":["AB"],"testOnly":true}]';
   const settings = (value: string | undefined) =>
     new CloudContainer(containerContext, {
       ...centerEnvironment,

@@ -141,7 +141,8 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
   assert.equal(centerSurfaces("identity,pages"), "identity,pages");
   assert.equal(centerSurfaces("identity,pages,operations"), "identity,pages,operations");
   assert.equal(centerSurfaces("identity,pages,fleet"), "identity,pages,fleet");
-  assert.deepEqual([...surfaceNames], ["identity", "pages", "operations", "fleet"]);
+  assert.equal(centerSurfaces("identity,pages,fleet,mobile"), "identity,pages,fleet,mobile");
+  assert.deepEqual([...surfaceNames], ["identity", "pages", "operations", "fleet", "mobile"]);
   assert.equal(surfaceTable.size, surfaceRoutes.length);
   for (const route of surfaceRoutes) {
     assert.equal(route.instance, "hello");
