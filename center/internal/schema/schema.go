@@ -92,6 +92,9 @@ var RuntimeGrants = []Grant{
 	// AF-CTR-04 part M (0006): the mobile native authorization flows, marked and never deleted at runtime (AF-PLAT-01's sweep runs
 	// with the migration role).
 	{"identity", "mobile_authorization", []Privilege{Select, Insert, Update}},
+	// AF-CTR-05 part E0 (0007): the deploy-level fact of the current definitions version (store-1), one row the starting revision
+	// writes once per version (its trigger refuses an update that keeps the version, and any deletion).
+	{"entitlement", "definitions_current", []Privilege{Select, Insert, Update}},
 }
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted

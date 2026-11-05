@@ -190,6 +190,17 @@ type IdentityPolicy struct {
 	// shares the production Neon project, and its flows are never deleted before AF-PLAT-01's sweeps exist. A global bucket would let
 	// anyone lock every sign-in out, so production sets none (AF-PROD-01 decides with the sweeps).
 	AnonymousFlows Window
+	// The per-account resource controls of the gated rows (AF-CTR-05 part E0, CTR5-GATE-05; access.Control, package quota). Every
+	// default is an owner placeholder under H-07, illustrative only: no plan limit is decided, the plan catalogue carries none, and no
+	// refusal of these controls says plan_limit_reached (they answer RESOURCE/rate_limited with retry_at). There is no connected-node
+	// cap (Q21): the enrollment cap (MaxNodesPerAccount) governs how many nodes an account has. RoutedCallsPerAccount is the routed
+	// calls of an account (submission, status and output, control; sized for the CLI's output following, PN-5),
+	// RoutedInFlightPerAccount the routed calls of an account that may run at once (per center process), and the two channel upgrade
+	// buckets bound how often an account's nodes, and one node, open the node channel (ready for AF-CTR-05 E1).
+	RoutedCallsPerAccount    Window
+	RoutedInFlightPerAccount int
+	ChannelUpgradePerAccount Window
+	ChannelUpgradePerNode    Window
 }
 
 // DefaultIdentityPolicy is the policy without an override.
@@ -241,6 +252,12 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		MobileBeginPerPrefix:    Window{Limit: 30, Window: 10 * time.Minute},
 		MobileTokenPerPrefix:    Window{Limit: 30, Window: 10 * time.Minute},
 		MobileApprovePerAccount: Window{Limit: 20, Window: time.Hour},
+		// AF-CTR-05 part E0: owner placeholders (H-07, illustrative), not plan limits: 3600 routed calls per hour per account, 64 at
+		// once, 600 channel upgrades per hour per account and 60 per hour per node.
+		RoutedCallsPerAccount:    Window{Limit: 3600, Window: time.Hour},
+		RoutedInFlightPerAccount: 64,
+		ChannelUpgradePerAccount: Window{Limit: 600, Window: time.Hour},
+		ChannelUpgradePerNode:    Window{Limit: 60, Window: time.Hour},
 	}
 }
 
@@ -296,6 +313,8 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"emailCodeSends":      {&p.EmailCodeSends, 1, 3},
 		"emailCodeIterations": {&p.EmailCodeIterations, 10_000, 600_000},
 		"maxNodesPerAccount":  {&p.MaxNodesPerAccount, 1, 1000},
+		// AF-CTR-05 part E0 (an owner placeholder, H-07).
+		"routedInFlightPerAccount": {&p.RoutedInFlightPerAccount, 1, 1024},
 	}
 	for name, window := range map[string]*Window{
 		"signInPerPrefix": &p.SignInPerPrefix, "signInFailuresAccount": &p.SignInFailuresAccount, "emailPerPrefix": &p.EmailPerPrefix,
@@ -306,6 +325,8 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"nodeApproveAccount": &p.NodeApprovePerAccount, "nodePollPrefix": &p.NodePollPerPrefix, "deviceEntryAccount": &p.DeviceEntryPerAccount,
 		"deviceEntryPrefix": &p.DeviceEntryPerPrefix, "mobileBeginPrefix": &p.MobileBeginPerPrefix, "mobileTokenPrefix": &p.MobileTokenPerPrefix,
 		"mobileApproveAccount": &p.MobileApprovePerAccount,
+		// AF-CTR-05 part E0 (owner placeholders, H-07).
+		"routedCallsAccount": &p.RoutedCallsPerAccount, "channelUpgradeAccount": &p.ChannelUpgradePerAccount, "channelUpgradeNode": &p.ChannelUpgradePerNode,
 	} {
 		counts[name+"Limit"] = countBound{&window.Limit, 1, 10_000}
 		durations[name+"Window"] = durationBound{&window.Window, time.Minute, 24 * time.Hour}

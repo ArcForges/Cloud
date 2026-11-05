@@ -49,7 +49,7 @@ func TestResourceControlsAreChargedOnlyByCallsEveryEarlierStageAdmitted(t *testi
 	foreign := map[string]string{"X-Probe-Device": foreignDevice.String()}
 
 	var charged counter
-	*r.controls = []Control{charged.control}
+	*r.controls = []Control{ControlFunc{Key: "counter", Check: charged.control}}
 	refused := []struct {
 		name, operation, token string
 		header                 map[string]string
@@ -99,9 +99,9 @@ func TestResourceControlsAreChargedOnlyByCallsEveryEarlierStageAdmitted(t *testi
 	}
 	// A control that refuses stops the call before the audit and the gate (stage 5 before 6 and 7).
 	questions, authorized := r.gate.questions(), r.db.Count("SELECT count(*) FROM audit.audit_event WHERE event_type = $1", AuditAuthorized)
-	*r.controls = []Control{func(context.Context, *ingress.Call, Operation) error {
+	*r.controls = []Control{ControlFunc{Key: "probe", Check: func(context.Context, *ingress.Call, Operation) error {
 		return arc.RateLimited("probe", 1, r.authorizer.clock())
-	}}
+	}}}
 	if got, _ := r.call("RemoteView", human, nil); got.reached || got.failure != "RESOURCE/rate_limited" {
 		t.Fatalf("an exhausted resource: %+v", got)
 	}
@@ -310,7 +310,8 @@ func TestAnUnknownMethodAndAnUnauthenticatedCallAreRefused(t *testing.T) {
 // TestACheckedTableRefusesARowThatContradictsItselfAndARowTwice is gate-8 (C14, C18): the table check runs CheckRow on every served
 // row and refuses a path named twice.
 func TestACheckedTableRefusesARowThatContradictsItselfAndARowTwice(t *testing.T) {
-	row := Operation{Path: probePrefix + "RemoteView", ID: "probe.remote.view", Risk: "R2", Session: true, Feature: feature.RemoteView, Audit: AuditBeforeCall}
+	row := Operation{Path: probePrefix + "RemoteView", ID: "probe.remote.view", Risk: "R2", Session: true, Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput,
+		Audit: AuditBeforeCall}
 	policy, err := ingress.NewUnary(row.Path, ingress.Session, ingress.NoScope, 4096, false)
 	if err != nil {
 		t.Fatal(err)

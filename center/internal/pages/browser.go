@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/identity"
@@ -31,6 +32,9 @@ import (
 
 // fail answers an error of a domain call: a refusal as its ArcError, anything else as the API maps it.
 func (e *exchange) fail(err error) {
+	// A gate that could not decide answers RESOURCE/overloaded like any refusal, and its cause is logged with the correlation ID
+	// (AF-CTR-05 E0, gate-3).
+	access.LogGateFailure(e.r.Context(), e.h.options.Logger, e.route.ID, e.correlation.CorrelationID, err)
 	var refusal *arc.Refusal
 	if errors.As(err, &refusal) {
 		e.refuseError(e.arcError(refusal), 0)

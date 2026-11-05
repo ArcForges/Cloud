@@ -231,6 +231,7 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 	header := writer.Header()
 	header.Set("Cache-Control", "no-store")
 	header.Set("X-Content-Type-Options", "nosniff")
+	defer call.Finish()
 	p.next.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), callKey{}, call)))
 }
 

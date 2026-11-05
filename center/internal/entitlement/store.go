@@ -83,6 +83,51 @@ type State struct {
 	// Revision advances on every commit of the account, including one that does not change the snapshot version. A commit that names a
 	// stale revision is refused, so two writers never derive a snapshot from a history the other has already changed.
 	Revision int64
+	// RevisionUpdatedAt is the instant of the account's last commit (entitlement.revision.updated_at), zero without one; it is one of
+	// the instants a computation floors at (Floor).
+	RevisionUpdatedAt Micros
+	// CurrentDefinitions is the deploy-level fact of the current definitions version (entitlement.definitions_current, store-1), or
+	// empty where no center recorded one.
+	CurrentDefinitions string
+}
+
+// Floor is the newest instant the account's state holds (AF-CTR-05 E0, CTR5-GATE-02): the stored snapshot's computation, the
+// creation of every record (grants, revocations, terms, term actions and status facts), every definitions activation and the
+// revision's last commit. A computation never goes behind it, so a snapshot dropped while a replica's clock is behind the newest
+// record is recomputed at the floor, not in the past. False when the account holds nothing yet.
+func (s State) Floor() (Micros, bool) {
+	var floor Micros
+	found := false
+	take := func(at Micros) {
+		if !found || at > floor {
+			floor, found = at, true
+		}
+	}
+	if s.Snapshot != nil {
+		take(s.Snapshot.ComputedAt)
+	}
+	if s.RevisionUpdatedAt != 0 {
+		take(s.RevisionUpdatedAt)
+	}
+	for _, grant := range s.Records.Grants {
+		take(grant.CreatedAt)
+	}
+	for _, revocation := range s.Records.Revocations {
+		take(revocation.CreatedAt)
+	}
+	for _, term := range s.Records.Terms {
+		take(term.CreatedAt)
+	}
+	for _, action := range s.Records.TermActions {
+		take(action.RecordedAt)
+	}
+	for _, fact := range s.Records.StatusFacts {
+		take(fact.RecordedAt)
+	}
+	for _, activation := range s.Records.Activations {
+		take(activation.ActivatedAt)
+	}
+	return floor, found
 }
 
 // TermRow is a service term as its owner admission appends it: the interval the resolver reads with the columns the row keeps.
@@ -120,9 +165,17 @@ const loadLimit = MaxRecords + 1
 // every query sees one consistent history (the C# store gets the same from reading the revision before and after its pages).
 func Load(ctx context.Context, tx pgx.Tx, account string) (State, error) {
 	state := State{Records: EmptyRecords(account)}
-	err := tx.QueryRow(ctx, "SELECT rev FROM entitlement.revision WHERE account_id = $1::uuid", account).Scan(&state.Revision)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	var updated time.Time
+	err := tx.QueryRow(ctx, "SELECT rev, updated_at FROM entitlement.revision WHERE account_id = $1::uuid", account).Scan(&state.Revision, &updated)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
 		return State{}, store.Sanitize("read the entitlement revision", err)
+	default:
+		state.RevisionUpdatedAt = FromTime(updated)
+	}
+	if state.CurrentDefinitions, err = LoadCurrentDefinitions(ctx, tx); err != nil {
+		return State{}, err
 	}
 	var snapshot StoredSnapshot
 	var computed time.Time
@@ -399,6 +452,20 @@ func loadReleases(ctx context.Context, tx pgx.Tx) ([]FeatureReleaseFact, error) 
 		releases = append(releases, release)
 	}
 	return releases, store.Sanitize("read the entitlement feature releases", rows.Err())
+}
+
+// LoadCurrentDefinitions reads the deploy-level fact of the current definitions version (store-1) within the caller's transaction:
+// the version, or empty where no center recorded one.
+func LoadCurrentDefinitions(ctx context.Context, tx pgx.Tx) (string, error) {
+	var version string
+	err := tx.QueryRow(ctx, "SELECT definitions_version FROM entitlement.definitions_current WHERE singleton").Scan(&version)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", store.Sanitize("read the current definitions version", err)
+	}
+	return version, nil
 }
 
 // LoadSnapshot reads only the stored snapshot of an account (the gate's fast path: no record is read when the snapshot is valid) and

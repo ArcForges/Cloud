@@ -183,7 +183,7 @@ func TestTheMobileLimitedRules(t *testing.T) {
 // TestFleetRowsCarryNoFeature (E1-2, CTR4-DES-03): node enrollment is an account and device operation and is never gated (AD-0021
 // section 13a), so no fleet row of the table carries a Feature or is audited before the call; the node rows admit the node scope
 // only, and the sign-in's account rows (the review and the decision) are HUMAN rows. A gated fleet row would first need the
-// prerequisites of docs/center-entitlement.md ("What waits for later tasks").
+// prerequisites AF-CTR-05 part E0 delivered (docs/center-entitlement.md, "What waits for later tasks"): a control and its group.
 func TestFleetRowsCarryNoFeature(t *testing.T) {
 	rows := 0
 	for _, operation := range Operations() {

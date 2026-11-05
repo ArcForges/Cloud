@@ -43,6 +43,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/mobileauth"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/pages"
+	"github.com/ArcForges/Cloud/center/internal/quota"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/ArcForges/Cloud/center/internal/session"
@@ -287,7 +288,12 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 		// is the lock order between the tables).
 		AccountParticipants: append(fleet.AccountParticipants(), mobileauth.ApprovalParticipant{})})
 	c.drain = service.Drain
-	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
+	// The per-account resource controls stand in front of every gated row (AF-CTR-05 E0, CTR5-GATE-05): a gated row without one
+	// refuses the composition.
+	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features), access.WithControls(quota.Controls(c.Store, c.Config.Identity.Policy, clock)...))
+	if err := authorizer.CheckComposition(); err != nil {
+		return composedIdentity{}, err
+	}
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
 	dispatcher.Register(server.Methods()...)
 	var fleetDirect *fleetapi.Direct
@@ -374,6 +380,41 @@ func checkIdentityComposition(modules []routes.Module) error {
 		}
 	}
 	return nil
+}
+
+// recordsDefinitions reports whether this center records the deploy-level fact of its definitions version (store-1): it reads
+// entitlements, so it is an official hosted center with a valid catalogue and a store. Production, without a catalogue, records nothing.
+func (c *Center) recordsDefinitions() bool {
+	return c.Entitlements != nil && c.Config.Mode == config.OfficialHosted && c.FeatureConfiguration.State == feature.StateValid
+}
+
+// recordDefinitions writes the fact once (entitlement.Service.RecordDefinitions) within five seconds and logs the version it recorded.
+func (c *Center) recordDefinitions(ctx context.Context) error {
+	attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	changed, err := c.Entitlements.RecordDefinitions(attempt)
+	if err != nil {
+		return err
+	}
+	c.Logger.Info("definitions version recorded", "definitionsVersion", c.Entitlements.DefinitionsVersion(), "changed", changed)
+	return nil
+}
+
+// keepRecordingDefinitions retries the fact every interval until it is written or the center stops (a store that did not answer at
+// the start).
+func (c *Center) keepRecordingDefinitions(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if c.recordDefinitions(ctx) == nil {
+				return
+			}
+		}
+	}
 }
 
 // Public is the handler of the public listeners.
@@ -606,6 +647,14 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	defer center.Close()
+	// store-1: the revision that starts with a definitions version records it before it serves; a replica of another version then
+	// neither recomputes nor writes an account (AF-CTR-05 E0).
+	if center.recordsDefinitions() {
+		if err := center.recordDefinitions(ctx); err != nil {
+			logger.Warn("the definitions version could not be recorded yet; retrying")
+			go center.keepRecordingDefinitions(ctx, 10*time.Second)
+		}
+	}
 	type plan struct {
 		name, address string
 		handler       http.Handler

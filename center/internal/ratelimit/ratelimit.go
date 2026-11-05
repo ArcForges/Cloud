@@ -82,6 +82,13 @@ const (
 	MobileTokenPrefix Kind = "mobile_token_prefix"
 	// MobileApproveAccount counts an account's decisions of mobile authorizations, approvals and denials.
 	MobileApproveAccount Kind = "mobile_approve_account"
+	// RoutedCallsAccount counts an account's routed calls (submission, status and output, control) in front of their gated rows
+	// (AF-CTR-05 part E0, CTR5-GATE-05; package quota): a request bucket, taken before the audit and the gate.
+	RoutedCallsAccount Kind = "routed_calls_per_account"
+	// ChannelUpgradeAccount and ChannelUpgradeNode count the node channel's upgrade attempts of an account and of one node (AF-CTR-05
+	// part E0, ready for E1's channel; Q21: an upgrade rate, never a connected-node cap).
+	ChannelUpgradeAccount Kind = "channel_upgrades_per_account"
+	ChannelUpgradeNode    Kind = "channel_upgrades_per_node"
 )
 
 // PollAuthorizationWindow is the window of NodePollAuthorization: 6 proved polls per 10 seconds (two intervals of the contract's
@@ -92,7 +99,8 @@ var PollAuthorizationWindow = config.Window{Limit: 6, Window: 10 * time.Second}
 func Kinds() []Kind {
 	return []Kind{SignInPrefix, SignInFailuresAccount, EmailPrefix, EmailAddress, RedeemFailuresAddress, RefreshPrefix, StepUpAccount, BootstrapPrefix,
 		AnonymousFlows, NodeRefreshPrefix, NodeRefreshSession, NodeReportInstallation, NodeFlowPrefix, NodeFlowNode, NodeCompletePrefix, NodeApproveAccount,
-		NodePollPrefix, NodePollAuthorization, DeviceEntryAccount, DeviceEntryPrefix, MobileBeginPrefix, MobileTokenPrefix, MobileApproveAccount}
+		NodePollPrefix, NodePollAuthorization, DeviceEntryAccount, DeviceEntryPrefix, MobileBeginPrefix, MobileTokenPrefix, MobileApproveAccount,
+		RoutedCallsAccount, ChannelUpgradeAccount, ChannelUpgradeNode}
 }
 
 // Window is the window of a bucket kind in a policy.
@@ -144,6 +152,12 @@ func Window(policy config.IdentityPolicy, kind Kind) config.Window {
 		return policy.MobileTokenPerPrefix
 	case MobileApproveAccount:
 		return policy.MobileApprovePerAccount
+	case RoutedCallsAccount:
+		return policy.RoutedCallsPerAccount
+	case ChannelUpgradeAccount:
+		return policy.ChannelUpgradePerAccount
+	case ChannelUpgradeNode:
+		return policy.ChannelUpgradePerNode
 	}
 	return config.Window{}
 }

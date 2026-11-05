@@ -19,15 +19,20 @@
 //  4. AGENT/HUMAN separation: the credential's principal is the one the operation serves (account sessions are HUMAN, node and
 //     automation credentials are AGENT), and an AGENT operation admits exactly the credential scopes its row names (a node row
 //     admits a node credential, never an automation one): another scope is refused with the audit reason scope;
-//  5. resource controls: the hook for the controls a composition registers (WithControls; none is composed yet, and the quotas,
-//     budgets and per-account limits of the gated operations arrive with the first gated operation, AF-CTR-05's node connection,
-//     DC-07);
+//  5. resource controls: the per-account controls a composition registers (WithControls, DC-07; AF-CTR-05 E0): each control stands in
+//     front of the rows it covers, every gated row has at least one (CheckControls; the composition refuses to start otherwise), and
+//     a control runs before the audit and the gate, so a call an exhausted control refuses writes no access.authorized row;
 //  6. audit: an operation whose Audit is AuditBeforeCall appends access.authorized, and a failed append refuses the call;
 //  7. the gate: an operation with a Feature key is refused with ENTITLEMENT/feature_not_entitled unless the feature is available to
 //     the caller's account, and the refusal is audited as access.gated.
 //
 // Essential operations (sign-in, account, billing, security and recovery) carry no Feature and are never gated. The node enrollment
 // rows of the fleet surface (AF-CTR-04) are essential too (AD-0021 section 13a): node sign-in, refresh, report and sign-out.
+//
+// A gate that cannot decide (a commit whose outcome is unknown, a refresh that lost its race on every attempt, a center without an
+// entitlement store, a replica whose definitions version is not the deploy's current one) answers RESOURCE/overloaded through a
+// *GateFailure that wraps its cause, audited as access.gate_failure with a closed reason and no request text; the failure paths of the
+// surfaces log it with the correlation ID (LogGateFailure).
 //
 // The audit reasons of access.refused are scope (a credential scope the center does not know, or one the AGENT row does not admit),
 // restricted (a restricted account on a row it may not reach), principal (an AGENT credential on a HUMAN row or the reverse) and
@@ -39,6 +44,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -142,6 +148,9 @@ type Operation struct {
 	// Feature is the gated feature key of the operation (AD-0021 section 13a), or empty for an essential operation, which is never
 	// gated. A gated operation is a session operation audited before the call (AuditBeforeCall).
 	Feature feature.Key
+	// Group is the group of the routed task control table (feature.OperationKeys) a gated row belongs to: its Feature must be the key
+	// the table names for the group (CheckRow), and only a gated row names one.
+	Group feature.Group
 	// Scopes are the credential scopes of an operation served to AGENT credentials instead of HUMAN account sessions: empty for a HUMAN
 	// row (account and mobile.limited), otherwise a subset of the AGENT scopes node and automation, and only those are admitted (a
 	// node row refuses an automation credential). No identity row is an agent operation; the fleet node rows admit node only.
@@ -361,7 +370,8 @@ func checkTable(table []Operation, served []ingress.Policy) error {
 }
 
 // CheckRow refuses a row that contradicts itself: evidence and its target go together; an anonymous row carries nothing that needs
-// a caller; a Feature is a gated key, is audited before the call and belongs to a session operation; an R3 or higher row is audited;
+// a caller; a Feature is a gated key, is the key of the row's group in the routed task control table (feature.OperationKeys; a row
+// without a Feature names no group), is audited before the call and belongs to a session operation; an R3 or higher row is audited;
 // an agent operation names only the agent scopes and is no mobile.limited or step-up row, because those rules are about a person's
 // session (a restricted account's node may still reach an agent row marked Restricted, such as its own sign-out).
 func CheckRow(operation Operation) error {
@@ -377,6 +387,10 @@ func CheckRow(operation Operation) error {
 		return inconsistent("an anonymous row needs no caller")
 	case operation.Feature != "" && !feature.IsGated(operation.Feature):
 		return inconsistent("the feature is not a gated key")
+	case operation.Feature == "" && operation.Group != "":
+		return inconsistent("only a gated row names a group of the routed task control table")
+	case operation.Feature != "" && !keyOfGroup(operation.Group, operation.Feature):
+		return inconsistent("a gated row carries the key of its group in the routed task control table (feature.OperationKeys)")
 	case operation.Feature != "" && operation.Restricted:
 		return inconsistent("a gated operation is no security operation a restricted account may reach")
 	case operation.Feature != "" && operation.Audit != AuditBeforeCall:
@@ -396,6 +410,13 @@ func CheckRow(operation Operation) error {
 		seen[scope] = true
 	}
 	return nil
+}
+
+// keyOfGroup reports whether a key is the key the routed task control table names for a group (AF-CTR-05 E0, CTR5-GATE-06): the
+// link between the operation table and feature.OperationKeys.
+func keyOfGroup(group feature.Group, key feature.Key) bool {
+	want, named := feature.KeyOfGroup(group)
+	return named && want == key
 }
 
 // A Principal is who a credential acts for: an account session acts for a person (HUMAN), a node or automation credential for a
@@ -440,10 +461,63 @@ type Subject struct {
 	Owner func(ctx context.Context) (account string, found bool, err error)
 }
 
-// Control is a resource control (DC-07): it returns nil to admit the call, or the refusal (an *arc.Refusal, for example a rate
-// limit) or the store failure that stops it. It runs after the call's scope and principal are decided and before the audit and the
-// gate, so a call that exhausted a resource is refused before it reaches either.
-type Control func(ctx context.Context, call *ingress.Call, operation Operation) error
+// Control is a resource control (DC-07; AF-CTR-05 E0, CTR5-GATE-05): a per-account bound that stands in front of the rows it
+// covers. Authorize runs the controls that cover a row after the call's scope and principal are decided and before the audit and the
+// gate, so a call that exhausted a resource is refused before it reaches either, and writes no access.authorized row.
+type Control interface {
+	// Name is the control's policy key: a closed value (a metric label and the limit name of its refusal), never request text.
+	Name() string
+	// Covers reports whether the control stands in front of an operation row.
+	Covers(operation Operation) bool
+	// Admit decides one call of a covered row: nil admits it, a refusal (an *arc.Refusal, for example a rate limit) or a store
+	// failure stops it. A control that holds a resource for the call's duration releases it with call.AfterCall.
+	Admit(ctx context.Context, call *ingress.Call, operation Operation) error
+}
+
+// ControlFunc is a Control made of its parts (tests and small compositions).
+type ControlFunc struct {
+	Key   string
+	Rows  func(Operation) bool
+	Check func(ctx context.Context, call *ingress.Call, operation Operation) error
+}
+
+// Name is the control's policy key.
+func (c ControlFunc) Name() string { return c.Key }
+
+// Covers asks Rows; a ControlFunc without Rows covers every row.
+func (c ControlFunc) Covers(operation Operation) bool { return c.Rows == nil || c.Rows(operation) }
+
+// Admit asks Check; a ControlFunc without Check admits.
+func (c ControlFunc) Admit(ctx context.Context, call *ingress.Call, operation Operation) error {
+	if c.Check == nil {
+		return nil
+	}
+	return c.Check(ctx, call, operation)
+}
+
+// CheckControls is the composition rule of the resource controls (CTR5-GATE-05): every gated row of the table has at least one
+// registered control in front of it, and every control has a name. A gated row without a control fails the composition, so no
+// gated call is ever served unbounded.
+func CheckControls(table []Operation, controls []Control) error {
+	for _, control := range controls {
+		if control == nil || control.Name() == "" {
+			return errors.New("a resource control has no name")
+		}
+	}
+	for _, operation := range table {
+		if operation.Feature == "" {
+			continue
+		}
+		covered := false
+		for _, control := range controls {
+			covered = covered || control.Covers(operation)
+		}
+		if !covered {
+			return fmt.Errorf("the gated row %s has no resource control in front of it", operation.Path)
+		}
+	}
+	return nil
+}
 
 // Authorizer decides a session call and audits its refusals.
 type Authorizer struct {
@@ -464,7 +538,7 @@ func WithGate(gate feature.Gate) Option { return func(a *Authorizer) { a.gate = 
 // Gate is the feature gate the authorizer asks, or nil.
 func (a *Authorizer) Gate() feature.Gate { return a.gate }
 
-// WithControls sets the resource controls Authorize runs, in order, before the audit and the gate.
+// WithControls sets the resource controls Authorize runs, in order, before the audit and the gate: each one for the rows it covers.
 func WithControls(controls ...Control) Option {
 	return func(a *Authorizer) { a.controls = append([]Control(nil), controls...) }
 }
@@ -480,6 +554,10 @@ func NewAuthorizer(db *store.DB, clock func() time.Time, options ...Option) *Aut
 	}
 	return authorizer
 }
+
+// CheckComposition is CheckControls over the served operation table and the authorizer's controls: the composition of a center
+// refuses to start when a gated row has no control in front of it.
+func (a *Authorizer) CheckComposition() error { return CheckControls(Operations(), a.controls) }
 
 // Authorize decides an admitted call of the identity surface before its handler does anything, for an operation that addresses no
 // object (AuthorizeSubject with none). An unknown method is refused (fail closed); an anonymous method needs nothing more; a session
@@ -528,9 +606,12 @@ func (a *Authorizer) AuthorizeSubject(ctx context.Context, call *ingress.Call, s
 	if principal == Agent && !slices.Contains(operation.Scopes, caller.Scope) {
 		return operation, a.refuse(ctx, call, operation, "scope")
 	}
-	// 5. Resource controls.
+	// 5. Resource controls: every control that covers the row, before the audit and the gate.
 	for _, control := range a.controls {
-		if err := control(ctx, call, operation); err != nil {
+		if !control.Covers(operation) {
+			continue
+		}
+		if err := control.Admit(ctx, call, operation); err != nil {
 			return operation, err
 		}
 	}
@@ -558,7 +639,29 @@ const (
 	AuditAuthorized = "access.authorized"
 	// AuditGated is a gated call the gate refused; its reason is the gate's.
 	AuditGated = "access.gated"
+	// AuditGateFailure is a gated call the gate could not decide (RESOURCE/overloaded); its reason is one of the closed gate failure
+	// reasons, and it carries no request text. The plan names it access.gateFailure; the audit store admits lower-case event types only
+	// (audit_event_event_type), so it is written access.gate_failure.
+	AuditGateFailure = "access.gate_failure"
 )
+
+// The closed reasons of access.gate_failure (AF-CTR-05 E0, CTR5-GATE-03).
+const (
+	// GateFailureCommitUnknown: the snapshot's refresh committed without an answer.
+	GateFailureCommitUnknown = "commit_unknown"
+	// GateFailureRefreshContended: the snapshot's refresh lost the race for the account's revision on every attempt.
+	GateFailureRefreshContended = "refresh_contended"
+	// GateFailureNoEntitlementStore: a hosted center with a valid catalogue has no entitlement store.
+	GateFailureNoEntitlementStore = "no_entitlement_store"
+	// GateFailureDefinitionsSuperseded: the replica's definitions version is not the deploy's current one and the snapshot needs a
+	// recompute the replica may not do (store-1, entitlement.ErrDefinitionsSuperseded).
+	GateFailureDefinitionsSuperseded = "definitions_superseded"
+)
+
+// GateFailureReasons is every reason of access.gate_failure.
+func GateFailureReasons() []string {
+	return []string{GateFailureCommitUnknown, GateFailureRefreshContended, GateFailureNoEntitlementStore, GateFailureDefinitionsSuperseded}
+}
 
 // owned is stage 2: the addressed object exists and belongs to the caller's account, else STATE/not_found. A row that names an
 // Object and a call without the matching Subject is a defect of the handler and is refused, never admitted.
@@ -587,7 +690,18 @@ func (a *Authorizer) gated(ctx context.Context, call *ingress.Call, operation Op
 	case decision.Available:
 		return nil
 	case decision.Err != nil:
-		return gateFailure(decision.Err)
+		failure := gateFailure(decision.Err)
+		var undecided *GateFailure
+		if !errors.As(failure, &undecided) {
+			return failure
+		}
+		// The failure is audited with its closed reason and no request text; the answer stays RESOURCE/overloaded even when the
+		// audit cannot be appended (its error joins the cause, which the failure path logs).
+		if err := a.audit(ctx, call, operation, AuditGateFailure, undecided.Reason, map[string]any{"operation": operation.ID,
+			"feature": string(operation.Feature), "reason": undecided.Reason}); err != nil {
+			undecided.cause = errors.Join(undecided.cause, err)
+		}
+		return undecided
 	}
 	if err := a.audit(ctx, call, operation, AuditGated, string(decision.Reason), map[string]any{"operation": operation.ID, "feature": string(operation.Feature),
 		"reason": string(decision.Reason)}); err != nil {
@@ -629,17 +743,72 @@ func (a *Authorizer) audit(ctx context.Context, call *ingress.Call, operation Op
 	})
 }
 
-// gateFailure is the answer to a gate that could not decide. The gate runs before the handler, so a failure of the snapshot's own
-// refresh did not touch the call's effect: a commit whose outcome is unknown, a refresh that lost its race on every attempt and a
-// center without an entitlement store are an unavailable store (RESOURCE/overloaded, the call did not happen, retry later). A store
-// failure keeps its own classification (the transport maps it) and anything else, a defect of the history or of the code, stays what
-// it is and is answered INTERNAL/internal.
-func gateFailure(err error) error {
+// GateFailure is the answer to a gate that could not decide (AF-CTR-05 E0, CTR5-GATE-03): RESOURCE/overloaded wrapped around its cause,
+// as fmt.Errorf("%w: %w", arc.Unavailable(), cause) would, with the closed reason of its access.gate_failure row. errors.As finds the
+// refusal (the reply), errors.Is the cause (the log line).
+type GateFailure struct {
+	// Reason is one of GateFailureReasons.
+	Reason  string
+	refusal *arc.Refusal
+	cause   error
+}
+
+func (f *GateFailure) Error() string { return f.refusal.Error() + ": " + f.cause.Error() }
+
+// Unwrap is the refusal and the cause.
+func (f *GateFailure) Unwrap() []error { return []error{f.refusal, f.cause} }
+
+// Cause is the error the gate could not decide on.
+func (f *GateFailure) Cause() error { return f.cause }
+
+// gateFailureReason is the closed reason of a cause a gate could not decide on, and false for any other error.
+func gateFailureReason(err error) (string, bool) {
 	var refusal *entitlement.Refusal
 	switch {
-	case errors.Is(err, store.ErrCommitUnknown), errors.Is(err, feature.ErrNoEntitlementStore),
-		errors.As(err, &refusal) && (refusal.Kind == entitlement.RefusedOutcomeUnknown || refusal.Kind == entitlement.RefusedConcurrentUpdate):
-		return arc.Unavailable()
+	case errors.Is(err, entitlement.ErrDefinitionsSuperseded):
+		return GateFailureDefinitionsSuperseded, true
+	case errors.Is(err, feature.ErrNoEntitlementStore):
+		return GateFailureNoEntitlementStore, true
+	case errors.Is(err, store.ErrCommitUnknown), errors.As(err, &refusal) && refusal.Kind == entitlement.RefusedOutcomeUnknown:
+		return GateFailureCommitUnknown, true
+	case errors.As(err, &refusal) && refusal.Kind == entitlement.RefusedConcurrentUpdate:
+		return GateFailureRefreshContended, true
+	}
+	return "", false
+}
+
+// gateFailure is the answer to a gate that could not decide. The gate runs before the handler, so a failure of the snapshot's own
+// refresh did not touch the call's effect: a commit whose outcome is unknown, a refresh that lost its race on every attempt, a center
+// without an entitlement store and a replica whose definitions are superseded are an unavailable store (a *GateFailure:
+// RESOURCE/overloaded, the call did not happen, retry later). A store failure keeps its own classification (the transport maps it)
+// and anything else, a defect of the history or of the code, stays what it is and is answered INTERNAL/internal.
+func gateFailure(err error) error {
+	if reason, ok := gateFailureReason(err); ok {
+		return &GateFailure{Reason: reason, refusal: arc.Unavailable(), cause: err}
 	}
 	return err
+}
+
+// NewGateFailure is the gate failure of a cause the gate could not decide on, and false for any other error (a store failure keeps its
+// own classification): the answer a gate that cannot decide gives, for the failure paths' tests and for a handler that asks the gate
+// itself.
+func NewGateFailure(cause error) (*GateFailure, bool) {
+	failure, ok := gateFailure(cause).(*GateFailure)
+	return failure, ok
+}
+
+// Controls are the resource controls the authorizer runs, in order.
+func (a *Authorizer) Controls() []Control { return append([]Control(nil), a.controls...) }
+
+// LogGateFailure writes the log line of a gate failure, with the method and the correlation ID, and reports whether err was one. The
+// failure paths of the surfaces (identityapi, fleetapi, the pages) call it, so an operator can tell a gate that could not decide from
+// load. The line names the closed reason and the cause, which is a store or entitlement error that carries no request text.
+func LogGateFailure(ctx context.Context, logger *slog.Logger, method, correlationID string, err error) bool {
+	var failure *GateFailure
+	if logger == nil || !errors.As(err, &failure) {
+		return false
+	}
+	logger.WarnContext(ctx, "the feature gate could not decide", "method", method, "correlationId", correlationID, "reason", failure.Reason,
+		"error", failure.cause.Error())
+	return true
 }

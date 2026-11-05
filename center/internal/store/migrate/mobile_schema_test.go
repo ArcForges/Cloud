@@ -34,7 +34,9 @@ func TestMigration0006LandsOverVersion5(t *testing.T) {
 	if fifth, err := apply(t, url, build[:5], Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas5, Grants: grants5}); err != nil || fifth.Version != 5 {
 		t.Fatalf("version 5: %+v %v", fifth, err)
 	}
-	result, err := apply(t, url, build[:6], Options{Runner: "test", RuntimeRole: name + "_runtime"})
+	// The grants of the build at 0006 (0007's table is not there yet).
+	schemas6, grants6 := schemasAndGrantsAt(6)
+	result, err := apply(t, url, build[:6], Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas6, Grants: grants6})
 	if err != nil || result.Version != 6 || len(result.Ran) != 1 || result.Ran[0].SHA256 != migration0006SHA256 || result.Grants != "reconciled" {
 		t.Fatalf("0006 over version 5: %+v %v", result, err)
 	}

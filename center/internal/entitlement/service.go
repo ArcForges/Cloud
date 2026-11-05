@@ -107,6 +107,9 @@ func NewService(db *store.DB, definitions DefinitionSource, ids IDSource, clock 
 	return &Service{db: db, definitions: definitions, ids: ids, clock: clock}
 }
 
+// DefinitionsVersion is the version of the service's active definitions.
+func (s *Service) DefinitionsVersion() string { return s.definitions.Current().Version }
+
 // Clock is the service's time source.
 func (s *Service) Clock() time.Time { return s.clock() }
 
@@ -140,6 +143,40 @@ func (s *Service) load(ctx context.Context, account string) (State, error) {
 		return err
 	})
 	return state, err
+}
+
+// ErrDefinitionsSuperseded is why a replica neither recomputes nor writes an account (AF-CTR-05 E0, store-1): its definitions version
+// is not the deploy-level fact's (entitlement.definitions_current), which the revision that started last recorded. Two revisions with
+// different definitions versions running side by side (a rolling deploy) would otherwise each recompute and append an activation at
+// every read of an account whose last activation is the other's, and the 2000-record bound would wedge the account. A read of such a
+// replica returns the stored snapshot as it is while it is valid; a read that needs a recompute, and every write, is this error, which
+// the gate answers as RESOURCE/overloaded (access.gate_failure, definitions_superseded).
+var ErrDefinitionsSuperseded = errors.New("the definitions version of this replica is not the deploy's current one")
+
+// mayCompute reports whether the service may recompute or write an account of the state: no center recorded a current definitions
+// version yet, or it recorded the service's own.
+func mayCompute(state State, definitions Definitions) bool {
+	return state.CurrentDefinitions == "" || state.CurrentDefinitions == definitions.Version
+}
+
+// RecordDefinitions records the service's definitions version as the deploy-level fact (store-1): the revision that starts with a
+// version writes it once, at its start, before it serves. A version already recorded is not written again (changed is false and the
+// row keeps its instant); another version replaces it, and from then on a replica of the earlier version neither recomputes nor writes.
+// The number of activations an account can gain is so bounded by the starts that change the version, never by its reads.
+func (s *Service) RecordDefinitions(ctx context.Context) (bool, error) {
+	version := s.definitions.Current().Version
+	changed := false
+	err := s.db.InTx(ctx, "record the current definitions version", store.TxOptions{Timeout: 5 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `INSERT INTO entitlement.definitions_current AS c (singleton, definitions_version, recorded_at) VALUES (true, $1, $2)
+ON CONFLICT (singleton) DO UPDATE SET definitions_version = excluded.definitions_version, recorded_at = excluded.recorded_at
+WHERE c.definitions_version <> excluded.definitions_version`, version, s.clock())
+		if err != nil {
+			return store.Sanitize("record the current definitions version", err)
+		}
+		changed = tag.RowsAffected() == 1
+		return nil
+	})
+	return changed, err
 }
 
 // Read is the current snapshot of an account. A stored snapshot is returned while its validity holds; otherwise it is recomputed and
@@ -179,6 +216,17 @@ func (s *Service) Refresh(ctx context.Context, account string) (StoredSnapshot, 
 			return StoredSnapshot{}, err
 		}
 		definitions := s.definitions.Current()
+		if !mayCompute(state, definitions) {
+			// store-1: a replica of superseded definitions reads the snapshot as stored while it is valid, and never recomputes it.
+			now, err := s.instant(state, false)
+			if err != nil {
+				return StoredSnapshot{}, err
+			}
+			if state.Snapshot != nil && (state.Snapshot.ValidUntil == nil || now < *state.Snapshot.ValidUntil) {
+				return *state.Snapshot, nil
+			}
+			return StoredSnapshot{}, ErrDefinitionsSuperseded
+		}
 		now, err := s.instant(state, needsActivation(state.Records, definitions))
 		if err != nil {
 			return StoredSnapshot{}, err
@@ -231,6 +279,9 @@ func (s *Service) IssueGrant(ctx context.Context, request IssueGrantRequest) (Gr
 			}
 		}
 		definitions := s.definitions.Current()
+		if !mayCompute(state, definitions) {
+			return Grant{}, false, ErrDefinitionsSuperseded
+		}
 		now, err := s.instant(state, true)
 		if err != nil {
 			return Grant{}, false, err
@@ -283,6 +334,9 @@ func (s *Service) RevokeGrant(ctx context.Context, request RevokeGrantRequest) (
 		}
 		if version != request.ExpectedSnapshotVersion {
 			return Revocation{}, false, refuse(RefusedStaleVersion, "The entitlement version changed since the caller decided.")
+		}
+		if !mayCompute(state, s.definitions.Current()) {
+			return Revocation{}, false, ErrDefinitionsSuperseded
 		}
 		now, err := s.instant(state, true)
 		if err != nil {
@@ -429,21 +483,24 @@ func contains(lines []string, line string) bool {
 	return false
 }
 
-// instant is the instant a call computes at. A read that only checks validity uses Now (the clock, never behind the stored
-// computation); a call that writes uses WriteNow: strictly after the stored computation, so no two admissions of one account share an
-// instant and the version, which counts changes across instants, can never collapse or fall because two records arrived together.
+// instant is the instant a call computes at, floored at the newest instant the account holds (State.Floor: the stored computation,
+// every record's creation, every activation and the revision's last commit; AF-CTR-05 E0, CTR5-GATE-02). A read that only checks
+// validity uses Now, never behind the floor; a call that writes uses WriteNow: strictly after the floor, so no two admissions of one
+// account share an instant and the version, which counts changes across instants, can never collapse or fall because two records
+// arrived together.
 func (s *Service) instant(state State, write bool) (Micros, error) {
 	now := FromTime(s.clock())
-	if state.Snapshot == nil {
+	floor, found := state.Floor()
+	if !found {
 		return now, nil
 	}
 	if !write {
-		return maxMicros(now, state.Snapshot.ComputedAt), nil
+		return maxMicros(now, floor), nil
 	}
-	if state.Snapshot.ComputedAt == MaxMicros {
+	if floor == MaxMicros {
 		return 0, ErrOverflow
 	}
-	return maxMicros(now, state.Snapshot.ComputedAt+1), nil
+	return maxMicros(now, floor+1), nil
 }
 
 func needsActivation(records RecordSet, definitions Definitions) bool {

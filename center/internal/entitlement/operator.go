@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -146,6 +147,10 @@ func NewOperator(db *store.DB, service *Service, policy func() (OperatorPolicy, 
 // Policy is the policy the operator grants run under now, or the reason they are refused (ErrGrantsSelfHosted, ErrGrantsNoCatalogue):
 // the keys that may be granted, the longest expiry and whether a catalogue-wide grant is allowed. The operations page shows it.
 func (o *Operator) Policy() (OperatorPolicy, error) { return o.policy() }
+
+// DefinitionsVersion is the version of the definitions the operator's grants are computed under: its entitlement service's (gate-2:
+// the composition hands the operator the service the gate reads, so both carry one version).
+func (o *Operator) DefinitionsVersion() string { return o.service.DefinitionsVersion() }
 
 // IsOperator reports whether an account is an operator now: an active account (a restricted, suspended, pending-deletion or deleted
 // account reaches only what its state allows, and the operator grant is no security operation) with a live operator row, or the
@@ -428,6 +433,10 @@ func (o *Operator) write(ctx context.Context, tx pgx.Tx, call GrantCall, request
 		return GrantResult{}, err
 	}
 	definitions := o.service.definitions.Current()
+	if !mayCompute(state, definitions) {
+		// store-1: a replica of superseded definitions writes nothing; the grant is an unavailable store (retry later).
+		return GrantResult{}, fmt.Errorf("%w: %w", &store.Error{Operation: "grant features", Kind: store.ErrUnavailable}, ErrDefinitionsSuperseded)
+	}
 	at, err := WriteInstant(state, now)
 	if err != nil {
 		return GrantResult{}, arc.InvalidState("operator_grant", "clock")

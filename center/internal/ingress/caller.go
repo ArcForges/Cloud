@@ -85,6 +85,36 @@ type Call struct {
 	// a command receipt digests these bytes without RequestMeta.correlation_id (platform.RequestDigestInput), never a re-encoding
 	// (AD-0021 section 10). It is never logged.
 	Message []byte
+	// after holds what runs when the call ends (AfterCall); finished is set once Finish ran.
+	after    []func()
+	finished bool
+}
+
+// AfterCall registers a release that runs when the call ends (Finish): a resource control that holds a resource for the call's
+// duration (an in-flight slot, AF-CTR-05 E0) gives it back there, whatever the handler answered. A release registered after the call
+// ended runs at once. A call is served by one goroutine.
+func (c *Call) AfterCall(release func()) {
+	if release == nil {
+		return
+	}
+	if c.finished {
+		release()
+		return
+	}
+	c.after = append(c.after, release)
+}
+
+// Finish ends the call: every release registered with AfterCall runs once, the last registered first. The ingress pipeline finishes
+// every call it admitted after its handler returned; whoever builds a Call by itself (the pages) finishes it.
+func (c *Call) Finish() {
+	if c.finished {
+		return
+	}
+	c.finished = true
+	for index := len(c.after) - 1; index >= 0; index-- {
+		c.after[index]()
+	}
+	c.after = nil
 }
 
 type callKey struct{}

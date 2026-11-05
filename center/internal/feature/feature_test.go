@@ -122,6 +122,16 @@ func TestOperationKeysAreTheRoutedTaskControlTable(t *testing.T) {
 	if len(rows) != len(want) {
 		t.Fatalf("%d rows", len(rows))
 	}
+	groups := map[Key]Group{RemoteControl: GroupControl, CenterExecute: GroupSubmission, RemoteView: GroupStatusAndOutput, CenterNodes: GroupNodeConnection,
+		CenterMCP: GroupMCP, Push: GroupPush}
+	for _, row := range rows {
+		if key, named := KeyOfGroup(row.Group); groups[row.Key] != row.Group || !named || key != row.Key {
+			t.Errorf("%s names the group %q", row.Key, row.Group)
+		}
+	}
+	if _, named := KeyOfGroup("status"); named {
+		t.Error("an unknown group names a key")
+	}
 	for _, row := range rows {
 		if want[row.Key] != row.Gates || !IsGated(row.Key) {
 			t.Errorf("%s gates %q", row.Key, row.Gates)
@@ -143,7 +153,7 @@ func TestTheCenterDocumentPrintsTheRoutedTaskControlTable(t *testing.T) {
 	if !found {
 		t.Fatal("docs/center.md has no routed task control table")
 	}
-	var printed [][2]string
+	var printed [][3]string
 	for _, line := range strings.Split(after, "\n") {
 		if !strings.HasPrefix(line, "|") {
 			if len(printed) > 0 {
@@ -152,18 +162,18 @@ func TestTheCenterDocumentPrintsTheRoutedTaskControlTable(t *testing.T) {
 			continue
 		}
 		cells := strings.Split(strings.Trim(line, "|"), "|")
-		if len(cells) != 2 {
+		if len(cells) != 3 {
 			t.Fatalf("a row of the table: %q", line)
 		}
-		key, gates := strings.TrimSpace(cells[0]), strings.TrimSpace(cells[1])
+		key, group, gates := strings.TrimSpace(cells[0]), strings.TrimSpace(cells[1]), strings.TrimSpace(cells[2])
 		if key == "Key" || strings.HasPrefix(key, "-") {
 			continue
 		}
-		printed = append(printed, [2]string{strings.Trim(key, "`"), gates})
+		printed = append(printed, [3]string{strings.Trim(key, "`"), strings.Trim(group, "`"), gates})
 	}
-	var want [][2]string
+	var want [][3]string
 	for _, row := range OperationKeys() {
-		want = append(want, [2]string{string(row.Key), row.Gates})
+		want = append(want, [3]string{string(row.Key), string(row.Group), row.Gates})
 	}
 	if !slices.Equal(printed, want) {
 		t.Fatalf("docs/center.md prints %v, the code has %v", printed, want)

@@ -151,10 +151,11 @@ logic is described in [center entitlement](center-entitlement.md). Its tables, t
 - `entitlement.revision` (one row per account, advancing by exactly one: a trigger refuses any other change) and
   `entitlement.snapshot` (the derived snapshot, whose `content` is the canonical text the gate parses): rewritten in place by the
   runtime role (SELECT, INSERT, UPDATE). The snapshot is rebuildable from the records (`Service.VerifyRebuild` compares the two),
-  but it is **not freely droppable**: the floor a computation may not go back past lives only in the snapshot's `computed_at`, so a
-  snapshot dropped while a replica's clock is behind the account's newest record is recomputed in the past (an older version, a
-  missing capability, or a definitions activation that collides with a recorded one) until the clock passes it. Drop one only while
-  every replica's clock is ahead of the newest record of the account. The revision row is **undeletable** (a trigger refuses DELETE
+  and since AF-CTR-05 part E0 a computation floors its instant at the newest instant the account holds (the snapshot's
+  `computed_at`, every record's creation, every definitions activation and the revision's `updated_at`), so a snapshot dropped while
+  a replica's clock is behind the account's newest record is recomputed at that record's instant, not in the past
+  (`TestAComputationNeverGoesBehindTheNewestRecord`). A snapshot is still dropped only by the migration role, and only for a
+  reason: its drop raises the version once more when it is recomputed. The revision row is **undeletable** (a trigger refuses DELETE
   and any change but one step forward); it is the fence of the writers, and clearing it (disabling the trigger and deleting the row)
   re-opens the fence for a writer that loaded the old revision, so the revision is never reset. The account purge of
   AF-ID-02 must delete in this order, behind the retention decision that lifts the append-only triggers: `entitlement.snapshot`,
@@ -241,6 +242,20 @@ Retention: no sweep yet (AF-PLAT-01): a flow row is to be kept at most 7 days af
 grows. It is a child of sessions and users (`NO ACTION`): a sweep or an account purge deletes it first. Personal data: the claim as
 the app reports it, the begin request's country and network, and account IDs; no code, verifier or token is stored in clear, and no
 audit payload holds one.
+
+### Definitions fact (AF-CTR-05 part E0)
+
+The seventh migration (`center/internal/schema/migrations/0007_entitlement_definitions_current.sql`, sha256
+`5fa106a23788c7f5600c538177e5bbbcc8f549e7df47bfcfff53ca9aa1ed7530`) lands `entitlement.definitions_current`, the deploy-level fact of the current definitions version
+(store-1, [center entitlement](center-entitlement.md#the-store)): one row (a `singleton` key that is always true), the version (the
+pattern of `definitions_activation`) and when it was recorded. The revision that starts with a definitions version writes it once
+(`Service.RecordDefinitions`, at the start of an official hosted center with a valid catalogue; production, without a catalogue,
+writes nothing), and a start with the version already recorded writes nothing. A trigger refuses an update that keeps the version
+and every deletion, so the row changes only when a start brings another version. The runtime role has SELECT, INSERT and UPDATE on
+it, never DELETE. A replica whose version differs from the row neither recomputes nor writes an account. The constraints, the
+trigger and the grants are pinned and the migration is rehearsed over version 6 (`TestMigration0007LandsOverVersion6`). The hosted
+deployment applies it while production is dark: the table exists and stays empty there. Proof's PostgreSQL gate moves from version
+6 to 7 with it, and the acceptance environment's start records its version. Personal data: none. Retention: one row, kept.
 
 ## Guarantees
 
