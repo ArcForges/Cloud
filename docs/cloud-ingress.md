@@ -148,7 +148,8 @@ in the table. It is deny by default in both directions and decides nothing the c
   follows a redirect the request did not forbid (`tests/worker/support/platform-fetch.ts`, used by the page, pipeline, proof-route
   and wake tests), and no request site can omit the option unnoticed: `tests/worker/ingress-pipeline.test.ts` scans the Worker's
   sources, names the five sites (`worker/ingress/pages.ts`, `pipeline.ts`, `worker/harness/run-alarm.ts`,
-  `worker/foundation/proof-routes.ts`, `container-client.ts`) and fails a site that does not say `redirect: "manual"`, a sixth
+  `worker/foundation/proof-routes.ts`, `container-client.ts`, and since AF-CTR-04 part M `worker/ingress/native.ts` and `applink.ts`)
+  and fails a site that does not say `redirect: "manual"`, a sixth
   site that is not on the list, and a redirect answered to the health read.
 - **Budget.** One page call has `pageDurationMs` (15 s) including the body read, aborted by the client's cancellation. A body that
   is not read within the body budget is 408, a call that outlasts the page budget 504 and a client that went away 499
@@ -158,6 +159,35 @@ in the table. It is deny by default in both directions and decides nothing the c
 `tests/worker/pages.test.ts` pins these byte for byte (the headers, the `Set-Cookie` forms, the `Location`s, the statuses and what
 the Container is sent); `tests/worker/account-script.test.ts` runs the page script's flows, including the open-redirect rule,
 against fakes.
+
+## Mobile rows (AF-CTR-04 part M)
+
+The mobile surface ([center mobile](center-mobile.md)) adds two kinds of rows beside the page routes, each with a handler of its own
+and a generated table (`nativeRoutes`, `apexRoutes`, from `center/internal/routes/mobile.go`); its HTML page and forms
+(`/mobile/authorize`, `/review`, `/decision`) are ordinary page routes. While `FLAGSHIP_SURFACES` does not name `mobile`, every row is
+the Worker's 404 before anything is read and the Container never wakes (`tests/worker/mobile-routes.test.ts`).
+
+- **Native JSON** (`worker/ingress/native.ts`, MB-3): exactly `/api/session/v1/mobile/begin` and `/api/session/v1/mobile/token`, POST
+  only. Refused before the edge limit and the Container: a query (400), an `Authorization` header (400), any `Cookie` header (400: the
+  app sends none, and a browser's cookie gains nothing), a `Content-Encoding` or `Content-Range` (415), a `Content-Type` other than
+  exactly `application/json` (415: a cross-site browser request then needs a CORS preflight, which nothing answers; an `OPTIONS` is 405) and a declared body over 4096 bytes (413). No `Origin` or CSRF token is required, and neither is forwarded: the Container
+  receives only `x-arcforges-client-ip`, the country and network headers from `request.cf`, a `traceparent` the Worker builds, the
+  content type and the body. The edge limit counts the call. The reply follows the page handler's rules (`completeResponse`): the
+  generated statuses and security headers (`Cache-Control: no-store, no-transform`), a JSON body within the route's bound (4096 for
+  begin, 65536 for token), no `Set-Cookie` and no `Location`; `redirect: "manual"`.
+- **Apex** (`worker/ingress/applink.ts`, MB-8, M-13): exactly `/.well-known/assetlinks.json` and `/app/callback` at the root of the
+  host (not below `/api`), GET only, forwarded to the same center path. A query, an `Authorization` header or a body is refused; no
+  cookie is forwarded (a browser's navigation to `/app/callback` carries the host's session cookie; neither route reads one). The
+  reply follows the page handler's rules with the route's one media type (`application/json` and `text/html; charset=utf-8`), no
+  `Set-Cookie` and no `Location` (Android's verifier and Google's fetcher follow no redirect; `redirect: "manual"`). Every other path
+  of the host stays the Worker's 404, including `/app/<anything else>` (Design's FCM deep links need a fallback owner:
+  AF-AND-02/AF-WEB-01; AF-WEB-01 must not serve these two paths).
+
+Production: `wrangler.json` routes only `arcforges.com/api/*`, so the apex code is unreachable there, and its `FLAGSHIP_SURFACES` is
+empty; proof's custom domain covers the whole host. AF-PROD-01 adds the two production zone routes and smoke-checks that they take
+precedence over the `arcforges-web` Custom Domain for exactly those two paths (and that a withdrawal restores Web's answer). Zone bot
+protections on the host must not challenge Google's Digital Asset Links fetcher (an owner zone setting; H3's optional DAL check
+detects it).
 
 ## The frame guard
 

@@ -183,6 +183,17 @@ button.primary {
   border-color: var(--accent);
 }
 
+/* The mobile done page's link that hands the callback to the app (AF-CTR-04 part M): a link shown as the primary button. */
+a.button {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  text-decoration: none;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.6;

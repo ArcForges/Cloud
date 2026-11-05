@@ -142,6 +142,8 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
     return ["the operations surface needs the identity and pages surfaces"];
   if (names.includes("fleet") && !(names.includes("identity") && names.includes("pages")))
     return ["the fleet surface needs the identity and pages surfaces"];
+  if (names.includes("mobile") && !(names.includes("identity") && names.includes("pages")))
+    return ["the mobile surface needs the identity and pages surfaces"];
   if (names.includes("identity")) {
     const base = vars?.ARCFORGES_CENTER_PUBLIC_BASE_URL;
     const origin =
@@ -156,9 +158,23 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
   return [];
 }
 
-test("production enables no surface and the acceptance environment enables identity, pages, operations and fleet", () => {
+test("production enables no surface and the acceptance environment enables identity, pages, operations, fleet and mobile", () => {
   assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
-  assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity,pages,operations,fleet");
+  assert.equal(
+    wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES,
+    "identity,pages,operations,fleet,mobile",
+  );
+  // AF-CTR-04 part M (Q-1): proof's Android app identity is one labelled non-shipping test statement (testOnly, the test package);
+  // production carries none.
+  const proofApps = JSON.parse(String(wrangler.env?.proof?.vars?.ARCFORGES_CENTER_ANDROID_APP)) as {
+    packageName: string;
+    sha256CertFingerprints: string[];
+    testOnly: boolean;
+  }[];
+  assert.equal(proofApps.length, 1);
+  assert.equal(proofApps[0]?.packageName, "com.arcforges.prooftest");
+  assert.equal(proofApps[0]?.testOnly, true);
+  assert.match(proofApps[0]?.sha256CertFingerprints[0] ?? "", /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/u);
   // C1: only the acceptance environment overrides the identity policy, and only with its anonymous-flow ceiling; production keeps
   // the defaults (no global bucket).
   assert.equal(wrangler.vars?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
@@ -224,7 +240,29 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,fleet" }), []);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,fleet" }).length, 1);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "fleet" }).length, 1);
-  assert.deepEqual([...surfaces].sort(), ["fleet", "identity", "operations", "pages"]);
+  // AF-CTR-04 part M: the mobile native authorization needs both as well.
+  assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,mobile" }), []);
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,mobile" }).length, 1);
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "mobile" }).length, 1);
+  assert.deepEqual([...surfaces].sort(), ["fleet", "identity", "mobile", "operations", "pages"]);
+  // Production never enables the mobile surface and never carries an Android app identity or the debug scheme (M-15); the
+  // acceptance environment enables it for H3.
+  assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("mobile"));
+  for (const [name, environment] of environments)
+    assert.equal(
+      String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+        .split(",")
+        .includes("mobile"),
+      name === "proof",
+      `wrangler.json environment ${name}: the mobile surface is enabled in the acceptance environment and nowhere else`,
+    );
+  assert.equal(wrangler.vars?.ARCFORGES_CENTER_ANDROID_APP, undefined);
+  for (const [name, environment] of environments)
+    assert.equal(
+      environment.vars?.ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT,
+      undefined,
+      `wrangler.json environment ${name}: the debug scheme is self-hosted only`,
+    );
   for (const [name, environment] of environments)
     assert.equal(
       String(environment.vars?.FLAGSHIP_SURFACES ?? "")

@@ -221,6 +221,27 @@ enforce; until then the rows stay. No token, one-use code, device code or user c
 of ReportNodeInfo and SignOutNode hold only the receipt (command ID and effect), under the principal `node:<installation id>`; those of
 ApproveDeviceCode hold only the receipt, under the principal `account:<account id>`.
 
+### Mobile authorization (AF-CTR-04 part M)
+
+The sixth migration (`center/internal/schema/migrations/0006_mobile_authorization.sql`, sha256
+`ab174f5da3db70380e4cb2533d88e6447213feaced3c0c166fa819543736be05`) lands `identity.mobile_authorization`, the flows of the mobile
+app's native authorization ([center mobile](center-mobile.md)), written by its begin, review, decision and token routes and the
+account's remediations. The runtime role has SELECT, INSERT and UPDATE on it, never DELETE. A row holds the client
+(`arcforges.android` or `arcforges.android.local`) and its redirect (checked together: the release App Link form or the debug
+private-use scheme form), the PKCE challenge and the client state, the installation claim as the app reports it (installation ID,
+an Android platform text, the app version without '+'), the begin request's country and network (official-hosted only), the
+review, the approval with the approving session and its epochs, the code's SHA-256 (its expiry never past the flow's) and the
+result session. A terminal row is final (a trigger refuses every change) except COMPLETED to REVOKED once. One statement changes a
+0004 object: `identity.session.revoke_reason` admits 9 (a mobile authorization code presented again; the family it delivered is
+revoked). Every foreign key has an index, the constraints and the trigger are pinned case by case (`TestTheMobileStoreConstraints`)
+and the migration is rehearsed over version 5 (`TestMigration0006LandsOverVersion5`). The hosted deployment applies it while
+production is dark: the table exists and stays empty. Proof's PostgreSQL gate moves from version 5 to 6 with it.
+
+Retention: no sweep yet (AF-PLAT-01): a flow row is to be kept at most 7 days after its end; until the sweep exists the table only
+grows. It is a child of sessions and users (`NO ACTION`): a sweep or an account purge deletes it first. Personal data: the claim as
+the app reports it, the begin request's country and network, and account IDs; no code, verifier or token is stored in clear, and no
+audit payload holds one.
+
 ## Guarantees
 
 `center/internal/platform` re-implements the guarantees of the D1 storage plans with native transactions, constraints and row

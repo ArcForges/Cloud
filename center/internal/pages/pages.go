@@ -39,6 +39,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identityapi"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
+	"github.com/ArcForges/Cloud/center/internal/mobileauth"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
@@ -65,6 +66,12 @@ type Options struct {
 	// Fleet is the fleet surface's account methods in process (node enrollment's reviews and decisions); nil where that surface is
 	// not composed (every route of it is then 404).
 	Fleet *fleetapi.Direct
+	// Mobile is the mobile surface's native authorization (AF-CTR-04 part M); nil where that surface is not composed (every route of
+	// it, the native JSON and apex routes included, is then 404).
+	Mobile *mobileauth.Service
+	// ClientOrigin extracts the coarse origin of a request (the hosted Worker's country and network headers, official-hosted only);
+	// nil is unknown. The mobile begin records it for the review page.
+	ClientOrigin func(*http.Request) ingress.Origin
 	// Registry holds the ingress policies the calls the pages make carry.
 	Registry *ingress.Registry
 	// ClientIP extracts the client's address of a request; RequireClientIP refuses a request whose address is unknown (hosted mode).
@@ -117,6 +124,9 @@ func New(options Options) (*Handler, error) {
 		"operations.grant": (*exchange).operationsGrantPage, "operations.review": (*exchange).operationsReview, "operations.confirm": (*exchange).operationsConfirm,
 		"connect.page": (*exchange).connectPage, "connect.review": (*exchange).connectReview, "connect.decision": (*exchange).connectDecision,
 		"activate.page": (*exchange).activatePage, "activate.review": (*exchange).activateReview, "activate.decision": (*exchange).activateDecision,
+		"mobile.page": (*exchange).mobilePage, "mobile.review": (*exchange).mobileReview, "mobile.decision": (*exchange).mobileDecision,
+		"mobile.begin": (*exchange).mobileBegin, "mobile.token": (*exchange).mobileToken, "apex.assetLinks": (*exchange).assetLinks,
+		"apex.appCallback": (*exchange).appCallback,
 	}
 	for _, row := range rows {
 		if handler.handlers[row.ID] == nil {
@@ -173,7 +183,8 @@ type exchange struct {
 // and answers every refusal as the route's kind answers: JSON on a JSON route, an HTML page elsewhere.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e := &exchange{h: h, w: w, r: r, correlation: correlation.ForRequest(r.Header.Values(ingress.TraceparentHeader), "")}
-	if surface, known := h.paths[r.URL.Path]; !known || !h.options.Enabled(surface) || surface == routes.SurfaceFleet && h.options.Fleet == nil {
+	if surface, known := h.paths[r.URL.Path]; !known || !h.options.Enabled(surface) || surface == routes.SurfaceFleet && h.options.Fleet == nil ||
+		surface == routes.SurfaceMobile && h.options.Mobile == nil {
 		e.notFound()
 		return
 	}
@@ -191,7 +202,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // admit applies the checks every route shares, in the order the Worker applies them: no query, no Authorization header, a known
-// client address, the exact Origin, the content type and size of the body, and the cookie.
+// client address, the exact Origin (a browser route), the content type and size of the body, and the cookie. A native JSON route
+// (the mobile app's begin and token, MB-3) takes no Origin or CSRF requirement and refuses any Cookie header and any media type but
+// exactly application/json; an apex route reads neither an Origin nor a cookie.
 func (e *exchange) admit() *refusalWithStatus {
 	r, route := e.r, e.route
 	if r.URL.RawQuery != "" || r.URL.ForceQuery || strings.Contains(r.RequestURI, "?") {
@@ -206,6 +219,15 @@ func (e *exchange) admit() *refusalWithStatus {
 			return refuse(arc.InvalidArgument("client", "unknown"), http.StatusBadRequest)
 		}
 		e.clientIP = address
+	}
+	switch route.Kind {
+	case routes.PageNativeKind:
+		return e.admitNative()
+	case routes.PageApexKind:
+		if r.ContentLength > 0 || len(r.TransferEncoding) > 0 {
+			return refuse(arc.InvalidArgument("body", "not_admitted"), http.StatusBadRequest)
+		}
+		return nil
 	}
 	origins := r.Header.Values("Origin")
 	switch {
@@ -227,6 +249,23 @@ func (e *exchange) admit() *refusalWithStatus {
 		}
 	}
 	return nil
+}
+
+// admitNative admits a native JSON request: no cookie of any name (the app sends none, and a browser's cookie gains nothing here),
+// exactly one Content-Type of exactly application/json (so a cross-site browser request needs a CORS preflight, which no route
+// answers), and a body within the route's bound. An Origin or a CSRF token is neither required nor read.
+func (e *exchange) admitNative() *refusalWithStatus {
+	r, route := e.r, e.route
+	if len(r.Header.Values("Cookie")) > 0 {
+		return refuse(arc.InvalidArgument("cookie", "not_admitted"), http.StatusBadRequest)
+	}
+	if types := r.Header.Values("Content-Type"); len(types) != 1 || types[0] != routes.TypeJSON {
+		return refuse(arc.InvalidArgument("content_type", "not_admitted"), http.StatusUnsupportedMediaType)
+	}
+	if route.Method != http.MethodPost {
+		return refuse(arc.InvalidArgument("method", "not_admitted"), http.StatusMethodNotAllowed)
+	}
+	return e.readBody()
 }
 
 // readBody reads a POST's body within the route's bound and media type. A route without a body type takes none.

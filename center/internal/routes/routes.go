@@ -122,7 +122,11 @@ func Center() ([]Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Module{hello, identity, pages, operations, fleet}, nil
+	mobile, err := Mobile()
+	if err != nil {
+		return nil, err
+	}
+	return []Module{hello, identity, pages, operations, fleet, mobile}, nil
 }
 
 // Surfaces are the switchable surfaces of the registrations, in registration order.
@@ -187,8 +191,11 @@ type WorkerTable struct {
 	Surfaces    []string
 	SurfaceRows []Row
 	// Pages are the page routes of every page surface (PLT-1): the Worker's page handler forwards them only while their surface is
-	// enabled.
-	Pages []PageRoute
+	// enabled. Native are the native JSON routes and Apex the apex routes (the mobile surface, AF-CTR-04 part M): the Worker's native
+	// and apex handlers forward them only while their surface is enabled; neither is in Pages.
+	Pages  []PageRoute
+	Native []PageRoute
+	Apex   []PageRoute
 	// MaxBodyBytes is the bound of a request body of a method that declares no larger one: the Hello bound, which the C#
 	// rollback host generates too. Every row carries its own bound; the center's Connect reader takes MaxRequestBytes.
 	MaxBodyBytes               int
@@ -228,7 +235,7 @@ func Table(modules []Module) (WorkerTable, error) {
 	budgets := map[string]Budget{}
 	var rows, surfaceRows []Row
 	var plain []string
-	var pageRows []PageRoute
+	var pageRows, nativeRows, apexRows []PageRoute
 	names := map[string]bool{}
 	for _, module := range modules {
 		if len(module.Pages) > 0 {
@@ -243,7 +250,16 @@ func Table(modules []Module) (WorkerTable, error) {
 			if err := CheckPages(module.Pages); err != nil {
 				return WorkerTable{}, err
 			}
-			pageRows = append(pageRows, module.Pages...)
+			for _, row := range module.Pages {
+				switch row.Kind {
+				case PageNativeKind:
+					nativeRows = append(nativeRows, row)
+				case PageApexKind:
+					apexRows = append(apexRows, row)
+				default:
+					pageRows = append(pageRows, row)
+				}
+			}
 		}
 		for name, budget := range module.Budgets {
 			if _, duplicate := budgets[name]; duplicate {
@@ -334,6 +350,8 @@ func Table(modules []Module) (WorkerTable, error) {
 		Surfaces:                   Surfaces(modules),
 		SurfaceRows:                surfaceRows,
 		Pages:                      pageRows,
+		Native:                     nativeRows,
+		Apex:                       apexRows,
 		MaxBodyBytes:               HelloMaxBodyBytes,
 		ColdStartMilliseconds:      ColdStartMilliseconds,
 		StreamLifetimeMilliseconds: StreamLifetimeMilliseconds,

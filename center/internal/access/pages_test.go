@@ -108,9 +108,36 @@ func TestTheOperationsPagesPerformACenterDefinedOperation(t *testing.T) {
 		}
 	}
 	operations := CenterOperations()
-	if len(operations) != 1 || operations[0].ID != "center.operatorGrant" || operations[0].Risk != "R4" || operations[0].StepUp != Evidence ||
-		operations[0].Target != TargetRequest || !operations[0].Receipt || operations[0].Audit != AuditInTransaction {
+	if len(operations) != 2 || operations[0].ID != "center.operatorGrant" || operations[0].Risk != "R4" || operations[0].StepUp != Evidence ||
+		operations[0].Target != TargetRequest || !operations[0].Receipt || operations[0].Audit != AuditInTransaction || operations[0].Restricted {
 		t.Fatalf("%+v", operations)
+	}
+	// AF-CTR-04 part M (M-17): identity.authorizeMobile is R3, audited in its transaction, its evidence bound to the flow and needed by
+	// an approval only, and open to a restricted account (Q-8: the approval signs the account in on its phone).
+	mobile := operations[1]
+	if MobileAuthorizationClass != "identity.authorizeMobile" || mobile.ID != MobileAuthorizationClass || mobile.Risk != "R3" || mobile.StepUp != EvidenceOnApprove ||
+		mobile.Target != TargetFlow || mobile.Receipt || !mobile.Restricted || mobile.Audit != AuditInTransaction {
+		t.Fatalf("%+v", mobile)
+	}
+	if !mobile.NeedsEvidenceToDecide(true) || mobile.NeedsEvidenceToDecide(false) || !operations[0].NeedsEvidenceToDecide(false) {
+		t.Fatal("the evidence rule of a decision")
+	}
+	if target, ok := StepUpClass(MobileAuthorizationClass); !ok || target != TargetFlow {
+		t.Fatalf("%q %v", target, ok)
+	}
+	if found, ok := CenterOperationOf(MobileAuthorizationClass); !ok || found != mobile {
+		t.Fatal("CenterOperationOf")
+	}
+	for id, want := range map[string]string{"mobile.page": "", "mobile.review": MobileAuthorizationClass, "mobile.decision": MobileAuthorizationClass} {
+		row, ok := PageOperationOf(id)
+		if !ok || row.Center != want || len(row.Calls) != 0 || (row.Credential == PageSession) != (want != "") {
+			t.Errorf("%s: %+v", id, row)
+		}
+	}
+	for _, id := range []string{"mobile.begin", "mobile.token", "apex.assetLinks", "apex.appCallback"} {
+		if row, ok := PageOperationOf(id); !ok || row.Credential != PageNoCredential || len(row.Calls) != 0 || row.Center != "" {
+			t.Errorf("%s reads a credential or calls a method: %+v", id, row)
+		}
 	}
 	if target, ok := StepUpClass(OperatorGrantClass); !ok || target != TargetRequest {
 		t.Fatalf("%q %v", target, ok)
@@ -121,7 +148,7 @@ func TestTheOperationsPagesPerformACenterDefinedOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range PageOperations() {
-		if row.Center != "" && row.Center != OperatorGrantClass {
+		if row.Center != "" && row.Center != OperatorGrantClass && row.Center != MobileAuthorizationClass {
 			t.Errorf("%s performs %q", row.ID, row.Center)
 		}
 	}

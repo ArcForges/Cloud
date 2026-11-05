@@ -34,14 +34,9 @@ const MaxNodesLimit = "max_nodes_per_account"
 // device authorization EXPIRED and answers the state EXPIRED.
 var ErrApprovalLapsed = errors.New("the approval of the enrollment lapsed")
 
-// Approver is the approving account's session as the approval recorded it.
-type Approver struct {
-	SessionID          platform.ID
-	AuthMethod         int16
-	AuthenticatedAt    time.Time
-	AuthEpoch          int64
-	RecoveryGeneration int64
-}
+// Approver is the approving account's session as the approval recorded it (session.Approver, shared with the mobile native
+// authorization).
+type Approver = session.Approver
 
 // EnrollRequest is an approved sign-in that delivers a node credential: the approving account and session, the node as it described
 // itself at the start of the flow, its public key and the flow kind.
@@ -71,10 +66,6 @@ type Enrolled struct {
 	CommandKeys     []platform.SigningKey
 	EntitlementKeys []platform.SigningKey
 }
-
-// The approving session's revoke reasons that end its approvals: revoked by the account, all sessions revoked, device revoked,
-// operator. A sign-out (1) and an expiry do not.
-var lapsingReasons = map[int16]bool{session.RevokedByAccount: true, session.RevokedAll: true, session.RevokedDevice: true, session.RevokedOperator: true}
 
 // Enroll is the one function that creates or re-uses a node's device, installation and fleet.node row, registers its key, supersedes
 // its older credentials and issues its node session (CTR4-DES-06), in the caller's transaction (the flow's success transaction, which
@@ -184,19 +175,13 @@ func keyHolder(ctx context.Context, tx pgx.Tx, key []byte, except *platform.ID) 
 }
 
 // approvalStands locks the approving session FOR SHARE (the session slot of the global order) and reports whether the approval still
-// stands: not revoked by a lapsing reason, at the epochs of the approval.
+// stands (session.ApprovalStands): not revoked by a lapsing reason, at the epochs of the approval; a lapse is ErrApprovalLapsed.
 func approvalStands(ctx context.Context, tx pgx.Tx, request EnrollRequest) error {
-	var reason *int16
-	var epoch, recovery int64
-	err := tx.QueryRow(ctx, `SELECT revoke_reason, auth_epoch, recovery_generation FROM identity.session WHERE session_id = $1 AND user_id = $2
-FOR SHARE`, request.Approver.SessionID, request.UserID).Scan(&reason, &epoch, &recovery)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrApprovalLapsed
-	}
+	stands, err := session.ApprovalStands(ctx, tx, request.Approver, request.UserID)
 	if err != nil {
-		return store.Sanitize("lock the approving session", err)
+		return err
 	}
-	if reason != nil && lapsingReasons[*reason] || epoch != request.Approver.AuthEpoch || recovery != request.Approver.RecoveryGeneration {
+	if !stands {
 		return ErrApprovalLapsed
 	}
 	return nil

@@ -40,7 +40,8 @@ func TestMigration0004LandsWholeOverVersion3(t *testing.T) {
 		if third, err := apply(t, url, build[:3], Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas3, Grants: grants3}); err != nil || third.Version != 3 {
 			t.Fatalf("version 3: %+v %v", third, err)
 		}
-		options := Options{Runner: "test", RuntimeRole: name + "_runtime"}
+		schemas4, grants4 := schemasAndGrantsAt(4)
+		options := Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas4, Grants: grants4}
 		if failing {
 			broken := fstest.MapFS{}
 			entries, err := fs.ReadDir(schema.Migrations(), ".")
@@ -232,9 +233,10 @@ func TestTheFleetStoreConstraints(t *testing.T) {
 		"a device platform number for a node": {nodeRow("gen_random_uuid()", "1.0.0", "3"), "node_os"},
 		"a second live row of one node ID": {strings.NewReplacer("'"+nodeDev+"'", "'"+secondDev+"'", "'"+nodeInst+"'", "'"+secondInst+"'").Replace(nodeRow("gen_random_uuid()", "1.0.0", "2")),
 			"node_live_node_id"},
-		"a revoked node without its reason":        {"UPDATE fleet.node SET revoked_at = now() WHERE enrollment_id = '" + enrollment + "'", "node_revoke_reason"},
-		"a revoke reason other than the device's":  {"UPDATE fleet.node SET revoked_at = now(), revoke_reason = 2 WHERE enrollment_id = '" + enrollment + "'", "node_revoke_reason"},
-		"a revoke reason beyond 8":                 {"UPDATE identity.session SET revoked_at = now(), revoke_reason = 9 WHERE session_id = '" + nodeSession + "'", "session_revoke_reason"},
+		"a revoked node without its reason":       {"UPDATE fleet.node SET revoked_at = now() WHERE enrollment_id = '" + enrollment + "'", "node_revoke_reason"},
+		"a revoke reason other than the device's": {"UPDATE fleet.node SET revoked_at = now(), revoke_reason = 2 WHERE enrollment_id = '" + enrollment + "'", "node_revoke_reason"},
+		// 0006 (AF-CTR-04 part M) adds reason 9, a reused mobile authorization code; nothing beyond it is admitted.
+		"a revoke reason beyond 9":                 {"UPDATE identity.session SET revoked_at = now(), revoke_reason = 10 WHERE session_id = '" + nodeSession + "'", "session_revoke_reason"},
 		"a key another installation holds":         {"INSERT INTO device.installation (installation_id, device_id, user_id, product_id, app_version, platform, public_key, key_version, installed_at, last_active_at, rev) VALUES (gen_random_uuid(), '" + browserDev + "', '" + user + "', 'arcforges-node', '1', 'linux', " + key + ", 1, now(), now(), 1)", "installation_public_key"},
 		"a flow key of 90 bytes":                   {strings.Replace(signIn("gen_random_uuid()", "1", "", ""), key, "decode(repeat('04', 90), 'hex')", 1), "node_sign_in_public_key"},
 		"a challenge of 42 characters":             {strings.Replace(signIn("gen_random_uuid()", "1", "", ""), challenge, "repeat('A', 42)", 1), "node_sign_in_code_challenge"},
@@ -313,7 +315,9 @@ func TestMigration0005IndexesEveryUserCode(t *testing.T) {
 	ctx := context.Background()
 	url, name := pgtest.Database(t)
 	conn := pgtest.Connect(t, url)
-	options := Options{Runner: "test", RuntimeRole: name + "_runtime"}
+	// The grants of the build at 0005 (0006's table is not there yet; they equal version 4's).
+	schemas5, grants5 := schemasAndGrantsAt(5)
+	options := Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas5, Grants: grants5}
 	if fourth, err := apply(t, url, build[:4], options); err != nil || fourth.Version != 4 {
 		t.Fatalf("version 4: %+v %v", fourth, err)
 	}

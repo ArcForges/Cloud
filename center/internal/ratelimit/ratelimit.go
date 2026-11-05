@@ -74,6 +74,14 @@ const (
 	// only an entry that names a live code the caller may act on gives them back (Reserve, Release; AF-CTR-04 E2, Q8).
 	DeviceEntryAccount Kind = "device_entry_account"
 	DeviceEntryPrefix  Kind = "device_entry_prefix"
+	// MobileBeginPrefix counts the mobile app's begin calls (past their validation, before the insert) per client address prefix
+	// (AF-CTR-04 part M, M-11).
+	MobileBeginPrefix Kind = "mobile_begin_prefix"
+	// MobileTokenPrefix counts, per client address prefix, the token calls that name no flow or present no matching code: a failure
+	// bucket, so a matching code never waits on it.
+	MobileTokenPrefix Kind = "mobile_token_prefix"
+	// MobileApproveAccount counts an account's decisions of mobile authorizations, approvals and denials.
+	MobileApproveAccount Kind = "mobile_approve_account"
 )
 
 // PollAuthorizationWindow is the window of NodePollAuthorization: 6 proved polls per 10 seconds (two intervals of the contract's
@@ -84,7 +92,7 @@ var PollAuthorizationWindow = config.Window{Limit: 6, Window: 10 * time.Second}
 func Kinds() []Kind {
 	return []Kind{SignInPrefix, SignInFailuresAccount, EmailPrefix, EmailAddress, RedeemFailuresAddress, RefreshPrefix, StepUpAccount, BootstrapPrefix,
 		AnonymousFlows, NodeRefreshPrefix, NodeRefreshSession, NodeReportInstallation, NodeFlowPrefix, NodeFlowNode, NodeCompletePrefix, NodeApproveAccount,
-		NodePollPrefix, NodePollAuthorization, DeviceEntryAccount, DeviceEntryPrefix}
+		NodePollPrefix, NodePollAuthorization, DeviceEntryAccount, DeviceEntryPrefix, MobileBeginPrefix, MobileTokenPrefix, MobileApproveAccount}
 }
 
 // Window is the window of a bucket kind in a policy.
@@ -130,6 +138,12 @@ func Window(policy config.IdentityPolicy, kind Kind) config.Window {
 		return policy.DeviceEntryPerAccount
 	case DeviceEntryPrefix:
 		return policy.DeviceEntryPerPrefix
+	case MobileBeginPrefix:
+		return policy.MobileBeginPerPrefix
+	case MobileTokenPrefix:
+		return policy.MobileTokenPerPrefix
+	case MobileApproveAccount:
+		return policy.MobileApprovePerAccount
 	}
 	return config.Window{}
 }

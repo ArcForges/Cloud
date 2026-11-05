@@ -35,7 +35,7 @@ export interface ApiRoute {
 }
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
-export type Surface = "identity" | "pages" | "operations" | "fleet";
+export type Surface = "identity" | "pages" | "operations" | "fleet" | "mobile";
 
 /** A method of a switchable surface. */
 export interface SurfaceRoute extends ApiRoute {
@@ -71,8 +71,44 @@ export interface PageRoute {
   readonly redirects: boolean;
 }
 
+/**
+ * A native JSON route of the mobile app (AF-CTR-04 part M, MB-3): an exact POST path below the owned /api prefix. The native handler
+ * admits a request only for such a row whose surface is enabled: exactly application/json, no cookie (a request with one is refused),
+ * no Origin or CSRF requirement, no CORS; it forwards no cookie and answers no Set-Cookie and no redirect.
+ */
+export interface NativeRoute {
+  readonly surface: Surface;
+  readonly method: "POST";
+  /** The path without the owned /api prefix. */
+  readonly path: string;
+  /** The exact media type of the body. */
+  readonly requestType: string;
+  readonly responseTypes: readonly string[];
+  readonly maxRequestBytes: number;
+  readonly maxResponseBytes: number;
+}
+
+/**
+ * An apex route of the mobile surface (AF-CTR-04 part M, MB-8, M-13): an exact GET path at the root of the host, outside the /api
+ * prefix, forwarded to the same center path only while its surface is enabled; no cookie, no body, no redirect.
+ */
+export interface ApexRoute {
+  readonly surface: Surface;
+  readonly method: "GET";
+  /** The exact path at the root of the host. */
+  readonly path: string;
+  readonly responseTypes: readonly string[];
+  readonly maxResponseBytes: number;
+}
+
 /** The surface names, in registration order; FLAGSHIP_SURFACES lists them comma-separated and exactly. */
-export const surfaceNames: readonly Surface[] = ["identity", "pages", "operations", "fleet"];
+export const surfaceNames: readonly Surface[] = [
+  "identity",
+  "pages",
+  "operations",
+  "fleet",
+  "mobile",
+];
 /** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */
 export const clientIpHeader = "x-arcforges-client-ip";
 /** The headers the Worker sets to the client's country and network (from request.cf) on every surface call. */
@@ -94,6 +130,8 @@ export const notActivatedReplies: Readonly<Record<Surface, string>> = {
     "AAAAAGEaXwoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86FyIVCgdzdXJmYWNlEgpvcGVyYXRpb25zgAAAABBncnBjLXN0YXR1czogMA0K",
   fleet:
     "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVmbGVldIAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
+  mobile:
+    "AAAAAF0aWwoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EyIRCgdzdXJmYWNlEgZtb2JpbGWAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
 };
 /** The byte offset of the correlation id slot in each surface's not_activated template. */
 export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, number>> = {
@@ -101,6 +139,7 @@ export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, numbe
   pages: 61,
   operations: 61,
   fleet: 61,
+  mobile: 61,
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
@@ -947,6 +986,45 @@ export const pageRoutes: readonly PageRoute[] = [
     setCookie: "none",
     redirects: false,
   },
+  {
+    surface: "mobile",
+    method: "GET",
+    path: "/mobile/authorize",
+    kind: "html",
+    requestType: "",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 0,
+    maxResponseBytes: 131072,
+    cookie: false,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    surface: "mobile",
+    method: "POST",
+    path: "/mobile/authorize/review",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
+  {
+    surface: "mobile",
+    method: "POST",
+    path: "/mobile/authorize/decision",
+    kind: "html",
+    requestType: "application/x-www-form-urlencoded",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 131072,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
 ];
 /**
  * The headers every reply of a page route must carry with exactly these values (the content security policy among them), in
@@ -979,6 +1057,45 @@ export const pageUserAgentBytes = 256;
 export const pageCookieMaxAgeDigits = 6;
 /** The most characters of the percent-encoded return path in a redirect's fragment. */
 export const pageReturnPathBytes = 512;
+
+/** The native JSON routes of the mobile app; each is forwarded only while its surface is enabled. */
+export const nativeRoutes: readonly NativeRoute[] = [
+  {
+    surface: "mobile",
+    method: "POST",
+    path: "/session/v1/mobile/begin",
+    requestType: "application/json",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 4096,
+  },
+  {
+    surface: "mobile",
+    method: "POST",
+    path: "/session/v1/mobile/token",
+    requestType: "application/json",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 4096,
+    maxResponseBytes: 65536,
+  },
+];
+/** The apex routes of the mobile surface, at the root of the host; each is forwarded only while its surface is enabled. */
+export const apexRoutes: readonly ApexRoute[] = [
+  {
+    surface: "mobile",
+    method: "GET",
+    path: "/.well-known/assetlinks.json",
+    responseTypes: ["application/json"],
+    maxResponseBytes: 8192,
+  },
+  {
+    surface: "mobile",
+    method: "GET",
+    path: "/app/callback",
+    responseTypes: ["text/html; charset=utf-8"],
+    maxResponseBytes: 131072,
+  },
+];
 
 export const helloPath = "/api/arcforges.hello.v1.HelloService/SayHello";
 export const healthPath = "/api/healthz";

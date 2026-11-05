@@ -1,0 +1,9 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Open the ArcForges app</h1>
+<p id="status" role="status" aria-live="polite"></p>
+{{if .Mobile.Approved}}<p>You approved the sign-in. Tap the button to return to the app, which finishes signing in on its own.</p>
+{{else}}<p>You denied the sign-in. Tap the button to tell the app.</p>{{end}}
+<p><a id="app-link" class="button primary" href="{{.Mobile.Redirect}}" rel="noopener noreferrer">Open the ArcForges app</a></p>
+<p class="help">If the button does not open the app, start the sign-in again in the app. The link works only once and only for a short time.</p>
+<p class="help">This browser stays signed in to your account. <a href="{{.Base}}/account/sign-out">Sign this browser out</a></p>
+{{end}}

@@ -59,6 +59,7 @@ import {
   stepUpsAtMost,
   stepUpsPerTenMinutes,
 } from "./node-flow.ts";
+import { mobileStepUpsAtMost, runMobileApprove } from "./mobile-flow.ts";
 
 export const defaultBaseUrl = "https://proof.arcforges.com/api";
 /** The only hosts the script drives: the acceptance environment, or a center on this machine. Production is never a target. */
@@ -82,6 +83,8 @@ export interface Options {
   operatorGrant: boolean;
   /** The node-approve mode (AF-CTR-04 E3): the handshake directory node-probe writes into, the number of cases, the waits. */
   nodeApprove: boolean;
+  /** The mobile-approve mode (AF-CTR-04 part M, H3): the same handshake directory, written by mobile-probe. */
+  mobileApprove: boolean;
   watch: string;
   cases: number;
   waitMs: number;
@@ -127,6 +130,7 @@ export const defaultReportName = {
   acceptance: "browser-acceptance.json",
   operatorGrant: "browser-operator-grant.json",
   nodeApprove: "browser-node-approve.json",
+  mobileApprove: "browser-mobile-approve.json",
 };
 
 /**
@@ -148,6 +152,7 @@ const usage = `Usage: node eng/verification/browser/acceptance.ts [--base-url <u
   [--bootstrap-file <file>] [--display-name <text>] [--headed] [--real-authenticator | --operator-grant] [--report <file>]
   [--pace-ms <n>] [--timeout-ms <n>] [--real-timeout-ms <n>] [--requests-per-minute <n>] [--help]
   node-approve: [--node-approve] --watch <dir> [--cases <n>] [--wait-ms <n>] [--negative]
+  mobile-approve: --mobile-approve --watch <dir> [--cases <n>] [--wait-ms <n>]
 Without --real-authenticator or --operator-grant the run enrolls the owner (the first run, with the bootstrap file) or signs in
 with the saved credential (every later run).
 --operator-grant needs the saved owner credential. It signs in with the MOCKED authenticator, then on the operations page reviews
@@ -167,6 +172,12 @@ Step-up limit: apart from the edge, the center allows 10 step-ups per account in
   revocation), so --cases refuses a set that could spend more than the center's ${stepUpsPerTenMinutes} in 10 minutes. --negative also
   submits one wrong fingerprint tail (one more step-up and one entry of the account's budget): for the local rehearsal. Its report
   defaults to artifacts/${defaultReportName.nodeApprove}.
+--mobile-approve (mobile-approve.ts, AF-CTR-04 part M) needs the saved owner credential. It decides the attempts that
+  center/cmd/mobile-probe (MobileProbe, MOCKED app) begins and announces in the --watch directory, --cases of them, on
+  /mobile/authorize; it hands each callback to the probe through the directory, taps the done page's link (the fallback page loads),
+  then revokes the phones its approvals created. The probe's requests count against the same edge limit, with the same pacing and
+  bound as --node-approve. Each case may spend 2 step-ups, so --cases refuses a set that could spend more than
+  ${stepUpsPerTenMinutes}. Its report defaults to artifacts/${defaultReportName.mobileApprove}.
 Exit codes: 0 passed, 1 failed, 2 not started (usage, missing browser, credential or bootstrap file).`;
 
 function whole(value: string | undefined, flag: string, min: number, max: number): number {
@@ -191,6 +202,7 @@ export function parseArguments(
     realAuthenticator: false,
     operatorGrant: false,
     nodeApprove: false,
+    mobileApprove: false,
     watch: "",
     cases: 2,
     waitMs: 600_000,
@@ -248,6 +260,9 @@ export function parseArguments(
       case "--node-approve":
         options.nodeApprove = true;
         break;
+      case "--mobile-approve":
+        options.mobileApprove = true;
+        break;
       case "--watch":
         options.watch = path.resolve(text());
         break;
@@ -284,21 +299,36 @@ export function parseArguments(
     }
   }
   if (
-    [options.realAuthenticator, options.operatorGrant, options.nodeApprove].filter(Boolean).length >
-    1
+    [
+      options.realAuthenticator,
+      options.operatorGrant,
+      options.nodeApprove,
+      options.mobileApprove,
+    ].filter(Boolean).length > 1
   )
     throw new UsageError(
-      "--real-authenticator, --operator-grant and --node-approve are separate runs; name one.",
+      "--real-authenticator, --operator-grant, --node-approve and --mobile-approve are separate runs; name one.",
     );
   if (options.operatorGrant && !reportNamed)
     options.report = path.resolve("artifacts", defaultReportName.operatorGrant);
   if (options.nodeApprove && !reportNamed)
     options.report = path.resolve("artifacts", defaultReportName.nodeApprove);
+  if (options.mobileApprove && !reportNamed)
+    options.report = path.resolve("artifacts", defaultReportName.mobileApprove);
   if (options.nodeApprove && options.watch === "")
     throw new UsageError("--node-approve needs --watch <dir>.");
-  if (!options.nodeApprove && (options.watch !== "" || options.negative))
+  if (options.mobileApprove && options.watch === "")
+    throw new UsageError("--mobile-approve needs --watch <dir>.");
+  if (options.mobileApprove && options.negative)
+    throw new UsageError("--negative belongs to --node-approve.");
+  if (!options.nodeApprove && !options.mobileApprove && (options.watch !== "" || options.negative))
     throw new UsageError("--watch and --negative belong to --node-approve.");
-  if (options.nodeApprove && !rateNamed) options.requestsPerMinute = nodeApproveRequestsPerMinute;
+  if ((options.nodeApprove || options.mobileApprove) && !rateNamed)
+    options.requestsPerMinute = nodeApproveRequestsPerMinute;
+  if (options.mobileApprove && mobileStepUpsAtMost(options.cases) > stepUpsPerTenMinutes)
+    throw new UsageError(
+      `--cases ${options.cases} could spend ${mobileStepUpsAtMost(options.cases)} step-ups (one per approval and one per revoked phone), more than the ${stepUpsPerTenMinutes} per account in 10 minutes the center allows.`,
+    );
   if (options.nodeApprove && stepUpsAtMost(options.cases, options.negative) > stepUpsPerTenMinutes)
     throw new UsageError(
       `--cases ${options.cases}${options.negative ? " with --negative" : ""} could spend ${stepUpsAtMost(options.cases, options.negative)} step-ups (one per approval and one per revoked device${options.negative ? ", one for --negative" : ""}), more than the ${stepUpsPerTenMinutes} per account in 10 minutes the center allows.`,
@@ -414,10 +444,14 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
   const store = new CredentialStore(options.stateDir, deps.machine);
   let bootstrap: ReturnType<typeof readBootstrapFile> | undefined;
   try {
-    const needsSaved = options.realAuthenticator || options.operatorGrant || options.nodeApprove;
+    const needsSaved =
+      options.realAuthenticator ||
+      options.operatorGrant ||
+      options.nodeApprove ||
+      options.mobileApprove;
     if (needsSaved && !store.exists()) {
       deps.writeError(
-        `${options.realAuthenticator ? "--real-authenticator" : options.operatorGrant ? "--operator-grant" : "--node-approve"} needs the saved owner credential; run the acceptance once first.`,
+        `${options.realAuthenticator ? "--real-authenticator" : options.operatorGrant ? "--operator-grant" : options.mobileApprove ? "--mobile-approve" : "--node-approve"} needs the saved owner credential; run the acceptance once first.`,
       );
       return 2;
     }
@@ -458,9 +492,11 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
         ? "operator-grant"
         : options.nodeApprove
           ? "node-approve"
-          : bootstrap
-            ? "enroll"
-            : "returning",
+          : options.mobileApprove
+            ? "mobile-approve"
+            : bootstrap
+              ? "enroll"
+              : "returning",
   });
   world.write(
     `playwright-core ${requiredPlaywrightCore}, Chromium ${world.report.browserVersion} (revision ${requiredChromiumRevision}), ${options.headed ? "headed" : "headless"}`,
@@ -476,6 +512,13 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
         cases: options.cases,
         waitMs: options.waitMs,
         negative: options.negative,
+        probeRequests,
+      });
+    else if (options.mobileApprove)
+      await runMobileApprove(world, {
+        handshake: (deps.handshake ?? fileHandshake)(options.watch),
+        cases: options.cases,
+        waitMs: options.waitMs,
         probeRequests,
       });
     else await runAcceptance(world);
@@ -503,17 +546,18 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
   const bounded =
     options.requestsPerMinute >= 1 && options.requestsPerMinute <= defaultRequestsPerMinute;
   // node-probe's requests share the browser's edge key: the two busiest minutes together bound the busiest minute of both.
-  if (options.nodeApprove) {
+  const probed = options.nodeApprove || options.mobileApprove;
+  if (probed) {
     world.report.facts.probeRequests = probeRequests.length;
     world.report.facts.probeBusiest60s = busiestOf(probeRequests);
     world.report.facts.requestsBusiest60sBound = combinedBusiest(sent.busiest, probeRequests);
   }
-  const busiest = options.nodeApprove ? combinedBusiest(sent.busiest, probeRequests) : sent.busiest;
+  const busiest = probed ? combinedBusiest(sent.busiest, probeRequests) : sent.busiest;
   if (exitCode === 0 && bounded && busiest > maxRequestsPerWindow) {
     world.report.result = "failed";
     exitCode = 1;
     deps.writeError(
-      `The browser${options.nodeApprove ? " and node-probe" : ""} sent up to ${busiest} requests inside one minute, more than the ${maxRequestsPerWindow} a run may send (the edge limit of the proof environment is ${edgeLimitPerMinute} per minute): it would be answered with 429. The run is failed.`,
+      `The browser${options.nodeApprove ? " and node-probe" : options.mobileApprove ? " and mobile-probe" : ""} sent up to ${busiest} requests inside one minute, more than the ${maxRequestsPerWindow} a run may send (the edge limit of the proof environment is ${edgeLimitPerMinute} per minute): it would be answered with 429. The run is failed.`,
     );
   }
   // The report holds steps, counts and flags; if anything secret is in it, it is not written.

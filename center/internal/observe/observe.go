@@ -47,6 +47,7 @@ type Metrics struct {
 	refusals  map[refusalKey]uint64
 	identity  map[eventKey]uint64
 	fleet     map[eventKey]uint64
+	mobile    map[eventKey]uint64
 }
 
 // FleetOutcomes is the closed label set of the fleet surface's events (AF-CTR-04, CR-02): the refresh of a node session (rotated,
@@ -80,13 +81,26 @@ func FleetOutcomes() map[string][]string {
 	}
 }
 
+// MobileOutcomes is the closed label set of the mobile surface's events (AF-CTR-04 part M, M-11): a begin (started, refused, rate
+// limited), a review (reviewed, shown, refused, rate limited: a review that shows a foreign or revoked installation is counted), a decision (approved, a code reissued, denied, refused, rate limited) and a token
+// request (completed, refused, a reuse, a failed verifier or binding, a lapsed approval, rate limited). ObserveMobile counts only these
+// pairs; any other pair is counted as unlisted.
+func MobileOutcomes() map[string][]string {
+	return map[string][]string{
+		"begin":   {"started", "refused", "rate_limited"},
+		"review":  {"reviewed", "shown", "refused", "rate_limited"},
+		"approve": {"approved", "reissued", "denied", "refused", "rate_limited"},
+		"token":   {"completed", "refused", "reused", "verifier_failed", "lapsed", "rate_limited"},
+	}
+}
+
 // Unlisted is the label pair a fleet event outside FleetOutcomes is counted under.
 const Unlisted = "unlisted"
 
 // NewMetrics is an empty metrics registry.
 func NewMetrics() *Metrics {
 	return &Metrics{requests: map[requestKey]uint64{}, latencies: map[string]*histogram{}, refusals: map[refusalKey]uint64{},
-		identity: map[eventKey]uint64{}, fleet: map[eventKey]uint64{}}
+		identity: map[eventKey]uint64{}, fleet: map[eventKey]uint64{}, mobile: map[eventKey]uint64{}}
 }
 
 // ObserveRequest counts one finished request.
@@ -137,6 +151,26 @@ func (m *Metrics) ObserveFleet(event, outcome string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.fleet[key]++
+}
+
+// ObserveMobile counts one outcome of the mobile surface; both labels are closed values of MobileOutcomes chosen by the code.
+func (m *Metrics) ObserveMobile(event, outcome string) {
+	key := eventKey{Unlisted, Unlisted}
+	for _, listed := range MobileOutcomes()[event] {
+		if listed == outcome {
+			key = eventKey{event, outcome}
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mobile[key]++
+}
+
+// MobileCount is how often the mobile surface counted a pair (tests read it; an unlisted pair is counted as Unlisted, Unlisted).
+func (m *Metrics) MobileCount(event, outcome string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.mobile[eventKey{event, outcome}]
 }
 
 // WritePrometheus writes the metrics in the Prometheus text exposition format (version 0.0.4).
@@ -208,6 +242,18 @@ func (m *Metrics) WritePrometheus(writer io.Writer) error {
 	for _, key := range fleet {
 		fmt.Fprintf(&text, "arcforges_center_fleet_events_total{event=%q,outcome=%q} %d\n", key.event, key.outcome, m.fleet[key])
 	}
+	text.WriteString("# HELP arcforges_center_mobile_events_total Mobile surface outcomes, by event and outcome.\n")
+	text.WriteString("# TYPE arcforges_center_mobile_events_total counter\n")
+	mobile := make([]eventKey, 0, len(m.mobile))
+	for key := range m.mobile {
+		mobile = append(mobile, key)
+	}
+	sort.Slice(mobile, func(i, j int) bool {
+		return mobile[i].event+"\x00"+mobile[i].outcome < mobile[j].event+"\x00"+mobile[j].outcome
+	})
+	for _, key := range mobile {
+		fmt.Fprintf(&text, "arcforges_center_mobile_events_total{event=%q,outcome=%q} %d\n", key.event, key.outcome, m.mobile[key])
+	}
 	_, err := io.WriteString(writer, text.String())
 	return err
 }
@@ -228,6 +274,9 @@ func (m *Metrics) Summary() map[string]uint64 {
 	}
 	for key, count := range m.fleet {
 		summary["fleet "+key.event+" "+key.outcome] += count
+	}
+	for key, count := range m.mobile {
+		summary["mobile "+key.event+" "+key.outcome] += count
 	}
 	return summary
 }

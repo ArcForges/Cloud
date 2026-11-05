@@ -135,3 +135,20 @@ export const fleet = {
   revokeDevice: (name: string) =>
     `tr:has(th bdi:text-is(${JSON.stringify(name)})) form[action$="/account/devices/revoke"] button`,
 } as const;
+
+/**
+ * The mobile surface's pages (AF-CTR-04 part M): the authorization page of the mobile app's native authorization, its review, its
+ * done page and the fixed callback page at the root of the host (the templates mobile-authorize* and app-callback).
+ */
+export const mobile = {
+  authorize: "/mobile/authorize",
+  review: "/mobile/authorize/review",
+  /** The apex path of the release App Link, at the root of the host (not below the public base URL). */
+  appCallback: "/app/callback",
+  platform: "#mobile-platform",
+  version: "#mobile-version",
+  claimNote: "#mobile-claim-note",
+  approve: '#approve button[type="submit"]',
+  deny: '#deny button[type="submit"]',
+  appLink: "#app-link",
+} as const;

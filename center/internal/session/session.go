@@ -76,6 +76,9 @@ const (
 	RevokedSuperseded int16 = 7
 	// RevokedEnrollmentCodeReused is a node session whose one-use enrollment code was presented again (AF-CTR-04).
 	RevokedEnrollmentCodeReused int16 = 8
+	// RevokedMobileCodeReused is a mobile session whose one-use authorization code was presented again (AF-CTR-04 part M, migration
+	// 0006).
+	RevokedMobileCodeReused int16 = 9
 )
 
 // PolicyVersion is the stored session_policy_version of the sessions this build issues.

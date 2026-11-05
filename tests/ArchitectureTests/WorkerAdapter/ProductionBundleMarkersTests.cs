@@ -18,10 +18,12 @@ public sealed class ProductionBundleMarkersTests
         "var a = 1;\n" + string.Join("\n", Pages.Select(path => $"route(\"{path}\");")) + "\n" + string.Join("\n", extra) + "\nexport { CloudContainer };\n";
 
     [Fact]
-    public void TheGeneratedTableListsTheSevenWebBrowserSessionRoutes()
+    public void TheGeneratedTableListsTheSevenWebBrowserSessionRoutesAndTheTwoNativeMobileRoutes()
     {
-        Assert.Equal(7, Pages.Count);
-        Assert.All(Pages, path => Assert.StartsWith("/session/v1/web/", path, StringComparison.Ordinal));
+        // AF-CTR-04 part M: the mobile surface's native begin and token rows lie below the session prefix too (dark in production).
+        Assert.Equal(9, Pages.Count);
+        Assert.Equal(7, Pages.Count(path => path.StartsWith("/session/v1/web/", StringComparison.Ordinal)));
+        Assert.Equal(new[] { "/session/v1/mobile/begin", "/session/v1/mobile/token" }, Pages.Where(path => !path.StartsWith("/session/v1/web/", StringComparison.Ordinal)).Order(StringComparer.Ordinal));
     }
 
     [Fact]

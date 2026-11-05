@@ -124,8 +124,9 @@ func TestThePageRoutesAreThePipelinesPlainPathsAndNotTheWorkersOwnRows(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(table.Pages) != len(AllPageRoutes()) {
-		t.Fatalf("the Worker table holds %d page routes", len(table.Pages))
+	// The mobile surface's native JSON and apex routes are tables of their own (AF-CTR-04 part M); every other route is a page row.
+	if len(table.Pages)+len(table.Native)+len(table.Apex) != len(AllPageRoutes()) || len(table.Native) != 2 || len(table.Apex) != 2 {
+		t.Fatalf("the Worker table holds %d page, %d native and %d apex routes", len(table.Pages), len(table.Native), len(table.Apex))
 	}
 	ingress, err := Ingress(modules)
 	if err != nil {
@@ -196,7 +197,7 @@ func TestTheOperationsRoutesAreTheirOwnSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet" {
+	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet,mobile" {
 		t.Fatalf("the surfaces %v", surfaces)
 	}
 	crossed := append([]Module(nil), modules...)
@@ -223,7 +224,7 @@ func TestTheFleetPagesAreTheirOwnSurface(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("the fleet routes:\n%s", strings.Join(got, "\n"))
 	}
-	if strings.Join(PageSurfaces(), ",") != "pages,operations,fleet" {
+	if strings.Join(PageSurfaces(), ",") != "pages,operations,fleet,mobile" {
 		t.Fatalf("the page surfaces %v", PageSurfaces())
 	}
 	for name, mutate := range map[string]func([]PageRoute) []PageRoute{

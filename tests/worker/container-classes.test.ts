@@ -279,6 +279,24 @@ test("the Go center gets the identity policy override only where an environment 
   assert.equal(csharp?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
 });
 
+test("the Go center gets the Android app identity only where an environment sets one (AF-CTR-04 part M)", () => {
+  const identity =
+    '[{"packageName":"com.arcforges.prooftest","sha256CertFingerprints":["AB"],"testOnly":true}]';
+  const settings = (value: string | undefined) =>
+    new CloudContainer(containerContext, {
+      ...centerEnvironment,
+      ARCFORGES_CENTER_ANDROID_APP: value,
+    }).envVars as Record<string, string>;
+  assert.equal(settings(identity).ARCFORGES_CENTER_ANDROID_APP, identity);
+  assert.equal(settings(undefined).ARCFORGES_CENTER_ANDROID_APP, undefined);
+  // The debug scheme is a self-hosted center's own variable: the hosted Worker never passes it.
+  const withDebug = new CloudContainer(containerContext, {
+    ...centerEnvironment,
+    ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT: "com.arcforges.android.debug",
+  } as never).envVars as Record<string, string>;
+  assert.equal(withDebug.ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT, undefined);
+});
+
 test("the acceptance entry runs the Go center under the proof Container class and keeps the retired classes inert", async () => {
   const {
     FoundationContainer: AcceptanceContainer,

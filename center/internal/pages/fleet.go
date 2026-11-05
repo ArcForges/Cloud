@@ -19,6 +19,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/session"
 )
 
@@ -386,7 +387,7 @@ func (e *exchange) activateDecision() {
 // fleetText is a refusal's text on the fleet pages: the fleet's own text of a code where the meaning differs from the account pages',
 // else the shared text (messageFor).
 func (e *exchange) fleetText(value *foundationv1.ArcError) string {
-	return messageForSurface(value, e.h.options.Clock(), true)
+	return messageForSurface(value, e.h.options.Clock(), routes.SurfaceFleet)
 }
 
 // serveStatus renders a page template with a status (a page shown again with a refusal keeps that refusal's status).

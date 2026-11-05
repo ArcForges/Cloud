@@ -119,6 +119,10 @@ test("every package of the Go center and its embedded migrations are admitted to
   assert(rules.indexOf("center/internal/nodetest/") > rules.indexOf("!center/internal/*/*.go"));
   // The development stand-in of a node (AF-CTR-04 E3) is excluded by name as well as by the closing rules, as center-gen is.
   assert(rules.includes("center/cmd/node-probe/"));
+  // MobileProbe (AF-CTR-04 part M), the MOCKED stand-in of the Android app, is never in the image: its library's closing exclusion
+  // comes after the rules that admit center/internal/*/, and its command is excluded by name.
+  assert(rules.indexOf("center/internal/mobiletest/") > rules.indexOf("!center/internal/*/*.go"));
+  assert(rules.includes("center/cmd/mobile-probe/"));
 });
 
 test("a rule never admits tests, the Worker, the plan files, build output or a stray file", () => {
@@ -229,6 +233,13 @@ test("the matcher of the Docker context follows the rules the file states", () =
     ["center/internal/fleet/enroll.go", true],
     ["center/internal/fleetapi/fleetapi.go", true],
     ["center/internal/nodetest/nodetest.go", false],
+    // AF-CTR-04 part M: the mobile authorization is carried; MobileProbe (the MOCKED app) and the vendored vectors are not.
+    ["center/internal/mobileauth/token.go", true],
+    ["center/internal/mobileauth/testdata/mobile-native-vectors.json", false],
+    ["center/internal/mobiletest/mobiletest.go", false],
+    ["center/cmd/mobile-probe/main.go", false],
+    ["center/internal/schema/migrations/0006_mobile_authorization.sql", true],
+    ["center/internal/pages/templates/mobile-authorize-review.gohtml", true],
     ["center/internal/schema/migrations/0004_fleet_enrollment.sql", true],
     ["center/tools/anything.go", false],
     ["center/README.md", false],

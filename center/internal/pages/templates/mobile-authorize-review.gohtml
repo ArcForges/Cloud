@@ -1,0 +1,36 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Sign in to the ArcForges app?</h1>
+<noscript><p>Approving needs JavaScript. Turn it on for this page and reload. Denying works without it.</p></noscript>
+<p id="needs-script" class="help">Approving needs this page's script. If this line stays, reload the page or allow scripts for it.</p>
+<p id="status" role="status" aria-live="polite"></p>
+<dl class="node">
+<dt>App</dt><dd id="mobile-client">{{if .Mobile.Debug}}ArcForges app, debug build{{else}}ArcForges app{{end}}</dd>
+<dt>Platform</dt><dd><bdi id="mobile-platform">{{.Mobile.Platform}}</bdi> (as the app reports it)</dd>
+<dt>App version</dt><dd><bdi id="mobile-version">{{.Mobile.AppVersion}}</bdi> (as the app reports it)</dd>
+<dt>Requested</dt><dd><time datetime="{{.Mobile.RequestedAt}}">{{.Mobile.RequestedText}}</time> ({{.Mobile.Age}})</dd>
+<dt>Expires</dt><dd><time datetime="{{.Mobile.ExpiresAt}}">{{.Mobile.ExpiresText}}</time></dd>
+<dt>Origin</dt><dd id="mobile-origin">{{.Mobile.Origin}}</dd>
+<dt>Signs in the account</dt><dd><bdi id="mobile-account">{{.Mobile.Account}}</bdi></dd>
+</dl>
+<p class="help" id="mobile-claim-note">The platform and the version are reported by the app and are not verified.</p>
+{{if .Mobile.Debug}}<p id="mobile-debug-note">This is a debug build of the app. Approve it only if you are developing the app on this phone.</p>{{end}}
+{{if .Mobile.Standing}}<p id="mobile-standing">{{.Mobile.Standing}}</p>{{end}}
+{{if .Mobile.State}}<p id="request-state">{{.Mobile.State}}</p>{{end}}
+{{if or .Mobile.Decide .Mobile.DenyOnly}}
+<p>Approve only a sign-in you started yourself in the ArcForges app on this phone, just now.</p>
+<div class="decision">
+<form method="post" action="{{.Base}}/mobile/authorize/decision" id="deny">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="flow_id" value="{{.Mobile.FlowID}}">
+<input type="hidden" name="decision" value="deny">
+<button type="submit">Deny</button>
+</form>
+{{if .Mobile.Decide}}<form method="post" action="{{.Base}}/mobile/authorize/decision" id="approve" data-step-up-class="identity.authorizeMobile" data-step-up-target="{{.Mobile.Target}}">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="flow_id" value="{{.Mobile.FlowID}}">
+<input type="hidden" name="decision" value="approve">
+<button type="submit" class="primary">Sign in the app with your passkey</button>
+</form>{{end}}
+</div>
+{{end}}
+{{end}}

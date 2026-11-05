@@ -81,7 +81,7 @@ The production Container runs the Go center (`/app/arcforges-center`, [center](c
 
 The `identity` surface (AF-CTR-03, [accounts, sessions and devices](center-identity.md#surface-switch)) is switched by
 `FLAGSHIP_SURFACES`: production carries `""` (no surface; Hello only, so no account page is served there), the acceptance
-environment `identity,pages,operations,fleet` with `ALLOWED_ORIGIN` set to its own origin. The `pages` surface ([account pages](center-identity.md#account-pages-and-browser-sessions))
+environment `identity,pages,operations,fleet,mobile` with `ALLOWED_ORIGIN` set to its own origin. The `pages` surface ([account pages](center-identity.md#account-pages-and-browser-sessions))
 is switched by the same flag, needs `identity`, and is forwarded by the Worker's [page handler](cloud-ingress.md#page-routes-plt-1);
 a disabled one is a 404 at the edge. The Worker passes the parsed list to the Container as `ARCFORGES_CENTER_SURFACES` and always
 `ARCFORGES_CENTER_CLIENT_IP_HEADER`; a disabled surface is answered at the edge without waking the Container. Both environments bind
@@ -123,10 +123,16 @@ Windows host after the deployment; it is post-merge evidence, not a CI check.
 
 The Container receives `ARCFORGES_CENTER_PLAN_CONFIGURATION` unchanged: production carries none (no catalogue, no gated feature
 available, no operator grant), and the acceptance environment `development-fixtures` (`tests/worker/proof-deploy.test.ts` pins both).
+AF-CTR-04 part M adds the `mobile` surface ([center mobile](center-mobile.md)) to the acceptance environment for H3 and
+`ARCFORGES_CENTER_ANDROID_APP`, which the Worker passes through unchanged where an environment sets it: proof carries one labelled
+non-shipping test statement (`testOnly`, the package `com.arcforges.prooftest` and the fingerprint of a throwaway self-signed
+certificate whose key was destroyed; never a real app identity), production none. `ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT` is a
+self-hosted center's own variable and is never passed. Production's routes are unchanged (`arcforges.com/api/*` only), so the apex
+rows exist only on proof's custom domain; the PostgreSQL gate of a deployment of this change expects version 6.
 The Worker passes no other variable of this part: in particular `ARCFORGES_CENTER_DISABLED_FEATURES`, a self-hosted operator's limit
 that the hosted center refuses, is never handed over (`tests/worker/container-classes.test.ts`, PLT-18). The `operations` surface is
 enabled in the acceptance environment only: production keeps `FLAGSHIP_SURFACES` empty (and no catalogue), the acceptance environment
-carries `identity,pages,operations,fleet` with the development fixture catalogue (**MOCKED**, illustrative), and
+carries `identity,pages,operations,fleet,mobile` with the development fixture catalogue (**MOCKED**, illustrative), and
 `tests/worker/center-config.test.ts` pins both. The proof owner, the bootstrap owner, counts as operator through
 `identity.bootstrap`, so no `arcforges-center admin grant-operator` (the migration role's path) and no migration-role credential is
 needed for the hosted proof of the operator grant; the hosted run (the `--operator-grant` mode of [the
@@ -218,7 +224,7 @@ what the deployed version starts the center with, computed from its configuratio
 `npm run test:live` compares the production health with `artifacts/deployment.json`, and the local Worker check
 (`npm run test:worker`) compares it with the surfaces the candidate's Worker forwards. CI makes no such request
 ([validation policy](validation-policy.md)), so for both environments the post-deploy acceptance reads `/api/healthz`
-`center.surfaces` and compares it with the deployment evidence (`none` on production, `identity,pages,operations,fleet` on proof).
+`center.surfaces` and compares it with the deployment evidence (`none` on production, `identity,pages,operations,fleet,mobile` on proof).
 
 A rollback to a Worker version from before AF-CTR-03 part A1b (`wrangler rollback` or the dashboard, which reach only the
 immediately previous version) brings back a Container class without the start digest. The running center keeps the start

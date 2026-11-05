@@ -428,6 +428,9 @@ test("every request the Worker makes to the Container says redirect manual (H-1)
       ["worker/foundation/container-client.ts", 1],
       ["worker/foundation/proof-routes.ts", 1],
       ["worker/harness/run-alarm.ts", 1],
+      // AF-CTR-04 part M: the apex and native JSON handlers of the mobile surface.
+      ["worker/ingress/applink.ts", 1],
+      ["worker/ingress/native.ts", 1],
       ["worker/ingress/pages.ts", 1],
       ["worker/ingress/pipeline.ts", 1],
     ],

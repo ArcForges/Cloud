@@ -78,7 +78,7 @@ func (e *exchange) serve(name string, data pageData) {
 
 // writeErrorPage answers a refusal as an HTML page with the refusal's text.
 func (e *exchange) writeErrorPage(status int, value *foundationv1.ArcError) {
-	text := messageForSurface(value, e.h.options.Clock(), e.route.Surface == routes.SurfaceFleet)
+	text := messageForSurface(value, e.h.options.Clock(), e.route.Surface)
 	if own, ok := operationsText[strings.TrimPrefix(value.GetCategory().String(), "ERROR_CATEGORY_")+"/"+value.GetCode()]; ok && e.route.Surface == routes.SurfaceOperations {
 		text = own
 	}

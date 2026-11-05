@@ -46,6 +46,12 @@ const SurfaceOperations Surface = "operations"
 // exist (part E3).
 const SurfaceFleet Surface = "fleet"
 
+// SurfaceMobile is the mobile native authorization (AF-CTR-04 part M; Contracts MobileNativeAuth v1): the native JSON routes
+// /session/v1/mobile/begin and /token the app calls, the /mobile/authorize pages where an account approves the app in a Custom Tab,
+// and the two apex routes /.well-known/assetlinks.json and /app/callback. It needs the identity and pages surfaces, is in the
+// self-hosted default (and off with them where the default turns identity off), and production keeps it off until AF-PROD-01.
+const SurfaceMobile Surface = "mobile"
+
 // MaxFleetPublicBaseURLLength bounds the public base URL of a center that serves the fleet surface: the contract bounds every URL the
 // center derives for a node at 512 characters (fleet.v1 authorize_url, verification_uri*), and the longest suffix it appends is
 // /connect#flow= and a 36-character flow ID (50 characters).
@@ -53,13 +59,14 @@ const MaxFleetPublicBaseURLLength = 512 - 50
 
 // KnownSurfaces is every surface name, in generated order.
 func KnownSurfaces() []Surface {
-	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet}
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile}
 }
 
-// DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces and node
-// enrollment with its pages (AF-CTR-04 E3, delivery-14), never the operations page.
+// DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces, node
+// enrollment with its pages (AF-CTR-04 E3, delivery-14) and the mobile native authorization (AF-CTR-04 part M), never the operations
+// page.
 func DefaultSelfHostedSurfaces() []Surface {
-	return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet}
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet, SurfaceMobile}
 }
 
 // ClientIPHeader is the one header the hosted Worker sets to the client's address (from cf-connecting-ip, overwriting any client
@@ -75,6 +82,10 @@ const (
 	ClientCountryHeader = "X-Arcforges-Client-Country"
 	ClientASNHeader     = "X-Arcforges-Client-Asn"
 )
+
+// MaxMobileCodeLifetime is the longest life of a mobile authorization code: the contract's 2 minutes (MobileNativeAuth
+// MobileAuthorizeCallbackSuccess.code), so no policy value can make the closed statement false.
+const MaxMobileCodeLifetime = 2 * time.Minute
 
 // MaxBootstrapLead bounds how far ahead a bootstrap token may expire.
 const MaxBootstrapLead = 7 * 24 * time.Hour
@@ -166,6 +177,14 @@ type IdentityPolicy struct {
 	NodePollPerPrefix     Window
 	DeviceEntryPerAccount Window
 	DeviceEntryPerPrefix  Window
+	// The mobile native authorization (AF-CTR-04 part M, M-11): the one-use code's lifetime after an approval (at most 2 minutes, the
+	// contract's bound, and never past the flow's 10 minutes), and the buckets of begin (per client prefix, taken before the insert),
+	// of token (a failure bucket per client prefix: an unknown flow or a code that does not match; a matching code never waits on it)
+	// and of the decisions (per account, approvals and denials).
+	MobileCodeLifetime      time.Duration
+	MobileBeginPerPrefix    Window
+	MobileTokenPerPrefix    Window
+	MobileApprovePerAccount Window
 	// AnonymousFlows is an opt-in global ceiling on the flows anonymous calls create (C1): every BeginAuthentication, of every method
 	// and purpose, and every BeginNodeSignIn and StartDeviceAuthorization (AF-CTR-04) counts in one bucket. A limit of 0 (the default) sets no ceiling. Only the acceptance environment sets one: it
 	// shares the production Neon project, and its flows are never deleted before AF-PLAT-01's sweeps exist. A global bucket would let
@@ -216,6 +235,12 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		NodePollPerPrefix:     Window{Limit: 120, Window: 10 * time.Minute},
 		DeviceEntryPerAccount: Window{Limit: 5, Window: 15 * time.Minute},
 		DeviceEntryPerPrefix:  Window{Limit: 20, Window: 15 * time.Minute},
+		// AF-CTR-04 part M: a 2-minute one-use code; 30 begins per 10 minutes per network (a carrier network shares its prefix among
+		// many phones), 30 failed token requests per 10 minutes per network, 20 decisions per hour per account.
+		MobileCodeLifetime:      2 * time.Minute,
+		MobileBeginPerPrefix:    Window{Limit: 30, Window: 10 * time.Minute},
+		MobileTokenPerPrefix:    Window{Limit: 30, Window: 10 * time.Minute},
+		MobileApprovePerAccount: Window{Limit: 20, Window: time.Hour},
 	}
 }
 
@@ -263,6 +288,8 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"nodeRefreshIdleLifetime": {&p.NodeRefreshIdleLifetime, time.Hour, 90 * 24 * time.Hour},
 		"nodeRefreshAbsolute":     {&p.NodeRefreshAbsolute, time.Hour, 400 * 24 * time.Hour},
 		"nodeCodeLifetime":        {&p.NodeCodeLifetime, 30 * time.Second, 10 * time.Minute},
+		// The contract bounds a mobile code's life at 2 minutes (MobileNativeAuth): the policy may shorten it, never lengthen it.
+		"mobileCodeLifetime": {&p.MobileCodeLifetime, 30 * time.Second, MaxMobileCodeLifetime},
 	}
 	counts := map[string]countBound{
 		"emailCodeAttempts":   {&p.EmailCodeAttempts, 1, 10},
@@ -277,7 +304,8 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"nodeRefreshPrefix": &p.NodeRefreshPerPrefix, "nodeRefreshSession": &p.NodeRefreshPerSession, "nodeReportInstallation": &p.NodeReportPerInstallation,
 		"nodeFlowPrefix": &p.NodeFlowPerPrefix, "nodeFlowNode": &p.NodeFlowPerNode, "nodeCompletePrefix": &p.NodeCompletePerPrefix,
 		"nodeApproveAccount": &p.NodeApprovePerAccount, "nodePollPrefix": &p.NodePollPerPrefix, "deviceEntryAccount": &p.DeviceEntryPerAccount,
-		"deviceEntryPrefix": &p.DeviceEntryPerPrefix,
+		"deviceEntryPrefix": &p.DeviceEntryPerPrefix, "mobileBeginPrefix": &p.MobileBeginPerPrefix, "mobileTokenPrefix": &p.MobileTokenPerPrefix,
+		"mobileApproveAccount": &p.MobileApprovePerAccount,
 	} {
 		counts[name+"Limit"] = countBound{&window.Limit, 1, 10_000}
 		durations[name+"Window"] = durationBound{&window.Window, time.Minute, 24 * time.Hour}
@@ -446,6 +474,18 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 		return Identity{}, invalid("the %s surface needs a public base URL of at most %d characters: every URL it derives for a node is at most 512", SurfaceFleet,
 			MaxFleetPublicBaseURLLength)
 	}
+	if identity.Enabled(SurfaceMobile) && (!identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages)) {
+		return Identity{}, invalid("the %s surface needs the %s and %s surfaces: the app is approved by an account on the pages", SurfaceMobile, SurfaceIdentity,
+			SurfacePages)
+	}
+	if identity.Enabled(SurfaceMobile) && !ValidMobileIssuer(publicBaseURL) {
+		if get(EnvSurfaces) != "" {
+			return Identity{}, invalid("the %s surface needs a public base URL that is a MobileNativeAuth issuer (https with a host of lower-case letters, "+
+				"digits, hyphens and dots, or http for a loopback host; at most %d characters): every callback names it", SurfaceMobile, MaxMobilePublicBaseURLLength)
+		}
+		// The self-hosted default never refuses to start for the mobile surface: it is left out.
+		identity.Surfaces = slices.DeleteFunc(identity.Surfaces, func(surface Surface) bool { return surface == SurfaceMobile })
+	}
 	if identity.Enabled(SurfaceOperations) {
 		if !identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages) {
 			return Identity{}, invalid("the %s surface needs the %s and %s surfaces: its page proves a step-up through the pages' routes", SurfaceOperations, SurfaceIdentity, SurfacePages)
@@ -472,7 +512,8 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 }
 
 // parseSurfaces reads the surface list: exact generated names, comma-separated, without whitespace or repetition. Official-hosted
-// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages and fleet, not operations) unless listed,
+// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages, fleet and mobile, not operations;
+// mobile only for a base URL that is an issuer) unless listed,
 // so an explicit list pins the surfaces across upgrades.
 func parseSurfaces(value string, mode Mode) ([]Surface, error) {
 	if value == "" {

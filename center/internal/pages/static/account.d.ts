@@ -38,6 +38,7 @@ export function normalizeUserCode(value: unknown): string | null;
 export function displayUserCode(code: string): string;
 export function safeFleetReturn(value: unknown, origin: string, base: string): string | null;
 export function isLoopbackResult(value: unknown): boolean;
+export function isMobileResult(value: unknown, origin: string): boolean;
 export function requestOptions(challenge: unknown): Record<string, unknown>;
 export function creationOptions(challenge: unknown, accountName: string): Record<string, unknown>;
 export function assertionBody(credential: unknown): Record<string, unknown>;

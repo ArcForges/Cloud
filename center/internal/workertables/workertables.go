@@ -111,6 +111,36 @@ export interface PageRoute {
   readonly redirects: boolean;
 }
 
+/**
+ * A native JSON route of the mobile app (AF-CTR-04 part M, MB-3): an exact POST path below the owned /api prefix. The native handler
+ * admits a request only for such a row whose surface is enabled: exactly application/json, no cookie (a request with one is refused),
+ * no Origin or CSRF requirement, no CORS; it forwards no cookie and answers no Set-Cookie and no redirect.
+ */
+export interface NativeRoute {
+  readonly surface: Surface;
+  readonly method: "POST";
+  /** The path without the owned /api prefix. */
+  readonly path: string;
+  /** The exact media type of the body. */
+  readonly requestType: string;
+  readonly responseTypes: readonly string[];
+  readonly maxRequestBytes: number;
+  readonly maxResponseBytes: number;
+}
+
+/**
+ * An apex route of the mobile surface (AF-CTR-04 part M, MB-8, M-13): an exact GET path at the root of the host, outside the /api
+ * prefix, forwarded to the same center path only while its surface is enabled; no cookie, no body, no redirect.
+ */
+export interface ApexRoute {
+  readonly surface: Surface;
+  readonly method: "GET";
+  /** The exact path at the root of the host. */
+  readonly path: string;
+  readonly responseTypes: readonly string[];
+  readonly maxResponseBytes: number;
+}
+
 `
 
 // ErrUnsafeText reports a value that cannot be written as a plain TypeScript string.
@@ -137,6 +167,10 @@ func Render(table routes.WorkerTable) (string, error) {
 		values = append(values, row.Method, row.Path, row.RequestType, string(row.SetCookie), string(row.Kind))
 		values = append(values, row.ResponseTypes...)
 	}
+	for _, row := range append(slices.Clone(table.Native), table.Apex...) {
+		values = append(values, row.Method, row.Path, row.RequestType, string(row.Kind), row.Surface)
+		values = append(values, row.ResponseTypes...)
+	}
 	for _, header := range routes.PageSecurityHeaders() {
 		values = append(values, header.Name, header.Value)
 	}
@@ -149,7 +183,15 @@ func Render(table routes.WorkerTable) (string, error) {
 	// The surfaces come first: the production block (from helloPath to the end) stays byte for byte what the C# generator writes
 	// for the rollback host (GeneratedTablesTests.TheGoCenterProductionTableEqualsTheCSharpRegistrations).
 	text.WriteString("/** The surface names, in registration order; FLAGSHIP_SURFACES lists them comma-separated and exactly. */\n")
-	text.WriteString("export const surfaceNames: readonly Surface[] = [" + joinQuoted(table.Surfaces) + "];\n")
+	if line := "export const surfaceNames: readonly Surface[] = [" + joinQuoted(table.Surfaces) + "];"; len(line) <= 100 {
+		text.WriteString(line + "\n")
+	} else {
+		text.WriteString("export const surfaceNames: readonly Surface[] = [\n")
+		for _, surface := range table.Surfaces {
+			text.WriteString("  " + quote(surface) + ",\n")
+		}
+		text.WriteString("];\n")
+	}
 	text.WriteString("/** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */\n")
 	text.WriteString("export const clientIpHeader = " + quote(strings.ToLower(config.ClientIPHeader)) + ";\n")
 	text.WriteString("/** The headers the Worker sets to the client's country and network (from request.cf) on every surface call. */\n")
@@ -217,6 +259,7 @@ func Render(table routes.WorkerTable) (string, error) {
 	}
 	text.WriteString("];\n\n")
 	pageTable(&text, table)
+	mobileTables(&text, table)
 	text.WriteString("export const helloPath = " + quote(table.HelloPath) + ";\n")
 	text.WriteString("export const healthPath = " + quote(table.HealthPath) + ";\n")
 	text.WriteString("/** The bound of a whole request body of a method that declares no larger one, frame header included. */\n")
@@ -297,6 +340,43 @@ func pageTable(text *strings.Builder, table routes.WorkerTable) {
 	text.WriteString("/** The most characters of the percent-encoded return path in a redirect's fragment. */\n")
 	text.WriteString("export const pageReturnPathBytes = " + strconv.Itoa(routes.PageReturnPathBytes) + ";\n")
 	text.WriteString("\n")
+}
+
+// mobileTables writes the native JSON routes and the apex routes of the mobile surface (AF-CTR-04 part M).
+func mobileTables(text *strings.Builder, table routes.WorkerTable) {
+	types := func(row routes.PageRoute) {
+		if list := joinQuoted(row.ResponseTypes); len("    responseTypes: ["+list+"],") <= 100 {
+			text.WriteString("    responseTypes: [" + list + "],\n")
+		} else {
+			text.WriteString("    responseTypes:\n      [" + list + "],\n")
+		}
+	}
+	text.WriteString("/** The native JSON routes of the mobile app; each is forwarded only while its surface is enabled. */\n")
+	text.WriteString("export const nativeRoutes: readonly NativeRoute[] = [\n")
+	for _, row := range table.Native {
+		text.WriteString("  {\n")
+		text.WriteString("    surface: " + quote(row.Surface) + ",\n")
+		text.WriteString("    method: " + quote(row.Method) + ",\n")
+		text.WriteString("    path: " + quote(row.Path) + ",\n")
+		text.WriteString("    requestType: " + quote(row.RequestType) + ",\n")
+		types(row)
+		text.WriteString("    maxRequestBytes: " + strconv.Itoa(row.MaxRequestBytes) + ",\n")
+		text.WriteString("    maxResponseBytes: " + strconv.Itoa(row.MaxResponseBytes) + ",\n")
+		text.WriteString("  },\n")
+	}
+	text.WriteString("];\n")
+	text.WriteString("/** The apex routes of the mobile surface, at the root of the host; each is forwarded only while its surface is enabled. */\n")
+	text.WriteString("export const apexRoutes: readonly ApexRoute[] = [\n")
+	for _, row := range table.Apex {
+		text.WriteString("  {\n")
+		text.WriteString("    surface: " + quote(row.Surface) + ",\n")
+		text.WriteString("    method: " + quote(row.Method) + ",\n")
+		text.WriteString("    path: " + quote(row.Path) + ",\n")
+		types(row)
+		text.WriteString("    maxResponseBytes: " + strconv.Itoa(row.MaxResponseBytes) + ",\n")
+		text.WriteString("  },\n")
+	}
+	text.WriteString("];\n\n")
 }
 
 func route(text *strings.Builder, row routes.Row, indent string) {

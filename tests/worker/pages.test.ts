@@ -74,7 +74,7 @@ function bindings(
   const env: CloudBindings = {
     SOURCE_REVISION: "candidate",
     ALLOWED_ORIGIN: origin,
-    FLAGSHIP_SURFACES: "identity,pages,operations,fleet",
+    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile",
     CLOUD_CONTAINER: {
       getByName() {
         return {
@@ -200,10 +200,13 @@ test("the generated page table is what the pages' contract names", () => {
   const keys = new Set<string>();
   for (const row of pageRoutes) {
     // The pages surface lives under the account and WebBrowserSession prefixes, the operations surface under its own, the fleet surface
-    // under /connect and /activate (each a page itself).
+    // under /connect and /activate (each a page itself), the mobile surface's pages under /mobile/authorize (AF-CTR-04 part M; its
+    // native and apex rows are the Worker's other tables).
     if (row.surface === "operations") assert(row.path.startsWith("/operations/"), row.path);
     else if (row.surface === "fleet")
       assert(/^\/(?:connect|activate)(?:\/(?:review|decision))?$/u.test(row.path), row.path);
+    else if (row.surface === "mobile")
+      assert(/^\/mobile\/authorize(?:\/(?:review|decision))?$/u.test(row.path), row.path);
     else
       assert(row.path.startsWith("/account/") || row.path.startsWith("/session/v1/web/"), row.path);
     assert(!/[?#%\\ ]|\/\/|\.\.|\/$/u.test(row.path), `canonical: ${row.path}`);
@@ -265,9 +268,12 @@ test("a route belongs to its own surface: the operations page is not the pages' 
     ["GET /operations/grant", "POST /operations/grant/review", "POST /operations/grant/confirm"],
   );
   assert(operations.length < pageRoutes.length);
-  // Every other route is of the pages surface or the fleet surface, and the methods of one path share a surface.
+  // Every other route is of the pages, the fleet or the mobile surface, and the methods of one path share a surface.
   for (const row of pageRoutes.filter((item) => item.surface !== "operations"))
-    assert(row.surface === "pages" || row.surface === "fleet", row.path);
+    assert(
+      row.surface === "pages" || row.surface === "fleet" || row.surface === "mobile",
+      row.path,
+    );
   assert.equal(pageTable.get("/api/operations/grant")?.length, 1);
   for (const flag of ["identity,pages", "pages", "identity", "operations,x"]) {
     const { env, seen, keys } = bindings(() => jsonOk(), { FLAGSHIP_SURFACES: flag });
