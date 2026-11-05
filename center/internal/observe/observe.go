@@ -101,20 +101,21 @@ func MobileOutcomes() map[string][]string {
 
 // ChannelOutcomes is the closed label set of the node channel's events (AF-CTR-05 E1a, Plan C.10): upgrades opened, refused before
 // the upgrade by stage, hellos by outcome, closes by close code (or normal, abnormal), heartbeat deadlines missed, violations by
-// reason, token rebinds, lapse checks that closed or could not decide, and the hub lease's changes. ObserveChannel counts only these
+// reason, token refreshes (rebound, unchanged, over the refresh rate), lapse checks that closed or could not decide, and the hub
+// lease's changes and failed renewals. ObserveChannel counts only these
 // pairs; any other pair is counted as unlisted.
 func ChannelOutcomes() map[string][]string {
 	return map[string][]string{
 		"opened":    {"upgraded"},
 		"refused":   {"request", "lease", "credential", "authorization", "node", "connections", "handshake"},
-		"hello":     {"accepted", "malformed", "signature", "mismatch", "deadline"},
+		"hello":     {"accepted", "malformed", "signature", "mismatch", "deadline", "no_signing_key", "fenced", "node_gone", "unrecorded"},
 		"closed":    {"4401", "4403", "4408", "4409", "4413", "4429", "4500", "4503", "normal", "abnormal"},
 		"heartbeat": {"missed"},
 		"violation": {"too_large", "rate", "write_timeout", "text_frame", "unreadable_frame", "before_hello", "unexpected_frame", "hello_without_nonce",
 			"hello_malformed", "hello_signature", "hello_mismatch"},
-		"token": {"rebound"},
+		"token": {"rebound", "unchanged", "rate"},
 		"lapse": {"closed", "undecided"},
-		"lease": {"acquired", "held_elsewhere", "lost", "released"},
+		"lease": {"acquired", "held_elsewhere", "renewal_failed", "lost", "released"},
 	}
 }
 
@@ -337,7 +338,15 @@ func (m *Metrics) WritePrometheus(writer io.Writer) error {
 	return err
 }
 
-// Summary is the request counts by method and outcome, for the periodic metrics log line.
+// Summary keys of the two gauges (AF-CTR-05 E1a, review B B-2): the hosted Container has no admin listener, so the periodic metrics
+// log line is the operator's only view of them.
+const (
+	SummaryDefinitionsSuperseded = "definitions superseded"
+	SummaryChannelConnected      = "channel connected_nodes"
+)
+
+// Summary is the request counts by method and outcome, the surfaces' event counts and the two gauges, for the periodic metrics log
+// line.
 func (m *Metrics) Summary() map[string]uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -360,6 +369,8 @@ func (m *Metrics) Summary() map[string]uint64 {
 	for key, count := range m.channel {
 		summary["channel "+key.event+" "+key.outcome] += count
 	}
+	summary[SummaryDefinitionsSuperseded] = uint64(m.superseded)
+	summary[SummaryChannelConnected] = uint64(max(m.connected, 0))
 	return summary
 }
 

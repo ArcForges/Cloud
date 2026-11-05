@@ -11,7 +11,8 @@
 //   - Response side: the Container's 101 is returned unchanged, the Response object itself with its WebSocket (PN-2; the Durable
 //     Object proxies the socket and stays awake while it is open). Any other reply is the center's refusal before the upgrade: kept
 //     only with one of the statuses the center answers and only its JSON body and the headers that carry its reason
-//     (ArcForges-Refusal, Retry-After; PN-3); anything else is the Worker's own 503.
+//     (ArcForges-Refusal, Retry-After; PN-3); anything else is the Worker's own 503. The Worker's own 503, 504 and 499 carry the fixed
+//     reason RESOURCE/overloaded in the refusal header too.
 import { newCorrelationId, traceparentFor } from "./correlation.ts";
 import { edgeClientKey } from "./edge-limit.ts";
 import { canceledError, deadlineError } from "./errors.ts";
@@ -23,7 +24,10 @@ import {
   clientCountryHeader,
   clientIpHeader,
   edgeRateLimitPeriodSeconds,
+  upgradeRefusalBytes,
   upgradeRefusalHeader,
+  upgradeRefusalStatuses,
+  upgradeRefusalValuePattern,
   type UpgradeRoute,
   upgradeRoutes,
 } from "../tables/center-tables.generated.ts";
@@ -36,19 +40,23 @@ export const upgradeTable: ReadonlyMap<string, UpgradeRoute> = new Map(
   upgradeRoutes.map((route) => [`/api${route.path}`, route]),
 );
 
-/** The statuses of the center's refusals before an upgrade; any other non-101 reply becomes the Worker's 503. */
-export const upgradeRefusalStatuses: readonly number[] = [400, 401, 403, 404, 405, 429, 503];
-
-/** The largest refusal body the Worker forwards (an ArcError as JSON). */
-export const upgradeRefusalBytes = 16384;
-
 /** The headers a refusal before the upgrade may keep. */
 const refusalHeaders = [upgradeRefusalHeader, "retry-after"];
+
+/** The reason the Worker's own unavailability carries (its 503, its deadline's 504, a cancel's 499): retry after a short time. */
+const overloadedReason = "RESOURCE/overloaded";
 
 /** A refusal of the Worker itself, with its closed reason in the refusal header (PN-3). */
 function refuse(status: number, reason: string, message: string): Response {
   const refused = reject(status, message);
   refused.headers.set(upgradeRefusalHeader, reason);
+  return refused;
+}
+
+/** The Worker's own 503, with its reason in the refusal header too (review B N-5: a client sees only the status and the headers). */
+function unavailable(): Response {
+  const refused = containerUnavailable(false);
+  refused.headers.set(upgradeRefusalHeader, overloadedReason);
   return refused;
 }
 
@@ -144,9 +152,9 @@ export async function handleUpgradeRequest(
     if (reply.status === 101) return reply;
     return await refusalOf(reply, signal);
   } catch (error) {
-    if (error === deadlineError) return reject(504, deadlineError.message);
-    if (error === canceledError) return reject(499, canceledError.message);
-    return containerUnavailable(false);
+    if (error === deadlineError) return refuse(504, overloadedReason, deadlineError.message);
+    if (error === canceledError) return refuse(499, overloadedReason, canceledError.message);
+    return unavailable();
   } finally {
     clearTimeout(deadline);
     request.signal.removeEventListener("abort", cancel);
@@ -158,13 +166,13 @@ async function refusalOf(reply: Response, signal: AbortSignal): Promise<Response
   const type = reply.headers.get("content-type");
   if (!upgradeRefusalStatuses.includes(reply.status) || type !== "application/json") {
     void reply.body?.cancel().catch(() => {});
-    return containerUnavailable(false);
+    return unavailable();
   }
   let body: Uint8Array<ArrayBuffer>;
   try {
     body = await readBytes(reply.body, upgradeRefusalBytes, signal);
   } catch {
-    return containerUnavailable(false);
+    return unavailable();
   }
   const headers = new Headers({
     "content-type": "application/json",
@@ -173,7 +181,7 @@ async function refusalOf(reply: Response, signal: AbortSignal): Promise<Response
   });
   for (const name of refusalHeaders) {
     const value = reply.headers.get(name);
-    if (value !== null && /^[\x21-\x7e]{1,128}$/u.test(value)) headers.set(name, value);
+    if (value !== null && upgradeRefusalValuePattern.test(value)) headers.set(name, value);
   }
   return new Response(body, { status: reply.status, headers });
 }

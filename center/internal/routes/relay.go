@@ -34,6 +34,17 @@ const (
 // time also carries Retry-After in whole seconds. The body is the same refusal as a JSON ArcError ({"error": ...}).
 const RefusalHeader = "ArcForges-Refusal"
 
+// The Worker's rules for a refusal of the upgrade it forwards (Plan PN-3; the Worker's generated table states them): only these
+// statuses, a JSON body of at most UpgradeRefusalBytes, and the reason headers (RefusalHeader, Retry-After) only with a value of
+// visible ASCII of at most 128 characters. Any other reply becomes the Worker's own 503.
+const (
+	UpgradeRefusalBytes        = 16384
+	UpgradeRefusalValuePattern = `^[\x21-\x7e]{1,128}$`
+)
+
+// UpgradeRefusalStatuses are the statuses of the center's refusals before an upgrade (hub.ServeHTTP answers no other).
+func UpgradeRefusalStatuses() []int { return []int{400, 401, 403, 404, 405, 429, 503} }
+
 // UpgradeRoute is one WebSocket upgrade route (AF-CTR-05 E1a): an exact GET path that the Worker passes through to the center as an
 // upgrade only (Upgrade: websocket, the route's subprotocol, a native bearer of the edge's shape, no query, no body, no cookie), and
 // whose 101 it returns unchanged (Plan PN-2). The Worker's generated table (upgradeRoutes) and the center's ingress both read these rows.

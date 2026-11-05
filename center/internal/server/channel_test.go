@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"crypto/x509"
 	"encoding/base64"
@@ -25,6 +26,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/hub"
 	"github.com/ArcForges/Cloud/center/internal/nodetest"
 	"github.com/ArcForges/Cloud/center/internal/observe"
+	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
@@ -208,6 +210,51 @@ func relayCenter(t *testing.T, db *dbtest.Database, logs io.Writer, keys ...conf
 	return center
 }
 
+// TestAFailedHandshakeGivesTheNodeSlotBack is review B N-6: the node slot is taken before websocket.Accept, so an upgrade whose
+// handshake fails there (here: a browser Origin the library refuses) moves its connection back to a request slot; its HTTP/1.1
+// connection stays open, and the one node slot is free for a node's channel.
+func TestAFailedHandshakeGivesTheNodeSlotBack(t *testing.T) {
+	center, db, url := channelCenter(t, 4, 1, channelSettings())
+	_, access, _ := enrollNode(t, db)
+	connection, err := net.Dial("tcp", strings.TrimPrefix(url, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	request := "GET /fleet/v1/node HTTP/1.1\r\nHost: " + strings.TrimPrefix(url, "http://") + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+		"Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + base64.StdEncoding.EncodeToString([]byte("the sample nonce")) + "\r\nSec-WebSocket-Protocol: arcforges.relay.v1\r\n" +
+		"Origin: https://elsewhere.example\r\nAuthorization: Bearer " + access + "\r\n\r\n"
+	if _, err := connection.Write([]byte(request)); err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.SetReadDeadline(time.Now().Add(5 * time.Second))
+	response, err := http.ReadResponse(bufio.NewReader(connection), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode == http.StatusSwitchingProtocols || response.Close {
+		t.Fatalf("the handshake with a foreign Origin: %d (close %v)", response.StatusCode, response.Close)
+	}
+	if center.Metrics.ChannelCount("refused", "handshake") != 1 {
+		t.Fatal("the failed handshake was not counted")
+	}
+	node, second, enrolled := enrollNode(t, db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	channel, err := nodetest.Dial(ctx, url, nodetest.DialOptions{Bearer: second})
+	if err != nil {
+		t.Fatalf("a channel while a failed handshake's connection is still open: %v", err)
+	}
+	defer func() { _ = channel.WS.CloseNow() }()
+	if err := channel.Hello(ctx, node, enrolled.InstallationID, "https://center.example.test/api"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := channel.Accept(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestStartRefusesAMismatchedOrMissingCommandKey is E1-15 (CTR5-SIG-02, CTR5-KEY-01, moved into E1a): a center that serves the relay
 // surface starts only with a valid command key whose private half it loaded. A loaded key that no valid row names refuses the start, as
 // does a loaded key whose row registers another public half (the error names the binding and the kid, never the key); with its row
@@ -235,6 +282,26 @@ func TestStartRefusesAMismatchedOrMissingCommandKey(t *testing.T) {
 	center := relayCenter(t, db, io.Discard, registered)
 	if err := center.CheckCommandKeys(t.Context()); err != nil {
 		t.Fatalf("the matching key: %v", err)
+	}
+	// A successor row of the same binding whose not_before lies ahead and whose public half is another key's (review A N-6): the
+	// loaded key is not that row's, so the start refuses before a rotation could adopt it.
+	now := time.Now()
+	successor := "test-" + platform.NewID().String()[:12]
+	tx, err := db.Migration.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := platform.RegisterKey(t.Context(), tx, platform.SigningKey{KID: successor, Purpose: platform.CommandSigning, Algorithm: "ES256",
+		PublicKey: other.PublicKey(), SecretBinding: "ARCFORGES_CENTER_KEY_MAIN", NotBefore: now.Add(time.Hour), NotAfter: now.Add(60 * 24 * time.Hour)}, now); err != nil {
+		_ = tx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	err = relayCenter(t, db, io.Discard, registered).CheckCommandKeys(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "ARCFORGES_CENTER_KEY_MAIN") || !strings.Contains(err.Error(), successor) {
+		t.Fatalf("a future row of the binding with another public half: %v", err)
 	}
 }
 

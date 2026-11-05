@@ -275,10 +275,12 @@ fleet](center-fleet.md#node-channel)):
 - **`fleet.hub_lease`:** the fenced singleton lease of the hub (Plan PB-5, Q22): `holder` (a random ID per process), `fence` (at least
   1), `acquired_at`, `renewed_at`, `expires_at`. A process takes the row when there is none (fence 1), or when it expired or was
   released (`expires_at` at or before now; the fence rises by one); it renews it every 10 s for 30 s and releases it at a graceful stop
-  (`expires_at` = now). The trigger refuses a fence that falls, a change of holder without a higher fence and every deletion. Every hub
-  write (the presence columns, and the clearing of a previous holder's connections at each acquisition) carries
-  `EXISTS (SELECT 1 FROM fleet.hub_lease WHERE fence = <its fence> AND expires_at > now)`, so a process that lost the lease, or an
-  older epoch of the same process, writes nothing. It never uses a session advisory lock, which the transaction-mode pooler of the
+  (`expires_at` = now). Every instant is the database's clock (`clock_timestamp()`), never the process's. The trigger refuses a fence
+  that falls, a change of holder without a higher fence and every deletion. Every presence write (the presence columns, and the
+  clearing of a previous holder's connections at each acquisition) carries
+  `EXISTS (SELECT 1 FROM fleet.hub_lease WHERE fence = <its fence> AND expires_at > clock_timestamp())`, so a process that lost the
+  lease, or an older epoch of the same process, records no presence; the accept's write tells a fence that is not live from a node row
+  that is not (one statement, `hub.ErrFenced` or `hub.ErrNodeGone`). The channel's audit appends are not fenced. It never uses a session advisory lock, which the transaction-mode pooler of the
   runtime role does not keep.
 
 The runtime role has SELECT, INSERT and UPDATE on `fleet.hub_lease`, never DELETE (`RuntimeGrants`). The constraints, the trigger and

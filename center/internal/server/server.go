@@ -375,10 +375,15 @@ func (c *Center) CheckCommandKeys(ctx context.Context) error {
 	}
 	check, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var valid []platform.SigningKey
+	var valid, named []platform.SigningKey
+	now := time.Now()
 	err := c.Store.InTx(check, "read the command keys", store.TxOptions{ReadOnly: true, Timeout: 10 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		valid, err = platform.ValidKeys(ctx, tx, platform.CommandSigning, time.Now())
+		if valid, err = platform.ValidKeys(ctx, tx, platform.CommandSigning, now); err != nil {
+			return err
+		}
+		// Every row that is neither retired nor expired, a successor whose not_before lies ahead included (review A N-6).
+		named, err = platform.PublishedKeys(ctx, tx, platform.CommandSigning, now)
 		return err
 	})
 	if err != nil {
@@ -388,16 +393,18 @@ func (c *Center) CheckCommandKeys(ctx context.Context) error {
 	for _, key := range c.Config.CommandKeys {
 		loaded[key.Binding] = key.PublicKey()
 	}
-	var usable []string
-	for _, key := range valid {
-		public, held := loaded[key.SecretBinding]
-		switch {
-		case !held:
-			continue
-		case !bytes.Equal(public, key.PublicKey):
+	// A loaded key must be the public half of every row that names its binding, valid now or not yet valid, so a rotation across a
+	// not_before (E1b) never adopts a private half its row does not register.
+	for _, key := range named {
+		if public, held := loaded[key.SecretBinding]; held && !bytes.Equal(public, key.PublicKey) {
 			return fmt.Errorf("the command key loaded from %s is not the public key the signing key %s registers", key.SecretBinding, key.KID)
 		}
-		usable = append(usable, key.KID)
+	}
+	var usable []string
+	for _, key := range valid {
+		if _, held := loaded[key.SecretBinding]; held {
+			usable = append(usable, key.KID)
+		}
 	}
 	if len(usable) == 0 {
 		bindings := make([]string, 0, len(loaded))
@@ -510,7 +517,8 @@ func (c *Center) recordDefinitions(ctx context.Context) error {
 
 // definitionsSuperseded reports whether the deploy's current definitions fact names another version than this revision's (AF-CTR-05
 // E0 C-N2): such a revision neither recomputes nor writes an entitlement and answers RESOURCE/overloaded where it would, so the gauge
-// arcforges_center_definitions_superseded makes it visible beyond its one start-up warning. A center that records no fact, and a
+// arcforges_center_definitions_superseded makes it visible beyond its one start-up warning: at every /metrics scrape, and on every
+// tick of the periodic metrics log line (the hosted Container's only view). A center that records no fact, and a
 // store that does not answer within two seconds, report false.
 func (c *Center) definitionsSuperseded(ctx context.Context) bool {
 	if !c.recordsDefinitions() {
@@ -934,6 +942,8 @@ func (c *Center) logReadiness(ctx context.Context) {
 	c.Logger.Warn("store not ready", "components", readiness.Components)
 }
 
+// logMetrics writes the periodic metrics log line. The superseded gauge is evaluated on every tick first (review B B-2): the hosted
+// Container serves no /metrics, so this line is where its operator sees a superseded revision and the node channel's connections.
 func (c *Center) logMetrics(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -942,6 +952,7 @@ func (c *Center) logMetrics(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			c.Metrics.SetDefinitionsSuperseded(c.definitionsSuperseded(ctx))
 			c.Logger.Info("metrics", "requests", c.Metrics.Summary())
 		}
 	}

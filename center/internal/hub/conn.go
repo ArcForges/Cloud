@@ -5,6 +5,7 @@ package hub
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -42,8 +43,14 @@ type conn struct {
 	cancel context.CancelFunc
 
 	mu            sync.Mutex
-	nonce         []byte // the one-use hello nonce; nil once spent or void
+	nonce         []byte    // the one-use hello nonce; nil once spent or void
+	helloDeadline time.Time // the nonce is void from this instant on
+	proved        bool      // the hello's proof held in time: the hello deadline no longer applies
 	accepted      bool
+	recorded      bool     // the accept's presence write succeeded: the close records the node offline
+	tokenDigest   [32]byte // the SHA-256 of the access token the connection is bound to
+	refreshes     int      // the TokenRefresh frames the connection sent
+	lastRefresh   time.Time
 	accessExpires time.Time
 	lastInbound   time.Time
 	lastPresence  time.Time
@@ -52,6 +59,7 @@ type conn struct {
 	queue       chan []byte
 	queuedBytes atomic.Int64
 	closing     atomic.Bool
+	lapsing     atomic.Bool // the lapse close is claimed: it is audited once
 	closeOnce   sync.Once
 	closeCode   uint32
 	closeReason string
@@ -75,11 +83,11 @@ func (c *conn) run() {
 		return
 	}
 	now := c.hub.clock()
+	deadline := now.Add(c.hub.settings.HelloDeadline)
 	c.mu.Lock()
-	c.nonce, c.lastInbound = nonce, now
+	c.nonce, c.helloDeadline, c.lastInbound = nonce, deadline, now
 	c.mu.Unlock()
 	go c.writer()
-	deadline := now.Add(c.hub.settings.HelloDeadline)
 	if err := c.send(func(seq uint64) ([]byte, error) { return c.hub.codec.Challenge(seq, nonce, c.connectionID, deadline) }); err != nil {
 		c.closeWith(CloseShuttingDown, "internal")
 	}
@@ -178,7 +186,7 @@ func (c *conn) handle(frame inbound, now time.Time) bool {
 		c.heartbeat(now)
 		return true
 	case frame.kind == inboundTokenRefresh:
-		return c.tokenRefresh(frame.token)
+		return c.tokenRefresh(frame.token, now)
 	case frame.kind == inboundClose:
 		c.closeWith(1000, "node_closed")
 		return false
@@ -192,14 +200,24 @@ func (c *conn) handle(frame inbound, now time.Time) bool {
 
 // hello checks the node's proof (PB-4, D0-B2) and, when it holds, makes this connection the node's. The signature is verified
 // against the key registered for the bearer credential's installation, before and apart from the check that the hello names the
-// credential's node and installation; the nonce is spent by the first hello whatever its outcome.
+// credential's node and installation; the nonce is spent by the first hello whatever its outcome, and a hello at or after the hello
+// deadline is refused by the nonce itself (4408), whatever the supervisor's tick. A proved hello then re-reads the credential (a
+// revocation committed between the admission and the connection's tracking reaches no revocation hook), finds the signing kids
+// (never an empty list: 4500 no_signing_key), and records the node online under the connection's fence before the connection becomes
+// the node's: a fence that is no longer live closes 4500 lease_lost, a node row that is no longer live 4401 revoked, a store that does
+// not answer 4500 unavailable, each without ChannelAccepted and without displacing the node's older connection.
 func (c *conn) hello(claimed hello, now time.Time) bool {
 	c.mu.Lock()
-	nonce := c.nonce
+	nonce, deadline := c.nonce, c.helloDeadline
 	c.nonce = nil
 	c.mu.Unlock()
 	if nonce == nil {
 		c.violation("hello_without_nonce")
+		return false
+	}
+	if !now.Before(deadline) {
+		c.hub.metrics.ObserveChannel("hello", "deadline")
+		c.closeWith(CloseDeadline, "hello_deadline")
 		return false
 	}
 	if claimed.Malformed || len(nonce) != NonceBytes {
@@ -218,21 +236,41 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 		c.violation("hello_mismatch")
 		return false
 	}
+	c.mu.Lock()
+	c.proved = true
+	c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(c.ctx, presenceTimeout)
+	defer cancel()
+	// The connection is tracked (the revocation hooks see it) since before this read, so no revocation falls between them.
+	c.recheckSession(ctx)
 	if c.closing.Load() {
 		return false
 	}
-	c.mu.Lock()
-	c.accepted, c.lastPresence = true, now
-	c.mu.Unlock()
-	older, ok := c.hub.accept(c)
-	if !ok {
-		c.closeWith(CloseShuttingDown, "shutting_down")
+	kids := c.hub.signingKids(ctx, now)
+	if len(kids) == 0 {
+		c.hub.metrics.ObserveChannel("hello", "no_signing_key")
+		c.hub.logger.Warn("a node's channel was closed: no command key the center holds is valid")
+		c.closeWith(CloseShuttingDown, "no_signing_key")
 		return false
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, presenceTimeout)
-	defer cancel()
-	if err := c.hub.markOnline(ctx, c.enrollmentID, c.connectionID, c.fence, now); err != nil {
+	older, err := c.register(ctx, now)
+	switch {
+	case errors.Is(err, ErrFenced):
+		c.hub.metrics.ObserveChannel("hello", "fenced")
+		c.closeWith(CloseShuttingDown, "lease_lost")
+		return false
+	case errors.Is(err, ErrNodeGone):
+		c.hub.metrics.ObserveChannel("hello", "node_gone")
+		c.closeWith(CloseCredential, "revoked")
+		return false
+	case errors.Is(err, errNotAccepted):
+		c.closeWith(CloseShuttingDown, "shutting_down")
+		return false
+	case err != nil:
+		c.hub.metrics.ObserveChannel("hello", "unrecorded")
 		c.hub.logger.Warn("a node's channel could not be recorded", "error", err.Error())
+		c.closeWith(CloseShuttingDown, "unavailable")
+		return false
 	}
 	payload := map[string]any{"nodeId": c.nodeID.String(), "connectionId": c.connectionID.String(), "replaced": older != nil}
 	if older != nil {
@@ -242,12 +280,32 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 	c.hub.metrics.ObserveChannel("hello", "accepted")
 	limits := Limits{MaxFrameBytes: c.hub.settings.MaxFrameBytes, MaxInFlightCalls: c.hub.settings.MaxInFlightCalls, Heartbeat: c.hub.settings.Heartbeat,
 		HeartbeatDeadline: c.hub.settings.HeartbeatDeadline, MaxRelayNonces: c.hub.settings.MaxRelayNonces}
-	kids := c.hub.signingKids(ctx, now)
 	if err := c.send(func(seq uint64) ([]byte, error) { return c.hub.codec.Accepted(seq, c.connectionID, limits, kids) }); err != nil {
 		c.closeWith(CloseShuttingDown, "internal")
 		return false
 	}
 	return true
+}
+
+// errNotAccepted is a proved connection the hub did not take: it is stopping, or the connection is closing.
+var errNotAccepted = errors.New("the hub did not accept the connection")
+
+// register records the node online under the connection's fence and then makes the connection the node's (an older one closes 4409),
+// as one step per node, so the row names the connection the hub holds. A refused write registers nothing and displaces nothing.
+func (c *conn) register(ctx context.Context, now time.Time) (*conn, error) {
+	unlock := c.hub.lockNode(c.nodeID)
+	defer unlock()
+	if err := c.hub.markOnline(ctx, c.enrollmentID, c.connectionID, c.fence, now); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.recorded, c.accepted, c.lastPresence = true, true, now
+	c.mu.Unlock()
+	older, ok := c.hub.accept(c)
+	if !ok {
+		return nil, errNotAccepted
+	}
+	return older, nil
 }
 
 // heartbeat records the node's heartbeat in its presence, at most once per presence interval.
@@ -269,8 +327,34 @@ func (c *conn) heartbeat(now time.Time) {
 }
 
 // tokenRefresh rebinds the connection to a new access token (CTR5-HUB-07): a valid token of the same session and installation; then
-// the credential and the gate are re-checked.
-func (c *conn) tokenRefresh(token string) bool {
+// the credential and the gate are re-checked. A refresh costs store work, so it has its own bound before any of it (review A B-1): the
+// first is free, and each later one comes at least TokenRefreshInterval after the last one admitted, else the connection closes 4429
+// token_refresh_rate; the token the connection is already bound to is answered without the store (and without the re-checks, which
+// the periodic SessionRecheck and LapseRecheck still make).
+func (c *conn) tokenRefresh(token string, now time.Time) bool {
+	digest := sha256.Sum256([]byte(token))
+	c.mu.Lock()
+	limited := c.refreshes > 0 && now.Sub(c.lastRefresh) < c.hub.settings.TokenRefreshInterval
+	c.refreshes++
+	if !limited {
+		c.lastRefresh = now
+	}
+	unchanged, boundExpires := digest == c.tokenDigest, c.accessExpires
+	c.mu.Unlock()
+	if limited {
+		c.hub.metrics.ObserveChannel("token", "rate")
+		c.closeWith(CloseRateLimited, "token_refresh_rate")
+		return false
+	}
+	if unchanged {
+		// The token the connection is bound to: nothing to rebind, and its expiry is known here.
+		if !now.Before(boundExpires) {
+			c.closeWith(CloseCredential, "token_refused")
+			return false
+		}
+		c.hub.metrics.ObserveChannel("token", "unchanged")
+		return true
+	}
 	ctx, cancel := context.WithTimeout(c.ctx, presenceTimeout)
 	defer cancel()
 	caller, expires, err := c.hub.verifier.VerifyNative(ctx, token)
@@ -282,6 +366,11 @@ func (c *conn) tokenRefresh(token string) bool {
 		// The store did not answer: the connection keeps its current token until the next refresh or its expiry.
 		c.hub.logger.Warn("a channel's token refresh could not be checked", "error", err.Error())
 		return true
+	case caller == nil && c.barred(ctx):
+		// The verifier admits no account that may no longer sign in; its standing tells that apart from an unknown token (4403, as
+		// the periodic re-check answers it).
+		c.closeWith(CloseRefused, "account_state")
+		return false
 	case caller == nil || caller.Scope != "node":
 		c.closeWith(CloseCredential, "token_refused")
 		return false
@@ -304,12 +393,18 @@ func (c *conn) tokenRefresh(token string) bool {
 		return false
 	}
 	c.mu.Lock()
-	c.accessExpires = expires
+	c.accessExpires, c.tokenDigest = expires, digest
 	c.mu.Unlock()
 	c.hub.metrics.ObserveChannel("token", "rebound")
 	c.recheckSession(ctx)
 	c.recheckLapse(ctx)
 	return !c.closing.Load()
+}
+
+// barred reports whether the connection's session belongs to an account that may no longer sign in.
+func (c *conn) barred(ctx context.Context) bool {
+	standing, _, err := c.hub.verifier.Recheck(ctx, c.sessionID)
+	return err == nil && standing == session.Barred
 }
 
 // supervise sends the heartbeats and enforces the deadlines and the periodic checks.
@@ -330,10 +425,10 @@ func (c *conn) supervise(helloDeadline time.Time) {
 		}
 		now := c.hub.clock()
 		c.mu.Lock()
-		accepted, lastInbound, expires := c.accepted, c.lastInbound, c.accessExpires
+		accepted, proved, lastInbound, expires := c.accepted, c.proved, c.lastInbound, c.accessExpires
 		c.mu.Unlock()
 		if !accepted {
-			if !now.Before(helloDeadline) {
+			if !proved && !now.Before(helloDeadline) {
 				// The nonce is void at the hello deadline.
 				c.mu.Lock()
 				c.nonce = nil
@@ -405,6 +500,9 @@ func (c *conn) recheckLapse(ctx context.Context) {
 		return
 	case decision.Err != nil:
 		c.hub.metrics.ObserveChannel("lapse", "undecided")
+		return
+	case !c.lapsing.CompareAndSwap(false, true):
+		// The supervisor and a refresh can both find the lapse: the first claims the close, so it is audited once (review A N-7).
 		return
 	}
 	c.hub.metrics.ObserveChannel("lapse", "closed")
@@ -534,13 +632,15 @@ func (c *conn) finish() {
 	ctx, cancel := context.WithTimeout(context.Background(), presenceTimeout)
 	defer cancel()
 	c.mu.Lock()
-	accepted := c.accepted
+	accepted, recorded := c.accepted, c.recorded
 	c.nonce = nil
 	c.mu.Unlock()
-	if accepted {
+	if recorded {
 		if err := c.hub.markOffline(ctx, c.enrollmentID, c.connectionID, c.fence, now); err != nil && !errors.Is(err, ErrFenced) {
 			c.hub.logger.Warn("the close of a node's channel could not be recorded", "error", err.Error())
 		}
+	}
+	if accepted {
 		c.audit(ctx, "fleet.channel.closed", c.closeReason, map[string]any{"connectionId": c.connectionID.String(), "code": c.closeCode,
 			"reason": c.closeReason})
 	}

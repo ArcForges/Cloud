@@ -37,11 +37,18 @@ func (c *clock) Advance(by time.Duration) {
 	c.mu.Unlock()
 }
 
+// expireLease ends the live lease by the database's clock, as the time to live passing would (the lease's instants are the
+// database's, so a test moves the row, not a clock).
+func expireLease(t *testing.T, db *dbtest.Database) {
+	t.Helper()
+	db.Exec("UPDATE fleet.hub_lease SET expires_at = acquired_at, renewed_at = acquired_at")
+}
+
 // TestASecondHubOnTheSameDatabaseRefusesToStart is E1-21 (Plan CTR5-HUB-05 as amended by PB-5 and Q22; EVIDENCE: REAL PostgreSQL, the
 // runtime role's privileges): one hub per database. While hub A holds a live lease, hub B's acquisition is refused (it serves no
 // channel); a lease that expired (a killed center) is taken over by B with a higher fence, and A's renewal then fails, so A knows it
 // lost it; a released lease (a graceful stop) is taken over at once; and a fenced write names the lease's live fence only, so a write of
-// an older epoch, even by the same process after it took the lease again, is refused.
+// an older epoch, even by the same process after it took the lease again, is refused. Every expiry is the database's clock.
 func TestASecondHubOnTheSameDatabaseRefusesToStart(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()
@@ -59,16 +66,19 @@ func TestASecondHubOnTheSameDatabaseRefusesToStart(t *testing.T) {
 		t.Fatal("B holds a fence it was refused")
 	}
 	// A renews within its time to live; B still cannot take it.
-	at.Advance(20 * time.Second)
 	if renewed, err := a.Renew(ctx); err != nil || !renewed {
 		t.Fatalf("A's renewal: %v %v", renewed, err)
 	}
-	at.Advance(20 * time.Second)
 	if _, err = b.Acquire(ctx); !errors.Is(err, ErrLeaseHeld) {
 		t.Fatalf("B within A's renewed lease: %v", err)
 	}
+	// A process whose own clock runs far ahead still cannot take the live lease: the expiry is the database's (review B N-2).
+	ahead := NewLease(db.Runtime, platform.NewID(), 30*time.Second, func() time.Time { return time.Now().Add(time.Hour) })
+	if _, err = ahead.Acquire(ctx); !errors.Is(err, ErrLeaseHeld) {
+		t.Fatalf("a process whose clock runs ahead: %v", err)
+	}
 	// A stops renewing (it was killed): after the time to live B takes over with a higher fence, and A's renewal fails.
-	at.Advance(31 * time.Second)
+	expireLease(t, db)
 	second, err := b.Acquire(ctx)
 	if err != nil || second != first+1 {
 		t.Fatalf("B's takeover after the expiry: %d %v", second, err)
@@ -87,7 +97,7 @@ func TestASecondHubOnTheSameDatabaseRefusesToStart(t *testing.T) {
 	if err != nil || third != second+1 {
 		t.Fatalf("A's takeover after B released it: %d %v", third, err)
 	}
-	// The fence of every hub write: only the live fence writes; B's fence, and A's own earlier fence, are refused.
+	// The fence of every presence write: only the live fence writes; B's fence, and A's own earlier fence, are refused.
 	h := &Hub{db: db.Runtime, lease: a}
 	enrollment := seedNode(t, db)
 	for fence, want := range map[int64]error{first: ErrFenced, second: ErrFenced, third: nil} {
@@ -96,12 +106,86 @@ func TestASecondHubOnTheSameDatabaseRefusesToStart(t *testing.T) {
 		}
 	}
 	// A lease that expired refuses even its own live fence's writes.
-	at.Advance(31 * time.Second)
+	expireLease(t, db)
 	if err := h.markOnline(ctx, enrollment, platform.NewID(), third, at.Now()); !errors.Is(err, ErrFenced) {
 		t.Errorf("a write under an expired lease: %v", err)
 	}
 	if n := db.Count("SELECT count(*) FROM fleet.hub_lease"); n != 1 {
 		t.Fatalf("the lease is one row: %d", n)
+	}
+}
+
+// TestTheAcceptWriteTellsAStaleFenceFromAGoneNode (review B B-1): the accept's presence write refuses a fence that is not live with
+// ErrFenced and a live fence over a revoked node row with ErrNodeGone, so the hub closes the first 4500 lease_lost and the second 4401.
+func TestTheAcceptWriteTellsAStaleFenceFromAGoneNode(t *testing.T) {
+	db := dbtest.New(t)
+	ctx := context.Background()
+	lease := NewLease(db.Runtime, platform.NewID(), 30*time.Second, nil)
+	fence, err := lease.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Hub{db: db.Runtime, lease: lease}
+	enrollment := seedNode(t, db)
+	if err := h.markOnline(ctx, enrollment, platform.NewID(), fence+1, time.Now()); !errors.Is(err, ErrFenced) {
+		t.Fatalf("a fence that is not live: %v", err)
+	}
+	db.Exec("UPDATE fleet.node SET revoked_at = now(), revoke_reason = 1, rev = rev + 1 WHERE enrollment_id = '" + enrollment.String() + "'")
+	if err := h.markOnline(ctx, enrollment, platform.NewID(), fence, time.Now()); !errors.Is(err, ErrNodeGone) {
+		t.Fatalf("a live fence over a revoked node: %v", err)
+	}
+	expireLease(t, db)
+	if err := h.markOnline(ctx, enrollment, platform.NewID(), fence, time.Now()); !errors.Is(err, ErrFenced) {
+		t.Fatalf("an expired lease over a revoked node: %v", err)
+	}
+}
+
+// TestAClaimWhoseRenewalsFailLapsesLocally (review B B-1): the claim keeps a local expiry, the time to live less a sixth after the start
+// of its last successful acquisition or renewal. A renewal that errors leaves it where it was, so once the process's own clock passes
+// it the claim holds no fence (Fence false, Lapse true once), even though the database's row still names it.
+func TestAClaimWhoseRenewalsFailLapsesLocally(t *testing.T) {
+	db := dbtest.New(t)
+	at := &clock{now: time.Now()}
+	lease := NewLease(db.Runtime, platform.NewID(), 30*time.Second, at.Now)
+	if _, err := lease.Acquire(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	at.Advance(20 * time.Second)
+	failing, cancel := context.WithCancel(t.Context())
+	cancel()
+	if renewed, err := lease.Renew(failing); err == nil || renewed {
+		t.Fatalf("a renewal over a store that does not answer: %v %v", renewed, err)
+	}
+	if _, held := lease.Fence(); !held || lease.Lapse() {
+		t.Fatal("the claim lapsed before its local expiry")
+	}
+	at.Advance(5 * time.Second)
+	if _, held := lease.Fence(); held {
+		t.Fatal("the claim still holds a fence past its local expiry")
+	}
+	if !lease.Lapse() || lease.Lapse() {
+		t.Fatal("the lapse of the claim is not reported exactly once")
+	}
+	if renewed, err := lease.Renew(t.Context()); err != nil || renewed {
+		t.Fatalf("a lapsed claim renewed: %v %v", renewed, err)
+	}
+	// A successful renewal moves the local expiry: a fresh claim renewed at 20 s holds until 45 s.
+	fresh := NewLease(db.Runtime, platform.NewID(), 30*time.Second, at.Now)
+	expireLease(t, db)
+	if _, err := fresh.Acquire(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	at.Advance(20 * time.Second)
+	if renewed, err := fresh.Renew(t.Context()); err != nil || !renewed {
+		t.Fatalf("the fresh claim's renewal: %v %v", renewed, err)
+	}
+	at.Advance(24 * time.Second)
+	if _, held := fresh.Fence(); !held {
+		t.Fatal("the renewal did not move the local expiry")
+	}
+	at.Advance(time.Second)
+	if _, held := fresh.Fence(); held {
+		t.Fatal("the renewed claim holds past its local expiry")
 	}
 }
 

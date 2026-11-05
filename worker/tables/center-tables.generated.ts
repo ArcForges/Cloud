@@ -1135,6 +1135,12 @@ export const upgradeRoutes: readonly UpgradeRoute[] = [
 ];
 /** The header of a refused upgrade that names its closed reason, <CATEGORY>/<code> (Plan PN-3). */
 export const upgradeRefusalHeader = "arcforges-refusal";
+/** The statuses of the center's refusals before an upgrade; any other non-101 reply becomes the Worker's 503. */
+export const upgradeRefusalStatuses: readonly number[] = [400, 401, 403, 404, 405, 429, 503];
+/** The largest refusal body the Worker forwards (an ArcError as JSON). */
+export const upgradeRefusalBytes = 16384;
+/** The value a forwarded reason header (the refusal header, Retry-After) must have: visible ASCII, at most 128 characters. */
+export const upgradeRefusalValuePattern = /^[\x21-\x7e]{1,128}$/u;
 
 export const helloPath = "/api/arcforges.hello.v1.HelloService/SayHello";
 export const healthPath = "/api/healthz";

@@ -75,7 +75,7 @@ type settings struct {
 func testSettings() hub.Settings {
 	return hub.Settings{HelloDeadline: time.Second, Heartbeat: 100 * time.Millisecond, HeartbeatDeadline: 600 * time.Millisecond, PresenceInterval: time.Hour,
 		SessionRecheck: time.Hour, LapseRecheck: time.Hour, TokenGrace: 300 * time.Millisecond, MaxFrameBytes: 1 << 20, InboundFramesPerSecond: 200,
-		MaxInFlightCalls: 8, MaxRelayNonces: 8, SendQueueFrames: 64, SendQueueBytes: 4 << 20, WriteTimeout: time.Second, LeaseTTL: 30 * time.Second,
+		MaxInFlightCalls: 8, MaxRelayNonces: 8, TokenRefreshInterval: 30 * time.Second, SendQueueFrames: 64, SendQueueBytes: 4 << 20, WriteTimeout: time.Second, LeaseTTL: 30 * time.Second,
 		LeaseRenew: time.Second, ReconnectMin: time.Second, ReconnectMax: 2 * time.Second}
 }
 

@@ -420,7 +420,17 @@ func upgradeTable(text *strings.Builder, table routes.WorkerTable) {
 	}
 	text.WriteString("];\n")
 	text.WriteString("/** The header of a refused upgrade that names its closed reason, <CATEGORY>/<code> (Plan PN-3). */\n")
-	text.WriteString("export const upgradeRefusalHeader = " + quote(strings.ToLower(routes.RefusalHeader)) + ";\n\n")
+	text.WriteString("export const upgradeRefusalHeader = " + quote(strings.ToLower(routes.RefusalHeader)) + ";\n")
+	statuses := make([]string, len(routes.UpgradeRefusalStatuses()))
+	for index, status := range routes.UpgradeRefusalStatuses() {
+		statuses[index] = strconv.Itoa(status)
+	}
+	text.WriteString("/** The statuses of the center's refusals before an upgrade; any other non-101 reply becomes the Worker's 503. */\n")
+	text.WriteString("export const upgradeRefusalStatuses: readonly number[] = [" + strings.Join(statuses, ", ") + "];\n")
+	text.WriteString("/** The largest refusal body the Worker forwards (an ArcError as JSON). */\n")
+	text.WriteString("export const upgradeRefusalBytes = " + strconv.Itoa(routes.UpgradeRefusalBytes) + ";\n")
+	text.WriteString("/** The value a forwarded reason header (the refusal header, Retry-After) must have: visible ASCII, at most 128 characters. */\n")
+	text.WriteString("export const upgradeRefusalValuePattern = /" + routes.UpgradeRefusalValuePattern + "/u;\n\n")
 }
 
 func route(text *strings.Builder, row routes.Row, indent string) {

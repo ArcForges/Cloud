@@ -13,8 +13,10 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 )
 
-// The rules of Contracts public/http/v1/web-browser-error.schema.json (cohort 1.0.0-ci.433.1, AF-CTR-05 C1; Plan Q14), restated here
-// because the Go module carries no HTTP schema: WebBrowserErrorReply is {"error": WebBrowserArcError} and nothing else; the ArcError
+// The rules of Contracts public/http/v1/web-browser-error.schema.json (AF-CTR-05 C1; Plan Q14; the pinned cohort 1.0.0-ci.437.1 carries
+// it unchanged from 1.0.0-ci.433.1: sha256 a969a256e5dd2b94d9144bbf09775c57a06d5b4417e3920854ee7c131c76ac5c at Contracts 48d63e0 and
+// e67a6b0, so a later cohort that changes the schema is noticed against this digest), restated here because the Go module carries no
+// HTTP schema: WebBrowserErrorReply is {"error": WebBrowserArcError} and nothing else; the ArcError
 // has exactly its members, each in its range; the details are one of state, limit or revision with their required members; and the
 // rule webBrowserErrorAdvice ties messageKey, retryAt, reconciliationOperation and the effect together. (C1 review N-6: the center's
 // error bodies rest on conventions of the arc constructors that errorOf alone does not enforce.)

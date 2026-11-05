@@ -71,7 +71,8 @@ func TestALapsedAccountsChannelClosesAtTheNextRefresh(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := channel.TokenRefresh(ctx, refreshed.access); err != nil {
+	// A new token: the one the connection is bound to is answered without the store and its checks.
+	if err := channel.TokenRefresh(ctx, slow.rotate(refreshed)); err != nil {
 		t.Fatal(err)
 	}
 	if closed := closedWithin(t, refreshedClosed, 3*time.Second); closed.Code != hub.CloseRefused || closed.Reason != "feature_not_entitled" {

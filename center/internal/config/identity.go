@@ -589,8 +589,8 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 }
 
 // parseSurfaces reads the surface list: exact generated names, comma-separated, without whitespace or repetition. Official-hosted
-// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages, fleet and mobile, not operations;
-// mobile only for a base URL that is an issuer) unless listed,
+// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages, fleet, mobile and relay, not
+// operations; mobile only for a base URL that is an issuer; relay only with a command key, ApplyCommandKeys) unless listed,
 // so an explicit list pins the surfaces across upgrades.
 func parseSurfaces(value string, mode Mode) ([]Surface, error) {
 	if value == "" {

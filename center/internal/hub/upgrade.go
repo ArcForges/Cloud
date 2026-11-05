@@ -4,6 +4,7 @@ package hub
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net/http"
 	"net/netip"
@@ -147,7 +148,7 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	ws.SetReadLimit(-1)
 	c := &conn{hub: h, ws: ws, sessionID: parseID(caller.SessionID), userID: parseID(caller.UserID), deviceID: parseID(caller.DeviceID),
 		installationID: parseID(caller.InstallationID), nodeID: node.nodeID, enrollmentID: node.enrollmentID, publicKey: node.publicKey,
-		connectionID: platform.NewID(), fence: fence, accessExpires: expires, queue: make(chan []byte, h.settings.SendQueueFrames),
+		connectionID: platform.NewID(), fence: fence, accessExpires: expires, tokenDigest: sha256.Sum256([]byte(token)), queue: make(chan []byte, h.settings.SendQueueFrames),
 		finished: make(chan struct{})}
 	if raw := correlation.IDBytes(call.CorrelationID); len(raw) == 16 {
 		var id platform.ID
@@ -156,17 +157,14 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	if !h.track(c) {
-		release()
+		// The connection is hijacked: its close gives the node slot back.
 		c.cancel()
 		_ = ws.Close(websocket.StatusCode(CloseShuttingDown), "shutting_down")
 		return
 	}
 	h.metrics.ObserveChannel("opened", "upgraded")
-	// The handler returns at once; the connection is served on its own goroutines, and its slot is released when it ends.
-	go func() {
-		defer release()
-		c.run()
-	}()
+	// The handler returns at once; the connection is served on its own goroutines, and its close gives the node slot back.
+	go c.run()
 }
 
 // admissible checks the upgrade request's shape (CTR5-HUB-02): exactly the upgrade headers of RFC 6455 version 13, the route's one

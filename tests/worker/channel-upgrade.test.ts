@@ -7,15 +7,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { routeRequest, type CloudBindings } from "../../worker/router.ts";
-import {
-  upgradeRefusalBytes,
-  upgradeRefusalStatuses,
-  upgradeTable,
-} from "../../worker/ingress/upgrade.ts";
+import { handleUpgradeRequest, upgradeTable } from "../../worker/ingress/upgrade.ts";
 import {
   clientIpHeader,
   surfaceNames,
+  upgradeRefusalBytes,
   upgradeRefusalHeader,
+  upgradeRefusalStatuses,
   upgradeRoutes,
 } from "../../worker/tables/center-tables.generated.ts";
 
@@ -327,7 +325,8 @@ test("the center's refusal before the upgrade keeps its status, its JSON body an
       env,
     );
     assert.equal(response.status, 503);
-    assert.equal(response.headers.get(upgradeRefusalHeader), null);
+    // The Worker's own 503 names its fixed reason (review B N-5), never the center's header it dropped.
+    assert.equal(response.headers.get(upgradeRefusalHeader), "RESOURCE/overloaded");
   }
 });
 
@@ -340,4 +339,33 @@ test("a Container that fails is the Worker's 503", async () => {
     env,
   );
   assert.equal(response.status, 503);
+  assert.equal(response.headers.get(upgradeRefusalHeader), "RESOURCE/overloaded");
+});
+
+test("the Worker's own deadline and cancel answers carry their reason too", async () => {
+  // review B N-5: a client such as .NET's ClientWebSocket sees only the status and the headers of a reply that is not 101.
+  const route = upgradeRoutes[0];
+  assert(route);
+  const { env } = bindings(() => new Promise<Response>(() => {}));
+  const deadline = await handleUpgradeRequest(
+    new Request(`https://api.example.test${path}`, { headers: upgradeHeaders() }),
+    env,
+    { ...route, maxDurationMs: 20 },
+    {},
+  );
+  assert.equal(deadline.status, 504);
+  assert.equal(deadline.headers.get(upgradeRefusalHeader), "RESOURCE/overloaded");
+  const gone = new AbortController();
+  gone.abort();
+  const canceled = await handleUpgradeRequest(
+    new Request(`https://api.example.test${path}`, {
+      headers: upgradeHeaders(),
+      signal: gone.signal,
+    }),
+    env,
+    route,
+    {},
+  );
+  assert.equal(canceled.status, 499);
+  assert.equal(canceled.headers.get(upgradeRefusalHeader), "RESOURCE/overloaded");
 });

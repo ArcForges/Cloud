@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -32,7 +33,7 @@ func pkcs8(t *testing.T, curve elliptic.Curve) (string, *ecdsa.PrivateKey) {
 }
 
 // TestCommandKeysLoadOnlyAsTheirRuleAllows (CTR5-KEY-01): an ARCFORGES_CENTER_KEY_ variable must be a valid name holding the base64 of
-// a PKCS#8 P-256 key; at most eight load; a refusal names the variable, never its value; every name read is reported for unsetting.
+// a PKCS#8 P-256 key; at most eight load; a refusal names the variable, never its value; every name with the prefix is reported for unsetting, a malformed one first included.
 func TestCommandKeysLoadOnlyAsTheirRuleAllows(t *testing.T) {
 	good, private := pkcs8(t, elliptic.P256())
 	other, _ := pkcs8(t, elliptic.P384())
@@ -62,6 +63,11 @@ func TestCommandKeysLoadOnlyAsTheirRuleAllows(t *testing.T) {
 	}
 	if _, _, err := LoadCommandKeys(many); !errors.Is(err, ErrInvalid) {
 		t.Errorf("nine keys: %v", err)
+	}
+	// A malformed entry first: every name with the prefix is still reported, so the caller unsets the ones after it too.
+	_, names, err = LoadCommandKeys([]string{"ARCFORGES_CENTER_KEY_X=%%%", "PATH=/bin", "ARCFORGES_CENTER_KEY_Y=" + good, "ARCFORGES_CENTER_KEY_z=" + good})
+	if !errors.Is(err, ErrInvalid) || !slices.Equal(names, []string{"ARCFORGES_CENTER_KEY_X", "ARCFORGES_CENTER_KEY_Y", "ARCFORGES_CENTER_KEY_z"}) {
+		t.Errorf("a malformed entry first: %v %v", names, err)
 	}
 }
 

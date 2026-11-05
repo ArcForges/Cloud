@@ -32,12 +32,14 @@ package hub
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"log/slog"
 	"math/big"
 	"net/http"
 	"net/netip"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -65,6 +67,10 @@ const (
 	CloseKillSwitch   = 4503 // reserved (AF-CLD-04)
 )
 
+// DefaultTokenRefreshInterval is the least time between two TokenRefresh frames of a connection after its first: a node refreshes once
+// per access-token lifetime (minutes), so one in 30 s is ample and bounds the store work a connection can cause.
+const DefaultTokenRefreshInterval = 30 * time.Second
+
 // Settings are the hub's intervals and bounds (config.IdentityPolicy's channel keys; tests shorten them).
 type Settings struct {
 	HelloDeadline          time.Duration
@@ -76,6 +82,8 @@ type Settings struct {
 	TokenGrace             time.Duration
 	MaxFrameBytes          int
 	InboundFramesPerSecond int
+	// TokenRefreshInterval is the least time between two TokenRefresh frames of a connection after its first (review A B-1).
+	TokenRefreshInterval time.Duration
 	// MaxInFlightCalls and MaxRelayNonces are what ChannelAccepted states for the calls (E1b) and the relay nonces (E2) of a
 	// connection: 8 each (Plan C.9).
 	MaxInFlightCalls int
@@ -98,7 +106,7 @@ func SettingsOf(policy config.IdentityPolicy) Settings {
 		HelloDeadline: 10 * time.Second, Heartbeat: policy.ChannelHeartbeat, HeartbeatDeadline: policy.ChannelHeartbeatDeadline,
 		PresenceInterval: time.Minute, SessionRecheck: policy.ChannelSessionRecheck, LapseRecheck: policy.ChannelLapseRecheck,
 		TokenGrace: policy.ChannelTokenGrace, MaxFrameBytes: routes.NodeChannelMaxFrameBytes, InboundFramesPerSecond: policy.ChannelInboundFramesPerSecond,
-		MaxInFlightCalls: 8, MaxRelayNonces: 8,
+		MaxInFlightCalls: 8, MaxRelayNonces: 8, TokenRefreshInterval: DefaultTokenRefreshInterval,
 		SendQueueFrames: policy.ChannelSendQueueFrames, SendQueueBytes: policy.ChannelSendQueueBytes, WriteTimeout: 10 * time.Second,
 		LeaseTTL: DefaultLeaseTTL, LeaseRenew: DefaultLeaseRenew, ReconnectMin: time.Second, ReconnectMax: 30 * time.Second,
 	}
@@ -123,7 +131,9 @@ type Options struct {
 	RequireClientIP bool
 	ClientOrigin    func(*http.Request) ingress.Origin
 	// Slot takes a node connection slot for an upgrade (the server's count of upgraded connections, apart from its listener limit;
-	// CTR5-HUB-12, PN-1) and moves the connection over to it: ok is false when every slot is held. Nil admits every upgrade.
+	// CTR5-HUB-12, PN-1) and moves the connection over to it: ok is false when every slot is held. Its release is for an upgrade that
+	// fails after the move (the connection goes back to a request slot); an upgraded connection gives its slot back when it closes.
+	// Nil admits every upgrade.
 	Slot    func(*http.Request) (release func(), ok bool)
 	Clock   func() time.Time
 	Logger  *slog.Logger
@@ -151,7 +161,10 @@ type Hub struct {
 	all      map[*conn]bool        // every open connection, accepted or not
 	stopping bool
 	kids     []string // the held command keys' kids (UseSigningKids)
-	wg       sync.WaitGroup
+	// heldElsewhere is set while another process holds the lease, so it is logged once.
+	heldElsewhere atomic.Bool
+	nodeLocks     [nodeLockStripes]sync.Mutex
+	wg            sync.WaitGroup
 
 	stop    context.CancelFunc
 	done    chan struct{}
@@ -198,34 +211,45 @@ func (h *Hub) Start(ctx context.Context) {
 	go h.leaseLoop(ctx)
 }
 
-// acquire tries to take the lease once, and clears what a previous holder left recorded.
+// acquire tries to take the lease once, and clears what a previous holder left recorded. A lease held elsewhere is logged once until
+// this hub takes it (Q22 (a): the second hub serves no channel, logged).
 func (h *Hub) acquire(ctx context.Context) {
 	fence, err := h.lease.Acquire(ctx)
 	switch {
 	case err == nil:
+		h.heldElsewhere.Store(false)
 		h.metrics.ObserveChannel("lease", "acquired")
 		h.logger.Info("the node channel hub holds the hub lease", "fence", fence)
-		if err := h.clearStale(ctx, fence, h.clock()); err != nil {
+		if err := h.clearStale(ctx, fence); err != nil {
 			h.logger.Warn("the channels a previous hub recorded could not be cleared", "error", err.Error())
 		}
-	case err == ErrLeaseHeld:
+	case errors.Is(err, ErrLeaseHeld):
 		h.metrics.ObserveChannel("lease", "held_elsewhere")
+		if !h.heldElsewhere.Swap(true) {
+			h.logger.Warn("another center process holds the hub lease of this database: this process serves no node channel until it can take it over")
+		}
 	default:
 		h.logger.Warn("the hub lease could not be acquired; retrying", "error", err.Error())
 	}
 }
 
-// leaseLoop renews the held lease, or tries to take it, every LeaseRenew. A lease lost closes every connection 4500 (the node
-// reconnects, to the process that holds the lease now).
+// leaseLoop renews the held lease, or tries to take it, every LeaseRenew, and wakes at the claim's local expiry too. A lease lost
+// (another holder took it, or the claim passed its local expiry while its renewals failed) closes every connection 4500 lease_lost:
+// the node reconnects, to the process that holds the lease then.
 func (h *Hub) leaseLoop(ctx context.Context) {
 	defer close(h.done)
-	ticker := time.NewTicker(h.settings.LeaseRenew)
-	defer ticker.Stop()
+	timer := time.NewTimer(h.settings.LeaseRenew)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
+		}
+		timer.Reset(h.settings.LeaseRenew)
+		if h.lease.Lapse() {
+			h.lost("the hub lease passed its local expiry without a renewal")
+			continue
 		}
 		if _, held := h.lease.Fence(); !held {
 			h.acquire(ctx)
@@ -233,14 +257,22 @@ func (h *Hub) leaseLoop(ctx context.Context) {
 		}
 		renewed, err := h.lease.Renew(ctx)
 		switch {
+		case err != nil && h.lease.Lapse():
+			h.lost("the hub lease passed its local expiry without a renewal")
 		case err != nil:
-			h.logger.Warn("the hub lease could not be renewed; retrying", "error", err.Error())
+			h.metrics.ObserveChannel("lease", "renewal_failed")
+			h.logger.Warn("the hub lease could not be renewed; retrying until its local expiry", "error", err.Error())
 		case !renewed:
-			h.metrics.ObserveChannel("lease", "lost")
-			h.logger.Warn("the node channel hub lost the hub lease; its connections close")
-			h.closeAll(CloseShuttingDown, "lease_lost")
+			h.lost("another center process took the hub lease over")
 		}
 	}
+}
+
+// lost is a lease this hub no longer holds: every connection closes 4500 lease_lost.
+func (h *Hub) lost(cause string) {
+	h.metrics.ObserveChannel("lease", "lost")
+	h.logger.Warn("the node channel hub lost the hub lease; its connections close", "cause", cause)
+	h.closeAll(CloseShuttingDown, "lease_lost")
 }
 
 // Stop is the graceful stop (CTR5-HUB-11): no new upgrade is admitted, every connection closes 4500 with a jittered reconnect hint and
@@ -297,6 +329,16 @@ func (h *Hub) Count() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.nodes)
+}
+
+// nodeLocks serialize the accept of one node's connections (its presence write and its registration), striped by node ID.
+const nodeLockStripes = 64
+
+// lockNode takes the accept lock of a node and returns its release.
+func (h *Hub) lockNode(nodeID platform.ID) func() {
+	lock := &h.nodeLocks[int(nodeID[0])%nodeLockStripes]
+	lock.Lock()
+	return lock.Unlock
 }
 
 // track adds an upgraded connection before its hello; it reports false while the hub is stopping.

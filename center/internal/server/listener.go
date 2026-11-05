@@ -102,6 +102,24 @@ func (c *slotConn) toNode() bool {
 	return true
 }
 
+// toRequest moves a connection whose upgrade failed back from a node channel slot to a request slot (review B N-6): its HTTP/1.1
+// connection lives on, so it holds a request slot again. When every request slot is held it keeps its node slot until it closes, so
+// neither bound is ever exceeded.
+func (c *slotConn) toRequest() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.holds != c.slots.nodes {
+		return
+	}
+	select {
+	case c.slots.requests <- struct{}{}:
+	default:
+		return
+	}
+	<-c.holds
+	c.holds = c.slots.requests
+}
+
 type connKey struct{}
 
 // connContext puts the connection in every request context of it, so the upgrade handler can move it to a node slot.
@@ -109,15 +127,15 @@ func connContext(ctx context.Context, connection net.Conn) context.Context {
 	return context.WithValue(ctx, connKey{}, connection)
 }
 
-// NodeSlot is the hub's Slot of a center: it moves the request's connection to a node channel slot. The connection gives the slot back
-// when it closes, so the release it returns does nothing. A request that did not come through a slot listener (an in-process test
-// server) is admitted.
+// NodeSlot is the hub's Slot of a center: it moves the request's connection to a node channel slot. A connection that holds one gives
+// it back when it closes; the release it returns is for an upgrade that failed after the move, and moves the connection back to a
+// request slot. A request that did not come through a slot listener (an in-process test server) is admitted.
 func NodeSlot(request *http.Request) (func(), bool) {
 	connection, ok := request.Context().Value(connKey{}).(*slotConn)
 	if !ok {
 		return func() {}, true
 	}
-	return func() {}, connection.toNode()
+	return connection.toRequest, connection.toNode()
 }
 
 // newPublicServer is a public listener's server: the center's timeouts and header bound, and the connection context the node slots

@@ -14,11 +14,14 @@ import (
 )
 
 // Presence (Plan CTR5-HUB-06; migration 0008): the hub writes a node's online_since, last_heartbeat_at and connection_id at accept, at
-// most once per presence interval from heartbeats, and at close, each write fenced by the hub lease. last_seen_at, the node's last
-// contact, follows every one of them.
+// most once per presence interval from heartbeats, and at close, each write fenced by the hub lease (the clearing of a previous hub's
+// rows too). last_seen_at, the node's last contact, follows every one of them. The audit appends of the channel are not fenced.
 
 // ErrFenced is a hub write the lease refused: the fence it named is no longer the live one.
 var ErrFenced = errors.New("the hub lease no longer holds the fence of this write")
+
+// ErrNodeGone is an accept's presence write that found no live node row (the node was revoked after the admission): the fence was live.
+var ErrNodeGone = errors.New("the node of this channel is no longer live")
 
 // presenceTimeout bounds one presence write.
 const presenceTimeout = 5 * time.Second
@@ -39,12 +42,28 @@ func (h *Hub) fencedExec(ctx context.Context, operation, statement string, argum
 	return nil
 }
 
-// markOnline records an accepted connection: the node is online since now, with its connection and a heartbeat now.
+// markOnline records an accepted connection: the node is online since now, with its connection and a heartbeat now. It tells the two
+// refusals apart in one statement: ErrFenced when the fence is not the live one, ErrNodeGone when the fence is live but the node row is
+// not (revoked since the admission).
 func (h *Hub) markOnline(ctx context.Context, enrollmentID, connectionID platform.ID, fence int64, now time.Time) error {
-	return h.fencedExec(ctx, "record a node's channel", `UPDATE fleet.node SET online_since = @now, last_heartbeat_at = @now, connection_id = @connection,
+	live, updated := false, int64(0)
+	err := h.db.InTx(ctx, "record a node's channel", store.TxOptions{Timeout: presenceTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `WITH lease AS (SELECT `+fencedCondition+` AS live),
+updated AS (UPDATE fleet.node SET online_since = @now, last_heartbeat_at = @now, connection_id = @connection,
     last_seen_at = greatest(last_seen_at, @now)
-WHERE enrollment_id = @enrollment AND revoked_at IS NULL AND `+fencedCondition,
-		pgx.NamedArgs{"now": now, "connection": connectionID, "enrollment": enrollmentID, "fence": fence})
+WHERE enrollment_id = @enrollment AND revoked_at IS NULL AND (SELECT live FROM lease) RETURNING 1)
+SELECT (SELECT live FROM lease), (SELECT count(*) FROM updated)`,
+			pgx.NamedArgs{"now": now, "connection": connectionID, "enrollment": enrollmentID, "fence": fence}).Scan(&live, &updated)
+	})
+	switch {
+	case err != nil:
+		return err
+	case !live:
+		return ErrFenced
+	case updated == 0:
+		return ErrNodeGone
+	}
+	return nil
 }
 
 // markHeartbeat records a heartbeat of the connection that holds the node.
@@ -66,9 +85,9 @@ WHERE enrollment_id = @enrollment AND connection_id = @connection AND `+fencedCo
 
 // clearStale clears the connections a previous holder of the lease left recorded (it was killed, or it lost the lease): this process
 // holds none of them. It runs once per acquisition, under the new fence.
-func (h *Hub) clearStale(ctx context.Context, fence int64, now time.Time) error {
+func (h *Hub) clearStale(ctx context.Context, fence int64) error {
 	err := h.fencedExec(ctx, "clear the channels of a previous hub", `UPDATE fleet.node SET connection_id = NULL
-WHERE connection_id IS NOT NULL AND `+fencedCondition, pgx.NamedArgs{"now": now, "fence": fence})
+WHERE connection_id IS NOT NULL AND `+fencedCondition, pgx.NamedArgs{"fence": fence})
 	if errors.Is(err, ErrFenced) {
 		// No row to clear is the usual answer; a lease lost meanwhile is found by the next renewal.
 		return nil

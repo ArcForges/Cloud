@@ -78,20 +78,22 @@ func NewCommandKey(binding string, key *ecdsa.PrivateKey) (CommandKey, error) {
 
 // LoadCommandKeys reads the command keys of an environment (os.Environ in production): every variable with CommandKeyPrefix must
 // match CommandKeyName and hold the standard base64 of a PKCS#8 ECDSA P-256 key, at most eight of them; anything else refuses the
-// start with an error that names the variable, never its value. The names it read are returned too, so the caller unsets them.
+// start with an error that names the variable, never its value. Every name with the prefix is collected before any is validated and
+// all of them are returned, whatever the outcome (a malformed entry never hides the ones after it), so the caller unsets each one.
 func LoadCommandKeys(environ []string) ([]CommandKey, []string, error) {
-	var keys []CommandKey
-	var names []string
+	var names, values []string
 	for _, entry := range environ {
 		name, value, _ := strings.Cut(entry, "=")
-		if !strings.HasPrefix(name, CommandKeyPrefix) {
-			continue
+		if strings.HasPrefix(name, CommandKeyPrefix) {
+			names, values = append(names, name), append(values, value)
 		}
-		names = append(names, name)
+	}
+	var keys []CommandKey
+	for index, name := range names {
 		if !CommandKeyName.MatchString(name) {
 			return nil, names, invalid("%s is not a command key variable name (%s)", name, CommandKeyName.String())
 		}
-		der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
+		der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(values[index]))
 		if err != nil {
 			return nil, names, invalid("%s must be the base64 of a PKCS#8 ECDSA P-256 private key", name)
 		}

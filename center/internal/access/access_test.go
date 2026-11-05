@@ -108,7 +108,7 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.pollDeviceAuthorization":  "R1 anonymous",
 		"fleet.lookupDeviceCode":         "R2 upgrade none - no-receipt active",
 		"fleet.approveDeviceCode":        "R3 upgrade evidence-on-approve user_code receipt active",
-		// AF-CTR-05 E1a (CTR5-SUR-02): the node channel, the first gated row (TestTheNodeChannelRowIsGatedAndControlled).
+		// AF-CTR-05 E1a (CTR5-SUR-02): the node channel, the first gated row (TestOperationRowsAreCheckedForConsistency).
 		"fleet.nodeChannel": "R2 allowed none - no-receipt active node",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
@@ -195,7 +195,7 @@ func TestFleetRowsCarryNoFeature(t *testing.T) {
 	rows := 0
 	for _, operation := range Operations() {
 		if !strings.HasPrefix(operation.ID, "fleet.") || operation.ID == "fleet.nodeChannel" {
-			// The node channel is the first gated row (AF-CTR-05 E1a): TestTheNodeChannelRowIsGatedAndControlled pins it.
+			// The node channel is the first gated row (AF-CTR-05 E1a): TestOperationRowsAreCheckedForConsistency pins it.
 			continue
 		}
 		rows++

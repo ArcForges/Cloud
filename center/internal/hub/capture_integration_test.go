@@ -384,8 +384,10 @@ func TestChannelExchangeCapture(t *testing.T) {
 	expired := h.enroll()
 	closedCase("token-expired", expired, func(channel *nodetest.Channel) {
 		hello(expired)(channel)
+		// A new token that has expired (the bound one is answered without the store).
+		token := h.rotate(expired)
 		h.db.Exec("UPDATE identity.session SET access_expires_at = now() WHERE installation_id = '" + expired.result.InstallationID.String() + "'")
-		_ = channel.TokenRefresh(ctx, expired.access)
+		_ = channel.TokenRefresh(ctx, token)
 	})
 	lapsed := h.enroll()
 	closedCase("lapsed", lapsed, func(channel *nodetest.Channel) {
