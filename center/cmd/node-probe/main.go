@@ -227,7 +227,11 @@ func (p *probe) refresh(name, token, want string) (string, bool) {
 		return "", p.record(name, got == want, "refused "+got)
 	}
 	next := reply.GetValue().GetRefreshToken()
-	return next, p.record(name, got == "" && strings.HasPrefix(next, "afr1.") && next != token, "rotated "+got)
+	outcome := "rotated"
+	if got != "" {
+		outcome = "refused " + got
+	}
+	return next, p.record(name, got == "" && strings.HasPrefix(next, "afr1.") && next != token, outcome)
 }
 
 // afterCredentials runs the refresh, the idle refresh and the reuse checks; reuse is the case's own reuse step, run before the last

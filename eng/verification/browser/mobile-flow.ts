@@ -91,6 +91,19 @@ export function mobileStepUpsAtMost(cases: number): number {
   return 2 * cases;
 }
 
+/**
+ * The wait for the review page after the authorization link: with a sign-in on the way (a passkey ceremony, the sign-in page's
+ * return and the review's POST), the real-network budget (--real-timeout-ms, 180 s by default), as the acceptance's own sign-ins
+ * take; otherwise --timeout-ms. Neither is less than --timeout-ms. The wait is for the review's elements, not for a load event: on
+ * proof the review page was in the tab while its load event had not fired after 30 s.
+ */
+export function reviewWaitMs(
+  world: { timeoutMs: number; realTimeoutMs: number },
+  signingIn: boolean,
+): number {
+  return signingIn ? Math.max(world.timeoutMs, world.realTimeoutMs) : world.timeoutMs;
+}
+
 /** Reads and checks a begin file: its URL must be this center's /mobile/authorize with the exact fragment. */
 export function parseMobileBegin(text: string, baseUrl: string): MobileBeginFile {
   let value: Partial<MobileBeginFile>;
@@ -126,6 +139,20 @@ export function parseMobileBegin(text: string, baseUrl: string): MobileBeginFile
     "A begin file's claim is not of the claim's shape.",
   );
   return value as MobileBeginFile;
+}
+
+/**
+ * The review page's hidden flow_id input of the begin file's flow: the review the wait found must be of this case's flow, not of
+ * another case's (every case reports the same platform and version). The flow ID is the fragment parseMobileBegin checked.
+ */
+export function reviewFlowSelector(begin: MobileBeginFile): string {
+  const [flow] = mobileBeginSecrets(begin);
+  expect(
+    flow !== undefined &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(flow),
+    "A begin file's flow ID is not a canonical UUID.",
+  );
+  return `input[type="hidden"][name="flow_id"][value="${flow}"]`;
 }
 
 /** What of a begin file must stay out of every output: the flow ID (the URL's fragment). */
@@ -248,13 +275,32 @@ export async function runMobileApprove(world: World, options: MobileApproveOptio
         `${begin.case}: ${a.signedIn ? "" : "sign in and "}review the app`,
         mockedLabel,
         async () => {
+          const waitMs = reviewWaitMs(world, !a.signedIn);
           if (!a.signedIn) {
             await a.enabled(selectors.signIn);
             await a.tab.click(selectors.signIn);
           }
-          await a.tab.waitForPath(pagePathname(world, mobile.review), world.timeoutMs);
+          // The review page's own element, not its load event (see reviewWaitMs).
+          const review = pagePathname(world, mobile.review);
+          await until(
+            world,
+            "the review page",
+            async () => {
+              if (new URL(a.tab.url()).pathname !== review) return false;
+              try {
+                return (await a.tab.count(mobile.platform)) > 0;
+              } catch {
+                return false; // the document is still being replaced
+              }
+            },
+            waitMs,
+          );
           a.signedIn = true;
-          await a.tab.waitForSelector(selectors.heading, world.timeoutMs);
+          expect(
+            (await a.tab.count(reviewFlowSelector(begin))) > 0,
+            "The review page is of another flow than the begin file's.",
+          );
+          await a.tab.waitForSelector(selectors.heading, waitMs);
           expect(
             (await a.tab.text(selectors.heading)) === "Sign in to the ArcForges app?",
             "The review has another heading.",

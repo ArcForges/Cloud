@@ -126,7 +126,8 @@ per-installation bucket (Q21).
 - pages: the fleet pages' texts in the app's words, and the two installation texts above.
 - Audit: `identity.mobile_authorization.{approved,denied,code_reissued,completed,code_reused,verifier_failed,approval_lapsed}` (target
   the flow), `identity.rate_limited`. No code, verifier or token is stored in clear (the code only as its SHA-256), and none of
-  them, nor the client state, is logged or audited. The client state is stored only to return it in the callback
+  them, nor the client state, is logged by the center or the Worker, or audited (PostgreSQL's own statement logging is an operator
+  setting: with it on, the server's log holds the statements' parameters, the state among them). The client state is stored only to return it in the callback
   (`identity.mobile_authorization.client_state`; `TestNoMobileSecretIsStoredLoggedOrAudited`).
 - Metrics: `arcforges_center_mobile_events_total{event,outcome}`, closed labels (`observe.MobileOutcomes`).
 
@@ -212,7 +213,10 @@ where the center's behaviour differs, each pinned by `TestTheExpectedMobileDiver
 MobileProbe is the MOCKED development stand-in of the Android app (the Plan's `fakes_allowed`): `center/internal/mobiletest` (fresh
 verifier and state, begin with the derived-URL check, the callback's state and issuer checked before any request, token) and
 `center/cmd/mobile-probe` (a handshake directory with the browser flow; its result file names the device ID of each session it was
-delivered, which is not secret, so the clean-up revokes exactly those devices). Both are kept out of the Docker context
+delivered, which is not secret, so the clean-up revokes exactly those devices). The probe's scenarios and their expectations are
+`mobiletest.RunScenario`, which `TestMobileProbesScenariosPassAgainstTheCenter` runs against the real center and PostgreSQL (the
+person is a seam there: the harness's browser decides on the pages); every refusal is compared in the native JSON's form
+(`conflict/code_reused`), a gRPC reply brought to it by `mobiletest.RefusalOf`. Both are kept out of the Docker context
 (`.dockerignore`, pinned by `tests/worker/docker-context.test.ts`). The browser flow is `eng/verification/browser/mobile-approve.ts`
 (`acceptance.ts --mobile-approve`).
 
@@ -228,7 +232,8 @@ delivered, which is not secret, so the clean-up revokes exactly those devices). 
    `https://proof.arcforges.com/app/callback`: `go run ./cmd/mobile-probe -center https://proof.arcforges.com/api -dir <dir> -case
 <case> -scenario <scenario>` for the cases approve, deny, reuse and wrong-verifier, and `node eng/verification/browser/mobile-approve.ts
 --watch <dir> --cases 4`. Each case signs in when needed, steps up, decides, hands the done page's link to the probe and taps it
-   (the fallback page loads without the fragment). Budget: 4 cases spend at most 8 step-ups (one per approval and one per revoked
+   (the fallback page loads without the fragment). A sign-in on the way to the review waits for the review page's own elements, not
+   its load event, within `--real-timeout-ms` (180 s by default, never less than `--timeout-ms`). Budget: 4 cases spend at most 8 step-ups (one per approval and one per revoked
    device; the center allows 10 per 10 minutes), 4 of the 20 decisions per hour, 4 of the 30 begins per 10 minutes, and the browser and
    the probe together stay within the edge minute (`acceptance.ts` fails a run that would not).
 5. The approve case refreshes once through `IdentityService.RefreshSession`; the devices page lists the session's device as an

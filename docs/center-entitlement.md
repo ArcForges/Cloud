@@ -7,8 +7,10 @@ sells nothing, charges nobody and activates nothing: the production catalogue is
 prices and limits (H-07).
 
 The commerce path (a purchase becomes grants and terms) is AF-CTR-09, the operator's own service is AF-OPS-01, and the gated
-operations themselves (node connection, task control, MCP, push) arrive with AF-CTR-05 and later: AF-CTR-04's node enrollment is an
-essential operation and serves no gated row ([center fleet](center-fleet.md), pinned by `TestFleetRowsCarryNoFeature`). [What waits](#what-waits-for-later-tasks) lists
+operations themselves (node connection, task control, MCP, push) arrive with AF-CTR-05 and later. AF-CTR-04's node
+enrollment and its mobile native authorization are essential operations and serve no gated row (node enrollment: [center fleet](center-fleet.md),
+pinned by `TestFleetRowsCarryNoFeature`; the mobile authorization is a center-defined operation, and the center-defined and page
+operation types have no `Feature` field). [What waits](#what-waits-for-later-tasks) lists
 what this document does not describe because it does not exist yet.
 
 ## Evidence labels
@@ -385,7 +387,8 @@ arc.Unavailable(), err)`) and log it with the correlation id in `identityapi.fai
   (The comment of migration `0003` says the same as this paragraph since fix round 2; its checksum changed with it, while the
   migration was still unmerged.)
 - **AF-CTR-05 and later**: the gated operations (node connection, task control, MCP), their quotas and budgets through the
-  resource-control stage, and the rows of the operation table that carry a `Feature` (AF-CTR-04's fleet rows carry none). The
+  resource-control stage, and the rows of the operation table that carry a `Feature` (AF-CTR-04's fleet rows carry none, and its
+  mobile operation is a center-defined operation, whose type has no `Feature` field). The
   production `Authorizer` is composed with **no resource control** today, so a gated call is not rate limited: the task that serves
   the first gated row must register a per-account control before it does,
   and must check every row that carries a `Feature` against `feature.OperationKeys` (`CheckRow` checks that the key is a gated key,

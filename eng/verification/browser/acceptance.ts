@@ -140,9 +140,16 @@ export const defaultReportName = {
  */
 export const nodeApproveRequestsPerMinute = 36;
 
+/** What the busiest-minute bound counts (the report's requestsBusiest60sBoundCovers). */
+export const boundCovers =
+  "the browser's requests and the requests the node's result files list (none the node makes after writing its result)";
+
 /**
- * The busiest minute of a node-approve run against the edge: the browser's busiest minute plus node-probe's (the two share the
- * machine's edge key, so their sum bounds the busiest minute of both). The run fails when it exceeds maxRequestsPerWindow.
+ * The busiest minute of a node-approve run against the edge: the browser's busiest minute plus the node's (the two share the
+ * machine's edge key, so their sum bounds the busiest minute of the counted requests). The run fails when it exceeds
+ * maxRequestsPerWindow. The node's requests are those its result files list: node-probe lists every request of its run, but a node
+ * that keeps calling the center after it wrote its result (the real node's later refreshes and reports) makes requests the bound does
+ * not see, so for such a node the bound is not an upper bound of the true busiest minute: it does not see those requests.
  */
 export function combinedBusiest(browserBusiest: number, probeRequests: readonly number[]): number {
   return browserBusiest + busiestOf(probeRequests);
@@ -163,12 +170,13 @@ Edge limit: the hosted edge counts the requests of a client over 60 seconds. Lea
 Step-up limit: apart from the edge, the center allows 10 step-ups per account in 10 minutes. --operator-grant spends 2 step-ups,
   a returning run 3, and a restarted step one more: wait ten minutes between repeated attempts, or a 429 of the center looks like
   the edge's.
---node-approve (node-approve.ts) needs the saved owner credential. It decides the sign-ins that center/cmd/node-probe (MOCKED node)
-  starts and announces in the --watch directory, --cases of them (default 2), on /connect and /activate, then revokes the devices
+--node-approve (node-approve.ts) needs the saved owner credential. It decides the sign-ins that the node writing the --watch directory
+  starts and announces there (center/cmd/node-probe, a MOCKED node, or the ArcForges node's end-to-end test, a REAL one), --cases of them (default 2), on /connect and /activate, then revokes the devices
   its approvals created. node-probe runs on the same machine (its loopback receiver must be the browser's), and its requests count
   against the same edge limit: the browser paces itself at ${nodeApproveRequestsPerMinute} requests a minute after a burst of
   ${requestBurst} (at most ${nodeApproveRequestsPerMinute + requestBurst} in any minute), and the run fails when the browser's busiest
-  minute and the probe's together exceed ${maxRequestsPerWindow}. Each case may spend 2 step-ups (its approval and its device's
+  minute and the node's together exceed ${maxRequestsPerWindow}. The node's minute counts the requests its result files list: a node
+  that calls the center after writing its result (the real node's refreshes) adds requests the bound does not see. Each case may spend 2 step-ups (its approval and its device's
   revocation), so --cases refuses a set that could spend more than the center's ${stepUpsPerTenMinutes} in 10 minutes. --negative also
   submits one wrong fingerprint tail (one more step-up and one entry of the account's budget): for the local rehearsal. Its report
   defaults to artifacts/${defaultReportName.nodeApprove}.
@@ -551,6 +559,7 @@ export async function main(argv: readonly string[], deps: Dependencies): Promise
     world.report.facts.probeRequests = probeRequests.length;
     world.report.facts.probeBusiest60s = busiestOf(probeRequests);
     world.report.facts.requestsBusiest60sBound = combinedBusiest(sent.busiest, probeRequests);
+    world.report.facts.requestsBusiest60sBoundCovers = boundCovers;
   }
   const busiest = probed ? combinedBusiest(sent.busiest, probeRequests) : sent.busiest;
   if (exitCode === 0 && bounded && busiest > maxRequestsPerWindow) {

@@ -11,9 +11,11 @@
 // <case>.result.json (the outcome of each step, the instant of each request and the device ID of each delivered session, so that the
 // browser flow's clean-up revokes exactly those devices; no token, code, verifier or state).
 //
-// Scenarios: approve (token, then IdentityService.RefreshSession once), deny (the callback says access_denied), reuse (token, then the
-// same code again: CONFLICT/code_reused, and the delivered family is refused at refresh), wrong-verifier (a token request with another
-// verifier: unauthenticated; then the right one: code_reused, the flow was ended).
+// Scenarios (mobiletest.RunScenario, which pages' integration tests also run against a real center): approve (token, then
+// IdentityService.RefreshSession once), deny (the callback says access_denied), reuse (token, then the same code again:
+// conflict/code_reused, and the delivered family is refused at refresh, authentication/credential_revoked), wrong-verifier (a token
+// request with another verifier: authentication/unauthenticated; then the right one: conflict/code_reused, the flow was ended). Every
+// refusal is compared in one form, the native JSON's (mobiletest.RefusalOf brings the gRPC reply to it).
 //
 //	go run ./cmd/mobile-probe -center <public base URL> -dir <handshake dir> -case <name> [-scenario approve|deny|reuse|wrong-verifier]
 //	    [-redirect <debug scheme>:/callback] [-timeout 9m]
@@ -29,11 +31,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -80,7 +82,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 		return options{}, errors.New("-dir is required")
 	case !casePattern.MatchString(o.caseName):
 		return options{}, errors.New("-case is 1 to 63 lower-case letters, digits and hyphens")
-	case o.scenario != "approve" && o.scenario != "deny" && o.scenario != "reuse" && o.scenario != "wrong-verifier":
+	case !slices.Contains(mobiletest.Scenarios, o.scenario):
 		return options{}, errors.New("-scenario is approve, deny, reuse or wrong-verifier")
 	case o.redirect != "" && !strings.HasSuffix(o.redirect, ":/callback"):
 		return options{}, errors.New("-redirect is <scheme>:/callback")
@@ -123,9 +125,6 @@ type result struct {
 	// DeviceIDs are the devices of the delivered sessions (the token replies' device.deviceId; not secret), for the clean-up.
 	DeviceIDs []string `json:"deviceIds"`
 }
-
-// deviceIDShape is a device ID as the token reply writes it: a canonical lower-case UUID.
-var deviceIDShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // probe is one run.
 type probe struct {
@@ -185,111 +184,43 @@ func (p *probe) waitLink(ctx context.Context) (string, error) {
 	}
 }
 
-func outcomeOf(reply mobiletest.Reply) string {
-	if refusal := reply.Refusal(); refusal != "/" && refusal != "" {
-		return fmt.Sprintf("HTTP %d %s", reply.Status, refusal)
-	}
-	return fmt.Sprintf("HTTP %d", reply.Status)
-}
-
-// token redeems a code and checks a session reply's shape; it returns the refresh token of a success.
-func (p *probe) token(ctx context.Context, name string, attempt mobiletest.Attempt, code, verifier, want string) (string, bool) {
-	p.requested()
-	reply, err := p.app.TokenWith(ctx, attempt, code, verifier)
-	if err != nil {
-		return "", p.record(name, false, "transport: "+err.Error())
-	}
-	if want != "" {
-		return "", p.record(name, reply.Refusal() == want, outcomeOf(reply))
-	}
-	scope, _ := reply.JSON["scope"].(string)
-	purpose, _ := reply.JSON["purpose"].(string)
-	refresh, _ := reply.JSON["refreshToken"].(string)
-	device, _ := reply.JSON["device"].(map[string]any)
-	platformName, _ := device["platform"].(string)
-	deviceID, _ := device["deviceId"].(string)
-	ok := reply.Status == http.StatusOK && scope == "account" && purpose == "authenticate" && refresh != "" && platformName == "android"
-	if reply.Status == http.StatusOK && deviceIDShape.MatchString(deviceID) {
-		p.result.DeviceIDs = append(p.result.DeviceIDs, deviceID)
-	} else if reply.Status == http.StatusOK {
-		ok = false
-	}
-	return refresh, p.record(name, ok, outcomeOf(reply)+" scope "+scope+" purpose "+purpose+" device "+platformName)
-}
-
-// refresh calls IdentityService.RefreshSession over the center's public gRPC-Web route with the installation's refresh token.
-func (p *probe) refresh(name, token, want string) bool {
-	p.requested()
+// refresh calls IdentityService.RefreshSession over the center's public gRPC-Web route with the installation's refresh token: "" for a
+// rotation, else the refusal in the one form the scenarios compare (mobiletest.RefusalOf).
+func (p *probe) refresh(_ context.Context, token string) (string, error) {
 	request := &publicapiv1.IdentityServiceRefreshSessionRequest{Meta: &foundationv1.RequestMeta{}, RefreshToken: proto.String(token),
 		InstallationId: &foundationv1.Id{Value: p.app.InstallationID[:]}}
 	response := &publicapiv1.IdentityServiceRefreshSessionResponse{}
-	err := grpcWeb(p.o.center+"/arcforges.publicapi.v1.IdentityService/RefreshSession", request, response)
-	if err != nil {
-		return p.record(name, false, "transport: "+err.Error())
+	if err := grpcWeb(p.o.center+"/arcforges.publicapi.v1.IdentityService/RefreshSession", request, response); err != nil {
+		return "", err
 	}
 	if failure := response.GetError(); failure != nil {
-		got := strings.TrimPrefix(failure.GetCategory().String(), "ERROR_CATEGORY_") + "/" + failure.GetCode()
-		return p.record(name, want != "" && got == want, got)
+		return mobiletest.RefusalOf(failure), nil
 	}
-	return p.record(name, want == "" && response.GetValue().GetSession().GetRefreshToken() != "", "refreshed")
+	if response.GetValue().GetSession().GetRefreshToken() == "" {
+		return "", errors.New("the refresh reply holds no session")
+	}
+	return "", nil
 }
 
-func (p *probe) run(ctx context.Context) bool {
-	p.requested()
-	attempt, reply, err := p.app.Begin(ctx)
-	if err != nil || reply.Status != http.StatusOK {
-		outcome := outcomeOf(reply)
-		if err != nil {
-			outcome = err.Error()
-		}
-		return p.record("begin", false, outcome)
-	}
-	p.record("begin", true, "the authorizeUrl is the derived one")
-	decision := "approve"
-	if p.o.scenario == "deny" {
-		decision = "deny"
-	}
+// link writes the begin handshake file for the browser flow and waits for its link file (the done page's callback link).
+func (p *probe) link(ctx context.Context, attempt mobiletest.Attempt, decision string) (string, error) {
 	center, _ := url.Parse(p.o.center)
-	if err = p.write(p.o.caseName+".begin.json", begin{Case: p.o.caseName, Scenario: p.o.scenario, AuthorizeURL: attempt.AuthorizeURL, Decision: decision,
+	if err := p.write(p.o.caseName+".begin.json", begin{Case: p.o.caseName, Scenario: p.o.scenario, AuthorizeURL: attempt.AuthorizeURL, Decision: decision,
 		CenterHost: center.Host, Platform: p.app.Platform, AppVersion: p.app.AppVersion}); err != nil {
-		return p.record("handshake", false, err.Error())
+		return "", fmt.Errorf("handshake: %w", err)
 	}
 	waiting, cancel := context.WithTimeout(ctx, p.o.timeout)
 	defer cancel()
-	address, err := p.waitLink(waiting)
-	if err != nil {
-		return p.record("link", false, err.Error())
-	}
-	callback, err := p.app.ParseCallback(address, attempt)
-	if err != nil {
-		return p.record("callback", false, err.Error())
-	}
-	if p.o.scenario == "deny" {
-		return p.record("callback", callback.Denied, "access_denied, state and iss checked")
-	}
-	if !p.record("callback", callback.Code != "", "a code, state and iss checked") {
-		return false
-	}
-	switch p.o.scenario {
-	case "approve":
-		refresh, ok := p.token(ctx, "token", attempt, callback.Code, attempt.Verifier, "")
-		return ok && p.refresh("refresh", refresh, "")
-	case "reuse":
-		refresh, ok := p.token(ctx, "token", attempt, callback.Code, attempt.Verifier, "")
-		ok = ok && p.token2(ctx, "token again", attempt, callback.Code, attempt.Verifier, "CONFLICT/code_reused")
-		return ok && p.refresh("refresh of the revoked family", refresh, "AUTHENTICATION/credential_revoked")
-	case "wrong-verifier":
-		wrong, _ := mobiletest.NewVerifier()
-		ok := p.token2(ctx, "token with another verifier", attempt, callback.Code, wrong, "AUTHENTICATION/unauthenticated")
-		return ok && p.token2(ctx, "token with the right verifier after", attempt, callback.Code, attempt.Verifier, "CONFLICT/code_reused")
-	}
-	return false
+	return p.waitLink(waiting)
 }
 
-// token2 is a token request that must be refused with want.
-func (p *probe) token2(ctx context.Context, name string, attempt mobiletest.Attempt, code, verifier, want string) bool {
-	_, ok := p.token(ctx, name, attempt, code, verifier, want)
-	return ok
+// run is the scenario (mobiletest.RunScenario, which the integration tests run against a real center too) with the handshake
+// directory as the person and the center's gRPC-Web route for the refresh.
+func (p *probe) run(ctx context.Context) bool {
+	passed, devices := p.app.RunScenario(ctx, p.o.scenario, mobiletest.Hooks{Link: p.link, Refresh: p.refresh, Record: p.record,
+		Requested: p.requested})
+	p.result.DeviceIDs = append(p.result.DeviceIDs, devices...)
+	return passed
 }
 
 func run(args []string, stdout, stderr io.Writer) int {

@@ -74,7 +74,8 @@ type Reply struct {
 	JSON   map[string]any
 }
 
-// Refusal is the CATEGORY/code of a JSON error reply ({"error": {category, code}}), or "" for none.
+// Refusal is the "<category>/<code>" of a JSON error reply ({"error": {category, code}}), with the category as the wire writes it (in
+// lower case, for example "conflict/code_reused"), or "" for none. RefusalOf brings a gRPC ArcError to the same form.
 func (r Reply) Refusal() string {
 	failure, ok := r.JSON["error"].(map[string]any)
 	if !ok {
