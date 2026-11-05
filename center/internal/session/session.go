@@ -384,6 +384,8 @@ WHERE family_id = $1 AND revoked_at IS NULL`, reuse.FamilyID, now, RevokedRefres
 	if reuse.Revoked == 0 {
 		return &reuse, nil
 	}
+	// A node family's revocation closes its channel (AF-CTR-05 E1a) once this transaction commits.
+	Announce(ctx, Revocation{Users: []platform.ID{reuse.UserID}})
 	payload, err := json.Marshal(map[string]any{"generation": generation, "revokedSessions": reuse.Revoked, "scope": reuse.Scope.String()})
 	if err != nil {
 		return nil, err

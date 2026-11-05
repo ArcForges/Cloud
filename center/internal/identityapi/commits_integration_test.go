@@ -240,7 +240,7 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 	roles := map[string]string{
 		// Reads.
 		"find an e-mail flow": read, "read a profile": read, "list credentials": read, "check for an account": read, "find a passkey": read,
-		"list sessions": read, "verify a session": read, "check a rate-limit bucket": read, "list devices": read,
+		"list sessions": read, "verify a session": read, "re-check a session": read, "check a rate-limit bucket": read, "list devices": read,
 		// Bookkeeping: counts, reservations, denials and give-backs around an effect, and the audits of refusals.
 		"count a rate-limit bucket": auxiliary, "reserve a rate-limit failure": auxiliary, "give a failure reservation back": auxiliary,
 		"audit an identity refusal": auxiliary, "audit an access decision": auxiliary, "count a flow attempt": auxiliary,

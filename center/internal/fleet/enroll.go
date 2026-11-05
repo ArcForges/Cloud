@@ -212,6 +212,8 @@ func reenroll(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, requ
 		installationID, now, session.RevokedSuperseded); err != nil {
 		return Enrolled{}, store.Sanitize("supersede the node's sessions", err)
 	}
+	// A channel of a superseded session closes once this transaction commits (AF-CTR-05 E1a).
+	session.Announce(ctx, session.Revocation{Installations: []platform.ID{installationID}})
 	var owner, onDevice platform.ID
 	var reportedName string
 	var os int16

@@ -52,6 +52,12 @@ const SurfaceFleet Surface = "fleet"
 // self-hosted default (and off with them where the default turns identity off), and production keeps it off until AF-PROD-01.
 const SurfaceMobile Surface = "mobile"
 
+// SurfaceRelay is the node channel (AF-CTR-05 E1a; Plan CTR5-SUR-01, Q10): the WebSocket upgrade route GET /fleet/v1/node, on which a
+// signed-in node holds its one outbound connection to the center. It needs the identity and fleet surfaces (the channel is admitted on
+// the node credential enrollment issues), is in the self-hosted default, and production keeps it off until AF-PROD-01 (proof gains it
+// in AF-CTR-05 E3).
+const SurfaceRelay Surface = "relay"
+
 // MaxFleetPublicBaseURLLength bounds the public base URL of a center that serves the fleet surface: the contract bounds every URL the
 // center derives for a node at 512 characters (fleet.v1 authorize_url, verification_uri*), and the longest suffix it appends is
 // /connect#flow= and a 36-character flow ID (50 characters).
@@ -59,14 +65,14 @@ const MaxFleetPublicBaseURLLength = 512 - 50
 
 // KnownSurfaces is every surface name, in generated order.
 func KnownSurfaces() []Surface {
-	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile}
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile, SurfaceRelay}
 }
 
 // DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces, node
-// enrollment with its pages (AF-CTR-04 E3, delivery-14) and the mobile native authorization (AF-CTR-04 part M), never the operations
-// page.
+// enrollment with its pages (AF-CTR-04 E3, delivery-14), the mobile native authorization (AF-CTR-04 part M) and the node channel
+// (AF-CTR-05 E1a, CTR5-SUR-01), never the operations page.
 func DefaultSelfHostedSurfaces() []Surface {
-	return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet, SurfaceMobile}
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet, SurfaceMobile, SurfaceRelay}
 }
 
 // ClientIPHeader is the one header the hosted Worker sets to the client's address (from cf-connecting-ip, overwriting any client
@@ -114,6 +120,10 @@ type Identity struct {
 	// Disabled explains why a self-hosted center's default left the identity surface off (its public base URL cannot be a WebAuthn
 	// relying party); the center logs it at start. Empty otherwise.
 	Disabled string
+	// DefaultSurfaces is true when Surfaces is the self-hosted default (no list was stated); RelayDisabled explains why the default
+	// left the relay surface out (no command key is configured, AF-CTR-05 E1a); the center logs it at start.
+	DefaultSurfaces bool
+	RelayDisabled   string
 }
 
 // Enabled reports whether a surface is enabled.
@@ -196,11 +206,27 @@ type IdentityPolicy struct {
 	// cap (Q21): the enrollment cap (MaxNodesPerAccount) governs how many nodes an account has. RoutedCallsPerAccount is the routed
 	// calls of an account (submission, status and output, control; sized for the CLI's output following, PN-5),
 	// RoutedInFlightPerAccount the routed calls of an account that may run at once (per center process), and the two channel upgrade
-	// buckets bound how often an account's nodes, and one node, open the node channel (ready for AF-CTR-05 E1).
+	// buckets bound how often an account's nodes, and one node, open the node channel (the row fleet.nodeChannel, AF-CTR-05 E1a).
 	RoutedCallsPerAccount    Window
 	RoutedInFlightPerAccount int
 	ChannelUpgradePerAccount Window
 	ChannelUpgradePerNode    Window
+	// The node channel (AF-CTR-05 E1a; Plan CTR5-HUB-03, -06, -07, -09, -10, C.9). Every value is a policy key whose default is the
+	// plan's; none is a plan limit. ChannelHeartbeat is how often the center sends a heartbeat, ChannelHeartbeatDeadline how long
+	// either side waits without any frame before it closes 4408; ChannelSessionRecheck how often the hub re-reads the credential of a
+	// connection (revocation, account state; also at every TokenRefresh), ChannelLapseRecheck how often it asks the gate for
+	// center.nodes (also at accept and at every TokenRefresh), ChannelTokenGrace how long a connection may outlive its bound access
+	// token without a TokenRefresh before it closes 4401. ChannelInboundFramesPerSecond bounds the frames a node may send per second
+	// (over it closes 4429), and the send
+	// queue of a connection holds at most ChannelSendQueueFrames frames and ChannelSendQueueBytes bytes.
+	ChannelHeartbeat              time.Duration
+	ChannelHeartbeatDeadline      time.Duration
+	ChannelSessionRecheck         time.Duration
+	ChannelLapseRecheck           time.Duration
+	ChannelTokenGrace             time.Duration
+	ChannelInboundFramesPerSecond int
+	ChannelSendQueueFrames        int
+	ChannelSendQueueBytes         int
 }
 
 // DefaultIdentityPolicy is the policy without an override.
@@ -258,6 +284,17 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		RoutedInFlightPerAccount: 64,
 		ChannelUpgradePerAccount: Window{Limit: 600, Window: time.Hour},
 		ChannelUpgradePerNode:    Window{Limit: 60, Window: time.Hour},
+		// AF-CTR-05 part E1a (Plan C.9): a heartbeat every 25 s with a 60 s deadline, the credential re-read every 60 s, the gate asked
+		// every 10 minutes, 120 s of grace for an expired access token; 100 inbound frames a second, a send queue of 64
+		// frames and 4 MiB.
+		ChannelHeartbeat:              25 * time.Second,
+		ChannelHeartbeatDeadline:      60 * time.Second,
+		ChannelSessionRecheck:         60 * time.Second,
+		ChannelLapseRecheck:           10 * time.Minute,
+		ChannelTokenGrace:             120 * time.Second,
+		ChannelInboundFramesPerSecond: 100,
+		ChannelSendQueueFrames:        64,
+		ChannelSendQueueBytes:         4 << 20,
 	}
 }
 
@@ -307,6 +344,12 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"nodeCodeLifetime":        {&p.NodeCodeLifetime, 30 * time.Second, 10 * time.Minute},
 		// The contract bounds a mobile code's life at 2 minutes (MobileNativeAuth): the policy may shorten it, never lengthen it.
 		"mobileCodeLifetime": {&p.MobileCodeLifetime, 30 * time.Second, MaxMobileCodeLifetime},
+		// AF-CTR-05 part E1a: the node channel's intervals.
+		"channelHeartbeat":         {&p.ChannelHeartbeat, 5 * time.Second, time.Minute},
+		"channelHeartbeatDeadline": {&p.ChannelHeartbeatDeadline, 10 * time.Second, 5 * time.Minute},
+		"channelSessionRecheck":    {&p.ChannelSessionRecheck, 10 * time.Second, 10 * time.Minute},
+		"channelLapseRecheck":      {&p.ChannelLapseRecheck, time.Minute, time.Hour},
+		"channelTokenGrace":        {&p.ChannelTokenGrace, 10 * time.Second, 10 * time.Minute},
 	}
 	counts := map[string]countBound{
 		"emailCodeAttempts":   {&p.EmailCodeAttempts, 1, 10},
@@ -315,6 +358,11 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"maxNodesPerAccount":  {&p.MaxNodesPerAccount, 1, 1000},
 		// AF-CTR-05 part E0 (an owner placeholder, H-07).
 		"routedInFlightPerAccount": {&p.RoutedInFlightPerAccount, 1, 1024},
+		// AF-CTR-05 part E1a: the node channel's bounds (its frame bound is the contract's 1 MiB, routes.NodeChannelMaxFrameBytes, which no
+		// policy changes).
+		"channelInboundFramesPerSecond": {&p.ChannelInboundFramesPerSecond, 10, 1000},
+		"channelSendQueueFrames":        {&p.ChannelSendQueueFrames, 8, 1024},
+		"channelSendQueueBytes":         {&p.ChannelSendQueueBytes, 1 << 20, 64 << 20},
 	}
 	for name, window := range map[string]*Window{
 		"signInPerPrefix": &p.SignInPerPrefix, "signInFailuresAccount": &p.SignInFailuresAccount, "emailPerPrefix": &p.EmailPerPrefix,
@@ -361,6 +409,9 @@ func (p IdentityPolicy) Validate() error {
 		return errors.New("nodeRefreshIdleLifetime must not exceed nodeRefreshAbsolute")
 	case p.NodeAccessLifetime > p.NodeRefreshIdleLifetime:
 		return errors.New("nodeAccessLifetime must not exceed nodeRefreshIdleLifetime")
+	case 2*p.ChannelHeartbeat > p.ChannelHeartbeatDeadline:
+		// A deadline of two heartbeats at least: one lost heartbeat never closes a live channel.
+		return errors.New("channelHeartbeatDeadline must be at least twice channelHeartbeat")
 	}
 	return nil
 }
@@ -450,6 +501,7 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 		return Identity{}, invalid("%s: %v", EnvSurfaces, err)
 	}
 	identity.Surfaces = surfaces
+	identity.DefaultSurfaces = get(EnvSurfaces) == "" && mode == SelfHosted
 	header := get(EnvClientIPHeader)
 	switch {
 	case header == "":
@@ -507,6 +559,10 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 		// The self-hosted default never refuses to start for the mobile surface: it is left out.
 		identity.Surfaces = slices.DeleteFunc(identity.Surfaces, func(surface Surface) bool { return surface == SurfaceMobile })
 	}
+	if identity.Enabled(SurfaceRelay) && (!identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfaceFleet)) {
+		return Identity{}, invalid("the %s surface needs the %s and %s surfaces: the node channel is admitted on the node credential enrollment issues",
+			SurfaceRelay, SurfaceIdentity, SurfaceFleet)
+	}
 	if identity.Enabled(SurfaceOperations) {
 		if !identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages) {
 			return Identity{}, invalid("the %s surface needs the %s and %s surfaces: its page proves a step-up through the pages' routes", SurfaceOperations, SurfaceIdentity, SurfacePages)
@@ -533,8 +589,8 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 }
 
 // parseSurfaces reads the surface list: exact generated names, comma-separated, without whitespace or repetition. Official-hosted
-// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages, fleet and mobile, not operations;
-// mobile only for a base URL that is an issuer) unless listed,
+// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages, fleet, mobile and relay, not
+// operations; mobile only for a base URL that is an issuer; relay only with a command key, ApplyCommandKeys) unless listed,
 // so an explicit list pins the surfaces across upgrades.
 func parseSurfaces(value string, mode Mode) ([]Surface, error) {
 	if value == "" {

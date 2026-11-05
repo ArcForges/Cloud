@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "goVersion": "go1.27.3",
   "inputs": {
-    "go.mod": "4d2790c513fbef94b5f6ff55d3495da81acf89be825828d72c663f7aa09f96af",
-    "go.sum": "311cd3c4a4a567438029b606ef37fe631fffa73ab60c205d2371702f1678cd81",
+    "go.mod": "f2ea622643a6382de7a44548405a7c1fe3075b2645b146a16b228c8b573716e2",
+    "go.sum": "db19a0bd5ee26ab77ab41bb9296bf2ad3955aeff15332f978635cd80f8e73b07",
     "toolchain.json": "ad46e23c3a42ecc48b5f2383e6039aeffb11d9723bafac038fc6c648b7bd5a51",
     "tools/go.mod": "1abc5df8e2b367cff0d4de646d089c62eb89ade03538ae799450a096a86d600b",
     "tools/go.sum": "6394a2049a55c360f2fc72d96588570ece75a3b1350fad580da4070d53b0ae2f"
@@ -22,16 +22,27 @@
     },
     {
       "path": "github.com/ArcForges/Contracts/go",
-      "version": "v1.0.0-ci.424.1",
-      "sum": "h1:w83B/NH+upo5xBoj7+sV/oEvOZQKQCFAmg0NChLHse0=",
+      "version": "v1.0.0-ci.437.1",
+      "sum": "h1:n2mEcBy1tjGGn1ZVidI89vh116t9bUZ1MvIhIVsAEh4=",
       "goModSum": "h1:9MwtkvawAZ6+s9I5pbTsJit1/7htfvowqEREcJlIXME=",
       "repository": "https://github.com/ArcForges/Contracts",
-      "commit": "a5bc52fd66505a1b5b0f767a6a4c6ec70167eaab",
+      "commit": "e67a6b089a7270ab771a97c27aeba92c5d3b0469",
       "spdx": "Apache-2.0",
       "licenceFile": "third-party/ContractsGo.LICENSE.txt",
       "licenceSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
       "noticeFile": "third-party/ContractsGo.NOTICE.txt",
       "noticeSha256": "8aa487acf6a48132c861cb00e83ffe6bda718771cbbc6809b7e734a2dd6d366d"
+    },
+    {
+      "path": "github.com/coder/websocket",
+      "version": "v1.8.15",
+      "sum": "h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=",
+      "goModSum": "h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=",
+      "repository": "https://github.com/coder/websocket",
+      "commit": "9c8faadccd1b679e811a79ce506f8a10237251ad",
+      "spdx": "ISC",
+      "licenceFile": "third-party/CoderWebsocket.LICENSE.txt",
+      "licenceSha256": "cc0975a5f6305145bdd7b41ce9479632fdac3870e6ac4281f28017f18c767c4e"
     },
     {
       "path": "github.com/fxamacker/cbor/v2",

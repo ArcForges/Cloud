@@ -7,6 +7,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -23,6 +25,7 @@ import (
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/ArcForges/Contracts/go/arcforges/hello/v1/hellov1connect"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/net/netutil"
 
@@ -35,6 +38,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/fleetapi"
 	"github.com/ArcForges/Cloud/center/internal/hello"
+	"github.com/ArcForges/Cloud/center/internal/hub"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/identityapi"
@@ -43,6 +47,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/mobileauth"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/pages"
+	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/quota"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/schema"
@@ -76,7 +81,9 @@ type Center struct {
 	// that surface is off.
 	Authorizer *access.Authorizer
 	// Store is the runtime role's PostgreSQL store, or nil when no runtime database is configured.
-	Store  *store.DB
+	Store *store.DB
+	// Hub is the node channel (AF-CTR-05 E1a), or nil where the relay surface is off.
+	Hub    *hub.Hub
 	public http.Handler
 	admin  http.Handler
 	pools  []namedPool
@@ -116,6 +123,10 @@ type Options struct {
 	// Participants are further device revocation cascade participants (DC-06): the center always registers fleet.NodeParticipant
 	// (AF-CTR-04); agent grants arrive with AF-CTR-07 and push with AF-CLD-06; the tests register a stand-in.
 	Participants []device.Participant
+	// Codec replaces the node channel's relay.v1 codec (tests only; nil is hub.RelayCodec).
+	Codec hub.Codec
+	// Hub replaces the node channel's settings (tests shorten its intervals); nil takes them from the identity policy.
+	Hub *hub.Settings
 	// Controls are further resource controls, run after the center's own (package quota): the tests register a control that holds a
 	// slot for the call's duration, to pin that every call releases it when it ends. A running center registers none (Run composes the
 	// center with Options{}).
@@ -217,10 +228,16 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 		ClientIP:       ClientAddress(cfg.Mode, cfg.Identity), RequireClientIP: cfg.Mode == config.OfficialHosted, ClientOrigin: ClientOrigin(cfg.Mode)}
 	// The page paths are served by the pages handler where the surface is on, and answered 404 (with the security headers) elsewhere.
 	pageHandler := pages.Disabled()
+	channelHandler := hub.Disabled()
 	if cfg.Identity.Enabled(config.SurfaceIdentity) {
 		if center.Store == nil {
 			center.Close()
 			return nil, errors.New("the identity surface needs the runtime database")
+		}
+		if cfg.Identity.Enabled(config.SurfaceRelay) {
+			center.Hub = center.composeHub(pipelineOptions, options, logger)
+			options.Participants = append([]device.Participant{center.Hub.Participant()}, options.Participants...)
+			channelHandler = center.Hub
 		}
 		composed, err := center.composeIdentity(dispatcher, &pipelineOptions, options, logger)
 		if err != nil {
@@ -228,6 +245,9 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 			return nil, err
 		}
 		center.Authorizer = composed.authorizer
+		if center.Hub != nil {
+			center.Hub.Bind(composed.authorizer, composed.verifier, center.Features)
+		}
 		if cfg.Identity.Enabled(config.SurfacePages) {
 			if pageHandler, err = center.composePages(composed, publicRoutes.Registry, pipelineOptions, logger); err != nil {
 				center.Close()
@@ -239,6 +259,10 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	for _, module := range modules {
 		for _, row := range module.Pages {
 			mux.Handle(row.Path, pageHandler)
+		}
+		// The node channel's upgrade route (AF-CTR-05 E1a): the hub where the relay surface is on, 404 elsewhere.
+		for _, row := range module.Upgrades {
+			mux.Handle(row.Path, channelHandler)
 		}
 	}
 	// The read bound is the largest request bound of the registered methods without the five-byte frame header (the pipeline
@@ -286,7 +310,8 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 		return composedIdentity{}, err
 	}
 	// The node cascade participant is registered wherever the identity surface runs, whether or not the fleet surface is on: a device
-	// revoked while fleet is off still ends its nodes (AF-CTR-04).
+	// revoked while fleet is off still ends its nodes (AF-CTR-04). The node channel's participant (AF-CTR-05 E1a), where the relay
+	// surface is on, comes after it (Options.Participants starts with it), so it closes the channels of nodes the cascade revoked.
 	participants := append([]device.Participant{fleet.NodeParticipant{}}, options.Participants...)
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: sender, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: participants,
@@ -322,6 +347,76 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	verifier := session.NewVerifier(c.Store, origin, clock)
 	pipeline.Bearer, pipeline.Browser = verifier, verifier
 	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock, fleet: fleetDirect, mobile: mobile}, nil
+}
+
+// composeHub builds the node channel's hub (AF-CTR-05 E1a); composeIdentity binds its authorizer and verifier afterwards.
+func (c *Center) composeHub(pipeline ingress.Options, options Options, logger *slog.Logger) *hub.Hub {
+	settings := hub.SettingsOf(c.Config.Identity.Policy)
+	if options.Hub != nil {
+		settings = *options.Hub
+	}
+	codec := options.Codec
+	if codec == nil {
+		codec = hub.RelayCodec{}
+	}
+	return hub.New(hub.Options{DB: c.Store, Codec: codec, Settings: settings, CenterURL: c.Config.PublicBaseURL,
+		Surface: func() bool { return c.Config.Identity.Enabled(config.SurfaceRelay) }, ClientIP: pipeline.ClientIP, RequireClientIP: pipeline.RequireClientIP,
+		ClientOrigin: pipeline.ClientOrigin, Slot: NodeSlot, Clock: options.Clock, Logger: logger, Metrics: c.Metrics})
+}
+
+// CheckCommandKeys is the start's rule of the command keys (AF-CTR-05 E1a; Plan CTR5-SIG-02, CTR5-KEY-01): a center that serves the
+// relay surface needs a command key valid now (fleet.signing_key, purpose command signing) whose private half it loaded from the
+// variable its row names; a loaded key whose row registers another public half refuses the start. The kids of the usable keys are what
+// ChannelAccepted lists. An error names bindings and kids only, never a key; a store that does not answer within ten seconds refuses
+// the start too (the rule cannot be decided).
+func (c *Center) CheckCommandKeys(ctx context.Context) error {
+	if c.Hub == nil {
+		return nil
+	}
+	check, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var valid, named []platform.SigningKey
+	now := time.Now()
+	err := c.Store.InTx(check, "read the command keys", store.TxOptions{ReadOnly: true, Timeout: 10 * time.Second}, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		if valid, err = platform.ValidKeys(ctx, tx, platform.CommandSigning, now); err != nil {
+			return err
+		}
+		// Every row that is neither retired nor expired, a successor whose not_before lies ahead included (review A N-6).
+		named, err = platform.PublishedKeys(ctx, tx, platform.CommandSigning, now)
+		return err
+	})
+	if err != nil {
+		return errors.New("the command keys could not be read: the relay surface needs a valid command key")
+	}
+	loaded := map[string][]byte{}
+	for _, key := range c.Config.CommandKeys {
+		loaded[key.Binding] = key.PublicKey()
+	}
+	// A loaded key must be the public half of every row that names its binding, valid now or not yet valid, so a rotation across a
+	// not_before (E1b) never adopts a private half its row does not register.
+	for _, key := range named {
+		if public, held := loaded[key.SecretBinding]; held && !bytes.Equal(public, key.PublicKey) {
+			return fmt.Errorf("the command key loaded from %s is not the public key the signing key %s registers", key.SecretBinding, key.KID)
+		}
+	}
+	var usable []string
+	for _, key := range valid {
+		if _, held := loaded[key.SecretBinding]; held {
+			usable = append(usable, key.KID)
+		}
+	}
+	if len(usable) == 0 {
+		bindings := make([]string, 0, len(loaded))
+		for binding := range loaded {
+			bindings = append(bindings, binding)
+		}
+		slices.Sort(bindings)
+		return fmt.Errorf("the relay surface needs a valid command key whose private half is loaded; loaded bindings: %v", bindings)
+	}
+	c.Hub.UseSigningKids(usable)
+	c.Logger.Info("command keys loaded", "kids", usable)
+	return nil
 }
 
 // mailSender is the sender of the identity surface: the injected one of a test, otherwise the one the mail configuration builds (the
@@ -363,13 +458,18 @@ func (c *Center) operator(clock func() time.Time) *entitlement.Operator {
 // checkIdentityComposition fails closed when the identity and fleet surfaces' registrations, their served Connect methods and the
 // operation table disagree (SEC-01, F13): every method of the surfaces is served and has exactly one operation row, and nothing else is.
 func checkIdentityComposition(modules []routes.Module) error {
-	var policies []ingress.Policy
+	var policies, upgrades []ingress.Policy
 	for _, module := range modules {
 		if module.Surface == routes.SurfaceIdentity || module.Surface == routes.SurfaceFleet {
 			policies = append(policies, module.Policies...)
 		}
+		// The relay surface's upgrade route (AF-CTR-05 E1a) is authorized with its own row (fleet.nodeChannel, a session row) by the
+		// upgrade handler, not served as a Connect method: the table must name it exactly once, as it names every served method.
+		for _, row := range module.Upgrades {
+			upgrades = append(upgrades, ingress.Policy{FullName: row.Path, Kind: ingress.Unary, Authentication: ingress.Session, Surface: row.Surface})
+		}
 	}
-	if err := access.Check(policies); err != nil {
+	if err := access.Check(append(slices.Clone(policies), upgrades...)); err != nil {
 		return err
 	}
 	served := map[string]bool{}
@@ -413,6 +513,27 @@ func (c *Center) recordDefinitions(ctx context.Context) error {
 	}
 	c.Logger.Info("definitions version recorded", "definitionsVersion", c.Entitlements.DefinitionsVersion(), "changed", recording == entitlement.Recorded)
 	return nil
+}
+
+// definitionsSuperseded reports whether the deploy's current definitions fact names another version than this revision's (AF-CTR-05
+// E0 C-N2): such a revision neither recomputes nor writes an entitlement and answers RESOURCE/overloaded where it would, so the gauge
+// arcforges_center_definitions_superseded makes it visible beyond its one start-up warning: at every /metrics scrape, and on every
+// tick of the periodic metrics log line (the hosted Container's only view). A center that records no fact, and a
+// store that does not answer within two seconds, report false.
+func (c *Center) definitionsSuperseded(ctx context.Context) bool {
+	if !c.recordsDefinitions() {
+		return false
+	}
+	check, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	current := ""
+	err := c.Store.InTx(check, "read the current definitions version", store.TxOptions{ReadOnly: true, Timeout: 2 * time.Second},
+		func(ctx context.Context, tx pgx.Tx) error {
+			version, err := entitlement.LoadCurrentDefinitions(ctx, tx)
+			current = version
+			return err
+		})
+	return err == nil && current != "" && current != c.Entitlements.DefinitionsVersion()
 }
 
 // keepRecordingDefinitions retries the fact of this start every interval until the store answers (a store that did not answer at the
@@ -602,6 +723,7 @@ func (c *Center) serveMetrics(writer http.ResponseWriter, request *http.Request)
 	}
 	writer.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	writer.Header().Set("Cache-Control", "no-store")
+	c.Metrics.SetDefinitionsSuperseded(c.definitionsSuperseded(request.Context()))
 	if err := c.Metrics.WritePrometheus(writer); err != nil {
 		return
 	}
@@ -685,7 +807,6 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if cfg.AdminAddress != "" {
 		plans = append(plans, plan{"admin", cfg.AdminAddress, center.Admin(), true})
 	}
-	errorLog := slog.NewLogLogger(logger.Handler(), slog.LevelWarn)
 	servers := make([]*http.Server, 0, len(plans))
 	failures := make(chan error, len(plans))
 	bound := map[string]string{}
@@ -698,15 +819,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			return errors.New("could not bind the " + item.name + " listener")
 		}
 		bound[item.name] = listener.Addr().String()
-		protocols := new(http.Protocols)
-		protocols.SetHTTP1(item.http1)
-		protocols.SetUnencryptedHTTP2(true)
-		server := &http.Server{
-			Handler: item.handler, Protocols: protocols, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second,
-			WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384, ErrorLog: errorLog,
-		}
+		server := newPublicServer(item.handler, item.http1, logger)
 		servers = append(servers, server)
-		go func() { failures <- server.Serve(netutil.LimitListener(listener, cfg.MaxConnections)) }()
+		// A request connection of a public listener holds one of MaxConnections; an admitted node channel moves to one of
+		// MaxNodeConnections (PN-1). The admin listener serves no channel and keeps the plain bound.
+		bounded := netutil.LimitListener(listener, cfg.MaxConnections)
+		if item.name != "admin" {
+			bounded = listen(listener, cfg.MaxConnections, cfg.MaxNodeConnections)
+		}
+		go func() { failures <- server.Serve(bounded) }()
 	}
 	surfaces := make([]string, 0, len(cfg.Identity.Surfaces))
 	for _, surface := range cfg.Identity.Surfaces {
@@ -723,11 +844,25 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if cfg.Identity.Disabled != "" {
 		logger.Error("the identity surface is off", "reason", cfg.Identity.Disabled)
 	}
+	if cfg.Identity.RelayDisabled != "" {
+		logger.Warn("the relay surface of the self-hosted default is off", "reason", cfg.Identity.RelayDisabled)
+	}
 	if bootstrap := cfg.Identity.Bootstrap; bootstrap != nil && !time.Now().Before(bootstrap.ExpiresAt) {
 		logger.Warn("the owner bootstrap has expired; remove its variables", "expiresAt", bootstrap.ExpiresAt.Format(time.RFC3339))
 	}
 	if center.Store != nil {
 		go center.logReadiness(ctx)
+	}
+	if center.Hub != nil {
+		// CTR5-SIG-02: a center that serves the relay surface holds a valid command key, or it does not start.
+		if err := center.CheckCommandKeys(ctx); err != nil {
+			for _, server := range servers {
+				_ = server.Close()
+			}
+			return err
+		}
+		// The hub takes the hub lease (or waits for it) before the listeners admit a channel.
+		center.Hub.Start(ctx)
 	}
 	if cfg.MetricsLogInterval > 0 {
 		go center.logMetrics(ctx, cfg.MetricsLogInterval)
@@ -752,6 +887,11 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 func (c *Center) stopServing(servers []*http.Server, bound time.Duration) {
 	shutdown, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
+	// The node channels first (CTR5-HUB-11): each closes 4500 with a reconnect hint, and the hub lease is released, before the
+	// listeners stop; http.Server.Shutdown does not wait for a hijacked connection.
+	if c.Hub != nil {
+		c.Hub.Stop(shutdown)
+	}
 	for _, server := range servers {
 		_ = server.Shutdown(shutdown)
 	}
@@ -802,6 +942,8 @@ func (c *Center) logReadiness(ctx context.Context) {
 	c.Logger.Warn("store not ready", "components", readiness.Components)
 }
 
+// logMetrics writes the periodic metrics log line. The superseded gauge is evaluated on every tick first (review B B-2): the hosted
+// Container serves no /metrics, so this line is where its operator sees a superseded revision and the node channel's connections.
 func (c *Center) logMetrics(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -810,6 +952,7 @@ func (c *Center) logMetrics(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			c.Metrics.SetDefinitionsSuperseded(c.definitionsSuperseded(ctx))
 			c.Logger.Info("metrics", "requests", c.Metrics.Summary())
 		}
 	}

@@ -371,6 +371,8 @@ func (s *Service) SignOut(ctx context.Context, tx pgx.Tx, request Request, node 
 	if tag.RowsAffected() != 1 {
 		return arc.CredentialRevoked()
 	}
+	// The node's channel closes once this transaction commits (AF-CTR-05 E1a, CTR5-HUB-08).
+	session.Announce(ctx, session.Revocation{Sessions: []platform.ID{node.SessionID}})
 	if err = s.audit(ctx, tx, request, NodeActor(node.InstallationID), "fleet.node.signed_out", "signed_out", row.enrollmentID,
 		map[string]any{"nodeId": row.nodeID.String()}, now); err != nil {
 		return err

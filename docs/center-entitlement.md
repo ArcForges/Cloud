@@ -7,7 +7,8 @@ sells nothing, charges nobody and activates nothing: the production catalogue is
 prices and limits (H-07).
 
 The commerce path (a purchase becomes grants and terms) is AF-CTR-09, the operator's own service is AF-OPS-01, and the gated
-operations themselves (node connection, task control, MCP, push) arrive with AF-CTR-05 and later. AF-CTR-04's node
+operations themselves (node connection, task control, MCP, push) arrive with AF-CTR-05 and later: the first is the node channel's
+row `fleet.nodeChannel` (node connection, `center.nodes`, AF-CTR-05 E1a; [center fleet](center-fleet.md#node-channel)). AF-CTR-04's node
 enrollment and its mobile native authorization are essential operations and serve no gated row (node enrollment: [center fleet](center-fleet.md),
 pinned by `TestFleetRowsCarryNoFeature`; the mobile authorization is a center-defined operation, and the center-defined and page
 operation types have no `Feature` field). [What waits](#what-waits-for-later-tasks) lists

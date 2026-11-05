@@ -19,8 +19,8 @@ import (
 // Outcome is what the pipeline reports about one request to its observer (logs and metrics). It carries no request content:
 // Method is a registered method path or a fixed word, never a client value.
 type Outcome struct {
-	// Method is the registered method path, "plain" for a plain route, "unregistered" for a method-shaped path without a
-	// policy and "not_found" for any other path.
+	// Method is the registered method path, the path of an upgrade route, "plain" for a plain route, "unregistered" for a
+	// method-shaped path without a policy and "not_found" for any other path.
 	Method string
 	// Refusal is the pipeline's refusal, or nil when the request was admitted or answered with a plain status.
 	Refusal *Reason
@@ -88,6 +88,11 @@ func (p *pipeline) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 		plain(writer, http.StatusNotFound)
 	case p.options.Routes.IsPlain(path):
 		p.observe(request, Outcome{Method: "plain"})
+		p.next.ServeHTTP(writer, request)
+	case p.options.Routes.IsUpgrade(path):
+		// An upgrade route (the node channel, AF-CTR-05 E1a) is the handler's from here: it checks the method, the upgrade headers, the
+		// surface and the credential before it upgrades, and answers every refusal itself (with its reason in a header, PN-3).
+		p.observe(request, Outcome{Method: path})
 		p.next.ServeHTTP(writer, request)
 	case LooksLikeRPC(path):
 		p.admit(writer, request)

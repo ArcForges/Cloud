@@ -79,6 +79,8 @@ type Module struct {
 	// Pages are the routes of the module's pages (only a surface of PageSurfaces declares any: PageRoutes, OperationsPageRoutes,
 	// FleetPageRoutes).
 	Pages []PageRoute
+	// Upgrades are the module's WebSocket upgrade routes (only the relay surface declares any: RelayUpgradeRoutes).
+	Upgrades []UpgradeRoute
 }
 
 // HelloMethod is the path of the anonymous Hello.
@@ -126,7 +128,11 @@ func Center() ([]Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Module{hello, identity, pages, operations, fleet, mobile}, nil
+	relay, err := Relay()
+	if err != nil {
+		return nil, err
+	}
+	return []Module{hello, identity, pages, operations, fleet, mobile, relay}, nil
 }
 
 // Surfaces are the switchable surfaces of the registrations, in registration order.
@@ -196,6 +202,9 @@ type WorkerTable struct {
 	Pages  []PageRoute
 	Native []PageRoute
 	Apex   []PageRoute
+	// Upgrades are the WebSocket upgrade routes (the relay surface, AF-CTR-05 E1a): the Worker's upgrade handler passes them through
+	// only while their surface is enabled, and returns the center's 101 unchanged.
+	Upgrades []UpgradeRoute
 	// MaxBodyBytes is the bound of a request body of a method that declares no larger one: the Hello bound, which the C#
 	// rollback host generates too. Every row carries its own bound; the center's Connect reader takes MaxRequestBytes.
 	MaxBodyBytes               int
@@ -211,10 +220,13 @@ var ErrRegistration = errors.New("inconsistent center registration")
 // Ingress is the center's public routes: the policy registry of every module and their plain paths.
 func Ingress(modules []Module) (*ingress.Routes, error) {
 	var policies []ingress.Policy
-	var plain []string
+	var plain, upgrades []string
 	for _, module := range modules {
 		policies = append(policies, module.Policies...)
 		plain = append(plain, module.PlainPaths...)
+		for _, row := range module.Upgrades {
+			upgrades = append(upgrades, row.Path)
+		}
 		// The pages are plain HTTP routes of the center: the pipeline lets their exact paths through to the page handler, which
 		// answers for its surface.
 		for _, row := range module.Pages {
@@ -227,7 +239,7 @@ func Ingress(modules []Module) (*ingress.Routes, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ingress.NewRoutes(registry, plain, nil), nil
+	return ingress.NewRoutes(registry, plain, nil).WithUpgrades(upgrades...), nil
 }
 
 // Table reads the Worker's production table from the registrations, fail-closed.
@@ -236,8 +248,20 @@ func Table(modules []Module) (WorkerTable, error) {
 	var rows, surfaceRows []Row
 	var plain []string
 	var pageRows, nativeRows, apexRows []PageRoute
+	var upgradeRows []UpgradeRoute
 	names := map[string]bool{}
 	for _, module := range modules {
+		if len(module.Upgrades) > 0 {
+			for _, row := range module.Upgrades {
+				if row.Surface != module.Surface {
+					return WorkerTable{}, fmt.Errorf("%w: the upgrade route %s is in the module %s of another surface", ErrRegistration, row.ID, module.Name)
+				}
+			}
+			if err := CheckUpgrades(module.Upgrades); err != nil {
+				return WorkerTable{}, err
+			}
+			upgradeRows = append(upgradeRows, module.Upgrades...)
+		}
 		if len(module.Pages) > 0 {
 			if !slices.Contains(PageSurfaces(), module.Surface) {
 				return WorkerTable{}, fmt.Errorf("%w: the module %s declares pages outside the page surfaces %v", ErrRegistration, module.Name, PageSurfaces())
@@ -352,6 +376,7 @@ func Table(modules []Module) (WorkerTable, error) {
 		Pages:                      pageRows,
 		Native:                     nativeRows,
 		Apex:                       apexRows,
+		Upgrades:                   upgradeRows,
 		MaxBodyBytes:               HelloMaxBodyBytes,
 		ColdStartMilliseconds:      ColdStartMilliseconds,
 		StreamLifetimeMilliseconds: StreamLifetimeMilliseconds,

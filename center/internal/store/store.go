@@ -234,6 +234,9 @@ func (db *DB) run(ctx context.Context, options pgx.TxOptions, fn func(ctx contex
 	if err != nil {
 		return err
 	}
+	// Each attempt has its own list of after-commit hooks: a hook registered by an attempt that rolled back never runs.
+	hooks := &afterCommit{}
+	ctx = context.WithValue(ctx, afterCommitKey{}, hooks)
 	// A panic (or Goexit) in fn must still end the transaction and give the connection back with its locks, as pgx.BeginTxFunc
 	// did (D1); the attempt's context is still live while the stack unwinds. After the commit or the rollback below it is a no-op
 	// (pgx.ErrTxClosed).
@@ -248,7 +251,29 @@ func (db *DB) run(ctx context.Context, options pgx.TxOptions, fn func(ctx contex
 		}
 		return &commitUnknown{err: err}
 	}
+	for _, hook := range hooks.hooks {
+		hook()
+	}
 	return nil
+}
+
+type afterCommitKey struct{}
+
+// afterCommit is the hooks one attempt of InTx registered.
+type afterCommit struct{ hooks []func() }
+
+// AfterCommit registers fn to run once the transaction of ctx (the context InTx passes to its function) has committed with a
+// definite answer, after the commit and in registration order, on the committing goroutine; it reports false, and registers
+// nothing, for a context that belongs to no transaction. A hook of an attempt that rolled back (a retried serialization failure, an
+// error of the function) or whose COMMIT went unanswered never runs, so a hook may only announce what the transaction committed: the
+// node channel hub's revocation close (AF-CTR-05 E1a) re-checks the store before it acts, and a hook must not block.
+func AfterCommit(ctx context.Context, fn func()) bool {
+	hooks, ok := ctx.Value(afterCommitKey{}).(*afterCommit)
+	if !ok || fn == nil {
+		return false
+	}
+	hooks.hooks = append(hooks.hooks, fn)
+	return true
 }
 
 // commitRolledBack reports a COMMIT error that proves the transaction rolled back: the server's own refusal of the commit, a

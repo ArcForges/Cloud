@@ -28,6 +28,7 @@ import { bounded, readBytes, reject, rpcError } from "./io.ts";
 import { apexTable, handleApexRequest } from "./applink.ts";
 import { handleNativeRequest, nativeTable } from "./native.ts";
 import { handlePageRequest, pageTable } from "./pages.ts";
+import { handleUpgradeRequest, upgradeTable } from "./upgrade.ts";
 import { healthRoute } from "../tables/center-tables.generated.ts";
 import { bodyReadMilliseconds } from "../tables/cloud-tables.generated.ts";
 import {
@@ -122,6 +123,9 @@ export async function handleApiRequest(
   if (apex) return handleApexRequest(request, env, apex);
   const native = nativeTable.get(url.pathname);
   if (native) return handleNativeRequest(request, env, native, requestOrigin(request));
+  // The node channel's WebSocket upgrade (AF-CTR-05 E1a) has a handler of its own, which returns the Container's 101 unchanged.
+  const upgrade = upgradeTable.get(url.pathname);
+  if (upgrade) return handleUpgradeRequest(request, env, upgrade, requestOrigin(request));
   const pageCandidates = pageTable.get(url.pathname);
   if (pageCandidates) return handlePageRequest(request, env, pageCandidates);
   const health = url.pathname === healthPath;

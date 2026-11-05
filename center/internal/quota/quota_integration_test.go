@@ -65,9 +65,16 @@ func TestTheCompositionsControlsCoverTheRoutedAndChannelGroupsOnly(t *testing.T)
 			t.Errorf("a %s row was admitted without its own control", group)
 		}
 	}
-	// No control stands in front of an essential row.
+	// No control stands in front of an essential row; the channel's upgrade buckets stand in front of the node channel's row (AF-CTR-05
+	// E1a), and of nothing else.
 	for _, control := range controls {
 		for _, operation := range access.Operations() {
+			if operation.ID == "fleet.nodeChannel" {
+				if control.Covers(operation) != (control.Name() == ChannelUpgradeName) {
+					t.Errorf("%s and the node channel's row: covers %v", control.Name(), control.Covers(operation))
+				}
+				continue
+			}
 			if control.Covers(operation) {
 				t.Errorf("%s covers the essential row %s", control.Name(), operation.ID)
 			}

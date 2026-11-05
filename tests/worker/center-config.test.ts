@@ -144,6 +144,8 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
     return ["the fleet surface needs the identity and pages surfaces"];
   if (names.includes("mobile") && !(names.includes("identity") && names.includes("pages")))
     return ["the mobile surface needs the identity and pages surfaces"];
+  if (names.includes("relay") && !(names.includes("identity") && names.includes("fleet")))
+    return ["the relay surface needs the identity and fleet surfaces"];
   if (names.includes("identity")) {
     const base = vars?.ARCFORGES_CENTER_PUBLIC_BASE_URL;
     const origin =
@@ -244,7 +246,30 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,mobile" }), []);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,mobile" }).length, 1);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "mobile" }).length, 1);
-  assert.deepEqual([...surfaces].sort(), ["fleet", "identity", "mobile", "operations", "pages"]);
+  // AF-CTR-05 E1a: the node channel needs identity and fleet (and so pages); production never enables it, and the acceptance
+  // environment gains it only in AF-CTR-05 E3.
+  assert.deepEqual(
+    surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,fleet,relay" }),
+    [],
+  );
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,relay" }).length, 1);
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "relay" }).length, 1);
+  assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("relay"));
+  for (const [name, environment] of environments)
+    assert(
+      !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+        .split(",")
+        .includes("relay"),
+      `wrangler.json environment ${name}: no environment enables the relay surface before AF-CTR-05 E3`,
+    );
+  assert.deepEqual([...surfaces].sort(), [
+    "fleet",
+    "identity",
+    "mobile",
+    "operations",
+    "pages",
+    "relay",
+  ]);
   // Production never enables the mobile surface and never carries an Android app identity or the debug scheme (M-15); the
   // acceptance environment enables it for H3.
   assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("mobile"));

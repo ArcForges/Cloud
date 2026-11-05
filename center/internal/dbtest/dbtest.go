@@ -7,12 +7,16 @@ package dbtest
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/provision"
@@ -147,3 +151,40 @@ VALUES ($1, $2, $3, $4, $5, 1, decode(repeat('c1', 32), 'hex'), 2, 0, $6, $7, $6
 }
 
 func sha256sum(data []byte) [32]byte { return sha256.Sum256(data) }
+
+// CommandKey generates a throwaway command-signing key (ECDSA P-256) under a binding, registers its public half as a valid
+// fleet.signing_key row with the migration role (the admin command's path, platform.RegisterKey) and returns the loaded key and its
+// kid (AF-CTR-05 E1a: a center that serves the relay surface needs one). The private half lives only in the test's memory.
+func (d *Database) CommandKey(binding string) (config.CommandKey, string) {
+	d.T.Helper()
+	return RegisterCommandKey(d.T, d.Migration, binding)
+}
+
+// RegisterCommandKey is CommandKey over any migration-role connection (the harnesses that build their own database).
+func RegisterCommandKey(t testing.TB, migration *pgx.Conn, binding string) (config.CommandKey, string) {
+	t.Helper()
+	private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := config.NewCommandKey(binding, private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kid := "test-" + platform.NewID().String()[:12]
+	now := time.Now()
+	ctx := context.Background()
+	tx, err := migration.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := platform.RegisterKey(ctx, tx, platform.SigningKey{KID: kid, Purpose: platform.CommandSigning, Algorithm: "ES256", PublicKey: key.PublicKey(),
+		SecretBinding: binding, NotBefore: now, NotAfter: now.Add(30 * 24 * time.Hour)}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return key, kid
+}

@@ -694,6 +694,7 @@ WHERE family_id = (SELECT family_id FROM identity.session WHERE session_id = $1)
 			return err
 		}
 		revoked = tag.RowsAffected()
+		session.Announce(ctx, session.Revocation{Sessions: []platform.ID{*flow.sessionID}})
 	}
 	return s.auditFlow(ctx, tx, request, Anonymous, "fleet.node_sign_in.code_reused", "code_reused", flow.FlowID, map[string]any{"sessions": revoked}, now)
 }

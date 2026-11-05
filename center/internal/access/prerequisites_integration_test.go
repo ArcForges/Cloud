@@ -268,11 +268,16 @@ func TestAGatedRowWithoutAControlFailsComposition(t *testing.T) {
 	if CheckControls(rows, []Control{everything, ControlFunc{Rows: everything.Rows}}) == nil {
 		t.Fatal("a control without a name was admitted")
 	}
-	// The essential rows need none: the served table of today composes without a control.
-	if err = CheckControls(Operations(), nil); err != nil {
-		t.Fatalf("the served operation table: %v", err)
+	// N-9 (routed from E0): the served table has its first gated row (fleet.nodeChannel, AF-CTR-05 E1a), so a composition without a
+	// control in front of the node connection group fails, and one with it composes; the essential rows need none.
+	if err = CheckControls(Operations(), nil); err == nil || !strings.Contains(err.Error(), "/fleet/v1/node") {
+		t.Fatalf("the served operation table without a control: %v", err)
 	}
-	if err = NewAuthorizer(nil, nil).CheckComposition(); err != nil {
+	if err = NewAuthorizer(nil, nil, WithControls(routed)).CheckComposition(); err == nil || !strings.Contains(err.Error(), "/fleet/v1/node") {
+		t.Fatalf("an authorizer whose controls omit the node connection group: %v", err)
+	}
+	channel := ControlFunc{Key: "channel", Rows: func(operation Operation) bool { return operation.Group == feature.GroupNodeConnection }}
+	if err = NewAuthorizer(nil, nil, WithControls(routed, channel)).CheckComposition(); err != nil {
 		t.Fatalf("an authorizer over the served table: %v", err)
 	}
 }

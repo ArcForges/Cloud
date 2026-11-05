@@ -93,24 +93,79 @@ func (row *verified) caller(credential ingress.CredentialKind) *ingress.Caller {
 // ingress.ErrCredentialRevoked; an expired access token is ingress.ErrTokenExpired (the client refreshes); an account that may
 // not sign in is no caller.
 func (v *Verifier) Verify(ctx context.Context, token string) (*ingress.Caller, error) {
+	caller, _, err := v.VerifyNative(ctx, token)
+	return caller, err
+}
+
+// VerifyNative is Verify that also answers when the access token expires: the earlier of its own expiry and the session's absolute
+// end. The node channel binds a connection to it (AF-CTR-05 E1a, CTR5-HUB-07).
+func (v *Verifier) VerifyNative(ctx context.Context, token string) (*ingress.Caller, time.Time, error) {
 	secret, ok := ParseToken(AccessPrefix, token)
 	if !ok {
-		return nil, nil
+		return nil, time.Time{}, nil
 	}
 	row, err := v.lookup(ctx, "WHERE s.access_token_hash = $1 AND s.credential_kind = 1", secret.Digest())
 	if err != nil || row == nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	now := v.clock()
 	switch {
 	case row.revoked:
-		return nil, ingress.ErrCredentialRevoked
+		return nil, time.Time{}, ingress.ErrCredentialRevoked
 	case row.accessExpiresAt == nil || !now.Before(*row.accessExpiresAt) || !now.Before(row.expiresAt):
-		return nil, ingress.ErrTokenExpired
+		return nil, time.Time{}, ingress.ErrTokenExpired
 	case row.state != 1 && row.state != 2:
-		return nil, nil
+		return nil, time.Time{}, nil
 	}
-	return row.caller(ingress.CredentialNativeBearer), nil
+	return row.caller(ingress.CredentialNativeBearer), minTime(*row.accessExpiresAt, row.expiresAt), nil
+}
+
+func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
+}
+
+// Standing is what a re-check of one native session finds (the node channel's periodic check, AF-CTR-05 E1a, CTR5-HUB-07 and -08).
+type Standing int
+
+// The standings.
+const (
+	// Live: the session, its device and its installation are live and the account may sign in.
+	Live Standing = iota + 1
+	// Revoked: the session, its device or its installation is revoked, or the session no longer exists.
+	Revoked
+	// Barred: the account may no longer sign in (its state is neither active nor restricted).
+	Barred
+)
+
+// Recheck reads the standing of a native session by its ID, and when it is live, when its current access token expires (the earlier
+// of the token's expiry and the session's absolute end). An error is a store that could not be reached.
+func (v *Verifier) Recheck(ctx context.Context, sessionID platform.ID) (Standing, time.Time, error) {
+	var row verified
+	found := true
+	err := v.db.InTx(ctx, "re-check a session", store.TxOptions{ReadOnly: true, Timeout: verifyTimeout}, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, verifyColumns+"WHERE s.session_id = $1 AND s.credential_kind = 1", sessionID).Scan(&row.sessionID, &row.userID, &row.deviceID,
+			&row.installationID, &row.kind, &row.scope, &row.method, &row.state, &row.product, &row.authenticatedAt, &row.expiresAt, &row.accessExpiresAt,
+			&row.idleExpiresAt, &row.origin, &row.authEpoch, &row.recoveryGeneration, &row.revoked, &row.purpose)
+		if errors.Is(err, pgx.ErrNoRows) {
+			found = false
+			return nil
+		}
+		return err
+	})
+	switch {
+	case err != nil:
+		return 0, time.Time{}, err
+	case !found || row.revoked:
+		return Revoked, time.Time{}, nil
+	case row.state != 1 && row.state != 2:
+		return Barred, time.Time{}, nil
+	case row.accessExpiresAt == nil:
+		return Live, row.expiresAt, nil
+	}
+	return Live, minTime(*row.accessExpiresAt, row.expiresAt), nil
 }
 
 // AllowedOrigin is the one exact Origin of browser sessions.

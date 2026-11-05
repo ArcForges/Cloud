@@ -39,6 +39,15 @@ func TestMetricsAreExposedInThePrometheusTextFormat(t *testing.T) {
 	if summary["plain 200"] != 1 || summary["refused auth.unauthenticated authentication"] != 1 {
 		t.Fatalf("summary: %v", summary)
 	}
+	// The gauges are in the summary too (review B B-2): the periodic log line is the hosted operator's only view of them.
+	if value, listed := summary[SummaryDefinitionsSuperseded]; !listed || value != 0 {
+		t.Fatalf("the superseded gauge: %v", summary)
+	}
+	metrics.SetDefinitionsSuperseded(true)
+	metrics.SetChannelConnected(3)
+	if summary = metrics.Summary(); summary[SummaryDefinitionsSuperseded] != 1 || summary[SummaryChannelConnected] != 3 {
+		t.Fatalf("the gauges: %v", summary)
+	}
 }
 
 func TestLogsAreJSONLinesOfTheCenter(t *testing.T) {

@@ -48,6 +48,11 @@ type Metrics struct {
 	identity  map[eventKey]uint64
 	fleet     map[eventKey]uint64
 	mobile    map[eventKey]uint64
+	channel   map[eventKey]uint64
+	// connected is the node channel's accepted connections (a gauge); superseded is 1 while this revision's definitions version is
+	// not the deploy's current one (E0 C-N2), set by the server at every scrape.
+	connected  int
+	superseded int
 }
 
 // FleetOutcomes is the closed label set of the fleet surface's events (AF-CTR-04, CR-02): the refresh of a node session (rotated,
@@ -94,13 +99,33 @@ func MobileOutcomes() map[string][]string {
 	}
 }
 
+// ChannelOutcomes is the closed label set of the node channel's events (AF-CTR-05 E1a, Plan C.10): upgrades opened, refused before
+// the upgrade by stage, hellos by outcome, closes by close code (or normal, abnormal), heartbeat deadlines missed, violations by
+// reason, token refreshes (rebound, unchanged, over the refresh rate), lapse checks that closed or could not decide, and the hub
+// lease's changes and failed renewals. ObserveChannel counts only these
+// pairs; any other pair is counted as unlisted.
+func ChannelOutcomes() map[string][]string {
+	return map[string][]string{
+		"opened":    {"upgraded"},
+		"refused":   {"request", "lease", "credential", "authorization", "node", "connections", "handshake"},
+		"hello":     {"accepted", "malformed", "signature", "mismatch", "deadline", "no_signing_key", "fenced", "node_gone", "unrecorded"},
+		"closed":    {"4401", "4403", "4408", "4409", "4413", "4429", "4500", "4503", "normal", "abnormal"},
+		"heartbeat": {"missed"},
+		"violation": {"too_large", "rate", "write_timeout", "text_frame", "unreadable_frame", "before_hello", "unexpected_frame", "hello_without_nonce",
+			"hello_malformed", "hello_signature", "hello_mismatch"},
+		"token": {"rebound", "unchanged", "rate"},
+		"lapse": {"closed", "undecided"},
+		"lease": {"acquired", "held_elsewhere", "renewal_failed", "lost", "released"},
+	}
+}
+
 // Unlisted is the label pair a fleet event outside FleetOutcomes is counted under.
 const Unlisted = "unlisted"
 
 // NewMetrics is an empty metrics registry.
 func NewMetrics() *Metrics {
 	return &Metrics{requests: map[requestKey]uint64{}, latencies: map[string]*histogram{}, refusals: map[refusalKey]uint64{},
-		identity: map[eventKey]uint64{}, fleet: map[eventKey]uint64{}, mobile: map[eventKey]uint64{}}
+		identity: map[eventKey]uint64{}, fleet: map[eventKey]uint64{}, mobile: map[eventKey]uint64{}, channel: map[eventKey]uint64{}}
 }
 
 // ObserveRequest counts one finished request.
@@ -164,6 +189,43 @@ func (m *Metrics) ObserveMobile(event, outcome string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.mobile[key]++
+}
+
+// ObserveChannel counts one outcome of the node channel; both labels are closed values of ChannelOutcomes chosen by the code.
+func (m *Metrics) ObserveChannel(event, outcome string) {
+	key := eventKey{Unlisted, Unlisted}
+	for _, listed := range ChannelOutcomes()[event] {
+		if listed == outcome {
+			key = eventKey{event, outcome}
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.channel[key]++
+}
+
+// ChannelCount is how often the node channel counted a pair (tests read it).
+func (m *Metrics) ChannelCount(event, outcome string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.channel[eventKey{event, outcome}]
+}
+
+// SetChannelConnected sets the gauge of the node channel's accepted connections.
+func (m *Metrics) SetChannelConnected(count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.connected = count
+}
+
+// SetDefinitionsSuperseded sets the gauge of a revision whose definitions version is not the deploy's current one (E0 C-N2).
+func (m *Metrics) SetDefinitionsSuperseded(superseded bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.superseded = 0
+	if superseded {
+		m.superseded = 1
+	}
 }
 
 // MobileCount is how often the mobile surface counted a pair (tests read it; an unlisted pair is counted as Unlisted, Unlisted).
@@ -254,11 +316,37 @@ func (m *Metrics) WritePrometheus(writer io.Writer) error {
 	for _, key := range mobile {
 		fmt.Fprintf(&text, "arcforges_center_mobile_events_total{event=%q,outcome=%q} %d\n", key.event, key.outcome, m.mobile[key])
 	}
+	text.WriteString("# HELP arcforges_center_channel_events_total Node channel outcomes, by event and outcome.\n")
+	text.WriteString("# TYPE arcforges_center_channel_events_total counter\n")
+	channel := make([]eventKey, 0, len(m.channel))
+	for key := range m.channel {
+		channel = append(channel, key)
+	}
+	sort.Slice(channel, func(i, j int) bool {
+		return channel[i].event+"\x00"+channel[i].outcome < channel[j].event+"\x00"+channel[j].outcome
+	})
+	for _, key := range channel {
+		fmt.Fprintf(&text, "arcforges_center_channel_events_total{event=%q,outcome=%q} %d\n", key.event, key.outcome, m.channel[key])
+	}
+	text.WriteString("# HELP arcforges_center_channel_connected_nodes Node channel connections accepted in this process.\n")
+	text.WriteString("# TYPE arcforges_center_channel_connected_nodes gauge\n")
+	fmt.Fprintf(&text, "arcforges_center_channel_connected_nodes %d\n", m.connected)
+	text.WriteString("# HELP arcforges_center_definitions_superseded 1 while this revision's definitions version is not the deploy's current one.\n")
+	text.WriteString("# TYPE arcforges_center_definitions_superseded gauge\n")
+	fmt.Fprintf(&text, "arcforges_center_definitions_superseded %d\n", m.superseded)
 	_, err := io.WriteString(writer, text.String())
 	return err
 }
 
-// Summary is the request counts by method and outcome, for the periodic metrics log line.
+// Summary keys of the two gauges (AF-CTR-05 E1a, review B B-2): the hosted Container has no admin listener, so the periodic metrics
+// log line is the operator's only view of them.
+const (
+	SummaryDefinitionsSuperseded = "definitions superseded"
+	SummaryChannelConnected      = "channel connected_nodes"
+)
+
+// Summary is the request counts by method and outcome, the surfaces' event counts and the two gauges, for the periodic metrics log
+// line.
 func (m *Metrics) Summary() map[string]uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -278,6 +366,11 @@ func (m *Metrics) Summary() map[string]uint64 {
 	for key, count := range m.mobile {
 		summary["mobile "+key.event+" "+key.outcome] += count
 	}
+	for key, count := range m.channel {
+		summary["channel "+key.event+" "+key.outcome] += count
+	}
+	summary[SummaryDefinitionsSuperseded] = uint64(m.superseded)
+	summary[SummaryChannelConnected] = uint64(max(m.connected, 0))
 	return summary
 }
 

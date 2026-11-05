@@ -273,6 +273,18 @@ func serve(lookup func(string) (string, bool), stderr io.Writer) int {
 		logger.Error("the center refused to start", "error", err.Error())
 		return exitFailure
 	}
+	// The command keys (AF-CTR-05 E1a, CTR5-KEY-01): read once from the process environment and unset from it at once, whatever
+	// follows, so no later os.Getenv or os.Environ and no child process sees them; an error names the variable, never its value. The
+	// unset does not reach the kernel's copy of the start environment (/proc/<pid>/environ keeps the variables for the life of the
+	// process, readable by the same user and root), and the Go heap copies are not zeroed, so a core dump can still contain them.
+	keys, err := commandKeys()
+	if err == nil {
+		err = cfg.ApplyCommandKeys(keys)
+	}
+	if err != nil {
+		logger.Error("the center refused to start", "error", err.Error())
+		return exitFailure
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err = server.Run(ctx, cfg, logger); err != nil {
@@ -280,6 +292,16 @@ func serve(lookup func(string) (string, bool), stderr io.Writer) int {
 		return exitFailure
 	}
 	return exitOK
+}
+
+// commandKeys reads the command keys of the process environment and unsets every ARCFORGES_CENTER_KEY_ variable, whatever the outcome
+// (CTR5-KEY-01: read once, never left in the process environment for a later reader; see serve for what an unset does not reach).
+func commandKeys() ([]config.CommandKey, error) {
+	keys, names, err := config.LoadCommandKeys(os.Environ())
+	for _, name := range names {
+		_ = os.Unsetenv(name)
+	}
+	return keys, err
 }
 
 // revision names this build in the migration record.

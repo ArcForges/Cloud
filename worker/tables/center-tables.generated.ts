@@ -35,7 +35,7 @@ export interface ApiRoute {
 }
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
-export type Surface = "identity" | "pages" | "operations" | "fleet" | "mobile";
+export type Surface = "identity" | "pages" | "operations" | "fleet" | "mobile" | "relay";
 
 /** A method of a switchable surface. */
 export interface SurfaceRoute extends ApiRoute {
@@ -101,6 +101,26 @@ export interface ApexRoute {
   readonly maxResponseBytes: number;
 }
 
+/**
+ * A WebSocket upgrade route of the relay surface (AF-CTR-05 E1a, the node channel): an exact GET path below the owned /api prefix. The
+ * upgrade handler passes a request through only for such a row whose surface is enabled, and only as an upgrade: Upgrade websocket,
+ * the row's subprotocol, a native bearer of the edge's shape, no query, no body, no cookie. It returns the center's 101 unchanged.
+ */
+export interface UpgradeRoute {
+  readonly surface: Surface;
+  readonly method: "GET";
+  /** The path without the owned /api prefix. */
+  readonly path: string;
+  /** The one WebSocket subprotocol the route admits. */
+  readonly subprotocol: string;
+  /** The largest message on the channel (the center enforces it). */
+  readonly maxFrameBytes: number;
+  /** The cap of the upgrade request's duration, until the 101. */
+  readonly maxDurationMs: number;
+  /** The Container instance (Durable Object name) that serves the route: the one center, the one hub. */
+  readonly instance: string;
+}
+
 /** The surface names, in registration order; FLAGSHIP_SURFACES lists them comma-separated and exactly. */
 export const surfaceNames: readonly Surface[] = [
   "identity",
@@ -108,6 +128,7 @@ export const surfaceNames: readonly Surface[] = [
   "operations",
   "fleet",
   "mobile",
+  "relay",
 ];
 /** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */
 export const clientIpHeader = "x-arcforges-client-ip";
@@ -132,6 +153,8 @@ export const notActivatedReplies: Readonly<Record<Surface, string>> = {
     "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVmbGVldIAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
   mobile:
     "AAAAAF0aWwoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EyIRCgdzdXJmYWNlEgZtb2JpbGWAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+  relay:
+    "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVyZWxheYAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
 };
 /** The byte offset of the correlation id slot in each surface's not_activated template. */
 export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, number>> = {
@@ -140,6 +163,7 @@ export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, numbe
   operations: 61,
   fleet: 61,
   mobile: 61,
+  relay: 61,
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
@@ -1096,6 +1120,27 @@ export const apexRoutes: readonly ApexRoute[] = [
     maxResponseBytes: 131072,
   },
 ];
+
+/** The WebSocket upgrade routes; each is passed through only while its surface is enabled. */
+export const upgradeRoutes: readonly UpgradeRoute[] = [
+  {
+    surface: "relay",
+    method: "GET",
+    path: "/fleet/v1/node",
+    subprotocol: "arcforges.relay.v1",
+    maxFrameBytes: 1048576,
+    maxDurationMs: 15000,
+    instance: "hello",
+  },
+];
+/** The header of a refused upgrade that names its closed reason, <CATEGORY>/<code> (Plan PN-3). */
+export const upgradeRefusalHeader = "arcforges-refusal";
+/** The statuses of the center's refusals before an upgrade; any other non-101 reply becomes the Worker's 503. */
+export const upgradeRefusalStatuses: readonly number[] = [400, 401, 403, 404, 405, 429, 503];
+/** The largest refusal body the Worker forwards (an ArcError as JSON). */
+export const upgradeRefusalBytes = 16384;
+/** The value a forwarded reason header (the refusal header, Retry-After) must have: visible ASCII, at most 128 characters. */
+export const upgradeRefusalValuePattern = /^[\x21-\x7e]{1,128}$/u;
 
 export const helloPath = "/api/arcforges.hello.v1.HelloService/SayHello";
 export const healthPath = "/api/healthz";

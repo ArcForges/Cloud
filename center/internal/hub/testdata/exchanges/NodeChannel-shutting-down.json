@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "source": "TestChannelExchangeCapture",
+  "contractsCohort": "1.0.0-ci.437.1",
+  "centerCommit": "250f93a",
+  "method": "NodeChannel",
+  "case": "shutting-down",
+  "outcome": "close 4500 shutting_down",
+  "headers": {
+    "authorization": "Bearer afa1.AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+    "sec-websocket-protocol": "arcforges.relay.v1",
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
+  "request": {
+    "contentType": "websocket arcforges.relay.v1",
+    "frames": [
+      "080110015283010a120a10a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6011205302e312e302a05312e302e303209726f757465642e76313a120a10a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3014240e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1"
+    ]
+  },
+  "reply": {
+    "contentType": "websocket arcforges.relay.v1",
+    "httpStatus": 101,
+    "frames": [
+      "08011001da013c0a20b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b112120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5011a0408001000",
+      "08011002d201340a120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501121008808040100818e0d40320a0fe0a28081a0c6b69642d3030303030303031",
+      "08011003a20115089423120d7368757474696e675f646f776e18e807"
+    ],
+    "trailers": "websocket-close: 4500"
+  },
+  "normalized": [
+    "a 16-byte ID the center or the node drew: 15 bytes of its kind (0xa1 correlation, 0xa3 installation, 0xa5 connection, 0xa6 node) and n for the n-th distinct one of the kind",
+    "the hello nonce the center drew: 32 bytes of 0xb0+n",
+    "a hello signature (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "a command key's kid: kid-\u003cn, 8 digits\u003e",
+    "a token: its prefix and the canonical base64url of 32 bytes of n (the n-th distinct token)",
+    "every Instant: unix_seconds is the offset from the case's start, rounded to 5 seconds; nanos 0",
+    "a 4500 close's reconnect hint (RelayClose.reconnect_after_ms): 1000",
+    "a refusal's JSON body: correlationId the placeholder text of its ID, retryAt the case's start plus the offset, rounded to 5 seconds",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
+  ],
+  "sha256": "851f9dbac527f2598b7011c5e670cdc3acaf6c0d70225ee71561b2f5f72c4bdf"
+}

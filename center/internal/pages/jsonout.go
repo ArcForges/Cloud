@@ -4,6 +4,7 @@ package pages
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -283,3 +284,7 @@ func statusOf(value *foundationv1.ArcError) int {
 	}
 	return 503
 }
+
+// ErrorBody is the JSON error body of a refusal ({"error": ...}, Contracts web-browser-error.schema.json's ArcError): the body the
+// node channel's upgrade refusals carry too (AF-CTR-05 E1a, Plan Q15), so that one reader serves both.
+func ErrorBody(value *foundationv1.ArcError) ([]byte, error) { return json.Marshal(errorOf(value)) }

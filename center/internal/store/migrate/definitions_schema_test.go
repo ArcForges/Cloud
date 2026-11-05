@@ -37,7 +37,8 @@ func TestMigration0007LandsOverVersion6(t *testing.T) {
 	if sixth, err := apply(t, url, build[:6], Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas6, Grants: grants6}); err != nil || sixth.Version != 6 {
 		t.Fatalf("version 6: %+v %v", sixth, err)
 	}
-	result, err := apply(t, url, build[:7], Options{Runner: "test", RuntimeRole: name + "_runtime"})
+	schemas7, grants7 := schemasAndGrantsAt(7)
+	result, err := apply(t, url, build[:7], Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas7, Grants: grants7})
 	if err != nil || result.Version != 7 || len(result.Ran) != 1 || result.Ran[0].SHA256 != migration0007SHA256 || result.Grants != "reconciled" {
 		t.Fatalf("0007 over version 6: %+v %v", result, err)
 	}

@@ -141,6 +141,26 @@ export interface ApexRoute {
   readonly maxResponseBytes: number;
 }
 
+/**
+ * A WebSocket upgrade route of the relay surface (AF-CTR-05 E1a, the node channel): an exact GET path below the owned /api prefix. The
+ * upgrade handler passes a request through only for such a row whose surface is enabled, and only as an upgrade: Upgrade websocket,
+ * the row's subprotocol, a native bearer of the edge's shape, no query, no body, no cookie. It returns the center's 101 unchanged.
+ */
+export interface UpgradeRoute {
+  readonly surface: Surface;
+  readonly method: "GET";
+  /** The path without the owned /api prefix. */
+  readonly path: string;
+  /** The one WebSocket subprotocol the route admits. */
+  readonly subprotocol: string;
+  /** The largest message on the channel (the center enforces it). */
+  readonly maxFrameBytes: number;
+  /** The cap of the upgrade request's duration, until the 101. */
+  readonly maxDurationMs: number;
+  /** The Container instance (Durable Object name) that serves the route: the one center, the one hub. */
+  readonly instance: string;
+}
+
 `
 
 // ErrUnsafeText reports a value that cannot be written as a plain TypeScript string.
@@ -170,6 +190,9 @@ func Render(table routes.WorkerTable) (string, error) {
 	for _, row := range append(slices.Clone(table.Native), table.Apex...) {
 		values = append(values, row.Method, row.Path, row.RequestType, string(row.Kind), row.Surface)
 		values = append(values, row.ResponseTypes...)
+	}
+	for _, row := range table.Upgrades {
+		values = append(values, row.Path, row.Surface, row.Subprotocol, row.Instance)
 	}
 	for _, header := range routes.PageSecurityHeaders() {
 		values = append(values, header.Name, header.Value)
@@ -260,6 +283,7 @@ func Render(table routes.WorkerTable) (string, error) {
 	text.WriteString("];\n\n")
 	pageTable(&text, table)
 	mobileTables(&text, table)
+	upgradeTable(&text, table)
 	text.WriteString("export const helloPath = " + quote(table.HelloPath) + ";\n")
 	text.WriteString("export const healthPath = " + quote(table.HealthPath) + ";\n")
 	text.WriteString("/** The bound of a whole request body of a method that declares no larger one, frame header included. */\n")
@@ -377,6 +401,36 @@ func mobileTables(text *strings.Builder, table routes.WorkerTable) {
 		text.WriteString("  },\n")
 	}
 	text.WriteString("];\n\n")
+}
+
+// upgradeTable writes the upgrade routes of the relay surface (AF-CTR-05 E1a) and the header that names an upgrade refusal's reason.
+func upgradeTable(text *strings.Builder, table routes.WorkerTable) {
+	text.WriteString("/** The WebSocket upgrade routes; each is passed through only while its surface is enabled. */\n")
+	text.WriteString("export const upgradeRoutes: readonly UpgradeRoute[] = [\n")
+	for _, row := range table.Upgrades {
+		text.WriteString("  {\n")
+		text.WriteString("    surface: " + quote(row.Surface) + ",\n")
+		text.WriteString("    method: \"GET\",\n")
+		text.WriteString("    path: " + quote(row.Path) + ",\n")
+		text.WriteString("    subprotocol: " + quote(row.Subprotocol) + ",\n")
+		text.WriteString("    maxFrameBytes: " + strconv.Itoa(row.MaxFrameBytes) + ",\n")
+		text.WriteString("    maxDurationMs: " + strconv.Itoa(row.MaxDurationMilliseconds) + ",\n")
+		text.WriteString("    instance: " + quote(row.Instance) + ",\n")
+		text.WriteString("  },\n")
+	}
+	text.WriteString("];\n")
+	text.WriteString("/** The header of a refused upgrade that names its closed reason, <CATEGORY>/<code> (Plan PN-3). */\n")
+	text.WriteString("export const upgradeRefusalHeader = " + quote(strings.ToLower(routes.RefusalHeader)) + ";\n")
+	statuses := make([]string, len(routes.UpgradeRefusalStatuses()))
+	for index, status := range routes.UpgradeRefusalStatuses() {
+		statuses[index] = strconv.Itoa(status)
+	}
+	text.WriteString("/** The statuses of the center's refusals before an upgrade; any other non-101 reply becomes the Worker's 503. */\n")
+	text.WriteString("export const upgradeRefusalStatuses: readonly number[] = [" + strings.Join(statuses, ", ") + "];\n")
+	text.WriteString("/** The largest refusal body the Worker forwards (an ArcError as JSON). */\n")
+	text.WriteString("export const upgradeRefusalBytes = " + strconv.Itoa(routes.UpgradeRefusalBytes) + ";\n")
+	text.WriteString("/** The value a forwarded reason header (the refusal header, Retry-After) must have: visible ASCII, at most 128 characters. */\n")
+	text.WriteString("export const upgradeRefusalValuePattern = /" + routes.UpgradeRefusalValuePattern + "/u;\n\n")
 }
 
 func route(text *strings.Builder, row routes.Row, indent string) {

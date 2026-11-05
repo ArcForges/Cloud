@@ -11,7 +11,7 @@
 //   - RoutedInFlight: the routed calls of an account that run at once (routed_in_flight_per_account), counted by this process and
 //     released when the call ends (ingress.Call.AfterCall), refused RESOURCE/rate_limited with a short retry_at.
 //   - ChannelUpgrades: the node channel's upgrade attempts of an account and of one node (channel_upgrades_per_account,
-//     channel_upgrades_per_node), request buckets ready for AF-CTR-05 E1's channel row.
+//     channel_upgrades_per_node), request buckets in front of the node channel's row (fleet.nodeChannel, AF-CTR-05 E1a).
 //
 // Every number is a policy key of config.IdentityPolicy whose default is an owner placeholder under H-07 (illustrative only). None is a
 // plan limit: the plan catalogue carries no limit, no refusal here says plan_limit_reached, and there is no connected-node cap (Q21:

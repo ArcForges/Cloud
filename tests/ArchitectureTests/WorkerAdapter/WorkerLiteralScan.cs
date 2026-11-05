@@ -110,6 +110,10 @@ internal static partial class WorkerLiteralScan
         new("worker/ingress/applink.ts", "handleApexRequest", ["400", "404", "405", "499", "504"],
             "HTTP status codes (RFC 9110); 499 is the Worker's client-closed-request code (a de facto status, not an RFC status)"),
         new("worker/ingress/applink.ts", "refused", ["429"], "HTTP status code 429 (RFC 6585)"),
+        // AF-CTR-05 part E1a: the node channel's upgrade handler; its refusal statuses and bounds come from the generated table.
+        new("worker/ingress/upgrade.ts", "handleUpgradeRequest", ["101", "400", "401", "404", "405", "499", "504"],
+            "HTTP status codes (RFC 9110); 101 Switching Protocols answers a WebSocket upgrade (RFC 6455 section 4.2.2); 499 is the Worker's client-closed-request code (a de facto status, not an RFC status)"),
+        new("worker/ingress/upgrade.ts", "refused", ["429"], "HTTP status code 429 (RFC 6585)"),
         new("worker/ingress/correlation.ts", "Reader",
             ["2", "4", "7", "8", "9", "10", "0x7f", "0x80", "2147483647"],
             "protobuf wire format: varint seven-bit groups and their continuation bit (0x80) in ten bytes, wire types 0, 1, 2 and 5, the fixed sizes of wire types 1 and 5, and the int32 maximum of a field number"),
@@ -169,6 +173,8 @@ internal static partial class WorkerLiteralScan
             "grpc-timeout grammar: one to eight ASCII digits and one unit letter (gRPC over HTTP/2 timeout value)"),
         new("worker/ingress/pipeline.ts", "requestOrigin", IdentifierRule,
             "ISO 3166-1 alpha-2: a country code is two upper-case letters (Cloudflare request.cf.country)"),
+        new("worker/ingress/upgrade.ts", "handleUpgradeRequest", IdentifierRule,
+            "RFC 6455 section 4.1: Sec-WebSocket-Key is the base64 of a 16-byte nonce, 22 characters and two '=' of padding"),
     ];
 
     private const string ModuleScope = "<module>";

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "source": "ArcForges/Contracts e67a6b089a7270ab771a97c27aeba92c5d3b0469 fixtures/internal/af-ctr-05-relay-vectors.json (cohort 1.0.0-ci.437.1)",
+  "sourceSha256": "8b6f1fb333a6aad96c32467b77148894ed0fce04d54fc9603c7b8c620fdec899",
+  "license": "Apache-2.0",
+  "description": "The hello vector of the C2 relay vectors, copied value for value (AF-CTR-05 E1a, review A N-3): the audience, the hello domain, the node test key (public half only), the node, installation and connection IDs, and the hello section. TestTheHelloMatchesTheContractsVector rebuilds the challenge frame, the signing input and the hello frame from these values with the hub's own code.",
+  "audience": "https://arcforges.com/api",
+  "audienceSha256": "3367e6f8dca35fdf193eb2ca864cca6c18b8bf638c6fd79872a4bdf2c0e2e03f",
+  "helloDomain": "ArcForges relay-hello v1\n",
+  "nodeSpki": "3059301306072a8648ce3d020106082a8648ce3d03010703420004af449ffeea270a2072d7c39ad0070c7d27786d69936d29830eb0e3f12cb92a71f4b3b8b0b1ccad631f98af77c6d13960a7fb44aa39bf0787cc1a71a094665f4f",
+  "ids": {
+    "node": "0192f7a0c3e47b1a8d2e5f6a7b8c9d02",
+    "installation": "0192f7a0c3e47b1a8d2e5f6a7b8c9d03",
+    "connection": "0192f7a0c3e47b1a8d2e5f6a7b8c9d07"
+  },
+  "hello": {
+    "challengeFrame": "08011001da01400a20cbb6d0e8395616210a311bf63cbedb17a1c60910706c91fab66692b708cd91e812120a100192f7a0c3e47b1a8d2e5f6a7b8c9d071a080894d69cd10d1000",
+    "nonce": "cbb6d0e8395616210a311bf63cbedb17a1c60910706c91fab66692b708cd91e8",
+    "helloDeadline": [1830000010, 0],
+    "helloFrame": "08011001528e010a120a100192f7a0c3e47b1a8d2e5f6a7b8c9d021209302e312e302d6465762a0c312e302e302d63692e302e303209726f757465642e76313a120a100192f7a0c3e47b1a8d2e5f6a7b8c9d03424052a2962cb4d57af199906818f5408abbb3b90b86945985d77ae1627b7726415b448b402594ec4a97b36668af130cc980dc234915aa20e3316dcbc3d04d780adb",
+    "signingInput": "417263466f726765732072656c61792d68656c6c6f2076310acbb6d0e8395616210a311bf63cbedb17a1c60910706c91fab66692b708cd91e80192f7a0c3e47b1a8d2e5f6a7b8c9d073367e6f8dca35fdf193eb2ca864cca6c18b8bf638c6fd79872a4bdf2c0e2e03f0192f7a0c3e47b1a8d2e5f6a7b8c9d020192f7a0c3e47b1a8d2e5f6a7b8c9d03",
+    "signature": "52a2962cb4d57af199906818f5408abbb3b90b86945985d77ae1627b7726415b448b402594ec4a97b36668af130cc980dc234915aa20e3316dcbc3d04d780adb",
+    "version": "0.1.0-dev",
+    "contractVersion": "1.0.0-ci.0.0",
+    "capabilities": ["routed.v1"],
+    "highSSignature": "52a2962cb4d57af199906818f5408abbb3b90b86945985d77ae1627b7726415bbb74bfd96b13b5694c999750ecf3367ee0c3b197fcf6bb5385ee06f2aeeb1a76"
+  }
+}

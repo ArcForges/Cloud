@@ -12,13 +12,13 @@ https://github.com/github/choosealicense.com @ 58267f8f2c5c0099810849cfd7677f52a
 AGPL-3.0-only
 GNU Affero General Public License version 3; Copyright Free Software Foundation, Inc. Complete original licence and its verbatim-copying permission are retained.
 
-center-runtime-r37
-https://github.com/ArcForges/Cloud @ 1fa8ae9e83ef0bb8a2d4983fe29f593c67fa6c6b
+center-runtime-r41
+https://github.com/ArcForges/Cloud @ c851c17896ee35cb141db83c777f813b81e34d7b
 AGPL-3.0-only
-ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped. Copyright (c) 2002-2025, Npgsql. Npgsql 10.0.3 is distributed under the PostgreSQL licence; its complete copyright and permission terms accompany the application. The Go center and its twenty-two locked runtime modules are included alongside the retained C# executable. Go, Go protobuf, the golang.org/x modules, google/uuid, go-webauthn and go-webauthn/x use BSD-3-Clause; Connect, the published Contracts Go bindings and go-tpm use Apache-2.0 (the Contracts NOTICE is retained under third-party/ContractsGo.NOTICE.txt); pgx and its helper modules, fxamacker/cbor, x448/float16, golang-jwt, go-viper/mapstructure, philhofer/fwd and tinylib/msgp use MIT (msgp's portions copyright The Go Authors are under the Go licence shipped as third-party/Go.LICENSE.txt). Complete original texts are shipped.
+ArcForges application: AGPL-3.0-only. Published Contracts: Apache-2.0; copyright ArcForges contributors. .NET/ASP.NET Core, gRPC and Protocol Buffers retain their full recorded notices and separate licences. The unchanged official Ubuntu base retains its six original copyright files. The complete published Contracts NOTICE is retained under third-party/Contracts.NOTICE.txt, including all generator attributions and the protobuf-generator BSD terms; generator implementations are not shipped. Copyright (c) 2002-2025, Npgsql. Npgsql 10.0.3 is distributed under the PostgreSQL licence; its complete copyright and permission terms accompany the application. The Go center and its twenty-three locked runtime modules are included alongside the retained C# executable. Go, Go protobuf, the golang.org/x modules, google/uuid, go-webauthn and go-webauthn/x use BSD-3-Clause; Connect, the published Contracts Go bindings and go-tpm use Apache-2.0 (the Contracts NOTICE is retained under third-party/ContractsGo.NOTICE.txt); pgx and its helper modules, fxamacker/cbor, x448/float16, golang-jwt, go-viper/mapstructure, philhofer/fwd and tinylib/msgp use MIT (msgp's portions copyright The Go Authors are under the Go licence shipped as third-party/Go.LICENSE.txt); coder/websocket uses ISC. Complete original texts are shipped.
 
-center-worker-r37
-https://github.com/ArcForges/Cloud @ 1fa8ae9e83ef0bb8a2d4983fe29f593c67fa6c6b
+center-worker-r41
+https://github.com/ArcForges/Cloud @ c851c17896ee35cb141db83c777f813b81e34d7b
 AGPL-3.0-only
 Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. @arcforges/ai-internal generated validators: Copyright ArcForges contributors, Apache-2.0 (published Contracts NOTICE retained in third-party/Contracts.NOTICE.txt). Complete respective terms accompany the actual Worker bundle.
 
@@ -52,15 +52,20 @@ https://github.com/evanw/esbuild @ bb9db84c02433fbe37b3509f53f9f3e3cc48725e
 MIT
 Copyright 2020 Evan Wallace. Complete MIT notice for inserted esbuild runtime helper.
 
+go-coderwebsocket-legal-r1
+https://github.com/coder/websocket @ 9c8faadccd1b679e811a79ce506f8a10237251ad
+ISC
+github.com/coder/websocket v1.8.15: ISC. Complete upstream copyright, permission and disclaimer terms are retained.
+
 go-connectgo-legal-r1
 https://github.com/connectrpc/connect-go @ 8f69fe4e4b2d861700b00983b2f55c8cf97e235b
 Apache-2.0
 connectrpc.com/connect/v2 v2.0.2: Apache-2.0. Complete upstream copyright, permission and disclaimer terms are retained.
 
-go-contractsgo-legal-r3
-https://github.com/ArcForges/Contracts @ a5bc52fd66505a1b5b0f767a6a4c6ec70167eaab
+go-contractsgo-legal-r4
+https://github.com/ArcForges/Contracts @ e67a6b089a7270ab771a97c27aeba92c5d3b0469
 Apache-2.0
-github.com/ArcForges/Contracts/go v1.0.0-ci.424.1: Apache-2.0, copyright 2026 ArcForges contributors. The complete licence and the module's NOTICE (generator attributions of protoc-gen-go and protoc-gen-connect-go) are retained verbatim.
+github.com/ArcForges/Contracts/go v1.0.0-ci.437.1: Apache-2.0, copyright 2026 ArcForges contributors. The complete licence and the module's NOTICE (generator attributions of protoc-gen-go and protoc-gen-connect-go) are retained verbatim.
 
 go-float16-legal-r1
 https://github.com/x448/float16 @ cb9afec31f2649663ebb64da5c6c32c3d365c3ca

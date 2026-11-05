@@ -4,11 +4,13 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -201,4 +203,79 @@ func TestTheStartRecordsTheDefinitionsVersion(t *testing.T) {
 	if !callsOf(t, "Run")["recordDefinitions"] || !callsOf(t, "Run")["recordsDefinitions"] {
 		t.Error("Run does not record the definitions version")
 	}
+}
+
+// TestThePeriodicMetricsLineCarriesTheGauges (review B B-2, E0 C-N2): the hosted Container has no admin listener, so the periodic
+// metrics log line is its operator's only view of a superseded revision. Each tick evaluates the superseded gauge first, and the line
+// names both gauges: 0 while this revision's version is the deploy's current one, 1 once a newer start recorded another version.
+func TestThePeriodicMetricsLineCarriesTheGauges(t *testing.T) {
+	hosted, db := hostedCenter(t, config.PlanDevelopmentFixtures, withOperations, Options{})
+	hosted.startedAt = time.Now()
+	if err := hosted.recordDefinitions(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	logs := &lockedLines{}
+	hosted.Logger = observe.NewLogger(logs, slog.LevelInfo)
+	gauges := func() (superseded, connected float64, found bool) {
+		for _, line := range logs.lines() {
+			var entry struct {
+				Msg      string             `json:"msg"`
+				Requests map[string]float64 `json:"requests"`
+			}
+			if json.Unmarshal([]byte(line), &entry) != nil || entry.Msg != "metrics" {
+				continue
+			}
+			value, listed := entry.Requests[observe.SummaryDefinitionsSuperseded]
+			nodes, counted := entry.Requests[observe.SummaryChannelConnected]
+			superseded, connected, found = value, nodes, listed && counted
+		}
+		return superseded, connected, found
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go hosted.logMetrics(ctx, 20*time.Millisecond)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if superseded, connected, found := gauges(); found {
+			if superseded != 0 || connected != 0 {
+				t.Fatalf("the current revision's gauges: %v %v", superseded, connected)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no metrics line names the gauges")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// A newer start records another version: the next ticks report this revision superseded, without any scrape.
+	if _, err := db.Migration.Exec(t.Context(), "UPDATE entitlement.definitions_current SET definitions_version = 'newer-start', recorded_at = now() + interval '1 minute'"); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if superseded, _, found := gauges(); found && superseded == 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the metrics line never reported the superseded revision")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// lockedLines collects log lines across goroutines.
+type lockedLines struct {
+	mu   sync.Mutex
+	text strings.Builder
+}
+
+func (l *lockedLines) Write(data []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.text.Write(data)
+}
+
+func (l *lockedLines) lines() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.Split(strings.TrimSpace(l.text.String()), "\n")
 }

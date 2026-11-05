@@ -490,8 +490,8 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     assert.deepEqual(block.targetRules, ["generic-api-key"]);
   }
   // S31 and S44: 64-hex values of the release profiles and of the Contracts identity copy, unchanged.
-  const [s31, s44, ...rows] = config.allowlists;
-  assert.ok(s31 && s44);
+  const [s31, s44, rfc6455, ...rows] = config.allowlists;
+  assert.ok(s31 && s44 && rfc6455);
   assert.match(String(s31.description), /^S31: /u);
   assert.deepEqual(s31.paths, ["^eng/provenance/artifact-profiles/cloud-release-r[0-9]+\\.json$"]);
   assert.match(String(s44.description), /^S44: /u);
@@ -500,7 +500,34 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     assert.equal(block.regexTarget, "secret");
     assert.deepEqual(block.regexes, ["^[0-9a-f]{64}$"]);
   }
-  // AF-CTR-03: one block per file (the policy, the receipts af-ctr-03-r1 to af-ctr-03-r21, af-ctr-04-r1 to af-ctr-04-r13 and af-ctr-05-r1 to af-ctr-05-r2), each row one exact
+  // AF-CTR-05: the public RFC 6455 section 1.3 sample nonce, the Sec-WebSocket-Key of the Worker upgrade test, and nothing else.
+  const sampleNonce = Buffer.from("the sample nonce").toString("base64");
+  assert.match(String(rfc6455.description), /^AF-CTR-05 RFC 6455: /u);
+  assert.deepEqual(rfc6455.paths, ["^tests/worker/channel\\-upgrade\\.test\\.ts$"]);
+  assert.equal(rfc6455.regexTarget, "secret");
+  assert.deepEqual(rfc6455.regexes, [`^${sampleNonce}$`]);
+  const nonceFile = gitleaksPattern(String(rfc6455.paths?.[0]));
+  assert.ok(nonceFile.test("tests/worker/channel-upgrade.test.ts"));
+  for (const other of [
+    "tests/worker/channel-upgrade.test.ts.backup",
+    "x/tests/worker/channel-upgrade.test.ts",
+    "worker/ingress/upgrade.ts",
+  ])
+    assert.ok(!nonceFile.test(other), other);
+  const nonceValue = gitleaksPattern(String(rfc6455.regexes?.[0]));
+  assert.ok(nonceValue.test(sampleNonce));
+  for (const other of [
+    Buffer.from("another sample!!").toString("base64"),
+    `${sampleNonce}x`,
+    `x${sampleNonce}`,
+  ])
+    assert.ok(!nonceValue.test(other), other);
+  assert.ok(
+    readFileSync(path.join(owner, "tests/worker/channel-upgrade.test.ts"), "utf8").includes(
+      `const key = "${sampleNonce}";`,
+    ),
+  );
+  // AF-CTR-03: one block per file (the policy, the receipts af-ctr-03-r1 to af-ctr-03-r21, af-ctr-04-r1 to af-ctr-04-r13, af-ctr-05-r1 to af-ctr-05-r4 and af-ctr-05-r6), each row one exact
   // key-and-digest line of an immutable record named in the inputs maps.
   // The digests are computed here from the records, so this file holds no digest literal.
   const records = [
@@ -545,6 +572,9 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/af-ctr-04-r13.json",
     "eng/policy/dependency-reviews/af-ctr-05-r1.json",
     "eng/policy/dependency-reviews/af-ctr-05-r2.json",
+    "eng/policy/dependency-reviews/af-ctr-05-r3.json",
+    "eng/policy/dependency-reviews/af-ctr-05-r4.json",
+    "eng/policy/dependency-reviews/af-ctr-05-r6.json",
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
@@ -571,7 +601,8 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       `x/${file}`,
       ...files.filter((_, other) => other !== index),
       "eng/policy/dependency-reviews/af-ctr-04-r14.json",
-      "eng/policy/dependency-reviews/af-ctr-05-r3.json",
+      "eng/policy/dependency-reviews/af-ctr-05-r5.json",
+      "eng/policy/dependency-reviews/af-ctr-05-r7.json",
     ])
       assert.ok(!exempt.test(other), other);
     // Positive control: the rows match exactly the lines that name the two records, and every row matches one.
