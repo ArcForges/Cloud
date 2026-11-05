@@ -592,6 +592,10 @@ func TestTheClaimedInstallationMustBeTheAccounts(t *testing.T) {
 	if refused.status != 403 || !strings.Contains(refused.text(), "This phone is signed in to another account") || h.mobileState(claimed.FlowID) != mobileauth.FlowPending {
 		t.Fatalf("the approval of a foreign installation: %d", refused.status)
 	}
+	// The evidence is consumed in the decision's own transaction (MB-4): the refused approval rolled it back, so it still stands.
+	if h.count("SELECT count(*) FROM identity.step_up_challenge WHERE user_id = $1 AND operation_id = $2 AND state = 2", who.id, mobileauth.Class) != 1 {
+		t.Fatal("the refused approval consumed the step-up evidence")
+	}
 	// Approved while the installation was new, claimed by the other account before the token request.
 	fresh := h.app()
 	pending := h.mustBegin(fresh)
