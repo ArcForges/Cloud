@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestChannelExchangeCapture",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "",
+  "centerCommit": "250f93a",
   "method": "NodeChannel",
   "case": "revoked",
   "outcome": "close 4401 revoked",
