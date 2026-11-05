@@ -140,15 +140,17 @@ export const defaultReportName = {
  */
 export const nodeApproveRequestsPerMinute = 36;
 
-/**
- * The busiest minute of a node-approve run against the edge: the browser's busiest minute plus the node's (the two share the
- * machine's edge key, so their sum bounds the busiest minute of both). The run fails when it exceeds maxRequestsPerWindow. The node's
- * requests are those its result files list: node-probe lists every request of its run, but a node that keeps calling the center after
- * it wrote its result (the real node's later refreshes and reports) makes requests the bound does not see, so for such a node the
- * bound is a lower bound (the report says so in requestsBusiest60sBoundCovers).
- */
+/** What the busiest-minute bound counts (the report's requestsBusiest60sBoundCovers). */
 export const boundCovers =
   "the browser's requests and the requests the node's result files list (none the node makes after writing its result)";
+
+/**
+ * The busiest minute of a node-approve run against the edge: the browser's busiest minute plus the node's (the two share the
+ * machine's edge key, so their sum bounds the busiest minute of the counted requests). The run fails when it exceeds
+ * maxRequestsPerWindow. The node's requests are those its result files list: node-probe lists every request of its run, but a node
+ * that keeps calling the center after it wrote its result (the real node's later refreshes and reports) makes requests the bound does
+ * not see, so for such a node the bound is not an upper bound of the true busiest minute: it does not see those requests.
+ */
 export function combinedBusiest(browserBusiest: number, probeRequests: readonly number[]): number {
   return browserBusiest + busiestOf(probeRequests);
 }
