@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "c851c17896ee35cb141db83c777f813b81e34d7b",
+  "sourceCommit": "d5325e1dafd4e3cb2116d53906b193fa28744f67",
   "manifests": ["package.json"],
   "inputs": {
     ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
@@ -63,6 +63,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r92.json": "8ebe7cc6514bdd9b334caf881c4ef4e62e98777455c2718ad4f16ca369b77db0",
     "eng/provenance/artifact-profiles/cloud-release-r93.json": "047dc26c0ba6d1b5677d426eaadf54969b000f2080292ed6b90478f6e71cc1a8",
     "eng/provenance/artifact-profiles/cloud-release-r95.json": "d544d11fc351828cbf08671ac559beafae97e6ff97976f8bf2d63fdfc8ca5f14",
+    "eng/provenance/artifact-profiles/cloud-release-r96.json": "7728afabc6766cbbd4e95ea51e5767b42e02285de78e4ab7729667312d6ff8e7",
     "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
     "eng/provenance/records/center-runtime-r10.json": "f48e644fec2814d5c2669b517e0ec276d8051c5ca82be1c255efc9403f9bbc03",
     "eng/provenance/records/center-runtime-r11.json": "2684a8b7a960382d94904f80e8a814d22cfc9ef3796b42eaeee67a9065b0f92f",
@@ -97,6 +98,7 @@
     "eng/provenance/records/center-runtime-r38.json": "11cc37e0b06515ea8907e1b923946cf851cd2b5019e3b81b7beccde1eb104dd8",
     "eng/provenance/records/center-runtime-r39.json": "00d343b67230ba7b5d8d95628de6b837bd62d3f957607bdf0f3e5a66f08efc3a",
     "eng/provenance/records/center-runtime-r41.json": "ee2cc585aa060a09aac268a540f5f690aa22cd0ee849e85ce4a9f9d5ee3f200c",
+    "eng/provenance/records/center-runtime-r42.json": "2c68f0e06f61ad434e53436f09729a56c4c2cccdb6dfdacf03261b635369a2a3",
     "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
     "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
     "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
@@ -137,6 +139,7 @@
     "eng/provenance/records/center-worker-r38.json": "306f6def3c9ce52d4137a9e0203298d5de5730fe37b9aea0e028bc5e0badd6f3",
     "eng/provenance/records/center-worker-r39.json": "695f42b7ae39833ce636bd5624c69fd7f5ea465862e98dfce83006bf1b4ae0a3",
     "eng/provenance/records/center-worker-r41.json": "af8d28de07841769eb150e25d1b4f304edada1c1b7928163431a1fea02f878bf",
+    "eng/provenance/records/center-worker-r42.json": "38e3a085a85ca59bd928110844789ba034ea781fc0daa5a748a86c2e715e4c91",
     "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
     "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
     "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
@@ -245,9 +248,9 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-05 delegated author, E1a); PR review is recorded separately",
-    "date": "2026-11-06",
-    "rationale": "AF-CTR-05 part E1a, the confirmation round of Cloud #144, after af-ctr-05-r4 (the fix round). No dependency is added, removed or changed: the twenty-three locked Go runtime modules, the Contracts Go module v1.0.0-ci.437.1, the isolated npm package eng/verification/browser and every npm package are as af-ctr-05-r4 admitted them, and no licence or legal record changes. The bound inputs that change are the release profile cloud-release-r95 and its successor records center-runtime-r41 and center-worker-r41, which bind the center sources and the Worker sources as they are at this change (the lease loop's wake at the claim's local expiry, the own-row takeover after a local lapse and the accept lock spread by a hash of the node ID and bounded by the hello's context; the Worker sources and bundle unchanged). The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in an exact-row block of its own, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-05 delegated author, E1b); PR review is recorded separately",
+    "date": "2026-11-05",
+    "rationale": "AF-CTR-05 part E1b (signed calls and results on the node channel), after af-ctr-05-r6. Nothing new is admitted and nothing is corrected in the dependencies: the locked Go runtime modules and their legal records stay as af-ctr-05-r6 admitted them (the signed calls use only the Go standard library and modules already admitted), and the isolated npm package eng/verification/browser is unchanged. center/go.mod, center/go.sum, center/dependencies.json, package.json, package-lock.json, wrangler.json, the NuGet locks, the Dockerfile, .dockerignore, the base images, the toolchains and .github/workflows/ci.yml are unchanged. The bound inputs that change are the release profile cloud-release-r96 and its successor records center-runtime-r42 and center-worker-r42, which bind the center sources and the Worker sources as they are at this change. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in an exact-row block of its own, pinned by tests/worker/provenance.test.ts. No D1 or business data migration and no center migration. Production stays dark.",
     "inputs": {
       ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -308,6 +311,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r92.json": "8ebe7cc6514bdd9b334caf881c4ef4e62e98777455c2718ad4f16ca369b77db0",
       "eng/provenance/artifact-profiles/cloud-release-r93.json": "047dc26c0ba6d1b5677d426eaadf54969b000f2080292ed6b90478f6e71cc1a8",
       "eng/provenance/artifact-profiles/cloud-release-r95.json": "d544d11fc351828cbf08671ac559beafae97e6ff97976f8bf2d63fdfc8ca5f14",
+      "eng/provenance/artifact-profiles/cloud-release-r96.json": "7728afabc6766cbbd4e95ea51e5767b42e02285de78e4ab7729667312d6ff8e7",
       "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
       "eng/provenance/records/center-runtime-r10.json": "f48e644fec2814d5c2669b517e0ec276d8051c5ca82be1c255efc9403f9bbc03",
       "eng/provenance/records/center-runtime-r11.json": "2684a8b7a960382d94904f80e8a814d22cfc9ef3796b42eaeee67a9065b0f92f",
@@ -342,6 +346,7 @@
       "eng/provenance/records/center-runtime-r38.json": "11cc37e0b06515ea8907e1b923946cf851cd2b5019e3b81b7beccde1eb104dd8",
       "eng/provenance/records/center-runtime-r39.json": "00d343b67230ba7b5d8d95628de6b837bd62d3f957607bdf0f3e5a66f08efc3a",
       "eng/provenance/records/center-runtime-r41.json": "ee2cc585aa060a09aac268a540f5f690aa22cd0ee849e85ce4a9f9d5ee3f200c",
+      "eng/provenance/records/center-runtime-r42.json": "2c68f0e06f61ad434e53436f09729a56c4c2cccdb6dfdacf03261b635369a2a3",
       "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
       "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
       "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
@@ -382,6 +387,7 @@
       "eng/provenance/records/center-worker-r38.json": "306f6def3c9ce52d4137a9e0203298d5de5730fe37b9aea0e028bc5e0badd6f3",
       "eng/provenance/records/center-worker-r39.json": "695f42b7ae39833ce636bd5624c69fd7f5ea465862e98dfce83006bf1b4ae0a3",
       "eng/provenance/records/center-worker-r41.json": "af8d28de07841769eb150e25d1b4f304edada1c1b7928163431a1fea02f878bf",
+      "eng/provenance/records/center-worker-r42.json": "38e3a085a85ca59bd928110844789ba034ea781fc0daa5a748a86c2e715e4c91",
       "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
       "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
       "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
@@ -497,11 +503,11 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "AF-CTR-05 part E1a, the confirmation round of Cloud #144, after af-ctr-05-r4 (the fix round). No dependency is added, removed or changed: the twenty-three locked Go runtime modules, the Contracts Go module v1.0.0-ci.437.1, the isolated npm package eng/verification/browser and every npm package are as af-ctr-05-r4 admitted them, and no licence or legal record changes. The bound inputs that change are the release profile cloud-release-r95 and its successor records center-runtime-r41 and center-worker-r41, which bind the center sources and the Worker sources as they are at this change (the lease loop's wake at the claim's local expiry, the own-row takeover after a local lapse and the accept lock spread by a hash of the node ID and bounded by the hello's context; the Worker sources and bundle unchanged). The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in an exact-row block of its own, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
+    "runtimeAssessment": "AF-CTR-05 part E1b (signed calls and results on the node channel), after af-ctr-05-r6. Nothing new is admitted and nothing is corrected in the dependencies: the locked Go runtime modules and their legal records stay as af-ctr-05-r6 admitted them (the signed calls use only the Go standard library and modules already admitted), and the isolated npm package eng/verification/browser is unchanged. center/go.mod, center/go.sum, center/dependencies.json, package.json, package-lock.json, wrangler.json, the NuGet locks, the Dockerfile, .dockerignore, the base images, the toolchains and .github/workflows/ci.yml are unchanged. The bound inputs that change are the release profile cloud-release-r96 and its successor records center-runtime-r42 and center-worker-r42, which bind the center sources and the Worker sources as they are at this change. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in an exact-row block of its own, pinned by tests/worker/provenance.test.ts. No D1 or business data migration and no center migration. Production stays dark.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-05-r4.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-05-r6.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
-    "reviewedOn": "2026-11-06",
+    "reviewedOn": "2026-11-05",
     "decision": "approved"
   },
   "closure": {
@@ -1285,7 +1291,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["center-runtime-r41", "center-worker-r41"],
+  "artifactRecords": ["center-runtime-r42", "center-worker-r42"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1299,7 +1305,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-05-r6.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-05-r7.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

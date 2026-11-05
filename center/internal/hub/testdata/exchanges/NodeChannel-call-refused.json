@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestChannelExchangeCapture",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "e1b-draft",
+  "centerCommit": "d5325e1dafd4e3cb2116d53906b193fa28744f67",
   "method": "NodeChannel",
   "case": "call-refused",
   "outcome": "close 1000 node_closed",
