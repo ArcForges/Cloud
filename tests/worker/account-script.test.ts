@@ -1792,3 +1792,98 @@ test("an /activate approval with a fingerprint tail of the wrong shape is refuse
   await settle();
   assert.deepEqual(review.events.slice(0, 1), ["fetch POST /api/session/v1/web/step-up/begin"]);
 });
+
+// AF-CTR-04 part M: the mobile pages.
+
+test("the sign-in page follows a return to /mobile/authorize with its exact fragment and nothing else", () => {
+  assert.equal(
+    script.safeFleetReturn(`/api/mobile/authorize#flow=${flowId}`, origin, "/api"),
+    `/api/mobile/authorize#flow=${flowId}`,
+  );
+  for (const hostile of [
+    `/api/mobile/authorize#flow=${flowId.toUpperCase()}`,
+    `/api/mobile/authorize#flow=${flowId}&x=1`,
+    `/api/mobile/authorize/review#flow=${flowId}`,
+    `/mobile/authorize#flow=${flowId}`,
+    `https://evil.example/api/mobile/authorize#flow=${flowId}`,
+    "/api/mobile/authorize#flow=00000000-0000-0000-0000-000000000000",
+    "/api/mobile/authorize#code=x",
+  ])
+    assert.equal(script.safeFleetReturn(hostile, origin, "/api"), null, hostile);
+});
+
+test("only the exact callback of a decided mobile authorization is a link to the app", () => {
+  const code = `${"A".repeat(42)}E`;
+  const state = "s".repeat(16);
+  const iss = encodeURIComponent(`${origin}/api`);
+  for (const good of [
+    `${origin}/app/callback#code=${code}&state=${state}&iss=${iss}`,
+    `${origin}/app/callback#error=access_denied&state=${state}&iss=${iss}`,
+    `com.arcforges.android.debug:/callback#code=${code}&state=${state}&iss=${iss}`,
+  ])
+    assert.equal(script.isMobileResult(good, origin), true, good);
+  for (const bad of [
+    `https://evil.example/app/callback#code=${code}&state=${state}&iss=${iss}`,
+    `${origin}/app/callback?code=${code}&state=${state}&iss=${iss}`,
+    `${origin}/app/callback#code=${"A".repeat(42)}B&state=${state}&iss=${iss}`,
+    `${origin}/app/callback#code=${code}&state=${state}`,
+    `${origin}/app/callback#error=server_error&state=${state}&iss=${iss}`,
+    `javascript:/callback#code=${code}&state=${state}&iss=${iss}`,
+    `${origin}/app/node#code=${code}&state=${state}&iss=${iss}`,
+    42,
+  ])
+    assert.equal(script.isMobileResult(bad, origin), false, String(bad));
+});
+
+test("the mobile done page leaves a valid link to the person's tap and removes an invalid one", async () => {
+  const ids = ["heading", "error-summary", "error-text", "status"];
+  const good = page("mobile-authorize-done", ids);
+  const link = new Element();
+  link.attributes.href = `${origin}/app/callback#code=${"A".repeat(42)}E&state=${"s".repeat(16)}&iss=${encodeURIComponent(`${origin}/api`)}`;
+  good.elements.set("app-link", link);
+  await script.start(good.window);
+  assert.deepEqual(good.assigned, [], "the script never follows the link (MB-7)");
+  assert.deepEqual(good.events, []);
+  assert.equal(link.removed, false);
+  const bad = page("mobile-authorize-done", ids);
+  const hostile = new Element();
+  hostile.attributes.href = "https://evil.example/app/callback#code=x";
+  bad.elements.set("app-link", hostile);
+  await script.start(bad.window);
+  assert.equal(hostile.removed, true);
+  assert.match(bad.elements.get("error-text")?.textContent ?? "", /not valid/u);
+});
+
+test("the app callback page strips its fragment without reading it and sends nothing (Q-4)", async () => {
+  const callback = page("app-callback", ["heading"]);
+  let read = 0;
+  Object.defineProperty(callback.window.location, "hash", {
+    get() {
+      read += 1;
+      return "#code=x&state=y&iss=z";
+    },
+  });
+  await script.start(callback.window);
+  assert.equal(read, 0, "the fragment is never read");
+  assert.deepEqual(callback.events, ["replaceState"]);
+  assert.deepEqual(callback.replaced, [[null, "", "/api/account/bootstrap"]]);
+});
+
+test("the mobile authorization page reads the flow, drops the fragment first and submits the review when signed in", async () => {
+  const form = new Element();
+  form.elements.csrf = new Element();
+  form.elements.flow_id = new Element();
+  let submitted = 0;
+  form.submit = () => {
+    submitted += 1;
+  };
+  const authorize = page("mobile-authorize", ["heading", "error-summary", "error-text", "status"], {
+    hash: `#flow=${flowId}`,
+    fetchImpl: async () => reply(200, { csrfToken: "T".repeat(43), authenticated: true }),
+  });
+  authorize.elements.set("mobile-review", form);
+  await script.start(authorize.window);
+  assert.equal(authorize.events[0], "replaceState");
+  assert.equal(form.elements.flow_id.value, flowId);
+  assert.equal(submitted, 1);
+});

@@ -146,7 +146,9 @@
 center/tools/
 center/cmd/center-gen/
 center/cmd/node-probe/
+center/cmd/mobile-probe/
 center/**/testdata/
 center/**/*_test.go
 center/internal/mail/mailtest/
 center/internal/nodetest/
+center/internal/mobiletest/

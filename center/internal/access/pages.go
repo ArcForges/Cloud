@@ -87,6 +87,18 @@ func PageOperations() []PageOperation {
 		{"activate.page", PageNoCredential, nil, ""},
 		{"activate.review", PageSession, []string{fleetv1connect.NodeEnrollmentServiceLookupDeviceCodeProcedure}, ""},
 		{"activate.decision", PageSession, []string{fleetv1connect.NodeEnrollmentServiceApproveDeviceCodeProcedure}, ""},
+		// The mobile surface (AF-CTR-04 part M): the authorization page is static (its script asks the bootstrap route who is signed in);
+		// its review and decision perform the center-defined operation identity.authorizeMobile with the cookie session (the review
+		// shows the flow and records the review, the decision consumes the step-up evidence of an approval). The two native JSON routes
+		// read no credential at all (the app is anonymous; token is bound to the flow by the code and the PKCE verifier), and neither do
+		// the two apex routes (the asset links statement and the fixed callback page).
+		{"mobile.page", PageNoCredential, nil, ""},
+		{"mobile.review", PageSession, nil, MobileAuthorizationClass},
+		{"mobile.decision", PageSession, nil, MobileAuthorizationClass},
+		{"mobile.begin", PageNoCredential, nil, ""},
+		{"mobile.token", PageNoCredential, nil, ""},
+		{"apex.assetLinks", PageNoCredential, nil, ""},
+		{"apex.appCallback", PageNoCredential, nil, ""},
 	}
 }
 

@@ -88,6 +88,10 @@ func isClaimText(text string) bool {
 	return true
 }
 
+// ValidClaimText reports the contract's text rule of a claim's product, platform and app version: 1 to 128 characters of
+// [A-Za-z0-9._:/-] (a '+' is refused; AF-CTR-04 part M's begin checks a mobile claim with it).
+func ValidClaimText(text string) bool { return isClaimText(text) }
+
 // MobilePlatform is the platform of a phone's claimed platform text: its leading letters name Android or iOS (for example
 // "android-15" or "ios/18.1"); anything else is not a phone.
 func MobilePlatform(text string) (Platform, bool) {

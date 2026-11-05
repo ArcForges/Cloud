@@ -107,6 +107,8 @@ type Config struct {
 	// DisabledFeatures are the gated feature keys the operator of a self-hosted center disabled (ARCFORGES_CENTER_DISABLED_FEATURES):
 	// the built-in default enables every other key. It is empty in official-hosted mode, where the variable is refused.
 	DisabledFeatures []string
+	// Mobile is the mobile surface's configuration (AF-CTR-04 part M): the published Android app identity and the debug app's scheme.
+	Mobile Mobile
 }
 
 // GatedFeatureKeys are the six gated feature keys of AD-0021 section 13a. Package feature owns the keys (feature.Gated); the list is
@@ -202,6 +204,9 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		}
 	default:
 		return Config{}, invalid("%s must be enabled or disabled", EnvNeonHello)
+	}
+	if config.Mobile, err = loadMobile(lookup, config.Mode); err != nil {
+		return Config{}, err
 	}
 	if config.Mail, err = loadMail(lookup); err != nil {
 		return Config{}, err

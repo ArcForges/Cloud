@@ -35,6 +35,7 @@ export interface CenterEnvironment {
   ARCFORGES_CENTER_PLAN_CONFIGURATION?: string;
   /** The identity policy override; only the acceptance environment sets one (its anonymous-flow ceiling, C1). */
   ARCFORGES_CENTER_IDENTITY_POLICY?: string;
+  ARCFORGES_CENTER_ANDROID_APP?: string;
   ARCFORGES_CENTER_DATABASE_URL?: string;
   /** The owner bootstrap of a protected proof dispatch (AF-CTR-03 A2): the SHA-256 of a one-time token and its expiry. */
   ARCFORGES_CENTER_BOOTSTRAP_SHA256?: string;
@@ -120,6 +121,7 @@ export function centerContainerSettings(center: CenterEnvironment): CenterContai
       "ARCFORGES_CENTER_PUBLIC_BASE_URL",
       "ARCFORGES_CENTER_PLAN_CONFIGURATION",
       "ARCFORGES_CENTER_IDENTITY_POLICY",
+      "ARCFORGES_CENTER_ANDROID_APP",
       "ARCFORGES_CENTER_BOOTSTRAP_SHA256",
       "ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT",
     ] as const) {

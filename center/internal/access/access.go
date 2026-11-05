@@ -226,8 +226,14 @@ const OperatorGrantClass = entitlement.OperatorGrantClass
 // TargetRequest is the target of a center-defined operation: the canonical request.
 const TargetRequest = "request"
 
-// CenterOperation is an operation the center defines itself, outside the contract's operation table: the page of the operations
-// surface performs it, and its authority is the operator role and the step-up evidence it consumes, not a session method's row.
+// MobileAuthorizationClass is the operation ID and step-up class of an account's approval of the mobile app's native authorization
+// (AF-CTR-04 part M, M-17; Contracts MobileNativeAuth names the class): a center-defined operation whose target is the flow, named by
+// its flow ID (identity.TargetHash). Package mobileauth owns the operation; the /mobile/authorize pages perform it.
+const MobileAuthorizationClass = "identity.authorizeMobile"
+
+// CenterOperation is an operation the center defines itself, outside the contract's operation table: a page performs it, and its
+// authority is its own rule (the operator role for the operator grant, the reviewing account for a mobile authorization) and the
+// step-up evidence it consumes, not a session method's row.
 type CenterOperation struct {
 	// ID is the operation ID, the command receipt's operation and the step-up class.
 	ID string
@@ -236,13 +242,36 @@ type CenterOperation struct {
 	StepUp  StepUp
 	Target  string
 	Receipt bool
+	// Restricted is true for an operation a restricted account may still perform (a mobile authorization is a sign-in, Q-8).
+	Restricted bool
 	// Audit says who appends its audit event.
 	Audit Audit
 }
 
-// CenterOperations is the closed list of the center-defined operations.
+// CenterOperations is the closed list of the center-defined operations: the operator grant (AF-CTR-03 B) and the mobile
+// authorization (AF-CTR-04 part M; evidence on an approval only, never on a denial, as fleet.approveNodeSignIn; audited in the
+// decision's transaction; a restricted account may approve, because the approval signs the account in on its phone).
 func CenterOperations() []CenterOperation {
-	return []CenterOperation{{ID: OperatorGrantClass, Risk: "R4", StepUp: Evidence, Target: TargetRequest, Receipt: true, Audit: AuditInTransaction}}
+	return []CenterOperation{
+		{ID: OperatorGrantClass, Risk: "R4", StepUp: Evidence, Target: TargetRequest, Receipt: true, Audit: AuditInTransaction},
+		{ID: MobileAuthorizationClass, Risk: "R3", StepUp: EvidenceOnApprove, Target: TargetFlow, Restricted: true, Audit: AuditInTransaction},
+	}
+}
+
+// CenterOperationOf is the center-defined operation of an ID.
+func CenterOperationOf(id string) (CenterOperation, bool) {
+	for _, operation := range CenterOperations() {
+		if operation.ID == id {
+			return operation, true
+		}
+	}
+	return CenterOperation{}, false
+}
+
+// NeedsEvidenceToDecide reports whether a decision of a center-defined operation (an approval, or a denial) needs step-up evidence:
+// every decision of an Evidence operation, only an approval of an EvidenceOnApprove operation.
+func (o CenterOperation) NeedsEvidenceToDecide(approve bool) bool {
+	return o.StepUp == Evidence || o.StepUp == EvidenceOnApprove && approve
 }
 
 // StepUpClass is a step-up class BeginStepUp admits and the target its hash names: the operation ID of a row that needs

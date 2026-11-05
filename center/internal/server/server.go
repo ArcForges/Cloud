@@ -40,6 +40,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/identityapi"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/mail"
+	"github.com/ArcForges/Cloud/center/internal/mobileauth"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/pages"
 	"github.com/ArcForges/Cloud/center/internal/routes"
@@ -257,6 +258,8 @@ type composedIdentity struct {
 	clock      func() time.Time
 	// fleet is the fleet surface's account methods in process, for its pages; nil where the fleet surface is off.
 	fleet *fleetapi.Direct
+	// mobile is the mobile surface's native authorization, for its routes; nil where the mobile surface is off.
+	mobile *mobileauth.Service
 }
 
 // composeIdentity registers the identity surface's served methods and its credential verifiers.
@@ -279,9 +282,10 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	participants := append([]device.Participant{fleet.NodeParticipant{}}, options.Participants...)
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: sender, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: participants,
-		// The approvals of the node sign-in are cancelled by the account's remediations wherever identity runs (protocol-6): the browser
-		// flows first, then the device authorizations (the registration order is the lock order between the two tables).
-		AccountParticipants: fleet.AccountParticipants()})
+		// The approvals of the node sign-in and of the mobile authorization are cancelled by the account's remediations wherever identity
+		// runs (protocol-6): the browser node flows first, then the device authorizations, then the mobile flows (the registration order
+		// is the lock order between the tables).
+		AccountParticipants: append(fleet.AccountParticipants(), mobileauth.ApprovalParticipant{})})
 	c.drain = service.Drain
 	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features))
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
@@ -295,9 +299,15 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 		// The /connect and /activate pages call the same server's account methods in process (AF-CTR-04 E3).
 		fleetDirect = fleetServer.Direct()
 	}
+	var mobile *mobileauth.Service
+	if c.Config.Identity.Enabled(config.SurfaceMobile) {
+		// The mobile native authorization (AF-CTR-04 part M): its routes are page routes, served by the pages handler.
+		mobile = mobileauth.New(mobileauth.Options{DB: c.Store, Policy: c.Config.Identity.Policy, Mobile: c.Config.Mobile, PublicBaseURL: c.Config.PublicBaseURL,
+			Clock: clock, Events: c.Metrics, Logger: logger})
+	}
 	verifier := session.NewVerifier(c.Store, origin, clock)
 	pipeline.Bearer, pipeline.Browser = verifier, verifier
-	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock, fleet: fleetDirect}, nil
+	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock, fleet: fleetDirect, mobile: mobile}, nil
 }
 
 // mailSender is the sender of the identity surface: the injected one of a test, otherwise the one the mail configuration builds (the
@@ -320,9 +330,10 @@ func (c *Center) composePages(composed composedIdentity, registry *ingress.Regis
 	return pages.New(pages.Options{
 		Origin: config.Origin(c.Config.PublicBaseURL), BasePath: config.BasePath(c.Config.PublicBaseURL),
 		Enabled: func(surface string) bool { return c.Config.Identity.Enabled(config.Surface(surface)) },
-		Policy:  c.Config.Identity.Policy, Operator: c.operator(composed.clock), Fleet: composed.fleet, Identity: composed.service, Direct: composed.server.Direct(),
-		Access: composed.authorizer, Verifier: composed.verifier,
-		DB: c.Store, Registry: registry, ClientIP: pipeline.ClientIP, RequireClientIP: pipeline.RequireClientIP, Clock: composed.clock, Logger: logger,
+		Policy:  c.Config.Identity.Policy, Operator: c.operator(composed.clock), Fleet: composed.fleet, Mobile: composed.mobile, Identity: composed.service,
+		Direct: composed.server.Direct(), Access: composed.authorizer, Verifier: composed.verifier,
+		DB: c.Store, Registry: registry, ClientIP: pipeline.ClientIP, RequireClientIP: pipeline.RequireClientIP, ClientOrigin: pipeline.ClientOrigin,
+		Clock: composed.clock, Logger: logger,
 	})
 }
 
@@ -639,6 +650,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		"helloBackend", center.Health.HelloBackend, "store", center.Store != nil, "schemaBuildVersion", center.buildVersion,
 		"revision", center.Health.Revision, "version", center.Health.Artifact.Version, "surfaces", surfaces,
 		"bootstrapConfigured", cfg.Identity.Bootstrap != nil, "mail", mailName(cfg.Mail))
+	if cfg.Mobile.TestOnly() && cfg.Identity.Enabled(config.SurfaceMobile) {
+		logger.Warn("the Android app statement of /.well-known/assetlinks.json is a labelled non-shipping test value", "variable", config.EnvAndroidApp)
+	}
 	if cfg.Identity.Disabled != "" {
 		logger.Error("the identity surface is off", "reason", cfg.Identity.Disabled)
 	}

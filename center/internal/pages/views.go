@@ -23,7 +23,8 @@ var (
 // pageNames are the templates; each is a content template laid out by base.html (with the fleet review pages' shared node block,
 // fleet-node.gohtml).
 var pageNames = []string{"sign-in", "bootstrap", "sign-out", "passkeys", "sessions", "devices", "register", "error", "operations-grant", "operations-review",
-	"operations-done", "connect", "connect-review", "connect-done", "activate", "activate-review", "activate-done"}
+	"operations-done", "connect", "connect-review", "connect-done", "activate", "activate-review", "activate-done", "mobile-authorize",
+	"mobile-authorize-review", "mobile-authorize-done", "app-callback"}
 
 // views are the parsed templates and the static files.
 type views struct {
@@ -93,6 +94,9 @@ type pageData struct {
 
 	// The fleet pages.
 	Fleet fleetView
+
+	// The mobile pages.
+	Mobile mobileView
 }
 
 type profileView struct {

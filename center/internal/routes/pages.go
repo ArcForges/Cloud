@@ -31,9 +31,11 @@ const (
 	PageActivatePrefix = "/activate"
 )
 
-// PageSurfaces are the surfaces whose modules may declare page routes (cloud-13): the pages surface, the operations surface and the
-// fleet surface. Table and CheckPages read the one list.
-func PageSurfaces() []string { return []string{SurfacePages, SurfaceOperations, SurfaceFleet} }
+// PageSurfaces are the surfaces whose modules may declare page routes (cloud-13): the pages surface, the operations surface, the fleet
+// surface and the mobile surface. Table and CheckPages read the one list.
+func PageSurfaces() []string {
+	return []string{SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile}
+}
 
 // underPrefix reports whether a path is a prefix page itself or one of its children.
 func underPrefix(path, prefix string) bool {
@@ -236,9 +238,9 @@ func pageSurfaceRoutes() []PageRoute {
 }
 
 // AllPageRoutes are the page routes of every surface, in registration order: the pages surface's, the operations surface's, the fleet
-// surface's.
+// surface's, the mobile surface's (its native JSON and apex routes included: the center's page handler serves them all).
 func AllPageRoutes() []PageRoute {
-	return append(append(PageRoutes(), OperationsPageRoutes()...), FleetPageRoutes()...)
+	return append(append(append(PageRoutes(), OperationsPageRoutes()...), FleetPageRoutes()...), MobilePageRoutes()...)
 }
 
 // OperationsPageRoutes are the routes of the operations surface, in registration order: the page of the operator grant, its review (the
@@ -266,7 +268,8 @@ var ErrPageRegistration = fmt.Errorf("%w: inconsistent page registration", ErrRe
 // canonical (no trailing slash, query, percent-encoding or dot segment), a method other than GET and POST, a duplicate row, a body or
 // content type that does not fit the method, a bound out of range, an unknown cookie rule, a redirect on a route that is not an HTML
 // route, a route of a surface that has no pages, or a route outside its surface's prefixes (the pages surface: the account and the
-// WebBrowserSession prefixes; the operations surface: its prefix; the fleet surface: /connect and /activate, each a page itself).
+// WebBrowserSession prefixes; the operations surface: its prefix; the fleet surface: /connect and /activate, each a page itself; the
+// mobile surface: mobileRowAdmitted's exact shapes). Only the mobile surface declares native JSON and apex routes.
 func CheckPages(rows []PageRoute) error {
 	seen := map[string]bool{}
 	ids := map[string]bool{}
@@ -283,11 +286,15 @@ func CheckPages(rows []PageRoute) error {
 			return fmt.Errorf("%w: %s is outside the operations prefix", ErrPageRegistration, row.Path)
 		case row.Surface == SurfaceFleet && !underPrefix(row.Path, PageConnectPrefix) && !underPrefix(row.Path, PageActivatePrefix):
 			return fmt.Errorf("%w: %s is outside the fleet prefixes", ErrPageRegistration, row.Path)
+		case row.Surface == SurfaceMobile && !mobileRowAdmitted(row):
+			return fmt.Errorf("%w: %s is not a mobile route of an admitted shape", ErrPageRegistration, row.ID)
+		case row.Surface != SurfaceMobile && (row.Kind == PageNativeKind || row.Kind == PageApexKind):
+			return fmt.Errorf("%w: %s is a native or apex route outside the mobile surface", ErrPageRegistration, row.ID)
 		case strings.ContainsAny(row.Path, "?#%\\ ") || strings.Contains(row.Path, "//") || strings.Contains(row.Path, "..") || strings.HasSuffix(row.Path, "/"):
 			return fmt.Errorf("%w: %s is not canonical", ErrPageRegistration, row.Path)
 		case seen[key] || ids[row.ID] || row.ID == "":
 			return fmt.Errorf("%w: %s is registered twice or unnamed", ErrPageRegistration, key)
-		case row.Kind != PageHTMLKind && row.Kind != PageAssetKind && row.Kind != PageJSONKind:
+		case row.Kind != PageHTMLKind && row.Kind != PageAssetKind && row.Kind != PageJSONKind && row.Kind != PageNativeKind && row.Kind != PageApexKind:
 			return fmt.Errorf("%w: %s has the kind %q", ErrPageRegistration, row.ID, row.Kind)
 		case row.SetCookie != SetCookieNone && row.SetCookie != SetCookieSession && row.SetCookie != SetCookieClear:
 			return fmt.Errorf("%w: %s has the Set-Cookie rule %q", ErrPageRegistration, row.ID, row.SetCookie)

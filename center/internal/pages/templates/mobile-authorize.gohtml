@@ -1,0 +1,11 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Sign in to the ArcForges app</h1>
+<noscript><p>Signing in the app needs JavaScript. Turn it on for this page and reload.</p></noscript>
+<p id="needs-script" class="help">This page needs its script. If this line stays, reload the page or allow scripts for it.</p>
+<p id="status" role="status" aria-live="polite">Reading the request.</p>
+<form id="mobile-review" method="post" action="{{.Base}}/mobile/authorize/review" hidden>
+<input type="hidden" name="csrf" value="">
+<input type="hidden" name="flow_id" value="">
+</form>
+<p class="help">The ArcForges app on your phone opened this page to sign in to your account. You review the request before anything happens.</p>
+{{end}}

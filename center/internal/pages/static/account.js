@@ -208,9 +208,9 @@ export function displayUserCode(code) {
 }
 
 /**
- * The return target of the sign-in page with a fleet fragment, or null: only <base>/connect#flow=<flow ID> and
- * <base>/activate#code=XXXX-XXXX (the code in its displayed form) are followed with their fragment; every other return value is a
- * path (safeReturnPath), which drops any fragment.
+ * The return target of the sign-in page with a fleet or mobile fragment, or null: only <base>/connect#flow=<flow ID>,
+ * <base>/mobile/authorize#flow=<flow ID> (AF-CTR-04 part M) and <base>/activate#code=XXXX-XXXX (the code in its displayed form) are
+ * followed with their fragment; every other return value is a path (safeReturnPath), which drops any fragment.
  */
 export function safeFleetReturn(value, origin, base) {
   if (typeof value !== "string" || value.length > MAX_RETURN_PATH) return null;
@@ -220,6 +220,12 @@ export function safeFleetReturn(value, origin, base) {
   const fragment = value.slice(hash + 1);
   if (safeReturnPath(path, origin) !== path) return null;
   if (path === `${base}/connect` && fragment.startsWith("flow=") && isFlowId(fragment.slice(5)))
+    return value;
+  if (
+    path === `${base}/mobile/authorize` &&
+    fragment.startsWith("flow=") &&
+    isFlowId(fragment.slice(5))
+  )
     return value;
   if (path === `${base}/activate` && fragment.startsWith("code=")) {
     const code = normalizeUserCode(fragment.slice(5));
@@ -243,6 +249,23 @@ export function isLoopbackResult(value) {
   if (found === null) return false;
   const port = Number(found[1]);
   return port >= 1024 && port <= 65535;
+}
+
+/**
+ * Whether a URL is the callback a decided mobile authorization hands to the app (AF-CTR-04 part M, MobileNativeAuth): the release
+ * app's App Link on this page's own origin (https, <origin>/app/callback) or a debug build's private-use scheme
+ * (<reverse-DNS scheme>:/callback), with the fragment #code=<canonical code>&state=<state>&iss=<issuer> or
+ * #error=access_denied&state=<state>&iss=<issuer>, and nothing else.
+ */
+export function isMobileResult(value, origin) {
+  if (typeof value !== "string" || value.length > 2048) return false;
+  const found =
+    /^(https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z][a-z0-9-]*(?::[1-9][0-9]{0,4})?\/app\/callback|[a-z][a-z0-9.+-]*\.[a-z0-9.+-]+:\/callback)#(?:code=[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]|error=access_denied)&state=[A-Za-z0-9._~-]{16,128}&iss=[A-Za-z0-9%._~-]{1,1400}$/u.exec(
+      value,
+    );
+  if (found === null) return false;
+  const target = found[1] ?? "";
+  return !target.startsWith("https:") || target === `${origin}/app/callback`;
 }
 
 /** The values of a URL fragment of the form #name=value&name=value (percent-decoded); unknown or malformed parts are ignored. */
@@ -813,6 +836,57 @@ async function activatePage(page) {
   });
 }
 
+/**
+ * /mobile/authorize (AF-CTR-04 part M): as /connect, the flow ID is read from the fragment and the fragment dropped before anything
+ * else, the ID checked, and only then the center asked who is signed in; signed in, the review form is submitted, otherwise the
+ * sign-in page returns here.
+ */
+async function mobilePage(page) {
+  const flow = parseFragment(page.window.location.hash).flow;
+  dropFragment(page);
+  const form = page.document.getElementById("mobile-review");
+  if (!form) return;
+  if (!isFlowId(flow)) {
+    setStatus(page.document, "");
+    showError(page.document, "This link is not complete. Start the sign-in again in the app.");
+    return;
+  }
+  let state;
+  try {
+    state = await page.api.bootstrap();
+  } catch (error) {
+    setStatus(page.document, "");
+    showError(page.document, errorText(error));
+    return;
+  }
+  if (!state.authenticated) {
+    go(page, signInWithReturn(page, `${page.base}/mobile/authorize#flow=${flow}`));
+    return;
+  }
+  form.elements.csrf.value = state.csrfToken;
+  form.elements.flow_id.value = flow;
+  form.submit();
+}
+
+/**
+ * The page of a decided mobile authorization: the link that hands the callback to the app is checked and left for the person to tap
+ * (MB-7: a tap is the hand-off Android passes to a verified App Link; a script navigation that the browser kept in the tab would load
+ * the fallback page and take the link away, so the script never follows it). An invalid link is removed.
+ */
+function mobileDonePage(page) {
+  const link = page.document.getElementById("app-link");
+  if (!link) return;
+  if (!isMobileResult(link.getAttribute("href"), page.window.location.origin)) {
+    showError(
+      page.document,
+      "The link to the app is not valid. Start the sign-in again in the app.",
+    );
+    link.remove();
+    return;
+  }
+  link.focus();
+}
+
 /** The page of a decided browser sign-in: the link back to the node's loopback receiver is followed once it is checked. */
 function connectDonePage(page) {
   const link = page.document.getElementById("return-link");
@@ -855,7 +929,15 @@ export function start(window) {
     case "operations-review":
     case "connect-review":
     case "activate-review":
+    case "mobile-authorize-review":
       return stepUpForms(page);
+    case "mobile-authorize":
+      return mobilePage(page);
+    case "mobile-authorize-done":
+      return mobileDonePage(page);
+    case "app-callback":
+      // The fixed page of an App Link the browser kept (Q-4): the fragment leaves the address bar and the history entry, unread.
+      return dropFragment(page);
     case "connect":
       return connectPage(page);
     case "activate":

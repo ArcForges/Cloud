@@ -83,7 +83,13 @@ export interface StepRecord {
 }
 
 export interface Report {
-  mode: "enroll" | "returning" | "real-authenticator" | "operator-grant" | "node-approve";
+  mode:
+    | "enroll"
+    | "returning"
+    | "real-authenticator"
+    | "operator-grant"
+    | "node-approve"
+    | "mobile-approve";
   baseUrl: string;
   startedAt: string;
   finishedAt?: string;

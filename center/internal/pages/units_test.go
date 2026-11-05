@@ -182,7 +182,11 @@ func TestWhatThePagesWriteStaysWithinTheBoundsTheWorkerIsGenerated(t *testing.T)
 func TestTheFleetRefusalTexts(t *testing.T) {
 	now := time.Now()
 	text := func(refusal *arc.Refusal, fleetPage bool) string {
-		return messageForSurface(refusal.Dated(now).ArcError(correlation.Context{}), now, fleetPage)
+		surface := ""
+		if fleetPage {
+			surface = "fleet"
+		}
+		return messageForSurface(refusal.Dated(now).ArcError(correlation.Context{}), now, surface)
 	}
 	if got := text(arc.CodeInvalid("device_entry_account", 5, 3), true); !strings.Contains(got, "You can try 3 more codes now") || strings.Contains(got, "15") {
 		t.Errorf("entries left: %q", got)

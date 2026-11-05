@@ -175,6 +175,8 @@ type settings struct {
 	// selfHostedOperations is a self-hosted center with the operations surface forced on (the configuration refuses it, so the
 	// harness appends it to the loaded one): the operator grant's policy then refuses as the self-hosted center does.
 	selfHostedOperations bool
+	// extra are further configuration values (the mobile surface's Android app identity and debug scheme, AF-CTR-04 part M).
+	extra map[string]string
 }
 
 const writePolicy = `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000}`
@@ -206,6 +208,9 @@ func newHarness(t *testing.T, options settings) *harness {
 	}
 	if options.surfaces != "" {
 		values[config.EnvSurfaces] = options.surfaces
+	}
+	for key, value := range options.extra {
+		values[key] = value
 	}
 	if !options.noBootstrap {
 		secret := session.NewSecret()

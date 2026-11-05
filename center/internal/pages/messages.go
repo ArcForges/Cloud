@@ -94,6 +94,25 @@ var fleetText = map[string]string{
 	"AUTHENTICATION/step_up_required": "Approving needs a passkey check. Try again and confirm with your passkey.",
 }
 
+// mobileText is the text of the refusals whose meaning differs on the mobile pages (AF-CTR-04 part M) from the account pages'; it is
+// read before reasonText, whose fleet texts speak of a node.
+var mobileText = map[string]string{
+	"STATE/expired":                                 "This sign-in request has expired. Start again in the app.",
+	"STATE/not_found":                               "This sign-in request does not exist, or another account decided it. Start again in the app.",
+	"AUTHENTICATION/step_up_required":               "Approving needs a passkey check. Try again and confirm with your passkey.",
+	"AUTHORIZATION/permission_denied":               "This phone is signed in to another account. Sign out in the app first.",
+	"AUTHENTICATION/credential_revoked":             "This app installation was removed from your account. Start again in the app; it signs in as a new installation.",
+	"STATE/invalid_state|not_reviewed":              "This request needs a fresh review. Open it again from the app.",
+	"STATE/invalid_state|denied":                    "This request was denied. Start again in the app.",
+	"STATE/invalid_state|completed":                 "The app already finished signing in with this request.",
+	"STATE/invalid_state|revoked":                   "This request was ended. Start again in the app.",
+	"STATE/invalid_state|expired":                   "This sign-in request has expired. Start again in the app.",
+	"STATE/invalid_state|pending":                   "This request is still waiting for a decision.",
+	"STATE/invalid_state|approved":                  "This request is already approved. Open the ArcForges app to finish signing in.",
+	"VALIDATION/invalid_argument|flow_id: pattern":  "This link is not complete. Start the sign-in again in the app.",
+	"VALIDATION/invalid_argument|decision: pattern": "Choose to sign the app in or to deny the request.",
+}
+
 // limitText is the text of a refusal chosen by the limit it names (E2: code_invalid tells an unknown code from one whose lookups are
 // spent), with the limit's value where the text has a %d: what is left, or the maximum.
 var limitText = map[string]struct {
@@ -116,13 +135,23 @@ var operationsText = map[string]string{
 
 // messageFor is the text of a refusal for a page.
 func messageFor(value *foundationv1.ArcError, now time.Time) string {
-	return messageForSurface(value, now, false)
+	return messageForSurface(value, now, "")
 }
 
-// messageForSurface is the text of a refusal, on a fleet page when fleetPage: a text chosen by the refusal's limit first, then by its
-// state reason, then the fleet's own text of the code, then the shared text of the code.
-func messageForSurface(value *foundationv1.ArcError, now time.Time, fleetPage bool) string {
+// messageForSurface is the text of a refusal on a page of a surface: on a mobile page the mobile text of the code and its reason
+// first; then a text chosen by the refusal's limit, then by its state reason, then (on a fleet page) the fleet's own text of the
+// code, then the shared text of the code.
+func messageForSurface(value *foundationv1.ArcError, now time.Time, surface string) string {
 	key := strings.TrimPrefix(value.GetCategory().String(), "ERROR_CATEGORY_") + "/" + value.GetCode()
+	if surface == "mobile" {
+		if text, ok := mobileText[key+"|"+value.GetDetails().GetState().GetReason()]; ok {
+			return withRetry(text, value, now)
+		}
+		if text, ok := mobileText[key]; ok {
+			return withRetry(text, value, now)
+		}
+	}
+	fleetPage := surface == "fleet"
 	if limit := value.GetDetails().GetLimit(); limit != nil {
 		if row, ok := limitText[key+"|"+limit.GetLimitName()]; ok {
 			maximum, maximumOK := decimalCount(limit.GetMaximum())

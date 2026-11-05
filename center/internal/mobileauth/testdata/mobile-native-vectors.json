@@ -1,0 +1,1004 @@
+{
+  "schemaVersion": "cloud-mobile-native-vectors.v1",
+  "license": "Apache-2.0",
+  "source": {
+    "repository": "https://github.com/ArcForges/Contracts",
+    "commit": "5873dc24d4452adc2306f3e0bc6fb477add911e9",
+    "cohort": "1.0.0-ci.430.1",
+    "document": "public/http/v1/mobile-native.schema.json",
+    "documentSha256": "90b2e829c89f19234e0d55d441e068ae32fee5763dbc09e9dc0af6d68787481a",
+    "fixture": "fixtures/public/con-07-identity.json",
+    "fixtureSha256": "1d0a28061b941859e1eb540ec0b751eeece46e15c0a9316c13635d808a992310",
+    "selection": "httpVectors whose id starts with mobile-, in fixture order, unchanged; routes.MobileNativeAuth unchanged"
+  },
+  "routes": [
+    {
+      "id": "mobile.begin",
+      "method": "POST",
+      "path": "/session/v1/mobile/begin",
+      "credential": "anonymous",
+      "origin": "none",
+      "csrf": "none",
+      "setCookie": "none",
+      "cache": "no-store",
+      "requestWire": "json",
+      "requestRoots": ["MobileBeginRequest"],
+      "responseWire": "json",
+      "responseRoots": ["MobileBeginResponse"]
+    },
+    {
+      "id": "mobile.token",
+      "method": "POST",
+      "path": "/session/v1/mobile/token",
+      "credential": "authorization-code",
+      "origin": "none",
+      "csrf": "none",
+      "setCookie": "none",
+      "cache": "no-store",
+      "requestWire": "json",
+      "requestRoots": ["MobileTokenRequest"],
+      "responseWire": "json",
+      "responseRoots": ["MobileTokenResponse"]
+    }
+  ],
+  "httpVectors": [
+    {
+      "id": "mobile-begin-release",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "canonical": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}"
+    },
+    {
+      "id": "mobile-begin-release-proof-port",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://proof.arcforges.com:8443/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "canonical": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://proof.arcforges.com:8443/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}"
+    },
+    {
+      "id": "mobile-begin-debug-scheme",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"com.arcforges.android.debug:/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "canonical": "{\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"com.arcforges.android.debug:/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}"
+    },
+    {
+      "id": "mobile-begin-debug-scheme-plus-and-hyphen",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"org.example-app+dev.x1:/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}"
+    },
+    {
+      "id": "mobile-begin-state-16",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"AAAAAAAAAAAAAAAA\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "canonical": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"AAAAAAAAAAAAAAAA\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}"
+    },
+    {
+      "id": "mobile-begin-state-128-unreserved",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "canonical": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}"
+    },
+    {
+      "id": "mobile-begin-platform-android-only",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android\",\"appVersion\":\"1.0.0\"}}",
+      "canonical": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android\",\"appVersion\":\"1.0.0\"}}"
+    },
+    {
+      "id": "mobile-begin-platform-android-path",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android/15:sdk-35\",\"appVersion\":\"1.0.0\"}}",
+      "canonical": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android/15:sdk-35\",\"appVersion\":\"1.0.0\"}}"
+    },
+    {
+      "id": "mobile-begin-app-version-prerelease",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"2.1.0-beta.4\"}}",
+      "canonical": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"2.1.0-beta.4\"}}"
+    },
+    {
+      "id": "mobile-begin-member-order-free",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"},\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\"}"
+    },
+    {
+      "id": "mobile-begin-release-with-private-scheme",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"com.arcforges.android.debug:/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-debug-with-app-link",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-http-app-link",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"http://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-loopback-name",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://localhost/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-loopback-ip",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://127.0.0.1/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-loopback-http",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"http://127.0.0.1:8080/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-app-link-other-path",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback/x\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-app-link-query",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback?x=1\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-app-link-fragment",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback#x\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-app-link-userinfo",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://user@arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-app-link-uppercase-host",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://ArcForges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-app-link-trailing-slash",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback/\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-scheme-without-dot",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"arcforges:/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-scheme-javascript",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"javascript:/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-scheme-uppercase",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"Com.Arcforges.Debug:/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-scheme-other-path",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"com.arcforges.debug:/other\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-scheme-authority",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"com.arcforges.debug://callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-frozen-native-client",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"companion.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-plain-method",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"plain\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-challenge-42",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-c\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-challenge-padded",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-c=\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-state-15",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"AAAAAAAAAAAAAAA\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-state-129",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-state-percent",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3Rh%20\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-state-plus",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3Rh+x\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-missing-installation",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-missing-state",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-extra-scope",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"},\"scope\":\"account\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-product-node",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-node\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-product-web",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-web\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-product-companion",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"companion\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-platform-ios",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"ios-18\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-platform-uppercase",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"Android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-platform-androidx",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"androidx\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-app-version-build-metadata",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0+42\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-app-version-empty",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-app-version-129",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-installation-zero",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"00000000-0000-0000-0000-000000000000\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-installation-uppercase",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99AA-BBCCDDEEFF00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-installation-extra-model",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\",\"model\":\"Pixel 9\"}}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-duplicate-member",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"},\"state\":\"Qm9yZWFsaXMtc3RhdGU\"}",
+      "failure": "malformed"
+    },
+    {
+      "id": "mobile-begin-trailing-comma",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"},}",
+      "failure": "malformed"
+    },
+    {
+      "id": "mobile-begin-form-body",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "clientId=arcforges.android&redirectUri=https%3A%2F%2Farcforges.com%2Fapp%2Fcallback",
+      "failure": "malformed"
+    },
+    {
+      "id": "mobile-begin-above-4096-bytes",
+      "root": "MobileBeginRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"codeChallenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\",\"codeChallengeMethod\":\"S256\",\"state\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"installation\":{\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"product\":\"arcforges-mobile\",\"platform\":\"android-15\",\"appVersion\":\"1.0.0\"}}",
+      "failure": "tooLarge"
+    },
+    {
+      "id": "mobile-begin-reply-official",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/api/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "canonical": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/api/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}"
+    },
+    {
+      "id": "mobile-begin-reply-proof",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://proof.arcforges.com/api/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "canonical": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://proof.arcforges.com/api/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}"
+    },
+    {
+      "id": "mobile-begin-reply-self-hosted-loopback",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"http://localhost:8080/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "canonical": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"http://localhost:8080/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}"
+    },
+    {
+      "id": "mobile-begin-reply-self-hosted-ipv6-loopback",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"http://[::1]:8080/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "canonical": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"http://[::1]:8080/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}"
+    },
+    {
+      "id": "mobile-begin-reply-root-base",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://center.example.org/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "canonical": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://center.example.org/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}"
+    },
+    {
+      "id": "mobile-begin-reply-512-characters",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "canonical": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}"
+    },
+    {
+      "id": "mobile-begin-reply-other-flow",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/api/mobile/authorize#flow=0b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-http-official",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"http://arcforges.com/api/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-userinfo",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://evil@arcforges.com/api/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-query-form",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/api/mobile/authorize?flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-empty-segment",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/api//mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-uppercase-host",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://ArcForges.com/api/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-space",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/a pi/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-other-page",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/api/connect#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-above-512-characters",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-missing-expiry",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/api/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-extra-code",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"authorizeUrl\":\"https://arcforges.com/api/mobile/authorize#flow=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"expiresAt\":\"2026-11-05T10:10:00Z\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-begin-reply-zero-flow",
+      "root": "MobileBeginResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"00000000-0000-0000-0000-000000000000\",\"authorizeUrl\":\"https://arcforges.com/api/mobile/authorize#flow=00000000-0000-0000-0000-000000000000\",\"expiresAt\":\"2026-11-05T10:10:00Z\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": true,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi",
+      "canonical": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi"
+    },
+    {
+      "id": "mobile-callback-success-loopback-issuer",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": true,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=http%3A%2F%2Flocalhost%3A8080",
+      "canonical": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=http%3A%2F%2Flocalhost%3A8080"
+    },
+    {
+      "id": "mobile-callback-success-any-order",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": true,
+      "text": "iss=https%3A%2F%2Farcforges.com%2Fapi&state=Qm9yZWFsaXMtc3RhdGU&code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "canonical": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi"
+    },
+    {
+      "id": "mobile-callback-success-plain-issuer",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": true,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https://arcforges.com/api",
+      "canonical": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi"
+    },
+    {
+      "id": "mobile-callback-success-missing-iss",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-http-issuer",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=http%3A%2F%2Farcforges.com%2Fapi",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-issuer-trailing-slash",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi%2F",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-issuer-query",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi%3Fx%3D1",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-issuer-userinfo",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Fa%40arcforges.com%2Fapi",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-issuer-empty",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-noncanonical-code",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-code-42",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-short-state",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=short&iss=https%3A%2F%2Farcforges.com%2Fapi",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-with-token",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi&access_token=x",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-with-error",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi&error=access_denied",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-success-duplicate-state",
+      "root": "MobileAuthorizeCallbackSuccess",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi&state=Qm9yZWFsaXMtc3RhdGU",
+      "failure": "malformed"
+    },
+    {
+      "id": "mobile-callback-failure",
+      "root": "MobileAuthorizeCallbackFailure",
+      "wire": "form-urlencoded",
+      "valid": true,
+      "text": "error=access_denied&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi",
+      "canonical": "error=access_denied&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi"
+    },
+    {
+      "id": "mobile-callback-failure-missing-iss",
+      "root": "MobileAuthorizeCallbackFailure",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "error=access_denied&state=Qm9yZWFsaXMtc3RhdGU",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-failure-other-error",
+      "root": "MobileAuthorizeCallbackFailure",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "error=server_error&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-failure-uppercase-error",
+      "root": "MobileAuthorizeCallbackFailure",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "error=ACCESS_DENIED&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-failure-with-description",
+      "root": "MobileAuthorizeCallbackFailure",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "error=access_denied&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi&error_description=no",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-failure-with-code",
+      "root": "MobileAuthorizeCallbackFailure",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "error=access_denied&state=Qm9yZWFsaXMtc3RhdGU&iss=https%3A%2F%2Farcforges.com%2Fapi&code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-callback-failure-missing-state",
+      "root": "MobileAuthorizeCallbackFailure",
+      "wire": "form-urlencoded",
+      "valid": false,
+      "text": "error=access_denied&iss=https%3A%2F%2Farcforges.com%2Fapi",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-release",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "canonical": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}"
+    },
+    {
+      "id": "mobile-token-debug",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"com.arcforges.android.debug:/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "canonical": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"com.arcforges.android.debug:/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}"
+    },
+    {
+      "id": "mobile-token-verifier-128",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "canonical": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-a.b_c~d-\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}"
+    },
+    {
+      "id": "mobile-token-verifier-42",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjX\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-verifier-129",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-verifier-plus",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjX+\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-release-with-private-scheme",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"com.arcforges.android.debug:/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-debug-with-app-link",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android.local\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-noncanonical-code",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-missing-installation",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-zero-installation",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"00000000-0000-0000-0000-000000000000\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-missing-flow",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-extra-grant-type",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"grantType\":\"authorization_code\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-extra-state",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\",\"state\":\"Qm9yZWFsaXMtc3RhdGU\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-form-body",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "flowId=9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4&code=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&codeVerifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk&clientId=arcforges.android&redirectUri=https%3A%2F%2Farcforges.com%2Fapp%2Fcallback&installationId=11223344-5566-4788-99aa-bbccddeeff00",
+      "failure": "malformed"
+    },
+    {
+      "id": "mobile-token-above-4096-bytes",
+      "root": "MobileTokenRequest",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"flowId\":\"9b2d6c1e-3f4a-4b5c-8d6e-7f8091a2b3c4\",\"code\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"codeVerifier\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"clientId\":\"arcforges.android\",\"redirectUri\":\"https://arcforges.com/app/callback\",\"installationId\":\"11223344-5566-4788-99aa-bbccddeeff00\"}",
+      "failure": "tooLarge"
+    },
+    {
+      "id": "mobile-token-response",
+      "root": "MobileTokenResponse",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\",\"installed\":[{\"product\":\"arcforges-mobile\",\"version\":\"1.0.0\",\"installedAt\":\"2026-11-05T10:01:00Z\"}]},\"recoveryGeneration\":\"0\",\"scope\":\"account\",\"purpose\":\"authenticate\"}",
+      "canonical": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\",\"installed\":[{\"product\":\"arcforges-mobile\",\"version\":\"1.0.0\",\"installedAt\":\"2026-11-05T10:01:00Z\"}]},\"recoveryGeneration\":\"0\",\"scope\":\"account\",\"purpose\":\"authenticate\"}"
+    },
+    {
+      "id": "mobile-token-response-without-installed",
+      "root": "MobileTokenResponse",
+      "wire": "json",
+      "valid": true,
+      "text": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\"},\"recoveryGeneration\":\"0\",\"scope\":\"account\",\"purpose\":\"authenticate\"}",
+      "canonical": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\"},\"recoveryGeneration\":\"0\",\"scope\":\"account\",\"purpose\":\"authenticate\"}"
+    },
+    {
+      "id": "mobile-token-response-node-scope",
+      "root": "MobileTokenResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\",\"installed\":[{\"product\":\"arcforges-mobile\",\"version\":\"1.0.0\",\"installedAt\":\"2026-11-05T10:01:00Z\"}]},\"recoveryGeneration\":\"0\",\"scope\":\"node\",\"purpose\":\"authenticate\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-response-enroll-purpose",
+      "root": "MobileTokenResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\",\"installed\":[{\"product\":\"arcforges-mobile\",\"version\":\"1.0.0\",\"installedAt\":\"2026-11-05T10:01:00Z\"}]},\"recoveryGeneration\":\"0\",\"scope\":\"account\",\"purpose\":\"enroll\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-response-missing-scope",
+      "root": "MobileTokenResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\",\"installed\":[{\"product\":\"arcforges-mobile\",\"version\":\"1.0.0\",\"installedAt\":\"2026-11-05T10:01:00Z\"}]},\"recoveryGeneration\":\"0\",\"purpose\":\"authenticate\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-response-node-product",
+      "root": "MobileTokenResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\",\"installed\":[{\"product\":\"arcforges-node\",\"version\":\"1.0.0\"}]},\"recoveryGeneration\":\"0\",\"scope\":\"account\",\"purpose\":\"authenticate\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-response-companion-product",
+      "root": "MobileTokenResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\",\"installed\":[{\"product\":\"companion\",\"version\":\"1.0.0\"}]},\"recoveryGeneration\":\"0\",\"scope\":\"account\",\"purpose\":\"authenticate\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-response-missing-revision",
+      "root": "MobileTokenResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"installed\":[{\"product\":\"arcforges-mobile\",\"version\":\"1.0.0\",\"installedAt\":\"2026-11-05T10:01:00Z\"}]},\"recoveryGeneration\":\"0\",\"scope\":\"account\",\"purpose\":\"authenticate\"}",
+      "failure": "invalid"
+    },
+    {
+      "id": "mobile-token-response-extra-id-token",
+      "root": "MobileTokenResponse",
+      "wire": "json",
+      "valid": false,
+      "text": "{\"sessionId\":\"33445566-7788-49aa-bbcc-ddeeff001122\",\"accessToken\":\"access-token-text\",\"accessExpiresAt\":\"2026-11-05T10:16:00Z\",\"refreshToken\":\"refresh-token-text\",\"refreshExpiresAt\":\"2027-02-03T10:01:00Z\",\"device\":{\"deviceId\":\"22334455-6677-4899-aabb-ccddeeff0011\",\"name\":\"Android phone\",\"platform\":\"android\",\"trust\":\"untrusted\",\"remoteEnabled\":false,\"revision\":\"1\",\"installed\":[{\"product\":\"arcforges-mobile\",\"version\":\"1.0.0\",\"installedAt\":\"2026-11-05T10:01:00Z\"}]},\"recoveryGeneration\":\"0\",\"scope\":\"account\",\"purpose\":\"authenticate\",\"idToken\":\"x\"}",
+      "failure": "invalid"
+    }
+  ]
+}

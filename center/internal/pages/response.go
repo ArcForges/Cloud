@@ -76,14 +76,15 @@ func (e *exchange) refuse(f *refusalWithStatus) {
 	e.refuseError(e.arcError(f.refusal), f.status)
 }
 
-// refuseError answers an ArcError as the route's kind answers it: the JSON body of the routes under /session/v1/web, an HTML page
-// with the refusal's text on the account pages and the forms, a bare status for an asset. A status of 0 takes the refusal's own.
+// refuseError answers an ArcError as the route's kind answers it: the JSON body of the routes under /session/v1/web and of the mobile
+// app's native routes, an HTML page with the refusal's text on the account pages and the forms, a bare status for an asset or an apex
+// route. A status of 0 takes the refusal's own.
 func (e *exchange) refuseError(value *foundationv1.ArcError, status int) {
 	if status == 0 {
 		status = statusOf(value)
 	}
 	switch e.route.Kind {
-	case routes.PageJSONKind:
+	case routes.PageJSONKind, routes.PageNativeKind:
 		var buffer bytes.Buffer
 		encoder := json.NewEncoder(&buffer)
 		encoder.SetEscapeHTML(false)

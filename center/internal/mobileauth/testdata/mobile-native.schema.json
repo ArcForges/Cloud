@@ -1,0 +1,412 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
+  "title": "MobileNativeAuth",
+  "description": "Closed native authorization of the ArcForges mobile app for an arcforges-mobile installation (AF-CTR-04; ArcForges-Design android.md and reuse-map.md): an app-started begin, the center's own authorization page in a Custom Tab (the browser's cookie sign-in, then a step-up of class identity.authorizeMobile bound to the flow), a one-use code in the URL fragment of the registered redirect with the issuer (RFC 9207), and an anonymous token exchange bound to the flow (PKCE S256 only, RFC 7636; RFC 8252 sections 7.1, 7.2 and 8). begin and token carry strict JSON (Content-Type application/json, no cookie, no Origin or CSRF requirement); the two callbacks are application/x-www-form-urlencoded fragments. The frozen NativeAuth document (public/http/v1/native-auth.schema.json) is unchanged. Shape validity is not flow, code, verifier, redirect, installation or issuer authorization.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/MobileBeginRequest"
+    },
+    {
+      "$ref": "#/$defs/MobileBeginResponse"
+    },
+    {
+      "$ref": "#/$defs/MobileAuthorizeCallbackSuccess"
+    },
+    {
+      "$ref": "#/$defs/MobileAuthorizeCallbackFailure"
+    },
+    {
+      "$ref": "#/$defs/MobileTokenRequest"
+    },
+    {
+      "$ref": "#/$defs/MobileTokenResponse"
+    }
+  ],
+  "$defs": {
+    "MobileInstallationClaim": {
+      "title": "MobileInstallationClaim",
+      "description": "The app's installation claim, as the app reports it (a public client: the center cannot prove it). installationId is the app's own nonzero canonical UUID, kept for the life of the installation; product is arcforges-mobile; platform starts with android (for example android-15); appVersion is the app's version name without build metadata: the app sends the text before the first + and never maps + to another character (a + is refused). The center checks the claim's shape at begin and its ownership at the decision and at token; the authorization page shows platform and appVersion labelled as the app reports it.",
+      "type": "object",
+      "properties": {
+        "installationId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "x-arcforges-rules": ["nonzeroUuid"]
+        },
+        "product": {
+          "type": "string",
+          "enum": ["arcforges-mobile"]
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 128,
+          "pattern": "^android(?:[0-9._:/-][A-Za-z0-9._:/-]{0,120})?$"
+        },
+        "appVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+        }
+      },
+      "required": ["installationId", "product", "platform", "appVersion"],
+      "additionalProperties": false
+    },
+    "MobileTokenInstalledProduct": {
+      "title": "MobileTokenInstalledProduct",
+      "type": "object",
+      "properties": {
+        "product": {
+          "type": "string",
+          "enum": ["arcforges-mobile"]
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+        },
+        "installedAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 30,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        }
+      },
+      "required": ["product", "version"],
+      "additionalProperties": false
+    },
+    "MobileTokenDevice": {
+      "title": "MobileTokenDevice",
+      "description": "The phone's device record as the center keeps it; a new phone device is named Android phone and can be renamed.",
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "x-arcforges-rules": ["nonzeroUuid"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+        },
+        "trust": {
+          "type": "string",
+          "enum": ["untrusted", "trusted", "revoked"]
+        },
+        "remoteEnabled": {
+          "type": "boolean"
+        },
+        "revokedAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 30,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 19,
+          "pattern": "^[1-9][0-9]*$",
+          "x-arcforges-rules": ["positiveInt64String"]
+        },
+        "installed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MobileTokenInstalledProduct"
+          },
+          "maxItems": 64
+        }
+      },
+      "required": ["deviceId", "name", "platform", "trust", "remoteEnabled", "revision"],
+      "additionalProperties": false
+    },
+    "MobileBeginRequest": {
+      "title": "MobileBeginRequest",
+      "description": "POST /session/v1/mobile/begin: begins one authorization attempt, anonymously, before any browser opens. For every attempt the app draws a fresh, random PKCE verifier and a fresh, random state (each from at least 32 random bytes, RFC 7636 section 7.1), sends codeChallenge = BASE64URL(SHA-256(verifier)) with method S256 (there is no plain method), sends begin once, and keeps exactly one pending attempt: its configured center, the flowId of the reply, the state and the verifier. Clients and redirects (rule mobileClientRedirect checks the form, the center the exact value): arcforges.android (release builds) takes the verified App Link https://<host and port of the center's public base URL>/app/callback; arcforges.android.local (debug builds) takes a private-use scheme redirect <scheme>:/callback (RFC 8252 section 7.1; a lower-case reverse-DNS scheme with at least one dot), admitted only by a self-hosted center configured for that scheme and never by an official-hosted center. Loopback redirects are not admitted for either client. The center checks the installation claim's shape here and reads no installation. Errors: VALIDATION/invalid_argument with the field path and reason (for example redirectUri: not_admitted or installation.platform: not_admitted), RESOURCE/rate_limited, and STATE/not_activated while the center's mobile surface is off.",
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "enum": ["arcforges.android", "arcforges.android.local"]
+        },
+        "redirectUri": {
+          "type": "string",
+          "minLength": 13,
+          "maxLength": 512,
+          "pattern": "^(?:https://[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.[a-z][a-z0-9-]*(?::[1-9][0-9]{0,4})?/app/callback|[a-z][a-z0-9.+-]*\\.[a-z0-9.+-]+:/callback)$"
+        },
+        "codeChallenge": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 43,
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "codeChallengeMethod": {
+          "type": "string",
+          "const": "S256"
+        },
+        "state": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._~-]{16,128}$"
+        },
+        "installation": {
+          "$ref": "#/$defs/MobileInstallationClaim"
+        }
+      },
+      "required": [
+        "clientId",
+        "redirectUri",
+        "codeChallenge",
+        "codeChallengeMethod",
+        "state",
+        "installation"
+      ],
+      "additionalProperties": false,
+      "x-arcforges-max-bytes": 4096,
+      "x-arcforges-rules": ["mobileClientRedirect"]
+    },
+    "MobileBeginResponse": {
+      "title": "MobileBeginResponse",
+      "description": "The begun flow. flowId names it; expiresAt is when it expires (10 minutes after begin). authorizeUrl is the center's authorization page, <the center's public base URL>/mobile/authorize#flow=<flowId> (rule mobileAuthorizeFlow: it ends in #flow=<flowId>; at most 512 characters, https, or http only for a loopback self-hosted center, without user information, spaces or control characters). Mix-up defence (RFC 9700 section 4.4): the app derives this URL itself from its configured center's public base URL and flowId, refuses a reply whose authorizeUrl is not byte-equal to the derived value, and opens only the derived value, in a Custom Tab. There the account signs in with the browser's own cookie session and approves with a step-up of class identity.authorizeMobile whose target is the flow; denial needs no step-up.",
+      "type": "object",
+      "properties": {
+        "flowId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "x-arcforges-rules": ["nonzeroUuid"]
+        },
+        "authorizeUrl": {
+          "type": "string",
+          "minLength": 68,
+          "maxLength": 512,
+          "pattern": "^(?:https://[a-z0-9-]+(?:\\.[a-z0-9-]+)*|http://(?:localhost|127\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|\\[::1\\]))(?::[1-9][0-9]{0,4})?(?:/[A-Za-z0-9._~-]+)*/mobile/authorize#flow=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 30,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        }
+      },
+      "required": ["flowId", "authorizeUrl", "expiresAt"],
+      "additionalProperties": false,
+      "x-arcforges-max-bytes": 4096,
+      "x-arcforges-rules": ["mobileAuthorizeFlow"]
+    },
+    "MobileAuthorizeCallbackSuccess": {
+      "title": "MobileAuthorizeCallbackSuccess",
+      "description": "The URL fragment of the redirect after an approval, <redirectUri>#code=<code>&state=<state>&iss=<iss>, application/x-www-form-urlencoded in this order with iss percent-encoded; the center builds it from the stored redirect only. The code travels in the fragment, so a browser that loads an unverified link sends it to no server. code: the canonical unpadded base64url of 32 random bytes, one use, valid for at most 2 minutes (the center's policy) and never past the flow's expiry; a re-approval replaces it. state: the begin request's state, unchanged. iss: the issuing center's public base URL (RFC 9207). The app discards, without any network call, a callback whose state does not equal its pending attempt's state or whose iss does not equal its configured center's public base URL.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 43,
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+        },
+        "state": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._~-]{16,128}$"
+        },
+        "iss": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 453,
+          "pattern": "^(?:https://[a-z0-9-]+(?:\\.[a-z0-9-]+)*|http://(?:localhost|127\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|\\[::1\\]))(?::[1-9][0-9]{0,4})?(?:/[A-Za-z0-9._~-]+)*$"
+        }
+      },
+      "required": ["code", "state", "iss"],
+      "additionalProperties": false,
+      "x-arcforges-max-bytes": 16384,
+      "x-arcforges-wire": "form-urlencoded"
+    },
+    "MobileAuthorizeCallbackFailure": {
+      "title": "MobileAuthorizeCallbackFailure",
+      "description": "The URL fragment of the redirect after a denial, <redirectUri>#error=access_denied&state=<state>&iss=<iss>, application/x-www-form-urlencoded in this order with iss percent-encoded. The app checks state and iss as for a success and treats access_denied as cancelled in the browser.",
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "string",
+          "const": "access_denied"
+        },
+        "state": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._~-]{16,128}$"
+        },
+        "iss": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 453,
+          "pattern": "^(?:https://[a-z0-9-]+(?:\\.[a-z0-9-]+)*|http://(?:localhost|127\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|\\[::1\\]))(?::[1-9][0-9]{0,4})?(?:/[A-Za-z0-9._~-]+)*$"
+        }
+      },
+      "required": ["error", "state", "iss"],
+      "additionalProperties": false,
+      "x-arcforges-max-bytes": 16384,
+      "x-arcforges-wire": "form-urlencoded"
+    },
+    "MobileTokenRequest": {
+      "title": "MobileTokenRequest",
+      "description": "POST /session/v1/mobile/token: redeems the code anonymously, bound to the flow. flowId is the begin reply's; clientId, redirectUri and installationId equal the begin request's values and codeVerifier is the verifier of its codeChallenge (rule mobileClientRedirect checks the client's redirect form). The center compares the code first, in constant time; a code that does not match changes nothing. A wrong verifier or a binding mismatch with the matching code ends the flow. The app sends one token request per code and never sends it again after its body was sent: when the reply is lost it begins a new attempt, and the session that reply carried can be ended in the account's device list. The same code sent again is refused CONFLICT/code_reused and revokes the session family it delivered. AUTHENTICATION/credential_revoked means that the installation or its device was revoked: the app makes a new installation ID and begins again. Errors: STATE/not_found (unknown flow), STATE/expired (the flow or its code expired, or the approval lapsed), AUTHENTICATION/unauthenticated (a code that does not match, a flow that is not approved, a wrong verifier or a binding mismatch), CONFLICT/code_reused (the code was already redeemed, or its flow was ended by a wrong verifier or a binding mismatch), AUTHORIZATION/permission_denied (the installation belongs to another account or product), AUTHENTICATION/credential_revoked (the installation or its device was revoked), RESOURCE/rate_limited, RESOURCE/overloaded, and STATE/not_activated while the center's mobile surface is off.",
+      "type": "object",
+      "properties": {
+        "flowId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "x-arcforges-rules": ["nonzeroUuid"]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 43,
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+        },
+        "codeVerifier": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._~-]{43,128}$"
+        },
+        "clientId": {
+          "type": "string",
+          "enum": ["arcforges.android", "arcforges.android.local"]
+        },
+        "redirectUri": {
+          "type": "string",
+          "minLength": 13,
+          "maxLength": 512,
+          "pattern": "^(?:https://[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.[a-z][a-z0-9-]*(?::[1-9][0-9]{0,4})?/app/callback|[a-z][a-z0-9.+-]*\\.[a-z0-9.+-]+:/callback)$"
+        },
+        "installationId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "x-arcforges-rules": ["nonzeroUuid"]
+        }
+      },
+      "required": ["flowId", "code", "codeVerifier", "clientId", "redirectUri", "installationId"],
+      "additionalProperties": false,
+      "x-arcforges-max-bytes": 4096,
+      "x-arcforges-rules": ["mobileClientRedirect"]
+    },
+    "MobileTokenResponse": {
+      "title": "MobileTokenResponse",
+      "description": "An account session (scope account, purpose authenticate) of the claimed arcforges-mobile installation, refreshed through IdentityService.RefreshSession. The center does not end older sessions of the same installation: the app keeps its current credential until the new tokens arrive and then revokes its previous session itself.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "x-arcforges-rules": ["nonzeroUuid"]
+        },
+        "accessToken": {
+          "type": "string",
+          "minLength": 1,
+          "x-arcforges-max-utf8-bytes": 8192
+        },
+        "accessExpiresAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 30,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        },
+        "refreshToken": {
+          "type": "string",
+          "minLength": 1,
+          "x-arcforges-max-utf8-bytes": 8192
+        },
+        "refreshExpiresAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 30,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        },
+        "device": {
+          "$ref": "#/$defs/MobileTokenDevice"
+        },
+        "recoveryGeneration": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "x-arcforges-rules": ["uint64String"]
+        },
+        "scope": {
+          "type": "string",
+          "const": "account"
+        },
+        "purpose": {
+          "type": "string",
+          "const": "authenticate"
+        }
+      },
+      "required": [
+        "sessionId",
+        "accessToken",
+        "accessExpiresAt",
+        "refreshToken",
+        "refreshExpiresAt",
+        "device",
+        "recoveryGeneration",
+        "scope",
+        "purpose"
+      ],
+      "additionalProperties": false,
+      "x-arcforges-max-bytes": 65536
+    }
+  },
+  "x-arcforges-routes": [
+    {
+      "id": "mobile.begin",
+      "method": "POST",
+      "path": "/session/v1/mobile/begin",
+      "credential": "anonymous",
+      "origin": "none",
+      "csrf": "none",
+      "setCookie": "none",
+      "cache": "no-store",
+      "request": ["MobileBeginRequest"],
+      "response": ["MobileBeginResponse"]
+    },
+    {
+      "id": "mobile.token",
+      "method": "POST",
+      "path": "/session/v1/mobile/token",
+      "credential": "authorization-code",
+      "origin": "none",
+      "csrf": "none",
+      "setCookie": "none",
+      "cache": "no-store",
+      "request": ["MobileTokenRequest"],
+      "response": ["MobileTokenResponse"]
+    }
+  ],
+  "x-arcforges-schema-version": "1"
+}

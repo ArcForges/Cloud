@@ -142,6 +142,8 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
     return ["the operations surface needs the identity and pages surfaces"];
   if (names.includes("fleet") && !(names.includes("identity") && names.includes("pages")))
     return ["the fleet surface needs the identity and pages surfaces"];
+  if (names.includes("mobile") && !(names.includes("identity") && names.includes("pages")))
+    return ["the mobile surface needs the identity and pages surfaces"];
   if (names.includes("identity")) {
     const base = vars?.ARCFORGES_CENTER_PUBLIC_BASE_URL;
     const origin =
@@ -224,7 +226,20 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,fleet" }), []);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,fleet" }).length, 1);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "fleet" }).length, 1);
-  assert.deepEqual([...surfaces].sort(), ["fleet", "identity", "operations", "pages"]);
+  // AF-CTR-04 part M: the mobile native authorization needs both as well.
+  assert.deepEqual(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,mobile" }), []);
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,mobile" }).length, 1);
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "mobile" }).length, 1);
+  assert.deepEqual([...surfaces].sort(), ["fleet", "identity", "mobile", "operations", "pages"]);
+  // Production never enables the mobile surface and never carries an Android app identity or the debug scheme (M-15).
+  assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("mobile"));
+  assert.equal(wrangler.vars?.ARCFORGES_CENTER_ANDROID_APP, undefined);
+  for (const [name, environment] of environments)
+    assert.equal(
+      environment.vars?.ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT,
+      undefined,
+      `wrangler.json environment ${name}: the debug scheme is self-hosted only`,
+    );
   for (const [name, environment] of environments)
     assert.equal(
       String(environment.vars?.FLAGSHIP_SURFACES ?? "")
