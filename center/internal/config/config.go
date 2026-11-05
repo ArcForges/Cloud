@@ -34,12 +34,15 @@ const (
 
 // The environment variables of the center.
 const (
-	EnvMode               = "ARCFORGES_CENTER_MODE"
-	EnvPublicBaseURL      = "ARCFORGES_CENTER_PUBLIC_BASE_URL"
-	EnvHTTPAddress        = "ARCFORGES_CENTER_HTTP_ADDRESS"
-	EnvGRPCAddress        = "ARCFORGES_CENTER_GRPC_ADDRESS"
-	EnvAdminAddress       = "ARCFORGES_CENTER_ADMIN_ADDRESS"
-	EnvMaxConnections     = "ARCFORGES_CENTER_MAX_CONNECTIONS"
+	EnvMode           = "ARCFORGES_CENTER_MODE"
+	EnvPublicBaseURL  = "ARCFORGES_CENTER_PUBLIC_BASE_URL"
+	EnvHTTPAddress    = "ARCFORGES_CENTER_HTTP_ADDRESS"
+	EnvGRPCAddress    = "ARCFORGES_CENTER_GRPC_ADDRESS"
+	EnvAdminAddress   = "ARCFORGES_CENTER_ADMIN_ADDRESS"
+	EnvMaxConnections = "ARCFORGES_CENTER_MAX_CONNECTIONS"
+	// EnvMaxNodeConnections bounds the node channel connections of a center (AF-CTR-05 E1a, CTR5-HUB-12): an upgraded connection
+	// leaves the listener's connection limit and counts here instead.
+	EnvMaxNodeConnections = "ARCFORGES_CENTER_MAX_NODE_CONNECTIONS"
 	EnvLogLevel           = "ARCFORGES_CENTER_LOG_LEVEL"
 	EnvMetricsLogInterval = "ARCFORGES_CENTER_METRICS_LOG_INTERVAL"
 	EnvDatabaseURL        = "ARCFORGES_CENTER_DATABASE_URL"
@@ -56,6 +59,8 @@ const (
 	DefaultGRPCAddress        = ":8081"
 	DefaultMaxConnections     = 64
 	MaxMaxConnections         = 4096
+	DefaultMaxNodeConnections = 256
+	MaxMaxNodeConnections     = 4096
 	DefaultDatabaseMaxConns   = 4
 	MaxDatabaseMaxConns       = 32
 	DefaultMetricsLogInterval = time.Minute
@@ -89,7 +94,9 @@ type Config struct {
 	GRPCAddress    string
 	AdminAddress   string
 	MaxConnections int
-	LogLevel       slog.Level
+	// MaxNodeConnections bounds the node channel connections (upgraded WebSockets), counted apart from MaxConnections.
+	MaxNodeConnections int
+	LogLevel           slog.Level
 	// MetricsLogInterval is how often the metrics summary is logged; zero disables it.
 	MetricsLogInterval time.Duration
 	// HelloFromDatabase is true when ARCFORGES_NEON_HELLO is enabled: the Hello greeting is read from PostgreSQL, through the
@@ -109,6 +116,8 @@ type Config struct {
 	DisabledFeatures []string
 	// Mobile is the mobile surface's configuration (AF-CTR-04 part M): the published Android app identity and the debug app's scheme.
 	Mobile Mobile
+	// CommandKeys are the command-signing keys loaded from ARCFORGES_CENTER_KEY_* (AF-CTR-05 E1a, CTR5-KEY-01; ApplyCommandKeys).
+	CommandKeys []CommandKey
 }
 
 // GatedFeatureKeys are the six gated feature keys of AD-0021 section 13a. Package feature owns the keys (feature.Gated); the list is
@@ -175,6 +184,9 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if config.MaxConnections, err = bounded(get(EnvMaxConnections), DefaultMaxConnections, 1, MaxMaxConnections); err != nil {
 		return Config{}, invalid("%s: %v", EnvMaxConnections, err)
+	}
+	if config.MaxNodeConnections, err = bounded(get(EnvMaxNodeConnections), DefaultMaxNodeConnections, 1, MaxMaxNodeConnections); err != nil {
+		return Config{}, invalid("%s: %v", EnvMaxNodeConnections, err)
 	}
 	if config.LogLevel, err = logLevel(get(EnvLogLevel)); err != nil {
 		return Config{}, invalid("%s: %v", EnvLogLevel, err)

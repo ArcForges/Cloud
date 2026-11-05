@@ -273,6 +273,16 @@ func serve(lookup func(string) (string, bool), stderr io.Writer) int {
 		logger.Error("the center refused to start", "error", err.Error())
 		return exitFailure
 	}
+	// The command keys (AF-CTR-05 E1a, CTR5-KEY-01): read once from the process environment and unset at once, whatever follows, so
+	// no later code, child or dump of the environment sees them; an error names the variable, never its value.
+	keys, err := commandKeys()
+	if err == nil {
+		err = cfg.ApplyCommandKeys(keys)
+	}
+	if err != nil {
+		logger.Error("the center refused to start", "error", err.Error())
+		return exitFailure
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err = server.Run(ctx, cfg, logger); err != nil {
@@ -280,6 +290,16 @@ func serve(lookup func(string) (string, bool), stderr io.Writer) int {
 		return exitFailure
 	}
 	return exitOK
+}
+
+// commandKeys reads the command keys of the process environment and unsets every variable it read, whatever the outcome
+// (CTR5-KEY-01: read once, never left behind for a later reader).
+func commandKeys() ([]config.CommandKey, error) {
+	keys, names, err := config.LoadCommandKeys(os.Environ())
+	for _, name := range names {
+		_ = os.Unsetenv(name)
+	}
+	return keys, err
 }
 
 // revision names this build in the migration record.

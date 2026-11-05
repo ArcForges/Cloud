@@ -889,6 +889,7 @@ WHERE family_id = (SELECT family_id FROM identity.session WHERE session_id = $1)
 			return err
 		}
 		revoked = tag.RowsAffected()
+		session.Announce(ctx, session.Revocation{Sessions: []platform.ID{*row.sessionID}})
 	}
 	return s.auditAuthorization(ctx, tx, request, Anonymous, "fleet.device_authorization.code_reused", "code_reused", row.AuthorizationID,
 		map[string]any{"sessions": revoked}, now)

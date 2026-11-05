@@ -225,9 +225,9 @@ func TestTheSurfaceRepliesAreTheCentersRefusals(t *testing.T) {
 			t.Fatal("the template marker does not round trip")
 		}
 	}
-	if !strings.Contains(generated, "export const surfaceNames: readonly Surface[] = [\n  \"identity\",\n  \"pages\",\n  \"operations\",\n  \"fleet\",\n  \"mobile\",\n];") ||
+	if !strings.Contains(generated, "export const surfaceNames: readonly Surface[] = [\n  \"identity\",\n  \"pages\",\n  \"operations\",\n  \"fleet\",\n  \"mobile\",\n  \"relay\",\n];") ||
 		!strings.Contains(generated, `export const clientIpHeader = "x-arcforges-client-ip";`) ||
-		!strings.Contains(generated, `export type Surface = "identity" | "pages" | "operations" | "fleet" | "mobile";`) {
+		!strings.Contains(generated, `export type Surface = "identity" | "pages" | "operations" | "fleet" | "mobile" | "relay";`) {
 		t.Fatal("the surface constants changed")
 	}
 }

@@ -54,7 +54,8 @@ func TestFleetRowsAreTheServedMethods(t *testing.T) {
 	}
 	rows := 0
 	for _, operation := range access.Operations() {
-		if !strings.HasPrefix(operation.ID, "fleet.") {
+		if !strings.HasPrefix(operation.ID, "fleet.") || operation.Path == routes.NodeChannelPath {
+			// The node channel's row is the relay surface's upgrade route (AF-CTR-05 E1a), not a NodeEnrollmentService method.
 			continue
 		}
 		rows++

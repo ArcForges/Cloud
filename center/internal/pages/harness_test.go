@@ -28,6 +28,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/dbtest"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
@@ -180,6 +181,8 @@ type settings struct {
 	extra map[string]string
 	// controls are further resource controls of the composition (server.Options.Controls).
 	controls []access.Control
+	// relay composes and starts the node channel (AF-CTR-05 E1a) with a throwaway command key; the surfaces must name relay.
+	relay bool
 }
 
 const writePolicy = `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000}`
@@ -242,12 +245,31 @@ func newHarness(t *testing.T, options settings) *harness {
 	if options.selfHostedOperations {
 		cfg.Identity.Surfaces = append(cfg.Identity.Surfaces, config.SurfaceOperations)
 	}
+	if options.relay {
+		key, _ := dbtest.RegisterCommandKey(t, migration, "ARCFORGES_CENTER_KEY_TEST")
+		// The key is valid from the real now; the harness clock started a moment earlier.
+		h.clock.Advance(time.Second)
+		if err := cfg.ApplyCommandKeys([]config.CommandKey{key}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: h.mail, Clock: h.clock.Now, Background: func(work func()) { work() },
 		Controls: options.controls})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(center.Close)
+	if options.relay {
+		if err := center.CheckCommandKeys(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		center.Hub.Start(context.Background())
+		t.Cleanup(func() {
+			stop, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			center.Hub.Stop(stop)
+		})
+	}
 	t.Cleanup(func() {
 		if t.Failed() {
 			for _, line := range strings.Split(h.logs.String(), "\n") {

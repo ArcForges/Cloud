@@ -73,8 +73,8 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.fleet.v1.NodeEnrollmentService/ReportNodeInfo session 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/SignOutNode session 4096",
 	}
-	if len(table.Surfaces) != 5 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
-		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || len(table.SurfaceRows) != len(served) {
+	if len(table.Surfaces) != 6 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
+		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || table.Surfaces[5] != SurfaceRelay || len(table.SurfaceRows) != len(served) {
 		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))
 	}
 	for index, row := range table.SurfaceRows {

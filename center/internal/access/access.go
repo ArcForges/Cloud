@@ -59,6 +59,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/feature"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
@@ -224,6 +225,12 @@ func Operations() []Operation {
 			Receipt: true},
 		{Path: fleetv1connect.NodeEnrollmentServiceSignOutNodeProcedure, ID: "fleet.signOutNode", Risk: "R2", Session: true, Scopes: []string{"node"},
 			Restricted: true, Receipt: true, Audit: AuditInTransaction},
+		// The node channel (AF-CTR-05 E1a; Plan CTR5-SUR-02, CTR5-HUB-02): the upgrade route GET /fleet/v1/node, the first gated row. A
+		// node credential only; the per-account and per-node upgrade-rate buckets stand in front of it (quota.ChannelUpgrades, Q21: no
+		// connected-node cap), access.authorized is appended before the gate, and the gate asks center.nodes (the node connection group).
+		// It is not served as a Connect method: the relay surface's upgrade handler authorizes it with this row before it upgrades.
+		{Path: routes.NodeChannelPath, ID: routes.NodeChannelID, Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes,
+			Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
 	}
 }
 

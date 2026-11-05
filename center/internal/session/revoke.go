@@ -60,6 +60,13 @@ WHERE revoked_at IS NULL AND ($1::uuid IS NULL OR user_id = $1) RETURNING scope`
 	if err != nil {
 		return nil, err
 	}
+	// The node channels of the revoked sessions close once this transaction commits, where a hub runs in this process (AF-CTR-05 E1a);
+	// the operator's command runs in a process of its own, so there the hub's periodic re-check ends them.
+	if userID == nil {
+		Announce(ctx, Revocation{All: true})
+	} else {
+		Announce(ctx, Revocation{Users: []platform.ID{*userID}})
+	}
 	defer rows.Close()
 	counts := map[string]int64{}
 	for rows.Next() {

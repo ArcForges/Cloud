@@ -13,7 +13,7 @@ connection, which AF-CTR-05 serves.
 
 ## Surface
 
-The methods and the six pages belong to the switchable surface `fleet`. It needs `identity` and `pages` (a list without them refuses to
+The methods and the six pages belong to the switchable surface `fleet`; the node channel is the surface `relay` ([node channel](#node-channel)). It needs `identity` and `pages` (a list without them refuses to
 start). Production `FLAGSHIP_SURFACES` stays `""` (AF-PROD-01 activates it); the acceptance environment (`proof`) carries
 `identity,pages,operations,fleet,mobile` (`mobile` since AF-CTR-04 part M; pinned by `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts`); a
 self-hosted center enables it by default together with `identity` and `pages`
@@ -513,6 +513,117 @@ headers of the files it writes; a file whose capture is unchanged keeps its byte
 stay as they were when the seven node-credential cases of commit `2686a73` were added; `npx prettier --write` formats the files, and
 the comparison reads them as JSON). Parts N1 and N2 will copy the directory
 verbatim for the ArcForges node's FakeCenter conformance test; nothing checks it against a node yet.
+
+## Node channel
+
+AF-CTR-05 part E1a (ArcForges-Design AD-0021 sections 9 to 11, 11-security-privacy section 3 "Channel proof of possession"; Plan
+CTR5-HUB-01 to 12 as amended by PB-4, PB-5, D0-B2, PN-1 to PN-4 and Q21 to Q23). A signed-in node holds one outbound WebSocket to the
+center, `GET <center>/fleet/v1/node` with the subprotocol `arcforges.relay.v1`, binary messages, one relay.v1 `RelayFrame` per message
+with `frame_version` 1 and `frame_seq` per connection and direction (`center/internal/hub`). It is the switchable surface `relay`
+(it needs `identity` and `fleet`; in the self-hosted default; off in production until AF-PROD-01, and on proof only from AF-CTR-05 E3).
+E1a carries no calls: signing with the command key, `ChannelCall`/`ChannelResult` and the in-flight bounds are E1b's, the relay nonces
+and the routed API E2's.
+
+**Command keys** (CTR5-KEY-01, CTR5-SIG-02, moved into E1a). A center that serves `relay` holds at least one valid command-signing key
+whose private half it loaded, or it does not start. The private half of a key lives only in the environment variable its
+`fleet.signing_key` row names (`secret_binding`, registered with `admin register-signing-key`): every `ARCFORGES_CENTER_KEY_<NAME>`
+(`<NAME>` 1 to 40 of `A-Z0-9_`, at most eight) holds the standard base64 of a PKCS#8 ECDSA P-256 key, is read once at start and
+unset from the process environment at once, and is never logged or printed (`config.CommandKey` prints its binding only). At the start
+(`Center.CheckCommandKeys`) a loaded key whose valid row registers another public half refuses the start, naming the binding and the
+kid; a center whose loaded keys match no valid row refuses too. A list that names `relay` without a key refuses to start; the self-hosted
+default leaves `relay` out when no key is configured and logs why. `ChannelAccepted.signing_kids` lists the held keys valid at each
+acceptance (at least one, the contract's bound). The hosted Worker passes no key variable yet: proof gains its key with the surface in
+AF-CTR-05 E3 (Q11), production with AF-PROD-01 (H-16).
+
+**Admission, before the upgrade** (CTR5-HUB-02). The hosted Worker passes only the route's exact upgrade through
+([cloud ingress](cloud-ingress.md#upgrade-route-af-ctr-05-part-e1a)); the center then checks, in this order, each refusal an HTTP answer
+whose closed reason is also in the `ArcForges-Refusal` header (`<CATEGORY>/<code>`, with `Retry-After` for a retry after time; PN-3:
+.NET's `ClientWebSocket` sees only the status and headers of a reply that is not 101) and whose body is the refusal as a JSON ArcError
+(`{"error": ...}`, the pages' body):
+
+| Step                                                                                                                                                                                                                                                                                                                                                    | Refusal                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| GET with `Upgrade: websocket`, `Connection: Upgrade`, version 13, one key, exactly the subprotocol, no query, no body                                                                                                                                                                                                                                   | 405 or 400 `VALIDATION/invalid_argument`                                                                               |
+| The hub lease is this process's and it is not stopping (PB-5)                                                                                                                                                                                                                                                                                           | 503 `RESOURCE/overloaded`                                                                                              |
+| A native bearer (`session.Verifier`); a cookie is never read on this route (PN-4, SEC-22: a cookie-only upgrade is unauthenticated)                                                                                                                                                                                                                     | 401 `AUTHENTICATION/unauthenticated`, `token_expired` (the node refreshes) or `credential_revoked` (it signs in again) |
+| The row `fleet.nodeChannel` through `access.Authorize`: the node scope only (an account session is `AUTHORIZATION/permission_denied`, audited `access.refused`), the upgrade-rate buckets `channel_upgrades_per_account` and `channel_upgrades_per_node` (Q21: no connected-node cap), `access.authorized`, the gate of `center.nodes` (`access.gated`) | 403, 429 `RESOURCE/rate_limited`, 403 `ENTITLEMENT/feature_not_entitled`                                               |
+| A live node row for the credential's installation in its account, with the installation's registered key                                                                                                                                                                                                                                                | 401 `AUTHENTICATION/unauthenticated`                                                                                   |
+| A free node connection slot (`ARCFORGES_CENTER_MAX_NODE_CONNECTIONS`, 256)                                                                                                                                                                                                                                                                              | 503 `RESOURCE/overloaded`                                                                                              |
+
+The upgrade itself accepts only `arcforges.relay.v1`, with compression off and the default origin check (never widened); the server's
+read and write deadlines are cleared before the hijack, and the connection moves from the listener's request slots
+(`ARCFORGES_CENTER_MAX_CONNECTIONS`) to a node slot, so a channel neither starves the requests nor is cut by the server's 20 s
+timeouts (PN-1; Go's Hijack clears the deadlines too).
+
+**The hello** (PB-4, D0-B2). The center's first frame is `ChannelChallenge`: 32 random bytes of nonce, the connection ID and the hello
+deadline, 10 s after the upgrade. The node answers `NodeHello` with `node_id`, `installation_id` and `hello_signature`, an ES256
+signature (P1363, low-S) by its node key over `"ArcForges relay-hello v1\n"` (25 bytes), the nonce (32), the connection ID (16), the
+SHA-256 of the canonical center URL (32; the center uses its own public base URL), the node ID (16) and the installation ID (16). The hub
+first refuses a hello whose IDs are absent, not 16 bytes or zero, or whose signature is not 64 bytes, before it builds the message (C2
+review N-4); then it verifies the signature against the key registered for the bearer credential's installation, never against a key
+the hello names (`hello_signature`); then it checks that the hello names the credential's node and installation (`hello_mismatch`).
+Each failure closes 4403 and is audited `fleet.channel.violation`. The nonce is spent by the first hello and is void at the deadline
+(4408 `hello_deadline`) or when the connection closes; a challenge belongs to one connection, so a hello proved for another connection
+fails. Only then is the connection the node's: an older connection of the node is closed 4409 (`replaced`) after the newer one is
+registered, the acceptance is audited `fleet.channel.accepted` (naming the connection it replaced), presence is written and the hub
+sends `ChannelAccepted` with the connection ID, the limits (`max_frame_bytes` 1 MiB, `max_in_flight_calls` 8, `heartbeat_interval_ms`
+25000, `heartbeat_deadline_ms` 60000, `max_relay_nonces` 8) and the kids of the valid command keys (`fleet.signing_key`, at most eight;
+the center signs with them from E1b). A token without the node key therefore never displaces a live channel
+(`TestATokenWithoutTheNodeKeyCannotReplaceTheChannel`, `TestAHelloSignedByAnotherInstallationsKeyIsRefused`). The binding is to the
+WebSocket connection, not to TLS, which ends at the Worker; a same-user process that can use the node key still proves possession (T-25).
+
+**While open.**
+
+| Rule                                   | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Heartbeats (CTR5-HUB-06)               | the center sends `ChannelHeartbeat` every 25 s (`channelHeartbeat`), the node answers with its seq; 60 s without any frame (`channelHeartbeatDeadline`) closes 4408: a half-open connection is found by this deadline, never by TCP                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Presence                               | `fleet.node.online_since`, `last_heartbeat_at` and `connection_id` (migration 0008, [PostgreSQL store](postgres-store.md#node-channel-af-ctr-05-part-e1a)) written at accept, at most once a minute from heartbeats and at close, each write fenced by the hub lease; a replaced connection's close leaves its successor's record. The states (`hub.Presence`, served by E2): ONLINE while a connection is open in this process, OFFLINE after one was, NEVER_CONNECTED when `online_since` is unset, REVOKED without a live enrollment                                                                                                                               |
+| `TokenRefresh` (CTR5-HUB-07)           | the node refreshes over gRPC-Web as before and sends the new access token on the channel; it must be a valid token of the same session and installation, whose live node row is this connection's node (another installation's or node's token closes 4403 `installation_mismatch` or `node_mismatch`, so the connection's installation key never changes; another session's 4401 `token_mismatch`); the connection is rebound to its expiry. A connection whose bound token expired without one for 120 s (`channelTokenGrace`) closes 4401 `token_expired`                                                                                                          |
+| Credential re-check (CTR5-HUB-07, -08) | every 60 s (`channelSessionRecheck`) and at every `TokenRefresh`: a revoked session, device or installation closes 4401 `revoked`, an account that may no longer sign in 4403 `account_state`; a store that does not answer keeps the connection                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Lapse (CTR5-HUB-09, Q23)               | the gate is asked for `center.nodes` every 10 minutes (`channelLapseRecheck`) and at every `TokenRefresh`: unavailable closes 4403 `feature_not_entitled`, audited `access.gated` once for the close; a gate that cannot decide keeps the connection until the next check (every routed call is gated itself, so an open channel grants nothing alone)                                                                                                                                                                                                                                                                                                                |
+| Frames (CTR5-HUB-10)                   | a message over 1 MiB closes 4413, more than 100 frames a second (`channelInboundFramesPerSecond`) 4429, a text message, an unreadable frame, a frame before the hello or one a node may not send 4403; a `RelayNonceRequest` is left unanswered until E2. The send queue holds 64 frames and 4 MiB (`channelSendQueueFrames`, `channelSendQueueBytes`); a write that does not finish in 10 s closes 4408                                                                                                                                                                                                                                                              |
+| Revocation (CTR5-HUB-08)               | the device revocation cascade's participant `fleet.channel` (after `fleet.node`) closes the device's channels 4401 once the revocation commits (`store.AfterCommit`; a revocation that rolls back closes nothing); the other session revocations of this process (a node's sign-out, a re-enrollment's supersession, a refresh token's reuse, a reused enrollment code, the operator's revocation run in this process) announce their sessions after commit (`session.Announce`), and the hub re-checks each named connection's credential before it closes it. A revocation committed by another process (`admin revoke-sessions`) is found by the periodic re-check |
+| Graceful stop (CTR5-HUB-11)            | on `SIGTERM` the hub closes every channel 4500 before the listeners stop, with a jittered reconnect hint of 1 to 30 s in `RelayClose.reconnect_after_ms` (meaningful with 4500 only, 0 to 300000), then releases the lease                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+Every close sends `RelayClose` with its code and closed reason before the WebSocket close with the same code (the close handshake waits
+at most a second), and is audited `fleet.channel.closed`. The codes: 4401 credential expired or revoked, 4403 refused, 4408 hello or
+heartbeat deadline (or a write that timed out), 4409 replaced, 4413 frame too large, 4429 rate limited, 4500 center going away
+(shutdown, or this process lost the hub lease), 4503 reserved (kill switch). A node treats an abnormal close (1006, 1011) like 4500.
+
+**One hub per database** (CTR5-HUB-05, PB-5, Q22). The connections live in one process's memory, so the hub holds the fenced singleton
+lease `fleet.hub_lease`: taken when free, expired or released, renewed every 10 s for 30 s, released at a graceful stop, and named by
+every hub write. A process that does not hold it serves no channel (the upgrade is 503 `RESOURCE/overloaded`, and E2's routed calls
+answer `STATE/node_offline`); a process that loses it closes its channels 4500 and keeps trying to take it. A killed center's lease is
+taken over after its 30 s; the new holder clears the connections the previous one left recorded.
+
+**Audit, metrics, logs.** Audit: `fleet.channel.accepted`, `fleet.channel.closed` (code and reason), `fleet.channel.violation`, as the
+node (`node:<installation>`) on its enrollment, and `access.authorized`, `access.refused`, `access.gated` of the row. Metrics:
+`arcforges_center_channel_events_total{event,outcome}` (closed pairs, `observe.ChannelOutcomes`: upgrades, refusals by stage, hellos,
+closes by code, missed heartbeats, violations, token rebinds, lapse checks, lease changes) and the gauge
+`arcforges_center_channel_connected_nodes`. No log line, audit row or metric label carries a token, a frame's content or any text the
+node supplied (its version, a close reason it sent).
+
+**Tests** (`center/internal/hub`, `center/internal/server`, `tests/worker/channel-upgrade.test.ts`; EVIDENCE: REAL PostgreSQL, the
+composed center and the real WebSocket server; MOCKED: the node, the `nodetest` channel client with a software key, never an end-to-end
+claim): `TestUpgradeAdmission`, `TestUpgradeRefusesUnknownRevokedExpiredAndAccountTokens`, `TestTheChannelIsGatedInBothModes`,
+`TestTheChannelsUpgradeRateIsBoundedPerNodeAndPerAccount`, `TestAHubWithoutTheLeaseAdmitsNoChannel`, `TestHelloMustNameTheEnrolledNode`,
+`TestAHelloSignedByAnotherInstallationsKeyIsRefused`, `TestAMalformedHelloIsRefusedBeforeAnySigningInput`,
+`TestATokenWithoutTheNodeKeyCannotReplaceTheChannel`, `TestTheHelloNonceIsOneUseAndVoidAtTheDeadline`,
+`TestANewConnectionReplacesTheOldAndBothAreAudited`, `TestHeartbeatDeadlineMarksTheNodeOffline`, `TestPresenceWritesAreBounded`,
+`TestTokenRefreshRebindsAndExpiryCloses`, `TestDeviceRevocationClosesTheChannelAndRefusesNewCalls`,
+`TestALapsedAccountsChannelClosesAtTheNextRefresh`, `TestAnOversizedFrameClosesTheChannel`, `TestGracefulShutdownClosesWith4500`,
+`TestASecondHubOnTheSameDatabaseRefusesToStart`, `TestConnectReplaceRevokeAndCloseConcurrently` (`-race`), `TestTheExchangeOfAChannel`,
+`TestTheServersDeadlinesNeverCutAnUpgradedChannel` (24 s on the server's real timeouts), `TestAnUpgradedChannelLeavesTheRequestBound`,
+`TestStartRefusesAMismatchedOrMissingCommandKey`, `TestTheCommandKeyNeverAppearsInLogsOrHealth` and, through the account's devices page
+and its real revoke path, `TestRevokingANodesDeviceOnTheDevicesPageClosesItsChannel`.
+
+**Exchange captures for the node** (E1-26). `TestChannelExchangeCapture` captures the channel's exchanges as the messages on the wire
+and normalized, in the format of the enrollment captures (schema version 2): `center/internal/hub/testdata/exchanges/NodeChannel-*.json`,
+one file per case (an accepted channel closed by the node; a hello refused for a mismatch, a signature, a malformed shape and the
+deadline; a replaced, revoked, expired, lapsed and shut-down channel; four refusals before the upgrade). `request.frames` are the node's
+messages and `reply.frames` the center's, each a RelayFrame in hex; `reply.trailers` is the WebSocket close; a refusal has its HTTP
+status, its reason headers and its JSON body. Part N1 copies the directory for the FakeCenter's conformance test; a fresh capture must
+equal it (`ARCFORGES_UPDATE_EXCHANGES=1` rewrites it).
 
 ## Test vectors for the node
 

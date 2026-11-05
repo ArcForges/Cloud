@@ -608,6 +608,13 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 			t.Error(err)
 		}
 		if strings.HasPrefix(operation.ID, "fleet.") {
+			// The node channel is the one gated fleet row (AF-CTR-05 E1a); every enrollment row stays essential.
+			if operation.ID == "fleet.nodeChannel" {
+				if operation.Feature != feature.CenterNodes || operation.Group != feature.GroupNodeConnection || operation.Audit != AuditBeforeCall {
+					t.Errorf("%s: %+v", operation.ID, operation)
+				}
+				continue
+			}
 			if operation.Feature != "" || operation.Object != "" || operation.Audit == AuditBeforeCall {
 				t.Errorf("%s: a fleet row carries a gate rule", operation.ID)
 			}

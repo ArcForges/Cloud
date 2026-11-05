@@ -160,7 +160,24 @@ type Routes struct {
 	Registry *Registry
 	plain    map[string]bool
 	prefixes []string
+	// upgrades are the exact paths of the WebSocket upgrade routes (AF-CTR-05 E1a, the node channel): the pipeline admits only a GET
+	// with an upgrade's headers to them and hands it to the next handler; nothing else reaches it.
+	upgrades map[string]bool
 }
+
+// WithUpgrades adds the exact paths of the upgrade routes.
+func (r *Routes) WithUpgrades(paths ...string) *Routes {
+	if r.upgrades == nil {
+		r.upgrades = map[string]bool{}
+	}
+	for _, path := range paths {
+		r.upgrades[path] = true
+	}
+	return r
+}
+
+// IsUpgrade reports an exact upgrade route.
+func (r *Routes) IsUpgrade(path string) bool { return r.upgrades[path] }
 
 // NewRoutes composes the public routes.
 func NewRoutes(registry *Registry, plainPaths, plainPrefixes []string) *Routes {

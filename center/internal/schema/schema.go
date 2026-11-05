@@ -95,6 +95,9 @@ var RuntimeGrants = []Grant{
 	// AF-CTR-05 part E0 (0007): the deploy-level fact of the current definitions version (store-1), one row the starting revision
 	// writes once per version (its trigger refuses an update that keeps the version, and any deletion).
 	{"entitlement", "definitions_current", []Privilege{Select, Insert, Update}},
+	// AF-CTR-05 part E1a (0008): the node channel hub's fenced lease, one row the hub takes, renews and releases (its trigger refuses a
+	// change of holder without a higher fence, and any deletion). The presence columns of 0008 are fleet.node's, granted above.
+	{"fleet", "hub_lease", []Privilege{Select, Insert, Update}},
 }
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted

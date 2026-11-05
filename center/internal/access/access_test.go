@@ -24,7 +24,12 @@ func identityPolicies(t *testing.T) []ingress.Policy {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return append(module.Policies, fleet.Policies...)
+	// The relay surface's upgrade route (AF-CTR-05 E1a) is authorized with its row by the upgrade handler: it counts as served.
+	var upgrades []ingress.Policy
+	for _, row := range routes.RelayUpgradeRoutes() {
+		upgrades = append(upgrades, ingress.Policy{FullName: row.Path, Kind: ingress.Unary, Authentication: ingress.Session, Surface: row.Surface})
+	}
+	return append(append(module.Policies, fleet.Policies...), upgrades...)
 }
 
 func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
@@ -103,6 +108,8 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.pollDeviceAuthorization":  "R1 anonymous",
 		"fleet.lookupDeviceCode":         "R2 upgrade none - no-receipt active",
 		"fleet.approveDeviceCode":        "R3 upgrade evidence-on-approve user_code receipt active",
+		// AF-CTR-05 E1a (CTR5-SUR-02): the node channel, the first gated row (TestTheNodeChannelRowIsGatedAndControlled).
+		"fleet.nodeChannel": "R2 allowed none - no-receipt active node",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
 	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own", EvidenceOnApprove: "evidence-on-approve"}
@@ -187,7 +194,8 @@ func TestTheMobileLimitedRules(t *testing.T) {
 func TestFleetRowsCarryNoFeature(t *testing.T) {
 	rows := 0
 	for _, operation := range Operations() {
-		if !strings.HasPrefix(operation.ID, "fleet.") {
+		if !strings.HasPrefix(operation.ID, "fleet.") || operation.ID == "fleet.nodeChannel" {
+			// The node channel is the first gated row (AF-CTR-05 E1a): TestTheNodeChannelRowIsGatedAndControlled pins it.
 			continue
 		}
 		rows++

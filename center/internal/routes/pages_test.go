@@ -197,7 +197,7 @@ func TestTheOperationsRoutesAreTheirOwnSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet,mobile" {
+	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet,mobile,relay" {
 		t.Fatalf("the surfaces %v", surfaces)
 	}
 	crossed := append([]Module(nil), modules...)

@@ -189,6 +189,25 @@ precedence over the `arcforges-web` Custom Domain for exactly those two paths (a
 protections on the host must not challenge Google's Digital Asset Links fetcher (an owner zone setting; H3's optional DAL check
 detects it).
 
+## Upgrade route (AF-CTR-05 part E1a)
+
+The relay surface adds one WebSocket upgrade route, the node channel `GET /api/fleet/v1/node` ([center fleet](center-fleet.md#node-channel)),
+with a handler of its own (`worker/ingress/upgrade.ts`) and a generated table (`upgradeRoutes`, from `center/internal/routes/relay.go`).
+While `FLAGSHIP_SURFACES` does not name `relay`, the route is the Worker's 404 (with `ArcForges-Refusal: STATE/not_activated`) before
+anything is read, and the Container never wakes (`tests/worker/channel-upgrade.test.ts`).
+
+| Row        | Rule                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Request    | GET only (405); no query (400); no body (400); `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Version: 13`, a well-formed `Sec-WebSocket-Key` (400); exactly the route's subprotocol `arcforges.relay.v1` (400); an `Authorization` of the native bearer's shape (401). Each refusal names its reason in `ArcForges-Refusal` (Plan PN-3)                   |
+| Edge limit | the surfaces' `IDENTITY_RATE_LIMITER` by `edgeClientKey`; over it, or without the binding, 429 with `Retry-After` and `ArcForges-Refusal: RESOURCE/rate_limited`                                                                                                                                                                                                        |
+| Forwarded  | only the upgrade headers, the bearer, `x-arcforges-client-ip` and the country and network from `request.cf`, and a `traceparent` the Worker builds; never a `Cookie` (PN-4: the channel is a node credential's), an `Origin` or any other client header; `redirect: "manual"`; the one Container instance `hello`                                                       |
+| Reply      | the Container's 101 is returned unchanged, the Durable Object's own `Response` with its `webSocket` (PN-2); any other reply is kept only as the center's refusal before the upgrade (status 400, 401, 403, 404, 405, 429 or 503, `application/json`, at most 16 KiB, with only `ArcForges-Refusal` and `Retry-After` of its headers), anything else is the Worker's 503 |
+
+The upgrade's own budget is 15 s, until the 101; the channel then lives as long as the connection, and the Durable Object, which
+proxies the socket, stays awake while it is open (the cost note in [center](center.md#hosted-deployment)). A channel's messages are at
+most 1 MiB (the center closes a larger one 4413), well under the platform's 32 MiB WebSocket message limit. Production: no `relay` in
+`FLAGSHIP_SURFACES` (pinned by `tests/worker/center-config.test.ts`); proof gains it only in AF-CTR-05 E3.
+
 ## The frame guard
 
 `guardResponse` wraps a Container reply body and follows frame boundaries without copying. It enforces the frame bound,

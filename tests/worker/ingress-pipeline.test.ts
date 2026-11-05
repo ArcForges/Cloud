@@ -433,6 +433,8 @@ test("every request the Worker makes to the Container says redirect manual (H-1)
       ["worker/ingress/native.ts", 1],
       ["worker/ingress/pages.ts", 1],
       ["worker/ingress/pipeline.ts", 1],
+      // AF-CTR-05 E1a: the node channel's upgrade handler.
+      ["worker/ingress/upgrade.ts", 1],
     ],
   );
   // The one stub that is not a request is stopped, never fetched.

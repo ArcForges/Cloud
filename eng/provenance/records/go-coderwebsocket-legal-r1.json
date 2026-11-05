@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-coderwebsocket-legal-r1",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/coder/websocket",
+  "sourceCommit": "9c8faadccd1b679e811a79ce506f8a10237251ad",
+  "sourcePaths": [
+    "LICENSE.txt"
+  ],
+  "licence": {
+    "spdx": "ISC",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE.txt",
+        "sha256": "cc0975a5f6305145bdd7b41ce9479632fdac3870e6ac4281f28017f18c767c4e",
+        "finding": "Complete licence from the exact Go module source; module integrity is pinned by go.sum."
+      }
+    ],
+    "scope": "github.com/coder/websocket v1.8.15: ISC. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "github.com/coder/websocket v1.8.15: ISC. Complete upstream copyright, permission and disclaimer terms are retained."
+  ],
+  "targets": [
+    {
+      "path": "third-party/CoderWebsocket.LICENSE.txt",
+      "sha256": "cc0975a5f6305145bdd7b41ce9479632fdac3870e6ac4281f28017f18c767c4e",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "github.com/coder/websocket v1.8.15: ISC. Complete upstream copyright, permission and disclaimer terms are retained.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/CoderWebsocket.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "github.com/coder/websocket v1.8.15: ISC. Complete upstream copyright, permission and disclaimer terms are retained."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-05 E1a delegated author); PR review is recorded separately",
+    "reviewedOn": "2026-11-05",
+    "decision": "approved",
+    "rationale": "github.com/coder/websocket v1.8.15: ISC. Complete upstream copyright, permission and disclaimer terms are retained. Linked into arcforges-center through github.com/coder/websocket (AF-CTR-05 E1a, the node channel's WebSocket server; Plan Q16 with PN-4: the read limit set by the center, compression disabled, the subprotocol required, the origin check not widened). No dependency of its own.",
+    "baselineCommit": "2ea0891fcba8a1296fcb55c732b3b5abe6cd4276",
+    "reconciliation": false
+  },
+  "supersedes": null
+}
