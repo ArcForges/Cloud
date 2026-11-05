@@ -7,7 +7,8 @@ which code), the entry point that runs it, the stage where it runs and the evide
 - **hook**: the `pre-commit` hook (`.githooks/pre-commit`, installed by `python eng/verify.py install`);
 - **native host**: the verification legs after the push, `win` on native Windows and `linux` on native Linux
   (`eng/verify_steps.py`, AD-0020), whose statuses `arcforges/windows` and `arcforges/linux` `main` requires;
-- **hosted CI**: `.github/workflows/ci.yml` for external PRs (Dependabot included), manual dispatch and the weekly schedule;
+- **hosted CI**: `.github/workflows/ci.yml` for external PRs (Dependabot included), manual dispatch and the weekly schedule (the
+  proof deployment dispatch validates nothing again: it is gated on the host legs, [deployment](deployment.md#the-proof-deployment-gate));
 - **release**: the `candidate` the Linux leg and the main push build, and the guarded `deploy` that promotes it unchanged.
 
 `python eng/center.py check` is the single entry point of the Go controls on both legs and in hosted CI; on success it writes

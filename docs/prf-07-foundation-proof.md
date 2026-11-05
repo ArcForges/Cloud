@@ -181,8 +181,12 @@ Cloudflare. Nothing is deployed by a push or a pull request.
    - `provision` adds `npm run provision:proof`: idempotent creation, after a lookup by exact name, of the D1
      database `arcforges-proof-business`, the R2 bucket `arcforges-proof-objects` and the queues
      `arcforges-proof-wake` and `arcforges-proof-wake-dlq`. Nothing else is created, changed or deleted.
-   - `deploy` runs both and then, in the job `Deploy Cloudflare proof environment`, consumes the sealed candidate of the
-     same run: pushes the sealed image, applies the proof migration to the proof database, deploys
+   - `deploy` runs no hosted validation and builds no candidate: the job `proof-gate` proves that both host legs verified
+     the merged tree and finds the candidate of the main push of the same commit ([the proof deployment
+     gate](deployment.md#the-proof-deployment-gate); dispatch after that main push succeeded; a failed gate deploys nothing:
+     re-run the host legs on the PR head, or merge again). The access job then runs both probes and provisioning, and the
+     job `Deploy Cloudflare proof environment` fetches that sealed candidate by run and artifact ID, checks its digest and
+     manifest, and consumes it: pushes the sealed image, applies the proof migration to the proof database, deploys
      `--env proof` with `--containers-rollout immediate` and a configuration generated at deploy time (the real D1
      database id, the registry image digest, the revision), and attaches the custom domain `proof.arcforges.com`.
    - `observe` runs `npm run observe:proof` in the same access job instead of the probes: a read-only report of the
