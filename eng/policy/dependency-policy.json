@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "86efeee801c26e27296d5c91d3d473aa487dab6b",
+  "sourceCommit": "a76246f22355ca2cc81f35486654d7ea147af847",
   "manifests": ["package.json"],
   "inputs": {
     ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
@@ -56,6 +56,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r85.json": "9f3c71828f514acb5cb0a321c56caa7dd9d94318f139c713471eed655f08cc4e",
     "eng/provenance/artifact-profiles/cloud-release-r86.json": "2514b784ad43fc348422b7a8d1fa92afeed7e67c84ca81a88b0cae9c1935c2a7",
     "eng/provenance/artifact-profiles/cloud-release-r87.json": "97005e092bc0c2455fb83d517a0227354145724ca38d00ecc2d1661b1baf9147",
+    "eng/provenance/artifact-profiles/cloud-release-r88.json": "dbc329ae58abc3f6ad4ca75289a090bc080cd141f9a5a87f8f8e3a8a8ecff4dd",
     "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
     "eng/provenance/records/center-runtime-r10.json": "f48e644fec2814d5c2669b517e0ec276d8051c5ca82be1c255efc9403f9bbc03",
     "eng/provenance/records/center-runtime-r11.json": "2684a8b7a960382d94904f80e8a814d22cfc9ef3796b42eaeee67a9065b0f92f",
@@ -83,6 +84,7 @@
     "eng/provenance/records/center-runtime-r31.json": "16082ebd996db29680b7ba9b5ed5c9057acd3d0bfd20f3a24fe229311a1e7fa7",
     "eng/provenance/records/center-runtime-r32.json": "d6a244fe5323c88502c56ab5c1f85ec306eccb39c54d2049f47b77835e7d9876",
     "eng/provenance/records/center-runtime-r33.json": "980e40240aec284211b2ce2cf72419708b4695bfbb186e072c0f2642a99eca69",
+    "eng/provenance/records/center-runtime-r34.json": "95bd1533f03a478aee2508f38e6a03ff7fbcfe3c1ee9e3d8a903632f09d48194",
     "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
     "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
     "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
@@ -116,6 +118,7 @@
     "eng/provenance/records/center-worker-r31.json": "2cac463aa5eaf77cb9c9bb792ef7cd45d0f36c7490a15e0986c774fd700714b2",
     "eng/provenance/records/center-worker-r32.json": "ce91178fae4e75419de28afa174f738a980addfb59ab47f0b97d7c72e0949a06",
     "eng/provenance/records/center-worker-r33.json": "611cea735e83adbda8dcad7eafeae7b7e5ead18ad154ade05d0b9a7f1e94c6d7",
+    "eng/provenance/records/center-worker-r34.json": "072900759029eea50157f4cfa201c433351222ec55e1fbd8a50826264ebc6ce7",
     "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
     "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
     "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
@@ -163,7 +166,7 @@
     "eng/verify_steps.py": "9584fddcd913fa27d94441d79a758093cd33fb18730bb092ef0be9d31064c74d",
     "global.json": "e5a8e714f4feef6cef607d06ef5fa62f65679fc29ab232cae9ea7955f6984f2e",
     "package-lock.json": "9c97c1a409c01c0a705ad32139f4806cfd31f9729dcd62e84015389cfea5248a",
-    "package.json": "7b4c15a36c05b202b0efe35f07df4ba348f29a044cef70e1587879fbb77cabdb",
+    "package.json": "7dec2595f720f83fa712872bff55fc82f626e42bac98c3f10038453f37c63a02",
     "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
     "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "182d8d0f0453368561d78bf88a72a6abff1ae5b3c0d3ec03be45f1dabb55522e",
     "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -218,13 +221,13 @@
     "tooling/release-provenance.ts": "a3763964fe3fd3fabb66fa69aaf2296253c36812cf66e0fc526e5c2d909ee171",
     "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
     "tools/ArcForges.Cloud.Generation/packages.lock.json": "36965c2f5b447302352d2abd554b1a034f9e277753f30583c036c86e14fbd256",
-    "wrangler.json": "84fa60bbd7decf067a17638d422dac08d196bcb38a9fdefd86c49855706653f5"
+    "wrangler.json": "741f4e57418a3fbc4ff98a74d97bed1e1bf077f0287f195d217d149691d7bf71"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "Claude, maintainer-authorized source and dependency review (verification lanes delegated author); PR review is recorded separately",
+    "reviewer": "Claude, maintainer-authorized source and dependency review (AF-CTR-04 delegated author, M); PR review is recorded separately",
     "date": "2026-11-05",
-    "rationale": "Verification lanes, after af-ctr-04-r10 (the CI proof deployment gate, review fix round 1). Nothing is admitted and nothing is corrected in the dependencies: everything af-ctr-04-r10 admitted stays as it is, and no action, package or tool is added. The one bound input that changes is eng/verify_steps.py: the Linux leg's Go center controls (linux-center, python eng/center.py check with the race detector, the fuzz targets and govulncheck) move from the linux lane to a lane of their own, center; the step, its command and the tools it runs are unchanged. No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-third exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
+    "rationale": "AF-CTR-04 part M, after af-ctr-04-r11 (the verification lanes). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as af-ctr-04-r11 admitted them (the mobile native authorization uses only the Go standard library and modules already admitted; the Contracts cohort 1.0.0-ci.430.1 changes no Go binding, so center/go.mod is unchanged and the cohort is pinned by the vendored JSON Schema and vectors under center/internal/mobileauth/testdata, which are test data and not part of the image), and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0) is unchanged. center/go.mod, center/go.sum, center/dependencies.json, package-lock.json, the NuGet locks, the Dockerfile, the base images, the toolchains and .github/workflows/ci.yml are unchanged. The bound inputs that change are the Go sources of the center (the mobileauth package, its account participant, the identity.authorizeMobile operation row, the mobile policy keys, buckets and metrics, the native and apex page routes, migration 0006, session.ApprovalStands shared with the fleet), the pages' templates, script and stylesheet, the Worker's ingress (the native and apex rows, the Android app statement passed to the container) and generated center table, the root package.json (the test list), .dockerignore (center/cmd/mobile-probe and center/internal/mobiletest, development stand-ins, stay out of the image) and wrangler.json: the acceptance environment's FLAGSHIP_SURFACES becomes identity,pages,operations,fleet,mobile and it carries ARCFORGES_CENTER_ANDROID_APP, a labelled non-shipping test statement (testOnly, the package com.arcforges.prooftest and the fingerprint of a throwaway certificate whose key was destroyed), while production's surfaces stay empty and it carries no app statement. The release profile cloud-release-r88 with its successor records center-runtime-r34 and center-worker-r34 binds the center sources and the Worker sources as they are at this change. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-fourth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration; one center migration (0006, a new table). Production stays dark: the mobile surface is enabled on the acceptance environment only.",
     "inputs": {
       ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -278,6 +281,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r85.json": "9f3c71828f514acb5cb0a321c56caa7dd9d94318f139c713471eed655f08cc4e",
       "eng/provenance/artifact-profiles/cloud-release-r86.json": "2514b784ad43fc348422b7a8d1fa92afeed7e67c84ca81a88b0cae9c1935c2a7",
       "eng/provenance/artifact-profiles/cloud-release-r87.json": "97005e092bc0c2455fb83d517a0227354145724ca38d00ecc2d1661b1baf9147",
+      "eng/provenance/artifact-profiles/cloud-release-r88.json": "dbc329ae58abc3f6ad4ca75289a090bc080cd141f9a5a87f8f8e3a8a8ecff4dd",
       "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
       "eng/provenance/records/center-runtime-r10.json": "f48e644fec2814d5c2669b517e0ec276d8051c5ca82be1c255efc9403f9bbc03",
       "eng/provenance/records/center-runtime-r11.json": "2684a8b7a960382d94904f80e8a814d22cfc9ef3796b42eaeee67a9065b0f92f",
@@ -305,6 +309,7 @@
       "eng/provenance/records/center-runtime-r31.json": "16082ebd996db29680b7ba9b5ed5c9057acd3d0bfd20f3a24fe229311a1e7fa7",
       "eng/provenance/records/center-runtime-r32.json": "d6a244fe5323c88502c56ab5c1f85ec306eccb39c54d2049f47b77835e7d9876",
       "eng/provenance/records/center-runtime-r33.json": "980e40240aec284211b2ce2cf72419708b4695bfbb186e072c0f2642a99eca69",
+      "eng/provenance/records/center-runtime-r34.json": "95bd1533f03a478aee2508f38e6a03ff7fbcfe3c1ee9e3d8a903632f09d48194",
       "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
       "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
       "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
@@ -338,6 +343,7 @@
       "eng/provenance/records/center-worker-r31.json": "2cac463aa5eaf77cb9c9bb792ef7cd45d0f36c7490a15e0986c774fd700714b2",
       "eng/provenance/records/center-worker-r32.json": "ce91178fae4e75419de28afa174f738a980addfb59ab47f0b97d7c72e0949a06",
       "eng/provenance/records/center-worker-r33.json": "611cea735e83adbda8dcad7eafeae7b7e5ead18ad154ade05d0b9a7f1e94c6d7",
+      "eng/provenance/records/center-worker-r34.json": "072900759029eea50157f4cfa201c433351222ec55e1fbd8a50826264ebc6ce7",
       "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
       "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
       "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
@@ -385,7 +391,7 @@
       "eng/verify_steps.py": "9584fddcd913fa27d94441d79a758093cd33fb18730bb092ef0be9d31064c74d",
       "global.json": "e5a8e714f4feef6cef607d06ef5fa62f65679fc29ab232cae9ea7955f6984f2e",
       "package-lock.json": "9c97c1a409c01c0a705ad32139f4806cfd31f9729dcd62e84015389cfea5248a",
-      "package.json": "7b4c15a36c05b202b0efe35f07df4ba348f29a044cef70e1587879fbb77cabdb",
+      "package.json": "7dec2595f720f83fa712872bff55fc82f626e42bac98c3f10038453f37c63a02",
       "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
       "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "182d8d0f0453368561d78bf88a72a6abff1ae5b3c0d3ec03be45f1dabb55522e",
       "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -440,7 +446,7 @@
       "tooling/release-provenance.ts": "a3763964fe3fd3fabb66fa69aaf2296253c36812cf66e0fc526e5c2d909ee171",
       "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
       "tools/ArcForges.Cloud.Generation/packages.lock.json": "36965c2f5b447302352d2abd554b1a034f9e277753f30583c036c86e14fbd256",
-      "wrangler.json": "84fa60bbd7decf067a17638d422dac08d196bcb38a9fdefd86c49855706653f5"
+      "wrangler.json": "741f4e57418a3fbc4ff98a74d97bed1e1bf077f0287f195d217d149691d7bf71"
     },
     "checks": [
       "locked-restore",
@@ -451,9 +457,9 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "Verification lanes, after af-ctr-04-r10 (the CI proof deployment gate, review fix round 1). Nothing is admitted and nothing is corrected in the dependencies: everything af-ctr-04-r10 admitted stays as it is, and no action, package or tool is added. The one bound input that changes is eng/verify_steps.py: the Linux leg's Go center controls (linux-center, python eng/center.py check with the race detector, the fuzz targets and govulncheck) move from the linux lane to a lane of their own, center; the step, its command and the tools it runs are unchanged. No image or Worker input changes, so no release profile and no artifact record changes. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-third exact-row block, pinned by tests/worker/provenance.test.ts. No D1, business data or center migration. Production stays dark.",
+    "runtimeAssessment": "AF-CTR-04 part M, after af-ctr-04-r11 (the verification lanes). Nothing new is admitted and nothing is corrected in the dependencies: the twenty-two locked Go runtime modules and their legal records stay as af-ctr-04-r11 admitted them (the mobile native authorization uses only the Go standard library and modules already admitted; the Contracts cohort 1.0.0-ci.430.1 changes no Go binding, so center/go.mod is unchanged and the cohort is pinned by the vendored JSON Schema and vectors under center/internal/mobileauth/testdata, which are test data and not part of the image), and the isolated npm package eng/verification/browser (playwright-core 1.63.0, Apache-2.0) is unchanged. center/go.mod, center/go.sum, center/dependencies.json, package-lock.json, the NuGet locks, the Dockerfile, the base images, the toolchains and .github/workflows/ci.yml are unchanged. The bound inputs that change are the Go sources of the center (the mobileauth package, its account participant, the identity.authorizeMobile operation row, the mobile policy keys, buckets and metrics, the native and apex page routes, migration 0006, session.ApprovalStands shared with the fleet), the pages' templates, script and stylesheet, the Worker's ingress (the native and apex rows, the Android app statement passed to the container) and generated center table, the root package.json (the test list), .dockerignore (center/cmd/mobile-probe and center/internal/mobiletest, development stand-ins, stay out of the image) and wrangler.json: the acceptance environment's FLAGSHIP_SURFACES becomes identity,pages,operations,fleet,mobile and it carries ARCFORGES_CENTER_ANDROID_APP, a labelled non-shipping test statement (testOnly, the package com.arcforges.prooftest and the fingerprint of a throwaway certificate whose key was destroyed), while production's surfaces stay empty and it carries no app statement. The release profile cloud-release-r88 with its successor records center-runtime-r34 and center-worker-r34 binds the center sources and the Worker sources as they are at this change. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in a thirty-fourth exact-row block, pinned by tests/worker/provenance.test.ts. No D1 or business data migration; one center migration (0006, a new table). Production stays dark: the mobile surface is enabled on the acceptance environment only.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-04-r10.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-04-r11.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-11-05",
     "decision": "approved"
@@ -1239,7 +1245,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["center-runtime-r33", "center-worker-r33"],
+  "artifactRecords": ["center-runtime-r34", "center-worker-r34"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1253,7 +1259,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-04-r11.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-04-r12.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

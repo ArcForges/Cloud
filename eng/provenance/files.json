@@ -533,6 +533,7 @@
     "eng/policy/dependency-reviews/af-ctr-04-r1.json",
     "eng/policy/dependency-reviews/af-ctr-04-r10.json",
     "eng/policy/dependency-reviews/af-ctr-04-r11.json",
+    "eng/policy/dependency-reviews/af-ctr-04-r12.json",
     "eng/policy/dependency-reviews/af-ctr-04-r2.json",
     "eng/policy/dependency-reviews/af-ctr-04-r3.json",
     "eng/policy/dependency-reviews/af-ctr-04-r4.json",
@@ -694,6 +695,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r85.json",
     "eng/provenance/artifact-profiles/cloud-release-r86.json",
     "eng/provenance/artifact-profiles/cloud-release-r87.json",
+    "eng/provenance/artifact-profiles/cloud-release-r88.json",
     "eng/provenance/artifact-profiles/cloud-release-r9.json",
     "eng/provenance/files.json",
     "eng/provenance/records/arcnotes-build-identity-r1.json",
@@ -726,6 +728,7 @@
     "eng/provenance/records/center-runtime-r31.json",
     "eng/provenance/records/center-runtime-r32.json",
     "eng/provenance/records/center-runtime-r33.json",
+    "eng/provenance/records/center-runtime-r34.json",
     "eng/provenance/records/center-runtime-r4.json",
     "eng/provenance/records/center-runtime-r5.json",
     "eng/provenance/records/center-runtime-r6.json",
@@ -759,6 +762,7 @@
     "eng/provenance/records/center-worker-r31.json",
     "eng/provenance/records/center-worker-r32.json",
     "eng/provenance/records/center-worker-r33.json",
+    "eng/provenance/records/center-worker-r34.json",
     "eng/provenance/records/center-worker-r4.json",
     "eng/provenance/records/center-worker-r5.json",
     "eng/provenance/records/center-worker-r6.json",
@@ -1635,5 +1639,5 @@
     "third-party/GoCrypto.LICENSE.txt": "go-gocrypto-legal-r1",
     "third-party/GoSys.LICENSE.txt": "go-gosys-legal-r1"
   },
-  "artifacts": ["center-runtime-r33", "center-worker-r33"]
+  "artifacts": ["center-runtime-r34", "center-worker-r34"]
 }
