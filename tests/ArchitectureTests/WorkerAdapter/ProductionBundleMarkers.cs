@@ -6,7 +6,8 @@ namespace ArcForges.Cloud.ArchitectureTests.WorkerAdapter;
 /// <summary>
 /// What the production bundle may not contain (CLOUD.84 D1 and S39): names that only the proof entry, its foundation, its harness alarm or
 /// its verification may hold, and every route string below <c>/session/v1/</c> that is not one of the center's own WebBrowserSession routes
-/// (AF-CTR-03 A2: generated into <c>worker/tables/center-tables.generated.ts</c>, dark in production because the pages surface is off).
+/// (AF-CTR-03 A2: generated into <c>worker/tables/center-tables.generated.ts</c>, dark in production because the pages surface is off)
+/// or one of its native mobile routes (AF-CTR-04 part M: generated there too, dark in production because the mobile surface is off).
 /// The proof pipeline's <c>/session/v1/bootstrap</c> and <c>/session/v1/logout</c> are such paths, and so is any other path below
 /// <c>/session/v1/web/</c> that the generated table does not list.
 /// </summary>
@@ -41,7 +42,7 @@ internal static class ProductionBundleMarkers
 
     private static readonly Regex GeneratedPagePaths = new("path:\\s*\"(?<path>/session/v1/[^\"]+)\"", RegexOptions.CultureInvariant);
 
-    /// <summary>The WebBrowserSession route paths of the generated Worker table (the rows whose path lies below the session prefix).</summary>
+    /// <summary>The WebBrowserSession and native mobile route paths of the generated Worker table (the rows whose path lies below the session prefix).</summary>
     public static IReadOnlySet<string> GeneratedPagePathsOf(string generatedTable) =>
         GeneratedPagePaths.Matches(generatedTable).Select(match => match.Groups["path"].Value).ToHashSet(StringComparer.Ordinal);
 
