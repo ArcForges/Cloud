@@ -89,7 +89,9 @@ func mobileOriginText(origin mobileauth.Origin) string {
 	return "Request came from " + *origin.Country + ", network AS" + strconv.FormatInt(*origin.ASN, 10)
 }
 
-// mobileAccount is the account the decision acts for: the identity caller of the cookie session and how it authenticated.
+// mobileAccount is the account the review and the decision act for: the identity caller of the cookie session (its scope included),
+// the session's purpose and how it authenticated. Package mobileauth refuses a session that is not of scope account and purpose
+// authenticate (the operation's access rule), as entitlement's operator grant refuses a caller that is not of scope account.
 func (e *exchange) mobileAccount(resolved *session.BrowserSession) mobileauth.Account {
 	caller := resolved.Credential.Caller
 	method := int16(1)
@@ -97,8 +99,8 @@ func (e *exchange) mobileAccount(resolved *session.BrowserSession) mobileauth.Ac
 		method = 2
 	}
 	return mobileauth.Account{Caller: identity.Caller{Request: e.request(), UserID: resolved.UserID, SessionID: resolved.SessionID, DeviceID: resolved.DeviceID,
-		Scope: caller.Scope, Browser: true, AuthEpoch: caller.AuthEpoch, RecoveryGeneration: resolved.RecoveryGeneration}, AuthMethod: method,
-		AuthenticatedAt: caller.AuthenticatedAt}
+		Scope: caller.Scope, Browser: true, AuthEpoch: caller.AuthEpoch, RecoveryGeneration: resolved.RecoveryGeneration}, Purpose: resolved.Purpose,
+		AuthMethod: method, AuthenticatedAt: caller.AuthenticatedAt}
 }
 
 // mobileRequest is the mobile service's view of the exchange.
@@ -145,7 +147,7 @@ func (e *exchange) mobileReview() {
 // renderMobileReview reviews a flow and renders the review page, with the error of a refused decision when there is one (the page
 // keeps that refusal's status).
 func (e *exchange) renderMobileReview(resolved *session.BrowserSession, flowID platform.ID, refused *foundationv1.ArcError, status int) {
-	flow, err := e.h.options.Mobile.Review(e.r.Context(), e.mobileAccount(resolved), flowID)
+	flow, err := e.h.options.Mobile.Review(e.r.Context(), e.mobileRequest(), e.mobileAccount(resolved), flowID)
 	if err != nil {
 		e.mobileFail(err)
 		return
@@ -182,8 +184,10 @@ func (e *exchange) mobileAccountText(userID platform.ID) string {
 }
 
 // mobileDecision is POST /mobile/authorize/decision: the decision. An approval consumes the step-up evidence the script proved for the
-// flow; the reply is a page with the link that hands the callback to the app, which the person taps (MB-7: the primary hand-off) and
-// the script follows once as a best effort. A decision without evidence, or refused for the installation, shows the review again.
+// flow; the reply is a page with the link that hands the callback to the app, which the person taps (MB-7: the only hand-off); the
+// script checks the link and never follows it. A decision without evidence, or refused for the installation, shows the review again.
+// The evidence rule is the center-defined operation's: a missing operation row refuses the decision (fail closed), it never decides
+// without evidence.
 func (e *exchange) mobileDecision() {
 	values, resolved, ok := e.formSession("flow_id", "decision")
 	if !ok {
@@ -197,7 +201,11 @@ func (e *exchange) mobileDecision() {
 	if !ok {
 		return
 	}
-	operation, _ := access.CenterOperationOf(mobileauth.Class)
+	operation, known := mobileOperation()
+	if !known {
+		e.internal(errors.New("pages: the center-defined operation " + mobileauth.Class + " is not in the operation table"))
+		return
+	}
 	decision, err := e.h.options.Mobile.Decide(e.r.Context(), e.mobileRequest(), e.mobileAccount(resolved), flowID, approve,
 		operation.NeedsEvidenceToDecide(approve))
 	if err != nil {
@@ -216,6 +224,9 @@ func (e *exchange) mobileDecision() {
 	e.serve("mobile-authorize-done", pageData{Title: title, Signed: true, CSRF: resolved.CSRF, Mobile: mobileView{FlowID: uuidText(flowID),
 		Redirect: template.URL(decision.RedirectURL), Approved: approve}}) // #nosec G203 -- an admitted redirect with center-built parameters
 }
+
+// mobileOperation is the center-defined operation the decision performs (its evidence rule); a variable so that a test can remove it.
+var mobileOperation = func() (access.CenterOperation, bool) { return access.CenterOperationOf(mobileauth.Class) }
 
 // mobileFail answers a refusal or a failure of the mobile service as the route's kind answers it.
 func (e *exchange) mobileFail(err error) {

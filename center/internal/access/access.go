@@ -242,7 +242,10 @@ type CenterOperation struct {
 	StepUp  StepUp
 	Target  string
 	Receipt bool
-	// Restricted is true for an operation a restricted account may still perform (a mobile authorization is a sign-in, Q-8).
+	// Restricted is true for an operation a restricted account may still perform (a mobile authorization is a sign-in, Q-8). On a
+	// CenterOperation it is a statement, not a check Authorize makes (no session method's row names it): the page's cookie session
+	// admits an active or restricted account only (session.ResolveSession, MaySignIn), and the operation's own rule decides the rest
+	// (the operator role; mobileauth's scope and purpose rule).
 	Restricted bool
 	// Audit says who appends its audit event.
 	Audit Audit

@@ -22,12 +22,29 @@ import (
 // Class is the step-up class of an approval (M-17): the center-defined operation identity.authorizeMobile, bound to the flow ID.
 const Class = access.MobileAuthorizationClass
 
-// Account is the account session that reviews or decides a flow: the identity caller (its account, session and epochs, for the
-// step-up evidence) and how and when the session authenticated (recorded with an approval and copied to the mobile session).
+// Account is the account session that reviews or decides a flow: the identity caller (its account, session, scope and epochs, for the
+// step-up evidence), the session's purpose, and how and when the session authenticated (recorded with an approval and copied to the
+// mobile session).
 type Account struct {
 	Caller          identity.Caller
+	Purpose         session.Purpose
 	AuthMethod      int16
 	AuthenticatedAt time.Time
+}
+
+// SignInScope is the only session scope that may review or decide a flow.
+const SignInScope = "account"
+
+// admitted is the access rule of identity.authorizeMobile for the session that reviews or decides a flow (as the operator grant
+// refuses a caller that is not of scope account): an approval issues a mobile session of scope account, so only a session of scope
+// account issued to sign in (purpose authenticate) may review or decide; a narrower one (mobile.limited, or a session of another
+// purpose) is AUTHORIZATION/permission_denied before anything is read, counted or written. The account's state is the cookie
+// session's own rule (session.ResolveSession admits an active or restricted account only: the operation's Restricted flag).
+func admitted(account Account) *arc.Refusal {
+	if account.Caller.Scope != SignInScope || account.Purpose != session.PurposeAuthenticate || account.Caller.UserID == (platform.ID{}) {
+		return arc.PermissionDenied(Class)
+	}
+	return nil
 }
 
 // Standing is what the claimed installation is to the reviewing account (Q-7): not known yet, this account's live mobile
@@ -143,8 +160,14 @@ func standingRefusal(standing Standing) *arc.Refusal {
 // Review shows a flow to an account: reviewing a PENDING, unexpired flow records the reviewing account and time (the latest review
 // wins: a displaced reviewer's decision is not_reviewed); any other flow is shown with its state and records nothing. An unknown flow
 // and one another account decided are STATE/not_found; an expired one STATE/expired. The view says what the claimed installation is
-// to the account, so the page can tell the person before any step-up (Q-7).
-func (s *Service) Review(ctx context.Context, account Account, flowID platform.ID) (FlowView, error) {
+// to the account, so the page can tell the person before any step-up (Q-7). A review that shows that the installation is another
+// account's or revoked is counted in the account's mobile_approve_account bucket (as a decision is), so the standing text is no
+// unbounded oracle for a known installation ID; an exhausted bucket refuses the review with RESOURCE/rate_limited.
+func (s *Service) Review(ctx context.Context, request Request, account Account, flowID platform.ID) (FlowView, error) {
+	if refusal := admitted(account); refusal != nil {
+		s.events.ObserveMobile("review", "refused")
+		return FlowView{}, refusal
+	}
 	var view FlowView
 	err := s.db.InTx(ctx, "review a mobile authorization", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		now := s.now()
@@ -169,6 +192,16 @@ WHERE flow_id = $1 AND state = 1 AND expires_at > $3 RETURNING `+flowColumns, fl
 		view.Standing, err = standingOf(ctx, tx, flow.InstallationID, account.Caller.UserID)
 		return err
 	})
+	if err == nil && (view.Standing == StandingForeign || view.Standing == StandingRevoked) {
+		bucket := s.bucket(ratelimit.MobileApproveAccount, "account:"+account.Caller.UserID.String())
+		decision, takeErr := s.limits.Take(ctx, bucket, s.now())
+		switch {
+		case takeErr != nil:
+			return FlowView{}, takeErr
+		case !decision.Allowed:
+			return FlowView{}, s.limited(ctx, request, bucket, decision, "review", identity.Actor(account.Caller.UserID))
+		}
+	}
 	var refusal *arc.Refusal
 	switch {
 	case errors.As(err, &refusal):
@@ -190,6 +223,7 @@ type Decision struct {
 
 // Decide approves or denies a flow (the center-defined operation identity.authorizeMobile), mirroring fleet's Decide (MB-4):
 //
+//  0. a session that is not of scope account and purpose authenticate is AUTHORIZATION/permission_denied (admitted), before anything;
 //  1. the account's decisions are counted first (mobile_approve_account);
 //  2. the flow row is locked FOR UPDATE;
 //  3. a flow another account decided or an unknown one is STATE/not_found, a lapsed one STATE/expired, a final one STATE/invalid_state
@@ -204,6 +238,10 @@ type Decision struct {
 //
 // Locks: the flow row, then (approving, with evidence) the account through the evidence (the global order).
 func (s *Service) Decide(ctx context.Context, request Request, account Account, flowID platform.ID, approve, evidence bool) (Decision, error) {
+	if refusal := admitted(account); refusal != nil {
+		s.events.ObserveMobile("approve", "refused")
+		return Decision{}, refusal
+	}
 	actor := identity.Actor(account.Caller.UserID)
 	bucket := s.bucket(ratelimit.MobileApproveAccount, "account:"+account.Caller.UserID.String())
 	decision, err := s.limits.Take(ctx, bucket, s.now())

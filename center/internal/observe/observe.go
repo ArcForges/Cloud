@@ -82,13 +82,13 @@ func FleetOutcomes() map[string][]string {
 }
 
 // MobileOutcomes is the closed label set of the mobile surface's events (AF-CTR-04 part M, M-11): a begin (started, refused, rate
-// limited), a review (reviewed, shown, refused), a decision (approved, a code reissued, denied, refused, rate limited) and a token
+// limited), a review (reviewed, shown, refused, rate limited: a review that shows a foreign or revoked installation is counted), a decision (approved, a code reissued, denied, refused, rate limited) and a token
 // request (completed, refused, a reuse, a failed verifier or binding, a lapsed approval, rate limited). ObserveMobile counts only these
 // pairs; any other pair is counted as unlisted.
 func MobileOutcomes() map[string][]string {
 	return map[string][]string{
 		"begin":   {"started", "refused", "rate_limited"},
-		"review":  {"reviewed", "shown", "refused"},
+		"review":  {"reviewed", "shown", "refused", "rate_limited"},
 		"approve": {"approved", "reissued", "denied", "refused", "rate_limited"},
 		"token":   {"completed", "refused", "reused", "verifier_failed", "lapsed", "rate_limited"},
 	}

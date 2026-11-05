@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/mobileauth"
 	"github.com/ArcForges/Cloud/center/internal/mobiletest"
+	"github.com/ArcForges/Cloud/center/internal/pages"
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
@@ -615,6 +617,120 @@ func TestTheClaimedInstallationMustBeTheAccounts(t *testing.T) {
 	}
 }
 
+// TestANarrowerSessionCannotReviewOrApprove (the operation's access rule): an approval issues a mobile session of scope account, so a
+// cookie session of a narrower scope (mobile.limited) or of another purpose (enroll) may neither review nor decide, even with the
+// step-up proved: AUTHORIZATION/permission_denied, nothing recorded, the flow PENDING and the evidence unconsumed. The session model
+// stores both columns for a browser session, so each narrowing is the stored row of the signed-in session.
+func TestANarrowerSessionCannotReviewOrApprove(t *testing.T) {
+	h := mobileHarness(t, nil)
+	who := h.seedAccount(1)
+	b := h.newBrowser()
+	b.mustSignIn(who)
+	attempt := h.mustBegin(h.app())
+	if review := b.postForm("/mobile/authorize/review", url.Values{"flow_id": {attempt.FlowID}}); review.status != 200 {
+		t.Fatalf("review: %d", review.status)
+	}
+	b.mustStepUp(who, mobileauth.Class, idOf(t, attempt.FlowID))
+	narrow := func(column string, value int) {
+		t.Helper()
+		if _, err := h.migration.Exec(context.Background(), "UPDATE identity.session SET "+column+" = $2, rev = rev + 1 WHERE user_id = $1 AND credential_kind = 2",
+			who.id, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, column := range []string{"scope", "purpose"} {
+		narrow(column, 2)
+		reviewed := h.count("SELECT count(*) FROM audit.audit_event")
+		if review := b.postForm("/mobile/authorize/review", url.Values{"flow_id": {attempt.FlowID}}); review.status != 403 {
+			t.Errorf("a review by a session of %s 2: %d", column, review.status)
+		}
+		if decision := b.postForm("/mobile/authorize/decision", url.Values{"flow_id": {attempt.FlowID}, "decision": {"approve"}}); decision.status != 403 ||
+			appLink.MatchString(decision.text()) {
+			t.Errorf("an approval by a session of %s 2: %d", column, decision.status)
+		}
+		if h.mobileState(attempt.FlowID) != mobileauth.FlowPending || h.count("SELECT count(*) FROM audit.audit_event") != reviewed ||
+			h.count("SELECT count(*) FROM identity.step_up_challenge WHERE user_id = $1 AND operation_id = $2 AND state = 2", who.id, mobileauth.Class) != 1 {
+			t.Fatalf("a refused session of %s 2 changed the flow, the audit or the evidence", column)
+		}
+		narrow(column, 1)
+	}
+	// The same session, of scope account and purpose authenticate again, approves with the same evidence.
+	if decision := b.postForm("/mobile/authorize/decision", url.Values{"flow_id": {attempt.FlowID}, "decision": {"approve"}}); decision.status != 200 ||
+		h.mobileState(attempt.FlowID) != mobileauth.FlowApproved {
+		t.Fatalf("the approval: %d", decision.status)
+	}
+}
+
+// TestAMissingOperationRowRefusesTheDecision (fail closed): the decision takes its evidence rule from the center-defined operation
+// identity.authorizeMobile; without that row it refuses (the internal failure, 503), never deciding without the step-up.
+func TestAMissingOperationRowRefusesTheDecision(t *testing.T) {
+	h := mobileHarness(t, nil)
+	who := h.seedAccount(1)
+	b := h.newBrowser()
+	b.mustSignIn(who)
+	attempt := h.mustBegin(h.app())
+	if review := b.postForm("/mobile/authorize/review", url.Values{"flow_id": {attempt.FlowID}}); review.status != 200 {
+		t.Fatalf("review: %d", review.status)
+	}
+	b.mustStepUp(who, mobileauth.Class, idOf(t, attempt.FlowID))
+	restore := pages.RemoveMobileOperation()
+	t.Cleanup(restore)
+	for _, decision := range []string{"approve", "deny"} {
+		if reply := b.postForm("/mobile/authorize/decision", url.Values{"flow_id": {attempt.FlowID}, "decision": {decision}}); reply.status != 503 ||
+			appLink.MatchString(reply.text()) {
+			t.Errorf("a %s without the operation row: %d", decision, reply.status)
+		}
+	}
+	if h.mobileState(attempt.FlowID) != mobileauth.FlowPending ||
+		h.count("SELECT count(*) FROM identity.step_up_challenge WHERE user_id = $1 AND operation_id = $2 AND state = 2", who.id, mobileauth.Class) != 1 {
+		t.Fatal("a decision without the operation row changed the flow or the evidence")
+	}
+	restore()
+	if reply := b.postForm("/mobile/authorize/decision", url.Values{"flow_id": {attempt.FlowID}, "decision": {"approve"}}); reply.status != 200 {
+		t.Fatalf("the approval with the row: %d", reply.status)
+	}
+}
+
+// TestAReviewThatShowsAForeignInstallationIsCounted (M-12, Q-7): the review page tells the person, before any step-up, that the claimed
+// installation is another account's; such a review is counted in the reviewer's mobile_approve_account bucket, so the text is no
+// unbounded oracle for a known installation ID. A review of a new installation is not counted.
+func TestAReviewThatShowsAForeignInstallationIsCounted(t *testing.T) {
+	h := newHarness(t, settings{surfaces: "identity,pages,mobile", policy: `{"stepUpPerAccountLimit": 1000, "signInPerPrefixLimit": 1000, ` +
+		`"mobileApproveAccountLimit": 2}`})
+	who, other := h.seedAccount(1), h.seedAccount(1)
+	b, them := h.newBrowser(), h.newBrowser()
+	b.mustSignIn(who)
+	them.mustSignIn(other)
+	fresh := h.mustBegin(h.app())
+	for range 3 {
+		if review := b.postForm("/mobile/authorize/review", url.Values{"flow_id": {fresh.FlowID}}); review.status != 200 {
+			t.Fatalf("a review of a new installation: %d", review.status)
+		}
+	}
+	theirs := h.app()
+	attempt := h.mustBegin(theirs)
+	link, _ := them.decide(other, attempt, true)
+	callback, _ := theirs.ParseCallback(link, attempt)
+	if reply, _ := theirs.Token(context.Background(), attempt, callback.Code); reply.Status != 200 {
+		t.Fatalf("their sign-in: %d", reply.Status)
+	}
+	mine := *theirs
+	claimed := h.mustBegin(&mine)
+	for range 2 {
+		if review := b.postForm("/mobile/authorize/review", url.Values{"flow_id": {claimed.FlowID}}); review.status != 200 ||
+			!strings.Contains(review.text(), "This phone is signed in to another account") {
+			t.Fatalf("a review of a foreign installation: %d", review.status)
+		}
+	}
+	if review := b.postForm("/mobile/authorize/review", url.Values{"flow_id": {claimed.FlowID}}); review.status != 429 ||
+		strings.Contains(review.text(), "This phone is signed in to another account") {
+		t.Fatalf("a third review of a foreign installation: %d", review.status)
+	}
+	if h.audits("identity.rate_limited") != 1 {
+		t.Fatalf("the exhausted bucket was audited %d times", h.audits("identity.rate_limited"))
+	}
+}
+
 // TestARestrictedAccountSignsItsPhoneIn (Q-8, M-14): a restricted account may approve (a mobile authorization is a sign-in); a suspended
 // account cannot sign in on the pages at all, so it never reaches the review (the existing texts).
 func TestARestrictedAccountSignsItsPhoneIn(t *testing.T) {
@@ -725,9 +841,11 @@ func TestTheDebugClientTakesItsSchemeOnASelfHostedCenter(t *testing.T) {
 	}
 }
 
-// TestNoMobileSecretIsStoredLoggedOrAudited (SEC-14, E1-18, MB-11): no one-use code, PKCE verifier, client state, callback link or
-// token the flow saw is in any table (as text or as the hex of its bytes), the statement statistics, the center's log or the test
-// server's log; only the code's digest is stored.
+// TestNoMobileSecretIsStoredLoggedOrAudited (SEC-14, E1-18, MB-11): no one-use code, PKCE verifier, callback link or token the flow
+// saw is in any table (as text or as the hex of its bytes), the statement statistics, the center's log or the test server's log; only
+// the code's digest is stored. The client state is stored in clear in identity.mobile_authorization only, to return it unchanged in
+// the callback: it is in no other table (the audit events and the rate-limit rows included), the statement statistics or the
+// center's log. (The test server logs every statement with its parameters, so the state of the begin insert is in that log.)
 func TestNoMobileSecretIsStoredLoggedOrAudited(t *testing.T) {
 	h := mobileHarness(t, nil)
 	ctx := context.Background()
@@ -757,6 +875,7 @@ func TestNoMobileSecretIsStoredLoggedOrAudited(t *testing.T) {
 	if raw, ok := session.ParseHandle(callback.Code); ok {
 		hexed = append(hexed, hex.EncodeToString(raw[:]))
 	}
+	withState := append(slices.Clone(secrets), attempt.State)
 	scan := func(where, text string, values []string) {
 		t.Helper()
 		for _, value := range values {
@@ -770,15 +889,19 @@ func TestNoMobileSecretIsStoredLoggedOrAudited(t *testing.T) {
 		if err := admin.QueryRow(ctx, "SELECT coalesce(string_agg(row_to_json(t)::text, ''), '') FROM "+table+" t").Scan(&text); err != nil {
 			t.Fatal(err)
 		}
-		scan(table, text, secrets)
+		if table == "identity.mobile_authorization" {
+			scan(table, text, secrets)
+		} else {
+			scan(table, text, withState)
+		}
 		scan(table+" (bytea)", text, hexed)
 	}
 	var statistics string
 	if err := admin.QueryRow(ctx, "SELECT coalesce(string_agg(query, ''), '') FROM pg_stat_statements").Scan(&statistics); err != nil {
 		t.Fatal(err)
 	}
-	scan("pg_stat_statements", statistics, secrets)
-	scan("the center's log", h.logs.String(), append(secrets, attempt.State))
+	scan("pg_stat_statements", statistics, withState)
+	scan("the center's log", h.logs.String(), withState)
 	if log, ok := pgtest.ServerLog(t); ok {
 		scan("the test server's log", log, secrets)
 		if !strings.Contains(log, "identity.mobile_authorization") {
