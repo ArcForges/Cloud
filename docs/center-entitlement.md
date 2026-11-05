@@ -221,7 +221,8 @@ the personal data and the retention are in [PostgreSQL store](postgres-store.md#
 ## Post-deploy checklist
 
 The hosted run on the proof environment is done by the coordinator after the merge and the deployment (a main push deploys
-production, then the `proof: deploy` dispatch deploys the acceptance environment). Nothing below was run by the author of the change
+production, then the `proof: deploy` dispatch, after that main push succeeded, deploys the same candidate to the acceptance
+environment through [the proof deployment gate](deployment.md#the-proof-deployment-gate)). Nothing below was run by the author of the change
 that enabled the surface on proof: no hosted environment was touched, and the acceptance script never targets production (step 1 only reads production with `curl`). The order is cheap and
 diagnostic first, one request at a time and fewer than ten in a minute (the edge counts the requests of a client over 60 seconds):
 

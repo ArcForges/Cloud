@@ -167,9 +167,34 @@ export function sourceBuild(commit: string, epoch: number, dirty: boolean, env: 
   };
 }
 
+/**
+ * The run that produced the candidate. A main push builds and deploys its own candidate, so the producer is this run. A proof
+ * deployment dispatch builds none: its gate job (eng/verification/proof-gate.ts) found the successful main-push run of the same
+ * commit and the deploy job names that run in ARCFORGES_CANDIDATE_RUN_ID, _RUN_NUMBER and _RUN_ATTEMPT. Only a workflow_dispatch may
+ * name another run, and only with all three.
+ */
+export const producerRunVariables = [
+  "ARCFORGES_CANDIDATE_RUN_ID",
+  "ARCFORGES_CANDIDATE_RUN_NUMBER",
+  "ARCFORGES_CANDIDATE_RUN_ATTEMPT",
+] as const;
+
 export function candidateEnvironment(version: string, environment: NodeJS.ProcessEnv) {
   const producer = { ...environment };
   if (producer.GITHUB_ACTIONS === "true") {
+    const named = producerRunVariables.map((name) => environment[name] ?? "");
+    if (named.some((value) => value !== "")) {
+      assert.equal(
+        environment.GITHUB_EVENT_NAME,
+        "workflow_dispatch",
+        "Only the proof dispatch deploys the candidate of another run.",
+      );
+      assert(
+        named.every((value) => /^[1-9][0-9]{0,15}$/u.test(value)),
+        "Name the candidate's run id, number and attempt together.",
+      );
+      [producer.GITHUB_RUN_ID, producer.GITHUB_RUN_NUMBER, producer.GITHUB_RUN_ATTEMPT] = named;
+    }
     const release = /^0\.1\.0-ci\.([1-9][0-9]*)\.([1-9][0-9]*)$/u.exec(version);
     assert(release?.[1] && release[2]);
     assert.equal(release[1], producer.GITHUB_RUN_NUMBER);

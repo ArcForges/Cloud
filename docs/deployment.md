@@ -25,6 +25,45 @@ Existing `test:live` command remains an explicit local diagnostic for a concrete
 
 See [validation policy](validation-policy.md) for the retained checks and post-merge stopping boundary.
 
+### The proof deployment gate
+
+A `proof: deploy` dispatch of `CI` on `main` (owner decision of 2026-11-04) validates nothing again and builds no candidate: no
+`Source`, `quality`, CodeQL, candidate or `Verify` job runs. Its `proof-gate` job (`node eng/verification/proof-gate.ts gate`; no
+secret, no environment, read-only `contents`, `statuses`, `actions` and `pull-requests`) proves through the GitHub API, failing on any
+doubt:
+
+1. **The commit.** The dispatched commit is the head of `main` and either the merge commit of a merged PR into `main` whose second
+   parent is the PR head (GitHub's merge method `merge`: `41c8a72` has the parents `2686a73`, main, and `17ede98`, the PR head), or a
+   fast-forward (the PR head itself, or a commit on `main` without a PR). A squash or rebase merge is refused.
+2. **The tree.** The tree of the dispatched commit is the tree of the commit the host legs verified: the PR head (a merge of an
+   up-to-date PR has the PR head's tree: `dc85b37` for both `41c8a72` and `17ede98`), or the commit itself after a fast-forward.
+3. **The host legs and their poster.** On that commit the latest status of each of `arcforges/linux` and `arcforges/windows` is
+   `success`: a later failure, error or pending, or a later status of anyone else, wins over an earlier success. Each counted status
+   was created by the User `deku2026` (login and numeric id), has no target URL and the description `eng/verify.py` writes after a
+   passed full leg (`<n> steps passed in <s>s on <host> (profile full)`).
+4. **The candidate.** The one successful main-push run of `ci.yml` for the commit exists, its `Native AOT image and Worker build` job
+   succeeded, and its artifact `cloud-candidate-<run>-<attempt>` is unexpired and was uploaded by that run for that commit.
+
+`deploy-proof` needs the gate and `proof-access`. Instead of a candidate of its own run it runs
+`node eng/verification/proof-gate.ts fetch`: it reads the artifact again by its ID, downloads it with the job's token (`actions: read`), checks the archive's SHA-256
+against the API's artifact digest, refuses an entry that is not a plain file name, unpacks it into `artifacts/candidate` and checks
+that `manifest.json` (revision, clean, the version `0.1.0-ci.<run number>.<attempt>` of the main-push run, every member's digest),
+`build-identity.json` (source commit, run id, attempt and pipeline URL of that run) and `image-provenance.json` (revision, image ID)
+name exactly the dispatched commit, and that the checkout is that commit and tree. Only then do the two migration steps and
+`npm run deploy:proof` run, unchanged and with their own checks (`verifyCandidate`, the release provenance, both migration gates, the
+newest-main check). `tooling/build-identity.ts` accepts the candidate's producer run, which the job names in `ARCFORGES_CANDIDATE_RUN_ID`,
+`_RUN_NUMBER` and `_RUN_ATTEMPT` from the gate's outputs, on a dispatch only; a main push refuses them. Production and proof therefore
+run the same bytes of one commit (before: production `0.1.0-ci.540.1` and proof `0.1.0-ci.542.1` for `2686a73`).
+
+**What is trusted:** the two host verification legs and the account `deku2026` that reports their statuses
+([AD-0020](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/decisions/AD-0020-post-push-verification-and-required-checks.md);
+a status is no stronger than that account's status credential), the GitHub API's answers, and the main push's candidate job on
+GitHub-hosted runners, which builds and seals the bytes as before.
+
+**When the gate fails**, nothing is deployed and nothing is rebuilt. Re-run both host legs (`python eng/verify.py run-and-report`) on
+the PR head and dispatch again, or merge again: a new merge commit gets its own main push and candidate. A dispatch while the main push
+still runs is refused until that run completed; a candidate past its 30-day retention needs a new merge.
+
 ## Ingress pipeline
 
 Every public call crosses the deny-by-default method table of the Worker and the admission pipeline of the host before any

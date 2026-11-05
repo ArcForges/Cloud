@@ -1,0 +1,305 @@
+{
+  "recorded": "2026-11-05, GitHub REST API, ArcForges/Cloud main at the merge of PR #137; each response is trimmed to the fields the proof gate reads, and the host names in the status descriptions are replaced by linux-host and workstation.",
+  "sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f",
+  "responses": {
+    "repos/ArcForges/Cloud/git/ref/heads/main": {
+      "ref": "refs/heads/main",
+      "object": {
+        "sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f",
+        "type": "commit"
+      }
+    },
+    "repos/ArcForges/Cloud/git/commits/9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f": {
+      "sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f",
+      "tree": {
+        "sha": "963af282e91567ef5940f498082fb6db3c6eb279"
+      },
+      "parents": [
+        {
+          "sha": "41c8a72dbbd63efdb6967f71c23610ae2f73fae1"
+        },
+        {
+          "sha": "21ab8eafba702fcf6109ec91f9457d3f0eaa341b"
+        }
+      ]
+    },
+    "repos/ArcForges/Cloud/commits/9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f/pulls?per_page=100": [
+      {
+        "number": 137,
+        "state": "closed",
+        "merged_at": "2026-11-04T16:23:54Z",
+        "merge_commit_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f",
+        "user": {
+          "login": "deku2026"
+        },
+        "base": {
+          "ref": "main",
+          "sha": "41c8a72dbbd63efdb6967f71c23610ae2f73fae1",
+          "repo": {
+            "full_name": "ArcForges/Cloud"
+          }
+        },
+        "head": {
+          "ref": "task/tests-tmp-hygiene",
+          "sha": "21ab8eafba702fcf6109ec91f9457d3f0eaa341b",
+          "repo": {
+            "full_name": "ArcForges/Cloud"
+          }
+        }
+      }
+    ],
+    "repos/ArcForges/Cloud/git/commits/21ab8eafba702fcf6109ec91f9457d3f0eaa341b": {
+      "sha": "21ab8eafba702fcf6109ec91f9457d3f0eaa341b",
+      "tree": {
+        "sha": "963af282e91567ef5940f498082fb6db3c6eb279"
+      },
+      "parents": [
+        {
+          "sha": "41c8a72dbbd63efdb6967f71c23610ae2f73fae1"
+        }
+      ]
+    },
+    "repos/ArcForges/Cloud/commits/21ab8eafba702fcf6109ec91f9457d3f0eaa341b/statuses?per_page=100&page=1": [
+      {
+        "id": 58061930671,
+        "state": "success",
+        "context": "arcforges/linux",
+        "description": "12 steps passed in 582s on linux-host (profile full)",
+        "target_url": null,
+        "created_at": "2026-11-04T16:23:10Z",
+        "updated_at": "2026-11-04T16:23:10Z",
+        "creator": {
+          "login": "deku2026",
+          "id": 263133346,
+          "type": "User"
+        }
+      },
+      {
+        "id": 58061125352,
+        "state": "success",
+        "context": "arcforges/windows",
+        "description": "5 steps passed in 83s on workstation (profile full)",
+        "target_url": null,
+        "created_at": "2026-11-04T16:15:15Z",
+        "updated_at": "2026-11-04T16:15:15Z",
+        "creator": {
+          "login": "deku2026",
+          "id": 263133346,
+          "type": "User"
+        }
+      },
+      {
+        "id": 58060984530,
+        "state": "pending",
+        "context": "arcforges/windows",
+        "description": "verifying on workstation",
+        "target_url": null,
+        "created_at": "2026-11-04T16:13:49Z",
+        "updated_at": "2026-11-04T16:13:49Z",
+        "creator": {
+          "login": "deku2026",
+          "id": 263133346,
+          "type": "User"
+        }
+      },
+      {
+        "id": 58060946442,
+        "state": "pending",
+        "context": "arcforges/linux",
+        "description": "verifying on linux-host",
+        "target_url": null,
+        "created_at": "2026-11-04T16:13:25Z",
+        "updated_at": "2026-11-04T16:13:25Z",
+        "creator": {
+          "login": "deku2026",
+          "id": 263133346,
+          "type": "User"
+        }
+      }
+    ],
+    "repos/ArcForges/Cloud/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f&exclude_pull_requests=true&per_page=100": {
+      "total_count": 1,
+      "workflow_runs": [
+        {
+          "id": 41866820816,
+          "name": "CI",
+          "path": ".github/workflows/ci.yml",
+          "event": "push",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f",
+          "head_branch": "main",
+          "run_number": 547,
+          "run_attempt": 1,
+          "repository": {
+            "id": 1372264358,
+            "full_name": "ArcForges/Cloud"
+          },
+          "head_repository": {
+            "id": 1372264358,
+            "full_name": "ArcForges/Cloud"
+          }
+        }
+      ]
+    },
+    "repos/ArcForges/Cloud/actions/runs/41866820816/jobs?filter=latest&per_page=100": {
+      "total_count": 9,
+      "jobs": [
+        {
+          "id": 126703022921,
+          "run_id": 41866820816,
+          "name": "Native AOT image and Worker build",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+        },
+        {
+          "id": 126703023249,
+          "run_id": 41866820816,
+          "name": "Source (${{ matrix.os }})",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+        },
+        {
+          "id": 126703023803,
+          "run_id": 41866820816,
+          "name": "Dependency review",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+        },
+        {
+          "id": 126703024298,
+          "run_id": 41866820816,
+          "name": "Dependency audit and repository checks",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+        },
+        {
+          "id": 126703073187,
+          "run_id": 41866820816,
+          "name": "CodeQL (${{ matrix.language }})",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+        },
+        {
+          "id": 126703085678,
+          "run_id": 41866820816,
+          "name": "Proof Cloudflare access and resources",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+        },
+        {
+          "id": 126704645764,
+          "run_id": 41866820816,
+          "name": "Deploy Cloudflare",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+        },
+        {
+          "id": 126704648135,
+          "run_id": 41866820816,
+          "name": "Verify",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+        },
+        {
+          "id": 126704650326,
+          "run_id": 41866820816,
+          "name": "Deploy Cloudflare proof environment",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+        }
+      ]
+    },
+    "repos/ArcForges/Cloud/actions/runs/41866820816/artifacts?per_page=100": {
+      "total_count": 2,
+      "artifacts": [
+        {
+          "id": 13343345828,
+          "name": "cloud-candidate-41866820816-1",
+          "size_in_bytes": 86549472,
+          "expired": false,
+          "digest": "sha256:c6cbb21b0973676a76d455baaa70be7c094ff22dd562b866e0a5a61276f74daf",
+          "created_at": "2026-11-04T16:26:43Z",
+          "expires_at": "2026-12-04T16:26:39Z",
+          "workflow_run": {
+            "id": 41866820816,
+            "repository_id": 1372264358,
+            "head_repository_id": 1372264358,
+            "head_branch": "main",
+            "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+          }
+        },
+        {
+          "id": 13342243386,
+          "name": "cloudflare-evidence-41866820816-1",
+          "size_in_bytes": 1374,
+          "expired": false,
+          "digest": "sha256:1ea8f7f34757ed6dc48f559a21d764a749df9846b93e979248957c01203c573a",
+          "created_at": "2026-11-04T16:33:22Z",
+          "expires_at": "2027-02-02T16:23:57Z",
+          "workflow_run": {
+            "id": 41866820816,
+            "repository_id": 1372264358,
+            "head_repository_id": 1372264358,
+            "head_branch": "main",
+            "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+          }
+        }
+      ]
+    },
+    "repos/ArcForges/Cloud/actions/runs/41866820816": {
+      "id": 41866820816,
+      "name": "CI",
+      "path": ".github/workflows/ci.yml",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f",
+      "head_branch": "main",
+      "run_number": 547,
+      "run_attempt": 1,
+      "repository": {
+        "id": 1372264358,
+        "full_name": "ArcForges/Cloud"
+      },
+      "head_repository": {
+        "id": 1372264358,
+        "full_name": "ArcForges/Cloud"
+      }
+    },
+    "repos/ArcForges/Cloud/actions/artifacts/13343345828": {
+      "id": 13343345828,
+      "name": "cloud-candidate-41866820816-1",
+      "size_in_bytes": 86549472,
+      "expired": false,
+      "digest": "sha256:c6cbb21b0973676a76d455baaa70be7c094ff22dd562b866e0a5a61276f74daf",
+      "created_at": "2026-11-04T16:26:43Z",
+      "expires_at": "2026-12-04T16:26:39Z",
+      "workflow_run": {
+        "id": 41866820816,
+        "repository_id": 1372264358,
+        "head_repository_id": 1372264358,
+        "head_branch": "main",
+        "head_sha": "9085b1217a96ef24cac5600a7cc9fadbb9a6fd6f"
+      }
+    }
+  }
+}
