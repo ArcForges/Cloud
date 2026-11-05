@@ -293,7 +293,10 @@ var errNotAccepted = errors.New("the hub did not accept the connection")
 // register records the node online under the connection's fence and then makes the connection the node's (an older one closes 4409),
 // as one step per node, so the row names the connection the hub holds. A refused write registers nothing and displaces nothing.
 func (c *conn) register(ctx context.Context, now time.Time) (*conn, error) {
-	unlock := c.hub.lockNode(c.nodeID)
+	unlock, err := c.hub.lockNode(ctx, c.nodeID)
+	if err != nil {
+		return nil, err
+	}
 	defer unlock()
 	if err := c.hub.markOnline(ctx, c.enrollmentID, c.connectionID, c.fence, now); err != nil {
 		return nil, err

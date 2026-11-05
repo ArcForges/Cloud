@@ -604,9 +604,15 @@ is the database's clock (`clock_timestamp()`), so a replica whose clock runs ahe
 refused once that fence is not the live one; the audit appends are not fenced. A process that does not hold it serves no channel (the
 upgrade is 503 `RESOURCE/overloaded`, and E2's routed calls answer `STATE/node_offline`), and logs once when another process holds
 it. The claim keeps a local expiry too, 25 s (the time to live less a sixth) after the start of its last successful renewal on the
-process's own clock: a process whose renewals fail (a store that does not answer, a saturated pool) holds nothing once it passes, so it
-admits no upgrade and closes its channels 4500 `lease_lost` before the database's expiry lets another process take over; a renewal
-that finds the lease another process's closes them the same way. A hello whose accept write the lease refuses closes 4500
+process's own clock: a process whose renewals fail (a store that does not answer, a saturated pool) holds nothing once it passes. The
+lease loop wakes at that instant (its timer is re-armed to the earlier of the next renewal and the local expiry, and a renewal waits
+for the store at most until then), so admission stops and every channel's close starts at the local expiry, 5 s before the database's
+expiry lets another process take over; a close takes at most about 3 s (the `RelayClose` write is bounded by 2 s and the close
+handshake by 1 s, all connections in parallel), so the channels are closed before then (`TestAHubWhoseRenewalsFailStandsDown`, at the
+3 : 1 ratio of PB-5). A renewal that finds the lease another process's closes them the same way. Once the store answers again, the
+process takes its own lapsed row over at once under a higher fence (it never takes it for another process's), so the lapsed epoch's
+writes stay refused. The accept lock is one per node, chosen by a hash of the whole node ID, and its wait ends with the hello's
+context (4500 `unavailable`). A hello whose accept write the lease refuses closes 4500
 `lease_lost`, without `ChannelAccepted` and without displacing the node's older connection; one whose node row was revoked since the
 admission closes 4401 `revoked`. A killed center's lease is taken over after its 30 s; the new holder clears the connections the
 previous one left recorded.
@@ -632,7 +638,7 @@ claim): `TestUpgradeAdmission`, `TestUpgradeRefusesUnknownRevokedExpiredAndAccou
 `TestStartRefusesAMismatchedOrMissingCommandKey`, `TestTheCommandKeyNeverAppearsInLogsOrHealth`, `TestTokenRefreshHasItsOwnBound`,
 `TestABarredAccountsRefreshCloses4403`, `TestALateHelloIsRefusedByItsNonce`, `TestARevocationBeforeTheHelloIsFound`,
 `TestAHelloUnderAStaleFenceIsClosedNotAccepted`, `TestAHubWhoseRenewalsFailStandsDown`, `TestALeaseTakenOverClosesTheChannels`,
-`TestAClaimWhoseRenewalsFailLapsesLocally`, `TestTheAcceptWriteTellsAStaleFenceFromAGoneNode`,
+`TestAClaimWhoseRenewalsFailLapsesLocally`, `TestTheAcceptWriteTellsAStaleFenceFromAGoneNode`, `TestTheAcceptLockSpreadsAndIsBounded`,
 `TestNoValidCommandKeyNeverSendsEmptySigningKids`, `TestAFailedHandshakeGivesTheNodeSlotBack`, `TestTheHelloMatchesTheContractsVector`
 (the C2 golden hello vector, `testdata/relay-hello-vector.json`) and, through the account's devices page and its real revoke path,
 `TestRevokingANodesDeviceOnTheDevicesPageClosesItsChannel`.

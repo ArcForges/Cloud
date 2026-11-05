@@ -3,6 +3,7 @@
 package hub_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -193,24 +194,34 @@ func TestAHelloUnderAStaleFenceIsClosedNotAccepted(t *testing.T) {
 	}
 }
 
-// TestAHubWhoseRenewalsFailStandsDown is review B B-1 (PB-5): a hub whose lease renewals fail (here the runtime role may no longer
-// update the lease row) keeps its claim only until the claim's local expiry, the time to live less a sixth: then it admits no upgrade
-// and closes its channels 4500 lease_lost, before the database's expiry lets another process take the lease. Once the store answers
-// again the hub takes the lease over under a higher fence and serves again.
+// TestAHubWhoseRenewalsFailStandsDown is review B B-1 and its confirmation (A B-3, B C-B1; PB-5), at the production ratio of the time
+// to live to the renewal interval (3 : 1; here 3 s and 1 s for PB-5's 30 s and 10 s): a hub whose lease renewals fail fast (the
+// runtime role may no longer update the lease row) gives its claim up at the claim's local expiry itself, the time to live less a sixth
+// after its last successful renewal: the loop wakes then, not on its next renewal tick, so admission stops and the channel's close
+// starts there, and the channel is closed before the database's expiry (a sixth later) lets another process take the lease. Once the
+// store answers again the hub takes its own lapsed row over under a higher fence (it never takes it for another process's) and serves
+// again.
 func TestAHubWhoseRenewalsFailStandsDown(t *testing.T) {
-	h := newHarness(t, settings{tune: func(s *hub.Settings) { s.LeaseTTL, s.LeaseRenew = 3*time.Second, 200*time.Millisecond }})
+	h := newHarness(t, settings{tune: func(s *hub.Settings) { s.LeaseTTL, s.LeaseRenew = 3*time.Second, time.Second }})
 	node := h.enroll()
 	closed := answer(h.connect(node))
 	fence, _ := h.center.Hub.Lease().Fence()
 	role := `"` + h.db.Name + `_runtime"`
 	h.db.Exec("REVOKE UPDATE ON fleet.hub_lease FROM " + role)
-	revoked := time.Now()
-	result := closedWithin(t, closed, 6*time.Second)
+	// A renewal in flight at the revoke may still have succeeded; past one renewal interval the local expiry no longer moves.
+	time.Sleep(1100 * time.Millisecond)
+	until, held := h.center.Hub.Lease().ValidUntil()
+	if !held || !time.Now().Before(until) {
+		t.Fatal("the claim lapsed before the test read its local expiry")
+	}
+	result := closedWithin(t, closed, 5*time.Second)
+	closedAt := time.Now()
 	if result.Code != hub.CloseShuttingDown || result.Reason != "lease_lost" {
 		t.Fatalf("a hub whose renewals fail: %+v", result)
 	}
-	if elapsed := time.Since(revoked); elapsed >= 3*time.Second {
-		t.Fatalf("the hub stood down only after the database's expiry (%s)", elapsed)
+	// The database's expiry is at least a sixth of the time to live (500 ms) after the local expiry; the close is done well before it.
+	if late := closedAt.Sub(until); late > 300*time.Millisecond {
+		t.Fatalf("the channel closed %s after the local expiry (the database's expiry is 500 ms after it)", late)
 	}
 	if h.center.Metrics.ChannelCount("lease", "renewal_failed") == 0 || h.center.Metrics.ChannelCount("lease", "lost") != 1 {
 		t.Fatal("the failed renewals and the loss were not counted")
@@ -222,10 +233,14 @@ func TestAHubWhoseRenewalsFailStandsDown(t *testing.T) {
 	if got := refusalOf(t, channel, err); got.status != 503 {
 		t.Fatalf("an upgrade while the hub holds no lease: %+v", got)
 	}
-	// The store answers again: the hub takes the lease over once it expired, under a higher fence, and admits the node again.
+	// The store answers again: the hub takes its own row over under a higher fence, and admits the node again. Its own lapsed row is
+	// never logged or counted as another process's (review B C-N1).
 	h.db.Exec("GRANT UPDATE ON fleet.hub_lease TO " + role)
 	if !eventually(t, 8*time.Second, func() bool { next, held := h.center.Hub.Lease().Fence(); return held && next > fence }) {
 		t.Fatal("the hub did not take the lease over again")
+	}
+	if h.center.Metrics.ChannelCount("lease", "held_elsewhere") != 0 || strings.Contains(h.logs.String(), "another center process holds") {
+		t.Fatal("the hub took its own lapsed lease for another process's")
 	}
 	answer(h.connect(node))
 }

@@ -33,6 +33,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"hash/maphash"
 	"log/slog"
 	"math/big"
 	"net/http"
@@ -163,7 +164,8 @@ type Hub struct {
 	kids     []string // the held command keys' kids (UseSigningKids)
 	// heldElsewhere is set while another process holds the lease, so it is logged once.
 	heldElsewhere atomic.Bool
-	nodeLocks     [nodeLockStripes]sync.Mutex
+	nodeLocks     [nodeLockStripes]chan struct{} // one-slot accept locks (lockNode)
+	lockSeed      maphash.Seed
 	wg            sync.WaitGroup
 
 	stop    context.CancelFunc
@@ -189,12 +191,16 @@ func New(options Options) *Hub {
 	if surface == nil {
 		surface = func() bool { return true }
 	}
-	return &Hub{
+	h := &Hub{
 		db: options.DB, verifier: options.Verifier, authorizer: options.Authorizer, gate: options.Gate, codec: options.Codec,
 		settings: options.Settings, centerURL: options.CenterURL, surface: surface, options: options, clock: clock, logger: logger,
 		metrics: metrics, lease: NewLease(options.DB, platform.NewID(), options.Settings.LeaseTTL, clock),
-		nodes: map[platform.ID]*conn{}, all: map[*conn]bool{},
+		nodes: map[platform.ID]*conn{}, all: map[*conn]bool{}, lockSeed: maphash.MakeSeed(),
 	}
+	for index := range h.nodeLocks {
+		h.nodeLocks[index] = make(chan struct{}, 1)
+	}
+	return h
 }
 
 // Lease is the hub's claim of the hub lease.
@@ -233,12 +239,14 @@ func (h *Hub) acquire(ctx context.Context) {
 	}
 }
 
-// leaseLoop renews the held lease, or tries to take it, every LeaseRenew, and wakes at the claim's local expiry too. A lease lost
-// (another holder took it, or the claim passed its local expiry while its renewals failed) closes every connection 4500 lease_lost:
-// the node reconnects, to the process that holds the lease then.
+// leaseLoop renews the held lease, or tries to take it, every LeaseRenew, and wakes at the claim's local expiry: its timer is re-armed
+// to the earlier of the two, and a renewal's own wait ends at the local expiry. So a claim whose renewals fail is given up, and every
+// channel's close started, at the local expiry itself (5 s before the database's expiry at PB-5's settings; see lease.go), never on the
+// next renewal's tick. A lease lost (another holder took it, or the claim passed its local expiry while its renewals failed) closes
+// every connection 4500 lease_lost: the node reconnects, to the process that holds the lease then.
 func (h *Hub) leaseLoop(ctx context.Context) {
 	defer close(h.done)
-	timer := time.NewTimer(h.settings.LeaseRenew)
+	timer := time.NewTimer(h.leaseWait())
 	defer timer.Stop()
 	for {
 		select {
@@ -246,25 +254,43 @@ func (h *Hub) leaseLoop(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-		timer.Reset(h.settings.LeaseRenew)
-		if h.lease.Lapse() {
-			h.lost("the hub lease passed its local expiry without a renewal")
-			continue
-		}
-		if _, held := h.lease.Fence(); !held {
-			h.acquire(ctx)
-			continue
-		}
-		renewed, err := h.lease.Renew(ctx)
-		switch {
-		case err != nil && h.lease.Lapse():
-			h.lost("the hub lease passed its local expiry without a renewal")
-		case err != nil:
-			h.metrics.ObserveChannel("lease", "renewal_failed")
-			h.logger.Warn("the hub lease could not be renewed; retrying until its local expiry", "error", err.Error())
-		case !renewed:
-			h.lost("another center process took the hub lease over")
-		}
+		h.leaseStep(ctx)
+		timer.Reset(h.leaseWait())
+	}
+}
+
+// leaseWait is the time to the loop's next wake: the next renewal, or the claim's local expiry when that comes first.
+func (h *Hub) leaseWait() time.Duration {
+	wait := h.settings.LeaseRenew
+	if remaining, held := h.lease.remaining(); held {
+		wait = min(wait, max(remaining, 0))
+	}
+	return wait
+}
+
+// leaseStep is one wake of the lease loop.
+func (h *Hub) leaseStep(ctx context.Context) {
+	if h.lease.Lapse() {
+		h.lost("the hub lease passed its local expiry without a renewal")
+		return
+	}
+	remaining, held := h.lease.remaining()
+	if _, valid := h.lease.Fence(); !held || !valid {
+		h.acquire(ctx)
+		return
+	}
+	// The renewal waits for the store at most until the local expiry, so a store that does not answer never holds the stand-down back.
+	renewal, cancel := context.WithTimeout(ctx, remaining)
+	renewed, err := h.lease.Renew(renewal)
+	cancel()
+	switch {
+	case err != nil && h.lease.Lapse():
+		h.lost("the hub lease passed its local expiry without a renewal")
+	case err != nil:
+		h.metrics.ObserveChannel("lease", "renewal_failed")
+		h.logger.Warn("the hub lease could not be renewed; retrying until its local expiry", "error", err.Error())
+	case !renewed:
+		h.lost("another center process took the hub lease over")
 	}
 }
 
@@ -331,14 +357,25 @@ func (h *Hub) Count() int {
 	return len(h.nodes)
 }
 
-// nodeLocks serialize the accept of one node's connections (its presence write and its registration), striped by node ID.
+// nodeLockStripes is the number of accept locks; a node's lock is chosen by a hash of its whole ID with a per-process seed (the node
+// chooses its ID, so no part of it spreads the nodes by itself; review A N-8).
 const nodeLockStripes = 64
 
-// lockNode takes the accept lock of a node and returns its release.
-func (h *Hub) lockNode(nodeID platform.ID) func() {
-	lock := &h.nodeLocks[int(nodeID[0])%nodeLockStripes]
-	lock.Lock()
-	return lock.Unlock
+// stripeOf is the accept lock of a node ID: a hash of the whole ID.
+func (h *Hub) stripeOf(nodeID platform.ID) int {
+	return int(maphash.Bytes(h.lockSeed, nodeID[:]) % nodeLockStripes)
+}
+
+// lockNode takes the accept lock of a node (its presence write and its registration are one step per node) and returns its release.
+// The wait is bounded by ctx: a context that ends first returns its error and takes nothing.
+func (h *Hub) lockNode(ctx context.Context, nodeID platform.ID) (func(), error) {
+	stripe := h.nodeLocks[h.stripeOf(nodeID)]
+	select {
+	case stripe <- struct{}{}:
+		return func() { <-stripe }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // track adds an upgraded connection before its hello; it reports false while the hub is stopping.

@@ -169,6 +169,19 @@ func TestAClaimWhoseRenewalsFailLapsesLocally(t *testing.T) {
 	if renewed, err := lease.Renew(t.Context()); err != nil || renewed {
 		t.Fatalf("a lapsed claim renewed: %v %v", renewed, err)
 	}
+	// The row still names this claim's holder and is still live by the database's clock: another process cannot take it, and this
+	// claim takes its own row over at once under a higher fence (review B C-N1), so the lapsed epoch's writes stay refused.
+	other := NewLease(db.Runtime, platform.NewID(), 30*time.Second, at.Now)
+	if _, err := other.Acquire(t.Context()); !errors.Is(err, ErrLeaseHeld) {
+		t.Fatalf("another process over a live lapsed row: %v", err)
+	}
+	first := db.Count("SELECT fence FROM fleet.hub_lease")
+	if again, err := lease.Acquire(t.Context()); err != nil || again != int64(first)+1 {
+		t.Fatalf("the claim over its own live lapsed row: %d %v", again, err)
+	}
+	if n := db.Count("SELECT count(*) FROM fleet.hub_lease WHERE expires_at > clock_timestamp()"); n != 1 {
+		t.Fatal("the own takeover left no live lease")
+	}
 	// A successful renewal moves the local expiry: a fresh claim renewed at 20 s holds until 45 s.
 	fresh := NewLease(db.Runtime, platform.NewID(), 30*time.Second, at.Now)
 	expireLease(t, db)
@@ -244,4 +257,49 @@ func seedNode(t *testing.T, db *dbtest.Database) platform.ID {
 		t.Fatal(err)
 	}
 	return result.EnrollmentID
+}
+
+// TestTheAcceptLockSpreadsAndIsBounded is review A N-8: a node chooses its own ID, so the accept lock is chosen by a hash of the whole ID
+// (nodes whose IDs share every byte but the last spread over the stripes), and the wait for it ends with the hello's context.
+func TestTheAcceptLockSpreadsAndIsBounded(t *testing.T) {
+	h := New(Options{Settings: Settings{LeaseTTL: 30 * time.Second}})
+	stripes := map[int]bool{}
+	for index := range 64 {
+		id := platform.ID{0x01, 0x92, 0xf7, 0xa0}
+		id[15] = byte(index)
+		stripes[h.stripeOf(id)] = true
+	}
+	if len(stripes) < 16 {
+		t.Fatalf("64 node IDs that differ in their last byte share %d of %d accept locks", len(stripes), nodeLockStripes)
+	}
+	node := platform.NewID()
+	unlock, err := h.lockNode(context.Background(), node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waited := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		release, err := h.lockNode(ctx, node)
+		if err == nil {
+			release()
+		}
+		waited <- err
+	}()
+	select {
+	case err := <-waited:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("a wait for a held accept lock: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		unlock()
+		t.Fatal("the wait for a held accept lock ignored its context")
+	}
+	unlock()
+	release, err := h.lockNode(context.Background(), node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
 }
