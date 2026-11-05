@@ -9,12 +9,13 @@
 // class identity.authorizeMobile), reads the callback from the done page's "Open the ArcForges app" link and hands it to the probe in
 // <case>.link.json (the MOCKED stand-in of a verified App Link handing the fragment to the app: the probe deletes the file as soon as it
 // reads it), and then taps the link as a person would: on the proof host the link loads the fixed /app/callback page, whose script
-// removes the fragment from the address. It waits for the probe's result. At the end, also after a failed step, it revokes on the
-// devices page as many "Android phone" devices as the run's approvals may have added (never more than were listed before the run plus
-// those approvals), and the report says how many are left.
+// removes the fragment from the address. It waits for the probe's result, which names the device of each session it was delivered. At
+// the end, also after a failed step, it revokes on the devices page exactly the devices the probe's results named (by device ID, so
+// no other phone of the account is touched), and the report says how many of them are left. A case whose result never arrived names
+// no device: the report counts such cases, and nothing is revoked for them.
 //
 // The center's own limits a run spends (docs/center-mobile.md "H3 checklist"): step-ups 10 per account in 10 minutes (one per approval
-// and one per revoked device: acceptance.ts refuses a --cases that could spend more), mobile_approve_account 20 decisions an hour,
+// and one per revoked device, at most one device per approval: acceptance.ts refuses a --cases that could spend more), mobile_approve_account 20 decisions an hour,
 // mobile_begin_prefix 30 begins in 10 minutes (one per case, on the probe's address), mobile_token_prefix 30 failed token requests in
 // 10 minutes (the wrong-verifier case spends none: its code matches).
 import {
@@ -33,6 +34,11 @@ import {
   until,
 } from "./flow.ts";
 import type { Handshake, ProbeResult } from "./node-flow.ts";
+
+/** What mobile-probe writes at the end: node-probe's result and the device ID of each session it was delivered. */
+export interface MobileProbeResult extends ProbeResult {
+  deviceIds?: unknown;
+}
 import { mobile, pages, selectors } from "./selectors.ts";
 
 /** What mobile-probe writes when a person can act. */
@@ -60,6 +66,25 @@ const casePattern = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 const flowFragment = /^#flow=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const claimText = /^[A-Za-z0-9._:/-]{1,128}$/u;
 const scenarios = ["approve", "deny", "reuse", "wrong-verifier"] as const;
+const deviceIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+/** The device IDs a probe result names: canonical lower-case UUIDs, at most one per case's approval (two would be a probe fault). */
+export function probeDeviceIds(result: MobileProbeResult): string[] {
+  const ids = result.deviceIds ?? [];
+  expect(
+    Array.isArray(ids) &&
+      ids.length <= 1 &&
+      ids.every((id) => typeof id === "string" && deviceIdPattern.test(id)),
+    "mobile-probe's result names a device ID that is not one canonical UUID.",
+  );
+  return ids as string[];
+}
+
+/** The revoke button of exactly one device, found by the device ID its revoke form carries. */
+export function revokeDeviceSelector(deviceId: string): string {
+  expect(deviceIdPattern.test(deviceId), "A device ID is not a canonical UUID.");
+  return `form[action$="/account/devices/revoke"]:has(input[name="device_id"][value="${deviceId}"]) button`;
+}
 
 /** The most step-ups a mobile-approve run of `cases` cases can spend: one per approval and one per device its clean-up revokes. */
 export function mobileStepUpsAtMost(cases: number): number {
@@ -178,8 +203,8 @@ async function nextBegin(
   return found as string;
 }
 
-function readResult(text: string, probeRequests: number[]): ProbeResult {
-  const result = JSON.parse(text) as ProbeResult;
+function readResult(text: string, probeRequests: number[]): MobileProbeResult {
+  const result = JSON.parse(text) as MobileProbeResult;
   for (const instant of result.requests ?? []) probeRequests.push(new Date(instant).getTime());
   return result;
 }
@@ -194,6 +219,8 @@ export async function runMobileApprove(world: World, options: MobileApproveOptio
   world.store.prepare();
   const handled = new Set<string>();
   let approvals = 0;
+  const unreported = new Set<string>();
+  const deviceIds: string[] = [];
   let actor: Actor | undefined;
   let failure: unknown;
   try {
@@ -253,7 +280,10 @@ export async function runMobileApprove(world: World, options: MobileApproveOptio
         mockedLabel,
         async () => {
           const previous = a.tab.document();
-          if (begin.decision === "approve") approvals += 1;
+          if (begin.decision === "approve") {
+            approvals += 1;
+            unreported.add(begin.case);
+          }
           await a.tab.click(begin.decision === "deny" ? mobile.deny : mobile.approve);
           const reply = await awaitDocument(
             world,
@@ -288,6 +318,8 @@ export async function runMobileApprove(world: World, options: MobileApproveOptio
           await waitForFile(world, options.handshake, `${begin.case}.result.json`, options.waitMs),
           options.probeRequests,
         );
+        deviceIds.push(...probeDeviceIds(result));
+        unreported.delete(begin.case);
         const failed = (result.steps ?? []).filter((item) => !item.ok).map((item) => item.name);
         expect(
           result.passed === true,
@@ -299,10 +331,13 @@ export async function runMobileApprove(world: World, options: MobileApproveOptio
   } catch (error) {
     failure = error;
   }
-  world.report.facts.devicesLeft = approvals === 0 ? 0 : "unknown";
-  if (actor !== undefined && approvals > 0) {
+  world.report.facts.approvals = approvals;
+  world.report.facts.devicesNamed = deviceIds.length;
+  world.report.facts.casesWithoutResult = unreported.size;
+  world.report.facts.devicesLeft = deviceIds.length === 0 ? 0 : "unknown";
+  if (actor !== undefined && deviceIds.length > 0) {
     try {
-      await cleanUp(world, actor, approvals);
+      await cleanUp(world, actor, deviceIds);
     } catch (error) {
       failure ??= error;
     }
@@ -311,11 +346,15 @@ export async function runMobileApprove(world: World, options: MobileApproveOptio
 }
 
 /**
- * Revokes, on the devices page, the "Android phone" devices the run's approvals may have added: at most one per approval (each
- * revocation proves a step-up). The probe's installations are new each run, so each delivered session made one such device.
+ * Revokes, on the devices page, exactly the devices the probe's results named (each revocation proves a step-up; at most one device per
+ * approval). A device that is no longer listed (revoked already) is skipped; no other device of the account is touched.
  */
-async function cleanUp(world: World, a: Actor, approvals: number): Promise<void> {
-  const count = async () => a.tab.count(mobile.revokePhone);
+async function cleanUp(world: World, a: Actor, deviceIds: string[]): Promise<void> {
+  const listed = async () => {
+    let count = 0;
+    for (const id of deviceIds) count += (await a.tab.count(revokeDeviceSelector(id))) > 0 ? 1 : 0;
+    return count;
+  };
   await step(world, "clean-up: open the devices page", mockedLabel, async () => {
     const reply = await a.tab.goto(pageUrl(world, pages.devices));
     expectReply(reply, 200, pages.devices);
@@ -326,31 +365,32 @@ async function cleanUp(world: World, a: Actor, approvals: number): Promise<void>
       a.signedIn = true;
     }
     await a.tab.waitForSelector(selectors.heading, world.timeoutMs);
-    world.report.facts.devicesLeft = await count();
+    world.report.facts.devicesLeft = await listed();
   });
   await step(
     world,
-    "clean-up: revoke the phones the approvals created",
+    "clean-up: revoke the devices of the delivered sessions",
     mockedLabel,
     async () => {
       let revoked = 0;
-      while (revoked < approvals) {
-        const before = await count();
-        if (before === 0) break;
+      for (const id of deviceIds) {
+        const button = revokeDeviceSelector(id);
+        if ((await a.tab.count(button)) === 0) continue;
         const previous = a.tab.document();
-        await a.tab.click(mobile.revokePhone);
+        await a.tab.click(button);
         await awaitDocument(
           world,
           a.tab,
           previous,
           "the devices page after a revocation",
           async () =>
-            (await a.tab.text(selectors.heading)) === "Devices" && (await count()) < before,
+            (await a.tab.text(selectors.heading)) === "Devices" &&
+            (await a.tab.count(button)) === 0,
         );
         revoked += 1;
       }
       world.report.facts.devicesRevoked = revoked;
-      world.report.facts.devicesLeft = await count();
+      world.report.facts.devicesLeft = await listed();
     },
     { restartable: false },
   );

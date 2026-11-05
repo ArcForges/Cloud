@@ -151,7 +151,4 @@ export const mobile = {
   approve: '#approve button[type="submit"]',
   deny: '#deny button[type="submit"]',
   appLink: "#app-link",
-  /** The revoke button of the devices page's rows of a phone the mobile authorization created (named "Android phone"). */
-  revokePhone:
-    'tr:has(th bdi:text-is("Android phone")) form[action$="/account/devices/revoke"] button',
 } as const;

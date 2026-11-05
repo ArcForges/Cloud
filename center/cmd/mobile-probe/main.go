@@ -8,7 +8,8 @@
 // secret), waits for <case>.link.json (the callback link the browser read from the done page's "Open the ArcForges app" link: the
 // MOCKED stand-in of a verified App Link handing the fragment to the app; it holds the one-use code, so the probe deletes it as soon
 // as it is read), checks the callback's state and issuer against its pending attempt, redeems the code per scenario and writes
-// <case>.result.json (the outcome of each step and the instant of each request; no token, code, verifier or state).
+// <case>.result.json (the outcome of each step, the instant of each request and the device ID of each delivered session, so that the
+// browser flow's clean-up revokes exactly those devices; no token, code, verifier or state).
 //
 // Scenarios: approve (token, then IdentityService.RefreshSession once), deny (the callback says access_denied), reuse (token, then the
 // same code again: CONFLICT/code_reused, and the delivered family is refused at refresh), wrong-verifier (a token request with another
@@ -119,7 +120,12 @@ type result struct {
 	Passed   bool        `json:"passed"`
 	Steps    []step      `json:"steps"`
 	Requests []time.Time `json:"requests"`
+	// DeviceIDs are the devices of the delivered sessions (the token replies' device.deviceId; not secret), for the clean-up.
+	DeviceIDs []string `json:"deviceIds"`
 }
+
+// deviceIDShape is a device ID as the token reply writes it: a canonical lower-case UUID.
+var deviceIDShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // probe is one run.
 type probe struct {
@@ -201,7 +207,13 @@ func (p *probe) token(ctx context.Context, name string, attempt mobiletest.Attem
 	refresh, _ := reply.JSON["refreshToken"].(string)
 	device, _ := reply.JSON["device"].(map[string]any)
 	platformName, _ := device["platform"].(string)
+	deviceID, _ := device["deviceId"].(string)
 	ok := reply.Status == http.StatusOK && scope == "account" && purpose == "authenticate" && refresh != "" && platformName == "android"
+	if reply.Status == http.StatusOK && deviceIDShape.MatchString(deviceID) {
+		p.result.DeviceIDs = append(p.result.DeviceIDs, deviceID)
+	} else if reply.Status == http.StatusOK {
+		ok = false
+	}
 	return refresh, p.record(name, ok, outcomeOf(reply)+" scope "+scope+" purpose "+purpose+" device "+platformName)
 }
 
@@ -294,7 +306,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	app := &mobiletest.App{Center: o.center, ClientID: client, Redirect: redirect, InstallationID: platform.NewID(), Platform: "android-15",
 		AppVersion: "0.0.0-mobile-probe"}
-	p := &probe{o: o, app: app, out: stdout, result: result{Case: o.caseName, Scenario: o.scenario}}
+	p := &probe{o: o, app: app, out: stdout, result: result{Case: o.caseName, Scenario: o.scenario, DeviceIDs: []string{}}}
 	ctx, cancel := context.WithTimeout(context.Background(), o.timeout+2*time.Minute)
 	defer cancel()
 	p.result.Passed = p.run(ctx)

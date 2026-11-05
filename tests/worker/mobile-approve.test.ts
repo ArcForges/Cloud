@@ -17,6 +17,8 @@ import {
   mobileBeginSecrets,
   mobileStepUpsAtMost,
   parseMobileBegin,
+  probeDeviceIds,
+  revokeDeviceSelector,
 } from "../../eng/verification/browser/mobile-flow.ts";
 import { mobile } from "../../eng/verification/browser/selectors.ts";
 
@@ -111,4 +113,35 @@ test("every element the flow touches is in the center's mobile templates", () =>
   assert(review.includes('id="approve"') && review.includes('id="deny"'));
   assert(done.includes(`id="${mobile.appLink.slice(1)}"`));
   assert.equal(mobile.appCallback, "/app/callback");
+});
+
+test("the clean-up revokes exactly the devices mobile-probe names, found by the device ID of their revoke form", () => {
+  const device = "0f1e2d3c-4b5a-4968-8776-655443322110";
+  const result = { case: "approve-1", kind: "mobile", passed: true, steps: [], requests: [] };
+  assert.deepEqual(probeDeviceIds({ ...result, deviceIds: [device] }), [device]);
+  assert.deepEqual(probeDeviceIds({ ...result, deviceIds: [] }), []);
+  assert.deepEqual(probeDeviceIds(result), []);
+  for (const deviceIds of [
+    [device.toUpperCase()],
+    [`${device} `],
+    ["Android phone"],
+    [device, device],
+    device,
+    [1],
+  ])
+    assert.throws(() => probeDeviceIds({ ...result, deviceIds }), String(deviceIds));
+  assert.equal(
+    revokeDeviceSelector(device),
+    `form[action$="/account/devices/revoke"]:has(input[name="device_id"][value="${device}"]) button`,
+  );
+  assert.throws(() => revokeDeviceSelector('x"] , button'));
+  // The devices page's revoke form carries the device ID in exactly the input the selector names.
+  const template = readFileSync(
+    path.join(import.meta.dirname, "../../center/internal/pages/templates/devices.gohtml"),
+    "utf8",
+  );
+  assert.match(
+    template,
+    /<form method="post" action="\{\{\$\.Base\}\}\/account\/devices\/revoke"[^>]*>\n<input type="hidden" name="csrf" value="\{\{\$\.CSRF\}\}">\n<input type="hidden" name="command_id" value="\{\{\.RevokeCommand\}\}">\n<input type="hidden" name="device_id" value="\{\{\.ID\}\}">/u,
+  );
 });
