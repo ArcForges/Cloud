@@ -160,7 +160,21 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
 
 test("production enables no surface and the acceptance environment enables identity, pages, operations and fleet", () => {
   assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
-  assert.equal(wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES, "identity,pages,operations,fleet");
+  assert.equal(
+    wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES,
+    "identity,pages,operations,fleet,mobile",
+  );
+  // AF-CTR-04 part M (Q-1): proof's Android app identity is one labelled non-shipping test statement (testOnly, the test package);
+  // production carries none.
+  const proofApps = JSON.parse(String(wrangler.env?.proof?.vars?.ARCFORGES_CENTER_ANDROID_APP)) as {
+    packageName: string;
+    sha256CertFingerprints: string[];
+    testOnly: boolean;
+  }[];
+  assert.equal(proofApps.length, 1);
+  assert.equal(proofApps[0]?.packageName, "com.arcforges.prooftest");
+  assert.equal(proofApps[0]?.testOnly, true);
+  assert.match(proofApps[0]?.sha256CertFingerprints[0] ?? "", /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/u);
   // C1: only the acceptance environment overrides the identity policy, and only with its anonymous-flow ceiling; production keeps
   // the defaults (no global bucket).
   assert.equal(wrangler.vars?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
@@ -231,8 +245,17 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,mobile" }).length, 1);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "mobile" }).length, 1);
   assert.deepEqual([...surfaces].sort(), ["fleet", "identity", "mobile", "operations", "pages"]);
-  // Production never enables the mobile surface and never carries an Android app identity or the debug scheme (M-15).
+  // Production never enables the mobile surface and never carries an Android app identity or the debug scheme (M-15); the
+  // acceptance environment enables it for H3.
   assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("mobile"));
+  for (const [name, environment] of environments)
+    assert.equal(
+      String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+        .split(",")
+        .includes("mobile"),
+      name === "proof",
+      `wrangler.json environment ${name}: the mobile surface is enabled in the acceptance environment and nowhere else`,
+    );
   assert.equal(wrangler.vars?.ARCFORGES_CENTER_ANDROID_APP, undefined);
   for (const [name, environment] of environments)
     assert.equal(

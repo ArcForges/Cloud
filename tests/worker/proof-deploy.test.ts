@@ -56,9 +56,14 @@ test("the checked-in proof environment is the isolated acceptance center", () =>
       ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
       // AF-CTR-03 and AF-CTR-04 E3: the acceptance environment serves the identity, pages, operations and fleet surfaces; browser cookies are bound to its own
       // origin, and its anonymous flows have a global ceiling (C1: it shares the production Neon project until the retention sweeps exist).
-      FLAGSHIP_SURFACES: "identity,pages,operations,fleet",
+      FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile",
       ALLOWED_ORIGIN: "https://proof.arcforges.com",
       ARCFORGES_CENTER_IDENTITY_POLICY: '{"anonymousFlowsLimit":600,"anonymousFlowsWindow":"1h"}',
+      // AF-CTR-04 part M (Q-1, H3): a labelled NON-SHIPPING TEST statement for the asset links of the proof host: a package name no app
+      // will ever publish and the SHA-256 fingerprint of a throwaway self-signed certificate (its key was destroyed; only the public
+      // fingerprint was ever kept). AF-AND-01 replaces it with the real app identity (AR-08, H-02).
+      ARCFORGES_CENTER_ANDROID_APP:
+        '[{"packageName":"com.arcforges.prooftest","sha256CertFingerprints":["33:58:0E:12:2B:9D:69:27:3B:BB:B9:1E:EC:58:D5:A2:B3:79:30:F8:EE:14:E4:20:62:FA:57:EC:23:76:5E:02"],"testOnly":true}]',
     },
   );
   // Production keeps the Hello-only bindings and never the development fixtures.
