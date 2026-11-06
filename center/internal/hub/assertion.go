@@ -115,13 +115,9 @@ type VerifiedRelay struct {
 	LocalSessionID         platform.ID
 	AssertionSHA256        []byte
 	ExpiresAt              time.Time
-}
-
-// Caller is the center caller of a verified relay (CallHeader.caller of kind NODE_RELAY): only from the assertion, never from a
-// request field (C-N1).
-func (v VerifiedRelay) Caller() Caller {
-	return Caller{Kind: nodev1.CenterCallerKind_CENTER_CALLER_KIND_NODE_RELAY, RelayingNodeID: v.RelayingNodeID, LocalOrigin: v.LocalOrigin,
-		LocalSessionID: v.LocalSessionID}
+	// verified is set only by VerifyRelayAssertion: hub.Call refuses a relay built any other way, so the call header's caller is
+	// structurally the verified assertion's (C-N1).
+	verified bool
 }
 
 // VerifyRelayAssertion verifies the relay assertion of a node-relayed call before it is served or routed (D0-B1, C-N1, C-N6), for the
@@ -189,5 +185,5 @@ func (h *Hub) VerifyRelayAssertion(ctx context.Context, credential ingress.Calle
 	digest := sha256.Sum256(request.Assertion)
 	h.metrics.ObserveChannel("assertion", "verified")
 	return VerifiedRelay{RelayingNodeID: relayingNode, RelayingInstallationID: relayingInstallation, LocalOrigin: assertion.GetLocalOrigin(),
-		LocalSessionID: localSession, AssertionSHA256: digest[:], ExpiresAt: expires}, nil
+		LocalSessionID: localSession, AssertionSHA256: digest[:], ExpiresAt: expires, verified: true}, nil
 }

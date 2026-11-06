@@ -92,11 +92,15 @@ func TestCallHeaderSignatureVerifiesInGoAndAgainstTheVector(t *testing.T) {
 	issued, deadline := vectorInstant(vector.IssuedAt), vectorInstant(vector.Deadline)
 	now := timeOf(issued)
 	command := platformID(t, vectors.IDs["command"])
-	built := callHeader(Call{AccountID: platformID(t, vectors.IDs["account"]), TargetNodeID: platformID(t, vectors.IDs["node"]),
-		Caller: Caller{Kind: nodev1.CenterCallerKind(vector.Caller.Kind), RelayingNodeID: platformID(t, vectors.IDs["node"]),
-			LocalOrigin: nodev1.Origin(vector.Caller.LocalOrigin), LocalSessionID: platformID(t, vectors.IDs["localSession"])},
-		CommandID: &command, Method: relayv1.RoutedMethod(vector.Method), Payload: vector.Payload, RelayAssertionSHA256: vector.RelayAssertionSHA256,
-		Deadline: timeOf(deadline).Sub(now)}, platformID(t, vectors.IDs["call"]), vector.KID, vectors.Audience, vector.PayloadSHA256, now)
+	relay := &VerifiedRelay{RelayingNodeID: platformID(t, vectors.IDs["node"]), LocalOrigin: nodev1.Origin(vector.Caller.LocalOrigin),
+		LocalSessionID: platformID(t, vectors.IDs["localSession"]), AssertionSHA256: vector.RelayAssertionSHA256, verified: true}
+	routed := Call{AccountID: platformID(t, vectors.IDs["account"]), TargetNodeID: platformID(t, vectors.IDs["node"]), Relay: relay,
+		CommandID: &command, Method: relayv1.RoutedMethod(vector.Method), Payload: vector.Payload, Deadline: timeOf(deadline).Sub(now)}
+	verified, ok := routed.callerOf()
+	if !ok || verified.kind != nodev1.CenterCallerKind(vector.Caller.Kind) {
+		t.Fatal("the vector's caller is a verified node relay")
+	}
+	built := callHeader(routed, verified, platformID(t, vectors.IDs["call"]), vector.KID, vectors.Audience, vector.PayloadSHA256, now)
 	data, err := proto.MarshalOptions{Deterministic: true}.Marshal(built)
 	if err != nil || !bytes.Equal(data, vector.CallHeader) {
 		t.Fatalf("the center's call header is not the vector's bytes:\n%x\n%x", data, vector.CallHeader)

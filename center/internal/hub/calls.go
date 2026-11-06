@@ -36,35 +36,57 @@ const callExpiryMargin = 30 * time.Second
 // is verified and dropped, never a violation.
 const lateResults = 256
 
-// Caller is the verified caller of a routed call, which the center signs into CallHeader.caller: an account session (its user and
-// session) or a node-relayed caller (the relaying node, the local origin it classified and its local session), filled only from the
-// verified session or relay assertion, never from a request field (Plan addendum C-N1).
-type Caller struct {
-	Kind nodev1.CenterCallerKind
-	// UserID and SessionID are an account session's.
+// SessionCaller is an account session's caller of a routed call (CallHeader.caller of kind ACCOUNT_SESSION): its user and session as
+// the session verifier stated them.
+type SessionCaller struct {
 	UserID, SessionID platform.ID
-	// RelayingNodeID, LocalOrigin and LocalSessionID are a node relay's (VerifiedRelay.Caller).
-	RelayingNodeID platform.ID
-	LocalOrigin    nodev1.Origin
-	LocalSessionID platform.ID
 }
 
-// Call is one routed call.
+// caller is the verified caller the center signs into CallHeader.caller: an account session, or a node relay taken only from a
+// VerifiedRelay (Plan addendum C-N1), never from a request field.
+type caller struct {
+	kind              nodev1.CenterCallerKind
+	userID, sessionID platform.ID
+	relayingNodeID    platform.ID
+	localOrigin       nodev1.Origin
+	localSessionID    platform.ID
+	assertionSHA256   []byte
+}
+
+// Call is one routed call. Exactly one of Session and Relay names its caller; a Relay must come from VerifyRelayAssertion (one built by
+// hand is refused), so the relayed caller is structurally the verified assertion's. Two ties have no enforcement point at this seam
+// and are the routed API's (E2): the relaying node's account (the bearer credential's) is AccountID, and CommandID equals the payload's
+// meta.command_id.
 type Call struct {
 	// AccountID is the account that owns the target node (the caller's; E2 has checked the ownership).
 	AccountID    platform.ID
 	TargetNodeID platform.ID
-	Caller       Caller
+	Session      *SessionCaller
+	Relay        *VerifiedRelay
 	// CommandID is the command of a SubmitNodeTask or CancelNodeTask (equal to the payload's meta.command_id), nil for a read.
 	CommandID *platform.ID
 	Method    relayv1.RoutedMethod
 	// Payload is the exact node.v1 TaskService request bytes the caller sent, never re-encoded (Plan decision Q9): 1..253,952 bytes.
 	Payload []byte
-	// RelayAssertionSHA256 is the SHA-256 of the relay assertion bytes of a node-relayed call (VerifiedRelay.AssertionSHA256), nil for an
-	// account session.
-	RelayAssertionSHA256 []byte
 	// Deadline is how long the center waits for the result (CTR5-RTE-06): more than zero, at most MaxCallDeadline.
 	Deadline time.Duration
+}
+
+// callerOf is the call's verified caller; ok is false without exactly one of Session and a verified Relay.
+func (call Call) callerOf() (caller, bool) {
+	zero := platform.ID{}
+	switch {
+	case call.Session != nil && call.Relay == nil:
+		return caller{kind: nodev1.CenterCallerKind_CENTER_CALLER_KIND_ACCOUNT_SESSION, userID: call.Session.UserID, sessionID: call.Session.SessionID},
+			call.Session.UserID != zero && call.Session.SessionID != zero
+	case call.Relay != nil && call.Session == nil:
+		relay := call.Relay
+		return caller{kind: nodev1.CenterCallerKind_CENTER_CALLER_KIND_NODE_RELAY, relayingNodeID: relay.RelayingNodeID, localOrigin: relay.LocalOrigin,
+				localSessionID: relay.LocalSessionID, assertionSHA256: relay.AssertionSHA256},
+			relay.verified && relay.RelayingNodeID != zero && relay.LocalSessionID != zero && relay.LocalOrigin >= nodev1.Origin_ORIGIN_HUMAN &&
+				relay.LocalOrigin <= nodev1.Origin_ORIGIN_AGENT && len(relay.AssertionSHA256) == DigestBytes
+	}
+	return caller{}, false
 }
 
 // Result is a call's verified result.
@@ -90,11 +112,25 @@ type pending struct {
 	method        relayv1.RoutedMethod
 	commandID     *platform.ID
 	requestSHA256 []byte
-	// delivered is set once the writer starts writing the call's frame: from then on the node may have acted on it.
-	delivered atomic.Bool
-	once      sync.Once
-	done      chan outcome
+	// expires is the call header's expires_at: the node may act on a delivered call until then, plus its 120 s skew.
+	expires time.Time
+	// state is queued, delivered or abandoned, moved only by compare-and-swap under the connection's lock: the writer moves a queued
+	// call to delivered just before it writes the frame, and a deadline, a caller that went away or a close moves a queued call to
+	// abandoned, whose frame the writer then skips. So a call failed DID_NOT_HAPPEN is never written afterwards.
+	state atomic.Int32
+	once  sync.Once
+	done  chan outcome
 }
+
+// The states of a pending call.
+const (
+	callQueued int32 = iota
+	callDelivered
+	callAbandoned
+)
+
+// nodeSkew is the clock skew a node applies on top of a call's expires_at (relay.proto, CallHeader).
+const nodeSkew = 120 * time.Second
 
 // outcome is how a pending call ended.
 type outcome struct {
@@ -106,9 +142,12 @@ func (p *pending) finish(value outcome) {
 	p.once.Do(func() { p.done <- value })
 }
 
-// unreachable is STATE/node_unreachable for a call: UNKNOWN with SAME_COMMAND for a delivered mutation, DID_NOT_HAPPEN otherwise.
+// unreachable is STATE/node_unreachable for a call: UNKNOWN with SAME_COMMAND for a delivered mutation, DID_NOT_HAPPEN with AFTER_TIME
+// otherwise, a delivered read included. That follows the catalogue row of STATE/node_unreachable (errors.md: "every routed read once
+// delivered: AFTER_TIME with DID_NOT_HAPPEN"), which supersedes the plan's CTR5-SIG-04 wording (UNKNOWN for any unverifiable result).
+// It reads the state after the call left the connection, when no writer can move it any more.
 func (p *pending) unreachable(nodeID platform.ID, reason string) *arc.Refusal {
-	return arc.NodeUnreachable(nodeID[:], reason, p.delivered.Load() && Mutation(p.method))
+	return arc.NodeUnreachable(nodeID[:], reason, p.state.Load() == callDelivered && Mutation(p.method))
 }
 
 // Call sends a routed call to its target node's channel and waits for the verified result (Plan CTR5-SIG-01..04). Its error is always
@@ -116,7 +155,9 @@ func (p *pending) unreachable(nodeID platform.ID, reason string) *arc.Refusal {
 //   - the call breaks its shape (a bug of the caller): VALIDATION/invalid_argument;
 //   - this process does not hold the hub lease, or the node has no accepted connection here: STATE/node_offline (DID_NOT_HAPPEN);
 //   - the node's connection is not the account's: STATE/not_found;
-//   - no held command key is valid at the call's instant: STATE/node_unreachable (channel_closed, DID_NOT_HAPPEN), nothing signed;
+//   - the caller has already gone away: STATE/node_unreachable (deadline_passed, DID_NOT_HAPPEN), nothing signed;
+//   - no held command key may sign at the call's instant (none valid, or the keyring not re-read for KeyStalePeriods refresh periods):
+//     STATE/node_unreachable (channel_closed, DID_NOT_HAPPEN), nothing signed;
 //   - the center's or the node's in-flight bound is reached, or the connection's send queue is full: RESOURCE/overloaded (CTR5-HUB-10);
 //   - the connection closes (revocation, replacement, a violation, the heartbeat deadline), the deadline passes or the caller goes
 //     away before a verified result: STATE/node_unreachable, UNKNOWN for a delivered mutation, DID_NOT_HAPPEN otherwise;
@@ -124,7 +165,8 @@ func (p *pending) unreachable(nodeID platform.ID, reason string) *arc.Refusal {
 //     closes 4403 (fleet.channel.violation).
 func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 	now := h.clock()
-	if !validCall(call) {
+	verified, ok := call.callerOf()
+	if !ok || !validCall(call) {
 		return Result{}, arc.InvalidArgument("call", "shape")
 	}
 	if _, serving := h.serving(); !serving {
@@ -141,14 +183,20 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 	case c.userID != call.AccountID:
 		return Result{}, arc.NotFound("node", call.TargetNodeID[:])
 	}
+	if ctx.Err() != nil {
+		// The caller went away before anything was signed (review A N-4).
+		return Result{}, arc.NodeUnreachable(call.TargetNodeID[:], arc.UnreachableDeadline, false)
+	}
 	kid, key, ok := h.signingKey(now)
 	if !ok {
-		// No held key is valid at this instant (an expired or retired key is never used to sign): the call is not sent, and the hub
-		// closes its channels 4500 (E1a) when none remains, so the call fails as a closed channel's undelivered call would.
+		// No held key may sign at this instant: none is valid (an expired key never signs), or the keyring is stale, so a key retired
+		// meanwhile signs at most KeyStalePeriods refresh periods after its retirement. The call is not sent; a hello closes 4500
+		// no_signing_key for the same reason (E1a), so the call fails as a closed channel's undelivered call would.
 		h.metrics.ObserveChannel("call", "no_key")
-		h.logger.Warn("no held command key is valid: routed calls are refused until one is")
+		h.noKey()
 		return Result{}, arc.NodeUnreachable(call.TargetNodeID[:], arc.UnreachableChannelClosed, false)
 	}
+	h.hasKey()
 	if !h.reserveCall() {
 		h.metrics.ObserveChannel("call", "center_bound")
 		return Result{}, arc.Unavailable()
@@ -156,7 +204,7 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 	defer h.releaseCall()
 	digest := sha256.Sum256(call.Payload)
 	callID := platform.NewID()
-	header := callHeader(call, callID, kid, h.centerURL, digest[:], now)
+	header := callHeader(call, verified, callID, kid, h.centerURL, digest[:], now)
 	if !validCallHeader(header) {
 		// The call passed validCall, so this is a bug of callHeader; nothing is signed.
 		return Result{}, arc.InvalidArgument("call", "shape")
@@ -169,8 +217,9 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 	if err != nil {
 		return Result{}, arc.Unavailable()
 	}
-	p := &pending{callID: callID, method: call.Method, commandID: call.CommandID, requestSHA256: digest[:], done: make(chan outcome, 1)}
-	switch c.addCall(p) {
+	p := &pending{callID: callID, method: call.Method, commandID: call.CommandID, requestSHA256: digest[:], expires: timeOf(header.ExpiresAt),
+		done: make(chan outcome, 1)}
+	switch c.addCall(p, now) {
 	case registerClosed:
 		h.metrics.ObserveChannel("call", "offline")
 		return Result{}, arc.NodeOffline(call.TargetNodeID[:], now)
@@ -194,7 +243,8 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 	case <-timer.C:
 	case <-ctx.Done():
 	}
-	// The deadline passed, or the caller went away: the call is no longer waited for, and a late result for it is dropped.
+	// The deadline passed, or the caller went away: the call is no longer waited for. A queued frame is abandoned (never written); a
+	// delivered call's late result is still verified and bound, then dropped.
 	c.dropCall(p, true)
 	p.finish(outcome{refusal: p.unreachable(c.nodeID, arc.UnreachableDeadline)})
 	return h.finished(<-p.done, kid)
@@ -252,7 +302,7 @@ func (h *Hub) InFlight() int {
 
 // validCall is a call's shape, checked before anything is built from it: the IDs present and not zero, the method a routed task method
 // with its command ID exactly for a mutation, the caller complete for its kind, the payload 1..253,952 bytes, the assertion digest 32
-// bytes exactly for a node relay, and the deadline within the call's window.
+// bytes exactly for a node relay (a verified one), and the deadline within the call's window.
 func validCall(call Call) bool {
 	zero := platform.ID{}
 	if call.AccountID == zero || call.TargetNodeID == zero || call.Method < MethodSubmitNodeTask || call.Method > maxCallMethod ||
@@ -260,38 +310,32 @@ func validCall(call Call) bool {
 		len(call.Payload) > MaxCallPayload || call.Deadline <= 0 || call.Deadline > MaxCallDeadline {
 		return false
 	}
-	switch call.Caller.Kind {
-	case nodev1.CenterCallerKind_CENTER_CALLER_KIND_ACCOUNT_SESSION:
-		return call.Caller.UserID != zero && call.Caller.SessionID != zero && call.RelayAssertionSHA256 == nil
-	case nodev1.CenterCallerKind_CENTER_CALLER_KIND_NODE_RELAY:
-		return call.Caller.RelayingNodeID != zero && call.Caller.LocalSessionID != zero && call.Caller.LocalOrigin >= nodev1.Origin_ORIGIN_HUMAN &&
-			call.Caller.LocalOrigin <= nodev1.Origin_ORIGIN_AGENT && len(call.RelayAssertionSHA256) == DigestBytes
-	}
-	return false
+	_, ok := call.callerOf()
+	return ok
 }
 
 // callHeader is a call's CallHeader (CTR5-SIG-01): issued now, its deadline now + Deadline, its expiry now + min(Deadline + 30 s,
 // 300 s), the caller as verified, center_url_sha256 the center's canonical public base URL.
-func callHeader(call Call, callID platform.ID, kid, centerURL string, requestSHA256 []byte, now time.Time) *relayv1.CallHeader {
+func callHeader(call Call, verified caller, callID platform.ID, kid, centerURL string, requestSHA256 []byte, now time.Time) *relayv1.CallHeader {
 	audience := sha256.Sum256([]byte(centerURL))
 	expires := min(call.Deadline+callExpiryMargin, MaxCallDeadline)
-	caller := &nodev1.CenterCaller{Kind: call.Caller.Kind.Enum(), AccountId: idValue(call.AccountID)}
-	switch call.Caller.Kind {
+	signed := &nodev1.CenterCaller{Kind: verified.kind.Enum(), AccountId: idValue(call.AccountID)}
+	switch verified.kind {
 	case nodev1.CenterCallerKind_CENTER_CALLER_KIND_ACCOUNT_SESSION:
-		caller.UserId, caller.SessionId = idValue(call.Caller.UserID), idValue(call.Caller.SessionID)
+		signed.UserId, signed.SessionId = idValue(verified.userID), idValue(verified.sessionID)
 	case nodev1.CenterCallerKind_CENTER_CALLER_KIND_NODE_RELAY:
-		caller.RelayingNodeId, caller.LocalOrigin, caller.LocalSessionId = idValue(call.Caller.RelayingNodeID), call.Caller.LocalOrigin.Enum(),
-			idValue(call.Caller.LocalSessionID)
+		signed.RelayingNodeId, signed.LocalOrigin, signed.LocalSessionId = idValue(verified.relayingNodeID), verified.localOrigin.Enum(),
+			idValue(verified.localSessionID)
 	}
 	header := &relayv1.CallHeader{CallId: idValue(callID), Kid: proto.String(kid), CenterUrlSha256: audience[:], AccountId: idValue(call.AccountID),
-		TargetNodeId: idValue(call.TargetNodeID), Caller: caller, Method: call.Method.Enum(), RequestSha256: requestSHA256,
+		TargetNodeId: idValue(call.TargetNodeID), Caller: signed, Method: call.Method.Enum(), RequestSha256: requestSHA256,
 		RequestSize: proto.Uint32(uint32(len(call.Payload))), IssuedAt: instant(now), ExpiresAt: instant(now.Add(expires)),
 		Deadline: instant(now.Add(call.Deadline))}
 	if call.CommandID != nil {
 		header.CommandId = idValue(*call.CommandID)
 	}
-	if call.RelayAssertionSHA256 != nil {
-		header.RelayAssertionSha256 = append([]byte(nil), call.RelayAssertionSHA256...)
+	if verified.assertionSHA256 != nil {
+		header.RelayAssertionSha256 = append([]byte(nil), verified.assertionSHA256...)
 	}
 	return header
 }
@@ -303,60 +347,91 @@ const (
 	registerFull
 )
 
-// addCall adds a pending call to the connection: refused when the connection is closing, or holds MaxInFlightCalls calls already.
-func (c *conn) addCall(p *pending) int {
+// lateCall is a delivered call no longer waited for: its late result is still verified and bound, then dropped, and it counts against the
+// node's in-flight bound until that result or until it can no longer run at the node (its expires_at plus the node's skew).
+type lateCall struct {
+	call  *pending
+	until time.Time
+}
+
+// addCall adds a pending call to the connection: refused when the connection is closing, or when the calls waited for and the delivered
+// calls that may still run at the node (review A N-3) are MaxInFlightCalls already.
+func (c *conn) addCall(p *pending, now time.Time) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	switch {
-	case c.callsClosed:
+	if c.callsClosed {
 		return registerClosed
-	case len(c.calls) >= c.hub.settings.MaxInFlightCalls:
+	}
+	c.pruneLateLocked(now)
+	if len(c.calls)+len(c.late) >= c.hub.settings.MaxInFlightCalls {
 		return registerFull
 	}
 	c.calls[p.callID] = p
 	return registered
 }
 
-// dropCall removes a pending call; late keeps its ID for a while once it was delivered, so its late result is dropped.
+// pruneLateLocked forgets the late calls that can no longer run at the node.
+func (c *conn) pruneLateLocked(now time.Time) {
+	kept := c.late[:0]
+	for _, late := range c.late {
+		if now.Before(late.until) {
+			kept = append(kept, late)
+		}
+	}
+	c.late = kept
+}
+
+// deliver moves a queued call to delivered, under the connection's lock, just before the writer writes its frame: only a call still
+// waited for on an open connection. A false answer is a frame the writer skips (the call was abandoned or the connection is closing).
+func (c *conn) deliver(p *pending) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.callsClosed && !c.closing.Load() && c.calls[p.callID] == p && p.state.CompareAndSwap(callQueued, callDelivered)
+}
+
+// dropCall removes a pending call. A queued call is abandoned (its frame is never written); a delivered one is kept as late when asked,
+// so its late result is bound and dropped, and it counts against the in-flight bound meanwhile.
 func (c *conn) dropCall(p *pending, late bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.calls[p.callID] == p {
 		delete(c.calls, p.callID)
 	}
-	if late && p.delivered.Load() {
-		if len(c.late) >= lateResults {
-			c.late = c.late[1:]
-		}
-		c.late = append(c.late, p.callID)
+	if p.state.CompareAndSwap(callQueued, callAbandoned) || !late || p.state.Load() != callDelivered {
+		return
 	}
+	if len(c.late) >= lateResults {
+		c.late = c.late[1:]
+	}
+	c.late = append(c.late, lateCall{call: p, until: p.expires.Add(nodeSkew)})
 }
 
-// take removes the pending call a result names; late reports a call that is no longer waited for.
-func (c *conn) take(callID platform.ID) (p *pending, late bool) {
+// take removes the call a result names: the pending one, or a late one.
+func (c *conn) take(callID platform.ID) (p *pending, late *pending) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if p = c.calls[callID]; p != nil {
 		delete(c.calls, callID)
-		return p, false
+		return p, nil
 	}
-	for i, id := range c.late {
-		if id == callID {
+	for i, entry := range c.late {
+		if entry.call.callID == callID {
 			c.late = append(c.late[:i], c.late[i+1:]...)
-			return nil, true
+			return nil, entry.call
 		}
 	}
-	return nil, false
+	return nil, nil
 }
 
 // failCalls ends every pending call of a closing connection with STATE/node_unreachable (channel_closed), and takes no call after it
-// (CTR5-HUB-04, -08: a revoked, replaced or dead connection's calls; UNKNOWN for a delivered mutation, DID_NOT_HAPPEN otherwise). The
-// connection's relay nonces are void with it.
+// (CTR5-HUB-04, -08: a revoked, replaced or dead connection's calls). A queued call is abandoned first, so it is DID_NOT_HAPPEN and its
+// frame is never written; a delivered mutation is UNKNOWN. The connection's relay nonces are void with it.
 func (c *conn) failCalls() {
 	c.mu.Lock()
 	c.callsClosed = true
 	calls := make([]*pending, 0, len(c.calls))
 	for id, p := range c.calls {
+		p.state.CompareAndSwap(callQueued, callAbandoned)
 		calls = append(calls, p)
 		delete(c.calls, id)
 	}
@@ -378,8 +453,12 @@ func (c *conn) result(frame resultFrame) bool {
 	}
 	p, late := c.take(frame.CallID)
 	switch {
-	case late:
-		// A result after its call's deadline: verified, then dropped.
+	case late != nil:
+		// A result after its call's deadline: verified and bound like any other (a mismatch is still a violation), then dropped.
+		if failure := bindResult(late, header, frame.Payload, c.nodeID); failure != "" {
+			c.violation(failure)
+			return false
+		}
 		c.hub.metrics.ObserveChannel("call", "late")
 		return true
 	case p == nil:

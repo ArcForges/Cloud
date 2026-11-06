@@ -414,7 +414,6 @@ func (c *Center) CheckCommandKeys(ctx context.Context) error {
 		slices.Sort(bindings)
 		return fmt.Errorf("the relay surface needs a valid command key whose private half is loaded; loaded bindings: %v", bindings)
 	}
-	c.Hub.UseSigningKids(usable)
 	// The hub signs routed calls with the newest of them valid at each call (AF-CTR-05 E1b), re-reading the rows every minute.
 	c.Hub.UseCommandKeys(c.Config.CommandKeys)
 	if err := c.Hub.RefreshKeys(check, time.Now()); err != nil {

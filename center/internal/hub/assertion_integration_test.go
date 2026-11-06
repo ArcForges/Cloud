@@ -239,7 +239,7 @@ func TestARelayAssertionIsVerifiedBeforeRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := sessionCall(node, hub.MethodGetNodeTask, payload)
-	call.Caller, call.RelayAssertionSHA256 = verified.Caller(), verified.AssertionSHA256
+	call.Session, call.Relay = nil, &verified
 	done := h.callAsync(call)
 	sent := nextCall(t, channel)
 	header := headerOf(t, sent)

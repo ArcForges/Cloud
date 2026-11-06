@@ -43,10 +43,22 @@ const ERROR_TEXT = {
   code_invalid: "That code cannot be used. Check it, or start the sign-in again on the device.",
   node_offline: "That node is not connected to the center now. Try again when it is online.",
   node_unreachable:
-    "The node did not answer in time. The request may or may not have reached it, so check before you do it again.",
+    "The node could not be reached, or its answer could not be checked. The request may or may not have reached it, so check before you do it again.",
   overloaded: "The service is busy. Try again in a moment.",
   internal:
     "Something went wrong on our side. The request may or may not have been completed, so check before you do it again.",
+};
+
+/** The texts of a code's closed reasons (ArcError details.state.reason), where the reason changes what the person should know. */
+const REASON_TEXT = {
+  node_unreachable: {
+    channel_closed:
+      "The node's connection to the center closed. The request may or may not have reached it, so check before you do it again.",
+    deadline_passed:
+      "The node did not answer in time. The request may or may not have reached it, so check before you do it again.",
+    result_unverifiable:
+      "The node's answer could not be checked. The request may or may not have reached it, so check before you do it again.",
+  },
 };
 
 const CANCELLED_TEXT = "The passkey prompt was closed. Try again when you are ready.";
@@ -55,13 +67,14 @@ const GENERIC_TEXT =
   "The request could not be completed, and it may or may not have taken effect. Reload the page to see the current state.";
 const NETWORK_TEXT = "The center could not be reached. Check the connection and try again.";
 
-/** An error reply of a route (or a failure to reach it): its HTTP status and ArcError code. */
+/** An error reply of a route (or a failure to reach it): its HTTP status, ArcError code and closed reason (details.state.reason). */
 export class ApiError extends Error {
-  constructor(status, code) {
+  constructor(status, code, reason = "") {
     super(`The request failed with ${status}${code ? ` (${code})` : ""}.`);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.reason = reason;
   }
 }
 
@@ -89,9 +102,12 @@ export class AlreadyRegisteredError extends Error {
 export function errorText(error) {
   if (error instanceof ApiError) {
     // Only a code the table names: a code such as "constructor" or "__proto__" is no text.
-    return typeof error.code === "string" && Object.hasOwn(ERROR_TEXT, error.code)
-      ? ERROR_TEXT[error.code]
-      : GENERIC_TEXT;
+    if (typeof error.code !== "string" || !Object.hasOwn(ERROR_TEXT, error.code))
+      return GENERIC_TEXT;
+    const reasons = Object.hasOwn(REASON_TEXT, error.code) ? REASON_TEXT[error.code] : undefined;
+    return reasons && typeof error.reason === "string" && Object.hasOwn(reasons, error.reason)
+      ? reasons[error.reason]
+      : ERROR_TEXT[error.code];
   }
   if (error instanceof AlreadyRegisteredError) return ERROR_TEXT.already_exists;
   const name = error && typeof error === "object" ? error.name : "";
@@ -439,7 +455,12 @@ export function createApi(base, fetchImpl) {
     } catch {
       payload = null;
     }
-    if (!response.ok) throw new ApiError(response.status, payload?.error?.code ?? "");
+    if (!response.ok)
+      throw new ApiError(
+        response.status,
+        payload?.error?.code ?? "",
+        payload?.error?.details?.state?.reason ?? "",
+      );
     return payload;
   };
   return {

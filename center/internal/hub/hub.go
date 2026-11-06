@@ -38,7 +38,6 @@ import (
 	"math/big"
 	"net/http"
 	"net/netip"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -96,6 +95,9 @@ type Settings struct {
 	SendQueueBytes       int
 	// WriteTimeout bounds one write to a node; a node that stops reading is closed when it passes.
 	WriteTimeout time.Duration
+	// KeyRefresh is how often the command keys' rows are re-read (DefaultKeyRefresh, one minute); the keyring stops signing after
+	// KeyStalePeriods of them without a successful read.
+	KeyRefresh time.Duration
 	// LeaseTTL and LeaseRenew are the hub lease's time to live and renewal interval (PB-5: 30 s and 10 s).
 	LeaseTTL   time.Duration
 	LeaseRenew time.Duration
@@ -113,7 +115,7 @@ func SettingsOf(policy config.IdentityPolicy) Settings {
 		MaxInFlightCalls: policy.RoutedInFlightPerNode, MaxRelayNonces: 8, MaxInFlightPerCenter: policy.RoutedInFlightPerCenter,
 		RelayNonceLifetime: AssertionWindowSeconds * time.Second, TokenRefreshInterval: DefaultTokenRefreshInterval,
 		SendQueueFrames: policy.ChannelSendQueueFrames, SendQueueBytes: policy.ChannelSendQueueBytes, WriteTimeout: 10 * time.Second,
-		LeaseTTL: DefaultLeaseTTL, LeaseRenew: DefaultLeaseRenew, ReconnectMin: time.Second, ReconnectMax: 30 * time.Second,
+		LeaseTTL: DefaultLeaseTTL, LeaseRenew: DefaultLeaseRenew, KeyRefresh: DefaultKeyRefresh, ReconnectMin: time.Second, ReconnectMax: 30 * time.Second,
 	}
 }
 
@@ -165,7 +167,6 @@ type Hub struct {
 	nodes    map[platform.ID]*conn // the accepted connection of each node
 	all      map[*conn]bool        // every open connection, accepted or not
 	stopping bool
-	kids     []string // the held command keys' kids (UseSigningKids)
 	// heldElsewhere is set while another process holds the lease, so it is logged once.
 	heldElsewhere atomic.Bool
 	nodeLocks     [nodeLockStripes]chan struct{} // one-slot accept locks (lockNode)
@@ -525,36 +526,15 @@ func Disabled() http.Handler {
 // maxSigningKids is ChannelAccepted's bound of signing_kids.
 const maxSigningKids = 8
 
-// UseSigningKids sets the kids of the command keys the center holds (CheckCommandKeys at the start: valid keys whose private half is
-// loaded), newest first. ChannelAccepted lists the ones still valid at each acceptance, at least one (the contract's bound).
-func (h *Hub) UseSigningKids(kids []string) {
-	h.mu.Lock()
-	h.kids = append([]string(nil), kids...)
-	h.mu.Unlock()
-}
-
-// signingKids are the held command keys valid now, newest first, at most eight: the keys a call of this connection may be signed with
-// (the center signs from AF-CTR-05 E1b on). A store that does not answer leaves the held list as the start found it.
+// signingKids are the kids a call of a new connection may be signed with (ChannelAccepted.signing_kids): the rows are re-read first, so
+// a hello sees a retirement or a successor at once, then the held keys valid now are listed from the keyring, newest first, at most
+// eight. They are the keyring's, as the call's kid and the health document's are. A read that fails leaves the rows last read, until
+// the keyring is stale.
 func (h *Hub) signingKids(ctx context.Context, now time.Time) []string {
-	h.mu.Lock()
-	held := append([]string(nil), h.kids...)
-	h.mu.Unlock()
-	var kids []string
-	err := h.db.InTx(ctx, "read the signing keys of a channel", store.TxOptions{ReadOnly: true, Timeout: presenceTimeout}, func(ctx context.Context, tx pgx.Tx) error {
-		keys, err := platform.ValidKeys(ctx, tx, platform.CommandSigning, now)
-		kids = kids[:0]
-		for _, key := range keys {
-			if len(kids) < maxSigningKids && slices.Contains(held, key.KID) {
-				kids = append(kids, key.KID)
-			}
-		}
-		return err
-	})
-	if err != nil {
-		h.logger.Warn("the signing keys of a channel could not be read", "error", err.Error())
-		return held[:min(len(held), maxSigningKids)]
+	if err := h.RefreshKeys(ctx, now); err != nil {
+		h.logger.Warn("the signing keys of a channel could not be re-read; the rows last read are listed", "error", err.Error())
 	}
-	return kids
+	return h.validKids(now)
 }
 
 // SetGate replaces the gate the lapse re-check asks (the composition binds the authorizer's; the lapse tests put one that changes its

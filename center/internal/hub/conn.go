@@ -60,10 +60,12 @@ type conn struct {
 	// which it takes no call. late are the delivered calls whose deadline passed, nonces the relay nonces not yet spent.
 	calls       map[platform.ID]*pending
 	callsClosed bool
-	late        []platform.ID
+	late        []lateCall
 	nonces      []relayNonce
 
-	queue       chan outbound
+	queue chan outbound
+	// stall holds the writer after it took a frame until it is closed (tests only: a stalled writer; nil in a running center).
+	stall       chan struct{}
 	queuedBytes atomic.Int64
 	closing     atomic.Bool
 	lapsing     atomic.Bool // the lapse close is claimed: it is audited once
@@ -596,9 +598,20 @@ func (c *conn) writer() {
 			return
 		case item := <-c.queue:
 			c.queuedBytes.Add(-int64(len(item.data)))
-			if item.call != nil {
-				// From here on the node may receive the call: its loss has an unknown effect for a mutation.
-				item.call.delivered.Store(true)
+			c.mu.Lock()
+			stall := c.stall
+			c.mu.Unlock()
+			if stall != nil {
+				select {
+				case <-stall:
+				case <-c.ctx.Done():
+					return
+				}
+			}
+			if item.call != nil && !c.deliver(item.call) {
+				// The call was abandoned (its deadline passed, its caller went away, the connection is closing): it was answered
+				// DID_NOT_HAPPEN, so its frame is never written. From a successful deliver on, its loss is UNKNOWN for a mutation.
+				continue
 			}
 			write, cancel := context.WithTimeout(c.ctx, c.hub.settings.WriteTimeout)
 			err := c.ws.Write(write, websocket.MessageBinary, item.data)

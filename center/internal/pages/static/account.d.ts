@@ -15,9 +15,10 @@ export interface Api {
 }
 
 export class ApiError extends Error {
-  constructor(status: number, code: string);
+  constructor(status: number, code: string, reason?: string);
   status: number;
   code: string;
+  reason: string;
 }
 
 export class PageDataError extends TypeError {

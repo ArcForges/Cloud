@@ -61,6 +61,8 @@ type harness struct {
 	// kid is the test's command key, commandKey its loaded key.
 	kid        string
 	commandKey config.CommandKey
+	// heldKeys are the command keys a test registered and loaded besides it.
+	heldKeys []config.CommandKey
 }
 
 type settings struct {

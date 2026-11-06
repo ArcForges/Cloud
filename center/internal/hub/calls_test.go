@@ -47,20 +47,25 @@ func TestAMalformedMessageNeverReachesASigningInput(t *testing.T) {
 	// A call that breaks its shape is refused before a header is built or signed.
 	h := New(Options{Settings: Settings{MaxInFlightCalls: 8, MaxInFlightPerCenter: 8}})
 	id := platform.NewID()
+	session := &SessionCaller{UserID: platform.NewID(), SessionID: platform.NewID()}
+	verified := &VerifiedRelay{RelayingNodeID: id, LocalSessionID: id, LocalOrigin: nodev1.Origin_ORIGIN_SCRIPT, AssertionSHA256: make([]byte, 32), verified: true}
+	unverified := &VerifiedRelay{RelayingNodeID: id, LocalSessionID: id, LocalOrigin: nodev1.Origin_ORIGIN_SCRIPT, AssertionSHA256: make([]byte, 32)}
+	remote := &VerifiedRelay{RelayingNodeID: id, LocalSessionID: id, LocalOrigin: nodev1.Origin_ORIGIN_REMOTE, AssertionSHA256: make([]byte, 32), verified: true}
+	short := &VerifiedRelay{RelayingNodeID: id, LocalSessionID: id, LocalOrigin: nodev1.Origin_ORIGIN_SCRIPT, AssertionSHA256: make([]byte, 31), verified: true}
 	for name, call := range map[string]Call{
-		"no payload":               {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Deadline: time.Second, Caller: sessionCaller()},
-		"a payload too large":      {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: make([]byte, MaxCallPayload+1), Deadline: time.Second, Caller: sessionCaller()},
-		"a submit without command": {AccountID: id, TargetNodeID: id, Method: MethodSubmitNodeTask, Payload: []byte{1}, Deadline: time.Second, Caller: sessionCaller()},
-		"a read with a command":    {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, CommandID: &id, Payload: []byte{1}, Deadline: time.Second, Caller: sessionCaller()},
-		"LIST_NODES":               {AccountID: id, TargetNodeID: id, Method: MethodListNodes, Payload: []byte{1}, Deadline: time.Second, Caller: sessionCaller()},
-		"a zero target":            {AccountID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second, Caller: sessionCaller()},
-		"a deadline past 300 s":    {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: 301 * time.Second, Caller: sessionCaller()},
-		"a relay without digest":   {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second, Caller: relayCaller()},
-		"a session with a digest": {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second, Caller: sessionCaller(),
-			RelayAssertionSHA256: make([]byte, 32)},
-		"origin REMOTE": {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second,
-			Caller:               Caller{Kind: nodev1.CenterCallerKind_CENTER_CALLER_KIND_NODE_RELAY, RelayingNodeID: id, LocalSessionID: id, LocalOrigin: nodev1.Origin_ORIGIN_REMOTE},
-			RelayAssertionSHA256: make([]byte, 32)},
+		"no payload":                  {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Deadline: time.Second, Session: session},
+		"a payload too large":         {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: make([]byte, MaxCallPayload+1), Deadline: time.Second, Session: session},
+		"a submit without command":    {AccountID: id, TargetNodeID: id, Method: MethodSubmitNodeTask, Payload: []byte{1}, Deadline: time.Second, Session: session},
+		"a read with a command":       {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, CommandID: &id, Payload: []byte{1}, Deadline: time.Second, Session: session},
+		"LIST_NODES":                  {AccountID: id, TargetNodeID: id, Method: MethodListNodes, Payload: []byte{1}, Deadline: time.Second, Session: session},
+		"a zero target":               {AccountID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second, Session: session},
+		"a deadline past 300 s":       {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: 301 * time.Second, Session: session},
+		"no caller":                   {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second},
+		"both callers":                {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second, Session: session, Relay: verified},
+		"a relay built by hand":       {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second, Relay: unverified},
+		"a relay with a short digest": {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second, Relay: short},
+		"origin REMOTE":               {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second, Relay: remote},
+		"a session without its user":  {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: []byte{1}, Deadline: time.Second, Session: &SessionCaller{SessionID: id}},
 	} {
 		if _, err := h.Call(t.Context(), call); err == nil || err.Error() != "refused: VALIDATION/invalid_argument" {
 			t.Errorf("%s: %v", name, err)
@@ -84,7 +89,11 @@ func TestALostCallsEffectIsItsDeliveryStates(t *testing.T) {
 		{MethodWaitNodeTask, true, false}, {MethodReadNodeTaskOutput, false, false},
 	} {
 		p := &pending{method: c.method}
-		p.delivered.Store(c.delivered)
+		if c.delivered {
+			p.state.Store(callDelivered)
+		} else {
+			p.state.Store(callAbandoned)
+		}
 		refusal := p.unreachable(node, "channel_closed")
 		unknown := refusal.Effect == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN
 		retry := foundationv1.RetryMode_RETRY_MODE_AFTER_TIME
@@ -95,15 +104,6 @@ func TestALostCallsEffectIsItsDeliveryStates(t *testing.T) {
 			t.Errorf("%v delivered=%v: %+v", c.method, c.delivered, refusal)
 		}
 	}
-}
-
-func sessionCaller() Caller {
-	return Caller{Kind: nodev1.CenterCallerKind_CENTER_CALLER_KIND_ACCOUNT_SESSION, UserID: platform.NewID(), SessionID: platform.NewID()}
-}
-
-func relayCaller() Caller {
-	return Caller{Kind: nodev1.CenterCallerKind_CENTER_CALLER_KIND_NODE_RELAY, RelayingNodeID: platform.NewID(), LocalSessionID: platform.NewID(),
-		LocalOrigin: nodev1.Origin_ORIGIN_SCRIPT}
 }
 
 func TestANodesRefusalIsRebuiltFromItsClosedFields(t *testing.T) {
@@ -154,6 +154,7 @@ func TestTheKeyringPicksTheNewestValidHeldKey(t *testing.T) {
 	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	retired := now.Add(3 * time.Hour)
 	h := &Hub{}
+	h.keys.refreshed = now
 	h.keys.private = map[string]*ecdsa.PrivateKey{"A": key, "B": successor}
 	h.keys.rows = []platform.SigningKey{
 		{KID: "cmd-current", SecretBinding: "A", NotBefore: now.Add(-time.Hour), NotAfter: now.Add(48 * time.Hour), RetiredAt: &retired},
@@ -169,13 +170,31 @@ func TestTheKeyringPicksTheNewestValidHeldKey(t *testing.T) {
 		{now.Add(30 * time.Hour), "", nil},                   // the successor expired, the current one is retired
 		{now.Add(-2 * time.Hour), "", nil},                   // before any key
 	} {
+		h.keys.refreshed = c.at // a fresh read at each instant
 		kid, signer, ok := h.signingKey(c.at)
 		if kid != c.kid || signer != c.held || ok != (c.kid != "") {
 			t.Errorf("at %s: %q %v", c.at, kid, ok)
 		}
+		if kids := h.validKids(c.at); (len(kids) > 0 && kids[0] != kid) || (len(kids) == 0) != (kid == "") {
+			t.Errorf("at %s: signing_kids %v disagree with the signing kid %q", c.at, kids, kid)
+		}
 	}
+	h.keys.refreshed = now.Add(48 * time.Hour)
 	if _, _, ok := h.signingKey(now.Add(48 * time.Hour)); ok {
 		t.Error("an expired key signs")
+	}
+	// Both keys valid: signing_kids lists them newest first, the signing kid first.
+	h.keys.rows[0].RetiredAt, h.keys.refreshed = nil, now.Add(2*time.Hour)
+	if kids := h.validKids(now.Add(2 * time.Hour)); len(kids) != 2 || kids[0] != "cmd-successor" || kids[1] != "cmd-current" {
+		t.Errorf("signing_kids with both keys valid: %v", kids)
+	}
+	// A stale keyring signs nothing: KeyStalePeriods periods without a successful read (review A N-2, B B-3).
+	h.keys.refreshed = now
+	if _, _, ok := h.signingKey(now.Add(KeyStalePeriods * DefaultKeyRefresh)); !ok {
+		t.Error("the keyring is stale before its bound")
+	}
+	if _, _, ok := h.signingKey(now.Add(KeyStalePeriods*DefaultKeyRefresh + time.Nanosecond)); ok || len(h.validKids(now.Add(4*time.Minute))) != 0 {
+		t.Error("a stale keyring signs")
 	}
 }
 

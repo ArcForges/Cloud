@@ -41,7 +41,7 @@ import (
 // sessionCall is a routed call of an account session to an enrolled node.
 func sessionCall(node *enrolled, method relayv1.RoutedMethod, payload []byte) hub.Call {
 	call := hub.Call{AccountID: node.user, TargetNodeID: node.node.ID, Method: method, Payload: payload, Deadline: 5 * time.Second,
-		Caller: hub.Caller{Kind: nodev1.CenterCallerKind_CENTER_CALLER_KIND_ACCOUNT_SESSION, UserID: node.user, SessionID: platform.NewID()}}
+		Session: &hub.SessionCaller{UserID: node.user, SessionID: platform.NewID()}}
 	if hub.Mutation(method) {
 		command := platform.NewID()
 		call.CommandID = &command
@@ -148,7 +148,7 @@ func TestARoutedCallIsSignedAndItsResultForwardedUnchanged(t *testing.T) {
 	case !bytes.Equal(header.GetRequestSha256(), digest[:]) || header.GetRequestSize() != uint32(len(payload)):
 		t.Fatal("the request digest and size")
 	case header.GetCaller().GetKind() != nodev1.CenterCallerKind_CENTER_CALLER_KIND_ACCOUNT_SESSION ||
-		!bytes.Equal(header.GetCaller().GetSessionId().GetValue(), idBytes(call.Caller.SessionID)) || header.RelayAssertionSha256 != nil:
+		!bytes.Equal(header.GetCaller().GetSessionId().GetValue(), idBytes(call.Session.SessionID)) || header.RelayAssertionSha256 != nil:
 		t.Fatal("the caller is the verified account session")
 	case issued.GetUnixSeconds() < before.Unix()-1 || deadline.GetUnixSeconds()-issued.GetUnixSeconds() != 5 || expires.GetUnixSeconds()-issued.GetUnixSeconds() != 35:
 		t.Fatalf("the window: issued %v, deadline %v, expires %v", issued, deadline, expires)
@@ -367,6 +367,9 @@ func TestInFlightBoundsHold(t *testing.T) {
 	if h.center.Metrics.ChannelCount("call", "node_bound") != 1 || h.center.Metrics.ChannelCount("call", "center_bound") != 1 {
 		t.Fatal("the two bounds are counted apart")
 	}
+	if sent := h.center.Hub.CallsSent(); sent != 3 {
+		t.Fatalf("%d call frames were queued: a refused call sends nothing (review A N-6)", sent)
+	}
 	ctx, cancel := background()
 	defer cancel()
 	channels := []*nodetest.Channel{firstChannel, firstChannel, secondChannel}
@@ -571,6 +574,36 @@ func TestTheCenterSignsWithTheNewestValidKeyItHolds(t *testing.T) {
 	if kid := h.health(t); kid != successorKID {
 		t.Fatalf("the health document names %q after the rotation", kid)
 	}
+	// The predecessor expires: a node that connects now is accepted, lists the successor only (the live keyring, never the start's
+	// snapshot), and its calls are signed with it (review B B-2).
+	h.db.Exec("UPDATE fleet.signing_key SET not_after = now() WHERE kid = '" + h.kid + "'")
+	late := h.enroll()
+	lateChannel, err := h.dial(late.access, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lateChannel.WS.CloseNow() })
+	if err := lateChannel.Hello(ctx, late.node, late.result.InstallationID, publicBaseURL); err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := lateChannel.Accept(ctx)
+	if err != nil {
+		t.Fatalf("a hello after the predecessor expired: %v", err)
+	}
+	if kids := accepted.GetSigningKids(); len(kids) != 1 || kids[0] != successorKID {
+		t.Fatalf("ChannelAccepted.signing_kids after the predecessor expired: %v", kids)
+	}
+	done := h.callAsync(sessionCall(late, hub.MethodGetNodeTask, []byte{1}))
+	lateCall := nextCall(t, lateChannel)
+	if lateCall.GetHeader().GetKid() != successorKID {
+		t.Fatalf("the late node's call: %s", lateCall.GetHeader().GetKid())
+	}
+	if err := lateChannel.Answer(ctx, late.node, lateCall.GetCallId(), late.node.Executed(lateCall, []byte{1}), []byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	if value := await(t, done); value.err != nil {
+		t.Fatal(value.err)
+	}
 	// Both keys retired: nothing is signed.
 	h.retireKeys(t, h.kid, successorKID)
 	if err := h.center.Hub.RefreshKeys(context.Background(), time.Now()); err != nil {
@@ -599,21 +632,37 @@ func (h *harness) health(t *testing.T) string {
 	}
 	defer func() { _ = response.Body.Close() }()
 	body, _ := io.ReadAll(response.Body)
-	public := h.commandKey.PublicKey()
-	for _, forbidden := range []string{"PRIVATE", string(public)} {
-		if strings.Contains(string(body), forbidden) {
+	// No form of any held key's public or private half (review B N-2): raw, base64, hex or PEM.
+	forbidden := []string{"PRIVATE", "PUBLIC KEY"}
+	for _, key := range append([]config.CommandKey{h.commandKey}, h.heldKeys...) {
+		forbidden = append(forbidden, string(key.PublicKey()))
+		forbidden = append(forbidden, keyForms(key.PublicKey(), "PUBLIC KEY")...)
+		forbidden = append(forbidden, privateForms(t, key)...)
+	}
+	for _, value := range forbidden {
+		if strings.Contains(string(body), value) {
 			t.Fatal("the health document carries key material")
 		}
 	}
 	var document struct {
-		Center struct {
-			SigningKid string `json:"signingKid"`
-		} `json:"center"`
+		Center map[string]json.RawMessage `json:"center"`
 	}
 	if err := json.Unmarshal(body, &document); err != nil {
 		t.Fatal(err)
 	}
-	return document.Center.SigningKid
+	var kid string
+	for name, value := range document.Center {
+		switch name {
+		case "binary", "mode", "publicBaseUrl", "surfaces":
+		case "signingKid":
+			if err := json.Unmarshal(value, &kid); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			t.Fatalf("the health document's center has a member %q", name)
+		}
+	}
+	return kid
 }
 
 // registerKey registers a command key valid from notBefore (outliving the test's key, as the rotation rule requires) and loads it.
@@ -641,6 +690,7 @@ func (h *harness) registerKey(t *testing.T, binding string, notBefore time.Time)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
+	h.heldKeys = append(h.heldKeys, key)
 	return key, kid
 }
 
