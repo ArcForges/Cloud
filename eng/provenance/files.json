@@ -162,6 +162,7 @@
     "center/internal/fleetapi/gate_failure_test.go",
     "center/internal/fleetapi/harness_test.go",
     "center/internal/fleetapi/registry.go",
+    "center/internal/fleetapi/registry_test.go",
     "center/internal/fleetapi/signin.go",
     "center/internal/fleetapi/signin_integration_test.go",
     "center/internal/fleetapi/testdata/exchanges/BeginNodeSignIn-invalid-redirect.json",
@@ -229,6 +230,7 @@
     "center/internal/hub/capture_integration_test.go",
     "center/internal/hub/catalogue.go",
     "center/internal/hub/channel_integration_test.go",
+    "center/internal/hub/close_integration_test.go",
     "center/internal/hub/conn.go",
     "center/internal/hub/export_test.go",
     "center/internal/hub/forgotten_test.go",
@@ -630,6 +632,7 @@
     "eng/policy/dependency-reviews/af-ctr-04-r9.json",
     "eng/policy/dependency-reviews/af-ctr-05-r1.json",
     "eng/policy/dependency-reviews/af-ctr-05-r10.json",
+    "eng/policy/dependency-reviews/af-ctr-05-r11.json",
     "eng/policy/dependency-reviews/af-ctr-05-r2.json",
     "eng/policy/dependency-reviews/af-ctr-05-r3.json",
     "eng/policy/dependency-reviews/af-ctr-05-r4.json",
@@ -706,6 +709,7 @@
     "eng/provenance/NOTICE.txt",
     "eng/provenance/artifact-profiles/cloud-release-r1.json",
     "eng/provenance/artifact-profiles/cloud-release-r10.json",
+    "eng/provenance/artifact-profiles/cloud-release-r100.json",
     "eng/provenance/artifact-profiles/cloud-release-r11.json",
     "eng/provenance/artifact-profiles/cloud-release-r12.json",
     "eng/provenance/artifact-profiles/cloud-release-r13.json",
@@ -845,6 +849,7 @@
     "eng/provenance/records/center-runtime-r43.json",
     "eng/provenance/records/center-runtime-r44.json",
     "eng/provenance/records/center-runtime-r45.json",
+    "eng/provenance/records/center-runtime-r46.json",
     "eng/provenance/records/center-runtime-r5.json",
     "eng/provenance/records/center-runtime-r6.json",
     "eng/provenance/records/center-runtime-r7.json",
@@ -889,6 +894,7 @@
     "eng/provenance/records/center-worker-r43.json",
     "eng/provenance/records/center-worker-r44.json",
     "eng/provenance/records/center-worker-r45.json",
+    "eng/provenance/records/center-worker-r46.json",
     "eng/provenance/records/center-worker-r5.json",
     "eng/provenance/records/center-worker-r6.json",
     "eng/provenance/records/center-worker-r7.json",
@@ -1769,5 +1775,5 @@
     "third-party/GoCrypto.LICENSE.txt": "go-gocrypto-legal-r1",
     "third-party/GoSys.LICENSE.txt": "go-gosys-legal-r1"
   },
-  "artifacts": ["center-runtime-r45", "center-worker-r45"]
+  "artifacts": ["center-runtime-r46", "center-worker-r46"]
 }
