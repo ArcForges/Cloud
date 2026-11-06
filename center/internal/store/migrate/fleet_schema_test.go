@@ -137,8 +137,9 @@ WHERE c.contype = 'f' AND n.nspname = 'fleet' ORDER BY 1`)
 			missing = append(missing, constraint)
 		}
 	}
-	// node: device and installation; each flow table: viewer, approver, approver session, session and enrollment.
-	if err = rows.Err(); err != nil || len(missing) > 0 || count != 12 {
+	// node: device and installation; each flow table: viewer, approver, approver session, session and enrollment; routed_call (0010):
+	// account, node and refusal code.
+	if err = rows.Err(); err != nil || len(missing) > 0 || count != 15 {
 		t.Fatalf("fleet foreign keys %d, without a leading index: %v %v", count, missing, err)
 	}
 }

@@ -54,7 +54,7 @@ AF-CTR-05 part E2a serves FleetService's node registry on the switchable surface
 key is configured), and production keeps it off: there, and on proof until AF-CTR-05 part E3, the four methods answer
 `STATE/not_activated` with `state.reason` `nodes` from the Worker. The registry is never gated (Q20: a lapsed account still lists,
 renames and revokes its nodes), and it stands behind no per-account control: ListNodes and GetNode, relayed calls included, are
-bounded only by the Worker's per-client edge limit (and a relayed read by the verification's one read-only transaction). The routed task methods of FleetService are part E2b's; every other FleetService method stays
+bounded only by the Worker's per-client edge limit (and a relayed read by the verification's one read-only transaction). The routed task methods are served from part E2b ([Routed calls](#routed-calls)); every other FleetService method stays
 unregistered (`UNIMPLEMENTED`, no Worker row; Plan CTR5-API-01: SendNodeCommand, GetNodeCommand, ListNodeCommands, CancelNodeCommand,
 the push preferences, IssueRelayToken, OpenFleetWatch and WatchFleet; `TestTheRegistryRowsAreTheServedMethods`).
 
@@ -127,6 +127,108 @@ An AGENT row of the operation table names the exact credential scopes it admits:
 An account or `mobile.limited` session is refused with `AUTHORIZATION/permission_denied` and audited `access.refused` with the reason
 `principal`; an `automation` or `push` credential with the reason `scope` (`TestScopeMatrixOverFleetRows`). The reply is always
 `state.state` `operation`, `state.reason` the operation ID; `restricted`, `scope` and `principal` are audit reasons only.
+
+## Routed calls
+
+AF-CTR-05 part E2b serves FleetService's six routed task methods on the `nodes` surface (Plan CTR5-RTE-01..07, CTR5-CALL-01..03 as
+amended by PB-1, PB-2, D0-B1, C-N1, C-N6, PN-1 and PN-6; the coordinator's decisions B-1..B-3, Q-1..Q-15 and section 4): SubmitNodeTask,
+GetNodeTask, ListNodeTasks, WaitNodeTask, ReadNodeTaskOutput and CancelNodeTask (`internal/fleetapi/routed.go`). EVIDENCE: REAL
+PostgreSQL, the REAL composed center and hub; MOCKED: the nodes (nodetest with software keys). Production and proof keep `nodes` off.
+
+**Rows.** Each method admits an account session, and a node credential only as the verified relay of its own node (the authorizer
+verifies the relay assertion, whose request digest is SHA-256 of the inner request bytes, before anything else). It addresses one of
+the account's live nodes (`not_found` for an unknown, revoked or foreign node, before anything is written), is gated by its group's key
+(submission `center.execute`, status and output `remote.view`, control `remote.control`), stands behind `routed_calls_per_account`
+and `routed_in_flight_per_account`, and appends `access.authorized` before the gate. Risks follow Design's classes: Submit R3, Cancel R2,
+the reads R1. Submit and Cancel are a person's medium or high operations (PB-1): a `mobile.limited` session upgrades first, and an
+account session needs step-up evidence of the row's class (`fleet.submitNodeTask`, `fleet.cancelNodeTask`) bound to the node on every
+delivery; a relayed caller carries neither rule. The call header's caller is the verified session's or the verified relay's, never the
+request's `caller` field.
+
+**The inner request.** The center decodes a copy only to check its shape: Submit a `TaskSpec`; Get, Wait and Cancel a task ID;
+ReadOutput an attempt ID; Submit and Cancel an inner `meta.command_id` equal to the outer one; Wait `wait_ms` at most 50,000; ReadOutput
+`max_bytes` at most 262,144 and `wait_ms` at most 20,000; Submit 1..253,952 bytes, the others 1..3,072. It stores none of it and routes
+the bytes unchanged. The node's response bytes are answered unchanged in `value.response` with `value.node_id`; a node's signed refusal
+is the method's error, rebuilt from its closed fields.
+
+**Deadlines (CTR5-RTE-06).** 10 s; Wait `wait_ms` + 5 s (at most 55 s); ReadOutput `wait_ms` + 10 s with `wait_ms` (at most 30 s).
+The hub waits the method's deadline less a second, so the reply never passes it (Q-7). PN-1: Wait and ReadOutput set their
+connection's read and write deadlines to their budget plus 5 s (`ingress.Policy.WithDeadline`), so a long poll is not cut by the
+server's 20 s timeouts (`TestARoutedLongPollOutlastsTheServerTimeouts`); the routed long polls (Wait, and ReadOutput with `wait_ms`)
+of all accounts hold at most half of the request connections (`config.RoutedLongPolls`; a further one is `RESOURCE/overloaded`), and
+a center that serves `nodes` refuses to start when `routedInFlightPerAccount` exceeds half of `ARCFORGES_CENTER_MAX_CONNECTIONS`
+(`TestTheLongPollsHoldAtMostHalfTheConnections`). The default `routedInFlightPerAccount` is 16 for that reason (an owner placeholder,
+H-07).
+
+**Reads** are routed with no record and no `fleet.routed.*` audit row (Q-10): `access.authorized` is their audit, `node_offline` a
+metric.
+
+**The routing record** (`fleet.routed_call`, migration 0010) is the receipt of Submit and Cancel (PN-6), keyed by the account and the
+command ID. It holds digests, sizes, the task ID, the states and their instants, never a request or response byte, a specification,
+an argument, a working directory, an environment or output (`TestTheStoreHoldsNoRoutedPayload`). The center stores no request bytes
+(decisions B-3): a resend routes the resend's own bytes, accepted only when its record digest equals the record's. The record digest is
+SHA-256 over the method, the node, the caller class (an account session's user, or a relay's relaying node and local origin) and the
+inner request's `RequestDigestInput` (its correlation ID left out), so a resend from a refreshed session or a new local process of the
+same origin converges, and another caller class under the same command ID is `CONFLICT/command_id_reused` (Q-4). Its states:
+
+| State                | Final                                    | Meaning                                                                                                                 |
+| -------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| ACCEPTED (1)         | no                                       | an attempt was admitted; while no attempt is in flight in this process it counts as one that may have reached the node  |
+| SUCCEEDED (3)        | yes                                      | a verified EXECUTED result whose response is a value (Submit: its task ID)                                              |
+| FAILED (4)           | yes                                      | a verified EXECUTED result whose response is the TaskService handler's own ArcError, with an effect other than UNKNOWN  |
+| REJECTED_BY_NODE (5) | when the node did not say DID_NOT_HAPPEN | a verified refusal by the node's verification or policy                                                                 |
+| EXPIRED (6)          | as REJECTED_BY_NODE                      | a verified EXPIRED result                                                                                               |
+| UNKNOWN (7)          | no                                       | no verified result although the call may have reached the node, a node answer whose effect is UNKNOWN, or swept at boot |
+| NOT_DELIVERED (8)    | no                                       | the hub answered DID_NOT_HAPPEN and no earlier attempt may have reached the node                                        |
+
+DELIVERED (2) is reserved and never written (Q-2): delivery is known only from the hub's answer (E1b's definition: the writer took the
+frame), and the record's monotonic `delivered` keeps it, so a record never says delivered while the reply said DID_NOT_HAPPEN, or the
+reverse (`TestARecordIsDeliveredExactlyWhenTheReplyIsUnknown`). A refusal code is a smallint of the fixed, append-only table
+`fleet.refusal_code` (decisions B-2; `fleet.RefusalCode`, 0 for a code outside it; `TestTheRefusalCodesAreFixed`,
+`TestTheRefusalCodeTableIsTheMigrations`).
+
+**No double execution (decisions B-1).** The record is never less conservative than the reply:
+
+- The admission (Tx1, `fleet.AcceptRouted`) checks, in this order: an existing record's digest (`command_id_reused`); its replay window
+  (a record that may have reached the node, delivered or ACCEPTED with no attempt in flight here, past `routedReplayWindow` is
+  `STATE/invalid_state` `replay_window_passed`, online or not, and is never routed); the node's presence (`node_offline`, nothing
+  written but one `fleet.routed.refused` audit row for a mutation, decisions Q-8, bounded by the account's routed-call quota); the
+  evidence; the account's live node; the record, inserted or locked and decided again; and the hub lease row `FOR SHARE` under the
+  routing fence, so a process that lost the lease commits no record and a take-over waits for the admissions in flight.
+- The hub routes nothing under a fence before its boot sweep committed (`fleet.SweepRouted`, retried at every lease wake): every
+  ACCEPTED record then becomes UNKNOWN and delivered (`TestALeaseTakeOverSweepsTheRecordsBeforeRouting`).
+- The attempt runs on a context detached from the request; its settlement (Tx2, `fleet.SettleRouted`, guarded by the attempt number) is
+  detached too and retried; a settlement that is never written leaves the record ACCEPTED, which counts as delivered
+  (`TestALostSettlementCountsAsDeliveredAndTheWindowComesFirst`). Only the hub's DID_NOT_HAPPEN answer recorded by Tx2 makes a record
+  NOT_DELIVERED.
+- The replay window (Q-1) is 23 h by default, at most 23 h 52 min: the node's deduplication keeps an entry 24 h from its execution,
+  which may come 120 s (the node's clock skew) before the record's creation; a resend admitted at the window's end reaches the node at
+  most 300 s (a call's longest lifetime) later; a minute of margin: 24 h - 120 s - 300 s - 60 s.
+
+**Joins (Q-15).** A duplicate of an attempt in flight in this process joins it: one routed call, every caller the same answer within
+its own deadline, each with its own evidence consumed and its own `fleet.routed.accepted` row (reason `joined`); a caller that goes away
+ends only its own wait (`TestConcurrentDuplicatesJoinOneRoutedCall`). There is no join across processes: after a lease move only the
+node's command deduplication prevents a second effect.
+
+**Resends.** The center never answers a resend from its record: a final record's resend is routed again (fresh step-up evidence for an
+account session, N-3; a fresh relay assertion for a relay) and the node's deduplication replays the recorded outcome. The replayed
+EXECUTED outcome is compared with the record's outcome digest: SHA-256 of the node.v1 response as transmitted with its `ResponseMeta`
+(field 1) left out and, in every `ArcError` of the outcome, its `correlation_id` and `retry.retry_at` left out (`OutcomeDigest`,
+decisions Q-5). Another digest is `STATE/node_unreachable` `replay_digest_differs` (UNKNOWN, NEVER), audited
+`fleet.routed.replay_differs` (`TestAReplayedOutcomeWithAnotherDigestIsUnknownAndAudited`). **Binding for N2:** the node replays a
+recorded outcome byte for byte outside those three fields.
+
+**Plan departures (decisions section 4).** REJECTED_BY_NODE and EXPIRED are not final when the node's signed result says the call did
+not happen (refused before any effect), so a resend is routed again; a node answer whose effect is UNKNOWN (a duplicate answered while
+the first is still executing) is UNKNOWN, never FAILED or final (`TestANodeRefusalThatDidNotHappenIsNotFinal`). **Binding for N2:** the
+node's in-progress answer to a duplicate carries effect UNKNOWN (its code from the existing catalogue).
+
+**Audit.** `fleet.routed.accepted` (each admitted attempt or join), `fleet.routed.result` (each settlement), `fleet.routed.refused`
+(a mutation refused `node_offline`) and `fleet.routed.replay_differs`: method, node, attempt, closed codes, digests and sizes, never
+payload text. Metrics: the event family `routed` (`accepted`, `joined`, `offline`, `settled`, `settle_lost`, `replay_differs`,
+`long_polls`), and `lease` `swept` / `sweep_failed`.
+
+**The node's `routed_call_log`** (N2) and the center's routing record are different records (PN-7).
 
 ## Browser sign-in
 

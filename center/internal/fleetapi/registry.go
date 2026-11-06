@@ -54,6 +54,8 @@ type Registry struct {
 	*Server
 	channels Channels
 	revoke   RevokeDevice
+	// routing is the routed task methods' state (WithRouter); without it they answer STATE/node_offline.
+	routing *routing
 }
 
 // Registry is the node registry of this fleet server: the nodes surface's methods.
@@ -78,6 +80,12 @@ func (r *Registry) Methods() []connect.Method {
 		registryMethod("GetNode", fleetv1connect.FleetServiceGetNodeProcedure, r.getNode),
 		registryMethod("RenameNode", fleetv1connect.FleetServiceRenameNodeProcedure, r.renameNode),
 		registryMethod("RevokeNode", fleetv1connect.FleetServiceRevokeNodeProcedure, r.revokeNode),
+		registryMethod("SubmitNodeTask", fleetv1connect.FleetServiceSubmitNodeTaskProcedure, r.submitNodeTask),
+		registryMethod("GetNodeTask", fleetv1connect.FleetServiceGetNodeTaskProcedure, r.getNodeTask),
+		registryMethod("ListNodeTasks", fleetv1connect.FleetServiceListNodeTasksProcedure, r.listNodeTasks),
+		registryMethod("WaitNodeTask", fleetv1connect.FleetServiceWaitNodeTaskProcedure, r.waitNodeTask),
+		registryMethod("ReadNodeTaskOutput", fleetv1connect.FleetServiceReadNodeTaskOutputProcedure, r.readNodeTaskOutput),
+		registryMethod("CancelNodeTask", fleetv1connect.FleetServiceCancelNodeTaskProcedure, r.cancelNodeTask),
 	}
 }
 

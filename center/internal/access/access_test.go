@@ -4,6 +4,7 @@ package access
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -132,6 +133,14 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.getNode":    "R1 allowed none - no-receipt active relayed:node",
 		"fleet.renameNode": "R2 upgrade none - receipt restricted",
 		"fleet.revokeNode": "R3 upgrade evidence node receipt restricted",
+		// AF-CTR-05 E2b (CTR5-SUR-02 as amended by PB-1, PB-2, D0-B1, C-N6; decisions section 5): the routed task methods, each also
+		// for a node-relayed caller; Submit (high) and Cancel (medium) a person's step-up rows bound to the node, the reads low.
+		"fleet.submitNodeTask":     "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.getNodeTask":        "R1 allowed none - no-receipt active relayed:node",
+		"fleet.listNodeTasks":      "R1 allowed none - no-receipt active relayed:node",
+		"fleet.waitNodeTask":       "R1 allowed none - no-receipt active relayed:node",
+		"fleet.readNodeTaskOutput": "R1 allowed none - no-receipt active relayed:node",
+		"fleet.cancelNodeTask":     "R2 upgrade evidence node no-receipt active relayed:node",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
 	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own", EvidenceOnApprove: "evidence-on-approve"}
@@ -173,7 +182,8 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	want := map[string]string{"identity.beginPasskeyRegistration": TargetAccount, "identity.removeAuthIdentity": TargetCredential,
 		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession,
-		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode, "fleet.revokeNode": TargetNode}
+		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode, "fleet.revokeNode": TargetNode,
+		"fleet.submitNodeTask": TargetNode, "fleet.cancelNodeTask": TargetNode}
 	if target, ok := StepUpClass("center.operatorGrant"); !ok || target != TargetRequest {
 		t.Fatalf("the operator grant class: %q %v", target, ok)
 	}
@@ -219,8 +229,9 @@ func TestTheMobileLimitedRules(t *testing.T) {
 func TestFleetRowsCarryNoFeature(t *testing.T) {
 	rows := 0
 	for _, operation := range Operations() {
-		if !strings.HasPrefix(operation.ID, "fleet.") || operation.ID == "fleet.nodeChannel" {
-			// The node channel is the first gated row (AF-CTR-05 E1a): TestOperationRowsAreCheckedForConsistency pins it.
+		if !strings.HasPrefix(operation.ID, "fleet.") || operation.ID == "fleet.nodeChannel" || routedTask(operation.ID) {
+			// The node channel is the first gated row (AF-CTR-05 E1a): TestOperationRowsAreCheckedForConsistency pins it; the routed
+			// task rows (E2b) are gated by their groups' keys, pinned by TestTheRoutedRowsAreGatedByTheirGroups.
 			continue
 		}
 		rows++
@@ -262,7 +273,7 @@ func TestTheRelayedRowsFollowTheirRules(t *testing.T) {
 			relayed = append(relayed, operation.ID)
 		}
 	}
-	if strings.Join(relayed, ",") != "fleet.listNodes,fleet.getNode" {
+	if strings.Join(relayed, ",") != strings.Join(RelayedOperations(), ",") {
 		t.Fatalf("the relayed rows: %v", relayed)
 	}
 	row, ok := Lookup(fleetv1connect.FleetServiceGetNodeProcedure)
@@ -291,5 +302,36 @@ func TestTheRelayedRowsFollowTheirRules(t *testing.T) {
 		if CheckRow(changed) == nil {
 			t.Errorf("%s was admitted", name)
 		}
+	}
+}
+
+// routedTask reports a routed task method's row (AF-CTR-05 E2b).
+func routedTask(id string) bool {
+	return slices.Contains([]string{"fleet.submitNodeTask", "fleet.getNodeTask", "fleet.listNodeTasks", "fleet.waitNodeTask", "fleet.readNodeTaskOutput",
+		"fleet.cancelNodeTask"}, id)
+}
+
+// TestTheRoutedRowsAreGatedByTheirGroups (AF-CTR-05 E2b, E2-3; CTR5-GATE-06): each routed task row carries its group's key of the routed
+// task control table (submission center.execute, status and output remote.view, control remote.control), is audited before the call,
+// addresses a node and admits the node-relayed caller; the routed controls cover it.
+func TestTheRoutedRowsAreGatedByTheirGroups(t *testing.T) {
+	want := map[string]feature.Group{"fleet.submitNodeTask": feature.GroupSubmission, "fleet.getNodeTask": feature.GroupStatusAndOutput,
+		"fleet.listNodeTasks": feature.GroupStatusAndOutput, "fleet.waitNodeTask": feature.GroupStatusAndOutput, "fleet.readNodeTaskOutput": feature.GroupStatusAndOutput,
+		"fleet.cancelNodeTask": feature.GroupControl}
+	seen := 0
+	for _, operation := range Operations() {
+		group, ok := want[operation.ID]
+		if !ok {
+			continue
+		}
+		seen++
+		key, _ := feature.KeyOfGroup(group)
+		if operation.Group != group || operation.Feature != key || operation.Audit != AuditBeforeCall || operation.Object != ObjectNode ||
+			strings.Join(operation.RelayedScopes, ",") != "node" || CheckRow(operation) != nil {
+			t.Errorf("%s: %+v", operation.ID, operation)
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("%d routed rows", seen)
 	}
 }

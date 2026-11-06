@@ -159,8 +159,8 @@ func sign(t *testing.T, node *enrolled, channel *nodetest.Channel, request proto
 }
 
 // TestTheRegistryRowsAreTheServedMethods (E2-1, E2-22; Plan CTR5-API-01): the nodes surface serves exactly ListNodes, GetNode,
-// RenameNode and RevokeNode, each with its operation row; every other FleetService method answers UNIMPLEMENTED; with the surface off
-// the four answer STATE/not_activated with state.reason nodes, before any credential is read.
+// RenameNode, RevokeNode and the six routed task methods (E2b), each with its operation row; every other FleetService method answers
+// UNIMPLEMENTED; with the surface off the ten answer STATE/not_activated with state.reason nodes, before any credential is read.
 func TestTheRegistryRowsAreTheServedMethods(t *testing.T) {
 	served := map[string]bool{}
 	for _, method := range routes.NodesMethods() {
@@ -169,8 +169,8 @@ func TestTheRegistryRowsAreTheServedMethods(t *testing.T) {
 			t.Errorf("%s has no row", method.Path)
 		}
 	}
-	if len(served) != 4 {
-		t.Fatalf("%d served", len(served))
+	if len(served) != 10 {
+		t.Fatalf("%d served (the registry's four and the six routed task methods, E2b)", len(served))
 	}
 	h := registryHarness(t)
 	user := h.db.Account(1)
@@ -179,8 +179,7 @@ func TestTheRegistryRowsAreTheServedMethods(t *testing.T) {
 	unserved := 0
 	for index := range methods.Len() {
 		path := fleetService + string(methods.Get(index).Name())
-		if served[path] || strings.HasSuffix(path, "NodeTask") || strings.HasSuffix(path, "NodeTasks") || strings.HasSuffix(path, "NodeTaskOutput") {
-			// The routed task methods are part E2b's.
+		if served[path] {
 			continue
 		}
 		unserved++

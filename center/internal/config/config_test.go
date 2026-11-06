@@ -105,6 +105,8 @@ func TestListenersAndLimits(t *testing.T) {
 	values[EnvGRPCAddress] = "off"
 	values[EnvAdminAddress] = "0.0.0.0:9090"
 	values[EnvMaxConnections] = "8"
+	// The routed calls of an account may hold at most half of the request connections where the nodes surface is on (PN-1).
+	values[EnvIdentityPolicy] = `{"routedInFlightPerAccount": 4}`
 	values[EnvLogLevel] = "debug"
 	values[EnvMetricsLogInterval] = "0"
 	config, err := Load(environment(values))

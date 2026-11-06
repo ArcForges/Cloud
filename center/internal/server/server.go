@@ -344,7 +344,11 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 		fleetDirect = fleetServer.Direct()
 		if c.Config.Identity.Enabled(config.SurfaceNodes) && c.Hub != nil {
 			// FleetService's node registry (AF-CTR-05 E2a): RevokeNode revokes the node's device with the identity service's cascade.
-			dispatcher.Register(fleetServer.Registry(c.Hub, service.RevokeDevice).Methods()...)
+			// The routed task methods (E2b) route through the hub (hubRouter), with the routed mutations' replay window and the
+			// center's long-poll bound (PN-1).
+			registry := fleetServer.Registry(c.Hub, service.RevokeDevice).WithRouter(hubRouter{hub: c.Hub}, fleetapi.RoutedLimits{
+				ReplayWindow: c.Config.Identity.Policy.RoutedReplayWindow, LongPolls: config.RoutedLongPolls(c.Config.MaxConnections), Events: c.Metrics})
+			dispatcher.Register(registry.Methods()...)
 		}
 	}
 	var mobile *mobileauth.Service

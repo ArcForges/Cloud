@@ -308,6 +308,25 @@ rehearsed over version 8 with a node row of the previous release (`TestMigration
 it while production is dark (no node is enrolled there). Personal data: a device name the person or the node chose, as `display_name`
 already is. Retention: with the node row.
 
+### Routing records (AF-CTR-05 part E2b)
+
+`0010_fleet_routed_call.sql` (expand only) adds two tables for the routed mutations ([center fleet](center-fleet.md#routed-calls);
+Plan CTR5-RTE-03, C.8, PN-6; decisions B-1..B-3):
+
+- `fleet.refusal_code`: the fixed, append-only table of the refusal codes a routing record names, a smallint for each CATEGORY/code
+  of the Contracts catalogue of cohort 1.0.0-ci.437.1 in the catalogue's order and 0 for `other`; a trigger refuses every UPDATE and
+  DELETE, and a later code is appended by a later migration with the next value. The runtime role only reads it.
+- `fleet.routed_call`: one row per SubmitNodeTask or CancelNodeTask command of an account (primary key account and command ID), the
+  command's receipt: the node, the method, the verified caller (an account session's session, or a relay's relaying node, local origin
+  and local session), the record digest and the request size, the state, `delivered`, the attempt count, the task ID, the response and
+  outcome digests and size, the refusal code and the instants. No column holds a request or response byte or any text. Its CHECKs tie
+  the caller to its kind, the digests to 32 bytes and the states to their outcomes; its trigger refuses a change of a record's identity,
+  a change of a final record's outcome, `delivered` or `attempts` going back, and any deletion. The runtime role has SELECT, INSERT and
+  UPDATE, never DELETE.
+
+No statement of the previous release names either table, so it keeps working. Personal data: none beyond the account and the IDs.
+Retention: 90 days by design; the sweep is not delivered (H-24 UNKNOWN, AF-PLAT-01).
+
 ## Guarantees
 
 `center/internal/platform` re-implements the guarantees of the D1 storage plans with native transactions, constraints and row

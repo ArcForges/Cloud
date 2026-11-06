@@ -47,6 +47,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/feature"
+	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/platform"
@@ -169,11 +170,14 @@ type Hub struct {
 	stopping bool
 	// heldElsewhere is set while another process holds the lease, so it is logged once.
 	heldElsewhere atomic.Bool
-	nodeLocks     [nodeLockStripes]chan struct{} // one-slot accept locks (lockNode)
-	lockSeed      maphash.Seed
-	inFlight      int // the calls this process waits for (MaxInFlightPerCenter)
-	wg            sync.WaitGroup
-	keys          keyring
+	// swept is the fence whose boot sweep of the routing records committed (fleet.SweepRouted; AF-CTR-05 E2b, decisions B-1): the hub
+	// routes nothing under a fence before its sweep committed, and a failed sweep is retried at every wake of the lease loop.
+	swept     atomic.Int64
+	nodeLocks [nodeLockStripes]chan struct{} // one-slot accept locks (lockNode)
+	lockSeed  maphash.Seed
+	inFlight  int // the calls this process waits for (MaxInFlightPerCenter)
+	wg        sync.WaitGroup
+	keys      keyring
 
 	stop    context.CancelFunc
 	done    chan struct{}
@@ -238,6 +242,7 @@ func (h *Hub) acquire(ctx context.Context) {
 		if err := h.clearStale(ctx, fence); err != nil {
 			h.logger.Warn("the channels a previous hub recorded could not be cleared", "error", err.Error())
 		}
+		h.sweep(ctx, fence)
 	case errors.Is(err, ErrLeaseHeld):
 		h.metrics.ObserveChannel("lease", "held_elsewhere")
 		if !h.heldElsewhere.Swap(true) {
@@ -284,9 +289,13 @@ func (h *Hub) leaseStep(ctx context.Context) {
 		return
 	}
 	remaining, held := h.lease.remaining()
-	if _, valid := h.lease.Fence(); !held || !valid {
+	fence, valid := h.lease.Fence()
+	if !held || !valid {
 		h.acquire(ctx)
 		return
+	}
+	if h.swept.Load() != fence {
+		h.sweep(ctx, fence)
 	}
 	// The renewal waits for the store at most until the local expiry, so a store that does not answer never holds the stand-down back.
 	renewal, cancel := context.WithTimeout(ctx, remaining)
@@ -341,6 +350,32 @@ func (h *Hub) Stop(ctx context.Context) {
 	} else {
 		h.metrics.ObserveChannel("lease", "released")
 	}
+}
+
+// sweep runs the boot sweep of the routing records under a fence (fleet.SweepRouted): every ACCEPTED record becomes UNKNOWN, because no
+// attempt of this fence is in flight yet and an earlier one may have reached the node. Only a committed sweep lets the hub route.
+func (h *Hub) sweep(ctx context.Context, fence int64) {
+	if h.db == nil {
+		return
+	}
+	swept, err := fleet.SweepRouted(ctx, h.db, fence, h.clock())
+	if err != nil {
+		h.metrics.ObserveChannel("lease", "sweep_failed")
+		h.logger.Warn("the routing records of a previous hub could not be swept; the hub routes nothing until they are", "error", err.Error())
+		return
+	}
+	h.swept.Store(fence)
+	h.metrics.ObserveChannel("lease", "swept")
+	if swept > 0 {
+		h.logger.Info("the routing records a previous hub left in flight are unknown now", "records", swept)
+	}
+}
+
+// Routable reports whether the hub routes calls, and under which fence: it holds the lease, is not stopping, and the boot sweep of
+// that fence committed (decisions B-1). The routed API's admission is fenced by it.
+func (h *Hub) Routable() (int64, bool) {
+	fence, serving := h.serving()
+	return fence, serving && h.swept.Load() == fence
 }
 
 // serving reports whether the hub admits an upgrade: it holds the lease and is not stopping.

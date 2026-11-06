@@ -278,6 +278,10 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		"record the current definitions version": effect,
 		// AF-CTR-05 E2a: the node registry's reads (package fleet); RenameNode and RevokeNode run under their receipts above.
 		"list the account's nodes": read, "read a node": read, "read a node's owner": read,
+		// AF-CTR-05 E2b: the routing records. The admission carries the attempt's effect (its evidence and the record), the settlement
+		// the answer and the boot sweep the hub's take-over; the offline refusal's audit is auxiliary (it records a refusal only).
+		"admit a routed call": effect, "settle a routed call": effect, "sweep the routing records of a previous hub": effect,
+		"audit a routed call to an offline node": auxiliary, "read a routing record": read,
 	}
 	found := map[string]string{}
 	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages", "../entitlement", "../fleet",

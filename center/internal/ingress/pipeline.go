@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
@@ -188,6 +189,15 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 		}
 	}
 
+	if policy.Deadline > 0 {
+		// A long-lived route (PN-1): the server's read and write timeouts bound every other request; this one's connection deadlines are
+		// its own budget plus a margin, so a routed long poll is not cut at 20 s. A writer that cannot set them (an in-process test
+		// recorder) keeps what it has.
+		controller := http.NewResponseController(writer)
+		until := time.Now().Add(policy.Deadline + RouteDeadlineMargin)
+		_ = controller.SetReadDeadline(until)
+		_ = controller.SetWriteDeadline(until)
+	}
 	caller := Caller{}
 	if policy.Authentication != Anonymous {
 		authenticated, refusal := p.authenticate(request)

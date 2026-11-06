@@ -81,6 +81,10 @@ const (
 	PlanDevelopmentFixtures PlanConfiguration = "development-fixtures"
 )
 
+// RoutedLongPolls is how many routed long polls (WaitNodeTask, and ReadNodeTaskOutput with wait_ms) may wait at once in a center process
+// (AF-CTR-05 E2b, Plan PN-1): half of the request connections, at least one.
+func RoutedLongPolls(maxConnections int) int { return max(1, maxConnections/2) }
+
 // Config is the validated configuration of one center process.
 type Config struct {
 	Mode Mode
@@ -225,6 +229,12 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if config.Identity, err = loadIdentity(get, config.Mode, config.PublicBaseURL, time.Now()); err != nil {
 		return Config{}, err
+	}
+	// The routed calls hold a request connection while they wait (PN-1): where the nodes surface serves them, an account's calls in
+	// flight may hold at most half of the request connections, and the routed long polls of all accounts together at most half too
+	// (RoutedLongPolls), so the routed API never exhausts the connections that sign-in, refresh and the reads need.
+	if limit := config.Identity.Policy.RoutedInFlightPerAccount; config.Identity.Enabled(SurfaceNodes) && limit > RoutedLongPolls(config.MaxConnections) {
+		return Config{}, invalid("routedInFlightPerAccount (%d) must be at most half of %s (%d)", limit, EnvMaxConnections, config.MaxConnections)
 	}
 	if config.Identity.Enabled(SurfaceIdentity) && config.Database == nil {
 		if get(EnvSurfaces) != "" {
