@@ -254,6 +254,7 @@
     "center/internal/hub/routed_capture_integration_test.go",
     "center/internal/hub/routed_integration_test.go",
     "center/internal/hub/routed_round1_integration_test.go",
+    "center/internal/hub/routed_round2_integration_test.go",
     "center/internal/hub/shape.go",
     "center/internal/hub/shape_test.go",
     "center/internal/hub/sign.go",
@@ -682,6 +683,7 @@
     "eng/policy/dependency-reviews/af-ctr-05-r11.json",
     "eng/policy/dependency-reviews/af-ctr-05-r12.json",
     "eng/policy/dependency-reviews/af-ctr-05-r13.json",
+    "eng/policy/dependency-reviews/af-ctr-05-r14.json",
     "eng/policy/dependency-reviews/af-ctr-05-r2.json",
     "eng/policy/dependency-reviews/af-ctr-05-r3.json",
     "eng/policy/dependency-reviews/af-ctr-05-r4.json",
@@ -761,6 +763,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r100.json",
     "eng/provenance/artifact-profiles/cloud-release-r101.json",
     "eng/provenance/artifact-profiles/cloud-release-r102.json",
+    "eng/provenance/artifact-profiles/cloud-release-r103.json",
     "eng/provenance/artifact-profiles/cloud-release-r11.json",
     "eng/provenance/artifact-profiles/cloud-release-r12.json",
     "eng/provenance/artifact-profiles/cloud-release-r13.json",
@@ -903,6 +906,7 @@
     "eng/provenance/records/center-runtime-r46.json",
     "eng/provenance/records/center-runtime-r47.json",
     "eng/provenance/records/center-runtime-r48.json",
+    "eng/provenance/records/center-runtime-r49.json",
     "eng/provenance/records/center-runtime-r5.json",
     "eng/provenance/records/center-runtime-r6.json",
     "eng/provenance/records/center-runtime-r7.json",
@@ -950,6 +954,7 @@
     "eng/provenance/records/center-worker-r46.json",
     "eng/provenance/records/center-worker-r47.json",
     "eng/provenance/records/center-worker-r48.json",
+    "eng/provenance/records/center-worker-r49.json",
     "eng/provenance/records/center-worker-r5.json",
     "eng/provenance/records/center-worker-r6.json",
     "eng/provenance/records/center-worker-r7.json",
@@ -1830,5 +1835,5 @@
     "third-party/GoCrypto.LICENSE.txt": "go-gocrypto-legal-r1",
     "third-party/GoSys.LICENSE.txt": "go-gosys-legal-r1"
   },
-  "artifacts": ["center-runtime-r48", "center-worker-r48"]
+  "artifacts": ["center-runtime-r49", "center-worker-r49"]
 }

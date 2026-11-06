@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "Cloud center/internal/hub routed_capture_integration_test.go",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "e2b-code",
+  "centerCommit": "6781c11",
   "method": "/arcforges.fleet.v1.FleetService/CancelNodeTask",
   "case": "ok",
   "outcome": "value",
