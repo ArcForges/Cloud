@@ -89,13 +89,13 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		surface, deadline, reply := SurfaceIdentity, 15_000, 65_536
 		switch {
 		case strings.HasPrefix(row.Path, "/arcforges.fleet.v1.FleetService/"):
-			// The node registry (AF-CTR-05 E2a): 5 s, RevokeNode 10 s; ListNodes replies up to 256 KiB.
+			// The node registry (AF-CTR-05 E2a): 5 s, RevokeNode 10 s; ListNodes replies up to 640 KiB.
 			surface, deadline = SurfaceNodes, 5_000
 			switch row.Path {
 			case "/arcforges.fleet.v1.FleetService/RevokeNode":
 				deadline = 10_000
 			case "/arcforges.fleet.v1.FleetService/ListNodes":
-				reply = 262_144
+				reply = ListNodesReplyBytes
 			}
 		case strings.HasPrefix(row.Path, "/arcforges.fleet.v1."):
 			surface, deadline = SurfaceFleet, 10_000
@@ -211,7 +211,7 @@ func TestInconsistentRegistrationsStopTheGenerator(t *testing.T) {
 }
 
 // TestTheCenterSendsEveryReplyItsBudgetsAdmit (F8): the Connect writer's bound is the largest reply budget of the registrations, so
-// it admits every method's budget (a full DeviceService.List page among them, and since AF-CTR-05 E2a a full ListNodes of 256 KiB),
+// it admits every method's budget (a full DeviceService.List page among them, and since AF-CTR-05 E2a a full ListNodes of 640 KiB),
 // not only the largest request.
 func TestTheCenterSendsEveryReplyItsBudgetsAdmit(t *testing.T) {
 	modules, err := Center()
@@ -226,7 +226,7 @@ func TestTheCenterSendsEveryReplyItsBudgetsAdmit(t *testing.T) {
 			}
 		}
 	}
-	if largest != 262_144 || largest <= MaxRequestBytes(modules) {
+	if largest != ListNodesReplyBytes || largest <= MaxRequestBytes(modules) {
 		t.Fatalf("send bound %d, request bound %d", largest, MaxRequestBytes(modules))
 	}
 }

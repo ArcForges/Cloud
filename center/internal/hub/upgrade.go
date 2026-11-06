@@ -149,7 +149,7 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	c := &conn{hub: h, ws: ws, sessionID: parseID(caller.SessionID), userID: parseID(caller.UserID), deviceID: parseID(caller.DeviceID),
 		installationID: parseID(caller.InstallationID), nodeID: node.nodeID, enrollmentID: node.enrollmentID, nodeName: node.name, publicKey: node.publicKey,
 		connectionID: platform.NewID(), fence: fence, accessExpires: expires, tokenDigest: sha256.Sum256([]byte(token)), queue: make(chan outbound, h.settings.SendQueueFrames),
-		calls:    map[platform.ID]*pending{},
+		calls: map[platform.ID]*pending{}, stopWrites: make(chan struct{}), writerDone: make(chan struct{}), closeDone: make(chan struct{}),
 		finished: make(chan struct{})}
 	if raw := correlation.IDBytes(call.CorrelationID); len(raw) == 16 {
 		var id platform.ID
@@ -157,9 +157,11 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		c.correlationID = &id
 	}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
+	c.writes, c.cancelWrites = context.WithCancel(context.Background())
 	if !h.track(c) {
 		// The connection is hijacked: its close gives the node slot back.
 		c.cancel()
+		c.cancelWrites()
 		_ = ws.Close(websocket.StatusCode(CloseShuttingDown), "shutting_down")
 		return
 	}

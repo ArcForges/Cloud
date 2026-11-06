@@ -53,6 +53,16 @@ func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
 	if err = Check(append(policies, extra)); err == nil {
 		t.Fatal("a served method without a row was admitted")
 	}
+	// An operation ID names one row (review A N-2): a second row on another path that reuses fleet.listNodes is refused.
+	reused := append(Operations(), Operation{Path: "/arcforges.fleet.v1.FleetService/IssueRelayToken", ID: "fleet.listNodes", Risk: "R1", Session: true,
+		RelayedScopes: []string{"node"}})
+	reusedPolicy, err := ingress.NewUnary("/arcforges.fleet.v1.FleetService/IssueRelayToken", ingress.Session, ingress.NoScope, 4096, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = checkTable(reused, append(policies, reusedPolicy)); err == nil {
+		t.Fatal("a repeated operation ID was admitted")
+	}
 	flipped := append([]ingress.Policy(nil), policies...)
 	for index, policy := range flipped {
 		if policy.Authentication == ingress.Session {

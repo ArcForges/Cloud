@@ -43,6 +43,16 @@ type conn struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	// writes is the parent of every write's context, apart from ctx (AF-CTR-05 E2a): coder/websocket closes the whole connection when a
+	// write's context ends while the write is still in progress, even after its bytes were flushed, so ending the reader (ctx) must
+	// never end a write. It ends when the close was sent, or at the close's flush deadline.
+	writes       context.Context
+	cancelWrites context.CancelFunc
+	// stopWrites asks the writer to write what is queued and stop (closeWith); writerDone is closed when the writer has stopped, and
+	// closeDone once the close is sent (or none will be).
+	stopWrites chan struct{}
+	writerDone chan struct{}
+	closeDone  chan struct{}
 
 	mu            sync.Mutex
 	nonce         []byte    // the one-use hello nonce; nil once spent or void
@@ -91,10 +101,12 @@ type outbound struct {
 	call *pending
 }
 
-// run serves the connection until it closes: the challenge, the reader, the writer and the supervisor.
+// run serves the connection until it closes: the challenge, the reader, the writer and the supervisor. The writer starts first: a close
+// waits for it to stop.
 func (c *conn) run() {
 	defer c.hub.forget(c)
 	defer close(c.finished)
+	go c.writer()
 	nonce := make([]byte, NonceBytes)
 	if _, err := rand.Read(nonce); err != nil {
 		c.closeWith(CloseShuttingDown, "internal")
@@ -106,7 +118,6 @@ func (c *conn) run() {
 	c.mu.Lock()
 	c.nonce, c.helloDeadline, c.lastInbound = nonce, deadline, now
 	c.mu.Unlock()
-	go c.writer()
 	if err := c.send(func(seq uint64) ([]byte, error) { return c.hub.codec.Challenge(seq, nonce, c.connectionID, deadline) }); err != nil {
 		c.closeWith(CloseShuttingDown, "internal")
 	}
@@ -184,6 +195,8 @@ func (c *conn) ended(err error) {
 		c.closing.Store(true)
 		c.closeCode, c.closeReason = code, reason
 		c.failCalls()
+		// The node closed or the transport ended: no close is sent.
+		close(c.closeDone)
 		go func() {
 			_ = c.ws.CloseNow()
 		}()
@@ -596,45 +609,73 @@ func (c *conn) enqueue(item outbound) error {
 	}
 }
 
-// writer writes the queued frames, each within the write timeout: a node that stops reading is closed when one passes.
+// writer writes the queued frames, each within the write timeout: a node that stops reading is closed when one passes. Asked to stop
+// (closeWith), it writes what is still queued (a call abandoned meanwhile is skipped) and stops, so the close frame comes after them;
+// every write's context descends from writes, never from the reader's ctx.
 func (c *conn) writer() {
+	defer close(c.writerDone)
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.writes.Done():
 			return
-		case item := <-c.queue:
-			c.queuedBytes.Add(-int64(len(item.data)))
-			c.mu.Lock()
-			stall := c.stall
-			c.mu.Unlock()
-			if stall != nil {
+		case <-c.stopWrites:
+			for {
 				select {
-				case <-stall:
-				case <-c.ctx.Done():
+				case item := <-c.queue:
+					if !c.write(item) {
+						return
+					}
+				default:
 					return
 				}
 			}
-			if item.call != nil && !c.deliver(item.call) {
-				// The call was abandoned (its deadline passed, its caller went away, the connection is closing): it was answered
-				// DID_NOT_HAPPEN, so its frame is never written. From a successful deliver on, its loss is UNKNOWN for a mutation.
-				continue
-			}
-			write, cancel := context.WithTimeout(c.ctx, c.hub.settings.WriteTimeout)
-			err := c.ws.Write(write, websocket.MessageBinary, item.data)
-			cancel()
-			if err != nil {
-				if !c.closing.Load() {
-					c.hub.metrics.ObserveChannel("violation", "write_timeout")
-					c.closeWith(CloseDeadline, "write_timeout")
-				}
+		case item := <-c.queue:
+			if !c.write(item) {
 				return
 			}
 		}
 	}
 }
 
+// write writes one queued frame; false ends the writer.
+func (c *conn) write(item outbound) bool {
+	c.queuedBytes.Add(-int64(len(item.data)))
+	c.mu.Lock()
+	stall := c.stall
+	c.mu.Unlock()
+	if stall != nil {
+		select {
+		case <-stall:
+		case <-c.writes.Done():
+			return false
+		}
+	}
+	if item.call != nil && !c.deliver(item.call) {
+		// The call was abandoned (its deadline passed, its caller went away, the connection is closing): it was answered
+		// DID_NOT_HAPPEN, so its frame is never written. From a successful deliver on, its loss is UNKNOWN for a mutation.
+		return true
+	}
+	write, cancel := context.WithTimeout(c.writes, c.hub.settings.WriteTimeout)
+	err := c.ws.Write(write, websocket.MessageBinary, item.data)
+	cancel()
+	if err != nil {
+		if !c.closing.Load() {
+			c.hub.metrics.ObserveChannel("violation", "write_timeout")
+			c.closeWith(CloseDeadline, "write_timeout")
+		}
+		return false
+	}
+	return true
+}
+
+// closeFlush bounds how long a close writes what was queued before it and its own RelayClose frame; the close handshake then waits at
+// most a second for the node's answer.
+const closeFlush = 2 * time.Second
+
 // closeWith closes the connection once: the RelayClose frame and the WebSocket close with the code (a 4500 carries the reconnect hint),
-// then the reader and writer end and finish records the close.
+// then the reader and writer end and finish records the close. The frames queued before the close are written first, then the
+// RelayClose, both within closeFlush; nothing ends the connection before (finish waits for closeDone), so a close frame is never lost
+// to the reader's end (AF-CTR-05 E2a).
 func (c *conn) closeWith(code uint32, reason string) {
 	c.closeOnce.Do(func() {
 		c.closing.Store(true)
@@ -642,7 +683,12 @@ func (c *conn) closeWith(code uint32, reason string) {
 		// A closing connection is no longer the node's: a newer one may take its place at once. Its calls fail now.
 		c.hub.release(c)
 		c.failCalls()
+		close(c.stopWrites)
+		// A node that stopped reading never lets a write finish: the flush deadline ends the writes.
+		flush := time.AfterFunc(closeFlush, c.cancelWrites)
 		go func() {
+			defer close(c.closeDone)
+			<-c.writerDone
 			hint := time.Duration(0)
 			if code == CloseShuttingDown {
 				hint = c.hub.reconnectHint()
@@ -651,11 +697,10 @@ func (c *conn) closeWith(code uint32, reason string) {
 			c.sentSeq++
 			frame, err := c.hub.codec.Close(c.sentSeq, code, reason, hint)
 			c.mu.Unlock()
-			write, cancel := context.WithTimeout(context.WithoutCancel(c.ctx), 2*time.Second)
 			if err == nil {
-				_ = c.ws.Write(write, websocket.MessageBinary, frame)
+				_ = c.ws.Write(c.writes, websocket.MessageBinary, frame)
 			}
-			cancel()
+			flush.Stop()
 			if code >= 1000 && code < 5000 && code != 1006 {
 				// The close handshake waits for the node's answer at most a second: a node that stopped reading never answers.
 				handshake := make(chan struct{})
@@ -671,21 +716,25 @@ func (c *conn) closeWith(code uint32, reason string) {
 				}
 			}
 			c.cancel()
+			c.cancelWrites()
 			_ = c.ws.CloseNow()
 		}()
 	})
 }
 
-// finish runs once the reader ended: it waits for the close to be sent, ends the writer and the supervisor, records presence and
-// audits the close.
+// finish runs once the reader ended: it waits for the close to be sent (closeDone), ends the writer and the supervisor, records
+// presence and audits the close.
 func (c *conn) finish() {
 	c.closeOnce.Do(func() {
 		c.closing.Store(true)
 		c.closeCode, c.closeReason = 1006, "transport"
+		close(c.closeDone)
 		_ = c.ws.CloseNow()
 	})
+	<-c.closeDone
 	c.failCalls()
 	c.cancel()
+	c.cancelWrites()
 	now := c.hub.clock()
 	ctx, cancel := context.WithTimeout(context.Background(), presenceTimeout)
 	defer cancel()

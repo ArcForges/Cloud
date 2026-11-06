@@ -383,11 +383,16 @@ func Check(served []ingress.Policy) error { return checkTable(Operations(), serv
 // checkTable is Check over a given table.
 func checkTable(table []Operation, served []ingress.Policy) error {
 	rows := map[string]Operation{}
+	ids := map[string]bool{}
 	for _, operation := range table {
 		if _, repeated := rows[operation.Path]; repeated {
 			return fmt.Errorf("the operation table names %s twice", operation.Path)
 		}
-		rows[operation.Path] = operation
+		// An operation ID names one row: RelayedOperations and the step-up classes are keyed by it (AF-CTR-05 E2a, review A N-2).
+		if ids[operation.ID] {
+			return fmt.Errorf("the operation table names the operation %s twice", operation.ID)
+		}
+		rows[operation.Path], ids[operation.ID] = operation, true
 	}
 	seen := map[string]bool{}
 	for _, policy := range served {

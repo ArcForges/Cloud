@@ -213,9 +213,14 @@ most 1 MiB (the center closes a larger one 4413), well under the platform's 32 M
 The nodes surface ([center fleet](center-fleet.md#node-registry)) adds ordinary method rows to the generated surface table, from
 `center/internal/routes/nodes.go`: FleetService ListNodes, GetNode, RenameNode and RevokeNode, each a session row of binary gRPC-Web
 with RequestMeta and a 4096-byte request bound, the contract's deadline as its budget (5 s, RevokeNode 10 s), and a reply bound of
-64 KiB (ListNodes 256 KiB: one node of a few hundred bytes per live enrollment, up to the enrollment cap's bound of 1,000). While
-`FLAGSHIP_SURFACES` does not name `nodes`, each is answered with the generated `STATE/not_activated` (`state.reason` `nodes`) before
-anything is read; production names none. Every other FleetService method has no row (`UNIMPLEMENTED` at the center).
+64 KiB, except ListNodes: 640 KiB (`routes.ListNodesReplyBytes`), which holds one reply of 1,000 nodes (the enrollment cap's upper bound,
+`config.MaxNodesPerAccountBound`) as large as the rules admit, about 615 KB with its frame (`TestTheListNodesReplyFitsItsBoundAtTheCap`).
+While `FLAGSHIP_SURFACES` does not name `nodes`, each is answered with the generated `STATE/not_activated` (`state.reason` `nodes`)
+before anything is read; production names none. Every other FleetService method has no row (`UNIMPLEMENTED` at the center).
+
+The center's Connect send bound is the largest reply budget of all registrations (F8), so it is now ListNodes' 640 KiB for every
+method: each method's own reply bound is the Worker's frame guard and unary bound. A self-hosted center without the Worker in front
+bounds every reply by the 640 KiB only; its replies are the center's own messages.
 
 ## The frame guard
 

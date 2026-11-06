@@ -36,7 +36,9 @@ import (
 // assertion's request digest is SHA-256 of the request's top-level fields as transmitted, every occurrence of the relay_assertion field
 // left out; Contracts relay.proto RelayAssertion) and admits the call only with a relay verified for the credential's own installation.
 // A bearer token alone is refused AUTHENTICATION/unauthenticated (relay_assertion missing) before anything is read or written. An
-// account session that sends a caller or a relay assertion is refused AUTHORIZATION/permission_denied (principal), audited.
+// account session whose request names a NODE_RELAY caller or carries a relay assertion is refused AUTHORIZATION/permission_denied
+// (principal), audited access.refused; a routed caller of any other kind is VALIDATION/invalid_argument (caller.kind), refused before
+// authorization and not audited, whoever sends it.
 
 // Channels tells whether a node's channel is open in this process (hub.Hub.Connected): FleetNode.online.
 type Channels interface {
@@ -129,11 +131,13 @@ func withoutField(message []byte, number protowire.Number) ([]byte, error) {
 }
 
 // nodeSubject is the subject of a row whose Object is node: the authorizer asks for the node's owner (stage 2), so an unknown or
-// foreign node is STATE/not_found before anything else is decided, and so is a revoked one for a read. A receipted write (receipted)
-// also owns its revoked node, so a replay reaches its receipt (fleet.NodeOwner).
-func (r *Registry) nodeSubject(nodeID platform.ID, receipted bool) *access.Subject {
+// foreign node is STATE/not_found before anything else is decided (nothing is written for it), and so is a revoked one for a read. A
+// receipted write (receipted) also owns the caller's own revoked enrollments of the node ID, before any other account's, so the
+// caller's replay reaches its receipt (fleet.NodeOwner).
+func (r *Registry) nodeSubject(call *ingress.Call, nodeID platform.ID, receipted bool) *access.Subject {
+	caller, _ := textID(call.Caller.UserID)
 	return &access.Subject{Kind: access.ObjectNode, ID: append([]byte(nil), nodeID[:]...), Owner: func(ctx context.Context) (string, bool, error) {
-		return fleet.NodeOwner(ctx, r.db, nodeID, receipted)
+		return fleet.NodeOwner(ctx, r.db, nodeID, caller, receipted)
 	}}
 }
 
@@ -217,7 +221,7 @@ func (r *Registry) getNode(ctx context.Context, call *ingress.Call, message *fle
 		if err != nil {
 			return nil, err
 		}
-		if _, _, err = r.access.AuthorizeRelayed(ctx, call, r.nodeSubject(nodeID, false), stated); err != nil {
+		if _, _, err = r.access.AuthorizeRelayed(ctx, call, r.nodeSubject(call, nodeID, false), stated); err != nil {
 			return nil, err
 		}
 		userID, ok := textID(call.Caller.UserID)
@@ -252,7 +256,7 @@ func (r *Registry) renameNode(ctx context.Context, call *ingress.Call, message *
 		if err != nil {
 			return nil, err
 		}
-		if _, err = r.access.AuthorizeSubject(ctx, call, r.nodeSubject(nodeID, true)); err != nil {
+		if _, err = r.access.AuthorizeSubject(ctx, call, r.nodeSubject(call, nodeID, true)); err != nil {
 			return nil, err
 		}
 		account, err := accountOf(call)
@@ -304,7 +308,7 @@ func (r *Registry) revokeNode(ctx context.Context, call *ingress.Call, message *
 		if err != nil {
 			return nil, err
 		}
-		operation, err := r.access.AuthorizeSubject(ctx, call, r.nodeSubject(nodeID, true))
+		operation, err := r.access.AuthorizeSubject(ctx, call, r.nodeSubject(call, nodeID, true))
 		if err != nil {
 			return nil, err
 		}

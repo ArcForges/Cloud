@@ -53,7 +53,8 @@ AF-CTR-05 part E2a serves FleetService's node registry on the switchable surface
 `fleet` and `relay` (a list without them refuses to start), is in the self-hosted default (and leaves it with `relay` when no command
 key is configured), and production keeps it off: there, and on proof until AF-CTR-05 part E3, the four methods answer
 `STATE/not_activated` with `state.reason` `nodes` from the Worker. The registry is never gated (Q20: a lapsed account still lists,
-renames and revokes its nodes). The routed task methods of FleetService are part E2b's; every other FleetService method stays
+renames and revokes its nodes), and it stands behind no per-account control: ListNodes and GetNode, relayed calls included, are
+bounded only by the Worker's per-client edge limit (and a relayed read by the verification's one read-only transaction). The routed task methods of FleetService are part E2b's; every other FleetService method stays
 unregistered (`UNIMPLEMENTED`, no Worker row; Plan CTR5-API-01: SendNodeCommand, GetNodeCommand, ListNodeCommands, CancelNodeCommand,
 the push preferences, IssueRelayToken, OpenFleetWatch and WatchFleet; `TestTheRegistryRowsAreTheServedMethods`).
 
@@ -72,35 +73,53 @@ the push preferences, IssueRelayToken, OpenFleetWatch and WatchFleet; `TestTheRe
   occurrence of `relay_assertion` left out (Contracts relay.proto `RelayAssertion`; binary encoding only, which is all the ingress admits).
   A bearer token alone, or a caller without an assertion, is refused `AUTHENTICATION/unauthenticated` (`state.state` `relay_assertion`,
   `state.reason` `missing`); a nonce spent again `nonce_reused`; another target, another origin or a field changed after signing
-  `request_mismatch`; another node's credential `signature_invalid`. None of these refusals, and no read, writes anything: the
-  verification reads the credential's node and key, and spends the nonce in memory (`TestATokenWithoutTheNodeKeyReadsNothing`). A relay
+  `request_mismatch`; another node's credential `signature_invalid`. None of these refusals writes anything, and a read writes nothing:
+  the verification reads the credential's node and key, and spends the nonce in memory (`TestATokenWithoutTheNodeKeyReadsNothing`).
+  The authorizer's later stages write their refusal audit as for any row: a restricted account's relayed read, for one, is audited
+  `access.refused` (`restricted`). The authorizer compares the relay's installation with the bearer credential's; that the relaying node
+  is the credential's live node of that installation is checked by the hub's verifier (`hub.VerifyRelayAssertion`), one live node per
+  installation making the two the same binding. A relay
   assertion refusal is a metric (`assertion`), not an audit row: it carries nothing trustworthy to record, and a row per refusal would let
   a token thief write. The rows that admit a relayed caller are a person's rows with `RelayedScopes` `node`; `CheckRow` holds them to
   RelayedOperations (the two reads here and the six routed task methods of E2b), never `Restricted`, gated or R1, addressing a node or
   nothing, and their `mobile.limited` and step-up rules apply to the account-session half only (`TestTheRelayedRowsFollowTheirRules`,
-  `TestAuthorizeVerifiesTheRelayOfANodeCaller`). An account session whose request names a routed caller or carries an assertion is
-  refused `AUTHORIZATION/permission_denied` (`principal`), audited `access.refused` (`TestAPersonSessionCannotSendANodeRelayCaller`).
+  `TestAuthorizeVerifiesTheRelayOfANodeCaller`). An account session whose request names a `NODE_RELAY` caller or carries an assertion is
+  refused `AUTHORIZATION/permission_denied` (`principal`), audited `access.refused`, and so is an automation credential; a routed caller
+  of any other kind is `VALIDATION/invalid_argument` (`caller.kind`), refused before authorization and not audited
+  (`TestAPersonSessionCannotSendANodeRelayCaller`).
 - **Values (CTR5-API-02).** ListNodes answers the account's live enrollments, oldest first (`node_id` is unique among the live rows
   only), each with `online` (`ONLINE` while the node's channel is open in this process, `OFFLINE` once a channel was accepted,
   `NEVER_CONNECTED` before; a process that does not hold the hub lease has no channel, so it states no node `ONLINE`), `last_seen_at` (the
   later of the node's last contact and its channel's last recorded heartbeat), `enrolled_at`, `device_id`, OS, architecture, the canonical
-  version, `credential_expires_at` (the latest `expires_at` of the node's live sessions, absent when it holds none) and `reported_name`;
-  no summary (AF-CLD-04). GetNode answers one live node of the account and no `recent_commands` (routing records are not command views).
-  An unknown, another account's and a revoked node are the same `STATE/not_found` (`TestTheRegistryListsTheAccountsLiveNodes`).
+  version, `credential_expires_at` (the latest `expires_at` of the node's sessions that are neither revoked nor expired, absent when it
+  holds none) and `reported_name`; no summary (AF-CLD-04), and no `role` (the store keeps none: the host and guest roles were retired by
+  AD-0018). GetNode answers one live node of the account and no `recent_commands` (routing records are not command views).
+  An unknown, another account's and a revoked node are the same `STATE/not_found`, answered at the ownership stage before anything is
+  written, for RenameNode and RevokeNode too, evidence for that node ID held or not (`TestTheRegistryListsTheAccountsLiveNodes`,
+  `TestAForeignNodeIsNotFoundAndWritesNothing`). ListNodes answers every live node in one reply, up to the enrollment cap's upper
+  bound of 1,000 (`config.MaxNodesPerAccountBound`): its reply budget, 640 KiB, holds 1,000 FleetNodes as large as the rules admit
+  (`TestTheListNodesReplyFitsItsBoundAtTheCap`). A restricted account may rename and revoke its nodes (as DeviceService.Rename and
+  Revoke) but not list or read them through FleetService, because a row that admits a relayed caller is never `Restricted`;
+  DeviceService.List still shows it its devices.
 - **RenameNode (CTR5-API-03, Q25: the account's name wins).** The name follows the rule of the name a node reports (`device.ValidNodeName`: 1 to 64
   UTF-16 units of letters, marks, numbers, punctuation, symbols and single spaces); the node's registry name (`fleet.node.display_name`) and its device's name take it in the
-  receipt's transaction, the node is marked `named_by_account`, and `fleet.node.renamed` is audited without the name. From then on a
+  receipt's transaction, the node is marked `named_by_account`, its reported name is kept (a row from before 0009, without
+  `reported_name`, keeps its `display_name` as such in the same UPDATE: `TestARenameOfAnEarlierRowKeepsTheReportedName`), and
+  `fleet.node.renamed` is audited without the name. From then on a
   report (ReportNodeInfo, a sign-in in place) only keeps the node's own name as `reported_name`, and changes neither the node's nor the
   device's name. The node adopts the account's name at its next accepted channel (`ChannelAccepted.node_name`, the name the upgrade read).
   The reply is the renamed node, kept in the receipt, so a replay answers the node as it was renamed
-  (`TestRenameNodeKeepsTheReportedNameAndTheNodeAdoptsIt`).
+  (`TestRenameNodeKeepsTheReportedNameAndTheNodeAdoptsIt`). A node that is revoked and then enrolled again is a new enrollment: it
+  starts with the name it reports, not the account's earlier name.
 - **RevokeNode (CTR5-API-04).** In the receipt's transaction: the step-up evidence of class `fleet.revokeNode` bound to the node ID
   (`access.TargetNode`; `identity.TargetHash` of the class, the account and the node ID), then `device.Revoke` of the node's device with
   the cascade (installations, sessions, `fleet.NodeParticipant`'s node rows, then the hub's participant, which closes the channel 4401
   once the transaction commits), and `device.revoked` audited. Without evidence, or with evidence bound to another node, the call is
   `AUTHENTICATION/step_up_required` and writes nothing. A replay answers the stored receipt; a new command for a revoked node is
-  `STATE/not_found`, kept in its receipt (`TestRevokeNodeNeedsEvidenceBoundToTheNode`). Ownership for the two receipted writes also finds
-  a node's newest revoked enrollment while none is live, so a replay of a committed command reaches its receipt.
+  `STATE/not_found`, kept in its receipt (`TestRevokeNodeNeedsEvidenceBoundToTheNode`). Ownership for the two receipted writes finds the
+  caller's own enrollments of the node ID, revoked ones included, before any other account's, so the caller's replay of a committed
+  command reaches its receipt even after the node ID was enrolled again under another account
+  (`TestAReplayAfterTheNodeIsEnrolledElsewhereAnswersItsReceipt`).
 - **mobile.limited (T-19).** A `mobile.limited` session lists and reads; RenameNode and RevokeNode answer it
   `AUTHENTICATION/step_up_required` before anything is written (`TestAMobileLimitedSessionReadsTheRegistryButUpgradesToChangeIt`).
 
@@ -654,7 +673,14 @@ WebSocket connection, not to TLS, which ends at the Worker; a same-user process 
 | Graceful stop (CTR5-HUB-11)            | on `SIGTERM` the hub closes every channel 4500 before the listeners stop, with a jittered reconnect hint of 1 to 30 s in `RelayClose.reconnect_after_ms` (meaningful with 4500 only, 0 to 300000), then releases the lease                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 Every close sends `RelayClose` with its code and closed reason before the WebSocket close with the same code (the close handshake waits
-at most a second), and is audited `fleet.channel.closed`. The codes: 4401 credential expired or revoked, 4403 refused, 4408 hello or
+at most a second), and is audited `fleet.channel.closed`. The frames queued before the close are written first, then the `RelayClose`,
+both within 2 s (`closeFlush`); nothing ends the connection before: the reader's end waits for the close to be sent, and every write's
+context descends from a context of the writes, not the reader's (AF-CTR-05 E2a). coder/websocket closes the whole connection when a
+write's context ends while the write is in progress, even after its bytes were flushed, so a close decided by the reader (the node's
+own `RelayClose`, a malformed frame) used to lose its `RelayClose` and close handshake under load
+(`TestACloseWaitsForTheWriteInFlightAndSendsItsCloseFrame`). A node that stopped reading never lets a write finish: the close flush
+ends the write in flight, so the connection ends and its close is recorded within seconds, not after the write timeout
+(`TestACloseToANodeThatStopsReadingEndsWithinTheFlush`). The codes: 4401 credential expired or revoked, 4403 refused, 4408 hello or
 heartbeat deadline (or a write that timed out), 4409 replaced, 4413 frame too large, 4429 rate limited, 4500 center going away
 (shutdown, or this process lost the hub lease), 4503 reserved (kill switch). A node treats any close without a preceding `RelayClose`
 like 4500 and reconnects with its backoff: through the hosted Durable Object an abnormal close (1005, 1006) reaches it as 1000
@@ -715,8 +741,8 @@ it. The claim keeps a local expiry too, 25 s (the time to live less a sixth) aft
 process's own clock: a process whose renewals fail (a store that does not answer, a saturated pool) holds nothing once it passes. The
 lease loop wakes at that instant (its timer is re-armed to the earlier of the next renewal and the local expiry, and a renewal waits
 for the store at most until then), so admission stops and every channel's close starts at the local expiry, 5 s before the database's
-expiry lets another process take over; a close takes at most about 3 s (the `RelayClose` write is bounded by 2 s and the close
-handshake by 1 s, all connections in parallel), so the channels are closed before then (`TestAHubWhoseRenewalsFailStandsDown`, at the
+expiry lets another process take over; a close takes at most about 3 s (the queued frames and the `RelayClose` are bounded by 2 s
+together and the close handshake by 1 s, all connections in parallel), so the channels are closed before then (`TestAHubWhoseRenewalsFailStandsDown`, at the
 3 : 1 ratio of PB-5). A renewal that finds the lease another process's closes them the same way. Once the store answers again, the
 process takes its own lapsed row over at once under a higher fence (it never takes it for another process's), so the lapsed epoch's
 writes stay refused. The accept lock is one of 64 striped locks, chosen by a hash of the whole node ID, and its wait ends with the hello's

@@ -28,16 +28,22 @@ func NodesMethods() []IdentityMethod {
 	}
 }
 
-// nodesBudget is a registry method's transport budget: the contract's deadline (5 s, RevokeNode 10 s); a ListNodes reply carries one
-// FleetNode of a few hundred bytes per live enrollment, at most the enrollment cap's bound of 1,000 (config MaxNodesPerAccount), so it
-// gets 256 KiB, the others 64 KiB.
+// ListNodesReplyBytes is ListNodes' reply bound: one FleetNode per live enrollment, at most config.MaxNodesPerAccountBound (1,000), and a
+// FleetNode is at most 612 bytes (two names of 64 UTF-16 units of 3-byte characters, a 128-character version, its IDs and the largest
+// instants), so the worst reply frame is 615,031 bytes; 640 KiB holds it with its trailers (fleetapi's
+// TestTheListNodesReplyFitsItsBoundAtTheCap builds that reply). It is the largest budget, so it is also the center's Connect send bound
+// for every method (routes.MaxResponseBytes); each other method's own reply bound is the Worker's.
+const ListNodesReplyBytes = 655_360
+
+// nodesBudget is a registry method's transport budget: the contract's deadline (5 s, RevokeNode 10 s); ListNodes replies up to
+// ListNodesReplyBytes, the others 64 KiB.
 func nodesBudget(path string) Budget {
 	deadline, reply := 5_000, 65_536
 	switch path {
 	case fleetv1connect.FleetServiceRevokeNodeProcedure:
 		deadline = 10_000
 	case fleetv1connect.FleetServiceListNodesProcedure:
-		reply = 262_144
+		reply = ListNodesReplyBytes
 	}
 	return Budget{MaxFrameBytes: reply, MaxUnaryResponseBytes: reply, MaxDurationMilliseconds: deadline, Instance: HealthInstance}
 }

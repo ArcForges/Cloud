@@ -64,6 +64,10 @@ const SurfaceRelay Surface = "relay"
 // off), and production keeps it off until AF-PROD-01.
 const SurfaceNodes Surface = "nodes"
 
+// MaxNodesPerAccountBound is the largest enrollment cap a policy may set (maxNodesPerAccount, 1 to this): the most live nodes one
+// account can have, which FleetService.ListNodes answers in one reply (its transport budget is sized for it, routes.Nodes).
+const MaxNodesPerAccountBound = 1000
+
 // MaxFleetPublicBaseURLLength bounds the public base URL of a center that serves the fleet surface: the contract bounds every URL the
 // center derives for a node at 512 characters (fleet.v1 authorize_url, verification_uri*), and the longest suffix it appends is
 // /connect#flow= and a 36-character flow ID (50 characters).
@@ -369,7 +373,7 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"emailCodeAttempts":   {&p.EmailCodeAttempts, 1, 10},
 		"emailCodeSends":      {&p.EmailCodeSends, 1, 3},
 		"emailCodeIterations": {&p.EmailCodeIterations, 10_000, 600_000},
-		"maxNodesPerAccount":  {&p.MaxNodesPerAccount, 1, 1000},
+		"maxNodesPerAccount":  {&p.MaxNodesPerAccount, 1, MaxNodesPerAccountBound},
 		// AF-CTR-05 part E0 (an owner placeholder, H-07).
 		"routedInFlightPerAccount": {&p.RoutedInFlightPerAccount, 1, 1024},
 		// AF-CTR-05 part E1a: the node channel's bounds (its frame bound is the contract's 1 MiB, routes.NodeChannelMaxFrameBytes, which no

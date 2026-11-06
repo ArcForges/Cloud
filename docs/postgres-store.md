@@ -300,7 +300,7 @@ already). Retention: the presence columns live with their node row; the lease is
   characters (`node_reported_name`). A row of the previous release has none until its node reports again; until then its `display_name`
   is the name it reported, and FleetNode.reported_name states that.
 - `named_by_account boolean NOT NULL DEFAULT false`: set by RenameNode; from then on `display_name` is the account's name, which a report
-  no longer changes.
+  no longer changes. The rename keeps the node's own name: a row without `reported_name` gets its `display_name` there in the same UPDATE.
 
 Every statement of the previous release names its `fleet.node` columns, so it keeps working: its enrollment insert takes the default
 and leaves `reported_name` empty. The runtime role keeps SELECT, INSERT and UPDATE on `fleet.node`, never DELETE. The migration is

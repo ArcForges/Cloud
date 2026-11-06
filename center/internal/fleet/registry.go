@@ -34,8 +34,8 @@ type NodeRecord struct {
 	LastSeenAt time.Time
 	// Connected is whether the node's channel was ever accepted (online_since set): it tells OFFLINE from NEVER_CONNECTED.
 	Connected bool
-	// CredentialExpiresAt is when the node's live credential ends at the latest (identity.session expires_at, the absolute lifetime);
-	// nil while it holds none (signed out).
+	// CredentialExpiresAt is when the node's live credential ends at the latest (identity.session expires_at, the absolute lifetime) over
+	// its node sessions that are neither revoked nor expired; nil while it holds none (signed out, or its credential ended).
 	CredentialExpiresAt *time.Time
 }
 
@@ -43,7 +43,7 @@ type NodeRecord struct {
 const recordColumns = `n.node_id, n.device_id, n.enrollment_id, n.display_name, coalesce(n.reported_name, n.display_name), n.version, n.os, n.arch,
     n.enrolled_at, greatest(n.last_seen_at, coalesce(n.last_heartbeat_at, n.last_seen_at)), n.online_since IS NOT NULL,
     (SELECT max(s.expires_at) FROM identity.session s WHERE s.installation_id = n.installation_id AND s.user_id = n.user_id AND s.scope = 3
-        AND s.revoked_at IS NULL)`
+        AND s.revoked_at IS NULL AND s.expires_at > now())`
 
 func scanRecord(row pgx.Row) (NodeRecord, error) {
 	var record NodeRecord
@@ -99,19 +99,23 @@ func readRecord(ctx context.Context, tx pgx.Tx, userID, nodeID platform.ID) (Nod
 }
 
 // NodeOwner is the account that owns a node (the owner the authorizer's ownership stage asks for a row whose Object is node), as the
-// text of its ID; found is false for an unknown node. A read (GetNode) asks for the live enrollment only, so a revoked node is not
-// found; a write under a command receipt (RenameNode, RevokeNode) also finds the node's newest revoked enrollment when no enrollment of
-// the node ID is live, so the replay of a committed command still reaches its receipt (a new command for a revoked node then answers
-// STATE/not_found from its own transaction, kept in its receipt).
-func NodeOwner(ctx context.Context, db *store.DB, nodeID platform.ID, includeRevoked bool) (string, bool, error) {
+// text of its ID; found is false for an unknown node. A read (GetNode; receipted false) asks for the live enrollment only, so a revoked
+// node is not found. A write under a command receipt (RenameNode, RevokeNode; receipted true) also finds the caller's own enrollments of
+// the node ID, revoked ones included, before any other account's: a node ID is unique among the live rows only, so after a revocation
+// the node may be enrolled again elsewhere, and the replay of the caller's committed command must still reach its receipt (a new command
+// for a node that is no longer the caller's then answers STATE/not_found from its own, account-filtered transaction, kept in its
+// receipt).
+func NodeOwner(ctx context.Context, db *store.DB, nodeID, caller platform.ID, receipted bool) (string, bool, error) {
 	var owner platform.ID
 	found := true
-	statement := "SELECT user_id FROM fleet.node WHERE node_id = $1 AND revoked_at IS NULL"
-	if includeRevoked {
-		statement = "SELECT user_id FROM fleet.node WHERE node_id = $1 ORDER BY revoked_at IS NULL DESC, revoked_at DESC, enrollment_id LIMIT 1"
+	statement, arguments := "SELECT user_id FROM fleet.node WHERE node_id = $1 AND revoked_at IS NULL", []any{nodeID}
+	if receipted {
+		statement = `SELECT user_id FROM fleet.node WHERE node_id = $1 ORDER BY user_id = $2 DESC, revoked_at IS NULL DESC, revoked_at DESC, enrollment_id
+LIMIT 1`
+		arguments = append(arguments, caller)
 	}
 	err := db.InTx(ctx, "read a node's owner", store.TxOptions{ReadOnly: true, Timeout: registryTimeout}, func(ctx context.Context, tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, statement, nodeID).Scan(&owner)
+		err := tx.QueryRow(ctx, statement, arguments...).Scan(&owner)
 		if errors.Is(err, pgx.ErrNoRows) {
 			found = false
 			return nil
@@ -168,8 +172,10 @@ func (s *Service) Rename(ctx context.Context, tx pgx.Tx, request Request, accoun
 	if _, err = tx.Exec(ctx, "UPDATE device.device SET display_name = $2, rev = rev + 1 WHERE device_id = $1 AND display_name <> $2", deviceID, name); err != nil {
 		return NodeRecord{}, store.Sanitize("rename the node's device", err)
 	}
-	if _, err = tx.Exec(ctx, "UPDATE fleet.node SET display_name = $2, named_by_account = true, rev = rev + 1 WHERE enrollment_id = $1", enrollmentID,
-		name); err != nil {
+	// A row from before 0009 has no reported_name: its display_name is the name its node reported, kept as such before the account's
+	// name replaces it (every right-hand side reads the old row).
+	if _, err = tx.Exec(ctx, `UPDATE fleet.node SET reported_name = coalesce(reported_name, display_name), display_name = $2, named_by_account = true,
+    rev = rev + 1 WHERE enrollment_id = $1`, enrollmentID, name); err != nil {
 		return NodeRecord{}, store.Sanitize("rename the node", err)
 	}
 	if err = s.audit(ctx, tx, request, identity.Actor(userID), "fleet.node.renamed", "renamed", enrollmentID, map[string]any{}, now); err != nil {

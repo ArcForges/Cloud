@@ -22,6 +22,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/dbtest"
+	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/hub"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/nodetest"
@@ -207,7 +208,8 @@ func TestTheRegistryRowsAreTheServedMethods(t *testing.T) {
 
 // TestTheRegistryListsTheAccountsLiveNodes is E2-16 (CTR5-API-02): ListNodes answers the account's live enrollments, oldest first, each
 // with its presence (ONLINE while its channel is open in this process, OFFLINE after, NEVER_CONNECTED before), its device, version, the
-// end of its credential and its reported name; another account's node, an unknown node and a revoked node are the same STATE/not_found
+// end of its live credential (absent once it expired) and its reported name; another account's node, an unknown node and a revoked node
+// are the same STATE/not_found
 // for GetNode, and a revoked node is no longer listed.
 func TestTheRegistryListsTheAccountsLiveNodes(t *testing.T) {
 	h := registryHarness(t)
@@ -248,6 +250,12 @@ func TestTheRegistryListsTheAccountsLiveNodes(t *testing.T) {
 	if got := h.getNode(bearer, &fleetv1.FleetServiceGetNodeRequest{Meta: &foundationv1.RequestMeta{}, NodeId: idValue(first.node.ID)}).GetValue(); !proto.Equal(
 		got.GetNode().GetNodeId(), idValue(first.node.ID)) || len(got.GetRecentCommands()) != 0 {
 		t.Fatalf("GetNode: %v", got)
+	}
+	// A credential that ended without a revocation is no live credential (review B N-3): credential_expires_at is absent.
+	h.db.Exec("UPDATE identity.session SET expires_at = issued_at + interval '1 millisecond', refresh_expires_at = issued_at + interval '1 millisecond' " +
+		"WHERE installation_id = '" + second.result.InstallationID.String() + "'")
+	if listed := h.listNodes(bearer, nil).GetValue().GetNodes()[1]; listed.GetCredentialExpiresAt() != nil {
+		t.Fatalf("an expired credential: %v", listed)
 	}
 	h.db.Exec("UPDATE fleet.node SET revoked_at = now(), revoke_reason = 1 WHERE node_id = '" + second.node.ID.String() + "'")
 	var replies []string
@@ -347,23 +355,37 @@ func TestATokenWithoutTheNodeKeyReadsNothing(t *testing.T) {
 }
 
 // TestAPersonSessionCannotSendANodeRelayCaller is E2-19's person half (Plan CTR5-SUR-03, SEC-10): an account session whose request
-// names a routed caller or carries a relay assertion is refused AUTHORIZATION/permission_denied (the principal) and audited
-// access.refused; an automation credential is refused too.
+// names a NODE_RELAY caller or carries a relay assertion is refused AUTHORIZATION/permission_denied (the principal) and audited
+// access.refused; an automation credential is refused the same way (an AGENT that is no relayed caller); a routed caller of another kind
+// is VALIDATION/invalid_argument (caller.kind), refused before authorization and not audited.
 func TestAPersonSessionCannotSendANodeRelayCaller(t *testing.T) {
 	h := registryHarness(t)
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
 	bearer := h.accountSession(user, session.ScopeAccount).AccessToken
-	for name, request := range map[string]*fleetv1.FleetServiceListNodesRequest{
-		"a caller":     {Meta: &foundationv1.RequestMeta{}, Caller: relayedCaller(node, nodev1.Origin_ORIGIN_HUMAN)},
-		"an assertion": {Meta: &foundationv1.RequestMeta{}, RelayAssertion: []byte{1}},
+	automation := h.accountSession(user, session.ScopeAutomation).AccessToken
+	for name, c := range map[string]struct {
+		bearer  string
+		request *fleetv1.FleetServiceListNodesRequest
+	}{
+		"a NODE_RELAY caller":      {bearer, &fleetv1.FleetServiceListNodesRequest{Meta: &foundationv1.RequestMeta{}, Caller: relayedCaller(node, nodev1.Origin_ORIGIN_HUMAN)}},
+		"an assertion":             {bearer, &fleetv1.FleetServiceListNodesRequest{Meta: &foundationv1.RequestMeta{}, RelayAssertion: []byte{1}}},
+		"an automation credential": {automation, nil},
 	} {
 		before := h.audits(access.AuditRefused)
-		failure := h.listNodes(bearer, request).GetError()
+		failure := h.listNodes(c.bearer, c.request).GetError()
 		if errorKey(failure) != "AUTHORIZATION/permission_denied" || failure.GetDetails().GetState().GetReason() != "fleet.listNodes" ||
 			h.audits(access.AuditRefused) != before+1 {
 			t.Errorf("%s: %v", name, failure)
 		}
+	}
+	other := relayedCaller(node, nodev1.Origin_ORIGIN_HUMAN)
+	other.Kind = fleetv1.CallerKind_CALLER_KIND_ACCOUNT_SESSION.Enum()
+	before := h.audits(access.AuditRefused)
+	failure := h.listNodes(bearer, &fleetv1.FleetServiceListNodesRequest{Meta: &foundationv1.RequestMeta{}, Caller: other}).GetError()
+	if errorKey(failure) != "VALIDATION/invalid_argument" || failure.GetDetails().GetState().GetReason() != "caller.kind: not_admitted" ||
+		h.audits(access.AuditRefused) != before {
+		t.Errorf("a routed caller of another kind: %v", failure)
 	}
 }
 
@@ -516,5 +538,125 @@ func TestRevokeNodeNeedsEvidenceBoundToTheNode(t *testing.T) {
 	if failure := h.getNode(issued.AccessToken, &fleetv1.FleetServiceGetNodeRequest{Meta: &foundationv1.RequestMeta{}, NodeId: idValue(node.node.ID)}).GetError(); errorKey(
 		failure) != "STATE/not_found" {
 		t.Fatalf("GetNode of the revoked node: %v", failure)
+	}
+}
+
+// TestAForeignNodeIsNotFoundAndWritesNothing (CTR5-SEC-17; review B B-3): RenameNode and RevokeNode of another account's node are
+// STATE/not_found at the ownership stage, before any receipt, evidence or audit is written, even when the caller holds step-up evidence
+// for that node ID; the owner's node is untouched.
+func TestAForeignNodeIsNotFoundAndWritesNothing(t *testing.T) {
+	h := registryHarness(t)
+	owner, stranger := h.db.Account(1), h.db.Account(1)
+	node := h.enrollIn(owner)
+	issued := h.accountSession(stranger, session.ScopeAccount)
+	target, err := hex.DecodeString(identity.TargetHash("fleet.revokeNode", stranger, node.node.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.db.ProveStepUp(dbtest.Session{ID: issued.SessionID, User: stranger}, "fleet.revokeNode", target, time.Now())
+	before, receipts := h.writes(), h.count("SELECT count(*) FROM platform.command_receipt")
+	name := "Taken"
+	if failure := h.renameNode(issued.AccessToken, commandMeta(), node.node.ID, &name).GetError(); errorKey(failure) != "STATE/not_found" {
+		t.Fatalf("RenameNode of another account's node: %v", failure)
+	}
+	if failure := h.revokeNode(issued.AccessToken, commandMeta(), node.node.ID).GetError(); errorKey(failure) != "STATE/not_found" {
+		t.Fatalf("RevokeNode of another account's node: %v", failure)
+	}
+	if after := h.writes(); after != before || h.count("SELECT count(*) FROM platform.command_receipt") != receipts {
+		t.Fatalf("a foreign node's refusals wrote %d rows or revisions", after-before)
+	}
+	bearer := h.accountSession(owner, session.ScopeAccount).AccessToken
+	if nodes := h.listNodes(bearer, nil).GetValue().GetNodes(); len(nodes) != 1 || nodes[0].GetName() != node.node.Name {
+		t.Fatalf("the owner's node: %v", nodes)
+	}
+}
+
+// enrollNode enrolls a given node (its ID and key) in an account through fleet.Enroll.
+func (h *harness) enrollNode(user platform.ID, node *nodetest.Node) *enrolled {
+	h.t.Helper()
+	approver := h.db.Session(user, 1)
+	info, err := fleet.ParseNodeInfo(node.Info())
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var result fleet.Enrolled
+	if err = h.db.Runtime.InTx(context.Background(), "enroll", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		result, err = fleet.Enroll(ctx, tx, h.policy, fleet.EnrollRequest{UserID: user, Approver: fleet.Approver{SessionID: approver.ID, AuthMethod: 1,
+			AuthenticatedAt: time.Now().Add(-time.Minute)}, NodeID: node.ID, Node: info, PublicKey: node.PublicKey, Flow: fleet.FlowDevice}, time.Now())
+		return err
+	}); err != nil {
+		h.t.Fatal(err)
+	}
+	h.secrets = append(h.secrets, result.Session.AccessToken, result.Session.RefreshToken)
+	return &enrolled{node: node, user: user, result: result, access: result.Session.AccessToken}
+}
+
+// TestAReplayAfterTheNodeIsEnrolledElsewhereAnswersItsReceipt (review A B-4): account A renames, then revokes its node; the same node
+// ID is then enrolled under account B. A's replays of both commands still answer their receipts (A's own enrollment is the owner of its
+// receipted writes), a new command of A for the node is STATE/not_found, and B reads its node.
+func TestAReplayAfterTheNodeIsEnrolledElsewhereAnswersItsReceipt(t *testing.T) {
+	h := registryHarness(t)
+	first, second := h.db.Account(1), h.db.Account(1)
+	node := h.enrollIn(first)
+	issued := h.accountSession(first, session.ScopeAccount)
+	name := "Build server"
+	renameMeta, revokeMeta := commandMeta(), commandMeta()
+	renamed := h.renameNode(issued.AccessToken, renameMeta, node.node.ID, &name).GetValue().GetNode()
+	target, err := hex.DecodeString(identity.TargetHash("fleet.revokeNode", first, node.node.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.db.ProveStepUp(dbtest.Session{ID: issued.SessionID, User: first}, "fleet.revokeNode", target, time.Now())
+	receipt := h.revokeNode(issued.AccessToken, revokeMeta, node.node.ID).GetValue().GetReceipt()
+	if renamed == nil || receipt == nil {
+		t.Fatalf("the commands: %v %v", renamed, receipt)
+	}
+	again, err := nodetest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	again.ID = node.node.ID
+	elsewhere := h.enrollNode(second, again)
+	if replay := h.revokeNode(issued.AccessToken, revokeMeta, node.node.ID).GetValue().GetReceipt(); !proto.Equal(replay, receipt) {
+		t.Fatalf("A's replayed revocation: %v", h.revokeNode(issued.AccessToken, revokeMeta, node.node.ID))
+	}
+	if replay := h.renameNode(issued.AccessToken, renameMeta, node.node.ID, &name).GetValue().GetNode(); !proto.Equal(replay, renamed) {
+		t.Fatalf("A's replayed rename: %v", replay)
+	}
+	if failure := h.renameNode(issued.AccessToken, commandMeta(), node.node.ID, &name).GetError(); errorKey(failure) != "STATE/not_found" {
+		t.Fatalf("A's new rename of the node: %v", failure)
+	}
+	bearer := h.accountSession(second, session.ScopeAccount).AccessToken
+	if got := h.getNode(bearer, &fleetv1.FleetServiceGetNodeRequest{Meta: &foundationv1.RequestMeta{}, NodeId: idValue(node.node.ID)}).GetValue().GetNode(); !proto.Equal(
+		got.GetDeviceId(), idValue(elsewhere.result.DeviceID)) || got.GetName() != again.Name {
+		t.Fatalf("B's node: %v", got)
+	}
+}
+
+// TestARenameOfAnEarlierRowKeepsTheReportedName (review B B-1): a node row from before 0009 has no reported_name; renaming it keeps the
+// name the node reported as reported_name (in the rename's own UPDATE), and the node's next report of that name changes nothing (no
+// fleet.node.info_reported).
+func TestARenameOfAnEarlierRowKeepsTheReportedName(t *testing.T) {
+	h := registryHarness(t)
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	h.db.Exec("UPDATE fleet.node SET reported_name = NULL WHERE node_id = '" + node.node.ID.String() + "'")
+	bearer := h.accountSession(user, session.ScopeAccount).AccessToken
+	if listed := h.listNodes(bearer, nil).GetValue().GetNodes()[0]; listed.GetReportedName() != node.node.Name {
+		t.Fatalf("an earlier row's reported name: %v", listed)
+	}
+	name := "Account name"
+	renamed := h.renameNode(bearer, commandMeta(), node.node.ID, &name).GetValue().GetNode()
+	if renamed.GetName() != name || renamed.GetReportedName() != node.node.Name {
+		t.Fatalf("the renamed earlier row: %v", renamed)
+	}
+	reports := h.audits("fleet.node.info_reported")
+	report := &fleetv1.NodeEnrollmentServiceReportNodeInfoResponse{}
+	h.rpc("/arcforges.fleet.v1.NodeEnrollmentService/ReportNodeInfo", &fleetv1.NodeEnrollmentServiceReportNodeInfoRequest{Meta: commandMeta(), Node: node.node.Info()},
+		node.access, report)
+	listed := h.listNodes(bearer, nil).GetValue().GetNodes()[0]
+	if report.GetError() != nil || h.audits("fleet.node.info_reported") != reports || listed.GetName() != name || listed.GetReportedName() != node.node.Name {
+		t.Fatalf("the node's next report: %v, %d reports audited, %v", report.GetError(), h.audits("fleet.node.info_reported")-reports, listed)
 	}
 }
