@@ -417,7 +417,9 @@ term, no `identity.operator` row, and the audit events `issued` once and `refuse
   - **The `OperationKeys` row check**: a row that carries a `Feature` names its group of `feature.OperationKeys` and must carry that
     group's key (`access.CheckRow`); the set of gated rows is empty today, and a table-driven negative test refuses every wrong key.
 - **AF-CTR-05 E1 and E2** serve the first gated rows on these prerequisites: E1a the node channel (`fleet.nodeChannel`, delivered,
-  behind the upgrade-rate controls); E2b the routed task methods. E2a's node registry adds no gated row.
+  behind the upgrade-rate controls); E2b the routed task methods (delivered: submission `center.execute`, status and output
+  `remote.view`, control `remote.control`, each behind both routed controls; [Routed calls](center-fleet.md#routed-calls)). E2a's node
+  registry adds no gated row.
 - **The Docker-context test models the file rules** (`worker-1`). `tests/worker/docker-context.test.ts` decides what the context
   carries from the include rules of `.dockerignore` and the closing exclusions of the center, as the other tests of that file do; a
   real build carries every `center/` file those exclusions do not remove (`!center/` re-includes the tree), so a stray file such as

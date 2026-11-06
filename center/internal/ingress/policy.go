@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 )
 
 // Kind is the shape of a method.
@@ -67,6 +68,19 @@ type Policy struct {
 	// Surface names the switchable surface the method belongs to (AF-CTR-03; empty for the always-on Hello). A method of a disabled
 	// surface is answered with the domain refusal STATE/not_activated before any credential is read.
 	Surface string
+	// Deadline is a long-lived route's own transport deadline (AF-CTR-05 E2b, Plan PN-1): the routed long polls (WaitNodeTask up to 55 s,
+	// ReadNodeTaskOutput up to 30 s) outlast the server's 20 s read and write timeouts, so the pipeline sets the connection's read and
+	// write deadlines to the route's budget plus RouteDeadlineMargin. Zero keeps the server's timeouts.
+	Deadline time.Duration
+}
+
+// RouteDeadlineMargin is what a long-lived route's transport deadline adds to its budget: the reply is written after the budget.
+const RouteDeadlineMargin = 5 * time.Second
+
+// WithDeadline is the policy of a long-lived route with its own transport deadline.
+func (p Policy) WithDeadline(deadline time.Duration) Policy {
+	p.Deadline = deadline
+	return p
 }
 
 // InSurface is the policy as a method of a surface.

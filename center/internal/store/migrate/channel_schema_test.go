@@ -62,7 +62,8 @@ VALUES ($1, $2, $3, $4, $5, 'buildbox', 2, 1, '0.1.0', now() - interval '1 hour'
 			t.Fatalf("seeding the previous release's node: %v", err)
 		}
 	}
-	result, err := apply(t, url, build[:8], Options{Runner: "test", RuntimeRole: name + "_runtime"})
+	schemas8, grants8 := schemasAndGrantsAt(8)
+	result, err := apply(t, url, build[:8], Options{Runner: "test", RuntimeRole: name + "_runtime", Schemas: schemas8, Grants: grants8})
 	if err != nil || result.Version != 8 || len(result.Ran) != 1 || result.Ran[0].SHA256 != migration0008SHA256 || result.Grants != "reconciled" {
 		t.Fatalf("0008 over version 7: %+v %v", result, err)
 	}

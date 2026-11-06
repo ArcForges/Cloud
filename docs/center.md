@@ -316,7 +316,7 @@ them says `plan_limit_reached`:
 | Control                        | Covers                                       | Policy keys (default)                                                      | Refusal                                              |
 | ------------------------------ | -------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------- |
 | `routed_calls_per_account`     | the gated rows of the three routed groups    | `routedCallsAccountLimit` / `routedCallsAccountWindow` (3600 per hour)     | `RESOURCE/rate_limited`, `retry_at` the window's end |
-| `routed_in_flight_per_account` | the gated rows of the three routed groups    | `routedInFlightPerAccount` (64 at once, per center process)                | `RESOURCE/rate_limited`, `retry_at` one second later |
+| `routed_in_flight_per_account` | the gated rows of the three routed groups    | `routedInFlightPerAccount` (16 at once, per center process)                | `RESOURCE/rate_limited`, `retry_at` one second later |
 | `channel_upgrades_per_account` | the gated node channel row (node connection) | `channelUpgradeAccount` (600 per hour), `channelUpgradeNode` (60 per hour) | `RESOURCE/rate_limited`, `retry_at` the window's end |
 
 There is no connected-node cap (AF-CTR-05 Q21): the enrollment cap (`maxNodesPerAccount`) governs how many nodes an account has.

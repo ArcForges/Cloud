@@ -126,7 +126,10 @@ func ChannelOutcomes() map[string][]string {
 		"assertion":   {"verified", "missing", "signature_invalid", "credential_mismatch", "expired", "nonce_reused", "request_mismatch"},
 		"token":       {"rebound", "unchanged", "rate"},
 		"lapse":       {"closed", "undecided"},
-		"lease":       {"acquired", "held_elsewhere", "renewal_failed", "lost", "released"},
+		"lease":       {"acquired", "held_elsewhere", "renewal_failed", "lost", "released", "swept", "sweep_failed"},
+		// AF-CTR-05 E2b: the routed API (an attempt admitted, a duplicate joined, a call to an offline node, a settlement written or
+		// lost after its retries, a replayed outcome with another digest, a long poll over the center's bound).
+		"routed": {"accepted", "joined", "offline", "settled", "settle_lost", "replay_differs", "long_polls"},
 	}
 }
 

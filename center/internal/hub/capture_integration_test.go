@@ -50,22 +50,25 @@ const channelExchangesDirectory = "testdata/exchanges"
 // channelCohort names the relay.v1 the captures are encoded with (the Contracts cohort the center pins).
 const channelCohort = "1.0.0-ci.437.1"
 
+// relayNonceLifetime is the relay nonce lifetime of the harness (testSettings, RelayNonceLifetime).
+const relayNonceLifetime = 120 * time.Second
+
 var channelNormalization = []string{
 	"a 16-byte ID the center or the node drew: 15 bytes of its kind (0xa1 correlation, 0xa3 installation, 0xa5 connection, 0xa6 node) and n for the n-th distinct one of the kind",
 	"the hello nonce the center drew: 32 bytes of 0xb0+n",
 	"a hello signature (ES256 draws a nonce): 64 bytes of 0xe0+n",
 	"a command key's kid: kid-<n, 8 digits>",
 	"a token: its prefix and the canonical base64url of 32 bytes of n (the n-th distinct token)",
-	"every Instant: unix_seconds is the offset from the case's start, rounded to 5 seconds; nanos 0",
+	"every Instant: the first Instant of a message is 0, each other Instant of the message its offset from that first one in whole seconds; nanos 0 (AF-CTR-05 E2b: offsets within one message are exact, so no rounding edge exists)",
 	"a 4500 close's reconnect hint (RelayClose.reconnect_after_ms): 1000",
-	"a refusal's JSON body: correlationId the placeholder text of its ID, retryAt the case's start plus the offset, rounded to 5 seconds",
+	"a refusal's JSON body: correlationId the placeholder text of its ID, retryAt 1970-01-01T00:00:00Z (its only Instant)",
 	"the authorization header carries the placeholder of its token; the client address header is recorded as sent",
 }
 
 // routedNormalization is what the routed cases (AF-CTR-05 E1b: calls, results, relay nonces) normalize besides channelNormalization.
 var routedNormalization = []string{
 	"the IDs of a routed case's own kinds: 15 bytes of 0xa2 account, 0xa4 session, 0xa7 call, 0xa9 command or 0xaa relay nonce request, and n for the n-th distinct one",
-	"the relay nonce the center drew: 32 bytes of 0xc0+n",
+	"the relay nonce the center drew: 32 bytes of 0xc0+n; its expires_at is its lifetime, 120 s (unix_seconds 120), checked against the case's clock",
 	"a call's or a result's signed header: its IDs, kid and instants normalized as everywhere, then re-encoded; its signature (ES256 draws a nonce) 64 bytes of 0xe0+n",
 }
 
@@ -95,6 +98,7 @@ type channelExchange struct {
 type channelPlaceholders struct {
 	t      *testing.T
 	start  time.Time
+	anchor *time.Time
 	ids    map[string][]byte
 	values map[string]string
 	counts map[string]int
@@ -149,9 +153,17 @@ func (p *channelPlaceholders) instant(value *foundationv1.Instant) *foundationv1
 	if value == nil {
 		return nil
 	}
-	offset := time.Unix(value.GetUnixSeconds(), int64(value.GetNanos())).Sub(p.start)
-	rounded := (offset + 2500*time.Millisecond) / (5 * time.Second) * 5
-	return &foundationv1.Instant{UnixSeconds: proto.Int64(int64(rounded)), Nanos: proto.Uint32(0)}
+	// The capture used to round each Instant's offset from the case's start to 5 s, which tipped across a rounding edge when the case's
+	// start and the center's instant drifted apart under load (AF-CTR-05 E2b, review B B-3). Instants of one message come from one
+	// reading of a clock plus fixed durations (issued_at, deadline and expires_at; a challenge's hello_deadline), so the first one of a
+	// message is the anchor and the others are exact whole-second offsets from it: nothing is rounded across an edge.
+	at := time.Unix(value.GetUnixSeconds(), int64(value.GetNanos()))
+	if p.anchor == nil {
+		p.anchor = &at
+		return &foundationv1.Instant{UnixSeconds: proto.Int64(0), Nanos: proto.Uint32(0)}
+	}
+	offset := at.Sub(*p.anchor).Round(time.Second) / time.Second
+	return &foundationv1.Instant{UnixSeconds: proto.Int64(int64(offset)), Nanos: proto.Uint32(0)}
 }
 
 func (p *channelPlaceholders) idValue(value *foundationv1.Id, kind byte) *foundationv1.Id {
@@ -163,6 +175,7 @@ func (p *channelPlaceholders) idValue(value *foundationv1.Id, kind byte) *founda
 
 // frame normalizes one transmitted RelayFrame.
 func (p *channelPlaceholders) frame(data []byte) string {
+	p.anchor = nil
 	var frame relayv1.RelayFrame
 	if err := proto.Unmarshal(data, &frame); err != nil {
 		p.t.Fatalf("a message that is not a RelayFrame: %v", err)
@@ -230,7 +243,14 @@ func (p *channelPlaceholders) frame(data []byte) string {
 		value := member.RelayNonce
 		value.RequestId = p.idValue(value.GetRequestId(), 0xaa)
 		value.Nonce = p.filled("relay-nonce", value.GetNonce(), 0xc0, 32)
-		value.ExpiresAt = p.instant(value.GetExpiresAt())
+		// The nonce's only Instant is its expiry: the capture records the lifetime the center applies (the harness's 120 s,
+		// hub.Settings.RelayNonceLifetime) as an exact value, after checking that the expiry lies within that lifetime of the case (review
+		// B N-13), so no rounding edge exists and the lifetime is kept.
+		expires := time.Unix(value.GetExpiresAt().GetUnixSeconds(), int64(value.GetExpiresAt().GetNanos()))
+		if lifetime := expires.Sub(p.start); lifetime < relayNonceLifetime-time.Second || lifetime > relayNonceLifetime+time.Minute {
+			p.t.Errorf("a relay nonce expires %s after the case's start, not its lifetime of %s", lifetime, relayNonceLifetime)
+		}
+		value.ExpiresAt = &foundationv1.Instant{UnixSeconds: proto.Int64(int64(relayNonceLifetime / time.Second)), Nanos: proto.Uint32(0)}
 	}
 	encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(&frame)
 	if err != nil {
@@ -315,12 +335,10 @@ func (c *channelCapturer) add(name, outcome string, start time.Time, headers map
 			return `"correlationId":"` + fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:]) + `"`
 		})
 		text = retryPattern.ReplaceAllStringFunc(text, func(match string) string {
-			at, err := time.Parse(time.RFC3339Nano, match[len(`"retryAt":"`):len(match)-1])
-			if err != nil {
+			if _, err := time.Parse(time.RFC3339Nano, match[len(`"retryAt":"`):len(match)-1]); err != nil {
 				return match
 			}
-			offset := (at.Sub(start) + 2500*time.Millisecond) / (5 * time.Second) * 5 * time.Second
-			return `"retryAt":"` + time.Unix(0, 0).UTC().Add(offset).Format(time.RFC3339) + `"`
+			return `"retryAt":"` + time.Unix(0, 0).UTC().Format(time.RFC3339) + `"`
 		})
 		result.Reply = channelWire{ContentType: refused.Header.Get("Content-Type"), HTTPStatus: refused.StatusCode, Frames: []string{hex.EncodeToString([]byte(text))}}
 		for _, name := range []string{"ArcForges-Refusal", "Retry-After"} {

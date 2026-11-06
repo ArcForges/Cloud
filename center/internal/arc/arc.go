@@ -392,6 +392,17 @@ func NodeUnreachable(nodeID []byte, reason string, unknown bool) *Refusal {
 	return refusal
 }
 
+// UnreachableReplayDiffers is the reason of a resend of a final routed mutation whose node replayed an executed outcome with another
+// digest than the routing record's (AF-CTR-05 E2b, Q-5, N-2).
+const UnreachableReplayDiffers = "replay_digest_differs"
+
+// ReplayDigestDiffers is STATE/node_unreachable replay_digest_differs (errors.md; Plan N-2): the node's replay of a final command
+// differs from what the center recorded, so neither answer can be trusted; UNKNOWN with NEVER (the command must not be sent again).
+func ReplayDigestDiffers(nodeID []byte) *Refusal {
+	return &Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "node_unreachable", Retry: foundationv1.RetryMode_RETRY_MODE_NEVER,
+		Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN, State: "node", Reason: UnreachableReplayDiffers, Resource: resource("node", nodeID)}
+}
+
 // The reasons of a refused relay assertion (errors.md AUTHENTICATION/unauthenticated, Plan addendum D0-B1, C-N1, C-N4).
 const (
 	RelayMissing            = "missing"

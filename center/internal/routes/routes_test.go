@@ -77,6 +77,13 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.fleet.v1.FleetService/GetNode session 4096",
 		"/arcforges.fleet.v1.FleetService/RenameNode session 4096",
 		"/arcforges.fleet.v1.FleetService/RevokeNode session 4096",
+		// AF-CTR-05 E2b: the routed task methods.
+		"/arcforges.fleet.v1.FleetService/SubmitNodeTask session 262144",
+		"/arcforges.fleet.v1.FleetService/GetNodeTask session 8192",
+		"/arcforges.fleet.v1.FleetService/ListNodeTasks session 8192",
+		"/arcforges.fleet.v1.FleetService/WaitNodeTask session 8192",
+		"/arcforges.fleet.v1.FleetService/ReadNodeTaskOutput session 8192",
+		"/arcforges.fleet.v1.FleetService/CancelNodeTask session 8192",
 	}
 	if len(table.Surfaces) != 7 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
 		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || table.Surfaces[5] != SurfaceRelay || table.Surfaces[6] != SurfaceNodes ||
@@ -96,6 +103,14 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 				deadline = 10_000
 			case "/arcforges.fleet.v1.FleetService/ListNodes":
 				reply = ListNodesReplyBytes
+			case "/arcforges.fleet.v1.FleetService/SubmitNodeTask", "/arcforges.fleet.v1.FleetService/GetNodeTask", "/arcforges.fleet.v1.FleetService/ListNodeTasks",
+				"/arcforges.fleet.v1.FleetService/CancelNodeTask":
+				// The routed task methods (E2b): 10 s, Wait 55 s, ReadOutput 30 s; a node response of up to 1 MiB plus its frame.
+				deadline, reply = 10_000, RoutedReplyBytes
+			case "/arcforges.fleet.v1.FleetService/WaitNodeTask":
+				deadline, reply = 55_000, RoutedReplyBytes
+			case "/arcforges.fleet.v1.FleetService/ReadNodeTaskOutput":
+				deadline, reply = 30_000, RoutedReplyBytes
 			}
 		case strings.HasPrefix(row.Path, "/arcforges.fleet.v1."):
 			surface, deadline = SurfaceFleet, 10_000
@@ -226,7 +241,7 @@ func TestTheCenterSendsEveryReplyItsBudgetsAdmit(t *testing.T) {
 			}
 		}
 	}
-	if largest != ListNodesReplyBytes || largest <= MaxRequestBytes(modules) {
+	if largest != RoutedReplyBytes || largest <= MaxRequestBytes(modules) {
 		t.Fatalf("send bound %d, request bound %d", largest, MaxRequestBytes(modules))
 	}
 }

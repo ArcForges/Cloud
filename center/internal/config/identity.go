@@ -242,7 +242,17 @@ type IdentityPolicy struct {
 	// RESOURCE/overloaded before it is sent.
 	RoutedInFlightPerNode   int
 	RoutedInFlightPerCenter int
+	// RoutedReplayWindow is how long after a routing record's creation a resend of a routed mutation that may have reached the node is
+	// still routed (AF-CTR-05 E2b, Q-1): 23 h, at most MaxRoutedReplayWindow; later it is STATE/invalid_state replay_window_passed and
+	// never routed, so the node's command deduplication always still holds the first execution's outcome.
+	RoutedReplayWindow time.Duration
 }
+
+// MaxRoutedReplayWindow is the longest RoutedReplayWindow (Q-1): the node's command deduplication keeps an entry for 24 h from the
+// execution, which may come 120 s (the node's clock skew) before the record's creation on the center's clock; a resend admitted at the
+// end of the window reaches the node at most 300 s (a call's longest lifetime) later; and a minute of margin is kept:
+// 24 h - 120 s - 300 s - 60 s = 23 h 52 min.
+const MaxRoutedReplayWindow = 24*time.Hour - 480*time.Second
 
 // DefaultIdentityPolicy is the policy without an override.
 func DefaultIdentityPolicy() IdentityPolicy {
@@ -293,10 +303,10 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		MobileBeginPerPrefix:    Window{Limit: 30, Window: 10 * time.Minute},
 		MobileTokenPerPrefix:    Window{Limit: 30, Window: 10 * time.Minute},
 		MobileApprovePerAccount: Window{Limit: 20, Window: time.Hour},
-		// AF-CTR-05 part E0: owner placeholders (H-07, illustrative), not plan limits: 3600 routed calls per hour per account, 64 at
-		// once, 600 channel upgrades per hour per account and 60 per hour per node.
+		// AF-CTR-05 part E0: owner placeholders (H-07, illustrative), not plan limits: 3600 routed calls per hour per account, 16 at
+		// once (at most half of the request connections, PN-1; E2b), 600 channel upgrades per hour per account and 60 per hour per node.
 		RoutedCallsPerAccount:    Window{Limit: 3600, Window: time.Hour},
-		RoutedInFlightPerAccount: 64,
+		RoutedInFlightPerAccount: 16,
 		ChannelUpgradePerAccount: Window{Limit: 600, Window: time.Hour},
 		ChannelUpgradePerNode:    Window{Limit: 60, Window: time.Hour},
 		// AF-CTR-05 part E1a (Plan C.9): a heartbeat every 25 s with a 60 s deadline, the credential re-read every 60 s, the gate asked
@@ -313,6 +323,7 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		// AF-CTR-05 part E1b (Plan C.9): 8 routed calls in flight per node, 1024 per center process.
 		RoutedInFlightPerNode:   8,
 		RoutedInFlightPerCenter: 1024,
+		RoutedReplayWindow:      23 * time.Hour,
 	}
 }
 
@@ -368,6 +379,8 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"channelSessionRecheck":    {&p.ChannelSessionRecheck, 10 * time.Second, 10 * time.Minute},
 		"channelLapseRecheck":      {&p.ChannelLapseRecheck, time.Minute, time.Hour},
 		"channelTokenGrace":        {&p.ChannelTokenGrace, 10 * time.Second, 10 * time.Minute},
+		// AF-CTR-05 part E2b: the routed mutations' replay window (Q-1).
+		"routedReplayWindow": {&p.RoutedReplayWindow, time.Hour, MaxRoutedReplayWindow},
 	}
 	counts := map[string]countBound{
 		"emailCodeAttempts":   {&p.EmailCodeAttempts, 1, 10},
