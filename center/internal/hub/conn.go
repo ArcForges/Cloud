@@ -56,7 +56,16 @@ type conn struct {
 	lastPresence  time.Time
 	sentSeq       uint64
 
-	queue       chan []byte
+	// calls are the calls waiting for their result (at most MaxInFlightCalls); callsClosed is set once the connection closes, after
+	// which it takes no call. late are the delivered calls whose deadline passed, nonces the relay nonces not yet spent.
+	calls       map[platform.ID]*pending
+	callsClosed bool
+	late        []lateCall
+	nonces      []relayNonce
+
+	queue chan outbound
+	// stall holds the writer after it took a frame until it is closed (tests only: a stalled writer; nil in a running center).
+	stall       chan struct{}
 	queuedBytes atomic.Int64
 	closing     atomic.Bool
 	lapsing     atomic.Bool // the lapse close is claimed: it is audited once
@@ -71,6 +80,12 @@ type conn struct {
 
 // errQueueFull is a frame the send queue could not take.
 var errQueueFull = errors.New("the connection's send queue is full")
+
+// outbound is one queued frame; call is the call it carries, marked delivered when the writer starts writing it.
+type outbound struct {
+	data []byte
+	call *pending
+}
 
 // run serves the connection until it closes: the challenge, the reader, the writer and the supervisor.
 func (c *conn) run() {
@@ -164,6 +179,7 @@ func (c *conn) ended(err error) {
 	c.closeOnce.Do(func() {
 		c.closing.Store(true)
 		c.closeCode, c.closeReason = code, reason
+		c.failCalls()
 		go func() {
 			_ = c.ws.CloseNow()
 		}()
@@ -191,8 +207,9 @@ func (c *conn) handle(frame inbound, now time.Time) bool {
 		c.closeWith(1000, "node_closed")
 		return false
 	case frame.kind == inboundNonceRequest:
-		// Relay nonces are served from AF-CTR-05 E2; until then the request is left unanswered, never a violation.
-		return true
+		return c.relayNonce(frame, now)
+	case frame.kind == inboundResult:
+		return c.result(frame.result)
 	}
 	c.violation("unexpected_frame")
 	return false
@@ -540,20 +557,35 @@ func (c *conn) send(encode func(seq uint64) ([]byte, error)) error {
 	if err != nil {
 		return err
 	}
-	return c.enqueue(data)
+	return c.enqueue(outbound{data: data})
+}
+
+// sendCall queues a call's frame; the call is marked delivered when the writer starts writing it.
+func (c *conn) sendCall(p *pending, encode func(seq uint64) ([]byte, error)) error {
+	if c.closing.Load() {
+		return errQueueFull
+	}
+	c.mu.Lock()
+	c.sentSeq++
+	data, err := encode(c.sentSeq)
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return c.enqueue(outbound{data: data, call: p})
 }
 
 // enqueue puts a frame in the bounded send queue (CTR5-HUB-10): at most SendQueueFrames frames and SendQueueBytes bytes.
-func (c *conn) enqueue(data []byte) error {
-	if c.queuedBytes.Add(int64(len(data))) > int64(c.hub.settings.SendQueueBytes) {
-		c.queuedBytes.Add(-int64(len(data)))
+func (c *conn) enqueue(item outbound) error {
+	if c.queuedBytes.Add(int64(len(item.data))) > int64(c.hub.settings.SendQueueBytes) {
+		c.queuedBytes.Add(-int64(len(item.data)))
 		return errQueueFull
 	}
 	select {
-	case c.queue <- data:
+	case c.queue <- item:
 		return nil
 	default:
-		c.queuedBytes.Add(-int64(len(data)))
+		c.queuedBytes.Add(-int64(len(item.data)))
 		return errQueueFull
 	}
 }
@@ -564,10 +596,25 @@ func (c *conn) writer() {
 		select {
 		case <-c.ctx.Done():
 			return
-		case data := <-c.queue:
-			c.queuedBytes.Add(-int64(len(data)))
+		case item := <-c.queue:
+			c.queuedBytes.Add(-int64(len(item.data)))
+			c.mu.Lock()
+			stall := c.stall
+			c.mu.Unlock()
+			if stall != nil {
+				select {
+				case <-stall:
+				case <-c.ctx.Done():
+					return
+				}
+			}
+			if item.call != nil && !c.deliver(item.call) {
+				// The call was abandoned (its deadline passed, its caller went away, the connection is closing): it was answered
+				// DID_NOT_HAPPEN, so its frame is never written. From a successful deliver on, its loss is UNKNOWN for a mutation.
+				continue
+			}
 			write, cancel := context.WithTimeout(c.ctx, c.hub.settings.WriteTimeout)
-			err := c.ws.Write(write, websocket.MessageBinary, data)
+			err := c.ws.Write(write, websocket.MessageBinary, item.data)
 			cancel()
 			if err != nil {
 				if !c.closing.Load() {
@@ -586,8 +633,9 @@ func (c *conn) closeWith(code uint32, reason string) {
 	c.closeOnce.Do(func() {
 		c.closing.Store(true)
 		c.closeCode, c.closeReason = code, reason
-		// A closing connection is no longer the node's: a newer one may take its place at once.
+		// A closing connection is no longer the node's: a newer one may take its place at once. Its calls fail now.
 		c.hub.release(c)
+		c.failCalls()
 		go func() {
 			hint := time.Duration(0)
 			if code == CloseShuttingDown {
@@ -630,6 +678,7 @@ func (c *conn) finish() {
 		c.closeCode, c.closeReason = 1006, "transport"
 		_ = c.ws.CloseNow()
 	})
+	c.failCalls()
 	c.cancel()
 	now := c.hub.clock()
 	ctx, cancel := context.WithTimeout(context.Background(), presenceTimeout)

@@ -62,6 +62,13 @@ var channelNormalization = []string{
 	"the authorization header carries the placeholder of its token; the client address header is recorded as sent",
 }
 
+// routedNormalization is what the routed cases (AF-CTR-05 E1b: calls, results, relay nonces) normalize besides channelNormalization.
+var routedNormalization = []string{
+	"the IDs of a routed case's own kinds: 15 bytes of 0xa2 account, 0xa4 session, 0xa7 call, 0xa9 command or 0xaa relay nonce request, and n for the n-th distinct one",
+	"the relay nonce the center drew: 32 bytes of 0xc0+n",
+	"a call's or a result's signed header: its IDs, kid and instants normalized as everywhere, then re-encoded; its signature (ES256 draws a nonce) 64 bytes of 0xe0+n",
+}
+
 type channelWire struct {
 	ContentType string   `json:"contentType"`
 	HTTPStatus  int      `json:"httpStatus,omitempty"`
@@ -187,12 +194,58 @@ func (p *channelPlaceholders) frame(data []byte) string {
 		}
 	case *relayv1.RelayFrame_TokenRefresh:
 		member.TokenRefresh.Token = proto.String(p.token(member.TokenRefresh.GetToken()))
+	case *relayv1.RelayFrame_Call:
+		value := member.Call
+		value.CallId = p.idValue(value.GetCallId(), 0xa7)
+		var header relayv1.CallHeader
+		if err := proto.Unmarshal(value.GetHeader().GetHeader(), &header); err != nil {
+			p.t.Fatal(err)
+		}
+		header.CallId, header.AccountId, header.TargetNodeId = p.idValue(header.CallId, 0xa7), p.idValue(header.AccountId, 0xa2), p.idValue(header.TargetNodeId, 0xa6)
+		header.CommandId, header.Kid = p.idValue(header.CommandId, 0xa9), proto.String(p.text("kid", header.GetKid(), "kid-%08d"))
+		if caller := header.Caller; caller != nil {
+			caller.AccountId, caller.UserId, caller.SessionId = p.idValue(caller.AccountId, 0xa2), p.idValue(caller.UserId, 0xa2), p.idValue(caller.SessionId, 0xa4)
+		}
+		header.IssuedAt, header.ExpiresAt, header.Deadline = p.instant(header.IssuedAt), p.instant(header.ExpiresAt), p.instant(header.Deadline)
+		value.Header.Header = p.encode(&header)
+		value.Header.Kid = header.Kid
+		value.Header.Signature = p.filled("signature", value.GetHeader().GetSignature(), 0xe0, 64)
+	case *relayv1.RelayFrame_CallResult:
+		value := member.CallResult
+		value.CallId = p.idValue(value.GetCallId(), 0xa7)
+		var header relayv1.ResultHeader
+		if err := proto.Unmarshal(value.GetHeader().GetHeader(), &header); err != nil {
+			p.t.Fatal(err)
+		}
+		header.CallId, header.CommandId, header.NodeId = p.idValue(header.CallId, 0xa7), p.idValue(header.CommandId, 0xa9), p.idValue(header.NodeId, 0xa6)
+		header.ExecutedAt = p.instant(header.ExecutedAt)
+		if header.Error != nil {
+			header.Error.CorrelationId = p.idValue(header.Error.CorrelationId, 0xa1)
+		}
+		value.Header.Header = p.encode(&header)
+		value.Header.Signature = p.filled("signature", value.GetHeader().GetSignature(), 0xe0, 64)
+	case *relayv1.RelayFrame_RelayNonceRequest:
+		member.RelayNonceRequest.RequestId = p.idValue(member.RelayNonceRequest.GetRequestId(), 0xaa)
+	case *relayv1.RelayFrame_RelayNonce:
+		value := member.RelayNonce
+		value.RequestId = p.idValue(value.GetRequestId(), 0xaa)
+		value.Nonce = p.filled("relay-nonce", value.GetNonce(), 0xc0, 32)
+		value.ExpiresAt = p.instant(value.GetExpiresAt())
 	}
 	encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(&frame)
 	if err != nil {
 		p.t.Fatal(err)
 	}
 	return hex.EncodeToString(encoded)
+}
+
+// encode re-encodes a normalized header.
+func (p *channelPlaceholders) encode(message proto.Message) []byte {
+	data, err := proto.MarshalOptions{Deterministic: true}.Marshal(message)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	return data
 }
 
 var (
@@ -233,6 +286,9 @@ func (c *channelCapturer) add(name, outcome string, start time.Time, headers map
 	p := &channelPlaceholders{t: c.t, start: start, ids: map[string][]byte{}, values: map[string]string{}, counts: map[string]int{}}
 	result := channelExchange{SchemaVersion: 2, Source: "TestChannelExchangeCapture", ContractsCohort: channelCohort, Method: "NodeChannel", Case: name, Outcome: outcome,
 		Headers: map[string]string{}, Normalized: channelNormalization}
+	if strings.HasPrefix(name, "call-") || strings.HasPrefix(name, "relay-") {
+		result.Normalized = append(slices.Clone(channelNormalization), routedNormalization...)
+	}
 	for name, value := range headers {
 		if name == "authorization" {
 			value = "Bearer " + p.token(strings.TrimPrefix(value, "Bearer "))
@@ -395,6 +451,42 @@ func TestChannelExchangeCapture(t *testing.T) {
 		gate.state.Store(gateLapsed)
 	})
 	gate.state.Store(gateAvailable)
+	// Routed calls (AF-CTR-05 E1b): an executed call, a node's policy refusal, an unverifiable result, and a relay nonce.
+	routed := func(name string, answer func(*nodetest.Channel, *enrolled, *relayv1.ChannelCall)) {
+		node := h.enroll()
+		closedCase(name, node, func(channel *nodetest.Channel) {
+			hello(node)(channel)
+			done := h.callAsync(sessionCall(node, hub.MethodSubmitNodeTask, []byte{0x0a, 0x00}))
+			call, err := channel.NextCall(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			answer(channel, node, call)
+			<-done
+		})
+	}
+	nodeClose := func(channel *nodetest.Channel) {
+		_ = channel.Send(ctx, &relayv1.RelayFrame{Frame: &relayv1.RelayFrame_Close{Close: &relayv1.RelayClose{Code: proto.Uint32(1000), Reason: proto.String("node_closed")}}})
+	}
+	routed("call-executed", func(channel *nodetest.Channel, node *enrolled, call *relayv1.ChannelCall) {
+		_ = channel.Answer(ctx, node.node, call.GetCallId(), node.node.Executed(call, []byte{0x0a, 0x01, 0x01}), []byte{0x0a, 0x01, 0x01})
+		go func() { time.Sleep(100 * time.Millisecond); nodeClose(channel) }()
+	})
+	routed("call-refused", func(channel *nodetest.Channel, node *enrolled, call *relayv1.ChannelCall) {
+		_ = channel.Answer(ctx, node.node, call.GetCallId(), node.node.Refused(call, relayv1.RoutedOutcome_ROUTED_OUTCOME_REFUSED_BY_POLICY, policyRefusal()), nil)
+		go func() { time.Sleep(100 * time.Millisecond); nodeClose(channel) }()
+	})
+	routed("call-unverifiable", func(channel *nodetest.Channel, node *enrolled, call *relayv1.ChannelCall) {
+		_ = channel.Answer(ctx, stranger.node, call.GetCallId(), node.node.Executed(call, []byte{0x0a, 0x01, 0x01}), []byte{0x0a, 0x01, 0x01})
+	})
+	nonced := h.enroll()
+	closedCase("relay-nonce", nonced, func(channel *nodetest.Channel) {
+		hello(nonced)(channel)
+		if _, err := channel.RelayNonce(ctx); err != nil {
+			t.Fatal(err)
+		}
+		nodeClose(channel)
+	})
 	// The refusals before the upgrade.
 	refusedCase := func(name string, bearer string, extra http.Header) {
 		t.Helper()

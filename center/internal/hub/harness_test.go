@@ -58,8 +58,11 @@ type harness struct {
 	url     string
 	logs    *lockedBuffer
 	secrets []string
-	// kid is the test's command key.
-	kid string
+	// kid is the test's command key, commandKey its loaded key.
+	kid        string
+	commandKey config.CommandKey
+	// heldKeys are the command keys a test registered and loaded besides it.
+	heldKeys []config.CommandKey
 }
 
 type settings struct {
@@ -75,7 +78,8 @@ type settings struct {
 func testSettings() hub.Settings {
 	return hub.Settings{HelloDeadline: time.Second, Heartbeat: 100 * time.Millisecond, HeartbeatDeadline: 600 * time.Millisecond, PresenceInterval: time.Hour,
 		SessionRecheck: time.Hour, LapseRecheck: time.Hour, TokenGrace: 300 * time.Millisecond, MaxFrameBytes: 1 << 20, InboundFramesPerSecond: 200,
-		MaxInFlightCalls: 8, MaxRelayNonces: 8, TokenRefreshInterval: 30 * time.Second, SendQueueFrames: 64, SendQueueBytes: 4 << 20, WriteTimeout: time.Second, LeaseTTL: 30 * time.Second,
+		MaxInFlightCalls: 8, MaxRelayNonces: 8, MaxInFlightPerCenter: 1024, RelayNonceLifetime: 120 * time.Second, TokenRefreshInterval: 30 * time.Second,
+		SendQueueFrames: 64, SendQueueBytes: 4 << 20, WriteTimeout: time.Second, LeaseTTL: 30 * time.Second,
 		LeaseRenew: time.Second, ReconnectMin: time.Second, ReconnectMax: 2 * time.Second}
 }
 
@@ -118,7 +122,7 @@ func newHarness(t *testing.T, options settings) *harness {
 	}
 	t.Cleanup(center.Close)
 	h.center = center
-	h.kid = kid
+	h.kid, h.commandKey = kid, key
 	if center.Hub != nil {
 		if err := center.CheckCommandKeys(context.Background()); err != nil {
 			t.Fatal(err)

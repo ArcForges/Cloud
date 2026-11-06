@@ -15,7 +15,7 @@ import (
 // inboundKind is the kind of a frame a node sends.
 type inboundKind int
 
-// The frames a node may send on the channel in AF-CTR-05 E1a; any other member is a violation (calls and results are E1b's).
+// The frames a node may send on the channel; any other member is a violation.
 const (
 	// inboundOther is a frame member the hub does not take from a node: a protocol violation (close 4403).
 	inboundOther inboundKind = iota
@@ -23,8 +23,10 @@ const (
 	inboundHeartbeat
 	inboundTokenRefresh
 	inboundClose
-	// inboundNonceRequest is a RelayNonceRequest: relay nonces are served from AF-CTR-05 E2, so E1a leaves it unanswered.
+	// inboundNonceRequest is a RelayNonceRequest: the hub answers it with a one-use relay nonce of this connection (Plan addendum C-N2).
 	inboundNonceRequest
+	// inboundResult is a ChannelResult: the node's signed answer to a call (Plan CTR5-SIG-03).
+	inboundResult
 )
 
 // inbound is one decoded frame of a node.
@@ -33,6 +35,27 @@ type inbound struct {
 	hello     hello
 	token     string
 	closeCode uint32
+	// requestID is a RelayNonceRequest's request ID; requestOK is false for one that is absent, not 16 bytes or zero.
+	requestID platform.ID
+	requestOK bool
+	result    resultFrame
+}
+
+// resultFrame is a ChannelResult as received: the members as they were on the wire, nothing re-encoded. The header bytes are the ones
+// the node signed.
+type resultFrame struct {
+	CallID platform.ID
+	// CallOK is false for a call ID that is absent, not 16 bytes or zero.
+	CallOK    bool
+	Header    []byte
+	Signature []byte
+	// HasKid is a kid on the signed header (a result names none: its key is the connection's installation key); Algorithm its
+	// algorithm, "" when absent.
+	HasKid    bool
+	Algorithm string
+	Payload   []byte
+	// Shaped reports that the frame met ChannelResult's rule (validChannelResult).
+	Shaped bool
 }
 
 // hello is a node's NodeHello as the hub needs it: the node and installation it claims and its signature over the channel hello proof.
@@ -69,6 +92,11 @@ type Codec interface {
 	// Close is RelayClose: the close code, its closed reason and, for a center that is going away (4500), how long the node waits
 	// before it reconnects.
 	Close(seq uint64, code uint32, reason string, reconnectAfter time.Duration) ([]byte, error)
+	// Call is ChannelCall: the call ID, the signed CallHeader bytes with their signature and the command key's kid, and the payload
+	// (the exact node.v1 request bytes).
+	Call(seq uint64, callID platform.ID, header, signature []byte, kid string, payload []byte) ([]byte, error)
+	// RelayNonce is RelayNonce: the request it answers, the one-use nonce and when it expires.
+	RelayNonce(seq uint64, requestID platform.ID, nonce []byte, expires time.Time) ([]byte, error)
 }
 
 // HelloDomain is the leading domain string of the channel hello proof (ArcForges-Design 11 section 3, "Signature domain strings";

@@ -809,11 +809,16 @@ sets it: only the acceptance environment does, with its anonymous-flow ceiling (
 | `routedCallsAccount` (AF-CTR-05 E0, owner placeholder H-07)    | 3600 per h           | limit 1–10000, window 1m–24h |
 | `routedInFlightPerAccount` (owner placeholder H-07)            | 64                   | 1–1024                       |
 | `channelUpgradeAccount` / `channelUpgradeNode` (H-07)          | 600 / 60 per h       | limit 1–10000, window 1m–24h |
+| `routedInFlightPerNode` (AF-CTR-05 E1b, Plan C.9)              | 8                    | 1–64                         |
+| `routedInFlightPerCenter` (AF-CTR-05 E1b, Plan C.9)            | 1024                 | 1–65536                      |
 
 The four AF-CTR-05 E0 settings are the per-account resource controls of the gated rows ([routed task control](center.md#routed-task-control)):
 their defaults are owner placeholders under H-07 (illustrative), not plan limits, and a refusal of them is `RESOURCE/rate_limited` with
 `retry_at`, never `plan_limit_reached`. They run before the audit and the gate, so an exhausted account appends no `access.authorized`
-row; they are not audited as `identity.rate_limited` either.
+row; they are not audited as `identity.rate_limited` either. The two AF-CTR-05 E1b bounds are not per account: at most
+`routedInFlightPerNode` routed calls wait on one node's channel (the `max_in_flight_calls` that `ChannelAccepted` states) and
+`routedInFlightPerCenter` in the whole process; a call over either is refused `RESOURCE/overloaded` before it is sent
+([node channel](center-fleet.md#node-channel)).
 
 A prefix is the client address's /24 (IPv4) or /56 (IPv6) network; an IPv4-mapped address counts as IPv4. A bucket is the
 SHA-256 of its kind and key in `platform.rate_limit`, counted in its own short transaction before the work it guards. A refusal is

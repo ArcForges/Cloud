@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "source": "TestChannelExchangeCapture",
+  "contractsCohort": "1.0.0-ci.437.1",
+  "centerCommit": "d5325e1dafd4e3cb2116d53906b193fa28744f67",
+  "method": "NodeChannel",
+  "case": "call-unverifiable",
+  "outcome": "close 4403 result_signature",
+  "headers": {
+    "authorization": "Bearer afa1.AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+    "sec-websocket-protocol": "arcforges.relay.v1",
+    "x-arcforges-client-ip": "198.51.100.7"
+  },
+  "request": {
+    "contentType": "websocket arcforges.relay.v1",
+    "frames": [
+      "080110015283010a120a10a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6011205302e312e302a05312e302e303209726f757465642e76313a120a10a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3014240e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2",
+      "08011002c201f4010a120a10a7a7a7a7a7a7a7a7a7a7a7a7a7a7a70112d8010a8c010a120a10a7a7a7a7a7a7a7a7a7a7a7a7a7a7a70112120a10a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9011a120a10a6a6a6a6a6a6a6a6a6a6a6a6a6a6a60120012a20102b51b9765a56a3e899f7cf0ee38e5251f9c503b357b330a49183eb7b1556043220e270ef6d30673abe7afca80576c51be130516f8dd1324d7fc36f6c106c5e1eba380342040800100048011240e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3220545533235361a030a0101"
+    ]
+  },
+  "reply": {
+    "contentType": "websocket arcforges.relay.v1",
+    "httpStatus": 101,
+    "frames": [
+      "08011001da013c0a20b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b112120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5011a0408001000",
+      "08011002d201340a120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501121008808040100818e0d40320a0fe0a28081a0c6b69642d3030303030303031",
+      "08011003ba01ed020a120a10a7a7a7a7a7a7a7a7a7a7a7a7a7a7a70112d2020af8010a120a10a7a7a7a7a7a7a7a7a7a7a7a7a7a7a701120c6b69642d30303030303030311a2055156cbd799d474d88cfe9b1a65e06152be0f80f6b364671607be0b89d22a20322120a10a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2012a120a10a6a6a6a6a6a6a6a6a6a6a6a6a6a6a601323e080112120a10a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2011a120a10a2a2a2a2a2a2a2a2a2a2a2a2a2a2a20122120a10a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4013a120a10a9a9a9a9a9a9a9a9a9a9a9a9a9a9a90140014a20102b51b9765a56a3e899f7cf0ee38e5251f9c503b357b330a49183eb7b15560450025a04080010006204084610006a04080a10001240e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e11a0c6b69642d3030303030303031220545533235361a020a00",
+      "08011004a2011508b3221210726573756c745f7369676e6174757265"
+    ],
+    "trailers": "websocket-close: 4403"
+  },
+  "normalized": [
+    "a 16-byte ID the center or the node drew: 15 bytes of its kind (0xa1 correlation, 0xa3 installation, 0xa5 connection, 0xa6 node) and n for the n-th distinct one of the kind",
+    "the hello nonce the center drew: 32 bytes of 0xb0+n",
+    "a hello signature (ES256 draws a nonce): 64 bytes of 0xe0+n",
+    "a command key's kid: kid-\u003cn, 8 digits\u003e",
+    "a token: its prefix and the canonical base64url of 32 bytes of n (the n-th distinct token)",
+    "every Instant: unix_seconds is the offset from the case's start, rounded to 5 seconds; nanos 0",
+    "a 4500 close's reconnect hint (RelayClose.reconnect_after_ms): 1000",
+    "a refusal's JSON body: correlationId the placeholder text of its ID, retryAt the case's start plus the offset, rounded to 5 seconds",
+    "the authorization header carries the placeholder of its token; the client address header is recorded as sent",
+    "the IDs of a routed case's own kinds: 15 bytes of 0xa2 account, 0xa4 session, 0xa7 call, 0xa9 command or 0xaa relay nonce request, and n for the n-th distinct one",
+    "the relay nonce the center drew: 32 bytes of 0xc0+n",
+    "a call's or a result's signed header: its IDs, kid and instants normalized as everywhere, then re-encoded; its signature (ES256 draws a nonce) 64 bytes of 0xe0+n"
+  ],
+  "sha256": "fdf88d86795c25255f7e56694d3dca59ff8fcedd424a183258c75aa3e4619e4e"
+}

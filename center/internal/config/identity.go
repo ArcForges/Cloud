@@ -227,6 +227,11 @@ type IdentityPolicy struct {
 	ChannelInboundFramesPerSecond int
 	ChannelSendQueueFrames        int
 	ChannelSendQueueBytes         int
+	// The routed calls in flight (AF-CTR-05 E1b; Plan CTR5-HUB-10, C.9): at most RoutedInFlightPerNode on one node's channel (the
+	// ChannelAccepted max_in_flight_calls, 1..64) and RoutedInFlightPerCenter in the whole process; a call over either is refused
+	// RESOURCE/overloaded before it is sent.
+	RoutedInFlightPerNode   int
+	RoutedInFlightPerCenter int
 }
 
 // DefaultIdentityPolicy is the policy without an override.
@@ -295,6 +300,9 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		ChannelInboundFramesPerSecond: 100,
 		ChannelSendQueueFrames:        64,
 		ChannelSendQueueBytes:         4 << 20,
+		// AF-CTR-05 part E1b (Plan C.9): 8 routed calls in flight per node, 1024 per center process.
+		RoutedInFlightPerNode:   8,
+		RoutedInFlightPerCenter: 1024,
 	}
 }
 
@@ -363,6 +371,9 @@ func (p *IdentityPolicy) policyFields() (map[string]durationBound, map[string]co
 		"channelInboundFramesPerSecond": {&p.ChannelInboundFramesPerSecond, 10, 1000},
 		"channelSendQueueFrames":        {&p.ChannelSendQueueFrames, 8, 1024},
 		"channelSendQueueBytes":         {&p.ChannelSendQueueBytes, 1 << 20, 64 << 20},
+		// AF-CTR-05 part E1b: the routed calls in flight (the per-node bound is ChannelLimits.max_in_flight_calls, 1..64).
+		"routedInFlightPerNode":   {&p.RoutedInFlightPerNode, 1, 64},
+		"routedInFlightPerCenter": {&p.RoutedInFlightPerCenter, 1, 65_536},
 	}
 	for name, window := range map[string]*Window{
 		"signInPerPrefix": &p.SignInPerPrefix, "signInFailuresAccount": &p.SignInFailuresAccount, "emailPerPrefix": &p.EmailPerPrefix,

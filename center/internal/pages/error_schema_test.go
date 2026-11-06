@@ -175,7 +175,11 @@ func TestEveryRefusalsErrorBodyIsAWebBrowserErrorReply(t *testing.T) {
 	at := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	call := correlation.New()
 	refusals := append(everyRefusal(at), arc.NotActivated("relay"), arc.FeatureNotEntitled("center.nodes"), arc.InvalidArgument("subprotocol", "not_admitted"),
-		arc.RateLimited("channel_upgrades_per_node", 60, at.Add(time.Hour)))
+		arc.RateLimited("channel_upgrades_per_node", 60, at.Add(time.Hour)),
+		// AF-CTR-05 E1b: the routed calls' refusals (the routed API E2 answers them as JSON too).
+		arc.NodeOffline(make16(), at), arc.NodeUnreachable(make16(), arc.UnreachableChannelClosed, false),
+		arc.NodeUnreachable(make16(), arc.UnreachableUnverifiable, true), arc.RelayAssertionRefused(arc.RelayMissing),
+		arc.RelayAssertionRefused(arc.RelayNonceReused))
 	for _, refusal := range refusals {
 		body, err := ErrorBody(refusal.Dated(at).ArcError(call))
 		if err != nil {
@@ -197,3 +201,6 @@ func TestEveryRefusalsErrorBodyIsAWebBrowserErrorReply(t *testing.T) {
 		}
 	}
 }
+
+// make16 is a node ID for the refusals that name one.
+func make16() []byte { return []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16} }

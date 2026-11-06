@@ -1279,6 +1279,25 @@ test("every code the center sends has a text of its own (js-7)", () => {
   assert(seen.size === codes.length);
 });
 
+test("node_unreachable is described by its closed reason, and an unknown reason by the code's text (AF-CTR-05 E1b)", () => {
+  const generic = script.errorText(new script.ApiError(503, "node_unreachable"));
+  const texts = ["channel_closed", "deadline_passed", "result_unverifiable"].map((reason) =>
+    script.errorText(new script.ApiError(503, "node_unreachable", reason)),
+  );
+  assert.equal(new Set([generic, ...texts]).size, 4);
+  for (const text of [generic, ...texts]) assert.match(text, /may or may not have reached it/u);
+  assert.match(texts[1] ?? "", /did not answer in time/u);
+  assert.doesNotMatch(texts[0] ?? "", /in time/u);
+  assert.equal(
+    script.errorText(new script.ApiError(503, "node_unreachable", "__proto__")),
+    generic,
+  );
+  assert.equal(
+    script.errorText(new script.ApiError(503, "node_offline", "channel_closed")),
+    script.errorText(new script.ApiError(503, "node_offline")),
+  );
+});
+
 test("code_invalid is described truly for an unknown code and for a code whose lookups are spent (AF-CTR-04 E2)", () => {
   // VALIDATION/code_invalid answers both an unknown user code and the sixth lookup of a live one: the text must not claim the code
   // was not recognized, and it names the way out (a new sign-in on the device).

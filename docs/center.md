@@ -473,7 +473,8 @@ hand-written Worker sources.
     "binary": "arcforges-center",
     "mode": "official-hosted",
     "publicBaseUrl": "https://…",
-    "surfaces": "none | the enabled surfaces in registration order (identity, pages, operations, fleet, mobile, relay), comma-separated"
+    "surfaces": "none | the enabled surfaces in registration order (identity, pages, operations, fleet, mobile, relay), comma-separated",
+    "signingKid": "the kid of the command key routed calls are signed with now (only with the relay surface and a valid held key)"
   }
 }
 ```
@@ -484,6 +485,9 @@ with the candidate. `center.surfaces` states the surfaces the center serves, as 
 it serves none), so a deployment can be compared with the surfaces its Worker forwards ([deployment](deployment.md#start-environment-after-a-deployment)).
 `operations` (the operator grant's interim page) is listed only together with `identity` and `pages`, and only on the official hosted
 center.
+`center.signingKid` (AF-CTR-05 E1b, Plan CTR5-SIG-02) names the command key the center signs routed calls with at the moment of the
+request, the newest valid key whose private half it holds; it is absent without the relay surface or when no held key is valid, and
+the document never carries key material.
 `arcforges-center version` prints the same document with `helloBackend` `not-probed` and no mode or surfaces.
 
 Readiness is separate from health. `GET /readyz` on the admin listener answers `200` with `{"status":"ready","components":{…}}`
