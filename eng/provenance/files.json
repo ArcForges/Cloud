@@ -216,6 +216,7 @@
     "center/internal/fleetapi/testdata/exchanges/StartDeviceAuthorization-surface-off.json",
     "center/internal/hello/hello.go",
     "center/internal/hello/hello_test.go",
+    "center/internal/hub/abandoned_integration_test.go",
     "center/internal/hub/admission_integration_test.go",
     "center/internal/hub/assertion.go",
     "center/internal/hub/assertion_integration_test.go",
@@ -625,6 +626,7 @@
     "eng/policy/dependency-reviews/af-ctr-05-r4.json",
     "eng/policy/dependency-reviews/af-ctr-05-r6.json",
     "eng/policy/dependency-reviews/af-ctr-05-r7.json",
+    "eng/policy/dependency-reviews/af-ctr-05-r8.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r1.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r2.json",
     "eng/policy/dependency-reviews/cloud-01-r1.json",
@@ -787,6 +789,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r93.json",
     "eng/provenance/artifact-profiles/cloud-release-r95.json",
     "eng/provenance/artifact-profiles/cloud-release-r96.json",
+    "eng/provenance/artifact-profiles/cloud-release-r97.json",
     "eng/provenance/files.json",
     "eng/provenance/records/arcnotes-build-identity-r1.json",
     "eng/provenance/records/arcnotes-build-identity-r2.json",
@@ -827,6 +830,7 @@
     "eng/provenance/records/center-runtime-r4.json",
     "eng/provenance/records/center-runtime-r41.json",
     "eng/provenance/records/center-runtime-r42.json",
+    "eng/provenance/records/center-runtime-r43.json",
     "eng/provenance/records/center-runtime-r5.json",
     "eng/provenance/records/center-runtime-r6.json",
     "eng/provenance/records/center-runtime-r7.json",
@@ -868,6 +872,7 @@
     "eng/provenance/records/center-worker-r4.json",
     "eng/provenance/records/center-worker-r41.json",
     "eng/provenance/records/center-worker-r42.json",
+    "eng/provenance/records/center-worker-r43.json",
     "eng/provenance/records/center-worker-r5.json",
     "eng/provenance/records/center-worker-r6.json",
     "eng/provenance/records/center-worker-r7.json",
@@ -1748,5 +1753,5 @@
     "third-party/GoCrypto.LICENSE.txt": "go-gocrypto-legal-r1",
     "third-party/GoSys.LICENSE.txt": "go-gosys-legal-r1"
   },
-  "artifacts": ["center-runtime-r42", "center-worker-r42"]
+  "artifacts": ["center-runtime-r43", "center-worker-r43"]
 }
