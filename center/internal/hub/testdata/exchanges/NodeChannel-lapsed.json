@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestChannelExchangeCapture",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "e2a-code",
+  "centerCommit": "16328b8",
   "method": "NodeChannel",
   "case": "lapsed",
   "outcome": "close 4403 feature_not_entitled",
