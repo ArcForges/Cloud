@@ -32,11 +32,17 @@ func (s *Server) account(ctx context.Context, call *ingress.Call, meta *foundati
 	if err != nil {
 		return access.Operation{}, fleet.Account{}, err
 	}
+	account, err := accountOf(call)
+	return operation, account, err
+}
+
+// accountOf is the account session of an authorized call as package fleet and the step-up evidence know it.
+func accountOf(call *ingress.Call) (fleet.Account, error) {
 	userID, userOK := textID(call.Caller.UserID)
 	sessionID, sessionOK := textID(call.Caller.SessionID)
 	deviceID, deviceOK := textID(call.Caller.DeviceID)
 	if !userOK || !sessionOK || !deviceOK {
-		return access.Operation{}, fleet.Account{}, arc.Unauthenticated()
+		return fleet.Account{}, arc.Unauthenticated()
 	}
 	method := int16(1)
 	if call.Caller.AuthMethod == "email_code" {
@@ -45,7 +51,7 @@ func (s *Server) account(ctx context.Context, call *ingress.Call, meta *foundati
 	caller := identity.Caller{Request: identity.Request{ClientIP: call.ClientIP, CorrelationID: request(call).CorrelationID}, UserID: userID, SessionID: sessionID,
 		DeviceID: deviceID, Scope: call.Caller.Scope, Browser: call.Caller.Credential == ingress.CredentialBrowserSession, AuthEpoch: call.Caller.AuthEpoch,
 		RecoveryGeneration: int64(call.Caller.RecoveryGeneration)}
-	return operation, fleet.Account{Caller: caller, AuthMethod: method, AuthenticatedAt: call.Caller.AuthenticatedAt}, nil
+	return fleet.Account{Caller: caller, AuthMethod: method, AuthenticatedAt: call.Caller.AuthenticatedAt}, nil
 }
 
 // flowView is the contract view of a flow: the node as it described itself (its canonical version), the state and the times.

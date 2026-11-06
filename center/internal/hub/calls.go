@@ -371,15 +371,27 @@ func (c *conn) addCall(p *pending, now time.Time) int {
 	return registered
 }
 
-// pruneLateLocked forgets the late calls that can no longer run at the node.
+// pruneLateLocked forgets the late calls that can no longer run at the node: they no longer count against the node's bound, and their
+// call IDs are kept as forgotten (E1b review A C-N2), so an honest node's very late result is dropped, not taken for a violation.
 func (c *conn) pruneLateLocked(now time.Time) {
 	kept := c.late[:0]
 	for _, late := range c.late {
 		if now.Before(late.until) {
 			kept = append(kept, late)
+		} else {
+			c.forgetLocked(late.call.callID)
 		}
 	}
 	c.late = kept
+}
+
+// forgetLocked keeps the call ID of a late call that left the late list: a result naming it is verified and dropped. The list holds at
+// most lateResults IDs, the oldest dropped first; a result for an ID dropped from it is a violation again (result_other_call).
+func (c *conn) forgetLocked(callID platform.ID) {
+	if len(c.forgotten) >= lateResults {
+		c.forgotten = c.forgotten[1:]
+	}
+	c.forgotten = append(c.forgotten, callID)
 }
 
 // deliver moves a queued call to delivered, under the connection's lock, just before the writer writes its frame: only a call still
@@ -402,26 +414,34 @@ func (c *conn) dropCall(p *pending, late bool) {
 		return
 	}
 	if len(c.late) >= lateResults {
+		c.forgetLocked(c.late[0].call.callID)
 		c.late = c.late[1:]
 	}
 	c.late = append(c.late, lateCall{call: p, until: p.expires.Add(nodeSkew)})
 }
 
-// take removes the call a result names: the pending one, or a late one.
-func (c *conn) take(callID platform.ID) (p *pending, late *pending) {
+// take removes the call a result names: the pending one, or a late one; forgotten reports a call ID that only the forgotten list holds
+// (it is removed from it, so a second result for it is a violation).
+func (c *conn) take(callID platform.ID) (p *pending, late *pending, forgotten bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if p = c.calls[callID]; p != nil {
 		delete(c.calls, callID)
-		return p, nil
+		return p, nil, false
 	}
 	for i, entry := range c.late {
 		if entry.call.callID == callID {
 			c.late = append(c.late[:i], c.late[i+1:]...)
-			return nil, entry.call
+			return nil, entry.call, false
 		}
 	}
-	return nil, nil
+	for i, id := range c.forgotten {
+		if id == callID {
+			c.forgotten = append(c.forgotten[:i], c.forgotten[i+1:]...)
+			return nil, nil, true
+		}
+	}
+	return nil, nil, false
 }
 
 // failCalls ends every pending call of a closing connection with STATE/node_unreachable (channel_closed), and takes no call after it
@@ -452,8 +472,14 @@ func (c *conn) result(frame resultFrame) bool {
 		c.unverifiable(frame, failure)
 		return false
 	}
-	p, late := c.take(frame.CallID)
+	p, late, forgotten := c.take(frame.CallID)
 	switch {
+	case forgotten:
+		// A result for a late call that can no longer run at the node (expires_at plus the node's skew passed): its signature by the
+		// connection's installation key and its header's shape held (verifyResult above), it holds no slot and nothing waits for it, so it
+		// is dropped without a violation (E1b review A C-N2).
+		c.hub.metrics.ObserveChannel("call", "forgotten")
+		return true
 	case late != nil:
 		// A result after its call's deadline: verified and bound like any other (a mismatch is still a violation), then dropped.
 		if failure := bindResult(late, header, frame.Payload, c.nodeID); failure != "" {
@@ -484,7 +510,7 @@ func (c *conn) result(frame resultFrame) bool {
 // unverifiable ends the call a failed frame names (when it is one of this connection's) and closes the connection as a violation.
 func (c *conn) unverifiable(frame resultFrame, reason string) {
 	if frame.CallOK {
-		if p, _ := c.take(frame.CallID); p != nil {
+		if p, _, _ := c.take(frame.CallID); p != nil {
 			p.finish(outcome{refusal: p.unreachable(c.nodeID, arc.UnreachableUnverifiable)})
 		}
 	}

@@ -53,7 +53,7 @@ const ERROR_TEXT = {
 const REASON_TEXT = {
   node_unreachable: {
     channel_closed:
-      "The node's connection to the center closed. The request may or may not have reached it, so check before you do it again.",
+      "The node could not be reached. The request may or may not have reached it, so check before you do it again.",
     deadline_passed:
       "The node did not answer in time. The request may or may not have reached it, so check before you do it again.",
     result_unverifiable:

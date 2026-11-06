@@ -217,9 +217,9 @@ func reenroll(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, requ
 	var owner, onDevice platform.ID
 	var reportedName string
 	var os int16
-	var stillLive bool
-	err = tx.QueryRow(ctx, "SELECT user_id, device_id, display_name, os, revoked_at IS NULL FROM fleet.node WHERE enrollment_id = $1 FOR UPDATE", enrollmentID).
-		Scan(&owner, &onDevice, &reportedName, &os, &stillLive)
+	var stillLive, named bool
+	err = tx.QueryRow(ctx, `SELECT user_id, device_id, display_name, os, revoked_at IS NULL, named_by_account FROM fleet.node WHERE enrollment_id = $1
+FOR UPDATE`, enrollmentID).Scan(&owner, &onDevice, &reportedName, &os, &stillLive, &named)
 	if err != nil || !stillLive || owner != request.UserID || onDevice != deviceID || os != request.Node.Platform.OS {
 		return Enrolled{}, &store.Error{Operation: "lock the node", Kind: store.ErrContention}
 	}
@@ -227,15 +227,20 @@ func reenroll(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, requ
     rev = rev + 1 WHERE installation_id = $1`, installationID, request.PublicKey, keyVersion, request.Node.Version, now); err != nil {
 		return Enrolled{}, keyContention("re-key the node's installation", err)
 	}
-	if _, err = tx.Exec(ctx, `UPDATE device.device SET display_name = $3, rev = rev + 1 WHERE device_id = $1 AND display_name = $2 AND display_name <> $3`,
-		deviceID, reportedName, request.Node.Name); err != nil {
-		return Enrolled{}, store.Sanitize("rename the node's device", err)
+	// A name the account gave the node (RenameNode, AF-CTR-05 E2a; Q25) wins over the one the node reports: neither the node's nor its
+	// device's name follows the report then, and the report is kept as reported_name.
+	if !named {
+		if _, err = tx.Exec(ctx, `UPDATE device.device SET display_name = $3, rev = rev + 1 WHERE device_id = $1 AND display_name = $2 AND display_name <> $3`,
+			deviceID, reportedName, request.Node.Name); err != nil {
+			return Enrolled{}, store.Sanitize("rename the node's device", err)
+		}
 	}
 	if _, err = tx.Exec(ctx, "UPDATE device.device SET last_seen_at = greatest(last_seen_at, $2), rev = rev + 1 WHERE device_id = $1", deviceID, now); err != nil {
 		return Enrolled{}, store.Sanitize("touch the node's device", err)
 	}
-	if _, err = tx.Exec(ctx, `UPDATE fleet.node SET display_name = $2, arch = $3, version = $4, last_seen_at = greatest(last_seen_at, $5), rev = rev + 1
-WHERE enrollment_id = $1`, enrollmentID, request.Node.Name, request.Node.Arch, request.Node.Version, now); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE fleet.node SET display_name = CASE WHEN named_by_account THEN display_name ELSE $2 END, reported_name = $2, arch = $3,
+    version = $4, last_seen_at = greatest(last_seen_at, $5), rev = rev + 1 WHERE enrollment_id = $1`, enrollmentID, request.Node.Name, request.Node.Arch,
+		request.Node.Version, now); err != nil {
 		return Enrolled{}, store.Sanitize("update the node", err)
 	}
 	return issue(ctx, tx, policy, request, Enrolled{EnrollmentID: enrollmentID, DeviceID: deviceID, InstallationID: installationID, KeyVersion: keyVersion,
@@ -262,8 +267,8 @@ func enrollNew(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, req
 		return Enrolled{}, err
 	}
 	enrollmentID := platform.NewID()
-	if _, err = tx.Exec(ctx, `INSERT INTO fleet.node (enrollment_id, node_id, user_id, device_id, installation_id, display_name, os, arch, version, enrolled_at,
-    last_seen_at, rev) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, 1)`, enrollmentID, request.NodeID, request.UserID, deviceID, installationID,
+	if _, err = tx.Exec(ctx, `INSERT INTO fleet.node (enrollment_id, node_id, user_id, device_id, installation_id, display_name, reported_name, os, arch, version,
+    enrolled_at, last_seen_at, rev) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, $10, 1)`, enrollmentID, request.NodeID, request.UserID, deviceID, installationID,
 		request.Node.Name, request.Node.Platform.OS, request.Node.Arch, request.Node.Version, now); err != nil {
 		return Enrolled{}, keyContention("create the node", err)
 	}

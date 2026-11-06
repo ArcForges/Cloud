@@ -13,12 +13,14 @@
 // Authorize decides in a fixed order (AF-CTR-03 part B, plan section (g)); an earlier stage that refuses ends the decision, so a
 // later stage is never reached by a call an earlier one refused:
 //
-//  1. authentication: the call has a validated credential;
+//  1. authentication: the call has a validated credential, and a node credential on a row that admits it as a relayed caller
+//     (RelayedScopes, AF-CTR-05 E2a) a relay assertion the authorizer itself verified for that credential's installation;
 //  2. ownership: the object the call addresses belongs to the caller's account, else STATE/not_found (rows that name an Object);
 //  3. scope and risk: a credential scope the center knows, an account whose state admits the operation, the session upgrade;
 //  4. AGENT/HUMAN separation: the credential's principal is the one the operation serves (account sessions are HUMAN, node and
 //     automation credentials are AGENT), and an AGENT operation admits exactly the credential scopes its row names (a node row
-//     admits a node credential, never an automation one): another scope is refused with the audit reason scope;
+//     admits a node credential, never an automation one): another scope is refused with the audit reason scope; a person's row with
+//     RelayedScopes admits the verified relay of stage 1 as its one AGENT caller, and refuses a person's session that names a relay;
 //  5. resource controls: the per-account controls a composition registers (WithControls, DC-07; AF-CTR-05 E0): each control stands in
 //     front of the rows it covers, every gated row has at least one (CheckControls; the composition refuses to start otherwise), and
 //     a control runs before the audit and the gate, so a call an exhausted control refuses writes no access.authorized row;
@@ -51,7 +53,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
+	nodev1 "github.com/ArcForges/Contracts/go/arcforges/node/v1"
 	"github.com/ArcForges/Contracts/go/arcforges/publicapi/v1/publicapiv1connect"
+	relayv1 "github.com/ArcForges/Contracts/go/arcforges/relay/v1"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
@@ -121,6 +125,9 @@ const (
 	// TargetUserCode is a device authorization, named by its normalized user code, 8 upper-case letters (AF-CTR-04 E2: the approval's
 	// evidence is bound to the code it decides; identity.TextTargetHash).
 	TargetUserCode = "user_code"
+	// TargetNode is an enrolled node, named by its node ID (AF-CTR-05 E2a, D0 verdict): RevokeNode's evidence of class fleet.revokeNode
+	// is bound to the node it revokes (and E2b's routed Submit and Cancel to the node they run on).
+	TargetNode = "node"
 )
 
 // UpgradeClass is the center's own step-up class for a mobile.limited session that verifies only to unlock everything (android.md
@@ -156,6 +163,11 @@ type Operation struct {
 	// row (account and mobile.limited), otherwise a subset of the AGENT scopes node and automation, and only those are admitted (a
 	// node row refuses an automation credential). No identity row is an agent operation; the fleet node rows admit node only.
 	Scopes []string
+	// RelayedScopes are the AGENT scopes a person's row also admits as a node-relayed caller (AF-CTR-05 E2a; Plan CTR5-SUR-03, PB-2,
+	// D0-B1, C-N6): only node, only on the rows of RelayedOperations, and only with a relay assertion the hub verified for the bearer
+	// credential (Authorize checks it before anything else). The row stays a HUMAN row: its MobileLimited and StepUp rules are its
+	// account-session half's, and a relayed caller carries none of them (Design 11 section 1, "The relayed half of a row").
+	RelayedScopes []string
 	// Object is the kind of the object the call addresses (device, task, ...), or empty. Authorize then needs the object's owner (a
 	// Subject) and answers STATE/not_found for an object of another account before it decides anything else.
 	Object string
@@ -231,7 +243,30 @@ func Operations() []Operation {
 		// It is not served as a Connect method: the relay surface's upgrade handler authorizes it with this row before it upgrades.
 		{Path: routes.NodeChannelPath, ID: routes.NodeChannelID, Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes,
 			Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
+		// The node registry of FleetService (AF-CTR-05 E2a; Plan CTR5-API-02..04, Q20: never gated, so a lapsed account still lists, renames
+		// and revokes its nodes). ListNodes and GetNode admit an account session, and a node credential only as the verified relay of its
+		// own node (C-N6: a bearer token alone reads nothing). RenameNode and RevokeNode are a person's device management (as
+		// DeviceService.Rename and Revoke: a mobile.limited session upgrades first, a restricted account may still use them); RevokeNode
+		// needs step-up evidence of its own class bound to the node it revokes, consumed in its receipt's transaction.
+		{Path: fleetv1connect.FleetServiceListNodesProcedure, ID: "fleet.listNodes", Risk: "R1", Session: true, RelayedScopes: []string{"node"}},
+		{Path: fleetv1connect.FleetServiceGetNodeProcedure, ID: "fleet.getNode", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceRenameNodeProcedure, ID: "fleet.renameNode", Risk: "R2", Session: true, Restricted: true, MobileLimited: Upgrade,
+			Receipt: true, Audit: AuditInTransaction, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceRevokeNodeProcedure, ID: "fleet.revokeNode", Risk: "R3", Session: true, Restricted: true, MobileLimited: Upgrade,
+			StepUp: Evidence, Target: TargetNode, Receipt: true, Audit: AuditInTransaction, Object: ObjectNode},
 	}
+}
+
+// ObjectNode is the Object of a row that addresses one enrolled node by its node ID: its owner is the account of the node's live
+// enrollment, so an unknown, revoked or foreign node is STATE/not_found alike (Plan CTR5-RTE-04, CTR5-SEC-17).
+const ObjectNode = "node"
+
+// RelayedOperations are the operation IDs a row may name with RelayedScopes (AF-CTR-05; Design 11 section 1, "The relayed half of a
+// row"): the node registry's two reads and the six routed task methods (served from part E2b). No other row admits a node-relayed
+// caller, so a node credential never reaches account, device, billing or security methods (Plan CTR5-CALL-02).
+func RelayedOperations() []string {
+	return []string{"fleet.listNodes", "fleet.getNode", "fleet.submitNodeTask", "fleet.getNodeTask", "fleet.listNodeTasks", "fleet.waitNodeTask",
+		"fleet.readNodeTaskOutput", "fleet.cancelNodeTask"}
 }
 
 // OperatorGrantClass is the operation ID and step-up class of the operator grant, a center-defined operation (the contract has no row
@@ -348,11 +383,16 @@ func Check(served []ingress.Policy) error { return checkTable(Operations(), serv
 // checkTable is Check over a given table.
 func checkTable(table []Operation, served []ingress.Policy) error {
 	rows := map[string]Operation{}
+	ids := map[string]bool{}
 	for _, operation := range table {
 		if _, repeated := rows[operation.Path]; repeated {
 			return fmt.Errorf("the operation table names %s twice", operation.Path)
 		}
-		rows[operation.Path] = operation
+		// An operation ID names one row: RelayedOperations and the step-up classes are keyed by it (AF-CTR-05 E2a, review A N-2).
+		if ids[operation.ID] {
+			return fmt.Errorf("the operation table names the operation %s twice", operation.ID)
+		}
+		rows[operation.Path], ids[operation.ID] = operation, true
 	}
 	seen := map[string]bool{}
 	for _, policy := range served {
@@ -409,12 +449,40 @@ func CheckRow(operation Operation) error {
 	case len(operation.Scopes) > 0 && (operation.MobileLimited != Allowed || operation.StepUp != NoEvidence):
 		return inconsistent("an agent row follows no person's session rule")
 	}
+	if len(operation.RelayedScopes) > 0 {
+		if err := checkRelayed(operation, inconsistent); err != nil {
+			return err
+		}
+	}
 	seen := map[string]bool{}
 	for _, scope := range operation.Scopes {
 		if principal, known := PrincipalOf(scope); !known || principal != Agent || seen[scope] {
 			return inconsistent("an agent row names each agent scope it admits once (node, automation)")
 		}
 		seen[scope] = true
+	}
+	return nil
+}
+
+// checkRelayed is CheckRow's rule of a row that admits a node-relayed caller (AF-CTR-05 E2a; Plan CTR5-SUR-03, PB-1 item 2): it is a
+// person's session row (no Scopes of its own), one of RelayedOperations, never a security operation a restricted account may reach,
+// gated or R1 (so a relayed caller reaches nothing above R1 that the gate does not stand in front of), addressing a node or nothing,
+// and its RelayedScopes name node, once. Its MobileLimited and StepUp rules are its account-session half's (Authorize applies them to
+// a person's session only).
+func checkRelayed(operation Operation, inconsistent func(string) error) error {
+	switch {
+	case len(operation.Scopes) > 0 || !operation.Session:
+		return inconsistent("a relayed row is a person's session row")
+	case !slices.Contains(RelayedOperations(), operation.ID):
+		return inconsistent("only the node registry's reads and the routed task methods admit a node-relayed caller")
+	case operation.Restricted:
+		return inconsistent("a relayed row is no security operation a restricted account may reach")
+	case operation.Feature == "" && operation.Risk != "R1":
+		return inconsistent("a relayed row is gated or R1")
+	case operation.Object != "" && operation.Object != ObjectNode:
+		return inconsistent("a relayed row addresses a node or nothing")
+	case len(operation.RelayedScopes) != 1 || operation.RelayedScopes[0] != "node":
+		return inconsistent("a relayed row admits the node scope once, and nothing else")
 	}
 	return nil
 }
@@ -532,6 +600,7 @@ type Authorizer struct {
 	clock    func() time.Time
 	gate     feature.Gate
 	controls []Control
+	relays   RelayVerifier
 	lookup   func(path string) (Operation, bool)
 }
 
@@ -577,41 +646,96 @@ func (a *Authorizer) Authorize(ctx context.Context, call *ingress.Call) (Operati
 // AuthorizeSubject is Authorize for a call that addresses an object: a row that names an Object needs the matching Subject, and a
 // call without one is refused (fail closed).
 func (a *Authorizer) AuthorizeSubject(ctx context.Context, call *ingress.Call, subject *Subject) (Operation, error) {
+	operation, _, err := a.AuthorizeRelayed(ctx, call, subject, nil)
+	return operation, err
+}
+
+// RelayClaim is what a routed request states about its node relay, for the relay assertion's verification (AF-CTR-05; Plan addendum
+// D0-B1, C-N1, C-N6): the relay_assertion bytes as received, the routed method, the request digest (Contracts relay.proto
+// RelayAssertion request_sha256), the target node (nil for ListNodes), the command (nil for a read), and the relaying node and local
+// origin its caller field names.
+type RelayClaim struct {
+	Assertion            []byte
+	Method               relayv1.RoutedMethod
+	RequestSHA256        []byte
+	TargetNodeID         *platform.ID
+	CommandID            *platform.ID
+	CallerRelayingNodeID platform.ID
+	CallerLocalOrigin    nodev1.Origin
+}
+
+// Relay is a verified relay as the verifier returns it (hub.VerifiedRelay, by value): Authorize checks that it is verified and that it
+// was verified for the bearer credential's installation, and hands it back to the handler, which routes with it (part E2b).
+type Relay interface {
+	// Verified reports whether the relay assertion was verified.
+	Verified() bool
+	// RelayingInstallationID is the relaying node's installation the assertion was verified for.
+	RelayingInstallationID() platform.ID
+}
+
+// RelayVerifier verifies the relay assertion of a node-relayed call for its bearer credential (hub.Hub.RelayVerifier); its error is
+// the refusal (an *arc.Refusal) or a store failure.
+type RelayVerifier func(ctx context.Context, credential ingress.Caller, claim RelayClaim) (Relay, error)
+
+// WithRelayVerifier sets the verifier of node-relayed calls. Without one a node credential reaches no relayed row (fail closed).
+func WithRelayVerifier(verifier RelayVerifier) Option {
+	return func(a *Authorizer) { a.relays = verifier }
+}
+
+// AuthorizeRelayed is AuthorizeSubject for a call that may be node-relayed: claim is what the request states about its relay (its
+// routed caller and relay assertion), or nil when it states none. A node credential reaches a row that lists its scope in RelayedScopes
+// only through the authorizer's own verification of the claim (stage 1b, decisions B-4): the verifier must answer a relay that is
+// verified, for the bearer credential's installation; otherwise the call is refused AUTHENTICATION/unauthenticated with the
+// relay_assertion reason (missing when the request states none), before anything is read or written, so a bearer token alone reaches
+// nothing (C-N6). A person's session whose request states a relay is refused as the wrong principal (audited; Plan CTR5-SUR-03). The
+// verified relay is returned for a relayed call, nil otherwise.
+func (a *Authorizer) AuthorizeRelayed(ctx context.Context, call *ingress.Call, subject *Subject, claim *RelayClaim) (Operation, Relay, error) {
 	operation, ok := a.lookup(call.Policy.FullName)
 	if !ok {
-		return Operation{}, arc.PermissionDenied("unknown")
+		return Operation{}, nil, arc.PermissionDenied("unknown")
 	}
 	if !operation.Session {
-		return operation, nil
+		return operation, nil, nil
 	}
 	caller := call.Caller
 	// 1. Authentication.
 	if !caller.IsAuthenticated() {
-		return operation, arc.Unauthenticated()
+		return operation, nil, arc.Unauthenticated()
+	}
+	// 1b. A node-relayed caller is authenticated by its relay assertion as well, verified here (C-N6): a bearer token alone reaches
+	// nothing, and nothing is read or written for a refused assertion but the credential's own node and key.
+	var relay Relay
+	relayed := slices.Contains(operation.RelayedScopes, caller.Scope)
+	if relayed {
+		var err error
+		if relay, err = a.verifyRelay(ctx, caller, claim); err != nil {
+			return operation, nil, err
+		}
 	}
 	// 2. Ownership of the addressed object. A subject for a row that names no Object is a handler that decided ownership by itself:
 	// refused, because nothing here would check it.
 	if operation.Object != "" || subject != nil {
 		if err := a.owned(ctx, call, operation, subject); err != nil {
-			return operation, err
+			return operation, nil, err
 		}
 	}
 	// 3. Scope and risk.
 	principal, known := PrincipalOf(caller.Scope)
 	switch {
 	case !known:
-		return operation, a.refuse(ctx, call, operation, "scope")
+		return operation, nil, a.refuse(ctx, call, operation, "scope")
 	case caller.AccountState == restrictedState && !operation.Restricted:
-		return operation, a.refuse(ctx, call, operation, "restricted")
+		return operation, nil, a.refuse(ctx, call, operation, "restricted")
 	case operation.MobileLimited == Upgrade && operation.NeedsUpgrade(caller, false):
-		return operation, arc.StepUpRequired()
+		return operation, nil, arc.StepUpRequired()
 	}
-	// 4. AGENT/HUMAN separation, and the exact scopes of an AGENT row.
-	if principal != operation.principal() {
-		return operation, a.refuse(ctx, call, operation, "principal")
+	// 4. AGENT/HUMAN separation, and the exact scopes of an AGENT row. A verified node relay of a relayed row is the one AGENT caller
+	// a person's row admits; a person's session that names a relay is the wrong principal.
+	if principal != operation.principal() && !relayed || principal == Human && claim != nil {
+		return operation, nil, a.refuse(ctx, call, operation, "principal")
 	}
-	if principal == Agent && !slices.Contains(operation.Scopes, caller.Scope) {
-		return operation, a.refuse(ctx, call, operation, "scope")
+	if principal == Agent && !relayed && !slices.Contains(operation.Scopes, caller.Scope) {
+		return operation, nil, a.refuse(ctx, call, operation, "scope")
 	}
 	// 5. Resource controls: every control that covers the row, before the audit and the gate.
 	for _, control := range a.controls {
@@ -619,23 +743,49 @@ func (a *Authorizer) AuthorizeSubject(ctx context.Context, call *ingress.Call, s
 			continue
 		}
 		if err := control.Admit(ctx, call, operation); err != nil {
-			return operation, err
+			return operation, nil, err
 		}
 	}
 	// 6. The audit that comes before the call; a failed append refuses it.
 	if operation.Audit == AuditBeforeCall {
 		if err := a.audit(ctx, call, operation, AuditAuthorized, "", map[string]any{"operation": operation.ID, "risk": operation.Risk, "feature": string(operation.Feature),
 			"scope": caller.Scope}); err != nil {
-			return operation, err
+			return operation, nil, err
 		}
 	}
 	// 7. The gate.
 	if operation.Feature != "" {
 		if err := a.gated(ctx, call, operation); err != nil {
-			return operation, err
+			return operation, nil, err
 		}
 	}
-	return operation, nil
+	return operation, relay, nil
+}
+
+// verifyRelay is stage 1b (decisions B-4: the authorizer verifies, no handler hands it a verdict): the composed verifier checks the
+// claim's relay assertion for the bearer credential (a request that states no claim is checked as one without an assertion, so it is
+// refused missing), and the relay it answers must be verified and verified for the credential's own installation. Without a verifier
+// every relayed call is refused (fail closed).
+func (a *Authorizer) verifyRelay(ctx context.Context, caller ingress.Caller, claim *RelayClaim) (Relay, error) {
+	if a.relays == nil {
+		return nil, arc.RelayAssertionRefused(arc.RelayMissing)
+	}
+	stated := RelayClaim{}
+	if claim != nil {
+		stated = *claim
+	}
+	relay, err := a.relays(ctx, caller, stated)
+	switch {
+	case err != nil:
+		return nil, err
+	case relay == nil || !relay.Verified():
+		return nil, arc.RelayAssertionRefused(arc.RelaySignatureInvalid)
+	}
+	installation := relay.RelayingInstallationID()
+	if raw := correlation.IDBytes(caller.InstallationID); len(raw) != len(installation) || string(raw) != string(installation[:]) {
+		return nil, arc.RelayAssertionRefused(arc.RelayCredentialMismatch)
+	}
+	return relay, nil
 }
 
 // The audit events Authorize appends.

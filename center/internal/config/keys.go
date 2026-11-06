@@ -112,7 +112,7 @@ func LoadCommandKeys(environ []string) ([]CommandKey, []string, error) {
 }
 
 // ApplyCommandKeys gives the configuration the loaded command keys. The relay surface needs at least one: where it came from the
-// self-hosted default and no key is loaded it is left out (the start never refuses for the default; RelayDisabled says why), and a
+// self-hosted default and no key is loaded it is left out, with the nodes surface that needs it (the start never refuses for the default; RelayDisabled says why), and a
 // list that names it without a key refuses to start.
 func (c *Config) ApplyCommandKeys(keys []CommandKey) error {
 	c.CommandKeys = append([]CommandKey(nil), keys...)
@@ -122,7 +122,8 @@ func (c *Config) ApplyCommandKeys(keys []CommandKey) error {
 	if !c.Identity.DefaultSurfaces {
 		return invalid("the %s surface needs a command key (%s<NAME>, the binding of a fleet.signing_key row)", SurfaceRelay, CommandKeyPrefix)
 	}
-	c.Identity.Surfaces = slices.DeleteFunc(c.Identity.Surfaces, func(surface Surface) bool { return surface == SurfaceRelay })
+	// The nodes surface needs relay (AF-CTR-05 E2a), so it goes with it.
+	c.Identity.Surfaces = slices.DeleteFunc(c.Identity.Surfaces, func(surface Surface) bool { return surface == SurfaceRelay || surface == SurfaceNodes })
 	c.Identity.RelayDisabled = "no command key is configured (" + CommandKeyPrefix + "<NAME>)"
 	return nil
 }

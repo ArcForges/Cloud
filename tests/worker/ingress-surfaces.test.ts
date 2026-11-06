@@ -144,7 +144,16 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
   assert.equal(centerSurfaces("identity,pages,fleet,mobile"), "identity,pages,fleet,mobile");
   assert.deepEqual(
     [...surfaceNames],
-    ["identity", "pages", "operations", "fleet", "mobile", "relay"],
+    ["identity", "pages", "operations", "fleet", "mobile", "relay", "nodes"],
+  );
+  // AF-CTR-05 E2a: FleetService's node registry is the nodes surface's, and no other FleetService method has a row.
+  assert.deepEqual(
+    surfaceRoutes
+      .filter((route) => route.path.startsWith("/arcforges.fleet.v1.FleetService/"))
+      .map((route) => `${route.path} ${route.surface}`),
+    ["ListNodes", "GetNode", "RenameNode", "RevokeNode"].map(
+      (name) => `/arcforges.fleet.v1.FleetService/${name} nodes`,
+    ),
   );
   assert.equal(surfaceTable.size, surfaceRoutes.length);
   for (const route of surfaceRoutes) {

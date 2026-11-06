@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestChannelExchangeCapture",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "250f93a",
+  "centerCommit": "16328b8",
   "method": "NodeChannel",
   "case": "accepted",
   "outcome": "close 1000 node_closed",
@@ -24,7 +24,7 @@
     "httpStatus": 101,
     "frames": [
       "08011001da013c0a20b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b112120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5011a0408001000",
-      "08011002d201340a120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501121008808040100818e0d40320a0fe0a28081a0c6b69642d3030303030303031",
+      "08011002d2013e0a120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501121008808040100818e0d40320a0fe0a28081a0c6b69642d303030303030303122086275696c64626f78",
       "08011003a2011008e807120b6e6f64655f636c6f736564"
     ],
     "trailers": "websocket-close: 1000"
@@ -40,5 +40,5 @@
     "a refusal's JSON body: correlationId the placeholder text of its ID, retryAt the case's start plus the offset, rounded to 5 seconds",
     "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
   ],
-  "sha256": "300c362e59f72d37611ced87200d0c269f05db88a69dfb704e4031bfce9a856d"
+  "sha256": "ec5f484a032a581a07f3024a181e03accca7808cdcd1e3095f536dddd94873a6"
 }

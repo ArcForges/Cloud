@@ -9,11 +9,13 @@ import (
 
 	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
 
+	"github.com/ArcForges/Cloud/center/internal/feature"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 )
 
-// identityPolicies are the served methods the operation table covers: the identity surface's and the fleet surface's (AF-CTR-04).
+// identityPolicies are the served methods the operation table covers: the identity surface's, the fleet surface's (AF-CTR-04) and
+// the nodes surface's (AF-CTR-05 E2a).
 func identityPolicies(t *testing.T) []ingress.Policy {
 	t.Helper()
 	module, err := routes.Identity()
@@ -24,12 +26,16 @@ func identityPolicies(t *testing.T) []ingress.Policy {
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodes, err := routes.Nodes()
+	if err != nil {
+		t.Fatal(err)
+	}
 	// The relay surface's upgrade route (AF-CTR-05 E1a) is authorized with its row by the upgrade handler: it counts as served.
 	var upgrades []ingress.Policy
 	for _, row := range routes.RelayUpgradeRoutes() {
 		upgrades = append(upgrades, ingress.Policy{FullName: row.Path, Kind: ingress.Unary, Authentication: ingress.Session, Surface: row.Surface})
 	}
-	return append(append(module.Policies, fleet.Policies...), upgrades...)
+	return append(append(append(module.Policies, fleet.Policies...), nodes.Policies...), upgrades...)
 }
 
 func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
@@ -46,6 +52,16 @@ func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
 	}
 	if err = Check(append(policies, extra)); err == nil {
 		t.Fatal("a served method without a row was admitted")
+	}
+	// An operation ID names one row (review A N-2): a second row on another path that reuses fleet.listNodes is refused.
+	reused := append(Operations(), Operation{Path: "/arcforges.fleet.v1.FleetService/IssueRelayToken", ID: "fleet.listNodes", Risk: "R1", Session: true,
+		RelayedScopes: []string{"node"}})
+	reusedPolicy, err := ingress.NewUnary("/arcforges.fleet.v1.FleetService/IssueRelayToken", ingress.Session, ingress.NoScope, 4096, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = checkTable(reused, append(policies, reusedPolicy)); err == nil {
+		t.Fatal("a repeated operation ID was admitted")
 	}
 	flipped := append([]ingress.Policy(nil), policies...)
 	for index, policy := range flipped {
@@ -110,6 +126,12 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.approveDeviceCode":        "R3 upgrade evidence-on-approve user_code receipt active",
 		// AF-CTR-05 E1a (CTR5-SUR-02): the node channel, the first gated row (TestOperationRowsAreCheckedForConsistency).
 		"fleet.nodeChannel": "R2 allowed none - no-receipt active node",
+		// AF-CTR-05 E2a (CTR5-SUR-02 as amended by PB-1, C-N6 and Q20): the node registry; the reads also admit a node-relayed caller,
+		// RenameNode and RevokeNode are a person's device management, RevokeNode with evidence bound to the node.
+		"fleet.listNodes":  "R1 allowed none - no-receipt active relayed:node",
+		"fleet.getNode":    "R1 allowed none - no-receipt active relayed:node",
+		"fleet.renameNode": "R2 upgrade none - receipt restricted",
+		"fleet.revokeNode": "R3 upgrade evidence node receipt restricted",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
 	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own", EvidenceOnApprove: "evidence-on-approve"}
@@ -131,6 +153,9 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 			if len(operation.Scopes) > 0 {
 				got += " " + strings.Join(operation.Scopes, ",")
 			}
+			if len(operation.RelayedScopes) > 0 {
+				got += " relayed:" + strings.Join(operation.RelayedScopes, ",")
+			}
 		}
 		if want[operation.ID] != got {
 			t.Errorf("%s: %q, want %q", operation.ID, got, want[operation.ID])
@@ -148,7 +173,7 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	want := map[string]string{"identity.beginPasskeyRegistration": TargetAccount, "identity.removeAuthIdentity": TargetCredential,
 		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession,
-		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode}
+		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode, "fleet.revokeNode": TargetNode}
 	if target, ok := StepUpClass("center.operatorGrant"); !ok || target != TargetRequest {
 		t.Fatalf("the operator grant class: %q %v", target, ok)
 	}
@@ -200,7 +225,7 @@ func TestFleetRowsCarryNoFeature(t *testing.T) {
 		}
 		rows++
 		account := operation.ID == "fleet.getNodeSignInFlow" || operation.ID == "fleet.approveNodeSignIn" || operation.ID == "fleet.lookupDeviceCode" ||
-			operation.ID == "fleet.approveDeviceCode"
+			operation.ID == "fleet.approveDeviceCode" || strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.FleetService/")
 		if operation.Feature != "" || operation.Audit == AuditBeforeCall || operation.Session && !account && strings.Join(operation.Scopes, ",") != "node" ||
 			account && len(operation.Scopes) != 0 {
 			t.Errorf("%s: feature %q, audit %d, scopes %v", operation.ID, operation.Feature, operation.Audit, operation.Scopes)
@@ -222,5 +247,49 @@ func TestTheApprovalRowDecidesTheEvidenceOfADecision(t *testing.T) {
 	strict.StepUp, none.StepUp, none.Target = Evidence, NoEvidence, ""
 	if !strict.NeedsEvidenceToDecide(false) || none.NeedsEvidenceToDecide(true) {
 		t.Fatal("NeedsEvidenceToDecide does not follow the row")
+	}
+}
+
+// TestTheRelayedRowsFollowTheirRules (AF-CTR-05 E2a; Plan CTR5-SUR-03, PB-1 item 2; decisions N-1): the rows that admit a node-relayed
+// caller are exactly the registry's reads, each a person's R1 session row with the node scope relayed; CheckRow refuses a relayed row
+// that is an agent row, an anonymous row, outside RelayedOperations, a restricted account's security row, ungated above R1, addressing
+// another object or admitting another or a repeated scope; it keeps a relayed row's person rules (an Upgrade and an Evidence on the
+// session half are admitted), and a person's row without relayed scopes is unchanged.
+func TestTheRelayedRowsFollowTheirRules(t *testing.T) {
+	var relayed []string
+	for _, operation := range Operations() {
+		if len(operation.RelayedScopes) > 0 {
+			relayed = append(relayed, operation.ID)
+		}
+	}
+	if strings.Join(relayed, ",") != "fleet.listNodes,fleet.getNode" {
+		t.Fatalf("the relayed rows: %v", relayed)
+	}
+	row, ok := Lookup(fleetv1connect.FleetServiceGetNodeProcedure)
+	if !ok || CheckRow(row) != nil {
+		t.Fatalf("the GetNode row: %+v %v", row, CheckRow(row))
+	}
+	gated := Operation{Path: "/arcforges.fleet.v1.FleetService/SubmitNodeTask", ID: "fleet.submitNodeTask", Risk: "R3", Session: true, RelayedScopes: []string{"node"},
+		MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Object: ObjectNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall}
+	if err := CheckRow(gated); err != nil {
+		t.Fatalf("a gated relayed row with its session half's person rules: %v", err)
+	}
+	for name, change := range map[string]func(*Operation){
+		"an agent row":         func(o *Operation) { o.Scopes = []string{"node"} },
+		"an anonymous row":     func(o *Operation) { o.Session, o.Object = false, "" },
+		"another operation":    func(o *Operation) { o.ID = "fleet.renameNode" },
+		"a restricted row":     func(o *Operation) { o.Restricted = true },
+		"an ungated R2 row":    func(o *Operation) { o.Risk = "R2" },
+		"another object":       func(o *Operation) { o.Object = "device" },
+		"the automation scope": func(o *Operation) { o.RelayedScopes = []string{"automation"} },
+		"the node scope twice": func(o *Operation) { o.RelayedScopes = []string{"node", "node"} },
+		"two scopes":           func(o *Operation) { o.RelayedScopes = []string{"node", "automation"} },
+		"a person's scope":     func(o *Operation) { o.RelayedScopes = []string{"account"} },
+	} {
+		changed := row
+		change(&changed)
+		if CheckRow(changed) == nil {
+			t.Errorf("%s was admitted", name)
+		}
 	}
 }

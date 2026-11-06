@@ -11,7 +11,8 @@ operations themselves (node connection, task control, MCP, push) arrive with AF-
 row `fleet.nodeChannel` (node connection, `center.nodes`, AF-CTR-05 E1a; [center fleet](center-fleet.md#node-channel)). AF-CTR-04's node
 enrollment and its mobile native authorization are essential operations and serve no gated row (node enrollment: [center fleet](center-fleet.md),
 pinned by `TestFleetRowsCarryNoFeature`; the mobile authorization is a center-defined operation, and the center-defined and page
-operation types have no `Feature` field). [What waits](#what-waits-for-later-tasks) lists
+operation types have no `Feature` field). FleetService's node registry (ListNodes, GetNode, RenameNode, RevokeNode; AF-CTR-05 E2a) is
+essential too (Plan Q20: a lapsed account still lists, renames and revokes its nodes; [center fleet](center-fleet.md#node-registry)). [What waits](#what-waits-for-later-tasks) lists
 what this document does not describe because it does not exist yet.
 
 ## Evidence labels
@@ -415,8 +416,8 @@ term, no `identity.operator` row, and the audit events `issued` once and `refuse
     placeholder (H-07, illustrative), never a plan limit; there is no connected-node cap (Q21: the enrollment cap governs).
   - **The `OperationKeys` row check**: a row that carries a `Feature` names its group of `feature.OperationKeys` and must carry that
     group's key (`access.CheckRow`); the set of gated rows is empty today, and a table-driven negative test refuses every wrong key.
-- **AF-CTR-05 E1 and E2** serve the first gated rows (the node channel, the routed methods) on these prerequisites; until then no route
-  serves a gated call, and the controls and the row check stand in front of an empty set of rows.
+- **AF-CTR-05 E1 and E2** serve the first gated rows on these prerequisites: E1a the node channel (`fleet.nodeChannel`, delivered,
+  behind the upgrade-rate controls); E2b the routed task methods. E2a's node registry adds no gated row.
 - **The Docker-context test models the file rules** (`worker-1`). `tests/worker/docker-context.test.ts` decides what the context
   carries from the include rules of `.dockerignore` and the closing exclusions of the center, as the other tests of that file do; a
   real build carries every `center/` file those exclusions do not remove (`!center/` re-includes the tree), so a stray file such as

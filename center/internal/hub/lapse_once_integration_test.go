@@ -63,9 +63,13 @@ func TestALapseCloseIsAuditedOnce(t *testing.T) {
 	gate := &barrierGate{arrived: make(chan struct{}, 2), release: make(chan struct{})}
 	h := &Hub{db: db.Runtime, gate: gate, codec: RelayCodec{}, clock: time.Now, logger: slog.New(slog.DiscardHandler), metrics: observe.NewMetrics(),
 		nodes: map[platform.ID]*conn{}, all: map[*conn]bool{}}
-	c := &conn{hub: h, ws: <-accepted, userID: platform.NewID(), installationID: platform.NewID(), enrollmentID: enrollment, connectionID: platform.NewID()}
+	c := &conn{hub: h, ws: <-accepted, userID: platform.NewID(), installationID: platform.NewID(), enrollmentID: enrollment, connectionID: platform.NewID(),
+		stopWrites: make(chan struct{}), writerDone: make(chan struct{}), closeDone: make(chan struct{})}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
+	c.writes, c.cancelWrites = context.WithCancel(context.Background())
 	defer c.cancel()
+	defer c.cancelWrites()
+	go c.writer()
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Add(1)

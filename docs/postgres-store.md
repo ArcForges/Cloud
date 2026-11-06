@@ -291,6 +291,23 @@ production is dark: the columns stay empty and the lease row is not created ther
 PostgreSQL gate moves from version 7 to 8. Personal data: the instants of a node's connections (the node row is personal data
 already). Retention: the presence columns live with their node row; the lease is one row, kept.
 
+### Node registry (AF-CTR-05 part E2a)
+
+`0009_fleet_node_names.sql` (expand only) adds two columns to `fleet.node` for FleetService's node registry
+([center fleet](center-fleet.md#node-registry); Plan CTR5-API-03, Q25: the account's name wins):
+
+- `reported_name text NULL`: the name the node last reported for itself (enrollment, ReportNodeInfo), 1 to 64 characters without control
+  characters (`node_reported_name`). A row of the previous release has none until its node reports again; until then its `display_name`
+  is the name it reported, and FleetNode.reported_name states that.
+- `named_by_account boolean NOT NULL DEFAULT false`: set by RenameNode; from then on `display_name` is the account's name, which a report
+  no longer changes. The rename keeps the node's own name: a row without `reported_name` gets its `display_name` there in the same UPDATE.
+
+Every statement of the previous release names its `fleet.node` columns, so it keeps working: its enrollment insert takes the default
+and leaves `reported_name` empty. The runtime role keeps SELECT, INSERT and UPDATE on `fleet.node`, never DELETE. The migration is
+rehearsed over version 8 with a node row of the previous release (`TestMigration0009LandsOverVersion8`). The hosted deployment applies
+it while production is dark (no node is enrolled there). Personal data: a device name the person or the node chose, as `display_name`
+already is. Retention: with the node row.
+
 ## Guarantees
 
 `center/internal/platform` re-implements the guarantees of the D1 storage plans with native transactions, constraints and row

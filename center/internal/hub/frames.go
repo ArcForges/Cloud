@@ -85,8 +85,9 @@ type Codec interface {
 	Decode(data []byte) (inbound, error)
 	// Challenge is the center's hello challenge: the one-use nonce and the connection ID (Plan PB-4, D0-B2).
 	Challenge(seq uint64, nonce []byte, connectionID platform.ID, deadline time.Time) ([]byte, error)
-	// Accepted is ChannelAccepted: the connection ID, the limits and the kids of the command keys calls may be signed with.
-	Accepted(seq uint64, connectionID platform.ID, limits Limits, kids []string) ([]byte, error)
+	// Accepted is ChannelAccepted: the connection ID, the node's registry name (AF-CTR-05 E2a: the account's name wins, Q25), the limits
+	// and the kids of the command keys calls may be signed with.
+	Accepted(seq uint64, connectionID platform.ID, nodeName string, limits Limits, kids []string) ([]byte, error)
 	// Heartbeat is the center's heartbeat.
 	Heartbeat(seq uint64, at time.Time) ([]byte, error)
 	// Close is RelayClose: the close code, its closed reason and, for a center that is going away (4500), how long the node waits
