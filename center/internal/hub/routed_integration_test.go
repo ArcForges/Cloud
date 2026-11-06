@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -23,6 +24,7 @@ import (
 	relayv1 "github.com/ArcForges/Contracts/go/arcforges/relay/v1"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/dbtest"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
@@ -151,7 +153,8 @@ func TestASubmitIsRoutedRecordedAndReplayedByTheNode(t *testing.T) {
 	node := h.enrollIn(user)
 	channel := h.connect(node)
 	task := platform.NewID()
-	calls := serve(t, node, channel, deduplicating(node, func(*relayv1.ChannelCall) []byte { return submitResponse(t, task, "PLANTED") }))
+	recorded := submitResponse(t, task, "PLANTED")
+	calls := serve(t, node, channel, deduplicating(node, func(*relayv1.ChannelCall) []byte { return recorded }))
 	issued := h.accountSession(user, session.ScopeAccount)
 	command := platform.NewID()
 	payload := submitPayload(t, command, "PLANTED")
@@ -164,8 +167,7 @@ func TestASubmitIsRoutedRecordedAndReplayedByTheNode(t *testing.T) {
 	if !bytes.Equal(sent.GetPayload(), payload) {
 		t.Fatal("the node did not receive the caller's exact bytes")
 	}
-	if !proto.Equal(first.GetValue().GetNodeId(), idValue(node.node.ID)) || !bytes.Equal(first.GetValue().GetResponse(), submitResponse(t, task, "PLANTED")) &&
-		len(first.GetValue().GetResponse()) == 0 {
+	if !proto.Equal(first.GetValue().GetNodeId(), idValue(node.node.ID)) || !bytes.Equal(first.GetValue().GetResponse(), recorded) {
 		t.Fatalf("the reply: %v", first.GetValue())
 	}
 	record := h.record(user, command)
@@ -328,7 +330,7 @@ func TestALostSettlementCountsAsDeliveredAndTheWindowComesFirst(t *testing.T) {
 		h.proveFor(issued, user, "fleet.submitNodeTask", node.node.ID)
 		failure := h.submit(issued.AccessToken, command, node.node.ID, payload).GetError()
 		if errorKey(failure) != "STATE/invalid_state" || failure.GetDetails().GetState().GetReason() != "replay_window_passed" ||
-			failure.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN || failure.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_NEVER {
+			failure.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN || failure.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_NEVER {
 			t.Fatalf("a resend past the window (online %v): %v", online, failure)
 		}
 	}
@@ -379,6 +381,19 @@ func TestALeaseTakeOverSweepsTheRecordsBeforeRouting(t *testing.T) {
 		Now: time.Now()})
 	if !strings.Contains(errorText(err), "node_offline") || h.count("SELECT count(*) FROM fleet.routed_call") != 1 {
 		t.Fatalf("an admission under a stale fence: %v", err)
+	}
+	// A resend of the swept record under the stale fence (review A CN-1): node_unreachable with UNKNOWN, and nothing is written.
+	_, err = fleet.AcceptRouted(context.Background(), h.db.Runtime, fleet.RoutedAccept{AccountID: user, NodeID: node.node.ID, CommandID: command, Method: 1,
+		Caller: fleet.RoutedCaller{Kind: fleet.RoutedCallerSession, SessionID: platform.NewID(), Actor: identity.Actor(user)}, Digest: bytes.Repeat([]byte{0xab}, 32),
+		RequestSHA256: make([]byte, 32), Size: 10, Fence: fence, Window: time.Hour, InFlight: func() bool { return false }, Online: func() bool { return true },
+		Now: time.Now()})
+	var refusal *arc.Refusal
+	if !errors.As(err, &refusal) || refusal.Code != "node_unreachable" || refusal.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN ||
+		refusal.Retry != foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND {
+		t.Fatalf("a resend under a stale fence: %v", err)
+	}
+	if got := h.record(user, command); got.Attempts != 1 {
+		t.Fatalf("a fenced resend wrote: %+v", got)
 	}
 	// A sweep that cannot commit (the runtime role may not update the records): the hub holds the new lease but routes nothing, a read
 	// to the node's open channel included, until a later wake of the lease loop sweeps.

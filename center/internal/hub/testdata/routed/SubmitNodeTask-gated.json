@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "Cloud center/internal/hub routed_capture_integration_test.go",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "65dcc6f",
+  "centerCommit": "e2b-code",
   "method": "/arcforges.fleet.v1.FleetService/SubmitNodeTask",
   "case": "gated",
   "outcome": "ENTITLEMENT/feature_not_entitled",

@@ -107,7 +107,8 @@ func TestALeaseMoveDuringAnInFlightCallIsUnknownAndReplayedLater(t *testing.T) {
 	gate := make(chan struct{})
 	var executed sync.WaitGroup
 	executed.Add(1)
-	dedup := deduplicating(node, func(*relayv1.ChannelCall) []byte { executed.Done(); return submitResponse(t, task, "MOVED") })
+	moved := submitResponse(t, task, "MOVED")
+	dedup := deduplicating(node, func(*relayv1.ChannelCall) []byte { executed.Done(); return moved })
 	held := make(chan struct{}, 4)
 	answer := func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
 		held <- struct{}{}
@@ -144,7 +145,8 @@ func TestALeaseMoveDuringAnInFlightCallIsUnknownAndReplayedLater(t *testing.T) {
 	serve(t, node, again, answer)
 	h.proveFor(issued, user, "fleet.submitNodeTask", node.node.ID)
 	reply := h.submit(issued.AccessToken, command, node.node.ID, payload)
-	if reply.GetError() != nil || !bytes.Equal(reply.GetValue().GetResponse(), submitResponse(t, task, "MOVED")) && len(reply.GetValue().GetResponse()) == 0 {
+	// The node's deduplication replays exactly the response of the first execution (review B N-14).
+	if reply.GetError() != nil || !bytes.Equal(reply.GetValue().GetResponse(), moved) {
 		t.Fatalf("the resend after the take-back: %v", reply)
 	}
 	if got := h.record(user, command); got.State != fleet.RoutedSucceeded || got.Attempts != 2 {
@@ -287,8 +289,9 @@ func TestASettlementIsRetried(t *testing.T) {
 	}
 }
 
-// TestTheFinalityOfANodeRefusalFollowsItsEffect (decisions section 4, review A B-2): a node refusal that says HAPPENED is final, one
-// that says DID_NOT_HAPPEN is not; the same for an EXPIRED outcome.
+// TestTheFinalityOfANodeRefusalFollowsItsEffect (decisions section 4, review A B-2; N2b decisions B-1): a node refusal that says
+// HAPPENED is final, one that says DID_NOT_HAPPEN is not; the same for an EXPIRED outcome and for the handler's own error in an EXECUTED
+// response (FAILED).
 func TestTheFinalityOfANodeRefusalFollowsItsEffect(t *testing.T) {
 	h := routedHarness(t)
 	user := h.db.Account(1)
@@ -307,6 +310,16 @@ func TestTheFinalityOfANodeRefusalFollowsItsEffect(t *testing.T) {
 		mu.Lock()
 		plan := planned[string(header.GetCommandId().GetValue())]
 		mu.Unlock()
+		if plan.result == relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED {
+			// The handler's own error inside an EXECUTED response (N2b decisions B-1).
+			response, err := proto.Marshal(&nodev1.TaskServiceSubmitTaskResponse{Outcome: &nodev1.TaskServiceSubmitTaskResponse_Error{Error: &foundationv1.ArcError{
+				Code: proto.String(plan.code), Category: foundationv1.ErrorCategory_ERROR_CATEGORY_EXECUTION.Enum(),
+				Retry: &foundationv1.RetryAdvice{Mode: foundationv1.RetryMode_RETRY_MODE_NEVER.Enum()}, Effect: plan.effect.Enum()}}})
+			if err != nil {
+				t.Error(err)
+			}
+			return node.node.Executed(call, response), response, true
+		}
 		category, prefix := foundationv1.ErrorCategory_ERROR_CATEGORY_AUTHORIZATION, "authorization"
 		if plan.result == relayv1.RoutedOutcome_ROUTED_OUTCOME_EXPIRED {
 			category, prefix = foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, "state"
@@ -326,6 +339,8 @@ func TestTheFinalityOfANodeRefusalFollowsItsEffect(t *testing.T) {
 		{outcome{relayv1.RoutedOutcome_ROUTED_OUTCOME_REFUSED_BY_POLICY, "permission_denied", didNotHappen}, fleet.RoutedRejected, false},
 		{outcome{relayv1.RoutedOutcome_ROUTED_OUTCOME_EXPIRED, "expired", didNotHappen}, fleet.RoutedExpired, false},
 		{outcome{relayv1.RoutedOutcome_ROUTED_OUTCOME_EXPIRED, "expired", happened}, fleet.RoutedExpired, true},
+		{outcome{relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED, "operation_failed", happened}, fleet.RoutedFailed, true},
+		{outcome{relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED, "operation_failed", didNotHappen}, fleet.RoutedFailed, false},
 	}
 	for index, c := range cases {
 		command := platform.NewID()
@@ -334,7 +349,8 @@ func TestTheFinalityOfANodeRefusalFollowsItsEffect(t *testing.T) {
 		mu.Unlock()
 		h.proveFor(issued, user, "fleet.submitNodeTask", node.node.ID)
 		failure := h.submit(issued.AccessToken, command, node.node.ID, submitPayload(t, command, "FINALITY")).GetError()
-		if !strings.HasSuffix(errorKey(failure), "/"+c.plan.code) {
+		if c.plan.result == relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED && failure != nil ||
+			c.plan.result != relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED && !strings.HasSuffix(errorKey(failure), "/"+c.plan.code) {
 			t.Fatalf("case %d: %v", index, failure)
 		}
 		if got := h.record(user, command); got == nil || got.State != c.state || got.Final != c.final {

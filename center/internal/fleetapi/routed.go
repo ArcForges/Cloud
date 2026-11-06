@@ -469,6 +469,9 @@ func (r *Registry) routed(ctx context.Context, call *ingress.Call, message route
 	}
 	operation, relay, err := r.access.AuthorizeRelayed(ctx, call, r.nodeSubject(call, nodeID, false), stated)
 	if err != nil {
+		if mutation {
+			err = r.resendNotFound(ctx, call, nodeID, *commandID, err)
+		}
 		return nil, nodeID, err
 	}
 	if r.routing == nil {
@@ -493,6 +496,26 @@ func (r *Registry) routed(ctx context.Context, call *ingress.Call, message route
 	}
 	response, err := r.routeMutation(ctx, call, operation, routedCall, checked)
 	return response, nodeID, err
+}
+
+// resendNotFound is the ownership stage's STATE/not_found for a Submit or Cancel (decisions R2): it consults the caller's own record of
+// the command, by the authenticated account and the command ID, so it is no ownership oracle. When that record names this node and may
+// have reached it (the node was revoked meanwhile), the reply is node_unreachable, UNKNOWN with SAME_COMMAND; otherwise not_found
+// stands. Every other refusal is returned as it is.
+func (r *Registry) resendNotFound(ctx context.Context, call *ingress.Call, nodeID, commandID platform.ID, err error) error {
+	var refusal *arc.Refusal
+	if !errors.As(err, &refusal) || refusal.Category != foundationv1.ErrorCategory_ERROR_CATEGORY_STATE || refusal.Code != "not_found" {
+		return err
+	}
+	userID, ok := textID(call.Caller.UserID)
+	if !ok {
+		return err
+	}
+	record, readErr := fleet.ReadRouted(ctx, r.db, userID, commandID)
+	if readErr != nil || record == nil || record.NodeID != nodeID || !record.MayHaveReached() {
+		return err
+	}
+	return arc.NodeUnreachable(nodeID[:], arc.UnreachableChannelClosed, true)
 }
 
 // read routes a read: no record, no audit of its own (Q-10); a long poll holds one of the process's long-poll slots (PN-1).
@@ -633,9 +656,8 @@ func (r *Registry) attempt(key routedKey, current *attempt, routedCall RoutedCal
 		r.observe("replay_differs")
 		current.err = arc.ReplayDigestDiffers(routedCall.TargetNodeID[:])
 	case err != nil && (decision.Delivered || decision.Final) && answer.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN:
-		// A resend of a command that may have reached the node is never answered DID_NOT_HAPPEN (decisions B-1: the reply is never less
-		// conservative than the record), whatever this attempt's own refusal said (offline, a full queue, a bound, its deadline before
-		// delivery).
+		// Every routing outcome of a resend (decisions R1) is node_unreachable, UNKNOWN with SAME_COMMAND, whatever this attempt's own
+		// refusal said (offline, a full queue, a bound, its deadline before delivery).
 		reason := arc.UnreachableChannelClosed
 		if refusal, ok := err.(*arc.Refusal); ok && refusal.Code == "node_unreachable" {
 			reason = refusal.Reason
@@ -643,6 +665,10 @@ func (r *Registry) attempt(key routedKey, current *attempt, routedCall RoutedCal
 		current.err = arc.NodeUnreachable(routedCall.TargetNodeID[:], reason, true)
 	case err != nil:
 		current.err = err
+	case (decision.Delivered || decision.Final) && result.Outcome != relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED:
+		// A node-signed refusal of a resend (decisions R1): node_unreachable, UNKNOWN with SAME_COMMAND; the node's own code is kept in
+		// the record and the audit row.
+		current.err = arc.NodeUnreachable(routedCall.TargetNodeID[:], arc.UnreachableChannelClosed, true)
 	case result.Outcome != relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED:
 		current.err = refusalOf(result)
 	default:

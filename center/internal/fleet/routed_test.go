@@ -27,7 +27,9 @@ func TestTheSettledStateFollowsTheAnswer(t *testing.T) {
 		{"the hub's DID_NOT_HAPPEN after a delivered attempt", RoutedAnswer{Effect: dnh, Refusal: "state/node_offline"}, true, RoutedUnknown, true, false},
 		{"the hub's UNKNOWN", RoutedAnswer{Effect: unknown, Refusal: "state/node_unreachable"}, false, RoutedUnknown, true, false},
 		{"an executed value", RoutedAnswer{Verified: true, Outcome: 1}, false, RoutedSucceeded, true, true},
-		{"a handler error", RoutedAnswer{Verified: true, Outcome: 1, HandlerError: true, Effect: dnh, Refusal: "state/not_found"}, false, RoutedFailed, true, true},
+		{"a handler error that did not happen", RoutedAnswer{Verified: true, Outcome: 1, HandlerError: true, Effect: dnh, Refusal: "state/not_found"}, false, RoutedFailed, true, false},
+		{"a handler error that happened", RoutedAnswer{Verified: true, Outcome: 1, HandlerError: true, Effect: happened, Refusal: "execution/operation_failed"}, false, RoutedFailed, true, true},
+		{"a handler error of a resend that did not happen", RoutedAnswer{Verified: true, Outcome: 1, HandlerError: true, Effect: dnh}, true, RoutedUnknown, true, false},
 		{"a handler error with an unknown effect", RoutedAnswer{Verified: true, Outcome: 1, HandlerError: true, Effect: unknown}, false, RoutedUnknown, true, false},
 		{"a policy refusal that did not happen", RoutedAnswer{Verified: true, Outcome: 2, Effect: dnh}, false, RoutedRejected, true, false},
 		{"a policy refusal that happened", RoutedAnswer{Verified: true, Outcome: 2, Effect: happened}, false, RoutedRejected, true, true},
@@ -35,6 +37,10 @@ func TestTheSettledStateFollowsTheAnswer(t *testing.T) {
 		{"an expiry that did not happen", RoutedAnswer{Verified: true, Outcome: 4, Effect: dnh}, false, RoutedExpired, true, false},
 		{"an expiry that happened", RoutedAnswer{Verified: true, Outcome: 4, Effect: happened}, false, RoutedExpired, true, true},
 		{"a refusal whose effect is unknown", RoutedAnswer{Verified: true, Outcome: 2, Effect: unknown}, false, RoutedUnknown, true, false},
+		// A resend (an earlier attempt may have reached the node; decisions R1): a refusal that did not happen leaves it UNKNOWN.
+		{"a policy refusal of a resend that did not happen", RoutedAnswer{Verified: true, Outcome: 2, Effect: dnh}, true, RoutedUnknown, true, false},
+		{"an expiry of a resend that did not happen", RoutedAnswer{Verified: true, Outcome: 4, Effect: dnh}, true, RoutedUnknown, true, false},
+		{"a policy refusal of a resend that happened", RoutedAnswer{Verified: true, Outcome: 2, Effect: happened}, true, RoutedRejected, true, true},
 	}
 	for _, c := range cases {
 		state, reached, final := settled(c.answer, c.delivered)

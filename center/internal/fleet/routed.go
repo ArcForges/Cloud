@@ -143,8 +143,8 @@ func offlineRefusal(nodeID platform.ID, now time.Time) error {
 }
 
 // mayHaveReached reports whether a record's command may have reached the node: it was delivered, or an attempt was admitted (ACCEPTED,
-// in flight here or not). A resend of such a record is never answered DID_NOT_HAPPEN (decisions B-1, the reply never less conservative
-// than the record): its refusals about delivery are STATE/node_unreachable, UNKNOWN with SAME_COMMAND.
+// in flight here or not). A call for such a record is a resend: its routing outcomes, and a not_found after the node's revocation, are
+// STATE/node_unreachable, UNKNOWN with SAME_COMMAND (decisions R1, R2).
 func (r *routedRow) mayHaveReached() bool {
 	return r != nil && (r.delivered || r.state == RoutedAccepted)
 }
@@ -196,9 +196,11 @@ func refuseResend(existing *routedRow, accept RoutedAccept, inFlight bool) error
 	}
 	mayHaveReached := existing.delivered || existing.state == RoutedAccepted && !inFlight
 	if mayHaveReached && !accept.Now.Before(existing.created.Add(accept.Window)) {
-		// The command may have run at the node: its effect is unknown, and it is never sent again (NEVER).
+		// The catalogue's pair of invalid_state (decisions R4): DID_NOT_HAPPEN, NEVER. The effect describes this delivery, which is not
+		// made; the reason says the window passed and the resource names the recorded task where it is known, so the caller reads it as
+		// "may have run, see the task", never as a reason for a new command ID.
 		refusal := arc.InvalidState("routed_call", "replay_window_passed")
-		refusal.Effect, refusal.Retry = foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN, foundationv1.RetryMode_RETRY_MODE_NEVER
+		refusal.Retry = foundationv1.RetryMode_RETRY_MODE_NEVER
 		if existing.taskID != nil && existing.state == RoutedSucceeded {
 			refusal.Resource = &arc.Resource{Kind: "task", ID: append([]byte(nil), existing.taskID[:]...)}
 		}
@@ -245,6 +247,10 @@ func AcceptRouted(ctx context.Context, db *store.DB, accept RoutedAccept) (Route
 		err = tx.QueryRow(ctx, `SELECT enrollment_id FROM fleet.node WHERE node_id = $1 AND user_id = $2 AND revoked_at IS NULL FOR SHARE`,
 			accept.NodeID, accept.AccountID).Scan(&enrollment)
 		if errors.Is(err, pgx.ErrNoRows) {
+			if existing.mayHaveReached() {
+				// The node was revoked after the command may have reached it (decisions R2): node_unreachable, UNKNOWN.
+				return arc.NodeUnreachable(accept.NodeID[:], arc.UnreachableChannelClosed, true)
+			}
 			return arc.NotFound("node", accept.NodeID[:])
 		}
 		if err != nil {
@@ -405,8 +411,17 @@ func settled(answer RoutedAnswer, delivered bool) (RoutedState, bool, bool) {
 	case unknown:
 		// The node answered without knowing the effect (a duplicate while the first is still executing; N2 states it so): never final.
 		return RoutedUnknown, true, false
+	case answer.Outcome != 1 && delivered && didNotHappen:
+		// A node's refusal of this attempt that did not happen, while an earlier attempt may have reached the node: the record stays
+		// UNKNOWN (with the node's refusal code), never less conservative than before (decisions R1).
+		return RoutedUnknown, true, false
+	case answer.Outcome == 1 && delivered && didNotHappen:
+		// The handler's DID_NOT_HAPPEN error of a resend, while an earlier attempt may have run: UNKNOWN.
+		return RoutedUnknown, true, false
 	case answer.Outcome == 1:
-		return RoutedFailed, true, true
+		// The handler's own error is final only when it says HAPPENED (N2b decisions B-1): the node does not record a transient or
+		// pre-deduplication error (node_stopping, overloaded, validation), so a resend may still execute.
+		return RoutedFailed, true, !didNotHappen
 	case answer.Outcome == 4:
 		return RoutedExpired, true, !didNotHappen
 	}
@@ -524,6 +539,7 @@ var ErrSweepFenced = errors.New("the hub lease no longer holds the fence of this
 
 // RoutedRecord is a routing record as tests and the inspection read it.
 type RoutedRecord struct {
+	NodeID    platform.ID
 	State     RoutedState
 	Delivered bool
 	Attempts  int
@@ -532,13 +548,19 @@ type RoutedRecord struct {
 	Refusal   *int16
 }
 
+// MayHaveReached reports whether a record's command may have reached the node (delivered, or ACCEPTED).
+func (r *RoutedRecord) MayHaveReached() bool {
+	return r != nil && (r.Delivered || r.State == RoutedAccepted)
+}
+
 // ReadRouted reads one routing record (nil when there is none).
 func ReadRouted(ctx context.Context, db *store.DB, accountID, commandID platform.ID) (*RoutedRecord, error) {
 	var value *RoutedRecord
 	err := db.InTx(ctx, "read a routing record", store.TxOptions{ReadOnly: true, Timeout: registryTimeout}, func(ctx context.Context, tx pgx.Tx) error {
 		var record RoutedRecord
-		err := tx.QueryRow(ctx, `SELECT state, delivered, attempts, task_id, final_at IS NOT NULL, refusal FROM fleet.routed_call WHERE account_id = $1 AND command_id = $2`,
-			accountID, commandID).Scan(&record.State, &record.Delivered, &record.Attempts, &record.TaskID, &record.Final, &record.Refusal)
+		err := tx.QueryRow(ctx, `SELECT node_id, state, delivered, attempts, task_id, final_at IS NOT NULL, refusal FROM fleet.routed_call WHERE account_id = $1 AND
+    command_id = $2`, accountID, commandID).Scan(&record.NodeID, &record.State, &record.Delivered, &record.Attempts, &record.TaskID, &record.Final,
+			&record.Refusal)
 		if errors.Is(err, pgx.ErrNoRows) {
 			value = nil
 			return nil

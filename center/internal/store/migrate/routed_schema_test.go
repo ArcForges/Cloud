@@ -14,7 +14,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
-const migration0010SHA256 = "ea17224275e94fb6ea4ac03c94378b26c19bfc78b0302526b67638a5308eba76"
+const migration0010SHA256 = "bd3e8e37290cb978e30723a0983a0f34d8397f3442345746366d80f3609c9dfe"
 
 // TestMigration0010LandsOverVersion9 (AF-CTR-05 part E2b): 0010 lands over version 9 with a node of the previous release; its checksum
 // is the pinned one; the runtime role holds SELECT, INSERT and UPDATE on fleet.routed_call and only SELECT on fleet.refusal_code; the

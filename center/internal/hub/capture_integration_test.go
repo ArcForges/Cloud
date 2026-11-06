@@ -50,6 +50,9 @@ const channelExchangesDirectory = "testdata/exchanges"
 // channelCohort names the relay.v1 the captures are encoded with (the Contracts cohort the center pins).
 const channelCohort = "1.0.0-ci.437.1"
 
+// relayNonceLifetime is the relay nonce lifetime of the harness (testSettings, RelayNonceLifetime).
+const relayNonceLifetime = 120 * time.Second
+
 var channelNormalization = []string{
 	"a 16-byte ID the center or the node drew: 15 bytes of its kind (0xa1 correlation, 0xa3 installation, 0xa5 connection, 0xa6 node) and n for the n-th distinct one of the kind",
 	"the hello nonce the center drew: 32 bytes of 0xb0+n",
@@ -65,7 +68,7 @@ var channelNormalization = []string{
 // routedNormalization is what the routed cases (AF-CTR-05 E1b: calls, results, relay nonces) normalize besides channelNormalization.
 var routedNormalization = []string{
 	"the IDs of a routed case's own kinds: 15 bytes of 0xa2 account, 0xa4 session, 0xa7 call, 0xa9 command or 0xaa relay nonce request, and n for the n-th distinct one",
-	"the relay nonce the center drew: 32 bytes of 0xc0+n",
+	"the relay nonce the center drew: 32 bytes of 0xc0+n; its expires_at is its lifetime, 120 s (unix_seconds 120), checked against the case's clock",
 	"a call's or a result's signed header: its IDs, kid and instants normalized as everywhere, then re-encoded; its signature (ES256 draws a nonce) 64 bytes of 0xe0+n",
 }
 
@@ -240,7 +243,14 @@ func (p *channelPlaceholders) frame(data []byte) string {
 		value := member.RelayNonce
 		value.RequestId = p.idValue(value.GetRequestId(), 0xaa)
 		value.Nonce = p.filled("relay-nonce", value.GetNonce(), 0xc0, 32)
-		value.ExpiresAt = p.instant(value.GetExpiresAt())
+		// The nonce's only Instant is its expiry: the capture records the lifetime the center applies (the harness's 120 s,
+		// hub.Settings.RelayNonceLifetime) as an exact value, after checking that the expiry lies within that lifetime of the case (review
+		// B N-13), so no rounding edge exists and the lifetime is kept.
+		expires := time.Unix(value.GetExpiresAt().GetUnixSeconds(), int64(value.GetExpiresAt().GetNanos()))
+		if lifetime := expires.Sub(p.start); lifetime < relayNonceLifetime-time.Second || lifetime > relayNonceLifetime+time.Minute {
+			p.t.Errorf("a relay nonce expires %s after the case's start, not its lifetime of %s", lifetime, relayNonceLifetime)
+		}
+		value.ExpiresAt = &foundationv1.Instant{UnixSeconds: proto.Int64(int64(relayNonceLifetime / time.Second)), Nanos: proto.Uint32(0)}
 	}
 	encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(&frame)
 	if err != nil {

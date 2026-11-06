@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestChannelExchangeCapture",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "65dcc6f",
+  "centerCommit": "e2b-code",
   "method": "NodeChannel",
   "case": "call-executed",
   "outcome": "close 1000 node_closed",
@@ -41,8 +41,8 @@
     "a refusal's JSON body: correlationId the placeholder text of its ID, retryAt 1970-01-01T00:00:00Z (its only Instant)",
     "the authorization header carries the placeholder of its token; the client address header is recorded as sent",
     "the IDs of a routed case's own kinds: 15 bytes of 0xa2 account, 0xa4 session, 0xa7 call, 0xa9 command or 0xaa relay nonce request, and n for the n-th distinct one",
-    "the relay nonce the center drew: 32 bytes of 0xc0+n",
+    "the relay nonce the center drew: 32 bytes of 0xc0+n; its expires_at is its lifetime, 120 s (unix_seconds 120), checked against the case's clock",
     "a call's or a result's signed header: its IDs, kid and instants normalized as everywhere, then re-encoded; its signature (ES256 draws a nonce) 64 bytes of 0xe0+n"
   ],
-  "sha256": "67101364c77493fc1252c0bb0b7f45f3f99c9a1acc55b8c0edaa1299690762de"
+  "sha256": "2c30732131521b8a8ad4eefd40750a9dcd42628b0fe6bab753c4dd2f81eb84d9"
 }

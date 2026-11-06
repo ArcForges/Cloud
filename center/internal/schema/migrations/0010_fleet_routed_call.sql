@@ -18,8 +18,8 @@
 -- FAILED (the node's handler refused), 5 REJECTED_BY_NODE, 6 EXPIRED, 7 UNKNOWN (the call may have reached the node without a verified
 -- result), 8 NOT_DELIVERED (the hub answered DID_NOT_HAPPEN and no earlier attempt may have reached the node). 2 (DELIVERED) is reserved
 -- and never written (Q-2): delivery is known only from the hub's answer, and delivered keeps it. A record is final exactly when final_at
--- is set: SUCCEEDED and FAILED always; REJECTED_BY_NODE and EXPIRED when the node's signed result did not say that the call did not
--- happen. delivered is monotonic: once a record may have reached the node it stays so.
+-- is set: SUCCEEDED always; FAILED, REJECTED_BY_NODE and EXPIRED when the node's signed result (for FAILED, the handler's error) did
+-- not say that the call did not happen. delivered is monotonic: once a record may have reached the node it stays so.
 --
 -- Personal data: none beyond the account and the IDs. Retention: 90 days by design; the sweep is not delivered (H-24 UNKNOWN, AF-PLAT-01).
 
@@ -155,8 +155,8 @@ CREATE TABLE fleet.routed_call (
     CONSTRAINT routed_call_executed CHECK ((response_sha256 IS NULL) = (outcome_sha256 IS NULL) AND (response_sha256 IS NULL) = (response_size IS NULL) AND
         (state NOT IN (3, 4) OR response_sha256 IS NOT NULL AND executed_at IS NOT NULL) AND (state <> 8 OR NOT delivered) AND
         (state NOT IN (3, 4, 5, 6, 7) OR delivered) AND (state <> 3 OR refusal IS NULL) AND (state NOT IN (4, 5, 6) OR refusal IS NOT NULL)),
-    -- SUCCEEDED and FAILED are always final; REJECTED_BY_NODE and EXPIRED may be; ACCEPTED, UNKNOWN and NOT_DELIVERED never are.
-    CONSTRAINT routed_call_final CHECK ((state NOT IN (3, 4) OR final_at IS NOT NULL) AND (final_at IS NULL OR state IN (3, 4, 5, 6))),
+    -- SUCCEEDED is always final; FAILED, REJECTED_BY_NODE and EXPIRED may be; ACCEPTED, UNKNOWN and NOT_DELIVERED never are.
+    CONSTRAINT routed_call_final CHECK ((state <> 3 OR final_at IS NOT NULL) AND (final_at IS NULL OR state IN (3, 4, 5, 6))),
     CONSTRAINT routed_call_instants CHECK (updated_at >= created_at AND (final_at IS NULL OR final_at >= created_at))
 );
 

@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "Cloud center/internal/hub routed_capture_integration_test.go",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "65dcc6f",
+  "centerCommit": "e2b-code",
   "method": "/arcforges.fleet.v1.FleetService/SubmitNodeTask",
   "case": "replay-window-passed",
   "outcome": "STATE/invalid_state",
@@ -20,7 +20,7 @@
     "contentType": "application/grpc-web+proto",
     "httpStatus": 200,
     "frames": [
-      "0a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1011a89010a0d696e76616c69645f737461746510061a196572726f722e73746174652e696e76616c69645f737461746522020801280332120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1013a41223f0a0b726f757465645f63616c6c12147265706c61795f77696e646f775f7061737365641a1a0a047461736b12120a1051515151515151515151515151515151"
+      "0a1422120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1011a89010a0d696e76616c69645f737461746510061a196572726f722e73746174652e696e76616c69645f737461746522020801280132120a10a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1013a41223f0a0b726f757465645f63616c6c12147265706c61795f77696e646f775f7061737365641a1a0a047461736b12120a1051515151515151515151515151515151"
     ],
     "trailers": "grpc-status:0"
   },
@@ -32,5 +32,5 @@
     "case unknown: a delivered Submit or Cancel whose channel closed, node_unreachable with UNKNOWN; case unreachable: a delivered read whose channel closed, node_unreachable with DID_NOT_HAPPEN",
     "the Submit resends (replayed, replay-digest-differs, step-up-required, command-id-reused, replay-window-passed) follow a first Submit of the same command that is not captured; replay-window-passed's record was moved 23 h 1 min back by the test"
   ],
-  "sha256": "f9c3c7774752c5f1261ce839f4aa8aea8d131524ba5078a302bc6e7ecd4dc551"
+  "sha256": "d190fb920acae107d2431490fba4078e7e7d712dcefdaec98875c1286cc39944"
 }
