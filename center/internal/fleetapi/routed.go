@@ -21,6 +21,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/arc"
+	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -125,6 +126,8 @@ type routing struct {
 
 // WithRouter gives the registry the hub to route through (the nodes surface's routed methods).
 func (r *Registry) WithRouter(router Router, limits RoutedLimits) *Registry {
+	// The replay window never passes its bound (config.MaxRoutedReplayWindow), whatever the composition passes.
+	limits.ReplayWindow = min(limits.ReplayWindow, config.MaxRoutedReplayWindow)
 	r.routing = &routing{router: router, limits: limits, seed: maphash.MakeSeed(), attempts: map[routedKey]*attempt{},
 		longPolls: make(chan struct{}, max(limits.LongPolls, 1)), settleTries: 3, settleBackoff: 100 * time.Millisecond}
 	return r
@@ -499,6 +502,9 @@ func (g *routing) read(ctx context.Context, call RoutedCall, checked inner) ([]b
 		case g.longPolls <- struct{}{}:
 			defer func() { <-g.longPolls }()
 		default:
+			if g.limits.Events != nil {
+				g.limits.Events.ObserveChannel("routed", "long_polls")
+			}
 			return nil, arc.Unavailable()
 		}
 	}
@@ -626,6 +632,15 @@ func (r *Registry) attempt(key routedKey, current *attempt, routedCall RoutedCal
 	case decision.Final && answer.Verified && answer.Outcome == int32(relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED) && !equalDigest(answer.OutcomeSHA256, decision.OutcomeSHA256):
 		r.observe("replay_differs")
 		current.err = arc.ReplayDigestDiffers(routedCall.TargetNodeID[:])
+	case err != nil && (decision.Delivered || decision.Final) && answer.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN:
+		// A resend of a command that may have reached the node is never answered DID_NOT_HAPPEN (decisions B-1: the reply is never less
+		// conservative than the record), whatever this attempt's own refusal said (offline, a full queue, a bound, its deadline before
+		// delivery).
+		reason := arc.UnreachableChannelClosed
+		if refusal, ok := err.(*arc.Refusal); ok && refusal.Code == "node_unreachable" {
+			reason = refusal.Reason
+		}
+		current.err = arc.NodeUnreachable(routedCall.TargetNodeID[:], reason, true)
 	case err != nil:
 		current.err = err
 	case result.Outcome != relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED:

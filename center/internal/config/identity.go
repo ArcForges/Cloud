@@ -303,8 +303,8 @@ func DefaultIdentityPolicy() IdentityPolicy {
 		MobileBeginPerPrefix:    Window{Limit: 30, Window: 10 * time.Minute},
 		MobileTokenPerPrefix:    Window{Limit: 30, Window: 10 * time.Minute},
 		MobileApprovePerAccount: Window{Limit: 20, Window: time.Hour},
-		// AF-CTR-05 part E0: owner placeholders (H-07, illustrative), not plan limits: 3600 routed calls per hour per account, 64 at
-		// once, 600 channel upgrades per hour per account and 60 per hour per node.
+		// AF-CTR-05 part E0: owner placeholders (H-07, illustrative), not plan limits: 3600 routed calls per hour per account, 16 at
+		// once (at most half of the request connections, PN-1; E2b), 600 channel upgrades per hour per account and 60 per hour per node.
 		RoutedCallsPerAccount:    Window{Limit: 3600, Window: time.Hour},
 		RoutedInFlightPerAccount: 16,
 		ChannelUpgradePerAccount: Window{Limit: 600, Window: time.Hour},

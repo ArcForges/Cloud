@@ -133,7 +133,8 @@ An account or `mobile.limited` session is refused with `AUTHORIZATION/permission
 AF-CTR-05 part E2b serves FleetService's six routed task methods on the `nodes` surface (Plan CTR5-RTE-01..07, CTR5-CALL-01..03 as
 amended by PB-1, PB-2, D0-B1, C-N1, C-N6, PN-1 and PN-6; the coordinator's decisions B-1..B-3, Q-1..Q-15 and section 4): SubmitNodeTask,
 GetNodeTask, ListNodeTasks, WaitNodeTask, ReadNodeTaskOutput and CancelNodeTask (`internal/fleetapi/routed.go`). EVIDENCE: REAL
-PostgreSQL, the REAL composed center and hub; MOCKED: the nodes (nodetest with software keys). Production and proof keep `nodes` off.
+PostgreSQL, the REAL composed center and hub; MOCKED: the nodes (nodetest with software keys) and the step-up ceremony (its proved
+challenge is seeded); NOT PROVEN: a hosted run, the real node (N1, N2). Production and proof keep `nodes` off.
 
 **Rows.** Each method admits an account session, and a node credential only as the verified relay of its own node (the authorizer
 verifies the relay assertion, whose request digest is SHA-256 of the inner request bytes, before anything else). It addresses one of
@@ -181,9 +182,17 @@ same origin converges, and another caller class under the same command ID is `CO
 | UNKNOWN (7)          | no                                       | no verified result although the call may have reached the node, a node answer whose effect is UNKNOWN, or swept at boot |
 | NOT_DELIVERED (8)    | no                                       | the hub answered DID_NOT_HAPPEN and no earlier attempt may have reached the node                                        |
 
-DELIVERED (2) is reserved and never written (Q-2): delivery is known only from the hub's answer (E1b's definition: the writer took the
-frame), and the record's monotonic `delivered` keeps it, so a record never says delivered while the reply said DID_NOT_HAPPEN, or the
-reverse (`TestARecordIsDeliveredExactlyWhenTheReplyIsUnknown`). A refusal code is a smallint of the fixed, append-only table
+DELIVERED (2) is reserved and never written (Q-2): delivery is known from the hub's answer (E1b's definition: the writer took the
+frame), and the record's monotonic `delivered` keeps it. The record is never less conservative than the reply. For a command's first
+attempt, `delivered` is set exactly when the hub's answer was UNKNOWN or a verified result (`TestARecordIsDeliveredExactlyWhenTheReplyIsUnknown`).
+The record is more conservative than a reply in three places, each without a hub answer of delivery: a resend's admission sets
+`delivered` for a record that was ACCEPTED (an attempt whose answer never landed may have reached the node); a resend's own
+DID_NOT_HAPPEN keeps a delivered record UNKNOWN; and the boot sweep makes every ACCEPTED record UNKNOWN and delivered. The reply follows
+the record in turn: a resend of a record that may have reached the node (delivered, or ACCEPTED) is never answered DID_NOT_HAPPEN; its
+refusals about delivery (the node offline, the lease moved, a full queue or a bound, its deadline before delivery) are
+`STATE/node_unreachable` with UNKNOWN and SAME_COMMAND, and `replay_window_passed` is UNKNOWN with NEVER
+(`TestAResendThatMayHaveReachedTheNodeIsNeverDidNotHappen`). Refusals that ask the caller to act (step-up, `command_id_reused`, a
+validation error) keep their own pairs. A refusal code is a smallint of the fixed, append-only table
 `fleet.refusal_code` (decisions B-2; `fleet.RefusalCode`, 0 for a code outside it; `TestTheRefusalCodesAreFixed`,
 `TestTheRefusalCodeTableIsTheMigrations`).
 
@@ -193,8 +202,10 @@ reverse (`TestARecordIsDeliveredExactlyWhenTheReplyIsUnknown`). A refusal code i
   (a record that may have reached the node, delivered or ACCEPTED with no attempt in flight here, past `routedReplayWindow` is
   `STATE/invalid_state` `replay_window_passed`, online or not, and is never routed); the node's presence (`node_offline`, nothing
   written but one `fleet.routed.refused` audit row for a mutation, decisions Q-8, bounded by the account's routed-call quota); the
-  evidence; the account's live node; the record, inserted or locked and decided again; and the hub lease row `FOR SHARE` under the
-  routing fence, so a process that lost the lease commits no record and a take-over waits for the admissions in flight.
+  evidence; the account's live node; the record, inserted or locked and decided again; its audit row; and, last, the hub lease row
+  `FOR SHARE` under the routing fence, so a process that lost the lease commits no record and a take-over waits for the admissions in
+  flight (a renewal waits only for an admission's commit, never for its audit append). The `FOR SHARE` is defence in depth: an ACCEPTED
+  record with no attempt in flight already counts as delivered.
 - The hub routes nothing under a fence before its boot sweep committed (`fleet.SweepRouted`, retried at every lease wake): every
   ACCEPTED record then becomes UNKNOWN and delivered (`TestALeaseTakeOverSweepsTheRecordsBeforeRouting`).
 - The attempt runs on a context detached from the request; its settlement (Tx2, `fleet.SettleRouted`, guarded by the attempt number) is
@@ -207,8 +218,11 @@ reverse (`TestARecordIsDeliveredExactlyWhenTheReplyIsUnknown`). A refusal code i
 
 **Joins (Q-15).** A duplicate of an attempt in flight in this process joins it: one routed call, every caller the same answer within
 its own deadline, each with its own evidence consumed and its own `fleet.routed.accepted` row (reason `joined`); a caller that goes away
-ends only its own wait (`TestConcurrentDuplicatesJoinOneRoutedCall`). There is no join across processes: after a lease move only the
-node's command deduplication prevents a second effect.
+ends only its own wait (`TestALeaderThatGoesAwayDoesNotEndTheJoinedCall`). There is no join across processes: after a lease move only the
+node's command deduplication prevents a second effect (`TestALeaseMoveDuringAnInFlightCallIsUnknownAndReplayedLater`). The per-account
+in-flight bound (`routed_in_flight_per_account`) is released when the caller's request ends, while a detached attempt may run on until its
+deadline: what bounds the attempts in flight is the hub's per-node (8) and per-center (1024) bounds, the routed-call bucket, and one
+step-up evidence (account session) or one center relay nonce (relay) per delivery.
 
 **Resends.** The center never answers a resend from its record: a final record's resend is routed again (fresh step-up evidence for an
 account session, N-3; a fresh relay assertion for a relay) and the node's deduplication replays the recorded outcome. The replayed
@@ -220,13 +234,18 @@ recorded outcome byte for byte outside those three fields.
 
 **Plan departures (decisions section 4).** REJECTED_BY_NODE and EXPIRED are not final when the node's signed result says the call did
 not happen (refused before any effect), so a resend is routed again; a node answer whose effect is UNKNOWN (a duplicate answered while
-the first is still executing) is UNKNOWN, never FAILED or final (`TestANodeRefusalThatDidNotHappenIsNotFinal`). **Binding for N2:** the
+the first is still executing) is UNKNOWN, never FAILED or final (`TestANodeRefusalThatDidNotHappenIsNotFinal`, `TestTheFinalityOfANodeRefusalFollowsItsEffect`, `TestTheNodePolicyRefusalIsForwardedAndAudited`).
+**Binding for N2:** the
 node's in-progress answer to a duplicate carries effect UNKNOWN (its code from the existing catalogue).
 
 **Audit.** `fleet.routed.accepted` (each admitted attempt or join), `fleet.routed.result` (each settlement), `fleet.routed.refused`
 (a mutation refused `node_offline`) and `fleet.routed.replay_differs`: method, node, attempt, closed codes, digests and sizes, never
-payload text. Metrics: the event family `routed` (`accepted`, `joined`, `offline`, `settled`, `settle_lost`, `replay_differs`,
-`long_polls`), and `lease` `swept` / `sweep_failed`.
+payload text. Each `fleet.routed.accepted` and `fleet.routed.refused` row names its own attempt's caller (Q-4): an account session's
+`sessionId`, or a relay's `relayingNodeId`, `localOrigin` and `localSessionId`, so two resends from two sessions, or two local
+processes, are told apart (`TestEachAttemptAuditsItsOwnCaller`); the record keeps the first attempt's caller. A settlement of a superseded
+attempt is audited with reason `superseded` and changes nothing (`TestASupersededAttemptsAnswerChangesNothing`); a settlement is retried
+three times (`TestASettlementIsRetried`). Metrics: the event family `routed` (`accepted`, `joined`, `offline`, `settled`, `settle_lost`, `replay_differs`,
+`long_polls`, counted on a long poll refused over the bound), and `lease` `swept` / `sweep_failed`.
 
 **The node's `routed_call_log`** (N2) and the center's routing record are different records (PN-7).
 

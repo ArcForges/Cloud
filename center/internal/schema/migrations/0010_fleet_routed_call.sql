@@ -6,7 +6,7 @@
 -- DELETE). Expand only: two new tables that no statement of the previous release names.
 --
 -- fleet.refusal_code is the fixed, append-only table of the refusal codes a routing record may name (decisions B-2): a smallint value
--- for each CATEGORY/code of the Contracts error catalogue of cohort 1.0.0-ci.437.1 (Contracts e67a6b0), in the catalogue's order, and 0
+-- for each CATEGORY/code of the Contracts error catalogue of cohort 1.0.0-ci.437.1 (Contracts e67a6b0), in alphabetical order of CATEGORY/code, and 0
 -- for a code outside it. A value never changes and is never reused; a later catalogue's new code is appended by a later migration with
 -- the next value. Its trigger refuses every UPDATE and DELETE.
 --

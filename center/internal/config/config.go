@@ -233,7 +233,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	// The routed calls hold a request connection while they wait (PN-1): where the nodes surface serves them, an account's calls in
 	// flight may hold at most half of the request connections, and the routed long polls of all accounts together at most half too
 	// (RoutedLongPolls), so the routed API never exhausts the connections that sign-in, refresh and the reads need.
-	if limit := config.Identity.Policy.RoutedInFlightPerAccount; config.Identity.Enabled(SurfaceNodes) && limit > RoutedLongPolls(config.MaxConnections) {
+	if limit := config.Identity.Policy.RoutedInFlightPerAccount; config.Identity.Enabled(SurfaceNodes) && 2*limit > config.MaxConnections {
 		return Config{}, invalid("routedInFlightPerAccount (%d) must be at most half of %s (%d)", limit, EnvMaxConnections, config.MaxConnections)
 	}
 	if config.Identity.Enabled(SurfaceIdentity) && config.Database == nil {

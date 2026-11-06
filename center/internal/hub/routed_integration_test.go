@@ -240,7 +240,7 @@ func TestAnOfflineNodeIsRefusedBeforeItsRecord(t *testing.T) {
 	}
 }
 
-// TestARecordIsDeliveredExactlyWhenTheReplyIsUnknown (the E1b "delivered" definition; decisions B-1): a call whose frame the writer never
+// TestARecordIsDeliveredExactlyWhenTheReplyIsUnknown (the E1b "delivered" definition, a command's first attempt; decisions B-1): a call whose frame the writer never
 // took (the writes stalled until the deadline) is answered DID_NOT_HAPPEN and recorded NOT_DELIVERED, not delivered, and the node never
 // receives it; a call the node received whose channel then closed is answered UNKNOWN and recorded UNKNOWN, delivered.
 func TestARecordIsDeliveredExactlyWhenTheReplyIsUnknown(t *testing.T) {
@@ -327,7 +327,8 @@ func TestALostSettlementCountsAsDeliveredAndTheWindowComesFirst(t *testing.T) {
 		}
 		h.proveFor(issued, user, "fleet.submitNodeTask", node.node.ID)
 		failure := h.submit(issued.AccessToken, command, node.node.ID, payload).GetError()
-		if errorKey(failure) != "STATE/invalid_state" || failure.GetDetails().GetState().GetReason() != "replay_window_passed" {
+		if errorKey(failure) != "STATE/invalid_state" || failure.GetDetails().GetState().GetReason() != "replay_window_passed" ||
+			failure.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN || failure.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_NEVER {
 			t.Fatalf("a resend past the window (online %v): %v", online, failure)
 		}
 	}
@@ -582,7 +583,8 @@ func TestAReplayedOutcomeWithAnotherDigestIsUnknownAndAudited(t *testing.T) {
 	}
 }
 
-// TestTheStepUpRulesStandBeforeTheRecord (PB-1): a mobile.limited session never reaches Submit or Cancel (step_up_required at the
+// TestTheStepUpRulesStandBeforeTheRecord (PB-1): a mobile.limited session never reaches Submit (Cancel's identical rules are pinned by
+// the operation table's tests) (step_up_required at the
 // authorizer, nothing written beyond nothing), and an account session without evidence for the node routes nothing and records nothing.
 func TestTheStepUpRulesStandBeforeTheRecord(t *testing.T) {
 	h := routedHarness(t)
@@ -773,8 +775,8 @@ func TestTheLongPollsHoldAtMostHalfTheConnections(t *testing.T) {
 			t.Fatal("the long polls did not reach the nodes")
 		}
 	}
-	if failure := poll(pollers[2]); errorKey(failure) != "RESOURCE/overloaded" {
-		t.Fatalf("a fifth long poll: %v", failure)
+	if failure := poll(pollers[2]); errorKey(failure) != "RESOURCE/overloaded" || h.center.Metrics.Summary()["channel routed long_polls"] != 1 {
+		t.Fatalf("a fifth long poll: %v, %d counted", failure, h.center.Metrics.Summary()["channel routed long_polls"])
 	}
 	close(release)
 	for range 4 {
@@ -857,16 +859,24 @@ func TestTheRefusalCodeTableIsTheMigrations(t *testing.T) {
 }
 
 // TestTheStoreHoldsNoRoutedPayload is the inspection (E2-14, E2-15; PN-6; decisions B-3): after a submission whose argv, working
-// directory and environment carry planted markers, a node response whose warning carries one, a resend and a refused submission, no
-// column of any table holds a marker, the logs hold none, and the routing record has no text column and no byte column but its three
-// digests.
+// directory and environment carry planted markers, a node response whose warning carries one, a resend, a refused submission, a Cancel
+// whose reason and a ReadOutput whose output carry one, no column of any table holds a marker, the logs and the metric keys hold none,
+// and the routing record has no text column and no byte column but its three digests.
 func TestTheStoreHoldsNoRoutedPayload(t *testing.T) {
 	h := routedHarness(t)
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
 	channel := h.connect(node)
 	task := platform.NewID()
-	serve(t, node, channel, deduplicating(node, func(*relayv1.ChannelCall) []byte { return submitResponse(t, task, "INSPECTMARK") }))
+	serve(t, node, channel, deduplicating(node, func(call *relayv1.ChannelCall) []byte {
+		var header relayv1.CallHeader
+		_ = proto.Unmarshal(call.GetHeader().GetHeader(), &header)
+		if header.GetMethod() == hub.MethodReadNodeTaskOutput {
+			return marshalInner(t, &nodev1.TaskServiceReadTaskOutputResponse{Outcome: &nodev1.TaskServiceReadTaskOutputResponse_Value{
+				Value: &nodev1.TaskServiceReadTaskOutputValue{Data: []byte("INSPECTMARK-OUTPUT"), Eof: proto.Bool(true)}}})
+		}
+		return submitResponse(t, task, "INSPECTMARK")
+	}))
 	issued := h.accountSession(user, session.ScopeAccount)
 	command := platform.NewID()
 	payload := submitPayload(t, command, "INSPECTMARK")
@@ -878,6 +888,27 @@ func TestTheStoreHoldsNoRoutedPayload(t *testing.T) {
 	}
 	refused := platform.NewID()
 	_ = h.submit(issued.AccessToken, refused, node.node.ID, submitPayload(t, refused, "INSPECTMARK"))
+	// A Cancel whose reason carries a marker, and a ReadOutput whose output does (review A N-9).
+	cancel := platform.NewID()
+	h.proveFor(issued, user, "fleet.cancelNodeTask", node.node.ID)
+	cancelResponse := &fleetv1.FleetServiceCancelNodeTaskResponse{}
+	h.rpc(fleetv1connect.FleetServiceCancelNodeTaskProcedure, &fleetv1.FleetServiceCancelNodeTaskRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(cancel)},
+		NodeId: idValue(node.node.ID), Request: marshalInner(t, &nodev1.TaskServiceCancelTaskRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(cancel)},
+			TaskId: idValue(task), Reason: proto.String("INSPECTMARK-REASON")})}, issued.AccessToken, cancelResponse)
+	if cancelResponse.GetError() != nil {
+		t.Fatal(cancelResponse.GetError())
+	}
+	outputResponse := &fleetv1.FleetServiceReadNodeTaskOutputResponse{}
+	h.rpc(fleetv1connect.FleetServiceReadNodeTaskOutputProcedure, &fleetv1.FleetServiceReadNodeTaskOutputRequest{Meta: &foundationv1.RequestMeta{}, NodeId: idValue(node.node.ID),
+		Request: marshalInner(t, &nodev1.TaskServiceReadTaskOutputRequest{AttemptId: idValue(task)})}, issued.AccessToken, outputResponse)
+	if outputResponse.GetError() != nil {
+		t.Fatal(outputResponse.GetError())
+	}
+	for key := range h.center.Metrics.Summary() {
+		if strings.Contains(key, "INSPECTMARK") {
+			t.Errorf("a metric key holds a planted marker: %s", key)
+		}
+	}
 	columns, err := h.db.Migration.Query(context.Background(), `SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns
 WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND data_type IN ('text', 'character varying', 'bytea', 'jsonb', 'json')`)
 	if err != nil {

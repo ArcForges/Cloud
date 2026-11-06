@@ -2,9 +2,9 @@
   "schemaVersion": 2,
   "source": "Cloud center/internal/hub routed_capture_integration_test.go",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "",
-  "method": "/arcforges.fleet.v1.FleetService/WaitNodeTask",
-  "case": "unknown",
+  "centerCommit": "e2b-code",
+  "method": "/arcforges.fleet.v1.FleetService/GetNodeTask",
+  "case": "unreachable",
   "outcome": "STATE/node_unreachable",
   "headers": {
     "authorization": "Bearer afa1.AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
@@ -13,7 +13,7 @@
   "request": {
     "contentType": "application/grpc-web+proto",
     "frames": [
-      "0a0052120a10a6a6a6a6a6a6a6a6a6a6a6a6a6a6a601621652120a10515151515151515151515151515151516064"
+      "0a0052120a10a6a6a6a6a6a6a6a6a6a6a6a6a6a6a601621452120a1051515151515151515151515151515151"
     ]
   },
   "reply": {
@@ -28,7 +28,9 @@
     "a 16-byte ID the center or the node drew: 15 bytes of its kind (0xa1 correlation, 0xa6 node) and n for the n-th distinct one of the kind",
     "every Instant: unix_seconds 0, nanos 0 (a retry_at carries the center's jitter)",
     "the authorization header carries the placeholder of its account session's token",
-    "the inner request and response bytes are the test's own fixed messages (task, attempt and command IDs fixed by the test)"
+    "the inner request and response bytes are the test's own fixed messages (task, attempt and command IDs fixed by the test)",
+    "case unknown: a delivered Submit or Cancel whose channel closed, node_unreachable with UNKNOWN; case unreachable: a delivered read whose channel closed, node_unreachable with DID_NOT_HAPPEN",
+    "the Submit resends (replayed, replay-digest-differs, step-up-required, command-id-reused, replay-window-passed) follow a first Submit of the same command that is not captured; replay-window-passed's record was moved 23 h 1 min back by the test"
   ],
-  "sha256": "5534f6437720240408a2a5098ec8cbe53b49a39f4baffb9aaf78b06c89c8ac90"
+  "sha256": "cdc6d66b670f8a4b04886be8af0edbc4d02ae6a6b3e91b97bc6bc6f6a3b082a9"
 }

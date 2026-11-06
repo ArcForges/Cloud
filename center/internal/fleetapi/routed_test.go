@@ -57,6 +57,25 @@ func TestTheOutcomeDigestLeavesOutOnlyTheVolatileFields(t *testing.T) {
 		bytes.Equal(base, digest(refusal(platform.NewID(), 100, "invalid_state", foundationv1.RetryMode_RETRY_MODE_NEVER))) {
 		t.Fatal("the code and the retry mode are digested")
 	}
+	// Every other field of the error is digested too: its effect, its details and its message key (review A N-2).
+	for name, change := range map[string]func(*foundationv1.ArcError){
+		"effect": func(e *foundationv1.ArcError) {
+			e.Effect = foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN.Enum()
+		},
+		"details": func(e *foundationv1.ArcError) {
+			e.Details = &foundationv1.ErrorDetails{Detail: &foundationv1.ErrorDetails_State{State: &foundationv1.StateFailure{State: proto.String("task")}}}
+		},
+		"message_key": func(e *foundationv1.ArcError) { e.MessageKey = proto.String("error.state.invalid_state") },
+	} {
+		var value nodev1.TaskServiceCancelTaskResponse
+		if err := proto.Unmarshal(refusal(platform.NewID(), 100, "invalid_state", after), &value); err != nil {
+			t.Fatal(err)
+		}
+		change(value.GetError())
+		if bytes.Equal(base, digest(marshal(t, &value))) {
+			t.Fatalf("a change of the error's %s is not digested", name)
+		}
+	}
 	value := func(task platform.ID) []byte {
 		return marshal(t, &nodev1.TaskServiceSubmitTaskResponse{Meta: &foundationv1.ResponseMeta{CorrelationId: pid(platform.NewID())},
 			Outcome: &nodev1.TaskServiceSubmitTaskResponse_Value{Value: &nodev1.TaskServiceSubmitTaskValue{TaskId: pid(task)}}})
@@ -110,6 +129,8 @@ func TestTheInnerRequestIsCheckedAndBounded(t *testing.T) {
 			WaitMs: proto.Uint32(20_001)}), nil, "request.wait_ms", 0, false},
 		{"output without waiting", relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_TASK_OUTPUT, marshal(t, &nodev1.TaskServiceReadTaskOutputRequest{AttemptId: pid(task)}), nil,
 			"", 10 * time.Second, false},
+		{"cancel with another inner command", relayv1.RoutedMethod_ROUTED_METHOD_CANCEL_NODE_TASK, marshal(t, &nodev1.TaskServiceCancelTaskRequest{
+			Meta: &foundationv1.RequestMeta{CommandId: pid(platform.NewID())}, TaskId: pid(task)}), &command, "request.meta.command_id", 0, false},
 		{"cancel", relayv1.RoutedMethod_ROUTED_METHOD_CANCEL_NODE_TASK, marshal(t, &nodev1.TaskServiceCancelTaskRequest{Meta: &foundationv1.RequestMeta{CommandId: pid(command)},
 			TaskId: pid(task)}), &command, "", 10 * time.Second, false},
 	}

@@ -314,7 +314,7 @@ already is. Retention: with the node row.
 Plan CTR5-RTE-03, C.8, PN-6; decisions B-1..B-3):
 
 - `fleet.refusal_code`: the fixed, append-only table of the refusal codes a routing record names, a smallint for each CATEGORY/code
-  of the Contracts catalogue of cohort 1.0.0-ci.437.1 in the catalogue's order and 0 for `other`; a trigger refuses every UPDATE and
+  of the Contracts catalogue of cohort 1.0.0-ci.437.1 numbered in alphabetical order of CATEGORY/code and 0 for `other`; a trigger refuses every UPDATE and
   DELETE, and a later code is appended by a later migration with the next value. The runtime role only reads it.
 - `fleet.routed_call`: one row per SubmitNodeTask or CancelNodeTask command of an account (primary key account and command ID), the
   command's receipt: the node, the method, the verified caller (an account session's session, or a relay's relaying node, local origin

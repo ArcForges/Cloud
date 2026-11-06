@@ -4,7 +4,7 @@ package fleet
 
 // refusalCodes is the fixed, append-only table of the refusal codes a routing record names (decisions B-2; migration 0010's
 // fleet.refusal_code): every CATEGORY/code of the Contracts error catalogue of cohort 1.0.0-ci.437.1 (Contracts e67a6b0) with its
-// smallint value, in the catalogue's order. A value never changes and is never reused; a code outside the table is RefusalOther. A
+// smallint value, numbered 1 to 67 in alphabetical order of CATEGORY/code. A value never changes and is never reused; a code outside the table is RefusalOther. A
 // later catalogue's new code is appended, with the next value, here and by a migration. TestTheRefusalCodesAreFixed pins every value,
 // that every catalogue code maps, and that the migration's rows are this table.
 var refusalCodes = map[string]int16{

@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestChannelExchangeCapture",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "16328b8",
+  "centerCommit": "e2b-code",
   "method": "NodeChannel",
   "case": "shutting-down",
   "outcome": "close 4500 shutting_down",
@@ -33,10 +33,10 @@
     "a hello signature (ES256 draws a nonce): 64 bytes of 0xe0+n",
     "a command key's kid: kid-\u003cn, 8 digits\u003e",
     "a token: its prefix and the canonical base64url of 32 bytes of n (the n-th distinct token)",
-    "every Instant: unix_seconds is the offset from the case's start, rounded to 5 seconds; nanos 0",
+    "every Instant: the first Instant of a message is 0, each other Instant of the message its offset from that first one in whole seconds; nanos 0 (AF-CTR-05 E2b: offsets within one message are exact, so no rounding edge exists)",
     "a 4500 close's reconnect hint (RelayClose.reconnect_after_ms): 1000",
-    "a refusal's JSON body: correlationId the placeholder text of its ID, retryAt the case's start plus the offset, rounded to 5 seconds",
+    "a refusal's JSON body: correlationId the placeholder text of its ID, retryAt 1970-01-01T00:00:00Z (its only Instant)",
     "the authorization header carries the placeholder of its token; the client address header is recorded as sent"
   ],
-  "sha256": "a69015e000fe6f387aba7d6722629aa9cddc0413ba0e9bb679dcd717f90ccc64"
+  "sha256": "82e50aa402c93cca132c0c5bf5242d0dfb54aaf02ec45be3f1d830d9e53c62df"
 }

@@ -56,9 +56,9 @@ var channelNormalization = []string{
 	"a hello signature (ES256 draws a nonce): 64 bytes of 0xe0+n",
 	"a command key's kid: kid-<n, 8 digits>",
 	"a token: its prefix and the canonical base64url of 32 bytes of n (the n-th distinct token)",
-	"every Instant: unix_seconds is the offset from the case's start, rounded to 5 seconds; nanos 0",
+	"every Instant: the first Instant of a message is 0, each other Instant of the message its offset from that first one in whole seconds; nanos 0 (AF-CTR-05 E2b: offsets within one message are exact, so no rounding edge exists)",
 	"a 4500 close's reconnect hint (RelayClose.reconnect_after_ms): 1000",
-	"a refusal's JSON body: correlationId the placeholder text of its ID, retryAt the case's start plus the offset, rounded to 5 seconds",
+	"a refusal's JSON body: correlationId the placeholder text of its ID, retryAt 1970-01-01T00:00:00Z (its only Instant)",
 	"the authorization header carries the placeholder of its token; the client address header is recorded as sent",
 }
 
@@ -95,6 +95,7 @@ type channelExchange struct {
 type channelPlaceholders struct {
 	t      *testing.T
 	start  time.Time
+	anchor *time.Time
 	ids    map[string][]byte
 	values map[string]string
 	counts map[string]int
@@ -149,9 +150,17 @@ func (p *channelPlaceholders) instant(value *foundationv1.Instant) *foundationv1
 	if value == nil {
 		return nil
 	}
-	offset := time.Unix(value.GetUnixSeconds(), int64(value.GetNanos())).Sub(p.start)
-	rounded := (offset + 2500*time.Millisecond) / (5 * time.Second) * 5
-	return &foundationv1.Instant{UnixSeconds: proto.Int64(int64(rounded)), Nanos: proto.Uint32(0)}
+	// The capture used to round each Instant's offset from the case's start to 5 s, which tipped across a rounding edge when the case's
+	// start and the center's instant drifted apart under load (AF-CTR-05 E2b, review B B-3). Instants of one message come from one
+	// reading of a clock plus fixed durations (issued_at, deadline and expires_at; a challenge's hello_deadline), so the first one of a
+	// message is the anchor and the others are exact whole-second offsets from it: nothing is rounded across an edge.
+	at := time.Unix(value.GetUnixSeconds(), int64(value.GetNanos()))
+	if p.anchor == nil {
+		p.anchor = &at
+		return &foundationv1.Instant{UnixSeconds: proto.Int64(0), Nanos: proto.Uint32(0)}
+	}
+	offset := at.Sub(*p.anchor).Round(time.Second) / time.Second
+	return &foundationv1.Instant{UnixSeconds: proto.Int64(int64(offset)), Nanos: proto.Uint32(0)}
 }
 
 func (p *channelPlaceholders) idValue(value *foundationv1.Id, kind byte) *foundationv1.Id {
@@ -163,6 +172,7 @@ func (p *channelPlaceholders) idValue(value *foundationv1.Id, kind byte) *founda
 
 // frame normalizes one transmitted RelayFrame.
 func (p *channelPlaceholders) frame(data []byte) string {
+	p.anchor = nil
 	var frame relayv1.RelayFrame
 	if err := proto.Unmarshal(data, &frame); err != nil {
 		p.t.Fatalf("a message that is not a RelayFrame: %v", err)
@@ -315,12 +325,10 @@ func (c *channelCapturer) add(name, outcome string, start time.Time, headers map
 			return `"correlationId":"` + fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:]) + `"`
 		})
 		text = retryPattern.ReplaceAllStringFunc(text, func(match string) string {
-			at, err := time.Parse(time.RFC3339Nano, match[len(`"retryAt":"`):len(match)-1])
-			if err != nil {
+			if _, err := time.Parse(time.RFC3339Nano, match[len(`"retryAt":"`):len(match)-1]); err != nil {
 				return match
 			}
-			offset := (at.Sub(start) + 2500*time.Millisecond) / (5 * time.Second) * 5 * time.Second
-			return `"retryAt":"` + time.Unix(0, 0).UTC().Add(offset).Format(time.RFC3339) + `"`
+			return `"retryAt":"` + time.Unix(0, 0).UTC().Format(time.RFC3339) + `"`
 		})
 		result.Reply = channelWire{ContentType: refused.Header.Get("Content-Type"), HTTPStatus: refused.StatusCode, Frames: []string{hex.EncodeToString([]byte(text))}}
 		for _, name := range []string{"ArcForges-Refusal", "Retry-After"} {

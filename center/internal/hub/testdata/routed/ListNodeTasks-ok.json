@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "Cloud center/internal/hub routed_capture_integration_test.go",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "",
+  "centerCommit": "e2b-code",
   "method": "/arcforges.fleet.v1.FleetService/ListNodeTasks",
   "case": "ok",
   "outcome": "value",
@@ -26,7 +26,9 @@
     "a 16-byte ID the center or the node drew: 15 bytes of its kind (0xa1 correlation, 0xa6 node) and n for the n-th distinct one of the kind",
     "every Instant: unix_seconds 0, nanos 0 (a retry_at carries the center's jitter)",
     "the authorization header carries the placeholder of its account session's token",
-    "the inner request and response bytes are the test's own fixed messages (task, attempt and command IDs fixed by the test)"
+    "the inner request and response bytes are the test's own fixed messages (task, attempt and command IDs fixed by the test)",
+    "case unknown: a delivered Submit or Cancel whose channel closed, node_unreachable with UNKNOWN; case unreachable: a delivered read whose channel closed, node_unreachable with DID_NOT_HAPPEN",
+    "the Submit resends (replayed, replay-digest-differs, step-up-required, command-id-reused, replay-window-passed) follow a first Submit of the same command that is not captured; replay-window-passed's record was moved 23 h 1 min back by the test"
   ],
   "sha256": "2bda3c8fdaf403023b360dbd742c3ddc98760e1d6759f27cc5c38296652475ae"
 }

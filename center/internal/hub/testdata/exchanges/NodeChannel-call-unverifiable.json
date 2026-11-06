@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestChannelExchangeCapture",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "16328b8",
+  "centerCommit": "e2b-code",
   "method": "NodeChannel",
   "case": "call-unverifiable",
   "outcome": "close 4403 result_signature",
@@ -35,13 +35,13 @@
     "a hello signature (ES256 draws a nonce): 64 bytes of 0xe0+n",
     "a command key's kid: kid-\u003cn, 8 digits\u003e",
     "a token: its prefix and the canonical base64url of 32 bytes of n (the n-th distinct token)",
-    "every Instant: unix_seconds is the offset from the case's start, rounded to 5 seconds; nanos 0",
+    "every Instant: the first Instant of a message is 0, each other Instant of the message its offset from that first one in whole seconds; nanos 0 (AF-CTR-05 E2b: offsets within one message are exact, so no rounding edge exists)",
     "a 4500 close's reconnect hint (RelayClose.reconnect_after_ms): 1000",
-    "a refusal's JSON body: correlationId the placeholder text of its ID, retryAt the case's start plus the offset, rounded to 5 seconds",
+    "a refusal's JSON body: correlationId the placeholder text of its ID, retryAt 1970-01-01T00:00:00Z (its only Instant)",
     "the authorization header carries the placeholder of its token; the client address header is recorded as sent",
     "the IDs of a routed case's own kinds: 15 bytes of 0xa2 account, 0xa4 session, 0xa7 call, 0xa9 command or 0xaa relay nonce request, and n for the n-th distinct one",
     "the relay nonce the center drew: 32 bytes of 0xc0+n",
     "a call's or a result's signed header: its IDs, kid and instants normalized as everywhere, then re-encoded; its signature (ES256 draws a nonce) 64 bytes of 0xe0+n"
   ],
-  "sha256": "e316a5f6193502dc4b64b55b72791f731aa4602e1f8b4506c238362a0ca70874"
+  "sha256": "01961f9b2f74db45400554ed76d6ec51729054437045b0f66a656566f0ca0315"
 }

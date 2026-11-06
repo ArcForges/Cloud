@@ -83,10 +83,17 @@ type RoutedCaller struct {
 	Actor string
 }
 
-// MaxReplayWindow is the longest routedReplayWindow (Q-1): the node's command deduplication keeps an entry for 24 h from its execution,
-// which may come 120 s (the node's clock skew) before the record's created_at on the center's clock; a resend admitted at the end of the
-// window reaches the node at most 300 s (a call's longest lifetime) later; and a minute of margin is kept: 24 h - 120 s - 300 s - 60 s.
-const MaxReplayWindow = 24*time.Hour - 480*time.Second
+// audit adds the caller's identity to an attempt's audit payload (Q-4): an account session's session, or a relay's relaying node, local
+// origin and local session, so each attempt and each join names its own caller.
+func (c RoutedCaller) audit(payload map[string]any) map[string]any {
+	payload["callerKind"] = c.Kind
+	if c.Kind == RoutedCallerSession {
+		payload["sessionId"] = c.SessionID.String()
+	} else {
+		payload["relayingNodeId"], payload["localOrigin"], payload["localSessionId"] = c.RelayingNodeID.String(), c.LocalOrigin, c.LocalSessionID.String()
+	}
+	return payload
+}
 
 // RoutedAccept is the admission of one attempt of a routed mutation.
 type RoutedAccept struct {
@@ -135,6 +142,22 @@ func offlineRefusal(nodeID platform.ID, now time.Time) error {
 	return offline{refusal: arc.NodeOffline(nodeID[:], now)}
 }
 
+// mayHaveReached reports whether a record's command may have reached the node: it was delivered, or an attempt was admitted (ACCEPTED,
+// in flight here or not). A resend of such a record is never answered DID_NOT_HAPPEN (decisions B-1, the reply never less conservative
+// than the record): its refusals about delivery are STATE/node_unreachable, UNKNOWN with SAME_COMMAND.
+func (r *routedRow) mayHaveReached() bool {
+	return r != nil && (r.delivered || r.state == RoutedAccepted)
+}
+
+// unreachableFor is the node_offline refusal of an admission, or, for a record that may have reached the node, node_unreachable
+// channel_closed with UNKNOWN (still marked offline for its audit row).
+func unreachableFor(record *routedRow, nodeID platform.ID, now time.Time) error {
+	if record.mayHaveReached() {
+		return offline{refusal: arc.NodeUnreachable(nodeID[:], arc.UnreachableChannelClosed, true)}
+	}
+	return offlineRefusal(nodeID, now)
+}
+
 // routedRow is a routing record as an admission reads it.
 type routedRow struct {
 	digest    []byte
@@ -173,7 +196,9 @@ func refuseResend(existing *routedRow, accept RoutedAccept, inFlight bool) error
 	}
 	mayHaveReached := existing.delivered || existing.state == RoutedAccepted && !inFlight
 	if mayHaveReached && !accept.Now.Before(existing.created.Add(accept.Window)) {
+		// The command may have run at the node: its effect is unknown, and it is never sent again (NEVER).
 		refusal := arc.InvalidState("routed_call", "replay_window_passed")
+		refusal.Effect, refusal.Retry = foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN, foundationv1.RetryMode_RETRY_MODE_NEVER
 		if existing.taskID != nil && existing.state == RoutedSucceeded {
 			refusal.Resource = &arc.Resource{Kind: "task", ID: append([]byte(nil), existing.taskID[:]...)}
 		}
@@ -193,8 +218,8 @@ const leaseFence = `SELECT EXISTS (SELECT 1 FROM fleet.hub_lease WHERE singleton
 // step-up evidence (identity.user and the challenge FOR UPDATE); the account's live node FOR SHARE (STATE/not_found); the record,
 // inserted ACCEPTED or locked FOR UPDATE and decided again under the lock (a record with an attempt in flight here is joined;
 // any other is routed again with its attempt count raised, ACCEPTED unless it is final, and delivered when it was ACCEPTED); the hub
-// lease FOR SHARE with the fence (STATE/node_offline when it is not live); fleet.routed.accepted, last. Lock order: identity.user, the
-// challenge, fleet.node, fleet.routed_call, fleet.hub_lease, the audit chain head. A refusal rolls everything back, the evidence
+// fleet.routed.accepted; the hub lease FOR SHARE with the fence (STATE/node_offline when it is not live), last. Lock order:
+// identity.user, the challenge, fleet.node, fleet.routed_call, the audit chain head, fleet.hub_lease. A refusal rolls everything back, the evidence
 // included.
 func AcceptRouted(ctx context.Context, db *store.DB, accept RoutedAccept) (RoutedDecision, error) {
 	var decision RoutedDecision
@@ -209,7 +234,7 @@ func AcceptRouted(ctx context.Context, db *store.DB, accept RoutedAccept) (Route
 			return err
 		}
 		if !accept.Online() {
-			return offlineRefusal(accept.NodeID, accept.Now)
+			return unreachableFor(existing, accept.NodeID, accept.Now)
 		}
 		if accept.Evidence != nil {
 			if err := identity.ConsumeEvidence(ctx, tx, *accept.Evidence, accept.Class, accept.NodeID, accept.Now); err != nil {
@@ -241,6 +266,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13
 		if err != nil {
 			return err
 		}
+		var prior *routedRow
 		if tag.RowsAffected() == 1 {
 			decision = RoutedDecision{Attempt: 1, State: RoutedAccepted}
 		} else {
@@ -249,6 +275,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13
 			if err != nil {
 				return err
 			}
+			prior = locked
 			inFlight := accept.InFlight()
 			if err := refuseResend(locked, accept, inFlight); err != nil {
 				return err
@@ -271,17 +298,22 @@ WHERE account_id = $1 AND command_id = $2`, accept.AccountID, accept.CommandID, 
 				decision = RoutedDecision{Attempt: locked.attempts + 1, Final: locked.final, State: state, Delivered: delivered, OutcomeSHA256: locked.outcome}
 			}
 		}
+		if err := auditRouted(ctx, tx, accept.Request, caller.Actor, "fleet.routed.accepted", map[bool]string{true: "joined", false: "accepted"}[decision.Join],
+			accept.CommandID, caller.audit(map[string]any{"method": accept.Method, "nodeId": accept.NodeID.String(), "attempt": decision.Attempt,
+				"requestSha256": hex.EncodeToString(accept.RequestSHA256), "requestSize": accept.Size, "joined": decision.Join}),
+			accept.Now); err != nil {
+			return err
+		}
+		// The fence comes last, after the audit append, so a renewal of the lease (an UPDATE of its row) waits for no audit lock, only
+		// for this commit (review B N-10).
 		live := false
 		if err := tx.QueryRow(ctx, leaseFence, accept.Fence).Scan(&live); err != nil {
 			return err
 		}
 		if !live {
-			return offlineRefusal(accept.NodeID, accept.Now)
+			return unreachableFor(prior, accept.NodeID, accept.Now)
 		}
-		return auditRouted(ctx, tx, accept.Request, caller.Actor, "fleet.routed.accepted", map[bool]string{true: "joined", false: "accepted"}[decision.Join],
-			accept.CommandID, map[string]any{"method": accept.Method, "nodeId": accept.NodeID.String(), "attempt": decision.Attempt,
-				"requestSha256": hex.EncodeToString(accept.RequestSHA256), "requestSize": accept.Size, "callerKind": caller.Kind, "joined": decision.Join},
-			accept.Now)
+		return nil
 	})
 	if err != nil {
 		var refusal *arc.Refusal
@@ -311,8 +343,8 @@ func auditRouted(ctx context.Context, tx pgx.Tx, request Request, actor, eventTy
 func AuditRoutedOffline(ctx context.Context, db *store.DB, accept RoutedAccept) error {
 	return db.InTx(ctx, "audit a routed call to an offline node", store.TxOptions{Timeout: registryTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		return auditRouted(ctx, tx, accept.Request, accept.Caller.Actor, "fleet.routed.refused", "node_offline", accept.CommandID,
-			map[string]any{"method": accept.Method, "nodeId": accept.NodeID.String(), "requestSha256": hex.EncodeToString(accept.RequestSHA256),
-				"requestSize": accept.Size, "callerKind": accept.Caller.Kind}, accept.Now)
+			accept.Caller.audit(map[string]any{"method": accept.Method, "nodeId": accept.NodeID.String(), "requestSha256": hex.EncodeToString(accept.RequestSHA256),
+				"requestSize": accept.Size}), accept.Now)
 	})
 }
 

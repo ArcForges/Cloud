@@ -43,6 +43,8 @@ var routedCaptureNormalization = []string{
 	"every Instant: unix_seconds 0, nanos 0 (a retry_at carries the center's jitter)",
 	"the authorization header carries the placeholder of its account session's token",
 	"the inner request and response bytes are the test's own fixed messages (task, attempt and command IDs fixed by the test)",
+	"case unknown: a delivered Submit or Cancel whose channel closed, node_unreachable with UNKNOWN; case unreachable: a delivered read whose channel closed, node_unreachable with DID_NOT_HAPPEN",
+	"the Submit resends (replayed, replay-digest-differs, step-up-required, command-id-reused, replay-window-passed) follow a first Submit of the same command that is not captured; replay-window-passed's record was moved 23 h 1 min back by the test",
 }
 
 // fixedID is an ID the test chooses: 16 bytes of b.
@@ -166,19 +168,26 @@ func TestRoutedExchangeCapture(t *testing.T) {
 	quota := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", policy: `{"routedCallsAccountLimit": 1}`,
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 	fixed := map[string]bool{}
-	for _, b := range []byte{0x51, 0x52, 0x91, 0x92, 0x93, 0x94, 0x95} {
+	for _, b := range []byte{0x51, 0x52, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97} {
 		value := fixedID(b)
 		fixed[hex.EncodeToString(value[:])] = true
 	}
 	cases := map[string]channelExchange{}
-	capture := func(h *harness, m routedMethodCase, name string, node *enrolled, issued session.Native, command platform.ID) {
+	// captureWith posts one case: inner replaces the method's fixed inner request when set, and evidence is false for a resend sent
+	// without fresh step-up evidence.
+	captureWith := func(h *harness, m routedMethodCase, name string, node *enrolled, issued session.Native, command platform.ID, inner []byte, evidence bool) {
 		t.Helper()
 		meta := &foundationv1.RequestMeta{}
 		if m.mutation {
 			meta.CommandId = &foundationv1.Id{Value: append([]byte(nil), command[:]...)}
-			h.proveFor(issued, node.user, m.class, node.node.ID)
+			if evidence {
+				h.proveFor(issued, node.user, m.class, node.node.ID)
+			}
 		}
-		request := m.build(meta, node.node.ID, m.inner(command))
+		if inner == nil {
+			inner = m.inner(command)
+		}
+		request := m.build(meta, node.node.ID, inner)
 		reply, err := nodetest.Client{URL: h.url, ClientIPHeader: config.ClientIPHeader}.Post(m.path, request, issued.AccessToken)
 		if err != nil {
 			t.Fatal(err)
@@ -206,6 +215,10 @@ func TestRoutedExchangeCapture(t *testing.T) {
 		value.SHA256 = sum
 		cases[m.name+"-"+name] = value
 	}
+	capture := func(h *harness, m routedMethodCase, name string, node *enrolled, issued session.Native, command platform.ID) {
+		t.Helper()
+		captureWith(h, m, name, node, issued, command, nil, true)
+	}
 	for _, m := range routedMethodCases(t) {
 		// ok, offline and unknown on the main center, each with its own account and node.
 		user := main.db.Account(1)
@@ -224,7 +237,12 @@ func TestRoutedExchangeCapture(t *testing.T) {
 			_ = otherChannel.WS.CloseNow()
 			return nil, nil, false
 		})
-		capture(main, m, "unknown", other, issued, fixedID(0x93))
+		// A delivered Submit or Cancel is UNKNOWN; a delivered read is DID_NOT_HAPPEN (node_unreachable either way).
+		unknown := "unreachable"
+		if m.mutation {
+			unknown = "unknown"
+		}
+		capture(main, m, unknown, other, issued, fixedID(0x93))
 		<-dropped
 		// gated: the features are disabled.
 		gatedUser := gated.db.Account(1)
@@ -238,9 +256,45 @@ func TestRoutedExchangeCapture(t *testing.T) {
 		delete(cases, m.name+"-offline-first")
 		capture(quota, m, "quota", quotaNode, quotaSession, fixedID(0x94))
 	}
+	// The resends of a Submit, for N2 (review B N-7): the node's replay of the recorded outcome, a replay with another outcome, a resend
+	// without fresh evidence, a resend with other bytes, and a resend past the replay window.
+	submit := routedMethodCases(t)[0]
+	user := main.db.Account(1)
+	node := main.enrollIn(user)
+	issued := main.accountSession(user, session.ScopeAccount)
+	channel := main.connect(node)
+	var answers int
+	other := mustMarshal(t, &nodev1.TaskServiceSubmitTaskResponse{Outcome: &nodev1.TaskServiceSubmitTaskResponse_Value{Value: &nodev1.TaskServiceSubmitTaskValue{
+		TaskId: &foundationv1.Id{Value: bytes.Repeat([]byte{0x53}, 16)}}}})
+	resends := serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
+		answers++
+		if answers == 4 {
+			return node.node.Executed(call, other), other, true
+		}
+		return node.node.Executed(call, submit.response), submit.response, true
+	})
+	captureWith(main, submit, "first", node, issued, fixedID(0x96), nil, true)
+	<-resends
+	delete(cases, submit.name+"-first")
+	captureWith(main, submit, "replayed", node, issued, fixedID(0x96), nil, true)
+	<-resends
+	captureWith(main, submit, "step-up-required", node, issued, fixedID(0x96), nil, false)
+	captureWith(main, submit, "command-id-reused", node, issued, fixedID(0x96), mustMarshal(t, &nodev1.TaskServiceSubmitTaskRequest{
+		Meta: &foundationv1.RequestMeta{CommandId: &foundationv1.Id{Value: bytes.Repeat([]byte{0x96}, 16)}},
+		Spec: &nodev1.TaskSpec{Command: &nodev1.CommandSpec{Form: &nodev1.CommandSpec_Argv{Argv: &nodev1.ArgvCommand{Argv: []string{"/bin/false"}}}}}}), true)
+	captureWith(main, submit, "first-of-another", node, issued, fixedID(0x97), nil, true)
+	<-resends
+	delete(cases, submit.name+"-first-of-another")
+	captureWith(main, submit, "replay-digest-differs", node, issued, fixedID(0x97), nil, true)
+	<-resends
+	main.db.Exec("ALTER TABLE fleet.routed_call DISABLE TRIGGER routed_call_guarded",
+		"UPDATE fleet.routed_call SET created_at = created_at - interval '23 hours 1 minute' WHERE command_id = '"+fixedID(0x96).String()+"'",
+		"ALTER TABLE fleet.routed_call ENABLE TRIGGER routed_call_guarded")
+	captureWith(main, submit, "replay-window-passed", node, issued, fixedID(0x96), nil, true)
 	for name, value := range cases {
-		want := map[string]string{"ok": "value", "offline": "STATE/node_offline", "unknown": "STATE/node_unreachable", "gated": "ENTITLEMENT/feature_not_entitled",
-			"quota": "RESOURCE/rate_limited"}[value.Case]
+		want := map[string]string{"ok": "value", "offline": "STATE/node_offline", "unknown": "STATE/node_unreachable", "unreachable": "STATE/node_unreachable",
+			"gated": "ENTITLEMENT/feature_not_entitled", "quota": "RESOURCE/rate_limited", "replayed": "value", "step-up-required": "AUTHENTICATION/step_up_required",
+			"command-id-reused": "CONFLICT/command_id_reused", "replay-digest-differs": "STATE/node_unreachable", "replay-window-passed": "STATE/invalid_state"}[value.Case]
 		if value.Outcome != want {
 			t.Errorf("%s: %s, want %s", name, value.Outcome, want)
 		}
@@ -291,6 +345,10 @@ func writeRoutedExchanges(t *testing.T, cases map[string]channelExchange) {
 	for _, name := range names {
 		value := cases[name]
 		value.CenterCommit = os.Getenv("ARCFORGES_CENTER_COMMIT")
+		if value.CenterCommit == "" {
+			// The records script names the code commit (it replaces this label).
+			value.CenterCommit = "e2b-code"
+		}
 		data, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
 			t.Fatal(err)
