@@ -251,19 +251,26 @@ func TestASettlementIsRetried(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = locker.Close(ctx) })
+	committed := make(chan struct{})
+	// The locking transaction's goroutine ends before the connection is closed.
+	t.Cleanup(func() {
+		<-committed
+		_ = locker.Close(ctx)
+	})
 	response := submitResponse(t, task, "RETRY")
 	serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
 		// Before the node answers, another transaction holds the record's row for 6 s.
 		tx, err := locker.Begin(ctx)
 		if err != nil {
 			t.Error(err)
+			close(committed)
 			return nil, nil, false
 		}
 		if _, err := tx.Exec(ctx, "SELECT 1 FROM fleet.routed_call WHERE command_id = $1 FOR UPDATE", command); err != nil {
 			t.Error(err)
 		}
 		go func() {
+			defer close(committed)
 			time.Sleep(6 * time.Second)
 			_ = tx.Commit(ctx)
 		}()
