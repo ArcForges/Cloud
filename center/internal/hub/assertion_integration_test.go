@@ -5,6 +5,8 @@ package hub_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -85,8 +87,8 @@ func TestARelayNonceIsOneUseAndVoidAtClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(request.Assertion)
-	if verified.RelayingNodeID != node.node.ID || verified.RelayingInstallationID != node.result.InstallationID || verified.LocalOrigin != nodev1.Origin_ORIGIN_HUMAN ||
-		!bytes.Equal(verified.AssertionSHA256, digest[:]) {
+	if verified.RelayingNodeID() != node.node.ID || verified.RelayingInstallationID() != node.result.InstallationID || verified.LocalOrigin() != nodev1.Origin_ORIGIN_HUMAN ||
+		!bytes.Equal(verified.AssertionSHA256(), digest[:]) {
 		t.Fatalf("the verified relay: %+v", verified)
 	}
 	// The replay: the nonce is spent.
@@ -245,8 +247,8 @@ func TestARelayAssertionIsVerifiedBeforeRouting(t *testing.T) {
 	header := headerOf(t, sent)
 	caller := header.GetCaller()
 	if caller.GetKind() != nodev1.CenterCallerKind_CENTER_CALLER_KIND_NODE_RELAY || !bytes.Equal(caller.GetRelayingNodeId().GetValue(), idBytes(node.node.ID)) ||
-		caller.GetLocalOrigin() != nodev1.Origin_ORIGIN_HUMAN || !bytes.Equal(caller.GetLocalSessionId().GetValue(), idBytes(verified.LocalSessionID)) ||
-		!bytes.Equal(header.GetRelayAssertionSha256(), verified.AssertionSHA256) || caller.UserId != nil || caller.SessionId != nil {
+		caller.GetLocalOrigin() != nodev1.Origin_ORIGIN_HUMAN || !bytes.Equal(caller.GetLocalSessionId().GetValue(), idBytes(verified.LocalSessionID())) ||
+		!bytes.Equal(header.GetRelayAssertionSha256(), verified.AssertionSHA256()) || caller.UserId != nil || caller.SessionId != nil {
 		t.Fatalf("the signed caller: %v", caller)
 	}
 	if err := channel.Answer(ctx, node.node, sent.GetCallId(), node.node.Executed(sent, []byte{1}), []byte{1}); err != nil {
@@ -254,5 +256,33 @@ func TestARelayAssertionIsVerifiedBeforeRouting(t *testing.T) {
 	}
 	if value := await(t, done); value.err != nil {
 		t.Fatal(value.err)
+	}
+}
+
+// TestAVerifiedRelayIsReadOnly is review A C-N1: another package can read a verified relay but never build or change one. Every field is
+// unexported, and its method set holds only the read-only accessors (a field re-exported, or a setter added, fails here).
+func TestAVerifiedRelayIsReadOnly(t *testing.T) {
+	kind := reflect.TypeOf(hub.VerifiedRelay{})
+	for i := range kind.NumField() {
+		if field := kind.Field(i); field.IsExported() {
+			t.Errorf("VerifiedRelay.%s is exported: a verified relay could be changed after verification", field.Name)
+		}
+	}
+	accessors := []string{"AssertionSHA256", "ExpiresAt", "LocalOrigin", "LocalSessionID", "RelayingInstallationID", "RelayingNodeID", "Verified"}
+	for _, value := range []reflect.Type{kind, reflect.PointerTo(kind)} {
+		var methods []string
+		for i := range value.NumMethod() {
+			method := value.Method(i)
+			methods = append(methods, method.Name)
+			if method.Type.NumIn() != 1 || method.Type.NumOut() != 1 {
+				t.Errorf("%s.%s is not a read-only accessor", value, method.Name)
+			}
+		}
+		if !slices.Equal(methods, accessors) {
+			t.Errorf("the methods of %s are %v, the read-only accessors %v", value, methods, accessors)
+		}
+	}
+	if (hub.VerifiedRelay{}).Verified() {
+		t.Error("a relay built outside VerifyRelayAssertion reads as verified")
 	}
 }

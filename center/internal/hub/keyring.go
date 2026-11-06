@@ -67,8 +67,19 @@ func (h *Hub) RefreshKeys(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	h.storeKeys(published, now)
+	return nil
+}
+
+// storeKeys keeps the rows of a read that started at now, unless a read that started later is already kept (review B C-N1): a slow read
+// (a hello's) that finishes after a newer one (the loop's) never puts the older snapshot back, so a retirement the newer read saw stays
+// seen. It reports whether the rows were kept.
+func (h *Hub) storeKeys(published []platform.SigningKey, now time.Time) bool {
 	h.keys.mu.Lock()
 	defer h.keys.mu.Unlock()
+	if now.Before(h.keys.refreshed) {
+		return false
+	}
 	rows := published[:0:0]
 	for _, row := range published {
 		public, held := h.keys.public[row.SecretBinding]
@@ -81,7 +92,7 @@ func (h *Hub) RefreshKeys(ctx context.Context, now time.Time) error {
 		}
 	}
 	h.keys.rows, h.keys.refreshed = rows, now
-	return nil
+	return true
 }
 
 // keyLoop re-reads the command keys' rows every KeyRefresh, apart from the lease loop (a slow store never holds a lease step back); each

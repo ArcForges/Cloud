@@ -367,6 +367,8 @@ func TestInFlightBoundsHold(t *testing.T) {
 	if h.center.Metrics.ChannelCount("call", "node_bound") != 1 || h.center.Metrics.ChannelCount("call", "center_bound") != 1 {
 		t.Fatal("the two bounds are counted apart")
 	}
+	// The three admitted calls count once their goroutines pass the send (the node may read a frame first); no refused one counts.
+	eventually(t, 2*time.Second, func() bool { return h.center.Hub.CallsSent() >= 3 })
 	if sent := h.center.Hub.CallsSent(); sent != 3 {
 		t.Fatalf("%d call frames were queued: a refused call sends nothing (review A N-6)", sent)
 	}

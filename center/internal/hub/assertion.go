@@ -107,18 +107,40 @@ type RelayRequest struct {
 }
 
 // VerifiedRelay is a relay assertion the center verified: the caller it states, and the SHA-256 of its bytes (the call header's
-// relay_assertion_sha256).
+// relay_assertion_sha256). Every field is unexported and read through an accessor (an accessor of a byte slice returns a copy), and
+// only VerifyRelayAssertion fills them: another package can neither build a verified relay nor change one, and a copy of the value
+// keeps exactly the verified fields (review A C-N1; TestAVerifiedRelayIsReadOnly pins it). hub.Call refuses a relay whose verified
+// flag is not set.
 type VerifiedRelay struct {
-	RelayingNodeID         platform.ID
-	RelayingInstallationID platform.ID
-	LocalOrigin            nodev1.Origin
-	LocalSessionID         platform.ID
-	AssertionSHA256        []byte
-	ExpiresAt              time.Time
-	// verified is set only by VerifyRelayAssertion: hub.Call refuses a relay built any other way, so the call header's caller is
-	// structurally the verified assertion's (C-N1).
-	verified bool
+	relayingNodeID         platform.ID
+	relayingInstallationID platform.ID
+	localOrigin            nodev1.Origin
+	localSessionID         platform.ID
+	assertionSHA256        []byte
+	expiresAt              time.Time
+	verified               bool
 }
+
+// RelayingNodeID is the relaying node the assertion states (the bearer credential's node).
+func (v VerifiedRelay) RelayingNodeID() platform.ID { return v.relayingNodeID }
+
+// RelayingInstallationID is the relaying installation the assertion states (the bearer credential's installation).
+func (v VerifiedRelay) RelayingInstallationID() platform.ID { return v.relayingInstallationID }
+
+// LocalOrigin is the local origin the relaying node classified (HUMAN, SCRIPT or AGENT).
+func (v VerifiedRelay) LocalOrigin() nodev1.Origin { return v.localOrigin }
+
+// LocalSessionID is the local caller's client session at the relaying node.
+func (v VerifiedRelay) LocalSessionID() platform.ID { return v.localSessionID }
+
+// AssertionSHA256 is a copy of the SHA-256 of the assertion's bytes as received.
+func (v VerifiedRelay) AssertionSHA256() []byte { return append([]byte(nil), v.assertionSHA256...) }
+
+// ExpiresAt is the assertion's expiry.
+func (v VerifiedRelay) ExpiresAt() time.Time { return v.expiresAt }
+
+// Verified reports a relay that VerifyRelayAssertion produced.
+func (v VerifiedRelay) Verified() bool { return v.verified }
 
 // VerifyRelayAssertion verifies the relay assertion of a node-relayed call before it is served or routed (D0-B1, C-N1, C-N6), for the
 // bearer credential that sent it, in the contract's order:
@@ -184,6 +206,6 @@ func (h *Hub) VerifyRelayAssertion(ctx context.Context, credential ingress.Calle
 	localSession, _ := idOf(assertion.LocalSessionId)
 	digest := sha256.Sum256(request.Assertion)
 	h.metrics.ObserveChannel("assertion", "verified")
-	return VerifiedRelay{RelayingNodeID: relayingNode, RelayingInstallationID: relayingInstallation, LocalOrigin: assertion.GetLocalOrigin(),
-		LocalSessionID: localSession, AssertionSHA256: digest[:], ExpiresAt: expires, verified: true}, nil
+	return VerifiedRelay{relayingNodeID: relayingNode, relayingInstallationID: relayingInstallation, localOrigin: assertion.GetLocalOrigin(),
+		localSessionID: localSession, assertionSHA256: digest[:], expiresAt: expires, verified: true}, nil
 }

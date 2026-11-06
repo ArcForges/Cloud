@@ -7,6 +7,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -48,10 +50,10 @@ func TestAMalformedMessageNeverReachesASigningInput(t *testing.T) {
 	h := New(Options{Settings: Settings{MaxInFlightCalls: 8, MaxInFlightPerCenter: 8}})
 	id := platform.NewID()
 	session := &SessionCaller{UserID: platform.NewID(), SessionID: platform.NewID()}
-	verified := &VerifiedRelay{RelayingNodeID: id, LocalSessionID: id, LocalOrigin: nodev1.Origin_ORIGIN_SCRIPT, AssertionSHA256: make([]byte, 32), verified: true}
-	unverified := &VerifiedRelay{RelayingNodeID: id, LocalSessionID: id, LocalOrigin: nodev1.Origin_ORIGIN_SCRIPT, AssertionSHA256: make([]byte, 32)}
-	remote := &VerifiedRelay{RelayingNodeID: id, LocalSessionID: id, LocalOrigin: nodev1.Origin_ORIGIN_REMOTE, AssertionSHA256: make([]byte, 32), verified: true}
-	short := &VerifiedRelay{RelayingNodeID: id, LocalSessionID: id, LocalOrigin: nodev1.Origin_ORIGIN_SCRIPT, AssertionSHA256: make([]byte, 31), verified: true}
+	verified := &VerifiedRelay{relayingNodeID: id, localSessionID: id, localOrigin: nodev1.Origin_ORIGIN_SCRIPT, assertionSHA256: make([]byte, 32), verified: true}
+	unverified := &VerifiedRelay{relayingNodeID: id, localSessionID: id, localOrigin: nodev1.Origin_ORIGIN_SCRIPT, assertionSHA256: make([]byte, 32)}
+	remote := &VerifiedRelay{relayingNodeID: id, localSessionID: id, localOrigin: nodev1.Origin_ORIGIN_REMOTE, assertionSHA256: make([]byte, 32), verified: true}
+	short := &VerifiedRelay{relayingNodeID: id, localSessionID: id, localOrigin: nodev1.Origin_ORIGIN_SCRIPT, assertionSHA256: make([]byte, 31), verified: true}
 	for name, call := range map[string]Call{
 		"no payload":                  {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Deadline: time.Second, Session: session},
 		"a payload too large":         {AccountID: id, TargetNodeID: id, Method: MethodGetNodeTask, Payload: make([]byte, MaxCallPayload+1), Deadline: time.Second, Session: session},
@@ -209,5 +211,42 @@ func TestARoutedRefusalOverItsBoundIsRefused(t *testing.T) {
 	padTo(value, MaxRefusalBytes+1)
 	if routedRefusal(value) {
 		t.Fatal("a refusal over 512 bytes")
+	}
+}
+
+// TestAVerifiedRelaysDigestIsACopy: the digest accessor hands out a copy, so a caller that writes into it changes nothing of the relay.
+func TestAVerifiedRelaysDigestIsACopy(t *testing.T) {
+	relay := VerifiedRelay{assertionSHA256: []byte{1, 2, 3}, verified: true}
+	read := relay.AssertionSHA256()
+	read[0] = 9
+	copied := relay
+	if relay.AssertionSHA256()[0] != 1 || copied.AssertionSHA256()[0] != 1 {
+		t.Fatal("the digest accessor shares the relay's bytes")
+	}
+}
+
+// TestASlowKeyReadNeverOverwritesANewerOne is review B C-N1: the keyring keeps the rows of the read that started last, so a hello's read
+// that started earlier but finishes after the loop's newer read (which saw a retirement) does not put the retired key back.
+func TestASlowKeyReadNeverOverwritesANewerOne(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	public, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	start := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	h := &Hub{logger: slog.New(slog.DiscardHandler)}
+	h.keys.private, h.keys.public = map[string]*ecdsa.PrivateKey{"A": key}, map[string][]byte{"A": public}
+	row := platform.SigningKey{KID: "cmd-current", SecretBinding: "A", PublicKey: public, NotBefore: start.Add(-time.Hour), NotAfter: start.Add(time.Hour)}
+	// The loop's read started at start+2s and saw the retirement (PublishedKeys leaves a retired key out).
+	if !h.storeKeys(nil, start.Add(2*time.Second)) {
+		t.Fatal("the newer read is kept")
+	}
+	// The hello's read started at start+1.5s, before the retirement committed in its snapshot, and finishes now.
+	if h.storeKeys([]platform.SigningKey{row}, start.Add(1500*time.Millisecond)) {
+		t.Fatal("an older read overwrote a newer one")
+	}
+	if _, _, ok := h.signingKey(start.Add(3 * time.Second)); ok {
+		t.Fatal("the retired key signs again after a slow read")
+	}
+	// A read that starts later is kept.
+	if !h.storeKeys([]platform.SigningKey{row}, start.Add(4*time.Second)) || len(h.validKids(start.Add(4*time.Second))) != 1 {
+		t.Fatal("a later read is not kept")
 	}
 }

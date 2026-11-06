@@ -53,8 +53,9 @@ type caller struct {
 	assertionSHA256   []byte
 }
 
-// Call is one routed call. Exactly one of Session and Relay names its caller; a Relay must come from VerifyRelayAssertion (one built by
-// hand is refused), so the relayed caller is structurally the verified assertion's. Two ties have no enforcement point at this seam
+// Call is one routed call. Exactly one of Session and Relay names its caller. A Relay comes only from VerifyRelayAssertion: it cannot be
+// hand-built (its fields are unexported and an unverified one is refused) or changed after verification (it has no setter, and a copy
+// keeps exactly the verified fields), so the relayed caller is the verified assertion's. Two ties have no enforcement point at this seam
 // and are the routed API's (E2): the relaying node's account (the bearer credential's) is AccountID, and CommandID equals the payload's
 // meta.command_id.
 type Call struct {
@@ -81,10 +82,10 @@ func (call Call) callerOf() (caller, bool) {
 			call.Session.UserID != zero && call.Session.SessionID != zero
 	case call.Relay != nil && call.Session == nil:
 		relay := call.Relay
-		return caller{kind: nodev1.CenterCallerKind_CENTER_CALLER_KIND_NODE_RELAY, relayingNodeID: relay.RelayingNodeID, localOrigin: relay.LocalOrigin,
-				localSessionID: relay.LocalSessionID, assertionSHA256: relay.AssertionSHA256},
-			relay.verified && relay.RelayingNodeID != zero && relay.LocalSessionID != zero && relay.LocalOrigin >= nodev1.Origin_ORIGIN_HUMAN &&
-				relay.LocalOrigin <= nodev1.Origin_ORIGIN_AGENT && len(relay.AssertionSHA256) == DigestBytes
+		return caller{kind: nodev1.CenterCallerKind_CENTER_CALLER_KIND_NODE_RELAY, relayingNodeID: relay.relayingNodeID, localOrigin: relay.localOrigin,
+				localSessionID: relay.localSessionID, assertionSHA256: relay.assertionSHA256},
+			relay.verified && relay.relayingNodeID != zero && relay.localSessionID != zero && relay.localOrigin >= nodev1.Origin_ORIGIN_HUMAN &&
+				relay.localOrigin <= nodev1.Origin_ORIGIN_AGENT && len(relay.assertionSHA256) == DigestBytes
 	}
 	return caller{}, false
 }

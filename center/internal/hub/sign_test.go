@@ -92,8 +92,8 @@ func TestCallHeaderSignatureVerifiesInGoAndAgainstTheVector(t *testing.T) {
 	issued, deadline := vectorInstant(vector.IssuedAt), vectorInstant(vector.Deadline)
 	now := timeOf(issued)
 	command := platformID(t, vectors.IDs["command"])
-	relay := &VerifiedRelay{RelayingNodeID: platformID(t, vectors.IDs["node"]), LocalOrigin: nodev1.Origin(vector.Caller.LocalOrigin),
-		LocalSessionID: platformID(t, vectors.IDs["localSession"]), AssertionSHA256: vector.RelayAssertionSHA256, verified: true}
+	relay := &VerifiedRelay{relayingNodeID: platformID(t, vectors.IDs["node"]), localOrigin: nodev1.Origin(vector.Caller.LocalOrigin),
+		localSessionID: platformID(t, vectors.IDs["localSession"]), assertionSHA256: vector.RelayAssertionSHA256, verified: true}
 	routed := Call{AccountID: platformID(t, vectors.IDs["account"]), TargetNodeID: platformID(t, vectors.IDs["node"]), Relay: relay,
 		CommandID: &command, Method: relayv1.RoutedMethod(vector.Method), Payload: vector.Payload, Deadline: timeOf(deadline).Sub(now)}
 	verified, ok := routed.callerOf()
