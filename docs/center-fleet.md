@@ -673,8 +673,9 @@ WebSocket connection, not to TLS, which ends at the Worker; a same-user process 
 | Graceful stop (CTR5-HUB-11)            | on `SIGTERM` the hub closes every channel 4500 before the listeners stop, with a jittered reconnect hint of 1 to 30 s in `RelayClose.reconnect_after_ms` (meaningful with 4500 only, 0 to 300000), then releases the lease                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 Every close sends `RelayClose` with its code and closed reason before the WebSocket close with the same code (the close handshake waits
-at most a second), and is audited `fleet.channel.closed`. The frames queued before the close are written first, then the `RelayClose`,
-both within 2 s (`closeFlush`); nothing ends the connection before: the reader's end waits for the close to be sent, and every write's
+at most a second), and is audited `fleet.channel.closed`. The frames queued before the close are written first (a call the close
+abandoned is skipped: it was answered DID_NOT_HAPPEN, so its frame is never written), then the `RelayClose`, both within 2 s
+(`closeFlush`); nothing ends the connection before: the reader's end waits for the close to be sent, and every write's
 context descends from a context of the writes, not the reader's (AF-CTR-05 E2a). coder/websocket closes the whole connection when a
 write's context ends while the write is in progress, even after its bytes were flushed, so a close decided by the reader (the node's
 own `RelayClose`, a malformed frame) used to lose its `RelayClose` and close handshake under load
