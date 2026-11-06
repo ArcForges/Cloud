@@ -34,10 +34,12 @@ type conn struct {
 	// The credential and the node row the upgrade admitted; the hello must name them.
 	sessionID, userID, deviceID, installationID platform.ID
 	nodeID, enrollmentID                        platform.ID
-	publicKey                                   []byte
-	connectionID                                platform.ID
-	correlationID                               *platform.ID
-	fence                                       int64
+	// nodeName is the node's registry name as the upgrade read it: ChannelAccepted.node_name (AF-CTR-05 E2a; Plan Q25).
+	nodeName      string
+	publicKey     []byte
+	connectionID  platform.ID
+	correlationID *platform.ID
+	fence         int64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -57,10 +59,12 @@ type conn struct {
 	sentSeq       uint64
 
 	// calls are the calls waiting for their result (at most MaxInFlightCalls); callsClosed is set once the connection closes, after
-	// which it takes no call. late are the delivered calls whose deadline passed, nonces the relay nonces not yet spent.
+	// which it takes no call. late are the delivered calls whose deadline passed, forgotten the call IDs of late calls that can no longer
+	// run at the node (at most lateResults, the oldest dropped first), nonces the relay nonces not yet spent.
 	calls       map[platform.ID]*pending
 	callsClosed bool
 	late        []lateCall
+	forgotten   []platform.ID
 	nonces      []relayNonce
 
 	queue chan outbound
@@ -297,7 +301,9 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 	c.hub.metrics.ObserveChannel("hello", "accepted")
 	limits := Limits{MaxFrameBytes: c.hub.settings.MaxFrameBytes, MaxInFlightCalls: c.hub.settings.MaxInFlightCalls, Heartbeat: c.hub.settings.Heartbeat,
 		HeartbeatDeadline: c.hub.settings.HeartbeatDeadline, MaxRelayNonces: c.hub.settings.MaxRelayNonces}
-	if err := c.send(func(seq uint64) ([]byte, error) { return c.hub.codec.Accepted(seq, c.connectionID, limits, kids) }); err != nil {
+	if err := c.send(func(seq uint64) ([]byte, error) {
+		return c.hub.codec.Accepted(seq, c.connectionID, c.nodeName, limits, kids)
+	}); err != nil {
 		c.closeWith(CloseShuttingDown, "internal")
 		return false
 	}

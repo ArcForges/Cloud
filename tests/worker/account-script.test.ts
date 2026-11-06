@@ -1288,6 +1288,10 @@ test("node_unreachable is described by its closed reason, and an unknown reason 
   for (const text of [generic, ...texts]) assert.match(text, /may or may not have reached it/u);
   assert.match(texts[1] ?? "", /did not answer in time/u);
   assert.doesNotMatch(texts[0] ?? "", /in time/u);
+  // channel_closed also answers a call no command key could sign (the hub answers it so; E1b review B C-N2, AF-CTR-05 E2a): its text
+  // says only that the node could not be reached, never that a connection closed.
+  assert.match(texts[0] ?? "", /^The node could not be reached\./u);
+  assert.doesNotMatch(texts[0] ?? "", /closed/u);
   assert.equal(
     script.errorText(new script.ApiError(503, "node_unreachable", "__proto__")),
     generic,

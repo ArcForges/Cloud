@@ -123,3 +123,24 @@ func TestTheRelaySurfaceNeedsACommandKey(t *testing.T) {
 		t.Fatalf("the default without a key: %v %v %q", err, cfg.Identity.Surfaces, cfg.Identity.RelayDisabled)
 	}
 }
+
+// TestTheNodesSurfaceNeedsTheRelaySurface (AF-CTR-05 E2a; Plan CTR5-SUR-01): a list that names nodes without identity, fleet or relay
+// refuses to start; the self-hosted default carries nodes with relay and leaves both out when no command key is configured.
+func TestTheNodesSurfaceNeedsTheRelaySurface(t *testing.T) {
+	for _, list := range []string{"identity,pages,fleet,nodes", "identity,pages,relay,nodes", "nodes"} {
+		if _, err := Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: list}))); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%q: %v", list, err)
+		}
+	}
+	cfg, err := Load(environment(withIdentity(SelfHosted, map[string]string{EnvSurfaces: "identity,pages,fleet,relay,nodes"})))
+	if err != nil || !cfg.Identity.Enabled(SurfaceNodes) {
+		t.Fatalf("nodes with its surfaces: %v %v", cfg.Identity.Surfaces, err)
+	}
+	cfg, err = Load(environment(withIdentity(SelfHosted, map[string]string{})))
+	if err != nil || !cfg.Identity.Enabled(SurfaceNodes) || !cfg.Identity.Enabled(SurfaceRelay) {
+		t.Fatalf("the default: %v %v", cfg.Identity.Surfaces, err)
+	}
+	if err = cfg.ApplyCommandKeys(nil); err != nil || cfg.Identity.Enabled(SurfaceNodes) || cfg.Identity.Enabled(SurfaceRelay) {
+		t.Fatalf("the default without a key: %v %v", err, cfg.Identity.Surfaces)
+	}
+}

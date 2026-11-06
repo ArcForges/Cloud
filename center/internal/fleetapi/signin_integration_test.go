@@ -515,7 +515,8 @@ func TestTheSignInRowsUpgradeAMobileLimitedSession(t *testing.T) {
 		return h.count("SELECT (SELECT coalesce(sum(rev), 0) FROM fleet.node_sign_in) + (SELECT coalesce(sum(count), 0) FROM platform.rate_limit)")
 	}
 	for _, operation := range access.Operations() {
-		if !operation.Session || operation.MobileLimited == access.Allowed || !strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.") {
+		// The FleetService rows are the nodes surface's (AF-CTR-05 E2a): hub's TestAMobileLimitedSessionReadsTheRegistryButUpgradesToChangeIt.
+		if !operation.Session || operation.MobileLimited == access.Allowed || !strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.NodeEnrollmentService/") {
 			continue
 		}
 		request, ok := requests[operation.Path]

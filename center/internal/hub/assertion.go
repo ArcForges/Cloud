@@ -13,6 +13,7 @@ import (
 	relayv1 "github.com/ArcForges/Contracts/go/arcforges/relay/v1"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/platform"
@@ -208,4 +209,18 @@ func (h *Hub) VerifyRelayAssertion(ctx context.Context, credential ingress.Calle
 	h.metrics.ObserveChannel("assertion", "verified")
 	return VerifiedRelay{relayingNodeID: relayingNode, relayingInstallationID: relayingInstallation, localOrigin: assertion.GetLocalOrigin(),
 		localSessionID: localSession, assertionSHA256: digest[:], expiresAt: expires, verified: true}, nil
+}
+
+// RelayVerifier is VerifyRelayAssertion as the authorizer asks for it (access.WithRelayVerifier; AF-CTR-05 E2a, decisions B-4): the
+// authorizer itself verifies the relay of every node-relayed call before it decides anything else, and receives the VerifiedRelay by
+// value, whose fields only VerifyRelayAssertion sets.
+func (h *Hub) RelayVerifier() access.RelayVerifier {
+	return func(ctx context.Context, credential ingress.Caller, claim access.RelayClaim) (access.Relay, error) {
+		verified, err := h.VerifyRelayAssertion(ctx, credential, RelayRequest{Assertion: claim.Assertion, Method: claim.Method, RequestSHA256: claim.RequestSHA256,
+			TargetNodeID: claim.TargetNodeID, CommandID: claim.CommandID, CallerRelayingNodeID: claim.CallerRelayingNodeID, CallerLocalOrigin: claim.CallerLocalOrigin})
+		if err != nil {
+			return nil, err
+		}
+		return verified, nil
+	}
 }

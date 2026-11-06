@@ -146,6 +146,11 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
     return ["the mobile surface needs the identity and pages surfaces"];
   if (names.includes("relay") && !(names.includes("identity") && names.includes("fleet")))
     return ["the relay surface needs the identity and fleet surfaces"];
+  if (
+    names.includes("nodes") &&
+    !(names.includes("identity") && names.includes("fleet") && names.includes("relay"))
+  )
+    return ["the nodes surface needs the identity, fleet and relay surfaces"];
   if (names.includes("identity")) {
     const base = vars?.ARCFORGES_CENTER_PUBLIC_BASE_URL;
     const origin =
@@ -262,10 +267,29 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
         .includes("relay"),
       `wrangler.json environment ${name}: no environment enables the relay surface before AF-CTR-05 E3`,
     );
+  // AF-CTR-05 E2a: FleetService (nodes) needs identity, fleet and relay; no environment enables it before AF-CTR-05 E3.
+  assert.deepEqual(
+    surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,fleet,relay,nodes" }),
+    [],
+  );
+  assert.equal(
+    surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,fleet,nodes" }).length,
+    1,
+  );
+  assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "nodes" }).length, 1);
+  assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("nodes"));
+  for (const [name, environment] of environments)
+    assert(
+      !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+        .split(",")
+        .includes("nodes"),
+      `wrangler.json environment ${name}: no environment enables the nodes surface before AF-CTR-05 E3`,
+    );
   assert.deepEqual([...surfaces].sort(), [
     "fleet",
     "identity",
     "mobile",
+    "nodes",
     "operations",
     "pages",
     "relay",

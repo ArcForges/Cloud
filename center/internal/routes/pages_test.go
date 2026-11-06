@@ -140,9 +140,10 @@ func TestThePageRoutesAreThePipelinesPlainPathsAndNotTheWorkersOwnRows(t *testin
 	if ingress.IsPlain("/account") || ingress.IsPlain("/account/") || ingress.IsPlain("/session/v1/web") {
 		t.Fatal("a path outside the registration is plain")
 	}
-	// The pages add no RPC row: the surface rows are the identity methods and the fleet methods (AF-CTR-04) only.
+	// The pages add no RPC row: the surface rows are the identity methods, the fleet methods (AF-CTR-04) and FleetService's (the nodes
+	// surface, AF-CTR-05 E2a) only.
 	for _, row := range table.SurfaceRows {
-		if row.Surface != SurfaceIdentity && row.Surface != SurfaceFleet {
+		if row.Surface != SurfaceIdentity && row.Surface != SurfaceFleet && row.Surface != SurfaceNodes {
 			t.Errorf("an RPC row of the surface %s", row.Surface)
 		}
 	}
@@ -197,7 +198,7 @@ func TestTheOperationsRoutesAreTheirOwnSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet,mobile,relay" {
+	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet,mobile,relay,nodes" {
 		t.Fatalf("the surfaces %v", surfaces)
 	}
 	crossed := append([]Module(nil), modules...)

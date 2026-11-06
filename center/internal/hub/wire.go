@@ -75,9 +75,10 @@ func (RelayCodec) Challenge(seq uint64, nonce []byte, connectionID platform.ID, 
 		HelloDeadline: instant(deadline)}})
 }
 
-// Accepted is ChannelAccepted: the connection ID, the limits and the command keys calls may be signed with.
-func (RelayCodec) Accepted(seq uint64, connectionID platform.ID, limits Limits, kids []string) ([]byte, error) {
-	return marshal(seq, &relayv1.RelayFrame_Accepted{Accepted: &relayv1.ChannelAccepted{ConnectionId: idValue(connectionID),
+// Accepted is ChannelAccepted: the connection ID, the node's registry name (node_name, 1..64 characters as fleet.node.display_name
+// is), the limits and the command keys calls may be signed with.
+func (RelayCodec) Accepted(seq uint64, connectionID platform.ID, nodeName string, limits Limits, kids []string) ([]byte, error) {
+	return marshal(seq, &relayv1.RelayFrame_Accepted{Accepted: &relayv1.ChannelAccepted{ConnectionId: idValue(connectionID), NodeName: proto.String(nodeName),
 		Limits: &relayv1.ChannelLimits{
 			MaxFrameBytes: proto.Uint32(uint32(limits.MaxFrameBytes)), MaxInFlightCalls: proto.Uint32(uint32(limits.MaxInFlightCalls)),
 			HeartbeatIntervalMs: proto.Uint32(uint32(limits.Heartbeat / time.Millisecond)), HeartbeatDeadlineMs: proto.Uint32(uint32(limits.HeartbeatDeadline / time.Millisecond)),

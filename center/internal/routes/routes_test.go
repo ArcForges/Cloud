@@ -72,16 +72,32 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.fleet.v1.NodeEnrollmentService/RefreshNodeSession anonymous 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/ReportNodeInfo session 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/SignOutNode session 4096",
+		// AF-CTR-05 E2a: the node registry of FleetService (the nodes surface).
+		"/arcforges.fleet.v1.FleetService/ListNodes session 4096",
+		"/arcforges.fleet.v1.FleetService/GetNode session 4096",
+		"/arcforges.fleet.v1.FleetService/RenameNode session 4096",
+		"/arcforges.fleet.v1.FleetService/RevokeNode session 4096",
 	}
-	if len(table.Surfaces) != 6 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
-		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || table.Surfaces[5] != SurfaceRelay || len(table.SurfaceRows) != len(served) {
+	if len(table.Surfaces) != 7 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
+		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || table.Surfaces[5] != SurfaceRelay || table.Surfaces[6] != SurfaceNodes ||
+		len(table.SurfaceRows) != len(served) {
 		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))
 	}
 	for index, row := range table.SurfaceRows {
 		// The fleet rows carry the contract's deadline of each method (F3: 5 s for GetNodeSignInFlow and LookupDeviceCode, 15 s for
 		// CompleteNodeSignIn, 10 s for the others); the identity rows the identity surface's 15 s.
-		surface, deadline := SurfaceIdentity, 15_000
-		if strings.HasPrefix(row.Path, "/arcforges.fleet.v1.") {
+		surface, deadline, reply := SurfaceIdentity, 15_000, 65_536
+		switch {
+		case strings.HasPrefix(row.Path, "/arcforges.fleet.v1.FleetService/"):
+			// The node registry (AF-CTR-05 E2a): 5 s, RevokeNode 10 s; ListNodes replies up to 256 KiB.
+			surface, deadline = SurfaceNodes, 5_000
+			switch row.Path {
+			case "/arcforges.fleet.v1.FleetService/RevokeNode":
+				deadline = 10_000
+			case "/arcforges.fleet.v1.FleetService/ListNodes":
+				reply = 262_144
+			}
+		case strings.HasPrefix(row.Path, "/arcforges.fleet.v1."):
 			surface, deadline = SurfaceFleet, 10_000
 			switch row.Path {
 			case "/arcforges.fleet.v1.NodeEnrollmentService/GetNodeSignInFlow", "/arcforges.fleet.v1.NodeEnrollmentService/LookupDeviceCode":
@@ -91,8 +107,8 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 			}
 		}
 		if got := fmt.Sprintf("%s %s %d", row.Path, row.Auth, row.MaxRequestBytes); got != served[index] || row.Surface != surface ||
-			!row.RequestMeta || row.Instance != HealthInstance || row.Kind != "unary" || row.MaxFrameBytes != 65_536 ||
-			row.MaxUnaryResponseBytes != 65_536 || row.MaxDurationMilliseconds != deadline {
+			!row.RequestMeta || row.Instance != HealthInstance || row.Kind != "unary" || row.MaxFrameBytes != reply ||
+			row.MaxUnaryResponseBytes != reply || row.MaxDurationMilliseconds != deadline {
 			t.Fatalf("surface row %d: %+v", index, row)
 		}
 	}
@@ -195,7 +211,8 @@ func TestInconsistentRegistrationsStopTheGenerator(t *testing.T) {
 }
 
 // TestTheCenterSendsEveryReplyItsBudgetsAdmit (F8): the Connect writer's bound is the largest reply budget of the registrations, so
-// it admits every method's budget (a full DeviceService.List page among them), not only the largest request.
+// it admits every method's budget (a full DeviceService.List page among them, and since AF-CTR-05 E2a a full ListNodes of 256 KiB),
+// not only the largest request.
 func TestTheCenterSendsEveryReplyItsBudgetsAdmit(t *testing.T) {
 	modules, err := Center()
 	if err != nil {
@@ -209,7 +226,7 @@ func TestTheCenterSendsEveryReplyItsBudgetsAdmit(t *testing.T) {
 			}
 		}
 	}
-	if largest != 65_536 || largest <= MaxRequestBytes(modules) {
+	if largest != 262_144 || largest <= MaxRequestBytes(modules) {
 		t.Fatalf("send bound %d, request bound %d", largest, MaxRequestBytes(modules))
 	}
 }

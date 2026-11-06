@@ -447,8 +447,9 @@ func TestTheServedMethodsAreExactlyTheIdentitySet(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range table.SurfaceRows {
-		// The fleet surface's rows are pinned by fleetapi's TestFleetRowsAreTheServedMethods.
-		if row.Surface == routes.SurfaceFleet {
+		// The fleet surface's rows are pinned by fleetapi's TestFleetRowsAreTheServedMethods, the nodes surface's (AF-CTR-05 E2a) by hub's
+		// TestTheRegistryRowsAreTheServedMethods.
+		if row.Surface == routes.SurfaceFleet || row.Surface == routes.SurfaceNodes {
 			continue
 		}
 		if !pinned[row.Path] {

@@ -323,7 +323,12 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	// The per-account resource controls stand in front of every gated row (AF-CTR-05 E0, CTR5-GATE-05): a gated row without one
 	// refuses the composition.
 	controls := append(quota.Controls(c.Store, c.Config.Identity.Policy, clock), options.Controls...)
-	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features), access.WithControls(controls...))
+	authorizerOptions := []access.Option{access.WithGate(c.Features), access.WithControls(controls...)}
+	if c.Hub != nil {
+		// A node-relayed call is verified by the authorizer itself against the hub's relay nonces (AF-CTR-05 E2a, C-N6, decisions B-4).
+		authorizerOptions = append(authorizerOptions, access.WithRelayVerifier(c.Hub.RelayVerifier()))
+	}
+	authorizer := access.NewAuthorizer(c.Store, clock, authorizerOptions...)
 	if err := authorizer.CheckComposition(); err != nil {
 		return composedIdentity{}, err
 	}
@@ -337,6 +342,10 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 		dispatcher.Register(fleetServer.Methods()...)
 		// The /connect and /activate pages call the same server's account methods in process (AF-CTR-04 E3).
 		fleetDirect = fleetServer.Direct()
+		if c.Config.Identity.Enabled(config.SurfaceNodes) && c.Hub != nil {
+			// FleetService's node registry (AF-CTR-05 E2a): RevokeNode revokes the node's device with the identity service's cascade.
+			dispatcher.Register(fleetServer.Registry(c.Hub, service.RevokeDevice).Methods()...)
+		}
 	}
 	var mobile *mobileauth.Service
 	if c.Config.Identity.Enabled(config.SurfaceMobile) {
@@ -464,7 +473,7 @@ func (c *Center) operator(clock func() time.Time) *entitlement.Operator {
 func checkIdentityComposition(modules []routes.Module) error {
 	var policies, upgrades []ingress.Policy
 	for _, module := range modules {
-		if module.Surface == routes.SurfaceIdentity || module.Surface == routes.SurfaceFleet {
+		if module.Surface == routes.SurfaceIdentity || module.Surface == routes.SurfaceFleet || module.Surface == routes.SurfaceNodes {
 			policies = append(policies, module.Policies...)
 		}
 		// The relay surface's upgrade route (AF-CTR-05 E1a) is authorized with its own row (fleet.nodeChannel, a session row) by the
@@ -480,7 +489,8 @@ func checkIdentityComposition(modules []routes.Module) error {
 	for _, method := range identityapi.New(nil, nil, nil, nil, nil).Methods() {
 		served[method.Spec.Procedure] = true
 	}
-	for _, method := range fleetapi.New(nil, nil, nil, nil, nil).Methods() {
+	fleetServer := fleetapi.New(nil, nil, nil, nil, nil)
+	for _, method := range append(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods()...) {
 		served[method.Spec.Procedure] = true
 	}
 	if len(served) != len(policies) {

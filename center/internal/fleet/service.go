@@ -270,9 +270,11 @@ func liveNode(ctx context.Context, tx pgx.Tx, installationID platform.ID) (row s
 	enrollmentID, nodeID, deviceID platform.ID
 	name, version                  string
 	os, arch                       int16
+	named                          bool
 }, err error) {
-	err = tx.QueryRow(ctx, `SELECT enrollment_id, node_id, device_id, display_name, version, os, arch FROM fleet.node
-WHERE installation_id = $1 AND revoked_at IS NULL`, installationID).Scan(&row.enrollmentID, &row.nodeID, &row.deviceID, &row.name, &row.version, &row.os, &row.arch)
+	err = tx.QueryRow(ctx, `SELECT enrollment_id, node_id, device_id, display_name, version, os, arch, named_by_account FROM fleet.node
+WHERE installation_id = $1 AND revoked_at IS NULL`, installationID).Scan(&row.enrollmentID, &row.nodeID, &row.deviceID, &row.name, &row.version, &row.os,
+		&row.arch, &row.named)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return row, arc.Unauthenticated()
 	}
@@ -281,10 +283,11 @@ WHERE installation_id = $1 AND revoked_at IS NULL`, installationID).Scan(&row.en
 
 // Report records what a node reports about itself (ReportNodeInfo; CRD-05) in the caller's receipt transaction: the node ID must be
 // the credential's (else node.node_id: mismatch), its OS cannot change (node.os: mismatch: another OS is another machine), and a
-// changed name, architecture or canonical version updates the node row and the installation's version; the device takes the new name
-// only while it still bears the name the node reported before (a name the account gave it wins; Q20). The node is always marked
-// seen; fleet.node.info_reported is audited only when something changed. Locks: the device only when renaming, then the
-// installation, then the node row (the global order).
+// changed name, architecture or canonical version updates the node row and the installation's version. The reported name is always
+// kept (reported_name); the node's registry name follows it only while no account renamed the node (RenameNode, AF-CTR-05 E2a; Q25:
+// the account's name wins), and the device takes the new name only then and while it still bears the name the node reported before
+// (a name the account gave it wins; Q20). The node is always marked seen; fleet.node.info_reported is audited only when something
+// changed. Locks: the device only when renaming, then the installation, then the node row (the global order).
 func (s *Service) Report(ctx context.Context, tx pgx.Tx, request Request, node Node, nodeID platform.ID, info NodeInfo, now time.Time) (bool, error) {
 	row, err := liveNode(ctx, tx, node.InstallationID)
 	if err != nil {
@@ -296,7 +299,7 @@ func (s *Service) Report(ctx context.Context, tx pgx.Tx, request Request, node N
 	case row.os != info.Platform.OS:
 		return false, arc.InvalidArgument("node.os", "mismatch")
 	}
-	renaming := row.name != info.Name
+	renaming := !row.named && row.name != info.Name
 	if renaming {
 		if _, err = tx.Exec(ctx, "SELECT 1 FROM device.device WHERE device_id = $1 FOR UPDATE", row.deviceID); err != nil {
 			return false, store.Sanitize("lock the node's device", err)
@@ -306,20 +309,21 @@ func (s *Service) Report(ctx context.Context, tx pgx.Tx, request Request, node N
 		return false, store.Sanitize("lock the node's installation", err)
 	}
 	var current struct {
-		name, version string
-		arch          int16
-		live          bool
+		name, version, reported string
+		arch                    int16
+		live, named             bool
 	}
-	if err = tx.QueryRow(ctx, "SELECT display_name, version, arch, revoked_at IS NULL FROM fleet.node WHERE enrollment_id = $1 FOR UPDATE", row.enrollmentID).
-		Scan(&current.name, &current.version, &current.arch, &current.live); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT display_name, version, arch, revoked_at IS NULL, coalesce(reported_name, display_name), named_by_account FROM fleet.node
+WHERE enrollment_id = $1 FOR UPDATE`, row.enrollmentID).Scan(&current.name, &current.version, &current.arch, &current.live, &current.reported,
+		&current.named); err != nil {
 		return false, store.Sanitize("lock the node", err)
 	}
-	if !current.live || current.name != row.name {
+	if !current.live || current.name != row.name || current.named != row.named {
 		// A concurrent report or revocation changed the row after the read: the identical retry decides again.
 		return false, &store.Error{Operation: "lock the node", Kind: store.ErrContention}
 	}
 	var changed []string
-	if current.name != info.Name {
+	if current.reported != info.Name {
 		changed = append(changed, "name")
 	}
 	if current.arch != info.Arch {
@@ -338,8 +342,9 @@ func (s *Service) Report(ctx context.Context, tx pgx.Tx, request Request, node N
 			return false, store.Sanitize("rename the node's device", err)
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE fleet.node SET display_name = $2, arch = $3, version = $4, last_seen_at = greatest(last_seen_at, $5), rev = rev + 1
-WHERE enrollment_id = $1`, row.enrollmentID, info.Name, info.Arch, info.Version, now); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE fleet.node SET display_name = CASE WHEN named_by_account THEN display_name ELSE $2 END, reported_name = $2, arch = $3,
+    version = $4, last_seen_at = greatest(last_seen_at, $5), rev = rev + 1 WHERE enrollment_id = $1`, row.enrollmentID, info.Name, info.Arch, info.Version,
+		now); err != nil {
 		return false, store.Sanitize("update the node", err)
 	}
 	if len(changed) == 0 {

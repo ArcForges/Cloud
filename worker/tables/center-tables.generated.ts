@@ -35,7 +35,7 @@ export interface ApiRoute {
 }
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
-export type Surface = "identity" | "pages" | "operations" | "fleet" | "mobile" | "relay";
+export type Surface = "identity" | "pages" | "operations" | "fleet" | "mobile" | "relay" | "nodes";
 
 /** A method of a switchable surface. */
 export interface SurfaceRoute extends ApiRoute {
@@ -129,6 +129,7 @@ export const surfaceNames: readonly Surface[] = [
   "fleet",
   "mobile",
   "relay",
+  "nodes",
 ];
 /** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */
 export const clientIpHeader = "x-arcforges-client-ip";
@@ -155,6 +156,8 @@ export const notActivatedReplies: Readonly<Record<Surface, string>> = {
     "AAAAAF0aWwoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EyIRCgdzdXJmYWNlEgZtb2JpbGWAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
   relay:
     "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVyZWxheYAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
+  nodes:
+    "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVub2Rlc4AAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
 };
 /** The byte offset of the correlation id slot in each surface's not_activated template. */
 export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, number>> = {
@@ -164,6 +167,7 @@ export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, numbe
   fleet: 61,
   mobile: 61,
   relay: 61,
+  nodes: 61,
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
@@ -589,6 +593,54 @@ export const surfaceRoutes: readonly SurfaceRoute[] = [
     instance: "hello",
     requestMeta: true,
     surface: "fleet",
+  },
+  {
+    path: "/arcforges.fleet.v1.FleetService/ListNodes",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 262144,
+    maxUnaryResponseBytes: 262144,
+    maxDurationMs: 5000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "nodes",
+  },
+  {
+    path: "/arcforges.fleet.v1.FleetService/GetNode",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 5000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "nodes",
+  },
+  {
+    path: "/arcforges.fleet.v1.FleetService/RenameNode",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 5000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "nodes",
+  },
+  {
+    path: "/arcforges.fleet.v1.FleetService/RevokeNode",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 10000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "nodes",
   },
 ];
 

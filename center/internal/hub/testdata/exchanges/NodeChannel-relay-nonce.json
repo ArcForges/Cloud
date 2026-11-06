@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "source": "TestChannelExchangeCapture",
   "contractsCohort": "1.0.0-ci.437.1",
-  "centerCommit": "d5325e1dafd4e3cb2116d53906b193fa28744f67",
+  "centerCommit": "e2a-code",
   "method": "NodeChannel",
   "case": "relay-nonce",
   "outcome": "close 1000 node_closed",
@@ -24,7 +24,7 @@
     "httpStatus": 101,
     "frames": [
       "08011001da013c0a20b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b112120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5011a0408001000",
-      "08011002d201340a120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501121008808040100818e0d40320a0fe0a28081a0c6b69642d3030303030303031",
+      "08011002d2013e0a120a10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501121008808040100818e0d40320a0fe0a28081a0c6b69642d303030303030303122086275696c64626f78",
       "08011003ea013d0a120a10aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa011220c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c11a0508f0011000",
       "08011004a2011008e807120b6e6f64655f636c6f736564"
     ],
@@ -44,5 +44,5 @@
     "the relay nonce the center drew: 32 bytes of 0xc0+n",
     "a call's or a result's signed header: its IDs, kid and instants normalized as everywhere, then re-encoded; its signature (ES256 draws a nonce) 64 bytes of 0xe0+n"
   ],
-  "sha256": "829715cb6a4ed4bdce6459cb234da4949bf2bbd16af51afe8db62865eb5b93e4"
+  "sha256": "77c16056449967bbe1b3f9566482b8b6eb930d4713a06c621017ba84ed3b616b"
 }

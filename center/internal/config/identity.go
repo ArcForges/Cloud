@@ -58,6 +58,12 @@ const SurfaceMobile Surface = "mobile"
 // in AF-CTR-05 E3).
 const SurfaceRelay Surface = "relay"
 
+// SurfaceNodes is FleetService on the center (AF-CTR-05 E2a; Plan CTR5-SUR-01, Q10): the node registry (ListNodes, GetNode, RenameNode,
+// RevokeNode) and, from part E2b, the routed task methods. It needs the identity, fleet and relay surfaces (a node-relayed caller is
+// verified against a relay nonce of its open channel), is in the self-hosted default (and off with relay where the default turns relay
+// off), and production keeps it off until AF-PROD-01.
+const SurfaceNodes Surface = "nodes"
+
 // MaxFleetPublicBaseURLLength bounds the public base URL of a center that serves the fleet surface: the contract bounds every URL the
 // center derives for a node at 512 characters (fleet.v1 authorize_url, verification_uri*), and the longest suffix it appends is
 // /connect#flow= and a 36-character flow ID (50 characters).
@@ -65,14 +71,14 @@ const MaxFleetPublicBaseURLLength = 512 - 50
 
 // KnownSurfaces is every surface name, in generated order.
 func KnownSurfaces() []Surface {
-	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile, SurfaceRelay}
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile, SurfaceRelay, SurfaceNodes}
 }
 
 // DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces, node
 // enrollment with its pages (AF-CTR-04 E3, delivery-14), the mobile native authorization (AF-CTR-04 part M) and the node channel
-// (AF-CTR-05 E1a, CTR5-SUR-01), never the operations page.
+// (AF-CTR-05 E1a, CTR5-SUR-01) with FleetService (AF-CTR-05 E2a), never the operations page.
 func DefaultSelfHostedSurfaces() []Surface {
-	return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet, SurfaceMobile, SurfaceRelay}
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet, SurfaceMobile, SurfaceRelay, SurfaceNodes}
 }
 
 // ClientIPHeader is the one header the hosted Worker sets to the client's address (from cf-connecting-ip, overwriting any client
@@ -574,6 +580,10 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 		return Identity{}, invalid("the %s surface needs the %s and %s surfaces: the node channel is admitted on the node credential enrollment issues",
 			SurfaceRelay, SurfaceIdentity, SurfaceFleet)
 	}
+	if identity.Enabled(SurfaceNodes) && (!identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfaceFleet) || !identity.Enabled(SurfaceRelay)) {
+		return Identity{}, invalid("the %s surface needs the %s, %s and %s surfaces: a node-relayed call is verified against its node's open channel",
+			SurfaceNodes, SurfaceIdentity, SurfaceFleet, SurfaceRelay)
+	}
 	if identity.Enabled(SurfaceOperations) {
 		if !identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages) {
 			return Identity{}, invalid("the %s surface needs the %s and %s surfaces: its page proves a step-up through the pages' routes", SurfaceOperations, SurfaceIdentity, SurfacePages)
@@ -600,8 +610,8 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 }
 
 // parseSurfaces reads the surface list: exact generated names, comma-separated, without whitespace or repetition. Official-hosted
-// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages, fleet, mobile and relay, not
-// operations; mobile only for a base URL that is an issuer; relay only with a command key, ApplyCommandKeys) unless listed,
+// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages, fleet, mobile, relay and nodes, not
+// operations; mobile only for a base URL that is an issuer; relay and nodes only with a command key, ApplyCommandKeys) unless listed,
 // so an explicit list pins the surfaces across upgrades.
 func parseSurfaces(value string, mode Mode) ([]Surface, error) {
 	if value == "" {

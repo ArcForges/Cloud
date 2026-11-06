@@ -615,7 +615,9 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 				}
 				continue
 			}
-			if operation.Feature != "" || operation.Object != "" || operation.Audit == AuditBeforeCall {
+			// The node registry (AF-CTR-05 E2a) is never gated either (Q20); its rows that address one node name it (Object node).
+			registry := strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.FleetService/")
+			if operation.Feature != "" || operation.Object != "" && !(registry && operation.Object == ObjectNode) || operation.Audit == AuditBeforeCall {
 				t.Errorf("%s: a fleet row carries a gate rule", operation.ID)
 			}
 			continue

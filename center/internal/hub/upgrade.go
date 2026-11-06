@@ -147,7 +147,7 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	// The hub bounds every message itself (4413), so the library's own limit is off.
 	ws.SetReadLimit(-1)
 	c := &conn{hub: h, ws: ws, sessionID: parseID(caller.SessionID), userID: parseID(caller.UserID), deviceID: parseID(caller.DeviceID),
-		installationID: parseID(caller.InstallationID), nodeID: node.nodeID, enrollmentID: node.enrollmentID, publicKey: node.publicKey,
+		installationID: parseID(caller.InstallationID), nodeID: node.nodeID, enrollmentID: node.enrollmentID, nodeName: node.name, publicKey: node.publicKey,
 		connectionID: platform.NewID(), fence: fence, accessExpires: expires, tokenDigest: sha256.Sum256([]byte(token)), queue: make(chan outbound, h.settings.SendQueueFrames),
 		calls:    map[platform.ID]*pending{},
 		finished: make(chan struct{})}
@@ -218,9 +218,10 @@ func (h *Hub) clientIP(request *http.Request) (netip.Addr, bool) {
 	return h.options.ClientIP(request)
 }
 
-// liveNodeRow is the live node of a credential's installation and the installation's registered key.
+// liveNodeRow is the live node of a credential's installation, its registry name and the installation's registered key.
 type liveNodeRow struct {
 	nodeID, enrollmentID platform.ID
+	name                 string
 	publicKey            []byte
 }
 
@@ -230,10 +231,10 @@ func (h *Hub) liveNode(ctx context.Context, caller ingress.Caller) (*liveNodeRow
 	var row liveNodeRow
 	found := true
 	err := h.db.InTx(ctx, "read the node of a channel", store.TxOptions{ReadOnly: true, Timeout: presenceTimeout}, func(ctx context.Context, tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT n.node_id, n.enrollment_id, i.public_key FROM fleet.node n
+		err := tx.QueryRow(ctx, `SELECT n.node_id, n.enrollment_id, n.display_name, i.public_key FROM fleet.node n
 JOIN device.installation i ON i.installation_id = n.installation_id
 WHERE n.installation_id = $1 AND n.user_id = $2 AND n.revoked_at IS NULL AND i.revoked_at IS NULL AND i.public_key IS NOT NULL`,
-			parseID(caller.InstallationID), parseID(caller.UserID)).Scan(&row.nodeID, &row.enrollmentID, &row.publicKey)
+			parseID(caller.InstallationID), parseID(caller.UserID)).Scan(&row.nodeID, &row.enrollmentID, &row.name, &row.publicKey)
 		if errors.Is(err, pgx.ErrNoRows) {
 			found = false
 			return nil

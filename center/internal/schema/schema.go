@@ -96,7 +96,8 @@ var RuntimeGrants = []Grant{
 	// writes once per version (its trigger refuses an update that keeps the version, and any deletion).
 	{"entitlement", "definitions_current", []Privilege{Select, Insert, Update}},
 	// AF-CTR-05 part E1a (0008): the node channel hub's fenced lease, one row the hub takes, renews and releases (its trigger refuses a
-	// change of holder without a higher fence, and any deletion). The presence columns of 0008 are fleet.node's, granted above.
+	// change of holder without a higher fence, and any deletion). The presence columns of 0008 and the name columns of 0009 (AF-CTR-05
+	// part E2a) are fleet.node's, granted above.
 	{"fleet", "hub_lease", []Privilege{Select, Insert, Update}},
 }
 

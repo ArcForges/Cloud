@@ -65,7 +65,8 @@ type Metrics struct {
 // the device-code sign-in (AF-CTR-04 E2): a Start (started, refused, rate limited), a poll (each state value it answers, delivered
 // credentials, a reuse, a lapse, an unknown code, a failed key proof, refused, rate limited), a lookup (shown, refused, rate limited),
 // a decision (approved, denied, refused, rate limited) and every user-code entry that keeps its reservation, by kind (an unknown or
-// foreign code, an expired code, a code in another state, a decision without the caller's review, a live code's sixth lookup).
+// foreign code, an expired code, a code in another state, a decision without the caller's review, a live code's sixth lookup), and an
+// account's rename of a node (AF-CTR-05 E2a).
 // ObserveFleet counts only these pairs; any other pair is counted as unlisted, and the fleet surface's integration harness (fleetapi)
 // fails every test after which the composed center counted an unlisted pair.
 func FleetOutcomes() map[string][]string {
@@ -84,6 +85,7 @@ func FleetOutcomes() map[string][]string {
 		"lookup":        {"shown", "refused", "rate_limited"},
 		"device_decide": {"approved", "denied", "refused", "rate_limited"},
 		"entry":         {"unknown", "expired", "state", "unreviewed", "lookups", "tail"},
+		"rename":        {"renamed"},
 	}
 }
 
@@ -116,9 +118,10 @@ func ChannelOutcomes() map[string][]string {
 			"hello_malformed", "hello_signature", "hello_mismatch", "result_malformed", "result_signature", "result_other_call", "result_mismatch",
 			"nonce_request_malformed"},
 		// AF-CTR-05 E1b: routed calls (sent, the outcome of a verified result, a late result dropped, the refusals before sending, and
-		// the reasons of node_unreachable), relay nonces and relay assertions (verified, or the closed reason of the refusal).
-		"call": {"sent", "executed", "refused_by_policy", "refused_verification", "expired", "late", "offline", "no_key", "center_bound", "node_bound",
-			"queue_full", "channel_closed", "deadline_passed", "result_unverifiable"},
+		// the reasons of node_unreachable), relay nonces and relay assertions (verified, or the closed reason of the refusal); AF-CTR-05 E2a: a
+		// result for a call whose late entry was already forgotten, verified and dropped (forgotten).
+		"call": {"sent", "executed", "refused_by_policy", "refused_verification", "expired", "late", "forgotten", "offline", "no_key", "center_bound",
+			"node_bound", "queue_full", "channel_closed", "deadline_passed", "result_unverifiable"},
 		"relay_nonce": {"issued", "spent", "unknown"},
 		"assertion":   {"verified", "missing", "signature_invalid", "credential_mismatch", "expired", "nonce_reused", "request_mismatch"},
 		"token":       {"rebound", "unchanged", "rate"},

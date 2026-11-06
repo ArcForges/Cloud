@@ -276,6 +276,8 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		"start a device authorization": effect, "deliver a device authorization": effect,
 		// AF-CTR-05 E0: the start's record of the current definitions version (store-1) is its own effect, outside any call.
 		"record the current definitions version": effect,
+		// AF-CTR-05 E2a: the node registry's reads (package fleet); RenameNode and RevokeNode run under their receipts above.
+		"list the account's nodes": read, "read a node": read, "read a node's owner": read,
 	}
 	found := map[string]string{}
 	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages", "../entitlement", "../fleet",
