@@ -429,6 +429,10 @@ func answerOf(method relayv1.RoutedMethod, result RoutedResult, err error) fleet
 		answer.HandlerError, answer.Effect, answer.Refusal = true, foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN, "other/other"
 		return answer
 	}
+	if failed && effect == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNSPECIFIED {
+		// A handler error without an effect counts as UNKNOWN, never as DID_NOT_HAPPEN (review B N-15).
+		effect = foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN
+	}
 	answer.HandlerError, answer.Refusal, answer.Effect, answer.TaskID = failed, key, effect, taskID
 	return answer
 }
@@ -652,6 +656,12 @@ func (r *Registry) attempt(key routedKey, current *attempt, routedCall RoutedCal
 		r.observe("settle_lost")
 	}
 	switch {
+	case (decision.Delivered || decision.Final) && answer.Verified && answer.HandlerError &&
+		answer.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_HAPPENED:
+		// The handler's error of a resend that did not say HAPPENED (a transient or pre-deduplication error, or an unknown effect; review B
+		// B-6): node_unreachable, UNKNOWN with SAME_COMMAND (R1); the node's code is kept in the record and the audit row. So the reply
+		// never depends on the order in which the node replays.
+		current.err = arc.NodeUnreachable(routedCall.TargetNodeID[:], arc.UnreachableChannelClosed, true)
 	case decision.Final && answer.Verified && answer.Outcome == int32(relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED) && !equalDigest(answer.OutcomeSHA256, decision.OutcomeSHA256):
 		r.observe("replay_differs")
 		current.err = arc.ReplayDigestDiffers(routedCall.TargetNodeID[:])

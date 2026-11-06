@@ -3,6 +3,9 @@
 package hub_test
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -14,8 +17,10 @@ import (
 	relayv1 "github.com/ArcForges/Contracts/go/arcforges/relay/v1"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/hub"
+	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/session"
 )
@@ -71,8 +76,9 @@ func TestANodeRefusalOfAResendIsUnknown(t *testing.T) {
 		t.Fatalf("the first attempt: %v", failure)
 	}
 	eventually(t, 5*time.Second, func() bool { return !h.center.Hub.Connected(node.node.ID) })
-	channel = h.connect(node)
-	serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
+	// A new channel of its own: the first channel's serving goroutine still reads its variable (the race the Linux leg found).
+	second := h.connect(node)
+	serve(t, node, second, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
 		mu.Lock()
 		next := plan[0]
 		plan = plan[1:]
@@ -186,5 +192,111 @@ func TestAResendOverTheQuotaKeepsItsPair(t *testing.T) {
 	if errorKey(failure) != "RESOURCE/rate_limited" || failure.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_AFTER_TIME ||
 		failure.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
 		t.Fatalf("a resend over the quota: %v", failure)
+	}
+}
+
+// handlerError is a node's EXECUTED Submit response that carries the handler's own error with an effect (UNSPECIFIED leaves it unset).
+func handlerError(t *testing.T, effect foundationv1.EffectCertainty) []byte {
+	t.Helper()
+	value := &foundationv1.ArcError{Code: proto.String("overloaded"), Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE.Enum(),
+		Retry: &foundationv1.RetryAdvice{Mode: foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND.Enum()}}
+	if effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNSPECIFIED {
+		value.Effect = effect.Enum()
+	}
+	return marshalInner(t, &nodev1.TaskServiceSubmitTaskResponse{Outcome: &nodev1.TaskServiceSubmitTaskResponse_Error{Error: value}})
+}
+
+// TestAHandlerErrorOfAResendIsUnknown (R1, review B B-6, N-15): the handler's error of a resend whose effect is not HAPPENED is answered
+// node_unreachable UNKNOWN SAME_COMMAND, whatever order the node replays in: case A, a first attempt FAILED and not final (DID_NOT_HAPPEN),
+// then a resend answered the same; case B, an UNKNOWN record, then a resend answered with an UNKNOWN effect. A handler error without an
+// effect counts as UNKNOWN. A resend answered with HAPPENED is the node's answer (FAILED, final).
+func TestAHandlerErrorOfAResendIsUnknown(t *testing.T) {
+	h := routedHarness(t)
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	channel := h.connect(node)
+	answers := make(chan []byte, 8)
+	serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
+		response := <-answers
+		return node.node.Executed(call, response), response, true
+	})
+	issued := h.accountSession(user, session.ScopeAccount)
+	submit := func(command platform.ID, response []byte) *fleetv1.FleetServiceSubmitNodeTaskResponse {
+		answers <- response
+		h.proveFor(issued, user, "fleet.submitNodeTask", node.node.ID)
+		return h.submit(issued.AccessToken, command, node.node.ID, submitPayload(t, command, "HANDLER"))
+	}
+	dnh, unknown := foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN, foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN
+	// Case A.
+	first := platform.NewID()
+	if reply := submit(first, handlerError(t, dnh)); reply.GetError() != nil {
+		t.Fatalf("a first attempt's handler error is the node's response: %v", reply.GetError())
+	}
+	if got := h.record(user, first); got.State != fleet.RoutedFailed || got.Final {
+		t.Fatalf("a first attempt FAILED with DID_NOT_HAPPEN: %+v", got)
+	}
+	if failure := submit(first, handlerError(t, dnh)).GetError(); !unknownSameCommand(failure) {
+		t.Fatalf("case A, the resend: %v", failure)
+	}
+	if got := h.record(user, first); got.State != fleet.RoutedUnknown || got.Refusal == nil || *got.Refusal != fleet.RefusalCode("resource/overloaded") {
+		t.Fatalf("case A, the record: %+v", got)
+	}
+	// Case B: the record is UNKNOWN now; a resend answered with an UNKNOWN effect, then one without an effect.
+	for _, effect := range []foundationv1.EffectCertainty{unknown, foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNSPECIFIED} {
+		if failure := submit(first, handlerError(t, effect)).GetError(); !unknownSameCommand(failure) {
+			t.Fatalf("case B (%s), the resend: %v", effect, failure)
+		}
+		if got := h.record(user, first); got.State != fleet.RoutedUnknown || got.Final {
+			t.Fatalf("case B (%s), the record: %+v", effect, got)
+		}
+	}
+	// A first attempt without an effect is UNKNOWN, not FAILED.
+	other := platform.NewID()
+	if reply := submit(other, handlerError(t, foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNSPECIFIED)); reply.GetError() != nil {
+		t.Fatal(reply.GetError())
+	}
+	if got := h.record(user, other); got.State != fleet.RoutedUnknown {
+		t.Fatalf("a handler error without an effect: %+v", got)
+	}
+	// HAPPENED: the node's answer, final.
+	happened := handlerError(t, foundationv1.EffectCertainty_EFFECT_CERTAINTY_HAPPENED)
+	if reply := submit(first, happened); reply.GetError() != nil || !bytes.Equal(reply.GetValue().GetResponse(), happened) {
+		t.Fatalf("a resend answered HAPPENED: %v", reply)
+	}
+	if got := h.record(user, first); got.State != fleet.RoutedFailed || !got.Final {
+		t.Fatalf("after HAPPENED: %+v", got)
+	}
+}
+
+// TestTheAdmissionsNotFoundFollowsTheRecord (R2, review A C2-N4): a node revoked between the ownership stage and the admission is
+// STATE/not_found for a new command, and node_unreachable UNKNOWN SAME_COMMAND for a command whose record may have reached it; neither
+// writes.
+func TestTheAdmissionsNotFoundFollowsTheRecord(t *testing.T) {
+	h := routedHarness(t)
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	fence, _ := h.center.Hub.Routable()
+	command := platform.NewID()
+	accept := func(command platform.ID) error {
+		_, err := fleet.AcceptRouted(context.Background(), h.db.Runtime, fleet.RoutedAccept{AccountID: user, NodeID: node.node.ID, CommandID: command, Method: 1,
+			Caller: fleet.RoutedCaller{Kind: fleet.RoutedCallerSession, SessionID: platform.NewID(), Actor: identity.Actor(user)}, Digest: make([]byte, 32),
+			RequestSHA256: make([]byte, 32), Size: 10, Fence: fence, Window: time.Hour, InFlight: func() bool { return false }, Online: func() bool { return true },
+			Now: time.Now()})
+		return err
+	}
+	if err := accept(command); err != nil {
+		t.Fatal(err)
+	}
+	h.db.Exec("UPDATE fleet.node SET revoked_at = now(), revoke_reason = 1, rev = rev + 1 WHERE node_id = '" + node.node.ID.String() + "'")
+	var refusal *arc.Refusal
+	if err := accept(command); !errors.As(err, &refusal) || refusal.Code != "node_unreachable" || refusal.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN ||
+		refusal.Retry != foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND {
+		t.Fatalf("a resend to the revoked node: %v", err)
+	}
+	if err := accept(platform.NewID()); !errors.As(err, &refusal) || refusal.Code != "not_found" {
+		t.Fatalf("a new command to the revoked node: %v", err)
+	}
+	if got := h.record(user, command); got.Attempts != 1 || h.count("SELECT count(*) FROM fleet.routed_call") != 1 {
+		t.Fatalf("a refused admission wrote: %+v", got)
 	}
 }

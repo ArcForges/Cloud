@@ -183,3 +183,14 @@ func TestTheRecordDigestBindsTheCallerClassNotTheCorrelation(t *testing.T) {
 		t.Fatal("the caller class and the request are digested")
 	}
 }
+
+// TestAHandlerErrorWithoutAnEffectIsUnknown (review B N-15): an EXECUTED response whose handler error states no effect counts as
+// UNKNOWN, never as DID_NOT_HAPPEN.
+func TestAHandlerErrorWithoutAnEffectIsUnknown(t *testing.T) {
+	response := marshal(t, &nodev1.TaskServiceSubmitTaskResponse{Outcome: &nodev1.TaskServiceSubmitTaskResponse_Error{Error: &foundationv1.ArcError{
+		Code: proto.String("overloaded"), Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE.Enum()}}})
+	answer := answerOf(relayv1.RoutedMethod_ROUTED_METHOD_SUBMIT_NODE_TASK, RoutedResult{Outcome: relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED, Response: response}, nil)
+	if !answer.HandlerError || answer.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN || answer.Refusal != "resource/overloaded" {
+		t.Fatalf("the answer: %+v", answer)
+	}
+}

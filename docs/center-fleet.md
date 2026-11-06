@@ -194,20 +194,28 @@ have reached the node: ACCEPTED, delivered, UNKNOWN or final.
 - **R0.** Every reply uses a pair the Contracts catalogue (`e67a6b0`) allows for its code.
 - **R1.** Every outcome of routing a resend is `STATE/node_unreachable` with UNKNOWN and SAME_COMMAND: the admission's offline and
   fence refusals, the hub's own refusals and deadlines (offline, a full queue or a bound, the lease moved), and every node-signed refusal
-  (policy, verification, `expired`). The node's own code is kept in the record's refusal code and the audit row, and a node's
-  DID_NOT_HAPPEN refusal of a resend leaves the record UNKNOWN (`TestAResendThatMayHaveReachedTheNodeIsNeverDidNotHappen`,
-  `TestANodeRefusalOfAResendIsUnknown`).
+  (policy, verification, `expired`), and the handler's own error in an EXECUTED response whose effect is not HAPPENED (a transient or
+  pre-deduplication error, or an unknown effect; a handler error without an effect counts as UNKNOWN, never as DID_NOT_HAPPEN). The
+  node's own code is kept in the record's refusal code and the audit row, and such an answer leaves the record UNKNOWN; so the reply
+  never depends on the order in which the node replays (`TestAResendThatMayHaveReachedTheNodeIsNeverDidNotHappen`,
+  `TestANodeRefusalOfAResendIsUnknown`, `TestAHandlerErrorOfAResendIsUnknown`). Its reason is `channel_closed` because the catalogue
+  has no closer reason for it.
 - **R2.** A `STATE/not_found` of a Submit or Cancel (the node revoked meanwhile, at the ownership stage or at the admission) consults
   the caller's own record by `(account, command_id)`, so it is no ownership oracle: when the record names that node and may have
-  reached it, the reply is `STATE/node_unreachable` UNKNOWN SAME_COMMAND (`TestARevocationDuringAnInFlightCallAnswersResendsUnknown`).
+  reached it, the reply is `STATE/node_unreachable` UNKNOWN SAME_COMMAND (`TestARevocationDuringAnInFlightCallAnswersResendsUnknown`,
+  `TestTheAdmissionsNotFoundFollowsTheRecord`).
   Reads keep `not_found`.
-- **R3.** The refusals made before routing that ask for the same command later keep their catalogue pairs (AFTER_TIME; they never
-  invite a new command ID): `RESOURCE/rate_limited` (the routed controls), the gate (`ENTITLEMENT/feature_not_entitled`, or
-  `RESOURCE/overloaded` when it cannot decide), the admission's store failure `RESOURCE/overloaded`, and a failed `access.authorized`
-  append (`RESOURCE/overloaded`) (`TestAResendOverTheQuotaKeepsItsPair`).
+- **R3.** Refusals decided before routing keep their catalogue pairs, because they concern the caller or the account, not this command;
+  a new command ID would be refused the same way. The AFTER_TIME ones ask for the same command later: `RESOURCE/rate_limited` (the
+  routed controls), the admission's store failure `RESOURCE/overloaded` (and the gate's, when it cannot decide), and a failed
+  `access.authorized` append (`RESOURCE/overloaded`) (`TestAResendOverTheQuotaKeepsItsPair`). The NEVER ones are
+  `ENTITLEMENT/feature_not_entitled` (accepted on a resend as intended), the authorizer's `AUTHORIZATION/permission_denied` (a
+  restricted account, the scope or the principal), the relay assertion's `AUTHENTICATION/unauthenticated`, and the ingress's credential
+  refusals.
 - **R4.** `replay_window_passed` is the catalogue's `STATE/invalid_state` with DID_NOT_HAPPEN and NEVER, its `state.resource` naming the
-  recorded task where it is known: the one DID_NOT_HAPPEN reply to a resend; its effect describes this delivery (Design errors.md),
-  and the caller reads it as "may have run, see the named task", never as a reason for a new command ID.
+  recorded task where it is known: the one DID_NOT_HAPPEN reply on a resend that concerns the command itself, and it names the task;
+  its effect describes this delivery (Design errors.md), and the caller reads it as "may have run, see the named task", never as a
+  reason for a new command ID.
 - **R5.** Refusals that ask the caller to act (step-up, `command_id_reused`, a validation error) keep their own pairs. A refusal code is a smallint of the fixed, append-only table
   `fleet.refusal_code` (decisions B-2; `fleet.RefusalCode`, 0 for a code outside it; `TestTheRefusalCodesAreFixed`,
   `TestTheRefusalCodeTableIsTheMigrations`).
@@ -255,7 +263,9 @@ the first is still executing) is UNKNOWN, never FAILED or final (`TestANodeRefus
 node's in-progress answer to a duplicate carries effect UNKNOWN (its code from the existing catalogue). **Binding for the node (N2b decisions B-1):** a handler error of an EXECUTED result carries effect HAPPENED only when the
 node recorded the command's outcome; a transient or pre-deduplication error (`node_stopping`, `overloaded`, a validation error) carries
 DID_NOT_HAPPEN, which the center records FAILED and not final, so a resend is routed again
-(`TestTheFinalityOfANodeRefusalFollowsItsEffect`).
+(`TestTheFinalityOfANodeRefusalFollowsItsEffect`). **Binding for the node (review A C2-N3):** the node's replay and its in-progress answer compare the caller class that the
+center's record digest uses: for an account session the account and the user, never the session ID; for a relay the relaying node and
+the local origin, never the local session ID.
 
 **Audit.** `fleet.routed.accepted` (each admitted attempt or join), `fleet.routed.result` (each settlement), `fleet.routed.refused`
 (a mutation refused `node_offline`) and `fleet.routed.replay_differs`: method, node, attempt, closed codes, digests and sizes, never
