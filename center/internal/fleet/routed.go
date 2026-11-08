@@ -143,8 +143,8 @@ func offlineRefusal(nodeID platform.ID, now time.Time) error {
 }
 
 // mayHaveReached reports whether a record's command may have reached the node: it was delivered, or an attempt was admitted (ACCEPTED,
-// in flight here or not). A call for such a record is a resend: its routing outcomes, and a not_found after the node's revocation, are
-// STATE/node_unreachable, UNKNOWN with SAME_COMMAND (decisions R1, R2).
+// in flight here or not). A call for such a record is a resend: its routing failures and non-comparable handler errors, and a not_found
+// after the node's revocation, are STATE/node_unreachable, UNKNOWN with SAME_COMMAND (decisions R1, R2).
 func (r *routedRow) mayHaveReached() bool {
 	return r != nil && (r.delivered || r.state == RoutedAccepted)
 }
@@ -373,6 +373,12 @@ type RoutedAnswer struct {
 	ExecutedAt     time.Time
 }
 
+// ComparableReplay reports whether this verified answer can represent a replay of a recorded final outcome. An EXECUTED handler
+// error whose effect is not HAPPENED may have been decided before the node's deduplication, so its digest is not comparable.
+func (answer RoutedAnswer) ComparableReplay() bool {
+	return answer.Verified && answer.Outcome == 1 && (!answer.HandlerError || answer.Effect == foundationv1.EffectCertainty_EFFECT_CERTAINTY_HAPPENED)
+}
+
 // RoutedSettle is the settlement (Tx2) of one attempt.
 type RoutedSettle struct {
 	Request   Request
@@ -386,8 +392,8 @@ type RoutedSettle struct {
 	Now       time.Time
 }
 
-// RoutedSettled is what a settlement found: ReplayDiffers when a final record's resend was answered with an executed outcome whose
-// digest is not the record's (Q-5).
+// RoutedSettled is what a settlement found: ReplayDiffers when a final record's resend was answered with a comparable executed
+// outcome whose digest is not the record's (Q-5).
 type RoutedSettled struct {
 	State         RoutedState
 	ReplayDiffers bool
@@ -429,9 +435,9 @@ func settled(answer RoutedAnswer, delivered bool) (RoutedState, bool, bool) {
 }
 
 // SettleRouted writes one attempt's answer (Tx2), guarded by the attempt number: a record that a later attempt took over, or that is
-// final, keeps its state (a final record's resend compares the executed outcome's digest with the record's; another one is
-// replay_digest_differs). fleet.routed.result is appended in the same transaction, and fleet.routed.replay_differs for a differing
-// replay. The caller runs it on a context detached from the request, and retries it; a settlement that is never written leaves the
+// final, keeps its state (a final record's resend compares a comparable executed outcome's digest with the record's; a different
+// comparable outcome is replay_digest_differs). fleet.routed.result is appended in the same transaction, and fleet.routed.replay_differs
+// for a differing comparable replay. The caller runs it on a context detached from the request, and retries it; a settlement that is never written leaves the
 // record ACCEPTED, which counts as one that may have reached the node.
 func SettleRouted(ctx context.Context, db *store.DB, settle RoutedSettle) (RoutedSettled, error) {
 	var result RoutedSettled
@@ -451,7 +457,7 @@ func SettleRouted(ctx context.Context, db *store.DB, settle RoutedSettle) (Route
 		switch {
 		case locked.final:
 			reason = "replay"
-			result.ReplayDiffers = answer.Verified && answer.Outcome == 1 && !equal(answer.OutcomeSHA256, locked.outcome)
+			result.ReplayDiffers = answer.ComparableReplay() && !equal(answer.OutcomeSHA256, locked.outcome)
 		case locked.attempts != settle.Attempt:
 			reason = "superseded"
 		default:

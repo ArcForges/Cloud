@@ -192,14 +192,14 @@ the record in turn, by the coordinator's rule for a resend. A resend is a Submit
 have reached the node: ACCEPTED, delivered, UNKNOWN or final.
 
 - **R0.** Every reply uses a pair the Contracts catalogue (`e67a6b0`) allows for its code.
-- **R1.** Every outcome of routing a resend is `STATE/node_unreachable` with UNKNOWN and SAME_COMMAND: the admission's offline and
-  fence refusals, the hub's own refusals and deadlines (offline, a full queue or a bound, the lease moved), and every node-signed refusal
-  (policy, verification, `expired`), and the handler's own error in an EXECUTED response whose effect is not HAPPENED (a transient or
-  pre-deduplication error, or an unknown effect; a handler error without an effect counts as UNKNOWN, never as DID_NOT_HAPPEN). The
-  node's own code is kept in the record's refusal code and the audit row, and such an answer leaves the record UNKNOWN; so the reply
-  never depends on the order in which the node replays (`TestAResendThatMayHaveReachedTheNodeIsNeverDidNotHappen`,
-  `TestANodeRefusalOfAResendIsUnknown`, `TestAHandlerErrorOfAResendIsUnknown`). Its reason is `channel_closed` because the catalogue
-  has no closer reason for it.
+- **R1.** The admission's offline and fence refusals, the hub's routing failures and deadlines (offline, a full queue or a bound, the
+  lease moved), node-signed refusals (policy, verification, `expired`), and an EXECUTED handler error whose effect is not HAPPENED
+  are `STATE/node_unreachable` with UNKNOWN and SAME_COMMAND. A handler error without an effect counts as UNKNOWN, never as
+  DID_NOT_HAPPEN. A non-final record becomes UNKNOWN, keeping the node's refusal code when a verified node error supplies one; a final
+  record keeps its previous outcome and refusal. The attempt's code, when supplied, is in the result audit in both cases. Matching successful or HAPPENED replays retain the node's answer; a
+  genuinely different comparable replay is `replay_digest_differs` with UNKNOWN and NEVER. A node refusal's reason is `channel_closed`
+  because the catalogue has no closer reason (`TestAResendThatMayHaveReachedTheNodeIsNeverDidNotHappen`,
+  `TestANodeRefusalOfAResendIsUnknown`, `TestAFinalOutcomeSurvivesAnIndeterminateHandlerError`).
 - **R2.** A `STATE/not_found` of a Submit or Cancel (the node revoked meanwhile, at the ownership stage or at the admission) consults
   the caller's own record by `(account, command_id)`, so it is no ownership oracle: when the record names that node and may have
   reached it, the reply is `STATE/node_unreachable` UNKNOWN SAME_COMMAND (`TestARevocationDuringAnInFlightCallAnswersResendsUnknown`,
@@ -212,10 +212,9 @@ have reached the node: ACCEPTED, delivered, UNKNOWN or final.
   `ENTITLEMENT/feature_not_entitled` (accepted on a resend as intended), the authorizer's `AUTHORIZATION/permission_denied` (a
   restricted account, the scope or the principal), the relay assertion's `AUTHENTICATION/unauthenticated`, and the ingress's credential
   refusals.
-- **R4.** `replay_window_passed` is the catalogue's `STATE/invalid_state` with DID_NOT_HAPPEN and NEVER, its `state.resource` naming the
-  recorded task where it is known: the one DID_NOT_HAPPEN reply on a resend that concerns the command itself, and it names the task;
-  its effect describes this delivery (Design errors.md), and the caller reads it as "may have run, see the named task", never as a
-  reason for a new command ID.
+- **R4.** `replay_window_passed` is the catalogue's `STATE/invalid_state` with DID_NOT_HAPPEN and NEVER: this delivery did not happen,
+  but the command may already have run. Its `state.resource` names the recorded task where known; an UNKNOWN record may have no task ID.
+  The caller must not create a new command ID solely because the replay window passed, even when no task is named. N3 carries this rule.
 - **R5.** Refusals that ask the caller to act (step-up, `command_id_reused`, a validation error) keep their own pairs. A refusal code is a smallint of the fixed, append-only table
   `fleet.refusal_code` (decisions B-2; `fleet.RefusalCode`, 0 for a code outside it; `TestTheRefusalCodesAreFixed`,
   `TestTheRefusalCodeTableIsTheMigrations`).
@@ -250,9 +249,10 @@ step-up evidence (account session) or one center relay nonce (relay) per deliver
 
 **Resends.** The center never answers a resend from its record: a final record's resend is routed again (fresh step-up evidence for an
 account session, N-3; a fresh relay assertion for a relay) and the node's deduplication replays the recorded outcome. The replayed
-EXECUTED outcome is compared with the record's outcome digest: SHA-256 of the node.v1 response as transmitted with its `ResponseMeta`
-(field 1) left out and, in every `ArcError` of the outcome, its `correlation_id` and `retry.retry_at` left out (`OutcomeDigest`,
-decisions Q-5). Another digest is `STATE/node_unreachable` `replay_digest_differs` (UNKNOWN, NEVER), audited
+EXECUTED successful outcome or handler error with effect HAPPENED is compared with the record's outcome digest: SHA-256 of the
+node.v1 response as transmitted with its `ResponseMeta` (field 1) left out and, in every `ArcError` of the outcome, its `correlation_id`
+and `retry.retry_at` left out (`OutcomeDigest`, decisions Q-5). A non-HAPPENED handler error is not comparable: it may have been
+decided before the node's deduplication. Another comparable digest is `STATE/node_unreachable` `replay_digest_differs` (UNKNOWN, NEVER), audited
 `fleet.routed.replay_differs` (`TestAReplayedOutcomeWithAnotherDigestIsUnknownAndAudited`). **Binding for N2:** the node replays a
 recorded outcome byte for byte outside those three fields.
 

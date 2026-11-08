@@ -300,3 +300,103 @@ func TestTheAdmissionsNotFoundFollowsTheRecord(t *testing.T) {
 		t.Fatalf("a refused admission wrote: %+v", got)
 	}
 }
+
+// TestAFinalOutcomeSurvivesAnIndeterminateHandlerError exercises final SUCCEEDED and FAILED records against verified handler errors
+// decided before replay. These errors are not comparable to the recorded result, but their refusal is still audited. Matching and
+// genuinely different final outcomes retain their usual replay semantics.
+func TestAFinalOutcomeSurvivesAnIndeterminateHandlerError(t *testing.T) {
+	h := routedHarness(t)
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	channel := h.connect(node)
+	answers := make(chan []byte, 8)
+	serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
+		response := <-answers
+		return node.node.Executed(call, response), response, true
+	})
+	issued := h.accountSession(user, session.ScopeAccount)
+	stopping := func(effect foundationv1.EffectCertainty) []byte {
+		value := &foundationv1.ArcError{Code: proto.String("node_stopping"), Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE.Enum()}
+		if effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNSPECIFIED {
+			value.Effect = effect.Enum()
+		}
+		return marshalInner(t, &nodev1.TaskServiceSubmitTaskResponse{Outcome: &nodev1.TaskServiceSubmitTaskResponse_Error{Error: value}})
+	}
+	snapshot := func(command platform.ID) string {
+		var value string
+		err := h.db.Migration.QueryRow(context.Background(), `SELECT row_to_json(r)::text FROM (
+  SELECT state, delivered, task_id, encode(outcome_sha256, 'hex') AS outcome, encode(response_sha256, 'hex') AS response,
+         response_size, executed_at, refusal, final_at
+  FROM fleet.routed_call WHERE account_id = $1 AND command_id = $2) AS r`, user, command).Scan(&value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	task := platform.NewID()
+	success := submitResponse(t, task, "FINAL")
+	failed := handlerError(t, foundationv1.EffectCertainty_EFFECT_CERTAINTY_HAPPENED)
+	var changedError nodev1.TaskServiceSubmitTaskResponse
+	if err := proto.Unmarshal(failed, &changedError); err != nil {
+		t.Fatal(err)
+	}
+	changedError.GetError().MessageKey = proto.String("error.changed_final_outcome")
+	cases := []struct {
+		name      string
+		state     fleet.RoutedState
+		initial   []byte
+		different []byte
+	}{
+		{"succeeded", fleet.RoutedSucceeded, success, submitResponse(t, task, "DIFFERENT")},
+		{"failed", fleet.RoutedFailed, failed, marshalInner(t, &changedError)},
+	}
+	for _, test := range cases {
+		command := platform.NewID()
+		payload := submitPayload(t, command, "FINAL-"+test.name)
+		submit := func(response []byte) *fleetv1.FleetServiceSubmitNodeTaskResponse {
+			answers <- response
+			h.proveFor(issued, user, "fleet.submitNodeTask", node.node.ID)
+			return h.submit(issued.AccessToken, command, node.node.ID, payload)
+		}
+		if reply := submit(test.initial); reply.GetError() != nil || !bytes.Equal(reply.GetValue().GetResponse(), test.initial) {
+			t.Fatalf("%s initial answer: %v", test.name, reply)
+		}
+		if got := h.record(user, command); got.State != test.state || !got.Final {
+			t.Fatalf("%s initial record: %+v", test.name, got)
+		}
+		original := snapshot(command)
+		if reply := submit(test.initial); reply.GetError() != nil || !bytes.Equal(reply.GetValue().GetResponse(), test.initial) {
+			t.Fatalf("%s matching replay: %v", test.name, reply)
+		}
+		for index, effect := range []foundationv1.EffectCertainty{
+			foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN,
+			foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN,
+			foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNSPECIFIED,
+		} {
+			if failure := submit(stopping(effect)).GetError(); !unknownSameCommand(failure) {
+				t.Fatalf("%s transient %s: %v", test.name, effect, failure)
+			}
+			if got := snapshot(command); got != original {
+				t.Fatalf("%s transient %s changed the final outcome: before %s after %s", test.name, effect, original, got)
+			}
+			if got := h.count(`SELECT count(*) FROM audit.audit_event WHERE event_type = 'fleet.routed.result' AND command_id = $1 AND
+    reason = 'replay' AND (convert_from(payload, 'UTF8')::jsonb->>'refusal')::int = $2`, command, int(fleet.RefusalCode("state/node_stopping"))); got != index+1 {
+				t.Fatalf("%s transient %s: %d audited refusal results, want %d", test.name, effect, got, index+1)
+			}
+			if got := h.count("SELECT count(*) FROM audit.audit_event WHERE event_type = 'fleet.routed.replay_differs' AND command_id = $1", command); got != 0 {
+				t.Fatalf("%s transient %s: %d false replay-differs events", test.name, effect, got)
+			}
+		}
+		failure := submit(test.different).GetError()
+		if errorKey(failure) != "STATE/node_unreachable" || failure.GetDetails().GetState().GetReason() != "replay_digest_differs" ||
+			failure.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN || failure.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_NEVER {
+			t.Fatalf("%s genuinely different replay: %v", test.name, failure)
+		}
+		if got := h.count("SELECT count(*) FROM audit.audit_event WHERE event_type = 'fleet.routed.replay_differs' AND command_id = $1", command); got != 1 {
+			t.Fatalf("%s differing replay: %d replay-differs events", test.name, got)
+		}
+		if got := snapshot(command); got != original {
+			t.Fatalf("%s differing replay changed the final outcome: before %s after %s", test.name, original, got)
+		}
+	}
+}

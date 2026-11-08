@@ -49,3 +49,24 @@ func TestTheSettledStateFollowsTheAnswer(t *testing.T) {
 		}
 	}
 }
+
+func TestComparableReplayRequiresARecordedOutcome(t *testing.T) {
+	cases := []struct {
+		name       string
+		answer     RoutedAnswer
+		comparable bool
+	}{
+		{"unverified", RoutedAnswer{Outcome: 1}, false},
+		{"node refusal", RoutedAnswer{Verified: true, Outcome: 2}, false},
+		{"success", RoutedAnswer{Verified: true, Outcome: 1}, true},
+		{"happened handler error", RoutedAnswer{Verified: true, Outcome: 1, HandlerError: true, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_HAPPENED}, true},
+		{"did not happen handler error", RoutedAnswer{Verified: true, Outcome: 1, HandlerError: true, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN}, false},
+		{"unknown handler error", RoutedAnswer{Verified: true, Outcome: 1, HandlerError: true, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN}, false},
+		{"unspecified handler error", RoutedAnswer{Verified: true, Outcome: 1, HandlerError: true, Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNSPECIFIED}, false},
+	}
+	for _, test := range cases {
+		if got := test.answer.ComparableReplay(); got != test.comparable {
+			t.Errorf("%s: comparable = %v, want %v", test.name, got, test.comparable)
+		}
+	}
+}

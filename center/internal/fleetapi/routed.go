@@ -659,14 +659,14 @@ func (r *Registry) attempt(key routedKey, current *attempt, routedCall RoutedCal
 	case (decision.Delivered || decision.Final) && answer.Verified && answer.HandlerError &&
 		answer.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_HAPPENED:
 		// The handler's error of a resend that did not say HAPPENED (a transient or pre-deduplication error, or an unknown effect; review B
-		// B-6): node_unreachable, UNKNOWN with SAME_COMMAND (R1); the node's code is kept in the record and the audit row. So the reply
-		// never depends on the order in which the node replays.
+		// B-6): node_unreachable, UNKNOWN with SAME_COMMAND (R1). A non-final record becomes UNKNOWN and keeps the node's code; a final
+		// record keeps its outcome. The attempt's code is audited in both cases. The reply does not depend on the node's replay order.
 		current.err = arc.NodeUnreachable(routedCall.TargetNodeID[:], arc.UnreachableChannelClosed, true)
-	case decision.Final && answer.Verified && answer.Outcome == int32(relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED) && !equalDigest(answer.OutcomeSHA256, decision.OutcomeSHA256):
+	case decision.Final && answer.ComparableReplay() && !equalDigest(answer.OutcomeSHA256, decision.OutcomeSHA256):
 		r.observe("replay_differs")
 		current.err = arc.ReplayDigestDiffers(routedCall.TargetNodeID[:])
 	case err != nil && (decision.Delivered || decision.Final) && answer.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN:
-		// Every routing outcome of a resend (decisions R1) is node_unreachable, UNKNOWN with SAME_COMMAND, whatever this attempt's own
+		// A routing failure of a resend (decisions R1) is node_unreachable, UNKNOWN with SAME_COMMAND, whatever this attempt's own
 		// refusal said (offline, a full queue, a bound, its deadline before delivery).
 		reason := arc.UnreachableChannelClosed
 		if refusal, ok := err.(*arc.Refusal); ok && refusal.Code == "node_unreachable" {
@@ -676,8 +676,8 @@ func (r *Registry) attempt(key routedKey, current *attempt, routedCall RoutedCal
 	case err != nil:
 		current.err = err
 	case (decision.Delivered || decision.Final) && result.Outcome != relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED:
-		// A node-signed refusal of a resend (decisions R1): node_unreachable, UNKNOWN with SAME_COMMAND; the node's own code is kept in
-		// the record and the audit row.
+		// A node-signed refusal of a resend (decisions R1): node_unreachable, UNKNOWN with SAME_COMMAND. A non-final record keeps the
+		// node's code; a final record keeps its outcome. The attempt's code is audited in both cases.
 		current.err = arc.NodeUnreachable(routedCall.TargetNodeID[:], arc.UnreachableChannelClosed, true)
 	case result.Outcome != relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED:
 		current.err = refusalOf(result)
