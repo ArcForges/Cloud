@@ -653,7 +653,11 @@ test("the fetch refuses a sealed manifest that names another commit, run, versio
     fetchWith(t, sealed(), {
       extra: (target) => {
         mkdirSync(path.join(target, "..", "elsewhere"), { recursive: true });
-        symlinkSync(path.join(target, "..", "elsewhere"), path.join(target, "link"));
+        symlinkSync(
+          path.join(target, "..", "elsewhere"),
+          path.join(target, "link"),
+          process.platform === "win32" ? "junction" : "dir",
+        );
       },
     }).run,
     /link is not a regular file/u,
