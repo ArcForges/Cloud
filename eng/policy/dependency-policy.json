@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "9c8d83ae6ae250b06e0e8e6057e624438ab0bbb4",
+  "sourceCommit": "50c71b3b4cc4982e3d90c43000d52cfb95f185b9",
   "manifests": ["package.json"],
   "inputs": {
-    ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
+    ".github/workflows/ci.yml": "9942870cd4ff1332993b8385ed24da1f4cd7a4c8176e196568b2d180f84811c6",
     ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
     ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
     "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
@@ -73,6 +73,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r103.json": "1a23ef91ef2d6039f7b7d81aff0ac7d715f201389f669c42619b1d9425124b93",
     "eng/provenance/artifact-profiles/cloud-release-r104.json": "7fccd6dc91398ad21fc6a09d82211fca0ed2559918f706c6b8a7b209ec5b6ac9",
     "eng/provenance/artifact-profiles/cloud-release-r105.json": "aadc7b0f4009242440505c92f65ef5383b9ff6a673f3c3529e73daa62a70ae16",
+    "eng/provenance/artifact-profiles/cloud-release-r106.json": "4611b78ebac0d1b39b056cec1182b9f4fc7fb8fe12c61af59545e31f55ad6e1c",
     "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
     "eng/provenance/records/center-runtime-r10.json": "f48e644fec2814d5c2669b517e0ec276d8051c5ca82be1c255efc9403f9bbc03",
     "eng/provenance/records/center-runtime-r11.json": "2684a8b7a960382d94904f80e8a814d22cfc9ef3796b42eaeee67a9065b0f92f",
@@ -117,6 +118,7 @@
     "eng/provenance/records/center-runtime-r49.json": "343bb763a98ad3180a641772521a770453b85cbfa7ed0633677a94be1190f808",
     "eng/provenance/records/center-runtime-r50.json": "52eaf6bf6703c3c94f20faf5a0f02efb976fc13b53bed18bfb041db5a1a3b104",
     "eng/provenance/records/center-runtime-r51.json": "db6972a5b9071854e5a4fe742c491335ded55839ec9653d97ac7f4cafa7cb2ba",
+    "eng/provenance/records/center-runtime-r52.json": "2e4d3dcd279046cb06a72fb7b891277401ae2cfa7b3175fa95b695ef61a1a6e4",
     "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
     "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
     "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
@@ -167,6 +169,7 @@
     "eng/provenance/records/center-worker-r49.json": "80c4d8e96ecedf5f88cd7e3097f29253c6ffe2ff091daf9e2d0b66919c6ba18f",
     "eng/provenance/records/center-worker-r50.json": "27f2b2f71c1e660bbde773705ec8c8689a8413142ba02b51f8b2567a2fa639bc",
     "eng/provenance/records/center-worker-r51.json": "f3e4f5584a9d8e2a0f4f840dc56202cdc90b48c35002f21dc6eeccb1a1306c3f",
+    "eng/provenance/records/center-worker-r52.json": "a8c76d4b2fd99a729577f2f40af898479b817f92cbc327440a58770ae5cab4be",
     "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
     "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
     "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
@@ -216,7 +219,7 @@
     "eng/verify_steps.py": "9584fddcd913fa27d94441d79a758093cd33fb18730bb092ef0be9d31064c74d",
     "global.json": "e5a8e714f4feef6cef607d06ef5fa62f65679fc29ab232cae9ea7955f6984f2e",
     "package-lock.json": "9c97c1a409c01c0a705ad32139f4806cfd31f9729dcd62e84015389cfea5248a",
-    "package.json": "ae1a3f2f66cc5795e6eef62ff8fd92dfc3bb834850d0624e95a5313165366491",
+    "package.json": "3d45881df43bbc91d526f0cefaddf180498354a783ef7c61e721c44aaef11f2e",
     "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
     "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "182d8d0f0453368561d78bf88a72a6abff1ae5b3c0d3ec03be45f1dabb55522e",
     "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -271,15 +274,15 @@
     "tooling/release-provenance.ts": "a3763964fe3fd3fabb66fa69aaf2296253c36812cf66e0fc526e5c2d909ee171",
     "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
     "tools/ArcForges.Cloud.Generation/packages.lock.json": "36965c2f5b447302352d2abd554b1a034f9e277753f30583c036c86e14fbd256",
-    "wrangler.json": "741f4e57418a3fbc4ff98a74d97bed1e1bf077f0287f195d217d149691d7bf71"
+    "wrangler.json": "914002252c6cda3d644f1ff9557d4edf3eee9d6f69fc2ba169f89e8d546f79e2"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "Codex (GPT-6.1 Terra), maintainer-authorized source and dependency inventory (AF-CTR-05 delegated author, E2b); independent PR review is recorded separately",
+    "reviewer": "Codex, maintainer-authorized source and dependency inventory (AF-CTR-05 delegated author, E3); independent PR review is recorded separately",
     "date": "2026-11-08",
-    "rationale": "AF-CTR-05 part E2b, review fix round 4 (FleetService's routed task methods on the nodes surface), after af-ctr-05-r15. Nothing new is admitted and nothing is corrected in the dependencies: the locked Go runtime modules and their legal records stay as af-ctr-05-r15 admitted them (the routed API uses only the Go standard library and modules already admitted), and the isolated npm package eng/verification/browser is unchanged. center/go.mod, center/go.sum, center/dependencies.json, package.json, package-lock.json, wrangler.json, the NuGet locks, the Dockerfile, .dockerignore, the base images, the toolchains and .github/workflows/ci.yml are unchanged. The bound inputs that change are the release profile cloud-release-r105 and its successor records center-runtime-r51 and center-worker-r51, which bind the center sources and the unchanged Worker sources as they are at this change. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in an exact-row block of its own, pinned by tests/worker/provenance.test.ts. No D1 or business data migration; the expand-only center migration of part E2b (0010_fleet_routed_call.sql, unmerged) is unchanged in this round. Production stays dark.",
+    "rationale": "AF-CTR-05 part E3 after af-ctr-05-r16. The existing locked Go and npm dependencies, their legal records, NuGet locks, base images and toolchains are unchanged. package.json adds the proof-key test to the existing test command, wrangler.json appends relay and nodes to proof while retaining mobile and keeping production dark, and the CI workflow uploads the public key-stage receipt. The new profile cloud-release-r106 and successor records center-runtime-r52 and center-worker-r52 bind the source commit, local Worker bundle and center image inputs; actual candidate/hosted verification remains separate. No schema migration or new package is introduced.",
     "inputs": {
-      ".github/workflows/ci.yml": "dbc88fcc5a625ae83688bfd4e94240e8463606e3da26cb0eba0dc27ea34a5f5a",
+      ".github/workflows/ci.yml": "9942870cd4ff1332993b8385ed24da1f4cd7a4c8176e196568b2d180f84811c6",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
       ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
       "Directory.Build.props": "594fe799ea787c02d4406e14360c4b1902a5aee8679b76c8ac797ae34a9e792c",
@@ -348,6 +351,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r103.json": "1a23ef91ef2d6039f7b7d81aff0ac7d715f201389f669c42619b1d9425124b93",
       "eng/provenance/artifact-profiles/cloud-release-r104.json": "7fccd6dc91398ad21fc6a09d82211fca0ed2559918f706c6b8a7b209ec5b6ac9",
       "eng/provenance/artifact-profiles/cloud-release-r105.json": "aadc7b0f4009242440505c92f65ef5383b9ff6a673f3c3529e73daa62a70ae16",
+      "eng/provenance/artifact-profiles/cloud-release-r106.json": "4611b78ebac0d1b39b056cec1182b9f4fc7fb8fe12c61af59545e31f55ad6e1c",
       "eng/provenance/records/center-runtime-r1.json": "5878b08d72dda859773f03092aceb1c3706b22443e0c1f7dd1ed1614085ed89b",
       "eng/provenance/records/center-runtime-r10.json": "f48e644fec2814d5c2669b517e0ec276d8051c5ca82be1c255efc9403f9bbc03",
       "eng/provenance/records/center-runtime-r11.json": "2684a8b7a960382d94904f80e8a814d22cfc9ef3796b42eaeee67a9065b0f92f",
@@ -392,6 +396,7 @@
       "eng/provenance/records/center-runtime-r49.json": "343bb763a98ad3180a641772521a770453b85cbfa7ed0633677a94be1190f808",
       "eng/provenance/records/center-runtime-r50.json": "52eaf6bf6703c3c94f20faf5a0f02efb976fc13b53bed18bfb041db5a1a3b104",
       "eng/provenance/records/center-runtime-r51.json": "db6972a5b9071854e5a4fe742c491335ded55839ec9653d97ac7f4cafa7cb2ba",
+      "eng/provenance/records/center-runtime-r52.json": "2e4d3dcd279046cb06a72fb7b891277401ae2cfa7b3175fa95b695ef61a1a6e4",
       "eng/provenance/records/center-runtime-r4.json": "05f230bf94baf2011d24ff14de83b225f05fcadc46b3c0ceb8de6a52270f2703",
       "eng/provenance/records/center-runtime-r5.json": "c2cc9b2127455cc9edfd4d064d1472052502a5691d8c88dc5c9e24ef8971762f",
       "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
@@ -442,6 +447,7 @@
       "eng/provenance/records/center-worker-r49.json": "80c4d8e96ecedf5f88cd7e3097f29253c6ffe2ff091daf9e2d0b66919c6ba18f",
       "eng/provenance/records/center-worker-r50.json": "27f2b2f71c1e660bbde773705ec8c8689a8413142ba02b51f8b2567a2fa639bc",
       "eng/provenance/records/center-worker-r51.json": "f3e4f5584a9d8e2a0f4f840dc56202cdc90b48c35002f21dc6eeccb1a1306c3f",
+      "eng/provenance/records/center-worker-r52.json": "a8c76d4b2fd99a729577f2f40af898479b817f92cbc327440a58770ae5cab4be",
       "eng/provenance/records/center-worker-r4.json": "b7bdedfddea0b91f964e05307579ebaf83596c3cc3aabfb54eca3ab7de38164d",
       "eng/provenance/records/center-worker-r5.json": "bd8e4ef6dd54d845ff1bcb1d2ea20ae3058aea17f27484f81dcb5df85f30be88",
       "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
@@ -491,7 +497,7 @@
       "eng/verify_steps.py": "9584fddcd913fa27d94441d79a758093cd33fb18730bb092ef0be9d31064c74d",
       "global.json": "e5a8e714f4feef6cef607d06ef5fa62f65679fc29ab232cae9ea7955f6984f2e",
       "package-lock.json": "9c97c1a409c01c0a705ad32139f4806cfd31f9729dcd62e84015389cfea5248a",
-      "package.json": "ae1a3f2f66cc5795e6eef62ff8fd92dfc3bb834850d0624e95a5313165366491",
+      "package.json": "3d45881df43bbc91d526f0cefaddf180498354a783ef7c61e721c44aaef11f2e",
       "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj": "77d9489e8d9c99cce08b9b847b41c6c3277ab6ed0435d56a7803d46bc502832c",
       "src/ArcForges.Cloud.Modules.Abstractions/packages.lock.json": "182d8d0f0453368561d78bf88a72a6abff1ae5b3c0d3ec03be45f1dabb55522e",
       "src/ArcForges.Cloud.Modules.Agent/ArcForges.Cloud.Modules.Agent.csproj": "f9cab23f0b2308c8990d9a3557dca34e5cfd7a86453c856552429c6fc1e7d453",
@@ -546,7 +552,7 @@
       "tooling/release-provenance.ts": "a3763964fe3fd3fabb66fa69aaf2296253c36812cf66e0fc526e5c2d909ee171",
       "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
       "tools/ArcForges.Cloud.Generation/packages.lock.json": "36965c2f5b447302352d2abd554b1a034f9e277753f30583c036c86e14fbd256",
-      "wrangler.json": "741f4e57418a3fbc4ff98a74d97bed1e1bf077f0287f195d217d149691d7bf71"
+      "wrangler.json": "914002252c6cda3d644f1ff9557d4edf3eee9d6f69fc2ba169f89e8d546f79e2"
     },
     "checks": [
       "locked-restore",
@@ -557,9 +563,9 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "AF-CTR-05 part E2b, review fix round 4 (FleetService's routed task methods on the nodes surface), after af-ctr-05-r15. Nothing new is admitted and nothing is corrected in the dependencies: the locked Go runtime modules and their legal records stay as af-ctr-05-r15 admitted them (the routed API uses only the Go standard library and modules already admitted), and the isolated npm package eng/verification/browser is unchanged. center/go.mod, center/go.sum, center/dependencies.json, package.json, package-lock.json, wrangler.json, the NuGet locks, the Dockerfile, .dockerignore, the base images, the toolchains and .github/workflows/ci.yml are unchanged. The bound inputs that change are the release profile cloud-release-r105 and its successor records center-runtime-r51 and center-worker-r51, which bind the center sources and the unchanged Worker sources as they are at this change. The secret scan's generic-api-key rule reads the digests of go-gowebauthn-legal-r1 and go-gowebauthnx-legal-r1 in this receipt's inputs map as credentials, so .gitleaks.toml allows exactly those two rows of this receipt in an exact-row block of its own, pinned by tests/worker/provenance.test.ts. No D1 or business data migration; the expand-only center migration of part E2b (0010_fleet_routed_call.sql, unmerged) is unchanged in this round. Production stays dark.",
+    "runtimeAssessment": "AF-CTR-05 part E3 after af-ctr-05-r16. The existing locked Go and npm dependencies, their legal records, NuGet locks, base images and toolchains are unchanged. package.json adds the proof-key test to the existing test command, wrangler.json appends relay and nodes to proof while retaining mobile and keeping production dark, and the CI workflow uploads the public key-stage receipt. The new profile cloud-release-r106 and successor records center-runtime-r52 and center-worker-r52 bind the source commit, local Worker bundle and center image inputs; actual candidate/hosted verification remains separate. No schema migration or new package is introduced.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-05-r15.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-05-r16.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
     "reviewedOn": "2026-11-08",
     "decision": "approved"
@@ -1345,7 +1351,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["center-runtime-r51", "center-worker-r51"],
+  "artifactRecords": ["center-runtime-r52", "center-worker-r52"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1359,7 +1365,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-05-r16.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-05-r17.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
