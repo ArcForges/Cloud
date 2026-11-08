@@ -3,7 +3,9 @@
 import assert from "node:assert/strict";
 import { createPrivateKey, createPublicKey } from "node:crypto";
 import { access, readFile, readdir, stat } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -18,12 +20,29 @@ import {
   type ProofKeyReceipt,
 } from "../../tooling/proof-command-key.ts";
 import { withNeonRuntimeSecret } from "../../tooling/neon-runtime.ts";
-import { runSensitive, SensitiveProcessError } from "../../tooling/sensitive-process.ts";
+import {
+  proofProcessEnvironment,
+  runSensitive,
+  SensitiveProcessError,
+} from "../../tooling/sensitive-process.ts";
 import { CenterExit } from "../../tooling/postgres-deploy.ts";
 import { prepareProofCandidate } from "../../tooling/proof-candidate.ts";
 import { scratchDirectory } from "./support/scratch.ts";
 
 const migration = "postgres://synthetic:synthetic-password@example.test/database";
+const dispatchContext = (revision: string) => ({
+  GITHUB_ACTIONS: "true",
+  GITHUB_REPOSITORY: "ArcForges/Cloud",
+  GITHUB_SHA: revision,
+  GITHUB_EVENT_NAME: "workflow_dispatch",
+  GITHUB_EVENT_PATH: "/synthetic/event.json",
+  GITHUB_RUN_ID: "999",
+  GITHUB_RUN_NUMBER: "560",
+  GITHUB_RUN_ATTEMPT: "1",
+  ARCFORGES_CANDIDATE_RUN_ID: "88",
+  ARCFORGES_CANDIDATE_RUN_NUMBER: "123",
+  ARCFORGES_CANDIDATE_RUN_ATTEMPT: "1",
+});
 const asRegistration = (key: ProofCommandKey) => ({
   kid: key.metadata.kid,
   purpose: "command",
@@ -582,7 +601,7 @@ test("protected candidate orchestration narrows every child environment and veri
   const environment = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
-    GITHUB_SHA: revision,
+    ...dispatchContext(revision),
     GH_TOKEN: "synthetic-gh-token",
     CLOUDFLARE_API_TOKEN: "synthetic-cf-token",
     CLOUDFLARE_ACCOUNT_ID: account,
@@ -610,6 +629,8 @@ test("protected candidate orchestration narrows every child environment and veri
       stage === "push" ? environment.CLOUDFLARE_API_TOKEN : undefined,
     );
     if (stage === "candidate") {
+      assert.equal(childEnv.GITHUB_ACTIONS, "true");
+      assert.equal(childEnv.ARCFORGES_CANDIDATE_RUN_ID, "88");
       assert.equal(command, process.execPath);
       assert.equal(mode, "json");
       return candidate;
@@ -678,6 +699,210 @@ test("protected candidate orchestration narrows every child environment and veri
   }
 });
 
+test(
+  "the protected dispatch child verifies a main-push producer identity with the real source identity code",
+  { timeout: 60000 },
+  async (t) => {
+    const scratch = scratchDirectory("e3-ci-identity-", t);
+    const repository = path.join(scratch, "repository");
+    mkdirSync(repository);
+    const sourceRoot = path.resolve(import.meta.dirname, "../..");
+    for (const name of [
+      "tooling/build-identity.ts",
+      "tooling/process.ts",
+      "eng/version-sources.json",
+      "eng/generated/contracts-identity.json",
+      "Directory.Packages.props",
+      "src/ArcForges.Cloud/packages.lock.json",
+      "package-lock.json",
+    ]) {
+      const target = path.join(repository, name);
+      mkdirSync(path.dirname(target), { recursive: true });
+      copyFileSync(path.join(sourceRoot, name), target);
+    }
+    writeFileSync(path.join(repository, "package.json"), '{"type":"module"}\n');
+    const hooks = path.join(scratch, "empty-hooks");
+    mkdirSync(hooks);
+    const gitEnv = proofProcessEnvironment(process.env);
+    const git = (...args: string[]) =>
+      execFileSync(
+        "git",
+        ["-c", `core.hooksPath=${hooks}`, "-c", "commit.gpgSign=false", ...args],
+        { cwd: repository, env: gitEnv, encoding: "utf8", windowsHide: true },
+      ).trim();
+    git("init", "--quiet");
+    git("add", ".");
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "--quiet",
+      "-m",
+      "synthetic identity fixture",
+    );
+    const commit = git("rev-parse", "HEAD");
+    const moduleUrl = pathToFileURL(path.join(repository, "tooling/build-identity.ts")).href;
+    const version = "0.1.0-ci.547.2";
+    const pushEnvironment = {
+      ...gitEnv,
+      GITHUB_ACTIONS: "true",
+      GITHUB_REPOSITORY: "ArcForges/Cloud",
+      GITHUB_SHA: commit,
+      GITHUB_EVENT_NAME: "push",
+      GITHUB_RUN_ID: "88",
+      GITHUB_RUN_NUMBER: "547",
+      GITHUB_RUN_ATTEMPT: "2",
+    };
+    const produce = `import {expectedIdentity} from ${JSON.stringify(moduleUrl)};process.stdout.write(JSON.stringify(expectedIdentity(${JSON.stringify(version)})));`;
+    const created = spawnSync(process.execPath, ["--input-type=module", "-e", produce], {
+      cwd: repository,
+      env: pushEnvironment,
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 30000,
+    });
+    assert.equal(created.status, 0, "synthetic main-push identity must be produced");
+    const identity = JSON.parse(created.stdout) as { build: { buildId: string } };
+    assert.equal(identity.build.buildId, "88.2");
+    const identityPath = path.join(scratch, "synthetic-main-push-identity.json");
+    writeFileSync(identityPath, JSON.stringify(identity));
+    const eventPath = path.join(scratch, "event.json");
+    writeFileSync(eventPath, "{}\n");
+    const account = "0".repeat(32),
+      imageId = `sha256:${"b".repeat(64)}`;
+    const candidate = {
+      revision: commit,
+      dirty: false,
+      image: "arcforges-cloud:0.1.0-ci.547.2",
+      imageId,
+      version,
+    };
+    const digest = `registry.cloudflare.com/${account}/arcforges-cloud@sha256:${"c".repeat(64)}`;
+    const sentinel = "synthetic-ci-secret-sentinel";
+    const dispatch = {
+      ...gitEnv,
+      GITHUB_ACTIONS: "true",
+      GITHUB_REPOSITORY: "ArcForges/Cloud",
+      GITHUB_SHA: commit,
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_RUN_ID: "999",
+      GITHUB_RUN_NUMBER: "560",
+      GITHUB_RUN_ATTEMPT: "1",
+      ARCFORGES_CANDIDATE_RUN_ID: "88",
+      ARCFORGES_CANDIDATE_RUN_NUMBER: "547",
+      ARCFORGES_CANDIDATE_RUN_ATTEMPT: "2",
+      GH_TOKEN: sentinel,
+      GITHUB_TOKEN: sentinel,
+      CLOUDFLARE_API_TOKEN: sentinel,
+      NEON_DATABASE_URL_DIRECT: sentinel,
+      NEON_DATABASE_URL: sentinel,
+      PROOF_BOOTSTRAP_SHA256: sentinel,
+      PROOF_BOOTSTRAP_EXPIRES_AT: sentinel,
+      NODE_OPTIONS: sentinel,
+    };
+    const check = `import {readFileSync} from 'node:fs';import {verifyIdentity} from ${JSON.stringify(moduleUrl)};
+    for(const name of ['GH_TOKEN','GITHUB_TOKEN','CLOUDFLARE_API_TOKEN','NEON_DATABASE_URL_DIRECT','NEON_DATABASE_URL','PROOF_BOOTSTRAP_SHA256','PROOF_BOOTSTRAP_EXPIRES_AT','NODE_OPTIONS'])
+      if(process.env[name]!==undefined)throw new Error('unexpected secret environment');
+    JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+    verifyIdentity(JSON.parse(readFileSync(process.argv[1],'utf8')),process.argv[2]);
+    process.stdout.write(JSON.stringify(${JSON.stringify(candidate)}));`;
+    const observed: string[] = [];
+    const fakeRunner: typeof runSensitive = async (stage, command, args, childEnv, mode) => {
+      observed.push(stage);
+      if (stage === "candidate")
+        return runSensitive(
+          stage,
+          process.execPath,
+          ["--input-type=module", "-e", check, identityPath, version],
+          childEnv,
+          mode,
+        );
+      if (stage === "head") return { sha: commit };
+      if (stage === "image" && args[0] === "load") return undefined;
+      if (stage === "image" && args[2] === candidate.image) return imageId;
+      if (stage === "image") return [digest];
+      if (stage === "push") return undefined;
+      throw new Error(`unexpected synthetic stage ${command}`);
+    };
+    const verify = (environment: NodeJS.ProcessEnv) =>
+      prepareProofCandidate(
+        account,
+        async (revision) => {
+          assert.equal(revision, commit);
+        },
+        { environment, run: fakeRunner },
+      );
+    assert.deepEqual(await verify(dispatch), { candidate, imageDigest: digest });
+    // A later retry of the same producer run may legitimately consume an earlier candidate attempt.
+    assert.deepEqual(await verify({ ...dispatch, ARCFORGES_CANDIDATE_RUN_ATTEMPT: "3" }), {
+      candidate,
+      imageDigest: digest,
+    });
+    for (const name of [
+      "GITHUB_ACTIONS",
+      "GITHUB_REPOSITORY",
+      "GITHUB_SHA",
+      "GITHUB_EVENT_NAME",
+      "GITHUB_EVENT_PATH",
+      "GITHUB_RUN_ID",
+      "GITHUB_RUN_NUMBER",
+      "GITHUB_RUN_ATTEMPT",
+      "ARCFORGES_CANDIDATE_RUN_ID",
+      "ARCFORGES_CANDIDATE_RUN_NUMBER",
+      "ARCFORGES_CANDIDATE_RUN_ATTEMPT",
+    ] as const) {
+      const badValues =
+        name === "GITHUB_EVENT_PATH"
+          ? [undefined, "", path.join(scratch, "missing-event.json")]
+          : [undefined, "", sentinel];
+      for (const bad of badValues) {
+        observed.length = 0;
+        await assert.rejects(
+          verify({ ...dispatch, [name]: bad }),
+          (error: Error) => !error.message.includes(sentinel),
+          name,
+        );
+        assert(!observed.includes("head") && !observed.includes("push"), name);
+      }
+    }
+    for (const name of [
+      "GITHUB_RUN_ID",
+      "GITHUB_RUN_NUMBER",
+      "GITHUB_RUN_ATTEMPT",
+      "ARCFORGES_CANDIDATE_RUN_ID",
+      "ARCFORGES_CANDIDATE_RUN_NUMBER",
+      "ARCFORGES_CANDIDATE_RUN_ATTEMPT",
+    ] as const) {
+      for (const bad of ["0", "-1", "1.0", "01", "1e3", "1".repeat(17)]) {
+        observed.length = 0;
+        await assert.rejects(verify({ ...dispatch, [name]: bad }));
+        assert.deepEqual(observed, [], `invalid ${name} must fail before any child`);
+      }
+    }
+    for (const change of [
+      { GITHUB_SHA: "a".repeat(40) },
+      { GITHUB_REPOSITORY: "Other/Repo" },
+      { GITHUB_EVENT_NAME: "push" },
+      { ARCFORGES_CANDIDATE_RUN_ID: "89" },
+      { ARCFORGES_CANDIDATE_RUN_NUMBER: "548" },
+      { ARCFORGES_CANDIDATE_RUN_ATTEMPT: "1" },
+    ]) {
+      observed.length = 0;
+      await assert.rejects(verify({ ...dispatch, ...change }));
+      assert(!observed.includes("head") && !observed.includes("push"));
+    }
+    const wrongIdentity = structuredClone(identity);
+    wrongIdentity.build.buildId = "89.2";
+    writeFileSync(identityPath, JSON.stringify(wrongIdentity));
+    observed.length = 0;
+    await assert.rejects(verify(dispatch));
+    assert(!observed.includes("head") && !observed.includes("push"));
+  },
+);
+
 test("protected candidate subprocess output and provider error sentinels are never printed", () => {
   const sentinel = "synthetic-proof-child-secret-47";
   const moduleUrl = new URL("../../tooling/proof-candidate.ts", import.meta.url).href;
@@ -689,7 +914,10 @@ test("protected candidate subprocess output and provider error sentinels are nev
     const candidate={revision,dirty:false,image:"arcforges-cloud:0.1.0-ci.123.1",imageId,version:"0.1.0-ci.123.1"};
     const digest="registry.cloudflare.com/"+account+"/arcforges-cloud@sha256:"+"c".repeat(64);
     const environment={...process.env,GH_TOKEN:process.env.SYNTHETIC, CLOUDFLARE_API_TOKEN:process.env.SYNTHETIC,
-      CLOUDFLARE_ACCOUNT_ID:account,NEON_DATABASE_URL_DIRECT:process.env.SYNTHETIC};
+      CLOUDFLARE_ACCOUNT_ID:account,NEON_DATABASE_URL_DIRECT:process.env.SYNTHETIC,
+      GITHUB_ACTIONS:"true",GITHUB_REPOSITORY:"ArcForges/Cloud",GITHUB_SHA:revision,GITHUB_EVENT_NAME:"workflow_dispatch",
+      GITHUB_EVENT_PATH:"/synthetic/event.json",GITHUB_RUN_ID:"999",GITHUB_RUN_NUMBER:"560",GITHUB_RUN_ATTEMPT:"1",
+      ARCFORGES_CANDIDATE_RUN_ID:"88",ARCFORGES_CANDIDATE_RUN_NUMBER:"123",ARCFORGES_CANDIDATE_RUN_ATTEMPT:"1"};
     let inspections=0;
     const run=async(stage,_command,args,env,mode)=>{
       const value=stage==="candidate"?candidate:stage==="head"?{sha:revision}:
@@ -714,6 +942,7 @@ test("protected candidate subprocess output and provider error sentinels are nev
 test("candidate preparation refuses oversized and failed real child output without advancing", async () => {
   const environment = {
     ...process.env,
+    ...dispatchContext("a".repeat(40)),
     GH_TOKEN: "synthetic-gh",
     CLOUDFLARE_API_TOKEN: "synthetic-cf",
   };

@@ -48,6 +48,36 @@ function verifiedCandidate(value: unknown): ProofCandidate {
   };
 }
 
+/** Only non-secret context needed by the real verifier to reproduce the gated main-push identity. */
+function proofCandidateEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const runFields = [
+    "GITHUB_RUN_ID",
+    "GITHUB_RUN_NUMBER",
+    "GITHUB_RUN_ATTEMPT",
+    "ARCFORGES_CANDIDATE_RUN_ID",
+    "ARCFORGES_CANDIDATE_RUN_NUMBER",
+    "ARCFORGES_CANDIDATE_RUN_ATTEMPT",
+  ] as const;
+  const child = proofProcessEnvironment(environment, [
+    "GITHUB_ACTIONS",
+    "GITHUB_REPOSITORY",
+    "GITHUB_SHA",
+    "GITHUB_EVENT_NAME",
+    "GITHUB_EVENT_PATH",
+    ...runFields,
+  ]);
+  if (
+    child.GITHUB_ACTIONS !== "true" ||
+    child.GITHUB_REPOSITORY !== "ArcForges/Cloud" ||
+    child.GITHUB_EVENT_NAME !== "workflow_dispatch" ||
+    !child.GITHUB_EVENT_PATH?.trim() ||
+    !commitPattern.test(child.GITHUB_SHA ?? "") ||
+    runFields.some((field) => !/^[1-9][0-9]{0,15}$/u.test(child[field] ?? ""))
+  )
+    throw new Error("The proof candidate CI producer context is invalid.");
+  return child;
+}
+
 /** Verifies the candidate and current main, requires the gate, loads/compares its image, then pushes and validates one digest. */
 export async function prepareProofCandidate(
   account: string,
@@ -65,11 +95,7 @@ export async function prepareProofCandidate(
   };
   if (!/^[0-9a-f]{32}$/u.test(account) || !env.GH_TOKEN || !env.CLOUDFLARE_API_TOKEN)
     throw new Error("The protected proof deployment credentials or account are unavailable.");
-  const verifyEnv = proofProcessEnvironment(env, [
-    "GITHUB_SHA",
-    "GITHUB_EVENT_NAME",
-    "GITHUB_EVENT_PATH",
-  ]);
+  const verifyEnv = proofCandidateEnvironment(env);
   const candidate = verifiedCandidate(
     await safeRun(
       "candidate",
@@ -79,6 +105,8 @@ export async function prepareProofCandidate(
       "json",
     ),
   );
+  if (candidate.revision !== verifyEnv.GITHUB_SHA)
+    throw new Error("The sealed proof candidate revision does not match the dispatch.");
   const head = await safeRun(
     "head",
     "gh",

@@ -136,8 +136,10 @@ the exact binding, purpose, algorithm, validity, retirement and full public-key 
 registration and inspection does the deploy combine the private command key and the alternate database credential in a short-lived
 runner-local secrets file for Wrangler. The generated config names only the selected binding. The Go proof entry forwards that exact
 secret only with `relay` enabled; production, C# and relay-disabled paths forward none. Candidate verification and its nested Git
-commands receive no provider or database credential; the main-head query gets only the GitHub token, Docker load/inspect no such
-credentials, Wrangler only the Cloudflare token, and center administration only the database alias it needs. Child output is bounded
+commands receive no provider or database credential. The child receives the non-secret dispatch and gated producer-run identity needed
+to independently verify the sealed main-push candidate; missing, malformed or inconsistent context fails before image promotion.
+The main-head query gets only the GitHub token, Docker load/inspect no such credentials, Wrangler only the Cloudflare token, and center
+administration only the database alias it needs. Child output is bounded
 or discarded and errors are fixed. A deadline terminates the owned Linux process group and bounds waiting even when a child retains a
 pipe; it cannot establish that a remote provider write was cancelled or rolled back. The key's private material is not included in the
 public receipt or checked-in configuration.
