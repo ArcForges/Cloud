@@ -24,7 +24,8 @@ import {
   staleCenterKillMs,
   staleCenterStopMs,
 } from "../tables/center-tables.generated.ts";
-import { centerSurfaces, clientIpHeader } from "../ingress/routes.ts";
+import { centerSurfaces, clientIpHeader, enabledSurfaces } from "../ingress/routes.ts";
+import { isProofCommandKeyBinding } from "./proof-command-key.ts";
 
 export interface CenterEnvironment {
   ARCFORGES_NEON_HELLO?: string;
@@ -37,6 +38,8 @@ export interface CenterEnvironment {
   ARCFORGES_CENTER_IDENTITY_POLICY?: string;
   ARCFORGES_CENTER_ANDROID_APP?: string;
   ARCFORGES_CENTER_DATABASE_URL?: string;
+  /** The protected proof deployment names one selected test-key binding, never its value. */
+  ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING?: string;
   /** The owner bootstrap of a protected proof dispatch (AF-CTR-03 A2): the SHA-256 of a one-time token and its expiry. */
   ARCFORGES_CENTER_BOOTSTRAP_SHA256?: string;
   ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT?: string;
@@ -109,7 +112,10 @@ export interface CenterContainerSettings {
 }
 
 /** The Container settings of the configured Hello runtime; it throws on an unknown runtime or a missing Hello credential. */
-export function centerContainerSettings(center: CenterEnvironment): CenterContainerSettings {
+export function centerContainerSettings(
+  center: CenterEnvironment,
+  options: { proofCommandKey?: boolean } = {},
+): CenterContainerSettings {
   const runtime = center.ARCFORGES_HELLO_RUNTIME;
   const settings: CenterContainerSettings = { envVars: {}, enableInternet: false };
   const go = runtime === "go";
@@ -133,6 +139,16 @@ export function centerContainerSettings(center: CenterEnvironment): CenterContai
     for (const name of mailVariablesOf(center.ARCFORGES_CENTER_MAIL_PROVIDER)) {
       const value: unknown = center[name];
       if (typeof value === "string" && value !== "") settings.envVars[name] = value;
+    }
+    // Only the protected proof entry can select a proof command key; stale or unselected Worker secrets are never forwarded.
+    if (options.proofCommandKey && enabledSurfaces(center.FLAGSHIP_SURFACES).has("relay")) {
+      const binding = center.ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING;
+      if (!isProofCommandKeyBinding(binding))
+        throw new Error("The proof command key binding is missing or invalid.");
+      const value = (center as unknown as Record<string, unknown>)[binding];
+      if (typeof value !== "string" || value === "")
+        throw new Error("The proof command key is missing or invalid.");
+      settings.envVars[binding] = value;
     }
     settings.envVars.ARCFORGES_CENTER_SURFACES = centerSurfaces(center.FLAGSHIP_SURFACES);
     settings.envVars.ARCFORGES_CENTER_CLIENT_IP_HEADER = clientIpHeader;
@@ -158,8 +174,12 @@ export function centerContainerSettings(center: CenterEnvironment): CenterContai
 }
 
 /** Applies the settings to a Container instance. */
-export function applyCenterContainer(container: Container, center: CenterEnvironment): void {
-  const settings = centerContainerSettings(center);
+export function applyCenterContainer(
+  container: Container,
+  center: CenterEnvironment,
+  options: { proofCommandKey?: boolean } = {},
+): void {
+  const settings = centerContainerSettings(center, options);
   if (settings.entrypoint) container.entrypoint = settings.entrypoint;
   container.enableInternet = settings.enableInternet;
   if (Object.keys(settings.envVars).length > 0) container.envVars = settings.envVars;

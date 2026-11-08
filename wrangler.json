@@ -157,7 +157,7 @@
         "ARCFORGES_CENTER_MODE": "official-hosted",
         "ARCFORGES_CENTER_PUBLIC_BASE_URL": "https://proof.arcforges.com/api",
         "ARCFORGES_CENTER_PLAN_CONFIGURATION": "development-fixtures",
-        "FLAGSHIP_SURFACES": "identity,pages,operations,fleet,mobile",
+        "FLAGSHIP_SURFACES": "identity,pages,operations,fleet,mobile,relay,nodes",
         "ALLOWED_ORIGIN": "https://proof.arcforges.com",
         "ARCFORGES_CENTER_ANDROID_APP": "[{\"packageName\":\"com.arcforges.prooftest\",\"sha256CertFingerprints\":[\"33:58:0E:12:2B:9D:69:27:3B:BB:B9:1E:EC:58:D5:A2:B3:79:30:F8:EE:14:E4:20:62:FA:57:EC:23:76:5E:02\"],\"testOnly\":true}]",
         "ARCFORGES_CENTER_IDENTITY_POLICY": "{\"anonymousFlowsLimit\":600,\"anonymousFlowsWindow\":\"1h\"}"

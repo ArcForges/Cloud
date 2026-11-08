@@ -30,7 +30,7 @@ import {
 } from "../../eng/verification/proof-bootstrap.ts";
 import {
   type CandidateConfig,
-  buildProofConfig,
+  buildProofConfig as buildProofConfigWithKey,
   checkProofBootstrap,
   maxBootstrapLeadMs,
   proofBootstrapFromEnvironment,
@@ -48,6 +48,12 @@ import {
   windowsGrantArguments,
   writeUserOnlyFile,
 } from "../../eng/verification/user-only.ts";
+
+const proofTestBinding = `ARCFORGES_CENTER_KEY_PROOF_${"A".repeat(32)}`;
+const buildProofConfig = (
+  candidate: Parameters<typeof buildProofConfigWithKey>[0],
+  options: Parameters<typeof buildProofConfigWithKey>[1],
+) => buildProofConfigWithKey(candidate, { proofCommandKeyBinding: proofTestBinding, ...options });
 
 const root = path.resolve(import.meta.dirname, "../..");
 const script = path.join(root, "eng/verification/proof-bootstrap.ts");
@@ -577,14 +583,14 @@ test("the workflow takes the two inputs for the deploy step only, through the en
 
 test("the deployment record carries the dispatch's digest and expiry, never a token", () => {
   const record = readFileSync(path.join(root, "eng/verification/proof-cloudflare.ts"), "utf8");
-  assert(
-    record.includes(
-      "bootstrap: bootstrap ? { sha256: bootstrap.sha256, expiresAt: bootstrap.expiresAt } : null,",
-    ),
+  assert.match(
+    record,
+    /bootstrap:\s*bootstrap\s*\?\s*\{ sha256: bootstrap\.sha256, expiresAt: bootstrap\.expiresAt \}\s*:\s*null,/u,
   );
   assert(record.includes("const bootstrap = proofBootstrapFromEnvironment(process.env);"));
-  assert(
-    record.includes("    bootstrap,\n  });"),
+  assert.match(
+    record,
+    /bootstrap,\s*\};[\s\S]*?buildProofConfig\(candidateConfig,/u,
     "the validated bootstrap reaches buildProofConfig",
   );
   for (const file of [

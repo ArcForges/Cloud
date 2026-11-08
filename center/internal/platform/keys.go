@@ -97,6 +97,24 @@ ORDER BY not_before, kid`, purpose, at)
 	return keys, store.Sanitize("read the published keys", err)
 }
 
+// FindSigningKey reads the exact row, including a retired or expired key, for protected-deployment reconciliation.
+// Only public metadata is stored in this table. A missing key is distinguished from an unavailable store.
+func FindSigningKey(ctx context.Context, q interface {
+	QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+}, kid string) (SigningKey, bool, error) {
+	var key SigningKey
+	err := q.QueryRow(ctx, `SELECT kid, purpose, algorithm, public_key, secret_binding, not_before, not_after, retired_at
+FROM fleet.signing_key WHERE kid = $1`, kid).
+		Scan(&key.KID, &key.Purpose, &key.Algorithm, &key.PublicKey, &key.SecretBinding, &key.NotBefore, &key.NotAfter, &key.RetiredAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SigningKey{}, false, nil
+	}
+	if err != nil {
+		return SigningKey{}, false, store.Sanitize("inspect the signing key", err)
+	}
+	return key, true, nil
+}
+
 // ErrKeyNotRetirable refuses the retirement of a key that does not exist or is already retired.
 var ErrKeyNotRetirable = errors.New("no unretired key has this key ID")
 
@@ -115,7 +133,9 @@ RETURNING kid, purpose, algorithm, public_key, secret_binding, not_before, not_a
 
 // RegisterKey records a new key's metadata (with the migration role; the runtime role can only read). It refuses an invalid
 // key, a validity longer than MaxKeyValidity, and a rotation gap: while keys of the purpose are valid, the new key must become
-// valid at least MinKeyOverlap before the latest of them expires and must outlive it.
+// valid at least MinKeyOverlap before the latest of them expires and must outlive it. The externally supported admin command
+// takes the shared registry lock and checks published-reply capacity before calling this lower-level helper. Direct SQL and test
+// fixtures that call this helper bypass that admission guard.
 func RegisterKey(ctx context.Context, tx pgx.Tx, key SigningKey, now time.Time) error {
 	if err := key.check(now); err != nil {
 		return err

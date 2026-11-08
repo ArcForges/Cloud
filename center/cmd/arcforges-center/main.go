@@ -62,6 +62,8 @@ commands:
                                    record the public half of a signing key (ES256 P-256) whose private half the named platform
                                    secret holds; nodes receive it with their next sign-in or refresh (audited as
                                    fleet.signing_key.registered)
+  admin inspect-signing-key --kid <id>
+                                   read public key metadata, including a retired key, without changing the registry
   admin retire-signing-key --kid <id> [--at <rfc3339>]
                                    retire a signing key now or at the instant (audited as fleet.signing_key.retired); prints how
                                    many valid keys of its purpose remain
@@ -102,7 +104,7 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	slot := ""
 	var target revokeTarget
 	var role operatorFlags
-	if command == "admin" && (sub == "register-signing-key" || sub == "retire-signing-key" || sub == "revoke-device") {
+	if command == "admin" && (sub == "register-signing-key" || sub == "inspect-signing-key" || sub == "retire-signing-key" || sub == "revoke-device") {
 		return fleetAdmin(sub, arguments[2:], lookup, stdout, stderr)
 	}
 	switch {

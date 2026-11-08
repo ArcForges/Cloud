@@ -266,6 +266,8 @@ test("a confirmation is retried, and one that keeps failing names the slot, the 
 });
 
 test("both deployments promote inside the rotation, which confirms the slot afterwards", () => {
+  assert.equal(slotOfMessage(`${slotLabel("a")} proof-command-key=proof-test`), "a");
+  assert.equal(slotOfMessage(`${slotLabel("b")} proof-command-key=proof-test`), "b");
   for (const file of ["tooling/cloudflare.ts", "eng/verification/proof-cloudflare.ts"]) {
     const source = readFileSync(path.resolve(import.meta.dirname, "../..", file), "utf8");
     const start = source.indexOf("withRuntimeCredential(");
@@ -282,14 +284,27 @@ test("both deployments promote inside the rotation, which confirms the slot afte
     );
     assert.match(
       callback,
-      /"--message",\s*slotLabel\(/u,
+      /"--message",\s*(?:slotLabel\(|`\$\{slotLabel\()/u,
       `${file} labels the new version with its runtime slot`,
     );
-    assert.match(
-      source,
-      /liveSlots: \(\) =>\s*readLiveSlots\(/u,
-      `${file} reads the live slots before rotating`,
-    );
+    if (file === "eng/verification/proof-cloudflare.ts") {
+      assert.match(
+        source,
+        /liveSlots: proofSlots/u,
+        "proof uses its fail-closed live-version check",
+      );
+      assert.match(source, /readProofLiveSlots\(/u, "proof reads and checks live versions");
+      assert(
+        source.indexOf("await proofSlots()") < source.indexOf("await withProofCommandKey("),
+        "proof checks live slots before key registration",
+      );
+    } else {
+      assert.match(
+        source,
+        /liveSlots: \(\) =>\s*readLiveSlots\(/u,
+        `${file} reads the live slots before rotating`,
+      );
+    }
   }
 });
 

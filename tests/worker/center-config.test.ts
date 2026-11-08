@@ -165,11 +165,11 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
   return [];
 }
 
-test("production enables no surface and the acceptance environment enables identity, pages, operations, fleet and mobile", () => {
+test("production enables no surface and the acceptance environment enables identity, pages, operations, fleet, mobile, relay and nodes", () => {
   assert.equal(wrangler.vars?.FLAGSHIP_SURFACES, "");
   assert.equal(
     wrangler.env?.proof?.vars?.FLAGSHIP_SURFACES,
-    "identity,pages,operations,fleet,mobile",
+    "identity,pages,operations,fleet,mobile,relay,nodes",
   );
   // AF-CTR-04 part M (Q-1): proof's Android app identity is one labelled non-shipping test statement (testOnly, the test package);
   // production carries none.
@@ -252,7 +252,7 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,mobile" }).length, 1);
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "mobile" }).length, 1);
   // AF-CTR-05 E1a: the node channel needs identity and fleet (and so pages); production never enables it, and the acceptance
-  // environment gains it only in AF-CTR-05 E3.
+  // environment enables it only in AF-CTR-05 E3.
   assert.deepEqual(
     surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,fleet,relay" }),
     [],
@@ -261,13 +261,14 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "relay" }).length, 1);
   assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("relay"));
   for (const [name, environment] of environments)
-    assert(
-      !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+    assert.equal(
+      String(environment.vars?.FLAGSHIP_SURFACES ?? "")
         .split(",")
         .includes("relay"),
-      `wrangler.json environment ${name}: no environment enables the relay surface before AF-CTR-05 E3`,
+      name === "proof",
+      `wrangler.json environment ${name}: only proof enables the relay surface`,
     );
-  // AF-CTR-05 E2a: FleetService (nodes) needs identity, fleet and relay; no environment enables it before AF-CTR-05 E3.
+  // AF-CTR-05 E2a: FleetService (nodes) needs identity, fleet and relay; only proof enables it from AF-CTR-05 E3.
   assert.deepEqual(
     surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "identity,pages,fleet,relay,nodes" }),
     [],
@@ -279,11 +280,12 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
   assert.equal(surfaceProblems({ ...valid, FLAGSHIP_SURFACES: "nodes" }).length, 1);
   assert(!String(wrangler.vars?.FLAGSHIP_SURFACES ?? "").includes("nodes"));
   for (const [name, environment] of environments)
-    assert(
-      !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+    assert.equal(
+      String(environment.vars?.FLAGSHIP_SURFACES ?? "")
         .split(",")
         .includes("nodes"),
-      `wrangler.json environment ${name}: no environment enables the nodes surface before AF-CTR-05 E3`,
+      name === "proof",
+      `wrangler.json environment ${name}: only proof enables the nodes surface`,
     );
   assert.deepEqual([...surfaces].sort(), [
     "fleet",

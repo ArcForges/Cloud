@@ -51,8 +51,10 @@ public sealed class ArchitectureExceptionTests
     {
         using var document = Document(Entry());
         var other = Finding with { File = "src/y.ts" };
-        var result = ArchitectureExceptions.Apply([Finding, other], document.RootElement, Today);
-        Assert.Equal(new[] { other }, result.Remaining);
+        var otherDetail = Finding with { Detail = "Other entry point" };
+        var otherRule = Finding with { Rule = "wire-codec" };
+        var result = ArchitectureExceptions.Apply([Finding, other, otherDetail, otherRule], document.RootElement, Today);
+        Assert.Equal(new[] { other, otherDetail, otherRule }, result.Remaining);
         Assert.Empty(result.Problems);
     }
 

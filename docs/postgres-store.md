@@ -373,8 +373,10 @@ locks. Integration tests against a real PostgreSQL cover each one.
     outlive it, so a node that refreshed its center keys within that window verifies both.
   - The runtime role reads the verification set (newest first; the first is the signing key). Registration runs with the
     migration role.
-  - Generating keys, and storing them in platform secrets without displaying them, is AF-CTR-05's (command signing) and
-    AF-CLD-03's (entitlement tokens). Production key material is Plan H-16.
+  - Every supported command or entitlement admin registration checks the entire published-key response budget under a shared lock
+    before insertion. The protected proof deployment generates an ephemeral command key; its public-only evidence and normal
+    overlap/retirement procedure are in [center fleet](center-fleet.md#the-centers-signing-keys).
+    Entitlement-token custody is AF-CLD-03; production key material is Plan H-16.
 
 `center/internal/store` is the runtime role's access:
 

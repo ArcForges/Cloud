@@ -653,7 +653,11 @@ test("the fetch refuses a sealed manifest that names another commit, run, versio
     fetchWith(t, sealed(), {
       extra: (target) => {
         mkdirSync(path.join(target, "..", "elsewhere"), { recursive: true });
-        symlinkSync(path.join(target, "..", "elsewhere"), path.join(target, "link"));
+        symlinkSync(
+          path.join(target, "..", "elsewhere"),
+          path.join(target, "link"),
+          process.platform === "win32" ? "junction" : "dir",
+        );
       },
     }).run,
     /link is not a regular file/u,
@@ -998,10 +1002,10 @@ test("the deployment job fetches the gated candidate before it migrates or deplo
     assert.match(action, /^[a-z-]+\/[a-z-]+(?:\/[a-z-]+)?@[0-9a-f]{40}$/u);
 });
 
-test("the main-push path and the deployment's steps after the fetch are unchanged by the proof gate", () => {
-  // SHA-256 of the job texts as they were before the gate (Cloud main 9085b12): the candidate build (from runs-on: on; its condition
-  // is covered by the event table above) and the production deployment of a main push, and the proof deployment's steps from its
-  // first migration on. A change here is a reviewed change of the delivery path, never a side effect of the gate.
+test("the main-push path and the reviewed proof deployment steps remain pinned", () => {
+  // Candidate and production deployment retain the pre-gate pins (Cloud main 9085b12). E3 adds only the public
+  // proof-key-registration.json evidence artifact to the proof steps, which receive their own reviewed pin below.
+  // Any future change here is a reviewed delivery-path change, never an incidental effect of the gate.
   const digest = (value: string) => createHash("sha256").update(value).digest("hex");
   const deploy = jobs.get("deploy-proof") ?? "";
   const candidate = jobs.get("candidate") ?? "";
@@ -1012,9 +1016,10 @@ test("the main-push path and the deployment's steps after the fetch are unchange
       deploy.slice(deploy.indexOf("      # CLOUD.70: the same gated D1 migration step")),
     ),
   };
+  assert.match(deploy, /artifacts\/proof-key-registration\.json/u);
   assert.deepEqual(pins, {
     candidate: "e9304d0b4ed9b27272acf3bf654ee7271e924a214e243212930321b6699a8b00",
     deploy: "63df864296382e2a0e9c44211af75ee4f7396dad874d53f418f2b61e718c7fe3",
-    proofSteps: "8fbe1c09a7546d876697f7294f146a5c4aa8507c2e7d1a4a7c768b94516766ac",
+    proofSteps: "809f00adb5ec26e565dd3a1273a1fd61e43faf0f19dfe3166337a678910dda1a",
   });
 });

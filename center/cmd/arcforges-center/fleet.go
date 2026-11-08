@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -22,6 +24,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
+	"github.com/ArcForges/Cloud/center/internal/fleetapi"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/store"
@@ -75,6 +78,8 @@ func fleetAdmin(sub string, rest []string, lookup func(string) (string, bool), s
 	switch sub {
 	case "register-signing-key":
 		run, ok = registerSigningKey(rest)
+	case "inspect-signing-key":
+		run, ok = inspectSigningKey(rest)
 	case "retire-signing-key":
 		run, ok = retireSigningKey(rest)
 	case "revoke-device":
@@ -101,7 +106,12 @@ func fleetAdmin(sub string, rest []string, lookup func(string) (string, bool), s
 	defer func() { _ = conn.Close(context.Background()) }()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	var result map[string]any
-	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+	options := pgx.TxOptions{}
+	if sub == "register-signing-key" {
+		// Each statement after the registration lock must see the last committed writer, even if the server default differs.
+		options.IsoLevel = pgx.ReadCommitted
+	}
+	err = pgx.BeginTxFunc(ctx, conn, options, func(tx pgx.Tx) error {
 		var err error
 		result, err = run(ctx, tx, now)
 		return err
@@ -185,6 +195,36 @@ func registerSigningKey(rest []string) (func(ctx context.Context, tx pgx.Tx, now
 		}
 		key := platform.SigningKey{KID: flags["--kid"], Purpose: purpose, Algorithm: "ES256", PublicKey: data, SecretBinding: flags["--secret-binding"],
 			NotBefore: notBefore.UTC(), NotAfter: notAfter.UTC()}
+		proof := strings.HasPrefix(key.SecretBinding, "ARCFORGES_CENTER_KEY_PROOF_")
+		if proof {
+			suffix := strings.TrimPrefix(key.KID, "proof-")
+			_, decodeErr := hex.DecodeString(suffix)
+			if purpose != platform.CommandSigning || !strings.HasPrefix(key.KID, "proof-") || len(suffix) != 32 ||
+				suffix != strings.ToLower(suffix) || decodeErr != nil ||
+				key.SecretBinding != "ARCFORGES_CENTER_KEY_PROOF_"+strings.ToUpper(suffix) {
+				return nil, &refusal{"the proof command key metadata is invalid"}
+			}
+		}
+		// Every supported command or entitlement registration takes the same lock before reading either published set.
+		// READ COMMITTED makes the read after a wait observe the previous writer; a stale-snapshot transaction is refused.
+		if _, err = tx.Exec(ctx, "LOCK TABLE fleet.signing_key IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+			return nil, err
+		}
+		var isolation string
+		if err = tx.QueryRow(ctx, "SHOW transaction_isolation").Scan(&isolation); err != nil {
+			return nil, err
+		}
+		if isolation != "read committed" {
+			return nil, &refusal{"signing key registration requires read committed isolation"}
+		}
+		proofBytes, proofLimit, err := fleetapi.SigningKeyReplyBudget(ctx, tx, now, key)
+		if err != nil {
+			return nil, err
+		}
+		if proofBytes > proofLimit {
+			return nil, &refusal{"the signing key would exceed the node-credential reply budget"}
+		}
+
 		if err = platform.RegisterKey(ctx, tx, key, now); err != nil {
 			var storeErr *store.Error
 			if errors.As(err, &storeErr) {
@@ -194,7 +234,49 @@ func registerSigningKey(rest []string) (func(ctx context.Context, tx pgx.Tx, now
 		}
 		result := map[string]any{"kid": key.KID, "purpose": purposeName(purpose), "notBefore": key.NotBefore.Format(time.RFC3339),
 			"notAfter": key.NotAfter.Format(time.RFC3339), "fingerprint": fleet.Fingerprint(key.PublicKey)}
+		if proof {
+			result["proofReplyBytes"], result["proofReplyLimit"] = proofBytes, proofLimit
+		}
 		return result, auditOperator(ctx, tx, now, "fleet.signing_key.registered", "signing_key", key.KID, result)
+	}, true
+}
+
+// inspectSigningKey returns public metadata only, including retired rows, without changing the registry. The complete SHA-256
+// of the public DER lets an operator reconcile a registration whose reply was lost without relying on a truncated fingerprint.
+func inspectSigningKey(rest []string) (func(ctx context.Context, tx pgx.Tx, now time.Time) (map[string]any, error), bool) {
+	flags, ok := fleetFlags(rest, "--kid")
+	if !ok || len(flags) != 1 || flags["--kid"] == "" {
+		return nil, false
+	}
+	return func(ctx context.Context, tx pgx.Tx, _ time.Time) (map[string]any, error) {
+		key, found, err := platform.FindSigningKey(ctx, tx, flags["--kid"])
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return map[string]any{"found": false}, nil
+		}
+		purpose := "unknown"
+		switch key.Purpose {
+		case platform.CommandSigning:
+			purpose = "command"
+		case platform.EntitlementToken:
+			purpose = "entitlement"
+		case platform.RelayHMAC:
+			purpose = "relay"
+		}
+		result := map[string]any{"found": true, "kid": key.KID, "purpose": purpose, "algorithm": key.Algorithm,
+			"secretBinding": key.SecretBinding, "notBefore": key.NotBefore.UTC().Format(time.RFC3339),
+			"notAfter": key.NotAfter.UTC().Format(time.RFC3339), "retiredAt": nil}
+		if key.RetiredAt != nil {
+			result["retiredAt"] = key.RetiredAt.UTC().Format(time.RFC3339)
+		}
+		if key.PublicKey != nil {
+			digest := sha256.Sum256(key.PublicKey)
+			result["publicSha256"] = hex.EncodeToString(digest[:])
+			result["fingerprint"] = fleet.Fingerprint(key.PublicKey)
+		}
+		return result, nil
 	}, true
 }
 

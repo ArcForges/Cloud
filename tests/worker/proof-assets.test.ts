@@ -12,7 +12,7 @@ import test from "node:test";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { isProofPath } from "../../worker/foundation/proof-routes.ts";
 import {
-  buildProofConfig,
+  buildProofConfig as buildProofConfigWithKey,
   composeHeaders,
   composeProofAssets,
   expectedProfileHeaders,
@@ -32,6 +32,12 @@ import {
   workerFirst,
   type CandidateConfig,
 } from "../../eng/verification/proof-deploy.ts";
+
+const proofTestBinding = `ARCFORGES_CENTER_KEY_PROOF_${"A".repeat(32)}`;
+const buildProofConfig = (
+  candidate: Parameters<typeof buildProofConfigWithKey>[0],
+  options: Parameters<typeof buildProofConfigWithKey>[1],
+) => buildProofConfigWithKey(candidate, { proofCommandKeyBinding: proofTestBinding, ...options });
 
 // ---- Synthetic WEB.40-shaped fixtures: the Web writers' formats, so that each test can damage one thing. ----
 const sha = (value: Uint8Array | string) => createHash("sha256").update(value).digest("hex");

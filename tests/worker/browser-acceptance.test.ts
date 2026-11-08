@@ -2278,7 +2278,10 @@ test("the features the form lists are the development fixture catalogue, in the 
     env: { proof: { vars: Record<string, string> } };
   };
   assert.equal(wrangler.env.proof.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, "development-fixtures");
-  assert.equal(wrangler.env.proof.vars.FLAGSHIP_SURFACES, "identity,pages,operations,fleet,mobile");
+  assert.equal(
+    wrangler.env.proof.vars.FLAGSHIP_SURFACES,
+    "identity,pages,operations,fleet,mobile,relay,nodes",
+  );
   assert.equal(wrangler.vars.FLAGSHIP_SURFACES, "");
   assert.equal(wrangler.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, undefined);
 });
