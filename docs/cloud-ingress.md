@@ -218,9 +218,16 @@ with RequestMeta and a 4096-byte request bound, the contract's deadline as its b
 While `FLAGSHIP_SURFACES` does not name `nodes`, each is answered with the generated `STATE/not_activated` (`state.reason` `nodes`)
 before anything is read; production names none. Every other FleetService method has no row (`UNIMPLEMENTED` at the center).
 
-The center's Connect send bound is the largest reply budget of all registrations (F8), so it is now ListNodes' 640 KiB for every
-method: each method's own reply bound is the Worker's frame guard and unary bound. A self-hosted center without the Worker in front
-bounds every reply by the 640 KiB only; its replies are the center's own messages.
+Part E2b adds the six routed task methods ([routed calls](center-fleet.md#routed-calls)): SubmitNodeTask (a 256 KiB request bound) and
+GetNodeTask, ListNodeTasks, WaitNodeTask, ReadNodeTaskOutput and CancelNodeTask (8 KiB), each with a reply bound of 1 MiB
+(`routes.RoutedReplyBytes`: a node response of at most 1,040,384 bytes and its frame), the contract's deadline as its budget (10 s;
+WaitNodeTask 55 s; ReadNodeTaskOutput 30 s), and, for the two long polls, the connection deadlines of their budget plus 5 s (PN-1). The
+routed reply bound is now the largest budget, so it is the center's Connect send bound for every method.
+
+The center's Connect send bound is the largest reply budget of all registrations (F8), so it is ListNodes' 640 KiB (part E2a) and,
+from part E2b, the routed methods' 1 MiB for every method: each method's own reply bound is the Worker's frame guard and unary bound.
+A self-hosted center without the Worker in front bounds every reply by that 1 MiB only; its replies are the center's own messages and
+the nodes' routed responses (at most 1,040,384 bytes each, verified by the hub).
 
 ## The frame guard
 

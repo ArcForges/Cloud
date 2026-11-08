@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
@@ -224,6 +225,16 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 		request.Body = http.MaxBytesReader(writer, request.Body, int64(policy.MaxRequestBytes))
 	}
 
+	if policy.Deadline > 0 {
+		// A long-lived route (PN-1): the server's read and write timeouts bound every other request; this one's connection deadlines are
+		// its own budget plus a margin, so a routed long poll is not cut at 20 s. They are set once its body is read (under the server's
+		// read timeout, review A N-6), so a slow body is not given the long deadline. A writer that cannot set them (an in-process test
+		// recorder) keeps what it has.
+		controller := http.NewResponseController(writer)
+		until := time.Now().Add(policy.Deadline + RouteDeadlineMargin)
+		_ = controller.SetReadDeadline(until)
+		_ = controller.SetWriteDeadline(until)
+	}
 	// One correlation identity per call: the client's validated value, else the Worker's traceparent trace id, else a new one.
 	// It is bound after every admission decision above and read by none of them.
 	call := &Call{

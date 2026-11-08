@@ -99,6 +99,11 @@ var RuntimeGrants = []Grant{
 	// change of holder without a higher fence, and any deletion). The presence columns of 0008 and the name columns of 0009 (AF-CTR-05
 	// part E2a) are fleet.node's, granted above.
 	{"fleet", "hub_lease", []Privilege{Select, Insert, Update}},
+	// AF-CTR-05 part E2b (0010): the routing records of the routed mutations, written by the routed API and the hub's boot sweep (their
+	// trigger refuses a change of a record's identity, of a final record's outcome, and any deletion), and the fixed refusal code
+	// table, read only (its trigger refuses every change; decisions B-2).
+	{"fleet", "routed_call", []Privilege{Select, Insert, Update}},
+	{"fleet", "refusal_code", []Privilege{Select}},
 }
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted

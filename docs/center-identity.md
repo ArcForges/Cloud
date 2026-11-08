@@ -782,35 +782,36 @@ within their bounds with `ARCFORGES_CENTER_IDENTITY_POLICY`, a JSON object (dura
 integers; unknown or repeated keys and values out of bounds refuse to start). The hosted Worker passes it only where `wrangler.json`
 sets it: only the acceptance environment does, with its anonymous-flow ceiling (below).
 
-| Setting                                                        | Default              | Bounds                       |
-| -------------------------------------------------------------- | -------------------- | ---------------------------- |
-| `accessTokenLifetime`                                          | 15m                  | 1m to 1h                     |
-| `refreshIdleLifetime` / `refreshAbsolute`                      | 720h / 2160h         | 1h to 2160h / 1h to 9600h    |
-| `browserIdle` / `browserAbsolute`                              | 30m / 12h            | 1m to 24h / 10m to 168h      |
-| `passkeyFlowLifetime` / `emailCodeLifetime`                    | 5m / 10m             | 1m to 15m / 1m to 30m        |
-| `emailCodeAttempts` / `emailCodeSends` / `emailCodeIterations` | 5 / 3 / 20000        | 1–10 / 1–3 / 10000–600000    |
-| `stepUpEvidenceTtl` (A1b)                                      | 5m                   | 1m to 5m                     |
-| `signInPerPrefix` (begin, completion, redemption)              | 30 per 10m           | limit 1–10000, window 1m–24h |
-| `signInFailuresAccount` (failed proofs per account)            | 10 per 10m           | as above                     |
-| `emailPerPrefix` / `emailPerAddress` (code sends)              | 10 per h / 5 per h   | as above                     |
-| `redeemFailuresAddress` (wrong codes per address)              | 10 per h             | as above                     |
-| `refreshPerPrefix`                                             | 120 per 10m          | as above                     |
-| `stepUpPerAccount` (A1b)                                       | 10 per 10m           | as above                     |
-| `bootstrapPerPrefix` (refused bootstraps)                      | 10 per h             | as above                     |
-| `anonymousFlows` (every flow an anonymous call creates)        | none (limit 0) per h | limit 0–10000, window 1m–24h |
-| `nodeAccessLifetime` (AF-CTR-04)                               | 60m                  | 15m to 60m                   |
-| `nodeRefreshIdleLifetime` / `nodeRefreshAbsolute`              | 2160h / 8760h        | 1h to 2160h / 1h to 9600h    |
-| `maxNodesPerAccount`                                           | 100                  | 1–1000                       |
-| `nodeRefreshPrefix` / `nodeRefreshSession`                     | 120 / 60 per 10m     | limit 1–10000, window 1m–24h |
-| `nodeReportInstallation`                                       | 12 per h             | as above                     |
-| `mobileCodeLifetime` (AF-CTR-04 part M)                        | 2m                   | 30s to 2m                    |
-| `mobileBeginPrefix` / `mobileTokenPrefix`                      | 30 / 30 per 10m      | limit 1–10000, window 1m–24h |
-| `mobileApproveAccount`                                         | 20 per h             | as above                     |
-| `routedCallsAccount` (AF-CTR-05 E0, owner placeholder H-07)    | 3600 per h           | limit 1–10000, window 1m–24h |
-| `routedInFlightPerAccount` (owner placeholder H-07)            | 64                   | 1–1024                       |
-| `channelUpgradeAccount` / `channelUpgradeNode` (H-07)          | 600 / 60 per h       | limit 1–10000, window 1m–24h |
-| `routedInFlightPerNode` (AF-CTR-05 E1b, Plan C.9)              | 8                    | 1–64                         |
-| `routedInFlightPerCenter` (AF-CTR-05 E1b, Plan C.9)            | 1024                 | 1–65536                      |
+| Setting                                                                                                       | Default              | Bounds                       |
+| ------------------------------------------------------------------------------------------------------------- | -------------------- | ---------------------------- |
+| `accessTokenLifetime`                                                                                         | 15m                  | 1m to 1h                     |
+| `refreshIdleLifetime` / `refreshAbsolute`                                                                     | 720h / 2160h         | 1h to 2160h / 1h to 9600h    |
+| `browserIdle` / `browserAbsolute`                                                                             | 30m / 12h            | 1m to 24h / 10m to 168h      |
+| `passkeyFlowLifetime` / `emailCodeLifetime`                                                                   | 5m / 10m             | 1m to 15m / 1m to 30m        |
+| `emailCodeAttempts` / `emailCodeSends` / `emailCodeIterations`                                                | 5 / 3 / 20000        | 1–10 / 1–3 / 10000–600000    |
+| `stepUpEvidenceTtl` (A1b)                                                                                     | 5m                   | 1m to 5m                     |
+| `signInPerPrefix` (begin, completion, redemption)                                                             | 30 per 10m           | limit 1–10000, window 1m–24h |
+| `signInFailuresAccount` (failed proofs per account)                                                           | 10 per 10m           | as above                     |
+| `emailPerPrefix` / `emailPerAddress` (code sends)                                                             | 10 per h / 5 per h   | as above                     |
+| `redeemFailuresAddress` (wrong codes per address)                                                             | 10 per h             | as above                     |
+| `refreshPerPrefix`                                                                                            | 120 per 10m          | as above                     |
+| `stepUpPerAccount` (A1b)                                                                                      | 10 per 10m           | as above                     |
+| `bootstrapPerPrefix` (refused bootstraps)                                                                     | 10 per h             | as above                     |
+| `anonymousFlows` (every flow an anonymous call creates)                                                       | none (limit 0) per h | limit 0–10000, window 1m–24h |
+| `nodeAccessLifetime` (AF-CTR-04)                                                                              | 60m                  | 15m to 60m                   |
+| `nodeRefreshIdleLifetime` / `nodeRefreshAbsolute`                                                             | 2160h / 8760h        | 1h to 2160h / 1h to 9600h    |
+| `maxNodesPerAccount`                                                                                          | 100                  | 1–1000                       |
+| `nodeRefreshPrefix` / `nodeRefreshSession`                                                                    | 120 / 60 per 10m     | limit 1–10000, window 1m–24h |
+| `nodeReportInstallation`                                                                                      | 12 per h             | as above                     |
+| `mobileCodeLifetime` (AF-CTR-04 part M)                                                                       | 2m                   | 30s to 2m                    |
+| `mobileBeginPrefix` / `mobileTokenPrefix`                                                                     | 30 / 30 per 10m      | limit 1–10000, window 1m–24h |
+| `mobileApproveAccount`                                                                                        | 20 per h             | as above                     |
+| `routedCallsAccount` (AF-CTR-05 E0, owner placeholder H-07)                                                   | 3600 per h           | limit 1–10000, window 1m–24h |
+| `routedInFlightPerAccount` (owner placeholder H-07; at most half of `ARCFORGES_CENTER_MAX_CONNECTIONS`, PN-1) | 16                   | 1–1024                       |
+| `routedReplayWindow` (AF-CTR-05 E2b, Q-1)                                                                     | 23h                  | 1h to 23h 52m                |
+| `channelUpgradeAccount` / `channelUpgradeNode` (H-07)                                                         | 600 / 60 per h       | limit 1–10000, window 1m–24h |
+| `routedInFlightPerNode` (AF-CTR-05 E1b, Plan C.9)                                                             | 8                    | 1–64                         |
+| `routedInFlightPerCenter` (AF-CTR-05 E1b, Plan C.9)                                                           | 1024                 | 1–65536                      |
 
 The four AF-CTR-05 E0 settings are the per-account resource controls of the gated rows ([routed task control](center.md#routed-task-control)):
 their defaults are owner placeholders under H-07 (illustrative), not plan limits, and a refusal of them is `RESOURCE/rate_limited` with

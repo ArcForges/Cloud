@@ -72,6 +72,8 @@ type settings struct {
 	policy   string
 	disabled string
 	tune     func(*hub.Settings)
+	// maxConnections sets the center's request connection bound (the routed long-poll bound is half of it).
+	maxConnections string
 }
 
 // testSettings are short intervals for the tests.
@@ -89,6 +91,9 @@ func newHarness(t *testing.T, options settings) *harness {
 	values := map[string]string{
 		config.EnvMode: string(config.SelfHosted), config.EnvPublicBaseURL: publicBaseURL, config.EnvDatabaseURL: db.RuntimeURL,
 		config.EnvSurfaces: "identity,pages,fleet,relay", config.EnvIdentityPolicy: options.policy, config.EnvClientIPHeader: config.ClientIPHeader,
+	}
+	if options.maxConnections != "" {
+		values[config.EnvMaxConnections] = options.maxConnections
 	}
 	if options.disabled != "" {
 		values[config.EnvDisabledFeatures] = options.disabled

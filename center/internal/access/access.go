@@ -254,6 +254,28 @@ func Operations() []Operation {
 			Receipt: true, Audit: AuditInTransaction, Object: ObjectNode},
 		{Path: fleetv1connect.FleetServiceRevokeNodeProcedure, ID: "fleet.revokeNode", Risk: "R3", Session: true, Restricted: true, MobileLimited: Upgrade,
 			StepUp: Evidence, Target: TargetNode, Receipt: true, Audit: AuditInTransaction, Object: ObjectNode},
+		// The routed task methods (AF-CTR-05 E2b; Plan CTR5-SUR-02 as amended by PB-1, PB-2, D0-B1, C-N6; decisions section 5: Design's risk
+		// classes, Submit high, Cancel medium, the reads low). Each admits an account session and a node credential as the verified relay of
+		// its own node, addresses one of the account's live nodes, is gated by its group's key of the routed task control table (submission
+		// center.execute, status and output remote.view, control remote.control), stands behind the routed controls and is audited before
+		// the call. Submit and Cancel are a person's medium or high operations (PB-1): a mobile.limited session upgrades first, and an
+		// account session needs step-up evidence of the row's class bound to the node on every delivery (consumed in the routing record's
+		// admission); a relayed caller carries neither rule. Their routing record is their receipt (Receipt stays false: no
+		// platform.command_receipt row is written for them).
+		{Path: fleetv1connect.FleetServiceSubmitNodeTaskProcedure, ID: "fleet.submitNodeTask", Risk: "R3", Session: true, RelayedScopes: []string{"node"},
+			MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall,
+			Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceGetNodeTaskProcedure, ID: "fleet.getNodeTask", Risk: "R1", Session: true, RelayedScopes: []string{"node"},
+			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceListNodeTasksProcedure, ID: "fleet.listNodeTasks", Risk: "R1", Session: true, RelayedScopes: []string{"node"},
+			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceWaitNodeTaskProcedure, ID: "fleet.waitNodeTask", Risk: "R1", Session: true, RelayedScopes: []string{"node"},
+			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceReadNodeTaskOutputProcedure, ID: "fleet.readNodeTaskOutput", Risk: "R1", Session: true, RelayedScopes: []string{"node"},
+			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceCancelNodeTaskProcedure, ID: "fleet.cancelNodeTask", Risk: "R2", Session: true, RelayedScopes: []string{"node"},
+			MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.RemoteControl, Group: feature.GroupControl, Audit: AuditBeforeCall,
+			Object: ObjectNode},
 	}
 }
 

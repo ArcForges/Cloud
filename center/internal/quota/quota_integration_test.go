@@ -69,6 +69,13 @@ func TestTheCompositionsControlsCoverTheRoutedAndChannelGroupsOnly(t *testing.T)
 	// E1a), and of nothing else.
 	for _, control := range controls {
 		for _, operation := range access.Operations() {
+			if Routed(operation) {
+				// The routed task rows (AF-CTR-05 E2b): both routed controls, never the channel's upgrade buckets.
+				if control.Covers(operation) != (control.Name() == RoutedCallsName || control.Name() == RoutedInFlightName) {
+					t.Errorf("%s and the routed row %s: covers %v", control.Name(), operation.ID, control.Covers(operation))
+				}
+				continue
+			}
 			if operation.ID == "fleet.nodeChannel" {
 				if control.Covers(operation) != (control.Name() == ChannelUpgradeName) {
 					t.Errorf("%s and the node channel's row: covers %v", control.Name(), control.Covers(operation))

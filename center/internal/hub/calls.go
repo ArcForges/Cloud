@@ -154,7 +154,8 @@ func (p *pending) unreachable(nodeID platform.ID, reason string) *arc.Refusal {
 // Call sends a routed call to its target node's channel and waits for the verified result (Plan CTR5-SIG-01..04). Its error is always
 // an *arc.Refusal:
 //   - the call breaks its shape (a bug of the caller): VALIDATION/invalid_argument;
-//   - this process does not hold the hub lease, or the node has no accepted connection here: STATE/node_offline (DID_NOT_HAPPEN);
+//   - this process does not hold the hub lease (or its boot sweep of the routing records has not committed yet), or the node has no
+//     accepted connection here: STATE/node_offline (DID_NOT_HAPPEN);
 //   - the node's connection is not the account's: STATE/not_found;
 //   - the caller has already gone away: STATE/node_unreachable (deadline_passed, DID_NOT_HAPPEN), nothing signed;
 //   - no held command key may sign at the call's instant (none valid, or the keyring not re-read for KeyStalePeriods refresh periods):
@@ -170,7 +171,7 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 	if !ok || !validCall(call) {
 		return Result{}, arc.InvalidArgument("call", "shape")
 	}
-	if _, serving := h.serving(); !serving {
+	if _, routable := h.Routable(); !routable {
 		h.metrics.ObserveChannel("call", "offline")
 		return Result{}, arc.NodeOffline(call.TargetNodeID[:], now)
 	}
