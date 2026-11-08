@@ -80,8 +80,8 @@ PostgreSQL database and runtime role, and the C# proof routes no longer deployed
 The production Container runs the Go center (`/app/arcforges-center`, [center](center.md)); `wrangler.json` selects it with `ARCFORGES_HELLO_RUNTIME=go` and states its explicit mode and public base URL (`ARCFORGES_CENTER_MODE=official-hosted`, `ARCFORGES_CENTER_PUBLIC_BASE_URL=https://arcforges.com/api`), which the Container class passes through unchanged; the center refuses to start without them. In official-hosted mode no gated feature is enabled until the plan configuration exists (AF-CTR-03); Hello and health are not gated. The runtime secrets are the runtime role's pooled URL `ARCFORGES_CENTER_DATABASE_URL`, rotated by every deployment and passed to the Go center, which reads the Hello greeting through it, and the Hello's pooled `NEON_DATABASE_URL`, which only the C# rollback path receives (`tooling/neon-runtime.ts`). The migration role's `NEON_DATABASE_URL_DIRECT` stays in the deployment job and never reaches the Worker or the Container. The deployment token is a GitHub CI credential, not an application credential and not forwarded into the Container. The C# Native AOT executable stays in the image as its default entrypoint and as the Hello rollback (`ARCFORGES_HELLO_RUNTIME=csharp` through a reviewed main push).
 
 The `identity` surface (AF-CTR-03, [accounts, sessions and devices](center-identity.md#surface-switch)) is switched by
-`FLAGSHIP_SURFACES`: production carries `""` (no surface; Hello only, so no account page is served there), the acceptance
-environment `identity,pages,operations,fleet,mobile` with `ALLOWED_ORIGIN` set to its own origin. The `pages` surface ([account pages](center-identity.md#account-pages-and-browser-sessions))
+`FLAGSHIP_SURFACES`: production carries `""` (no surface; Hello only, so no account page is served there), the checked-in acceptance
+target `identity,pages,operations,fleet,mobile,relay,nodes` with `ALLOWED_ORIGIN` set to its own origin. The `pages` surface ([account pages](center-identity.md#account-pages-and-browser-sessions))
 is switched by the same flag, needs `identity`, and is forwarded by the Worker's [page handler](cloud-ingress.md#page-routes-plt-1);
 a disabled one is a 404 at the edge. The Worker passes the parsed list to the Container as `ARCFORGES_CENTER_SURFACES` and always
 `ARCFORGES_CENTER_CLIENT_IP_HEADER`; a disabled surface is answered at the edge without waking the Container. Both environments bind
@@ -119,6 +119,37 @@ dispatch without the inputs removes a spent or expired one. The token itself is 
 (`eng/verification/browser`, its own package with an exact lockfile that the root `npm ci` and no workflow installs) runs on the
 Windows host after the deployment; it is post-merge evidence, not a CI check.
 
+### Proof command signing and recovery (AF-CTR-05 E3)
+
+The checked-in proof target adds `relay,nodes` to the existing identity, pages, operations, fleet and mobile surfaces. This is a
+configuration target, not evidence that a hosted version has been deployed or accepted. Production remains dark. A protected proof
+deploy verifies its sealed candidate and PostgreSQL gate, and requires readable, unambiguous provider traffic percentages and one
+known runtime slot across all active versions before it registers anything. It checks again before rotating the other runtime slot.
+Unknown, malformed, unlabelled or mixed live-version state stops the deploy; it is never treated as an inactive version. Existing
+resource preparation can detach retired queue consumers before key generation, so a stopped preflight is not a claim that no earlier
+provisioning or resource write occurred.
+
+Each attempted deploy generates a new test-only P-256 command key and unique binding. The sealed center registers its public DER in
+the acceptance database with 400-day validity, subject to the seven-day successor rule and the complete public-key response budget
+([signing keys and normal overlap](center-fleet.md#the-centers-signing-keys)); a read-only `admin inspect-signing-key` then verifies
+the exact binding, purpose, algorithm, validity, retirement and full public-key hash. The registry stores no private key. Only after
+registration and inspection does the deploy combine the private command key and the alternate database credential in a short-lived
+runner-local secrets file for Wrangler. The generated config names only the selected binding. The Go proof entry forwards that exact
+secret only with `relay` enabled; production, C# and relay-disabled paths forward none. Child outputs are bounded or discarded and
+reported with fixed errors. The key's private material is not included in the public receipt or checked-in configuration.
+
+`artifacts/proof-key-registration.json` records the public KID, binding, public hash, validity and stage (`generated`,
+`registration-started`, `registered`, `upload-started`, `uploaded`); `uploaded` follows upload, runtime-slot confirmation and the
+required provider checks. Generation or an unverified registration cannot promote the new Worker; a registration may nevertheless
+have committed when its reply is lost. After a verified registration, the inactive database slot may have been rotated before upload
+fails. An upload or later confirmation failure can leave the provider outcome unknown: do not assume rollback or retry a write. Inspect
+the public receipt and exact registry row, provider's active version messages and database runtime-slot state read-only first; compare
+all public metadata, then follow the existing runtime-credential recovery and key-overlap runbooks. No old key is automatically
+retired. Preserve existing live services and stop for manual reconciliation when an outcome or active binding remains uncertain.
+
+The full deployment and live acceptance remain separate evidence. Mocked token, provider and device tests do not claim a hosted
+run or real-device validation, and owner-only live integrations remain disabled until configured and verified.
+
 ### Plan configuration and the operator grant (AF-CTR-03 B)
 
 The Container receives `ARCFORGES_CENTER_PLAN_CONFIGURATION` unchanged: production carries none (no catalogue, no gated feature
@@ -132,7 +163,7 @@ rows exist only on proof's custom domain; the PostgreSQL gate of a deployment of
 The Worker passes no other variable of this part: in particular `ARCFORGES_CENTER_DISABLED_FEATURES`, a self-hosted operator's limit
 that the hosted center refuses, is never handed over (`tests/worker/container-classes.test.ts`, PLT-18). The `operations` surface is
 enabled in the acceptance environment only: production keeps `FLAGSHIP_SURFACES` empty (and no catalogue), the acceptance environment
-carries `identity,pages,operations,fleet,mobile` with the development fixture catalogue (**MOCKED**, illustrative), and
+carries `identity,pages,operations,fleet,mobile,relay,nodes` with the development fixture catalogue (**MOCKED**, illustrative), and
 `tests/worker/center-config.test.ts` pins both. The proof owner, the bootstrap owner, counts as operator through
 `identity.bootstrap`, so no `arcforges-center admin grant-operator` (the migration role's path) and no migration-role credential is
 needed for the hosted proof of the operator grant; the hosted run (the `--operator-grant` mode of [the
@@ -224,7 +255,8 @@ what the deployed version starts the center with, computed from its configuratio
 `npm run test:live` compares the production health with `artifacts/deployment.json`, and the local Worker check
 (`npm run test:worker`) compares it with the surfaces the candidate's Worker forwards. CI makes no such request
 ([validation policy](validation-policy.md)), so for both environments the post-deploy acceptance reads `/api/healthz`
-`center.surfaces` and compares it with the deployment evidence (`none` on production, `identity,pages,operations,fleet,mobile` on proof).
+`center.surfaces` and compares it with the actual deployment evidence (`none` on production; the E3 proof target is
+`identity,pages,operations,fleet,mobile,relay,nodes` after that deployment).
 
 A rollback to a Worker version from before AF-CTR-03 part A1b (`wrangler rollback` or the dashboard, which reach only the
 immediately previous version) brings back a Container class without the start digest. The running center keeps the start

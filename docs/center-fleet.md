@@ -15,7 +15,7 @@ connection, which AF-CTR-05 serves.
 
 The methods and the six pages belong to the switchable surface `fleet`; the node channel is the surface `relay` ([node channel](#node-channel)). It needs `identity` and `pages` (a list without them refuses to
 start). Production `FLAGSHIP_SURFACES` stays `""` (AF-PROD-01 activates it); the acceptance environment (`proof`) carries
-`identity,pages,operations,fleet,mobile` (`mobile` since AF-CTR-04 part M; pinned by `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts`); a
+`identity,pages,operations,fleet,mobile,relay,nodes` (the E3 checked-in target, retaining `mobile` from AF-CTR-04 part M; pinned by `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts`); a
 self-hosted center enables it by default together with `identity` and `pages`
 (`TestTheFleetSurfaceNeedsIdentityAndPagesAndIsInTheSelfHostedDefault`). With the surface off, every fleet method answers `STATE/not_activated`
 with `state.reason` `fleet`, from the Worker's generated reply before anything else is read, and from the center. Each method's Worker
@@ -51,7 +51,7 @@ anonymous.
 
 AF-CTR-05 part E2a serves FleetService's node registry on the switchable surface `nodes` (Plan CTR5-SUR-01, Q10): it needs `identity`,
 `fleet` and `relay` (a list without them refuses to start), is in the self-hosted default (and leaves it with `relay` when no command
-key is configured), and production keeps it off: there, and on proof until AF-CTR-05 part E3, the four methods answer
+key is configured), and production keeps it off: there, and on proof until a successful AF-CTR-05 E3 deployment, the four methods answer
 `STATE/not_activated` with `state.reason` `nodes` from the Worker. The registry is never gated (Q20: a lapsed account still lists,
 renames and revokes its nodes), and it stands behind no per-account control: ListNodes and GetNode, relayed calls included, are
 bounded only by the Worker's per-client edge limit (and a relayed read by the verification's one read-only transaction). The routed task methods are served from part E2b ([Routed calls](#routed-calls)); every other FleetService method stays
@@ -134,7 +134,7 @@ AF-CTR-05 part E2b serves FleetService's six routed task methods on the `nodes` 
 amended by PB-1, PB-2, D0-B1, C-N1, C-N6, PN-1 and PN-6; the coordinator's decisions B-1..B-3, Q-1..Q-15 and section 4): SubmitNodeTask,
 GetNodeTask, ListNodeTasks, WaitNodeTask, ReadNodeTaskOutput and CancelNodeTask (`internal/fleetapi/routed.go`). EVIDENCE: REAL
 PostgreSQL, the REAL composed center and hub; MOCKED: the nodes (nodetest with software keys) and the step-up ceremony (its proved
-challenge is seeded); NOT PROVEN: a hosted run, the real node (N1, N2). Production and proof keep `nodes` off.
+challenge is seeded); NOT PROVEN: a hosted run, the real node (N1, N2). Production keeps `nodes` off; proof enables it only after the protected E3 deployment succeeds.
 
 **Rows.** Each method admits an account session, and a node credential only as the verified relay of its own node (the authorizer
 verifies the relay assertion, whose request digest is SHA-256 of the inner request bytes, before anything else). It addresses one of
@@ -659,8 +659,9 @@ free to enroll again with a new key; the revoked installation keeps holding the 
 The center delivers the public keys of `fleet.signing_key` with every sign-in and refresh: every key of a purpose that is neither
 retired nor expired, including a registered successor whose `not_before` lies ahead, so a node holds it before the center signs with
 it (`platform.PublishedKeys`); a key whose retirement is scheduled ahead is published with that instant as its `not_after`. Until keys
-are registered the sets are empty. Generating the private keys and holding them in platform
-secrets is AF-CTR-05's.
+are registered the sets are empty. The relay process loads at most eight private bindings, but the published public sets have no
+corresponding eight-key limit. The E3 proof deployment supplies one selected ephemeral command key; production key custody remains
+owner-configured (Plan H-16).
 
 **Runbook.** With the migration role:
 
@@ -668,6 +669,8 @@ secrets is AF-CTR-05's.
 --secret-binding <NAME> --not-before <rfc3339> --not-after <rfc3339>` records the public half of an ES256 P-256 key whose private
   half the named platform secret holds (at most 400 days; while keys of the purpose are valid, a successor must become valid at least
   7 days before they expire and outlive them), audited `fleet.signing_key.registered`.
+- `arcforges-center admin inspect-signing-key --kid <id>` reads one exact public row, including expired or retired rows, and reports
+  its binding, purpose, algorithm, validity, retirement and full SHA-256 of the public DER. It changes no key.
 - `arcforges-center admin retire-signing-key --kid <id> [--at <rfc3339>]` retires a key now or later (never backdated), audited
   `fleet.signing_key.retired`, and prints how many valid keys of its purpose remain; an emergency retirement may leave none until a
   new key is registered.
@@ -676,7 +679,22 @@ secrets is AF-CTR-05's.
   its node rows, audited `device.revoked` with the actor `operator:cli`.
 
 The overlap rule consults only the keys valid at registration, so two successors registered ahead of time are not checked against
-each other (AF-CTR-05's custody owns the schedule).
+each other (AF-CTR-05's custody owns the schedule). `PublishedKeys` includes future successors as well as currently valid keys;
+expired and already retired keys are excluded. Every protected proof registration checks both actual published sets plus its
+candidate under the signing-key table lock, before INSERT, against the complete sign-in, poll and refresh protobuf responses and the
+actual fleet transport budgets. The current fleet response limit is 65,536 bytes, including framing and the conservative trailer
+allowance in that check. A missing budget, an unreadable set or an over-budget candidate stops registration and promotion. It is
+not safe to assume repeated deployments can accumulate public keys indefinitely. Other registrations must also respect these bounds;
+the proof preflight only guarantees the set at its own insertion. No live registry count is implied by this check.
+
+**Normal proof-key follow-through.** A new Worker version does not retire the old public key. Preserve at least the seven-day
+successor overlap required by `RegisterKey` and reconcile the exact old and successor public metadata, validity and retirement using
+`inspect-signing-key`, the public deployment receipts and all active provider versions before considering retirement. Confirm that no
+active or rollback-needed version depends on the old binding and that nodes have had the required verification overlap. Do not retire
+an owner, persistent, unlabelled or unidentified key based on its name. If the registry is approaching the response bound, stop new
+proof registrations until this reconciliation is done; use an authorized operator to retire only a proven eligible old key, then
+recheck capacity. If eligibility or active-version state cannot be established, leave keys intact and escalate for manual inspection.
+This runbook is not an automatic retirement scheduler; emergency retirement is a separate operator decision.
 
 ## Store
 
@@ -1081,7 +1099,7 @@ loopback receiver; it proves nothing about other browsers.
    `https://arcforges.com/api/connect` and `/api/activate` answer the Worker's plain 404; a fleet method answers `STATE/not_activated`
    with `state.reason` `fleet`.
 2. **Proof carries the surface.** `curl -si https://proof.arcforges.com/api/healthz`: `center.surfaces`
-   `identity,pages,operations,fleet` (`identity,pages,operations,fleet,mobile` since AF-CTR-04 part M), equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`; the migration gate shows
+   `identity,pages,operations,fleet,mobile,relay,nodes` after the E3 proof deployment (`mobile` was added by AF-CTR-04 part M), equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`; the migration gate shows
    `arcforges_acceptance` at version 5 (6 since AF-CTR-04 part M).
 3. **The pages' replies** (from the Linux host, a key of its own): `curl -si https://proof.arcforges.com/api/connect` and `/api/activate`:
    200, the seven security headers exactly, `Cache-Control: no-store, no-transform`, no `cloudflareinsights` and no `data-cf-beacon` in the

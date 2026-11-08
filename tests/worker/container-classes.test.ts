@@ -817,3 +817,61 @@ test("the production Container class hands the mail variables to a configured ce
     [],
   );
 });
+
+test("the acceptance container forwards only its selected proof command key when relay is enabled", async () => {
+  const binding = `ARCFORGES_CENTER_KEY_PROOF_${"A".repeat(32)}`;
+  const stale = `ARCFORGES_CENTER_KEY_PROOF_${"B".repeat(32)}`;
+  const selector = "ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING";
+  const environment = {
+    ARCFORGES_HELLO_RUNTIME: "go",
+    ARCFORGES_CENTER_MODE: "official-hosted",
+    FLAGSHIP_SURFACES: "identity,pages,fleet,relay,nodes",
+    [selector]: binding,
+    [binding]: "synthetic-selected-proof-key",
+    [stale]: "synthetic-stale-proof-key",
+  };
+  const selected = new acceptance.FoundationContainer(containerContext, environment);
+  const settings = selected.envVars as Record<string, string>;
+  assert.equal(settings[binding], environment[binding]);
+  assert.equal(settings[stale], undefined);
+  assert.equal(settings[selector], undefined);
+  assert.equal(
+    (new CloudContainer(containerContext, environment).envVars as Record<string, string>)[binding],
+    undefined,
+  );
+  const off = new acceptance.FoundationContainer(containerContext, {
+    ...environment,
+    FLAGSHIP_SURFACES: "identity,pages,fleet",
+  });
+  assert.equal((off.envVars as Record<string, string>)[binding], undefined);
+  const csharp = new acceptance.FoundationContainer(containerContext, {
+    ...environment,
+    ARCFORGES_HELLO_RUNTIME: "csharp",
+  });
+  assert.equal((csharp.envVars as Record<string, string>)[binding], undefined);
+  const changed = new acceptance.FoundationContainer(containerContext, {
+    ...environment,
+    [binding]: "synthetic-rotated-proof-key",
+  });
+  const makeSettings = (instance: Record<string, unknown>): Settings => ({
+    entrypoint: instance.entrypoint as string[] | undefined,
+    envVars: instance.envVars as Record<string, string>,
+    enableInternet: instance.enableInternet as boolean,
+  });
+  assert.notEqual(
+    await startDigest("same-revision", makeSettings(selected)),
+    await startDigest("same-revision", makeSettings(changed)),
+  );
+  for (const invalid of [
+    { ...environment, [selector]: undefined },
+    { ...environment, [selector]: "synthetic-secret-not-a-binding" },
+    { ...environment, [binding]: "" },
+    { ...environment, [binding]: undefined },
+  ]) {
+    assert.throws(
+      () => new acceptance.FoundationContainer(containerContext, invalid),
+      (error: Error) =>
+        /proof command key/u.test(error.message) && !error.message.includes("synthetic-"),
+    );
+  }
+});

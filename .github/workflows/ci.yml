@@ -516,6 +516,7 @@ jobs:
           name: proof-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             artifacts/proof-deployment.json
+            artifacts/proof-key-registration.json
             artifacts/migration-gate-proof.json
             artifacts/postgres-gate-acceptance.json
           if-no-files-found: warn

@@ -90,6 +90,16 @@ func TestTheFleetAdministrationCommands(t *testing.T) {
 	if registered["kid"] != "cmdcurrent01" || registered["purpose"] != "command" || !strings.Contains(registered["fingerprint"].(string), "-") {
 		t.Fatalf("register: %v", registered)
 	}
+	inspection := command(0, "admin", "inspect-signing-key", "--kid", "cmdcurrent01")
+	if inspection["found"] != true || inspection["kid"] != "cmdcurrent01" || inspection["purpose"] != "command" ||
+		inspection["secretBinding"] != "TEST_ONLY_CMDCURRENT01" || inspection["fingerprint"] != registered["fingerprint"] ||
+		inspection["retiredAt"] != nil || len(inspection["publicSha256"].(string)) != 64 {
+		t.Fatalf("inspect public metadata: %v", inspection)
+	}
+	if missing := command(0, "admin", "inspect-signing-key", "--kid", "notpresent01"); len(missing) != 1 || missing["found"] != false {
+		t.Fatalf("missing inspection: %v", missing)
+	}
+	command(2, "admin", "inspect-signing-key")
 	register(1, "cmdcurrent01", successorFile, now, now.Add(30*24*time.Hour))
 	register(1, "cmdrsakey001", rsaFile, now, now.Add(30*24*time.Hour))
 	register(1, "cmdlate00001", successorFile, now.Add(29*24*time.Hour), now.Add(60*24*time.Hour))
@@ -115,6 +125,10 @@ func TestTheFleetAdministrationCommands(t *testing.T) {
 	if retired["validKeys"] != float64(0) || retired["purpose"] != "command" {
 		t.Fatalf("retire: %v", retired)
 	}
+	afterRetirement := command(0, "admin", "inspect-signing-key", "--kid", "cmdcurrent01")
+	if afterRetirement["retiredAt"] == nil || afterRetirement["publicSha256"] != inspection["publicSha256"] {
+		t.Fatalf("retired inspection: %v", afterRetirement)
+	}
 	command(1, "admin", "retire-signing-key", "--kid", "cmdcurrent01")
 	command(1, "admin", "retire-signing-key", "--kid", "unknownkid01")
 	command(1, "admin", "retire-signing-key", "--kid", "cmdsuccessor", "--at", now.Add(-time.Hour).Format(time.RFC3339))
@@ -127,6 +141,49 @@ func TestTheFleetAdministrationCommands(t *testing.T) {
 	if published, err = platform.PublishedKeys(ctx, center, platform.CommandSigning, time.Now().Add(time.Second)); err != nil || len(published) != 1 ||
 		!published[0].NotAfter.Equal(retireAt) {
 		t.Fatalf("a scheduled retirement: %+v %v", published, err)
+	}
+
+	// E3 proof registration checks the complete published key set against all real node-credential response budgets before
+	// inserting the new key. An accumulated synthetic set must be refused transactionally without retiring or changing old rows.
+	proofKid := "proof-" + strings.Repeat("a", 32)
+	proofBinding := "ARCFORGES_CENTER_KEY_PROOF_" + strings.Repeat("A", 32)
+	proofKey := func(expected int, kid, binding string) map[string]any {
+		return command(expected, "admin", "register-signing-key", "--purpose", "command", "--kid", kid,
+			"--public-key-file", currentFile, "--secret-binding", binding, "--not-before", now.Format(time.RFC3339),
+			"--not-after", now.Add(399*24*time.Hour).Format(time.RFC3339))
+	}
+	safe := proofKey(0, proofKid, proofBinding)
+	if bytes, ok := safe["proofReplyBytes"].(float64); !ok || bytes <= 0 || bytes > safe["proofReplyLimit"].(float64) {
+		t.Fatalf("proof reply budget: %v", safe)
+	}
+	proofInspection := command(0, "admin", "inspect-signing-key", "--kid", proofKid)
+	if proofInspection["secretBinding"] != proofBinding || proofInspection["publicSha256"] == nil || proofInspection["retiredAt"] != nil {
+		t.Fatalf("proof public metadata: %v", proofInspection)
+	}
+	publicDER, err := x509.MarshalPKIXPublicKey(&current.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = center.Exec(ctx, `INSERT INTO fleet.signing_key
+(kid, purpose, algorithm, public_key, secret_binding, not_before, not_after, created_at)
+SELECT 'synthetic-' || lpad(i::text, 8, '0'), 1, 'ES256', $1, 'SYNTHETIC_' || i::text, $2, $3, $2
+FROM generate_series(1, 1000) AS i`, publicDER, now, now.Add(300*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	overflowKid := "proof-" + strings.Repeat("b", 32)
+	overflowArgs := []string{"admin", "register-signing-key", "--purpose", "command", "--kid", overflowKid,
+		"--public-key-file", currentFile, "--secret-binding", "ARCFORGES_CENTER_KEY_PROOF_" + strings.Repeat("B", 32),
+		"--not-before", now.Format(time.RFC3339), "--not-after", now.Add(400 * 24 * time.Hour).Format(time.RFC3339)}
+	var overflowOut, overflowErr bytes.Buffer
+	if code := run(overflowArgs, environment(values), &overflowOut, &overflowErr); code != 1 ||
+		!strings.Contains(overflowErr.String(), "node-credential reply budget") {
+		t.Fatalf("over-budget registration exit %d, expected budget refusal", code)
+	}
+	if missing := command(0, "admin", "inspect-signing-key", "--kid", overflowKid); missing["found"] != false {
+		t.Fatalf("an over-budget registration inserted a key: %v", missing)
+	}
+	if still := command(0, "admin", "inspect-signing-key", "--kid", proofKid); still["retiredAt"] != nil || still["found"] != true {
+		t.Fatalf("an over-budget registration changed an old key: %v", still)
 	}
 
 	// revoke-device: a node enrolled by an account, released by the operator by its node ID.

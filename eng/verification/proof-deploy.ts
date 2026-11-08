@@ -9,6 +9,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  isProofCommandKeyBinding,
+  proofCommandKeyBindingVariable,
+} from "../../worker/foundation/proof-command-key.ts";
 
 export const proofWorkerName = "arcforges-cloud-proof";
 export const proofDatabaseName = "arcforges-proof-business";
@@ -153,6 +157,8 @@ export function buildProofConfig(
     bootstrap?: ProofBootstrap;
     /** The instant the bootstrap's expiry is judged against (tests). */
     now?: Date;
+    /** The generated test-key binding; the secret value is handed to Wrangler separately. */
+    proofCommandKeyBinding?: string;
   },
 ): CandidateConfig {
   assert.match(
@@ -247,6 +253,25 @@ export function buildProofConfig(
   }
   if (options.migrationsDir !== undefined)
     (proof.d1_databases[0] as { migrations_dir?: string }).migrations_dir = options.migrationsDir;
+  // Checked-in configuration never supplies the selected binding or a key. The protected deployment injects its public name only.
+  for (const vars of [
+    (candidate as { vars?: Record<string, string> }).vars,
+    candidate.env.proof.vars,
+  ]) {
+    assert(
+      vars?.[proofCommandKeyBindingVariable] === undefined,
+      "A checked-in proof key binding is not allowed.",
+    );
+    assert(
+      !Object.keys(vars ?? {}).some((name) => name.startsWith("ARCFORGES_CENTER_KEY_")),
+      "A checked-in command key is not allowed.",
+    );
+  }
+  assert(
+    isProofCommandKeyBinding(options.proofCommandKeyBinding),
+    "The proof command key binding is missing or invalid.",
+  );
+  proof.vars[proofCommandKeyBindingVariable] = options.proofCommandKeyBinding;
   return config;
 }
 

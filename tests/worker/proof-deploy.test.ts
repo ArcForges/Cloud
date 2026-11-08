@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { main as liveMain } from "../../eng/verification/foundation-live.ts";
 import {
-  buildProofConfig,
+  buildProofConfig as buildProofConfigWithKey,
   generateSecrets,
   proofHostname,
   proofSourceEntry,
@@ -26,6 +26,12 @@ import {
   runAll,
   runScenarios,
 } from "../../eng/verification/foundation-scenarios.ts";
+
+const proofTestBinding = `ARCFORGES_CENTER_KEY_PROOF_${"A".repeat(32)}`;
+const buildProofConfig = (
+  candidate: Parameters<typeof buildProofConfigWithKey>[0],
+  options: Parameters<typeof buildProofConfigWithKey>[1],
+) => buildProofConfigWithKey(candidate, { proofCommandKeyBinding: proofTestBinding, ...options });
 
 const wrangler = JSON.parse(
   readFileSync(path.resolve(import.meta.dirname, "../../wrangler.json"), "utf8"),
@@ -56,7 +62,7 @@ test("the checked-in proof environment is the isolated acceptance center", () =>
       ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
       // AF-CTR-03 and AF-CTR-04 E3: the acceptance environment serves the identity, pages, operations and fleet surfaces; browser cookies are bound to its own
       // origin, and its anonymous flows have a global ceiling (C1: it shares the production Neon project until the retention sweeps exist).
-      FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile",
+      FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile,relay,nodes",
       ALLOWED_ORIGIN: "https://proof.arcforges.com",
       ARCFORGES_CENTER_IDENTITY_POLICY: '{"anonymousFlowsLimit":600,"anonymousFlowsWindow":"1h"}',
       // AF-CTR-04 part M (Q-1, H3): a labelled NON-SHIPPING TEST statement for the asset links of the proof host: a package name no app
@@ -134,6 +140,40 @@ test("production clears the discarded cron schedule while the proof environment 
   assert.deepEqual((wrangler.env.proof as unknown as Record<string, unknown>).triggers, {});
   const worker = readFileSync(path.resolve(import.meta.dirname, "../../worker/index.ts"), "utf8");
   assert(!/\bscheduled\b/u.test(worker), "the Worker has no scheduled handler");
+});
+
+test("a proof relay configuration requires one protected key binding and never carries a checked-in binding", () => {
+  const options = {
+    account,
+    imageDigest: digest,
+    revision: "b".repeat(40),
+    main: sealedProofBundle,
+  };
+  assert.throws(() => buildProofConfigWithKey(wrangler, options), /proof command key binding/u);
+  for (const binding of ["", "synthetic-private-key", "ARCFORGES_CENTER_KEY_PROD_X"]) {
+    assert.throws(
+      () => buildProofConfigWithKey(wrangler, { ...options, proofCommandKeyBinding: binding }),
+      (error: Error) =>
+        /proof command key binding/u.test(error.message) &&
+        (binding === "" || !error.message.includes(binding)),
+    );
+  }
+  const config = buildProofConfig(wrangler, options);
+  assert.equal(config.env.proof.vars.ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING, proofTestBinding);
+  assert.equal(
+    (config as unknown as { vars: Record<string, string> }).vars
+      .ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING,
+    undefined,
+  );
+  assert.equal(wrangler.env.proof.vars.ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING, undefined);
+  const bad = structuredClone(wrangler);
+  bad.env.proof.vars.ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING = "synthetic-checked-in-private";
+  assert.throws(
+    () => buildProofConfigWithKey(bad, { ...options, proofCommandKeyBinding: proofTestBinding }),
+    (error: Error) =>
+      /checked-in proof key/u.test(error.message) &&
+      !error.message.includes("synthetic-checked-in-private"),
+  );
 });
 
 test("the proof config pins the registry digest, revision and account and nothing else", () => {

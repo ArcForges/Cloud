@@ -74,7 +74,7 @@ function bindings(
   const env: CloudBindings = {
     SOURCE_REVISION: "candidate",
     ALLOWED_ORIGIN: origin,
-    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile",
+    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile,relay,nodes",
     CLOUD_CONTAINER: {
       getByName() {
         return {

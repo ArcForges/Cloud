@@ -950,15 +950,17 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   const { verifyCandidate } = await import("../../tooling/project.ts");
   const { candidateDir, readJson, root, run, wrangler, writeJson } =
     await import("../../tooling/process.ts");
-  const {
-    loadCandidateImage,
-    readGate,
-    readLiveSlots,
-    requirePostgresGate,
-    slotLabel,
-    withRuntimeCredential,
-  } = await import("../../tooling/postgres-deploy.ts");
+  const { loadCandidateImage, readGate, requirePostgresGate, slotLabel, withRuntimeCredential } =
+    await import("../../tooling/postgres-deploy.ts");
   const { withNeonRuntimeSecret } = await import("../../tooling/neon-runtime.ts");
+  const {
+    protectedProofRuntimeRunner,
+    proofRotationReceipt,
+    registerProofCommandKey,
+    readProofLiveSlots,
+    withProofCommandKey,
+  } = await import("../../tooling/proof-command-key.ts");
+  const { runSensitive } = await import("../../tooling/sensitive-process.ts");
   // AF-CTR-03 A2: the owner bootstrap of this dispatch (none after the owner exists); an invalid one stops the deployment before
   // anything is pushed.
   const bootstrap = proofBootstrapFromEnvironment(process.env);
@@ -988,99 +990,146 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
 
   await checkProofDomainFree(api);
   const candidateConfig = await readJson<CandidateConfig>(path.join(candidateDir, "wrangler.json"));
-  const config = buildProofConfig(candidateConfig, {
+  const configOptions = {
     account: api.account,
     imageDigest,
     revision: candidate.revision,
     databaseId: provisioned.d1DatabaseId,
-    // CLOUD.84 D1: the proof environment runs its own sealed bundle (the acceptance entry since AF-CTR-02), which the candidate job
-    // built and verifyCandidate checked against the manifest above; the deploy below uploads it with --no-bundle.
+    // The proof runs the candidate's sealed bundle; no deployment rebuilds it.
     main: sealedProofBundle,
     buildIdentity: (candidateConfig as { vars?: { BUILD_IDENTITY?: string } }).vars?.BUILD_IDENTITY,
     migrationsDir: "../worker/proof-migrations",
     bootstrap,
+  };
+  // Refuse an invalid candidate and unknown or mixed live versions before registering a key. This temporary config names no secret.
+  const preflightConfig = buildProofConfig(candidateConfig, {
+    ...configOptions,
+    proofCommandKeyBinding: `ARCFORGES_CENTER_KEY_PROOF_${"0".repeat(32)}`,
   });
   const configFile = path.join(root, "artifacts", "proof.wrangler.json");
-  await writeJson(configFile, config);
-  // AF-CTR-02 follow-up: the retired C# proof consumers are detached (and anything the configuration does not declare refused)
-  // before the rotation and upload.
-  const preflight = await prepareProofScript(api, config.env.proof);
-  for (const entry of preflight.retiredConsumers)
-    console.log(`  Queue ${entry.queue}: ${proofWorkerName} consumer ${entry.outcome}`);
-  console.log(
-    `  Proof script: ${preflight.cronSchedules} cron schedules; Durable Object migration tag ${preflight.migrationTag ?? "none"}`,
-  );
+  await writeJson(configFile, preflightConfig);
   const common = ["--config", "artifacts/proof.wrangler.json", "--env", "proof"];
-  // The acceptance runtime credential is rotated now and travels in a runner-local file that Wrangler uploads with the version and
-  // that is removed immediately; nothing prints it. The revision still running keeps its own credential of the other slot.
-  // The live version's message names its runtime slot, which the rotation never touches; the new version is labelled likewise.
-  const rotation = await withRuntimeCredential(
-    "acceptance",
-    candidate.image,
-    async (secrets, rotated) => {
-      await withNeonRuntimeSecret(secrets, async (secretArguments) => {
-        await run(process.execPath, [
-          wrangler,
-          "deploy",
-          ...common,
-          "--no-bundle",
-          "--containers-rollout",
-          "immediate",
-          "--tag",
-          `${candidate.version}-acceptance`,
-          "--message",
-          slotLabel(String(rotated.slot)),
-          ...secretArguments,
-        ]);
+  const proofSlots = async () =>
+    readProofLiveSlots(
+      async (args) =>
+        JSON.stringify(
+          await runSensitive(
+            "provider",
+            process.execPath,
+            [wrangler, ...args],
+            process.env,
+            "json",
+          ),
+        ),
+      common,
+    );
+  await proofSlots();
+  // Prepare only the declared proof resources. This can change retired queue consumers; it never promotes a Worker version.
+  const preflight = await prepareProofScript(api, preflightConfig.env.proof);
+  console.log("Proof script preflight completed.");
+  await withProofCommandKey(
+    (key) => registerProofCommandKey(candidate.image, key),
+    async (key, beforeUpload) => {
+      const config = buildProofConfig(candidateConfig, {
+        ...configOptions,
+        proofCommandKeyBinding: key.metadata.binding,
       });
+      await writeJson(configFile, config);
+      // The acceptance runtime credential is rotated now and travels in a runner-local file that Wrangler uploads with the version and
+      // that is removed immediately; nothing prints it. The revision still running keeps its own credential of the other slot.
+      // The live version's message names its runtime slot, which the rotation never touches; the new version is labelled likewise.
+      const rotation = await withRuntimeCredential(
+        "acceptance",
+        candidate.image,
+        async (secrets, rotated) => {
+          const safeRotation = proofRotationReceipt(rotated);
+          await withNeonRuntimeSecret(
+            { ...secrets, [key.metadata.binding]: key.secret() },
+            async (secretArguments) => {
+              await beforeUpload();
+              // Wrangler receives both secrets via one private file. Its output is bounded/discarded, including on errors.
+              await runSensitive(
+                "upload",
+                process.execPath,
+                [
+                  wrangler,
+                  "deploy",
+                  ...common,
+                  "--no-bundle",
+                  "--containers-rollout",
+                  "immediate",
+                  "--tag",
+                  `${candidate.version}-acceptance`,
+                  "--message",
+                  `${slotLabel(String(safeRotation.slot))} proof-command-key=${key.metadata.kid}`,
+                  ...secretArguments,
+                ],
+                process.env,
+                "discard",
+              );
+            },
+          );
+        },
+        {
+          liveSlots: proofSlots,
+          runner: protectedProofRuntimeRunner,
+        },
+      );
+      const safeRotation = proofRotationReceipt(rotation);
+      const receipts = await postDeployChecks(api);
+      await writeJson(path.join(root, "artifacts", "proof-deployment.json"), {
+        revision: candidate.revision,
+        version: candidate.version,
+        imageId: candidate.imageId,
+        imageDigest,
+        worker: proofWorkerName,
+        hostname: proofHostname,
+        baseUrl: acceptanceBaseUrl,
+        center: {
+          mode: "official-hosted",
+          planConfiguration: "development-fixtures",
+          // The configured surfaces: those this Worker version forwards and starts the center with, computed from its configuration, not
+          // observed (CI makes no live call). The Container restarts a center left running under another version's start environment
+          // before it serves a request (AF-CTR-03); the post-deploy acceptance compares the center's health (`center.surfaces`).
+          configuredSurfaces: centerSurfaces(config.env.proof.vars.FLAGSHIP_SURFACES),
+          // Public metadata only: private key bytes never enter this receipt or the generated Wrangler config.
+          commandSigning: key.metadata,
+          // The owner bootstrap this deployment configured: the digest of a one-time token and its expiry (public by construction), or
+          // null when the dispatch carried none (every dispatch after the owner exists).
+          bootstrap: bootstrap
+            ? { sha256: bootstrap.sha256, expiresAt: bootstrap.expiresAt }
+            : null,
+          ...safeRotation,
+          // The independently produced PostgreSQL gate retains the server's logging settings.
+          logging: "see postgres-gate-acceptance.json",
+        },
+        retainedD1DatabaseId: provisioned.d1DatabaseId,
+        // The retired C# proof queues stay, unconsumed, until AF-CTR-09.
+        retiredQueueConsumers: preflight.retiredConsumers,
+        cronSchedules: preflight.cronSchedules,
+        migrationTag: preflight.migrationTag,
+        resources: provisioned.actions,
+        centerResources: centerResources.acceptance,
+        receipts: receipts.map((check) => ({ name: check.name, ok: check.ok })),
+        deployedAt: new Date().toISOString(),
+      });
+      // Provider details are not trusted as log text; the fixed check names and boolean results retain the receipt without
+      // risking an echoed secret. A failed required receipt still fails the deploy.
+      report(
+        "Post-deployment provider receipts",
+        receipts.map(({ name, required, ok }) => ({
+          name,
+          required,
+          ok,
+          detail: "",
+        })),
+      );
+      console.log(
+        `Acceptance center deployed at ${acceptanceBaseUrl}. This is deployment completion, not live acceptance evidence.`,
+      );
     },
-    {
-      liveSlots: () =>
-        readLiveSlots((args) => run(process.execPath, [wrangler, ...args], true), common),
-    },
-  );
-  const receipts = await postDeployChecks(api);
-  await writeJson(path.join(root, "artifacts", "proof-deployment.json"), {
-    revision: candidate.revision,
-    version: candidate.version,
-    imageId: candidate.imageId,
-    imageDigest,
-    worker: proofWorkerName,
-    hostname: proofHostname,
-    baseUrl: acceptanceBaseUrl,
-    center: {
-      mode: "official-hosted",
-      planConfiguration: "development-fixtures",
-      // The configured surfaces: those this Worker version forwards and starts the center with, computed from its configuration, not
-      // observed (CI makes no live call). The Container restarts a center left running under another version's start environment
-      // before it serves a request (AF-CTR-03); the post-deploy acceptance compares the center's health (`center.surfaces`).
-      configuredSurfaces: centerSurfaces(config.env.proof.vars.FLAGSHIP_SURFACES),
-      // The owner bootstrap this deployment configured: the digest of a one-time token and its expiry (public by construction), or
-      // null when the dispatch carried none (every dispatch after the owner exists).
-      bootstrap: bootstrap ? { sha256: bootstrap.sha256, expiresAt: bootstrap.expiresAt } : null,
-      database: rotation.database,
-      runtimeRole: rotation.runtimeRole,
-      loginRole: rotation.loginRole,
-      slot: rotation.slot,
-      passwordForm: rotation.passwordForm,
-      serverVersionNum: rotation.serverVersionNum,
-      logging: rotation.logging,
-      slotSource: rotation.slotSource,
-      probe: rotation.probe,
-    },
-    retainedD1DatabaseId: provisioned.d1DatabaseId,
-    // The retired C# proof queues stay, unconsumed, until AF-CTR-09.
-    retiredQueueConsumers: preflight.retiredConsumers,
-    cronSchedules: preflight.cronSchedules,
-    migrationTag: preflight.migrationTag,
-    resources: provisioned.actions,
-    centerResources: centerResources.acceptance,
-    receipts: receipts.map((check) => ({ name: check.name, ok: check.ok })),
-    deployedAt: new Date().toISOString(),
-  });
-  report("Post-deployment provider receipts", receipts);
-  console.log(
-    `Acceptance center deployed at ${acceptanceBaseUrl}. This is deployment completion, not live acceptance evidence.`,
+    async (receipt) =>
+      writeJson(path.join(root, "artifacts", "proof-key-registration.json"), receipt),
   );
 }
 

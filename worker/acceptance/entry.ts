@@ -21,7 +21,7 @@ export { ContainerProxy };
 export class FoundationContainer extends CloudContainer {
   constructor(ctx: ConstructorParameters<typeof CloudContainer>[0], env: object) {
     super(ctx, env);
-    applyCenterContainer(this, env as CenterEnvironment);
+    applyCenterContainer(this, env as CenterEnvironment, { proofCommandKey: true });
   }
 }
 
