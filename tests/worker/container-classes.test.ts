@@ -599,7 +599,7 @@ test("the self-hosted operator's feature limits are never passed to the hosted c
     assert(!Object.values(settings.envVars).some((value) => value.includes("remote.control")));
   }
   // No environment of wrangler.json sets it, and no source of the Worker names it.
-  const root = new URL("../../", import.meta.url).pathname;
+  const root = path.resolve(import.meta.dirname, "../..");
   const wrangler = JSON.parse(readFileSync(path.join(root, "wrangler.json"), "utf8")) as {
     vars?: Record<string, unknown>;
     env?: Record<string, { vars?: Record<string, unknown> }>;
