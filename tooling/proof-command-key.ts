@@ -2,7 +2,17 @@
 // Protected proof deployment's per-deploy test key. Private bytes exist only in this process and the short-lived Wrangler secrets
 // file; the public receipt is persisted before registration so an uncertain write can be inspected, never blindly retried.
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  open,
+  rename,
+  rm,
+  unlink,
+  writeFile,
+  type FileHandle,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -14,7 +24,11 @@ import {
   type LiveSlots,
   type WranglerReader,
 } from "./postgres-deploy.ts";
-import { runSensitive, SensitiveProcessError } from "./sensitive-process.ts";
+import {
+  proofProcessEnvironment,
+  runSensitive,
+  SensitiveProcessError,
+} from "./sensitive-process.ts";
 
 export interface ProofKeyMetadata {
   kid: string;
@@ -148,14 +162,17 @@ export async function readProofLiveSlots(
 }
 
 /** The existing credential rotation's sealed-image runner, with bounded/discarded child output and its exit-4 meaning intact. */
-export function proofRuntimeRunner(run: RunSensitive = runSensitive): CenterRunner {
+export function proofRuntimeRunner(
+  run: RunSensitive = runSensitive,
+  environment: NodeJS.ProcessEnv = process.env,
+): CenterRunner {
   return async (image, variables, command, options = {}) => {
     try {
       const value = await run(
         "runtime",
         "docker",
         dockerArguments(image, Object.keys(variables), command, options),
-        { ...process.env, ...variables },
+        { ...proofProcessEnvironment(environment), ...variables },
         "json",
       );
       if (typeof value !== "object" || value === null || Array.isArray(value))
@@ -266,7 +283,7 @@ export async function registerProofCommandKey(
         user,
         secretsDirectory: directory,
       });
-    const env = { ...environment, ...variables };
+    const env = { ...proofProcessEnvironment(environment), ...variables };
     const meta = key.metadata;
     const registered = await runner(
       "registration",
@@ -311,6 +328,96 @@ export async function registerProofCommandKey(
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/** Validate and copy only the public fields; no caller-supplied extra field is ever written. */
+function publicReceipt(receipt: ProofKeyReceipt): ProofKeyReceipt {
+  const {
+    kid,
+    binding,
+    notBefore,
+    notAfter,
+    publicSha256,
+    fingerprint,
+    testOnly,
+    stage,
+    proofReplyBytes,
+    proofReplyLimit,
+  } = receipt;
+  const id = /^proof-([a-f0-9]{32})$/u.exec(kid)?.[1];
+  const at = (value: unknown) => {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u.test(value))
+      return NaN;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) || instant(date) !== value ? NaN : date.getTime();
+  };
+  const validBudget =
+    Number.isSafeInteger(proofReplyBytes) &&
+    Number.isSafeInteger(proofReplyLimit) &&
+    (proofReplyBytes as number) > 0 &&
+    (proofReplyBytes as number) <= (proofReplyLimit as number);
+  if (
+    !id ||
+    binding !== `ARCFORGES_CENTER_KEY_PROOF_${id.toUpperCase()}` ||
+    !/^[a-f0-9]{64}$/u.test(publicSha256) ||
+    fingerprint !== (publicSha256.slice(0, 20).toUpperCase().match(/.{4}/gu) ?? []).join("-") ||
+    !Number.isFinite(at(notBefore)) ||
+    at(notAfter) - at(notBefore) !== validityMs ||
+    testOnly !== true ||
+    !["generated", "registration-started", "registered", "upload-started", "uploaded"].includes(
+      stage,
+    ) ||
+    ((proofReplyBytes !== undefined || proofReplyLimit !== undefined) && !validBudget) ||
+    (["registered", "upload-started", "uploaded"].includes(stage) && !validBudget)
+  )
+    throw new Error("The public proof command-key receipt is invalid.");
+  return {
+    kid,
+    binding,
+    notBefore,
+    notAfter,
+    publicSha256,
+    fingerprint,
+    testOnly,
+    stage,
+    ...(validBudget ? { proofReplyBytes, proofReplyLimit } : {}),
+  };
+}
+
+/** Atomically replaces a complete public stage receipt; injection is only for synthetic I/O failure tests. */
+export async function writeProofKeyReceipt(
+  file: string,
+  receipt: ProofKeyReceipt,
+  options: {
+    write?: (handle: FileHandle, text: string) => Promise<void>;
+    replace?: (temporary: string, target: string) => Promise<void>;
+  } = {},
+): Promise<void> {
+  let handle: FileHandle | undefined;
+  let owned = false;
+  let temporary = "";
+  try {
+    temporary = path.join(path.dirname(file), `.proof-key-${randomBytes(16).toString("hex")}.tmp`);
+    const document = `${JSON.stringify(publicReceipt(receipt), null, 2)}\n`;
+    await mkdir(path.dirname(file), { recursive: true });
+    handle = await open(temporary, "wx", 0o600);
+    owned = true;
+    await (
+      options.write ??
+      (async (target, text) => {
+        await target.writeFile(text);
+      })
+    )(handle, document);
+    await handle.close();
+    handle = undefined;
+    await (options.replace ?? rename)(temporary, file);
+    owned = false;
+  } catch {
+    throw new Error("The public proof command-key receipt could not be saved.");
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    if (owned) await unlink(temporary).catch(() => {});
   }
 }
 

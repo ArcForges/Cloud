@@ -24,10 +24,10 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/session"
 )
 
-// ProofKeyReplyBudget checks the actual published command and entitlement key sets plus the proposed proof key. The caller holds a
+// SigningKeyReplyBudget checks both actual published key sets plus a proposed command or entitlement key. The caller holds a
 // table lock through registration so another write cannot make the checked set stale before the INSERT. The Worker sends binary
 // gRPC-Web and enforces each fleet method's own frame and unary bounds, which are taken from the actual registrations.
-func ProofKeyReplyBudget(ctx context.Context, tx pgx.Tx, now time.Time, proposed platform.SigningKey) (int, int, error) {
+func SigningKeyReplyBudget(ctx context.Context, tx pgx.Tx, now time.Time, proposed platform.SigningKey) (int, int, error) {
 	command, err := platform.PublishedKeys(ctx, tx, platform.CommandSigning, now)
 	if err != nil {
 		return 0, 0, err
@@ -36,7 +36,14 @@ func ProofKeyReplyBudget(ctx context.Context, tx pgx.Tx, now time.Time, proposed
 	if err != nil {
 		return 0, 0, err
 	}
-	command = append(command, proposed)
+	switch proposed.Purpose {
+	case platform.CommandSigning:
+		command = append(command, proposed)
+	case platform.EntitlementToken:
+		entitlement = append(entitlement, proposed)
+	default:
+		return 0, 0, errors.New("the key purpose is not published with node credentials")
+	}
 	return proofKeyReplyBudget(command, entitlement)
 }
 

@@ -680,12 +680,14 @@ owner-configured (Plan H-16).
 
 The overlap rule consults only the keys valid at registration, so two successors registered ahead of time are not checked against
 each other (AF-CTR-05's custody owns the schedule). `PublishedKeys` includes future successors as well as currently valid keys;
-expired and already retired keys are excluded. Every protected proof registration checks both actual published sets plus its
-candidate under the signing-key table lock, before INSERT, against the complete sign-in, poll and refresh protobuf responses and the
-actual fleet transport budgets. The current fleet response limit is 65,536 bytes, including framing and the conservative trailer
-allowance in that check. A missing budget, an unreadable set or an over-budget candidate stops registration and promotion. It is
-not safe to assume repeated deployments can accumulate public keys indefinitely. Other registrations must also respect these bounds;
-the proof preflight only guarantees the set at its own insertion. No live registry count is implied by this check.
+expired and already retired keys are excluded. Every supported `admin register-signing-key` command for either command or
+entitlement takes the same signing-key table lock, then reads both published sets in READ COMMITTED and checks the candidate before
+INSERT against the complete sign-in, poll and refresh protobuf responses and actual fleet transport budgets. A registration using a
+stale snapshot is refused. The current fleet response limit is 65,536 bytes, including framing and the conservative trailer allowance
+in that check. A missing budget, an unreadable set or an over-budget candidate stops registration and promotion. Repeated
+deployments cannot accumulate public keys indefinitely. This guard covers the supported admin registration path; privileged direct
+SQL or test-only calls to the lower-level `platform.RegisterKey` bypass it and must not be treated as guarded registration. No live
+registry count is implied by this check.
 
 **Normal proof-key follow-through.** A new Worker version does not retire the old public key. Preserve at least the seven-day
 successor overlap required by `RegisterKey` and reconcile the exact old and successor public metadata, validity and retirement using

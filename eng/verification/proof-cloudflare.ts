@@ -947,10 +947,9 @@ export async function verifyAndStageProofAssets(
 }
 
 async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<void> {
-  const { verifyCandidate } = await import("../../tooling/project.ts");
-  const { candidateDir, readJson, root, run, wrangler, writeJson } =
+  const { candidateDir, readJson, root, wrangler, writeJson } =
     await import("../../tooling/process.ts");
-  const { loadCandidateImage, readGate, requirePostgresGate, slotLabel, withRuntimeCredential } =
+  const { readGate, requirePostgresGate, slotLabel, withRuntimeCredential } =
     await import("../../tooling/postgres-deploy.ts");
   const { withNeonRuntimeSecret } = await import("../../tooling/neon-runtime.ts");
   const {
@@ -959,34 +958,17 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
     registerProofCommandKey,
     readProofLiveSlots,
     withProofCommandKey,
+    writeProofKeyReceipt,
   } = await import("../../tooling/proof-command-key.ts");
-  const { runSensitive } = await import("../../tooling/sensitive-process.ts");
+  const { proofProcessEnvironment, runSensitive } =
+    await import("../../tooling/sensitive-process.ts");
+  const { prepareProofCandidate } = await import("../../tooling/proof-candidate.ts");
   // AF-CTR-03 A2: the owner bootstrap of this dispatch (none after the owner exists); an invalid one stops the deployment before
   // anything is pushed.
   const bootstrap = proofBootstrapFromEnvironment(process.env);
-  const candidate = await verifyCandidate();
-  assert.equal(candidate.dirty, false, "Uncommitted local builds cannot deploy.");
-  const current = await run(
-    "gh",
-    ["api", "repos/ArcForges/Cloud/git/ref/heads/main", "--jq", ".object.sha"],
-    true,
+  const { candidate, imageDigest } = await prepareProofCandidate(api.account, async (revision) =>
+    requirePostgresGate(await readGate("acceptance"), "acceptance", revision),
   );
-  assert.equal(candidate.revision, current, "A newer main commit exists; only it may deploy.");
-  // AF-CTR-02: the gated PostgreSQL step migrated the acceptance database for this very candidate.
-  requirePostgresGate(await readGate("acceptance"), "acceptance", candidate.revision);
-  await loadCandidateImage(candidate);
-  await run(process.execPath, [wrangler, "containers", "push", candidate.image]);
-  const registryTag = `registry.cloudflare.com/${api.account}/${candidate.image}`;
-  const digests = JSON.parse(
-    await run(
-      "docker",
-      ["image", "inspect", registryTag, "--format", "{{json .RepoDigests}}"],
-      true,
-    ),
-  ) as string[];
-  const prefix = `registry.cloudflare.com/${api.account}/arcforges-cloud@sha256:`;
-  const imageDigest = digests.find((value) => value.startsWith(prefix));
-  assert(imageDigest, "Cloudflare registry did not return the pushed image digest.");
 
   await checkProofDomainFree(api);
   const candidateConfig = await readJson<CandidateConfig>(path.join(candidateDir, "wrangler.json"));
@@ -1017,7 +999,7 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
             "provider",
             process.execPath,
             [wrangler, ...args],
-            process.env,
+            proofProcessEnvironment(process.env, ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"]),
             "json",
           ),
         ),
@@ -1064,7 +1046,10 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
                   `${slotLabel(String(safeRotation.slot))} proof-command-key=${key.metadata.kid}`,
                   ...secretArguments,
                 ],
-                process.env,
+                proofProcessEnvironment(process.env, [
+                  "CLOUDFLARE_ACCOUNT_ID",
+                  "CLOUDFLARE_API_TOKEN",
+                ]),
                 "discard",
               );
             },
@@ -1129,7 +1114,7 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
       );
     },
     async (receipt) =>
-      writeJson(path.join(root, "artifacts", "proof-key-registration.json"), receipt),
+      writeProofKeyReceipt(path.join(root, "artifacts", "proof-key-registration.json"), receipt),
   );
 }
 

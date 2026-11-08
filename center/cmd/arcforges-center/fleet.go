@@ -106,7 +106,12 @@ func fleetAdmin(sub string, rest []string, lookup func(string) (string, bool), s
 	defer func() { _ = conn.Close(context.Background()) }()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	var result map[string]any
-	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+	options := pgx.TxOptions{}
+	if sub == "register-signing-key" {
+		// Each statement after the registration lock must see the last committed writer, even if the server default differs.
+		options.IsoLevel = pgx.ReadCommitted
+	}
+	err = pgx.BeginTxFunc(ctx, conn, options, func(tx pgx.Tx) error {
 		var err error
 		result, err = run(ctx, tx, now)
 		return err
@@ -190,10 +195,8 @@ func registerSigningKey(rest []string) (func(ctx context.Context, tx pgx.Tx, now
 		}
 		key := platform.SigningKey{KID: flags["--kid"], Purpose: purpose, Algorithm: "ES256", PublicKey: data, SecretBinding: flags["--secret-binding"],
 			NotBefore: notBefore.UTC(), NotAfter: notAfter.UTC()}
-		var proofBytes, proofLimit int
-		if strings.HasPrefix(key.SecretBinding, "ARCFORGES_CENTER_KEY_PROOF_") {
-			// Proof keys are per-deploy and their public rows may overlap. Check the actual response budget under a lock that
-			// serializes registry writes, so this registration cannot make node sign-in or refresh overflow the Worker.
+		proof := strings.HasPrefix(key.SecretBinding, "ARCFORGES_CENTER_KEY_PROOF_")
+		if proof {
 			suffix := strings.TrimPrefix(key.KID, "proof-")
 			_, decodeErr := hex.DecodeString(suffix)
 			if purpose != platform.CommandSigning || !strings.HasPrefix(key.KID, "proof-") || len(suffix) != 32 ||
@@ -201,17 +204,27 @@ func registerSigningKey(rest []string) (func(ctx context.Context, tx pgx.Tx, now
 				key.SecretBinding != "ARCFORGES_CENTER_KEY_PROOF_"+strings.ToUpper(suffix) {
 				return nil, &refusal{"the proof command key metadata is invalid"}
 			}
-			if _, err = tx.Exec(ctx, "LOCK TABLE fleet.signing_key IN SHARE ROW EXCLUSIVE MODE"); err != nil {
-				return nil, err
-			}
-			proofBytes, proofLimit, err = fleetapi.ProofKeyReplyBudget(ctx, tx, now, key)
-			if err != nil {
-				return nil, err
-			}
-			if proofBytes > proofLimit {
-				return nil, &refusal{"the proof command key would exceed the node-credential reply budget"}
-			}
 		}
+		// Every supported command or entitlement registration takes the same lock before reading either published set.
+		// READ COMMITTED makes the read after a wait observe the previous writer; a stale-snapshot transaction is refused.
+		if _, err = tx.Exec(ctx, "LOCK TABLE fleet.signing_key IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+			return nil, err
+		}
+		var isolation string
+		if err = tx.QueryRow(ctx, "SHOW transaction_isolation").Scan(&isolation); err != nil {
+			return nil, err
+		}
+		if isolation != "read committed" {
+			return nil, &refusal{"signing key registration requires read committed isolation"}
+		}
+		proofBytes, proofLimit, err := fleetapi.SigningKeyReplyBudget(ctx, tx, now, key)
+		if err != nil {
+			return nil, err
+		}
+		if proofBytes > proofLimit {
+			return nil, &refusal{"the signing key would exceed the node-credential reply budget"}
+		}
+
 		if err = platform.RegisterKey(ctx, tx, key, now); err != nil {
 			var storeErr *store.Error
 			if errors.As(err, &storeErr) {
@@ -221,7 +234,7 @@ func registerSigningKey(rest []string) (func(ctx context.Context, tx pgx.Tx, now
 		}
 		result := map[string]any{"kid": key.KID, "purpose": purposeName(purpose), "notBefore": key.NotBefore.Format(time.RFC3339),
 			"notAfter": key.NotAfter.Format(time.RFC3339), "fingerprint": fleet.Fingerprint(key.PublicKey)}
-		if proofLimit > 0 {
+		if proof {
 			result["proofReplyBytes"], result["proofReplyLimit"] = proofBytes, proofLimit
 		}
 		return result, auditOperator(ctx, tx, now, "fleet.signing_key.registered", "signing_key", key.KID, result)

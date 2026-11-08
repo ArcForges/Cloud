@@ -135,12 +135,18 @@ the acceptance database with 400-day validity, subject to the seven-day successo
 the exact binding, purpose, algorithm, validity, retirement and full public-key hash. The registry stores no private key. Only after
 registration and inspection does the deploy combine the private command key and the alternate database credential in a short-lived
 runner-local secrets file for Wrangler. The generated config names only the selected binding. The Go proof entry forwards that exact
-secret only with `relay` enabled; production, C# and relay-disabled paths forward none. Child outputs are bounded or discarded and
-reported with fixed errors. The key's private material is not included in the public receipt or checked-in configuration.
+secret only with `relay` enabled; production, C# and relay-disabled paths forward none. Candidate verification and its nested Git
+commands receive no provider or database credential; the main-head query gets only the GitHub token, Docker load/inspect no such
+credentials, Wrangler only the Cloudflare token, and center administration only the database alias it needs. Child output is bounded
+or discarded and errors are fixed. A deadline terminates the owned Linux process group and bounds waiting even when a child retains a
+pipe; it cannot establish that a remote provider write was cancelled or rolled back. The key's private material is not included in the
+public receipt or checked-in configuration.
 
 `artifacts/proof-key-registration.json` records the public KID, binding, public hash, validity and stage (`generated`,
 `registration-started`, `registered`, `upload-started`, `uploaded`); `uploaded` follows upload, runtime-slot confirmation and the
-required provider checks. Generation or an unverified registration cannot promote the new Worker; a registration may nevertheless
+required provider checks. Each stage is fully written to a new same-directory file before atomic replacement, so ordinary write or
+rename failure preserves the previous complete receipt. A lost runner, SIGKILL, filesystem crash or failed artifact upload can still
+lose evidence; this is not a durable-storage guarantee. Generation or an unverified registration cannot promote the new Worker; a registration may nevertheless
 have committed when its reply is lost. After a verified registration, the inactive database slot may have been rotated before upload
 fails. An upload or later confirmation failure can leave the provider outcome unknown: do not assume rollback or retry a write. Inspect
 the public receipt and exact registry row, provider's active version messages and database runtime-slot state read-only first; compare

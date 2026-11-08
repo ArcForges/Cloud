@@ -2,7 +2,7 @@
 // E3 uses synthetic keys and mocked provider/registry calls. No owner key, account or provider is contacted.
 import assert from "node:assert/strict";
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import { access, readFile, stat } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
@@ -14,11 +14,14 @@ import {
   registerProofCommandKey,
   requireKnownProofSlots,
   withProofCommandKey,
+  writeProofKeyReceipt,
   type ProofKeyReceipt,
 } from "../../tooling/proof-command-key.ts";
 import { withNeonRuntimeSecret } from "../../tooling/neon-runtime.ts";
 import { runSensitive, SensitiveProcessError } from "../../tooling/sensitive-process.ts";
 import { CenterExit } from "../../tooling/postgres-deploy.ts";
+import { prepareProofCandidate } from "../../tooling/proof-candidate.ts";
+import { scratchDirectory } from "./support/scratch.ts";
 
 const migration = "postgres://synthetic:synthetic-password@example.test/database";
 const asRegistration = (key: ProofCommandKey) => ({
@@ -65,12 +68,19 @@ test("registration uses the sealed image, public file and exact read-only inspec
   const stages: string[] = [];
   let directory = "";
   await registerProofCommandKey("sealed-candidate-image", key, {
-    environment: { NEON_DATABASE_URL_DIRECT: migration },
+    environment: {
+      NEON_DATABASE_URL_DIRECT: migration,
+      GH_TOKEN: "synthetic-gh",
+      CLOUDFLARE_API_TOKEN: "synthetic-cloudflare",
+    },
     run: async (stage, command, args, env, output) => {
       stages.push(stage);
       assert.equal(command, "docker");
       assert.equal(output, "json");
       assert.equal(env.ARCFORGES_CENTER_MIGRATION_DATABASE_URL, migration);
+      assert.equal(env.NEON_DATABASE_URL_DIRECT, undefined);
+      assert.equal(env.GH_TOKEN, undefined);
+      assert.equal(env.CLOUDFLARE_API_TOKEN, undefined);
       assert(!args.join(" ").includes(key.secret()));
       assert(!args.join(" ").includes(migration));
       const volume = args[args.indexOf("--volume") + 1] as string;
@@ -173,6 +183,90 @@ test("the protected flow records public stages, combines runtime and command sec
   }
 });
 
+test("atomic public stage receipts preserve the last complete state on write or replace failure", async (t) => {
+  for (const stage of ["registered", "upload-started"] as const) {
+    for (const fault of ["write", "replace"] as const) {
+      const directory = scratchDirectory("e3-proof-receipt-", t);
+      const file = path.join(directory, "receipt.json");
+      let prior = "",
+        privateKey = "",
+        uploads = 0;
+      const flow = withProofCommandKey(
+        async (key) => {
+          privateKey = key.secret();
+          key.metadata.proofReplyBytes = 1000;
+          key.metadata.proofReplyLimit = 65536;
+        },
+        async (_key, beforeUpload) => {
+          await beforeUpload();
+          uploads++;
+        },
+        async (receipt) => {
+          const options =
+            receipt.stage !== stage
+              ? {}
+              : fault === "write"
+                ? {
+                    write: async (handle: import("node:fs/promises").FileHandle, text: string) => {
+                      await handle.writeFile(text.slice(0, 16));
+                      throw new Error(`synthetic write failure ${privateKey}`);
+                    },
+                  }
+                : {
+                    replace: async () => {
+                      throw new Error(`synthetic rename failure ${privateKey}`);
+                    },
+                  };
+          await writeProofKeyReceipt(
+            file,
+            { ...receipt, unexpected: privateKey } as ProofKeyReceipt,
+            options,
+          );
+          prior = await readFile(file, "utf8");
+        },
+      );
+      await assert.rejects(flow, (error: Error) => !error.message.includes(privateKey));
+      const after = await readFile(file, "utf8");
+      assert.equal(after, prior, `${stage}/${fault} keeps the exact previous receipt`);
+      assert.equal(
+        JSON.parse(after).stage,
+        stage === "registered" ? "registration-started" : "registered",
+      );
+      assert(!after.includes(privateKey));
+      assert.equal(uploads, 0);
+      assert.deepEqual(await readdir(directory), ["receipt.json"]);
+    }
+  }
+  const directory = scratchDirectory("e3-proof-receipt-ok-", t);
+  const file = path.join(directory, "receipt.json");
+  let privateKey = "";
+  await withProofCommandKey(
+    async (key) => {
+      privateKey = key.secret();
+      key.metadata.proofReplyBytes = 1000;
+      key.metadata.proofReplyLimit = 65536;
+    },
+    async (_key, beforeUpload) => {
+      await beforeUpload();
+    },
+    async (receipt) =>
+      writeProofKeyReceipt(file, { ...receipt, unexpected: privateKey } as ProofKeyReceipt),
+  );
+  const completed = await readFile(file, "utf8");
+  assert.equal(JSON.parse(completed).stage, "uploaded");
+  assert(!completed.includes(privateKey));
+  const invalid = {
+    ...JSON.parse(completed),
+    binding: "synthetic-private-sentinel",
+  } as ProofKeyReceipt;
+  await assert.rejects(
+    writeProofKeyReceipt(file, invalid),
+    (error: Error) => !error.message.includes("synthetic-private-sentinel"),
+  );
+  assert.equal(await readFile(file, "utf8"), completed);
+  assert.deepEqual(await readdir(directory), ["receipt.json"]);
+});
+
 test("registration failure never uploads, unknown upload is not retried, and caller errors are sanitized", async () => {
   const stages: ProofKeyReceipt[] = [];
   let publishes = 0;
@@ -248,6 +342,135 @@ test("sensitive JSON reader enforces a fixed memory bound and reports only a fix
       !error.message.includes("synthetic-private-sentinel"),
   );
 });
+
+test(
+  "a timed-out sensitive child and inherited-pipe descendant cannot hold the secret file open",
+  { skip: process.platform !== "linux" && "Linux process-group semantics", timeout: 8000 },
+  async (t) => {
+    const directory = scratchDirectory("e3-sensitive-deadline-", t);
+    const pidsFile = path.join(directory, "owned-pids.json");
+    const sentinel = "synthetic-deadline-secret";
+    let secretFile = "";
+    const descendant = `process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);`;
+    const child = `
+      import { spawn } from "node:child_process";
+      import { readFileSync, writeFileSync } from "node:fs";
+      process.on("SIGTERM", () => {});
+      const descendant = spawn(process.execPath, ["-e", process.env.DESCENDANT], { stdio: "inherit" });
+      const identity = (pid) => { const stat = readFileSync('/proc/'+pid+'/stat', 'utf8'); return {pid, start:stat.slice(stat.lastIndexOf(')')+2).split(' ')[19]}; };
+      writeFileSync(process.env.PIDS, JSON.stringify([identity(process.pid), identity(descendant.pid)]));
+      process.stdout.write(process.env.SENTINEL);
+      process.stderr.write(process.env.SENTINEL);
+      setInterval(() => {}, 1000);
+    `;
+    const started = Date.now();
+    const flow = withNeonRuntimeSecret({ synthetic: sentinel }, async (args) => {
+      secretFile = args[1] as string;
+      await runSensitive(
+        "upload",
+        process.execPath,
+        ["--input-type=module", "-e", child],
+        { ...process.env, PIDS: pidsFile, DESCENDANT: descendant, SENTINEL: sentinel },
+        "discard",
+        { deadlineMs: 1000, killGraceMs: 100 },
+      );
+    }).then(
+      () => ({ kind: "success", message: "" }),
+      (error: Error) => ({ kind: "error", message: error.message }),
+    );
+    let guardTimer: ReturnType<typeof setTimeout> | undefined;
+    const guard = new Promise<{ kind: string; message: string }>((resolve) => {
+      guardTimer = setTimeout(() => resolve({ kind: "timeout", message: "" }), 3000);
+    });
+    const outcome = await Promise.race([flow, guard]);
+    clearTimeout(guardTimer);
+    const identities = JSON.parse(await readFile(pidsFile, "utf8")) as {
+      pid: number;
+      start: string;
+    }[];
+    const current = async ({ pid, start }: { pid: number; start: string }) => {
+      const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
+      if (!stat) return { same: false, zombie: false };
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      return { same: fields[19] === start, zombie: fields[0] === "Z" };
+    };
+    if (outcome.kind === "timeout") {
+      // Only kill a still-running PID with the exact start identity created by this test.
+      for (const identity of identities) {
+        const state = await current(identity);
+        if (state.same && !state.zombie)
+          try {
+            process.kill(identity.pid, "SIGKILL");
+          } catch {
+            /* already gone */
+          }
+      }
+      await flow;
+    }
+    assert.equal(outcome.kind, "error", "the protected flow must settle on its deadline");
+    assert(Date.now() - started < 3000);
+    assert(!outcome.message.includes(sentinel));
+    assert.match(outcome.message, /outcome may be unknown/u);
+    await assert.rejects(access(secretFile));
+    for (const identity of identities) {
+      let stopped = false;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const state = await current(identity);
+        if (!state.same || state.zombie) {
+          stopped = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert(stopped, `owned child ${identity.pid} still runs after the bounded termination wait`);
+    }
+  },
+);
+
+test(
+  "a protected child deadline bounds cleanup on each supported host",
+  { timeout: 8000 },
+  async (t) => {
+    const directory = scratchDirectory("e3-sensitive-direct-", t);
+    const pidFile = path.join(directory, "pid");
+    const sentinel = "synthetic-direct-deadline-secret";
+    let secretFile = "";
+    const child = `require("node:fs").writeFileSync(process.env.OWNED_PID, String(process.pid)); process.stderr.write(process.env.SENTINEL); setInterval(() => {}, 1000);`;
+    const flow = withNeonRuntimeSecret({ synthetic: sentinel }, async (args) => {
+      secretFile = args[1] as string;
+      await runSensitive(
+        "upload",
+        process.execPath,
+        ["-e", child],
+        { ...process.env, OWNED_PID: pidFile, SENTINEL: sentinel },
+        "discard",
+        { deadlineMs: 1000, killGraceMs: 200 },
+      );
+    }).then(
+      () => ({ kind: "success", message: "" }),
+      (error: Error) => ({ kind: "error", message: error.message }),
+    );
+    let guardTimer: ReturnType<typeof setTimeout> | undefined;
+    const guard = new Promise<{ kind: string; message: string }>((resolve) => {
+      guardTimer = setTimeout(() => resolve({ kind: "timeout", message: "" }), 4000);
+    });
+    const outcome = await Promise.race([flow, guard]);
+    clearTimeout(guardTimer);
+    if (outcome.kind === "timeout") {
+      const pid = Number(await readFile(pidFile, "utf8"));
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* our child already exited */
+      }
+      await flow;
+    }
+    assert.equal(outcome.kind, "error");
+    assert.match(outcome.message, /outcome may be unknown/u);
+    assert(!outcome.message.includes(sentinel));
+    await assert.rejects(access(secretFile));
+  },
+);
 
 test("proof live-version reader validates every traffic share and label before choosing a slot", async () => {
   const a = "11111111-1111-1111-1111-111111111111";
@@ -342,6 +565,205 @@ test("proof live-version reader validates every traffic share and label before c
         /unavailable or ambiguous/u.test(error.message) && !error.message.includes(secret),
     );
   }
+});
+
+test("protected candidate orchestration narrows every child environment and verifies identity before a push", async () => {
+  const account = "0".repeat(32),
+    revision = "a".repeat(40),
+    id = `sha256:${"b".repeat(64)}`;
+  const candidate = {
+    revision,
+    dirty: false,
+    image: "arcforges-cloud:0.1.0-ci.123.1",
+    imageId: id,
+    version: "0.1.0-ci.123.1",
+  };
+  const digest = `registry.cloudflare.com/${account}/arcforges-cloud@sha256:${"c".repeat(64)}`;
+  const environment = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    GITHUB_SHA: revision,
+    GH_TOKEN: "synthetic-gh-token",
+    CLOUDFLARE_API_TOKEN: "synthetic-cf-token",
+    CLOUDFLARE_ACCOUNT_ID: account,
+    NEON_DATABASE_URL_DIRECT: "synthetic-neon-url",
+    PROOF_BOOTSTRAP_SHA256: "synthetic-bootstrap",
+    NODE_OPTIONS: "synthetic-node-options",
+  };
+  const calls: string[] = [];
+  const run: typeof runSensitive = async (stage, command, args, childEnv, mode) => {
+    const step =
+      stage === "image" && args[0] === "load"
+        ? "load"
+        : stage === "image" && args[2] === candidate.image
+          ? "inspect"
+          : stage === "image"
+            ? "digest"
+            : stage;
+    calls.push(step);
+    assert.equal(childEnv.NEON_DATABASE_URL_DIRECT, undefined);
+    assert.equal(childEnv.PROOF_BOOTSTRAP_SHA256, undefined);
+    assert.equal(childEnv.NODE_OPTIONS, undefined);
+    assert.equal(childEnv.GH_TOKEN, stage === "head" ? environment.GH_TOKEN : undefined);
+    assert.equal(
+      childEnv.CLOUDFLARE_API_TOKEN,
+      stage === "push" ? environment.CLOUDFLARE_API_TOKEN : undefined,
+    );
+    if (stage === "candidate") {
+      assert.equal(command, process.execPath);
+      assert.equal(mode, "json");
+      return candidate;
+    }
+    if (stage === "head") {
+      assert.equal(command, "gh");
+      return { sha: revision };
+    }
+    if (step === "load") {
+      assert.equal(mode, "discard");
+      return undefined;
+    }
+    if (step === "inspect") return id;
+    if (step === "digest") return [digest];
+    if (stage === "push") {
+      assert.equal(mode, "discard");
+      return undefined;
+    }
+    throw new Error("unexpected stage");
+  };
+  const result = await prepareProofCandidate(
+    account,
+    async (value) => {
+      calls.push("gate");
+      assert.equal(value, revision);
+    },
+    { environment, run },
+  );
+  assert.deepEqual(result, { candidate, imageDigest: digest });
+  assert.deepEqual(calls, ["candidate", "head", "gate", "load", "inspect", "push", "digest"]);
+
+  for (const bad of ["candidate", "head", "gate", "load", "inspect", "push", "digest"] as const) {
+    const observed: string[] = [];
+    const broken: typeof runSensitive = async (stage, command, args, childEnv, mode) => {
+      const step =
+        stage === "image" && args[0] === "load"
+          ? "load"
+          : stage === "image" && args[2] === candidate.image
+            ? "inspect"
+            : stage === "image"
+              ? "digest"
+              : stage;
+      observed.push(step);
+      if (step === bad) {
+        if (bad === "candidate") return { ...candidate, revision: "synthetic-private-sentinel" };
+        if (bad === "head") return { sha: "synthetic-private-sentinel" };
+        if (bad === "inspect") return "synthetic-private-sentinel";
+        if (bad === "digest") return ["synthetic-private-sentinel"];
+        throw new Error("synthetic-private-sentinel");
+      }
+      return run(stage, command, args, childEnv, mode);
+    };
+    await assert.rejects(
+      prepareProofCandidate(
+        account,
+        async () => {
+          observed.push("gate");
+          if (bad === "gate") throw new Error("synthetic-private-sentinel");
+        },
+        { environment, run: broken },
+      ),
+      (error: Error) => !error.message.includes("synthetic-private-sentinel"),
+    );
+    if (["candidate", "head", "gate", "load", "inspect"].includes(bad))
+      assert(!observed.includes("push"));
+  }
+});
+
+test("protected candidate subprocess output and provider error sentinels are never printed", () => {
+  const sentinel = "synthetic-proof-child-secret-47";
+  const moduleUrl = new URL("../../tooling/proof-candidate.ts", import.meta.url).href;
+  const runnerUrl = new URL("../../tooling/sensitive-process.ts", import.meta.url).href;
+  const script = `
+    import { prepareProofCandidate } from ${JSON.stringify(moduleUrl)};
+    import { runSensitive } from ${JSON.stringify(runnerUrl)};
+    const account="0".repeat(32), revision="a".repeat(40), imageId="sha256:"+"b".repeat(64);
+    const candidate={revision,dirty:false,image:"arcforges-cloud:0.1.0-ci.123.1",imageId,version:"0.1.0-ci.123.1"};
+    const digest="registry.cloudflare.com/"+account+"/arcforges-cloud@sha256:"+"c".repeat(64);
+    const environment={...process.env,GH_TOKEN:process.env.SYNTHETIC, CLOUDFLARE_API_TOKEN:process.env.SYNTHETIC,
+      CLOUDFLARE_ACCOUNT_ID:account,NEON_DATABASE_URL_DIRECT:process.env.SYNTHETIC};
+    let inspections=0;
+    const run=async(stage,_command,args,env,mode)=>{
+      const value=stage==="candidate"?candidate:stage==="head"?{sha:revision}:
+        stage==="image"&&args[0]!=="load"?(inspections++===0?imageId:[digest]):undefined;
+      const child='process.stderr.write(process.env.GH_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "");'+
+        (mode==="json"?'process.stdout.write(process.env.REPLY)':'process.stdout.write(process.env.CLOUDFLARE_API_TOKEN || "")');
+      return runSensitive(stage,process.execPath,["-e",child],{...env,REPLY:JSON.stringify(value)},mode);
+    };
+    const result=await prepareProofCandidate(account,async()=>{},{environment,run});
+    console.log(result.candidate.revision.length);
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    env: { ...process.env, SYNTHETIC: sentinel },
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.stdout + result.stderr, new RegExp(sentinel, "u"));
+  assert.match(result.stdout, /40/u);
+});
+
+test("candidate preparation refuses oversized and failed real child output without advancing", async () => {
+  const environment = {
+    ...process.env,
+    GH_TOKEN: "synthetic-gh",
+    CLOUDFLARE_API_TOKEN: "synthetic-cf",
+  };
+  for (const kind of ["oversized", "failure"] as const) {
+    let calls = 0;
+    const run: typeof runSensitive = async (stage, _command, _args, env, mode) => {
+      calls++;
+      const code =
+        kind === "oversized"
+          ? "process.stdout.write('x'.repeat(131072)); process.stderr.write('synthetic-private-sentinel')"
+          : "process.stderr.write('synthetic-private-sentinel'); process.exit(7)";
+      return runSensitive(stage, process.execPath, ["-e", code], env, mode);
+    };
+    await assert.rejects(
+      prepareProofCandidate(
+        "0".repeat(32),
+        async () => {
+          throw new Error("gate should not run");
+        },
+        { environment, run },
+      ),
+      (error: Error) => !error.message.includes("synthetic-private-sentinel"),
+    );
+    assert.equal(calls, 1);
+  }
+});
+
+test("protected runtime forwards only the database alias and necessary environment", async () => {
+  const runner = proofRuntimeRunner(
+    async (_stage, _command, _args, environment) => {
+      assert.equal(environment.ARCFORGES_CENTER_MIGRATION_DATABASE_URL, migration);
+      assert.equal(environment.NEON_DATABASE_URL_DIRECT, undefined);
+      assert.equal(environment.GH_TOKEN, undefined);
+      assert.equal(environment.CLOUDFLARE_API_TOKEN, undefined);
+      return { ok: true };
+    },
+    {
+      PATH: process.env.PATH,
+      GH_TOKEN: "synthetic-gh",
+      CLOUDFLARE_API_TOKEN: "synthetic-cf",
+      NEON_DATABASE_URL_DIRECT: migration,
+    },
+  );
+  assert.deepEqual(
+    await runner("sealed", { ARCFORGES_CENTER_MIGRATION_DATABASE_URL: migration }, [
+      "admin",
+      "inspect",
+    ]),
+    { ok: true },
+  );
 });
 
 test("proof slot preflight refuses missing, unreadable, mixed and unlabelled live versions", () => {

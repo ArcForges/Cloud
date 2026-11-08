@@ -373,8 +373,9 @@ locks. Integration tests against a real PostgreSQL cover each one.
     outlive it, so a node that refreshed its center keys within that window verifies both.
   - The runtime role reads the verification set (newest first; the first is the signing key). Registration runs with the
     migration role.
-  - The protected proof deployment generates an ephemeral command key and checks the entire published-key response budget before
-    registration. Its public-only evidence and normal overlap/retirement procedure are in [center fleet](center-fleet.md#the-centers-signing-keys).
+  - Every supported command or entitlement admin registration checks the entire published-key response budget under a shared lock
+    before insertion. The protected proof deployment generates an ephemeral command key; its public-only evidence and normal
+    overlap/retirement procedure are in [center fleet](center-fleet.md#the-centers-signing-keys).
     Entitlement-token custody is AF-CLD-03; production key material is Plan H-16.
 
 `center/internal/store` is the runtime role's access:
