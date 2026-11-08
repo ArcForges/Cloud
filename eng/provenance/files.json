@@ -38,6 +38,7 @@
     "center/cmd/arcforges-center/main.go",
     "center/cmd/arcforges-center/main_test.go",
     "center/cmd/arcforges-center/operator.go",
+    "center/cmd/arcforges-center/proof_key_budget_integration_test.go",
     "center/cmd/center-gen/main.go",
     "center/cmd/mobile-probe/grpcweb.go",
     "center/cmd/mobile-probe/main.go",
@@ -689,6 +690,7 @@
     "eng/policy/dependency-reviews/af-ctr-05-r15.json",
     "eng/policy/dependency-reviews/af-ctr-05-r16.json",
     "eng/policy/dependency-reviews/af-ctr-05-r17.json",
+    "eng/policy/dependency-reviews/af-ctr-05-r18.json",
     "eng/policy/dependency-reviews/af-ctr-05-r2.json",
     "eng/policy/dependency-reviews/af-ctr-05-r3.json",
     "eng/policy/dependency-reviews/af-ctr-05-r4.json",
@@ -772,6 +774,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r104.json",
     "eng/provenance/artifact-profiles/cloud-release-r105.json",
     "eng/provenance/artifact-profiles/cloud-release-r106.json",
+    "eng/provenance/artifact-profiles/cloud-release-r107.json",
     "eng/provenance/artifact-profiles/cloud-release-r11.json",
     "eng/provenance/artifact-profiles/cloud-release-r12.json",
     "eng/provenance/artifact-profiles/cloud-release-r13.json",
@@ -919,6 +922,7 @@
     "eng/provenance/records/center-runtime-r50.json",
     "eng/provenance/records/center-runtime-r51.json",
     "eng/provenance/records/center-runtime-r52.json",
+    "eng/provenance/records/center-runtime-r53.json",
     "eng/provenance/records/center-runtime-r6.json",
     "eng/provenance/records/center-runtime-r7.json",
     "eng/provenance/records/center-runtime-r8.json",
@@ -970,6 +974,7 @@
     "eng/provenance/records/center-worker-r50.json",
     "eng/provenance/records/center-worker-r51.json",
     "eng/provenance/records/center-worker-r52.json",
+    "eng/provenance/records/center-worker-r53.json",
     "eng/provenance/records/center-worker-r6.json",
     "eng/provenance/records/center-worker-r7.json",
     "eng/provenance/records/center-worker-r8.json",
@@ -1730,6 +1735,7 @@
     "tooling/postgres-deploy.ts",
     "tooling/process.ts",
     "tooling/project.ts",
+    "tooling/proof-candidate.ts",
     "tooling/proof-command-key.ts",
     "tooling/protocol.ts",
     "tooling/provenance.ts",
@@ -1853,5 +1859,5 @@
     "third-party/GoCrypto.LICENSE.txt": "go-gocrypto-legal-r1",
     "third-party/GoSys.LICENSE.txt": "go-gosys-legal-r1"
   },
-  "artifacts": ["center-runtime-r52", "center-worker-r52"]
+  "artifacts": ["center-runtime-r53", "center-worker-r53"]
 }
