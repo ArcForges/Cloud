@@ -150,7 +150,15 @@ test("a proof relay configuration requires one protected key binding and never c
     main: sealedProofBundle,
   };
   assert.throws(() => buildProofConfigWithKey(wrangler, options), /proof command key binding/u);
-  for (const binding of ["", "synthetic-private-key", "ARCFORGES_CENTER_KEY_PROD_X"]) {
+  for (const binding of [
+    "",
+    "synthetic-private-key",
+    "ARCFORGES_CENTER_KEY_PROD_X",
+    `ARCFORGES_CENTER_KEY_PROOF_${"A".repeat(31)}`,
+    `ARCFORGES_CENTER_KEY_PROOF_${"A".repeat(33)}`,
+    `ARCFORGES_CENTER_KEY_PROOF_${"a".repeat(32)}`,
+    `ARCFORGES_CENTER_KEY_PROOF_${"G".repeat(32)}`,
+  ]) {
     assert.throws(
       () => buildProofConfigWithKey(wrangler, { ...options, proofCommandKeyBinding: binding }),
       (error: Error) =>
