@@ -3,7 +3,7 @@
 package hub
 
 // refusalCatalogue is every CATEGORY/code of the Contracts error catalogue (fixtures/public/af-con-01-error-catalogue.json at Contracts
-// e67a6b0, cohort 1.0.0-ci.437.1), in lower case as the rule routedRefusal ties a node's refusal to it: a code the catalogue does not list
+// de3dba7, cohort 1.0.0-ci.450.1), in lower case as the rule routedRefusal ties a node's refusal to it: a code the catalogue does not list
 // under the refusal's category is refused. TestTheRefusalCatalogueIsTheContracts compares it with the vendored fixture.
 var refusalCatalogue = map[string]struct{}{
 	"authentication/credential_revoked":    {},
@@ -73,6 +73,9 @@ var refusalCatalogue = map[string]struct{}{
 	"validation/purchase_invalid":          {},
 	"validation/unsafe_batch_argument":     {},
 	"validation/unsupported_shell":         {},
+	"conflict/file_changed":                {},
+	"conflict/occurrence_mismatch":         {},
+	"state/file_access_denied":             {},
 }
 
 // catalogued reports a category/code pair of the catalogue.

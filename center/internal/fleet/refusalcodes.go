@@ -75,6 +75,9 @@ var refusalCodes = map[string]int16{
 	"validation/purchase_invalid":          65,
 	"validation/unsafe_batch_argument":     66,
 	"validation/unsupported_shell":         67,
+	"conflict/file_changed":                68,
+	"conflict/occurrence_mismatch":         69,
+	"state/file_access_denied":             70,
 }
 
 // RefusalOther is the value of a refusal code outside the table.

@@ -307,7 +307,7 @@ func (h *Hub) InFlight() int {
 // bytes exactly for a node relay (a verified one), and the deadline within the call's window.
 func validCall(call Call) bool {
 	zero := platform.ID{}
-	if call.AccountID == zero || call.TargetNodeID == zero || call.Method < MethodSubmitNodeTask || call.Method > maxCallMethod ||
+	if call.AccountID == zero || call.TargetNodeID == zero || !callMethod(call.Method) ||
 		(call.CommandID != nil) != Mutation(call.Method) || (call.CommandID != nil && *call.CommandID == zero) || len(call.Payload) < 1 ||
 		len(call.Payload) > MaxCallPayload || call.Deadline <= 0 || call.Deadline > MaxCallDeadline {
 		return false

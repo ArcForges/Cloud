@@ -113,6 +113,10 @@ type RoutedAccept struct {
 	Size          int
 	Fence         int64
 	Window        time.Duration
+	// WorkspaceID and TargetAttemptID are checked file-operation metadata, never paths or contents.
+	WorkspaceID     *platform.ID
+	TargetAttemptID *platform.ID
+	TargetPath      *string
 	// InFlight reports whether an attempt of this record is in flight in this process; Online whether the node can be routed to now.
 	InFlight func() bool
 	Online   func() bool
@@ -172,6 +176,17 @@ type routedRow struct {
 
 const routedColumns = `request_digest, state, delivered, attempts, task_id, outcome_sha256, created_at, final_at IS NOT NULL`
 
+// routedStorage selects only migration-owned constant SQL identifiers. No caller-controlled
+// table, column or SQL text crosses this boundary. Reads never acquire a mutation receipt.
+func routedStorage(method int16) (table, columns string, file bool) {
+	switch method {
+	case 10, 11, 14, 15, 17, 18:
+		return "fleet.routed_file_call", `request_digest, state, delivered, attempts, NULL::uuid, outcome_sha256, created_at, final_at IS NOT NULL`, true
+	default:
+		return "fleet.routed_call", routedColumns, false
+	}
+}
+
 func scanRouted(row pgx.Row) (*routedRow, error) {
 	var value routedRow
 	err := row.Scan(&value.digest, &value.state, &value.delivered, &value.attempts, &value.taskID, &value.outcome, &value.created, &value.final)
@@ -224,10 +239,26 @@ const leaseFence = `SELECT EXISTS (SELECT 1 FROM fleet.hub_lease WHERE singleton
 // identity.user, the challenge, fleet.node, fleet.routed_call, the audit chain head, fleet.hub_lease. A refusal rolls everything back, the evidence
 // included.
 func AcceptRouted(ctx context.Context, db *store.DB, accept RoutedAccept) (RoutedDecision, error) {
+	table, columns, file := routedStorage(accept.Method)
 	var decision RoutedDecision
 	err := db.InTx(ctx, "admit a routed call", store.TxOptions{Timeout: registryTimeout}, func(ctx context.Context, tx pgx.Tx) error {
 		decision = RoutedDecision{}
-		existing, err := scanRouted(tx.QueryRow(ctx, `SELECT `+routedColumns+` FROM fleet.routed_call WHERE account_id = $1 AND command_id = $2`,
+		// Cross-kind reuse is decided before presence or step-up. The trigger below
+		// still arbitrates a concurrent insert that was absent at this read.
+		var reserved int16
+		reservationErr := tx.QueryRow(ctx, "SELECT receipt_kind FROM fleet.routed_command_id WHERE account_id=$1 AND command_id=$2",
+			accept.AccountID, accept.CommandID).Scan(&reserved)
+		if reservationErr != nil && !errors.Is(reservationErr, pgx.ErrNoRows) {
+			return reservationErr
+		}
+		expectedKind := int16(1)
+		if file {
+			expectedKind = 2
+		}
+		if reservationErr == nil && reserved != expectedKind {
+			return arc.CommandIDReused()
+		}
+		existing, err := scanRouted(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+table+` WHERE account_id = $1 AND command_id = $2`,
 			accept.AccountID, accept.CommandID))
 		if err != nil {
 			return err
@@ -264,19 +295,33 @@ func AcceptRouted(ctx context.Context, db *store.DB, accept RoutedAccept) (Route
 		} else {
 			relaying, localSession, origin = &caller.RelayingNodeID, &caller.LocalSessionID, &caller.LocalOrigin
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO fleet.routed_call (account_id, command_id, node_enrollment_id, node_id, method, caller_kind, session_id,
+		query := `INSERT INTO ` + table + ` (account_id, command_id, node_enrollment_id, node_id, method, caller_kind, session_id,
     relaying_node_id, local_origin, local_session_id, request_digest, request_size, state, delivered, attempts, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13) ON CONFLICT (account_id, command_id) DO NOTHING`,
-			accept.AccountID, accept.CommandID, enrollment, accept.NodeID, accept.Method, caller.Kind, session, relaying, origin, localSession,
-			accept.Digest, accept.Size, accept.Now)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13) ON CONFLICT (account_id, command_id) DO NOTHING`
+		args := []any{accept.AccountID, accept.CommandID, enrollment, accept.NodeID, accept.Method, caller.Kind, session, relaying, origin, localSession,
+			accept.Digest, accept.Size, accept.Now}
+		if file {
+			query = `INSERT INTO fleet.routed_file_call (account_id, command_id, node_enrollment_id, node_id, method, caller_kind, session_id,
+    relaying_node_id, local_origin, local_session_id, request_digest, request_size, state, delivered, attempts, created_at, updated_at, workspace_id, target_attempt_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13, $14, $15) ON CONFLICT (account_id, command_id) DO NOTHING`
+			args = append(args, accept.WorkspaceID, accept.TargetAttemptID)
+		}
+		tag, err := tx.Exec(ctx, query, args...)
 		if err != nil {
-			return err
+			// The private trigger enforces this even for an older writer.
+			// No PostgreSQL message escapes this definite rollback.
+			sanitized := store.Sanitize("reserve a routed command", err)
+			var conflict *store.Error
+			if errors.As(sanitized, &conflict) && conflict.SQLState == "23505" && conflict.Constraint == "routed_command_id_namespace" {
+				return arc.CommandIDReused()
+			}
+			return sanitized
 		}
 		var prior *routedRow
 		if tag.RowsAffected() == 1 {
 			decision = RoutedDecision{Attempt: 1, State: RoutedAccepted}
 		} else {
-			locked, err := scanRouted(tx.QueryRow(ctx, `SELECT `+routedColumns+` FROM fleet.routed_call WHERE account_id = $1 AND command_id = $2 FOR UPDATE`,
+			locked, err := scanRouted(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+table+` WHERE account_id = $1 AND command_id = $2 FOR UPDATE`,
 				accept.AccountID, accept.CommandID))
 			if err != nil {
 				return err
@@ -297,17 +342,20 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13
 					state = locked.state
 				}
 				delivered := locked.delivered || locked.state == RoutedAccepted
-				if _, err := tx.Exec(ctx, `UPDATE fleet.routed_call SET attempts = attempts + 1, state = $3, delivered = $4, updated_at = greatest(updated_at, $5)
+				if _, err := tx.Exec(ctx, `UPDATE `+table+` SET attempts = attempts + 1, state = $3, delivered = $4, updated_at = greatest(updated_at, $5)
 WHERE account_id = $1 AND command_id = $2`, accept.AccountID, accept.CommandID, state, delivered, accept.Now); err != nil {
 					return err
 				}
 				decision = RoutedDecision{Attempt: locked.attempts + 1, Final: locked.final, State: state, Delivered: delivered, OutcomeSHA256: locked.outcome}
 			}
 		}
+		payload := caller.audit(map[string]any{"method": accept.Method, "nodeId": accept.NodeID.String(), "attempt": decision.Attempt,
+			"requestSha256": hex.EncodeToString(accept.RequestSHA256), "requestSize": accept.Size, "joined": decision.Join})
+		if file {
+			addFileTarget(payload, accept.WorkspaceID, accept.TargetAttemptID, accept.TargetPath)
+		}
 		if err := auditRouted(ctx, tx, accept.Request, caller.Actor, "fleet.routed.accepted", map[bool]string{true: "joined", false: "accepted"}[decision.Join],
-			accept.CommandID, caller.audit(map[string]any{"method": accept.Method, "nodeId": accept.NodeID.String(), "attempt": decision.Attempt,
-				"requestSha256": hex.EncodeToString(accept.RequestSHA256), "requestSize": accept.Size, "joined": decision.Join}),
-			accept.Now); err != nil {
+			accept.CommandID, payload, accept.Now); err != nil {
 			return err
 		}
 		// The fence comes last, after the audit append, so a renewal of the lease (an UPDATE of its row) waits for no audit lock, only
@@ -366,11 +414,13 @@ type RoutedAnswer struct {
 	HandlerError bool
 	Refusal      string
 	// TaskID is a SubmitNodeTask value's task ID.
-	TaskID         *platform.ID
-	ResponseSHA256 []byte
-	OutcomeSHA256  []byte
-	ResponseSize   int
-	ExecutedAt     time.Time
+	TaskID             *platform.ID
+	ResponseSHA256     []byte
+	OutcomeSHA256      []byte
+	ResponseSize       int
+	ExecutedAt         time.Time
+	NodeAuditAvailable bool
+	Observations       []RoutedObservation
 }
 
 // ComparableReplay reports whether this verified answer can represent a replay of a recorded final outcome. An EXECUTED handler
@@ -381,15 +431,18 @@ func (answer RoutedAnswer) ComparableReplay() bool {
 
 // RoutedSettle is the settlement (Tx2) of one attempt.
 type RoutedSettle struct {
-	Request   Request
-	AccountID platform.ID
-	CommandID platform.ID
-	Method    int16
-	NodeID    platform.ID
-	Attempt   int
-	Actor     string
-	Answer    RoutedAnswer
-	Now       time.Time
+	Request         Request
+	AccountID       platform.ID
+	CommandID       platform.ID
+	Method          int16
+	NodeID          platform.ID
+	Attempt         int
+	Actor           string
+	Answer          RoutedAnswer
+	WorkspaceID     *platform.ID
+	TargetAttemptID *platform.ID
+	TargetPath      *string
+	Now             time.Time
 }
 
 // RoutedSettled is what a settlement found: ReplayDiffers when a final record's resend was answered with a comparable executed
@@ -440,10 +493,11 @@ func settled(answer RoutedAnswer, delivered bool) (RoutedState, bool, bool) {
 // for a differing comparable replay. The caller runs it on a context detached from the request, and retries it; a settlement that is never written leaves the
 // record ACCEPTED, which counts as one that may have reached the node.
 func SettleRouted(ctx context.Context, db *store.DB, settle RoutedSettle) (RoutedSettled, error) {
+	table, columns, file := routedStorage(settle.Method)
 	var result RoutedSettled
 	err := db.InTx(ctx, "settle a routed call", store.TxOptions{Timeout: registryTimeout}, func(ctx context.Context, tx pgx.Tx) error {
 		result = RoutedSettled{}
-		locked, err := scanRouted(tx.QueryRow(ctx, `SELECT `+routedColumns+` FROM fleet.routed_call WHERE account_id = $1 AND command_id = $2 FOR UPDATE`,
+		locked, err := scanRouted(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+table+` WHERE account_id = $1 AND command_id = $2 FOR UPDATE`,
 			settle.AccountID, settle.CommandID))
 		if err != nil {
 			return err
@@ -481,16 +535,28 @@ func SettleRouted(ctx context.Context, db *store.DB, settle RoutedSettle) (Route
 			if state == RoutedSucceeded {
 				taskID = answer.TaskID
 			}
-			if _, err := tx.Exec(ctx, `UPDATE fleet.routed_call SET state = $3, delivered = delivered OR $4, task_id = $5, response_sha256 = $6, outcome_sha256 = $7,
+			query := `UPDATE fleet.routed_call SET state = $3, delivered = delivered OR $4, task_id = $5, response_sha256 = $6, outcome_sha256 = $7,
     response_size = $8, executed_at = $9, refusal = $10, final_at = $11, updated_at = greatest(updated_at, $12)
-WHERE account_id = $1 AND command_id = $2`, settle.AccountID, settle.CommandID, state, delivered, taskID, response, outcome, size, executed, refusal, finalAt,
-				settle.Now); err != nil {
+WHERE account_id = $1 AND command_id = $2`
+			args := []any{settle.AccountID, settle.CommandID, state, delivered, taskID, response, outcome, size, executed, refusal, finalAt, settle.Now}
+			if file {
+				query = `UPDATE fleet.routed_file_call SET state = $3, delivered = delivered OR $4, response_sha256 = $5, outcome_sha256 = $6,
+    response_size = $7, executed_at = $8, refusal = $9, final_at = $10, updated_at = greatest(updated_at, $11)
+WHERE account_id = $1 AND command_id = $2`
+				args = []any{settle.AccountID, settle.CommandID, state, delivered, response, outcome, size, executed, refusal, finalAt, settle.Now}
+			}
+			if _, err := tx.Exec(ctx, query, args...); err != nil {
 				return err
 			}
 			result.State = state
 		}
 		payload := map[string]any{"method": settle.Method, "nodeId": settle.NodeID.String(), "attempt": settle.Attempt, "state": result.State.String(),
 			"verified": answer.Verified, "outcome": answer.Outcome, "effect": answer.Effect.String()}
+		if file {
+			addFileTarget(payload, settle.WorkspaceID, settle.TargetAttemptID, settle.TargetPath)
+			payload["nodeAuditAvailable"] = answer.NodeAuditAvailable
+			payload["observations"] = answer.Observations
+		}
 		if answer.Refusal != "" {
 			payload["refusal"] = RefusalCode(answer.Refusal)
 		}
@@ -527,9 +593,15 @@ func SweepRouted(ctx context.Context, db *store.DB, fence int64, now time.Time) 
 		if !live {
 			return ErrSweepFenced
 		}
-		tag, err := tx.Exec(ctx, `UPDATE fleet.routed_call SET state = 7, delivered = true, updated_at = greatest(updated_at, $1) WHERE state = 1`, now)
-		swept = tag.RowsAffected()
-		return err
+		swept = 0 // reset on a transaction retry
+		for _, table := range []string{"fleet.routed_call", "fleet.routed_file_call"} {
+			tag, err := tx.Exec(ctx, `UPDATE `+table+` SET state = 7, delivered = true, updated_at = greatest(updated_at, $1) WHERE state = 1`, now)
+			if err != nil {
+				return err
+			}
+			swept += tag.RowsAffected()
+		}
+		return nil
 	})
 	if errors.Is(err, ErrSweepFenced) {
 		return 0, err
@@ -561,10 +633,20 @@ func (r *RoutedRecord) MayHaveReached() bool {
 
 // ReadRouted reads one routing record (nil when there is none).
 func ReadRouted(ctx context.Context, db *store.DB, accountID, commandID platform.ID) (*RoutedRecord, error) {
+	return ReadRoutedForMethod(ctx, db, accountID, commandID, 1)
+}
+
+// ReadRoutedForMethod reads only the authenticated account's receipt kind for this method.
+func ReadRoutedForMethod(ctx context.Context, db *store.DB, accountID, commandID platform.ID, method int16) (*RoutedRecord, error) {
+	table, _, file := routedStorage(method)
+	taskColumn := "task_id"
+	if file {
+		taskColumn = "NULL::uuid"
+	}
 	var value *RoutedRecord
 	err := db.InTx(ctx, "read a routing record", store.TxOptions{ReadOnly: true, Timeout: registryTimeout}, func(ctx context.Context, tx pgx.Tx) error {
 		var record RoutedRecord
-		err := tx.QueryRow(ctx, `SELECT node_id, state, delivered, attempts, task_id, final_at IS NOT NULL, refusal FROM fleet.routed_call WHERE account_id = $1 AND
+		err := tx.QueryRow(ctx, `SELECT node_id, state, delivered, attempts, `+taskColumn+`, final_at IS NOT NULL, refusal FROM `+table+` WHERE account_id = $1 AND
     command_id = $2`, accountID, commandID).Scan(&record.NodeID, &record.State, &record.Delivered, &record.Attempts, &record.TaskID, &record.Final,
 			&record.Refusal)
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -609,9 +609,9 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 		}
 		if strings.HasPrefix(operation.ID, "fleet.") {
 			// The node channel is the one gated fleet row (AF-CTR-05 E1a); every enrollment row stays essential.
-			if operation.ID == "fleet.nodeChannel" || routedTask(operation.ID) {
+			if operation.ID == "fleet.nodeChannel" || routedOperation(operation.ID) {
 				// The routed task rows (AF-CTR-05 E2b) are gated by their groups' keys (TestTheRoutedRowsAreGatedByTheirGroups).
-				if routedTask(operation.ID) {
+				if routedOperation(operation.ID) {
 					continue
 				}
 				if operation.Feature != feature.CenterNodes || operation.Group != feature.GroupNodeConnection || operation.Audit != AuditBeforeCall {

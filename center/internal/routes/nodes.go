@@ -55,6 +55,18 @@ func NodesMethods() []IdentityMethod {
 		{fleetv1connect.FleetServiceWaitNodeTaskProcedure, true, routedReadBytes},
 		{fleetv1connect.FleetServiceReadNodeTaskOutputProcedure, true, routedReadBytes},
 		{fleetv1connect.FleetServiceCancelNodeTaskProcedure, true, routedReadBytes},
+		{fleetv1connect.FleetServiceReadNodeFileProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceWriteNodeFileProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceEditNodeFileProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceSearchNodeFilesProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceListNodeDirectoryProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServicePlanNodeRemovalProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceExecuteNodeRemovalProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceGetNodeFileOperationProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceRegisterNodeWorkspaceProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceUnregisterNodeWorkspaceProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceListNodeWorkspacesProcedure, true, routedSubmitBytes},
+		{fleetv1connect.FleetServiceGetNodeWorkspaceProcedure, true, routedSubmitBytes},
 	}
 }
 
@@ -76,6 +88,8 @@ func nodesBudget(path string) Budget {
 		reply = ListNodesReplyBytes
 	case fleetv1connect.FleetServiceSubmitNodeTaskProcedure, fleetv1connect.FleetServiceGetNodeTaskProcedure, fleetv1connect.FleetServiceListNodeTasksProcedure,
 		fleetv1connect.FleetServiceCancelNodeTaskProcedure:
+		deadline, reply = int(RoutedDeadline.Milliseconds()), RoutedReplyBytes
+	case fleetv1connect.FleetServiceReadNodeFileProcedure, fleetv1connect.FleetServiceWriteNodeFileProcedure, fleetv1connect.FleetServiceEditNodeFileProcedure, fleetv1connect.FleetServiceSearchNodeFilesProcedure, fleetv1connect.FleetServiceListNodeDirectoryProcedure, fleetv1connect.FleetServicePlanNodeRemovalProcedure, fleetv1connect.FleetServiceExecuteNodeRemovalProcedure, fleetv1connect.FleetServiceGetNodeFileOperationProcedure, fleetv1connect.FleetServiceRegisterNodeWorkspaceProcedure, fleetv1connect.FleetServiceUnregisterNodeWorkspaceProcedure, fleetv1connect.FleetServiceListNodeWorkspacesProcedure, fleetv1connect.FleetServiceGetNodeWorkspaceProcedure:
 		deadline, reply = int(RoutedDeadline.Milliseconds()), RoutedReplyBytes
 	case fleetv1connect.FleetServiceWaitNodeTaskProcedure:
 		deadline, reply = int(RoutedWaitDeadline.Milliseconds()), RoutedReplyBytes

@@ -1,0 +1,1136 @@
+{
+  "schemaVersion": "af-con-01-error-catalogue.v2",
+  "license": "Apache-2.0",
+  "source": {
+    "repository": "ArcForges/ArcForges-Design",
+    "commit": "f0206cdad77d179ea300ea41f672790f3c698783",
+    "path": "docs/contracts/errors.md",
+    "sha256": "ef7746a2caeb51e94d7cc44e44a8c9617d6a3053943f71f51db9ffde6bcb32e5"
+  },
+  "messageKey": "error.<category>.<code>",
+  "annotationForm": "CATEGORY/code",
+  "pairForm": "Each code lists its possible replies as explicit {effect, retry} pairs (errors.md, \"Delivered against target\" and the effect rule): AFTER_TIME pairs with DID_NOT_HAPPEN or HAPPENED, never with UNKNOWN; UNKNOWN pairs with RECONCILE (naming its reconciliationOperation), SAME_COMMAND or NEVER; a RECONCILE pair names its read operation and no other pair does. There are no independent retry-mode and effect arrays.",
+  "implicit": {
+    "anyMethod": ["INTERNAL/internal", "RESOURCE/overloaded"],
+    "localNodeMethods": ["STATE/node_stopping"],
+    "cloudMethods": [
+      "AUTHENTICATION/unauthenticated",
+      "RESOURCE/rate_limited",
+      "STATE/not_activated"
+    ],
+    "receiptedMutations": ["CONFLICT/command_id_reused"]
+  },
+  "codes": [
+    {
+      "category": "VALIDATION",
+      "code": "invalid_argument",
+      "messageKey": "error.validation.invalid_argument",
+      "meaning": "A field violates its `validate:` rule",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = field path and rule"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "unsafe_batch_argument",
+      "messageKey": "error.validation.unsafe_batch_argument",
+      "meaning": "A batch-file argument cannot be quoted safely (CVE-2024-24576 class)",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = argument index"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "unsupported_shell",
+      "messageKey": "error.validation.unsupported_shell",
+      "meaning": "The requested shell is unavailable on the executing node",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = shell kind"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "path_not_found",
+      "messageKey": "error.validation.path_not_found",
+      "meaning": "A required file or directory does not exist or has the wrong required type",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = path field"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "inputs_required",
+      "messageKey": "error.validation.inputs_required",
+      "meaning": "Remote placement needs input selection, and none can be derived safely (for example a non-git working directory)",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = working directory"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "program_not_found",
+      "messageKey": "error.validation.program_not_found",
+      "meaning": "`argv[0]` did not resolve through PATH/PATHEXT",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = program"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "invalid_dependency",
+      "messageKey": "error.validation.invalid_dependency",
+      "meaning": "A dependency is missing or forms a cycle",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.resource` = dependency"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "invalid_policy",
+      "messageKey": "error.validation.invalid_policy",
+      "meaning": "The policy document has ERROR issues",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "Issues in the method value"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "invalid_cursor",
+      "messageKey": "error.validation.invalid_cursor",
+      "meaning": "A page or stream cursor is malformed or from another generation",
+      "retryAdvice": "`NEVER` (restart listing)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "incompatible_version",
+      "messageKey": "error.validation.incompatible_version",
+      "meaning": "Contract or protocol major mismatch",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`upgrade` (`VersionFailure`)"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "code_invalid",
+      "messageKey": "error.validation.code_invalid",
+      "meaning": "A device user code that names no authorization the caller may act on: an unknown code, a code another account decided, or the sixth and later lookup of a live code (the authorization stays `PENDING`)",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`limit`: for an unknown or decided code `limit_name` `device_entry_account`, `maximum` the account budget's cap and `available` the account's entries left; for a spent live code `limit_name` `device_code_lookups`, `maximum` 5 and `available` 0"
+    },
+    {
+      "category": "VALIDATION",
+      "code": "purchase_invalid",
+      "messageKey": "error.validation.purchase_invalid",
+      "meaning": "Google Play rejected the purchase token",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "AUTHENTICATION",
+      "code": "unauthenticated",
+      "messageKey": "error.authentication.unauthenticated",
+      "meaning": "Missing or invalid credential. AF-CTR-05 target (Plan addendum D0-B1, C-N6): also a node-relayed call, `ListNodes` and `GetNode` included, whose relay assertion is missing or invalid ([11](../architecture/11-security-privacy.md) \u00a71); the call is never served or routed",
+      "retryAdvice": "`NEVER` (sign in again). AF-CTR-05 target, for a relayed call refused `expired` or `nonce_reused` (C-N4): no sign-in, the relaying node signs a new assertion with a fresh relay nonce and resends with the same `command_id`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        },
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "SAME_COMMAND"
+        }
+      ],
+      "details": "\u2014. AF-CTR-05 target, for a relayed call: `state.state` = `relay_assertion`, `state.reason` = `missing`, `signature_invalid`, `credential_mismatch`, `expired`, `nonce_reused` or `request_mismatch` (a request field, the `caller` included, that differs from the assertion)"
+    },
+    {
+      "category": "AUTHENTICATION",
+      "code": "token_expired",
+      "messageKey": "error.authentication.token_expired",
+      "meaning": "Access, relay or refresh token expired. Answered by a refresh call itself (`RefreshSession`, later `RefreshNodeSession`), it means the refresh credential expired: refreshing cannot succeed, so the client signs in again (a node re-enrolls)",
+      "retryAdvice": "`SAME_COMMAND` after refresh",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "SAME_COMMAND"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "AUTHENTICATION",
+      "code": "credential_revoked",
+      "messageKey": "error.authentication.credential_revoked",
+      "meaning": "The device, node or session was revoked",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "AUTHENTICATION",
+      "code": "step_up_required",
+      "messageKey": "error.authentication.step_up_required",
+      "meaning": "The operation needs a recent strong authentication",
+      "retryAdvice": "`SAME_COMMAND` after step-up",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "SAME_COMMAND"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "AUTHENTICATION",
+      "code": "signature_invalid",
+      "messageKey": "error.authentication.signature_invalid",
+      "meaning": "A manifest, token or command signature failed verification. AF-CTR-05 target: also a center-routed call that fails the node's verification, a replayed call included",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = what failed. AF-CTR-05 target: the failed verification step, `call_replayed` for a call whose call ID the node already logged (C-N3)"
+    },
+    {
+      "category": "AUTHORIZATION",
+      "code": "permission_denied",
+      "messageKey": "error.authorization.permission_denied",
+      "meaning": "The origin is denied by the permission matrix or ownership. AF-CTR-05 target: also a local `TaskService.SubmitTask` from a caller that is not HUMAN ([AD-0021](../decisions/AD-0021-central-access-go-center.md) \u00a75, Plan decision Q8), and a center-routed call that the target node's center-routed policy refuses ([11](../architecture/11-security-privacy.md) \u00a71)",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = matrix operation. AF-CTR-05 target: for the local submission `state.state` = `task.submit` and `state.reason` = `local_submission_human_only`; for a node-relayed call from another node `state.state` = the matrix operation and `state.reason` = `relay_own_node_only` (the target's `relayed_from` is `own_node`, the default) or `relayed_agent_own_node_only` (a claimed AGENT origin, until AF-CTR-07; the relaying node refuses to forward such a call with the same reason); for any routed call while the target's center-routed policy is off, `state.reason` = `center_routed_disabled`"
+    },
+    {
+      "category": "AUTHORIZATION",
+      "code": "approval_required",
+      "messageKey": "error.authorization.approval_required",
+      "meaning": "An approval request was raised; the node executes the request once approved",
+      "retryAdvice": "`RECONCILE` via `ApprovalService.GetApproval`",
+      "effect": "`DID_NOT_HAPPEN` (yet)",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "RECONCILE",
+          "reconciliationOperation": "arcforges.node.v1.ApprovalService/GetApproval"
+        }
+      ],
+      "details": "`state.resource` = `{kind: \"approval\", id}`"
+    },
+    {
+      "category": "AUTHORIZATION",
+      "code": "command_pattern_denied",
+      "messageKey": "error.authorization.command_pattern_denied",
+      "meaning": "The command is outside the agent's or peer's allowed patterns",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = policy path"
+    },
+    {
+      "category": "AUTHORIZATION",
+      "code": "peer_policy_denied",
+      "messageKey": "error.authorization.peer_policy_denied",
+      "meaning": "The peer policy does not allow this operation",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "AUTHORIZATION",
+      "code": "account_mismatch",
+      "messageKey": "error.authorization.account_mismatch",
+      "meaning": "Play `obfuscatedAccountId` differs from the caller's account",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "ENTITLEMENT",
+      "code": "feature_not_entitled",
+      "messageKey": "error.entitlement.feature_not_entitled",
+      "meaning": "The plan lacks the cloud feature (`remote.*`, `push`); local and LAN features are never gated",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = feature"
+    },
+    {
+      "category": "ENTITLEMENT",
+      "code": "plan_limit_reached",
+      "messageKey": "error.entitlement.plan_limit_reached",
+      "meaning": "A per-plan count (nodes, viewers) is exhausted",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`limit`"
+    },
+    {
+      "category": "CONFLICT",
+      "code": "revision_conflict",
+      "messageKey": "error.conflict.revision_conflict",
+      "meaning": "`meta.expected_rev` differs from the current revision",
+      "retryAdvice": "`NEVER` (re-read, merge)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`revision`"
+    },
+    {
+      "category": "CONFLICT",
+      "code": "already_exists",
+      "messageKey": "error.conflict.already_exists",
+      "meaning": "The named object already exists",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.resource`; or, without a resource: for a node key an installation holds (`BeginNodeSignIn`, `StartDeviceAuthorization`, `CompleteNodeSignIn`, `PollDeviceAuthorization`) `state.state` = `node_key` and `state.reason` = `already_registered`; for a node ID live under another account (`CompleteNodeSignIn`, `PollDeviceAuthorization` only) `state.state` = `node` and `state.reason` = `already_exists`"
+    },
+    {
+      "category": "CONFLICT",
+      "code": "command_id_reused",
+      "messageKey": "error.conflict.command_id_reused",
+      "meaning": "The same `command_id` arrived with a different payload digest",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "CONFLICT",
+      "code": "digest_mismatch",
+      "messageKey": "error.conflict.digest_mismatch",
+      "meaning": "A plan digest or AF-CTR-06 file-operation acknowledgment's expected request digest differs from the recorded one",
+      "retryAdvice": "`NEVER` (re-plan, or show and review the current file operation)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "For file-operation acknowledgment, `state.state` = `file_operation`, `state.reason` = `operation_digest_mismatch`; no body"
+    },
+    {
+      "category": "CONFLICT",
+      "code": "file_changed",
+      "messageKey": "error.conflict.file_changed",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "meaning": "AF-CTR-06 target: the checked file hash, opened identity or planned path differs before any filesystem effect",
+      "retryAdvice": "`NEVER` (re-read and submit a new command)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "details": "`state.state` = `file`, `state.reason` = closed mismatch kind; no file content"
+    },
+    {
+      "category": "CONFLICT",
+      "code": "occurrence_mismatch",
+      "messageKey": "error.conflict.occurrence_mismatch",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "meaning": "AF-CTR-06 target: the exact edit occurrence count differs",
+      "retryAdvice": "`NEVER` (re-read and submit a new command)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "details": "`state.state` = `file`, `state.reason` = `occurrence_mismatch`; no file content"
+    },
+    {
+      "category": "CONFLICT",
+      "code": "code_reused",
+      "messageKey": "error.conflict.code_reused",
+      "meaning": "A sign-in code was presented twice; the flow is revoked",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "CONFLICT",
+      "code": "purchase_already_linked",
+      "messageKey": "error.conflict.purchase_already_linked",
+      "meaning": "The Play purchase is linked to another account",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "not_found",
+      "messageKey": "error.state.not_found",
+      "meaning": "The object does not exist (or is not visible to the caller)",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.resource`"
+    },
+    {
+      "category": "STATE",
+      "code": "invalid_state",
+      "messageKey": "error.state.invalid_state",
+      "meaning": "The object's state does not allow the operation",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.state`, `state.reason`"
+    },
+    {
+      "category": "STATE",
+      "code": "expired",
+      "messageKey": "error.state.expired",
+      "meaning": "A flow, offer, pairing or approval expired. AF-CTR-05 target: also a center-routed call past its expiry plus the 120 s skew, at the node's verification or at its re-check immediately before the effect",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "plan_expired",
+      "messageKey": "error.state.plan_expired",
+      "meaning": "A cleanup or integration plan expired",
+      "retryAdvice": "`NEVER` (re-plan)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "node_stopping",
+      "messageKey": "error.state.node_stopping",
+      "meaning": "The node is shutting down or switching versions",
+      "retryAdvice": "`AFTER_TIME` (2 s)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "pause_unsupported",
+      "messageKey": "error.state.pause_unsupported",
+      "meaning": "Pause is not supported on this platform (Windows)",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "not_attached",
+      "messageKey": "error.state.not_attached",
+      "meaning": "A stdin call without the caller's current attach",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "secrets_unavailable",
+      "messageKey": "error.state.secrets_unavailable",
+      "meaning": "A retry needs sealed secret environment values that were purged (terminal state + `storage.secret_retention_hours`), or that the node data key can no longer open because the key is missing or unreadable ([04](../architecture/04-execution.md) \u00a72)",
+      "retryAdvice": "`NEVER` (submit again with the environment)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = purge time (absent when the key cannot open them)"
+    },
+    {
+      "category": "STATE",
+      "code": "in_use",
+      "messageKey": "error.state.in_use",
+      "meaning": "Referenced by running work, a session or a lease",
+      "retryAdvice": "`AFTER_TIME`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "`state.reason` = holder"
+    },
+    {
+      "category": "STATE",
+      "code": "file_access_denied",
+      "messageKey": "error.state.file_access_denied",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "meaning": "AF-CTR-06 target: the native filesystem refuses access before any effect or cannot supply the required safe identity or path primitive",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "details": "`state.state` = `file`, `state.reason` = closed non-secret reason"
+    },
+    {
+      "category": "STATE",
+      "code": "dirty_worktree",
+      "messageKey": "error.state.dirty_worktree",
+      "meaning": "A worktree has uncommitted changes",
+      "retryAdvice": "`NEVER` (archive or commit)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "sas_mismatch",
+      "messageKey": "error.state.sas_mismatch",
+      "meaning": "Pairing digits did not match, or the commitment failed",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "peer_incompatible",
+      "messageKey": "error.state.peer_incompatible",
+      "meaning": "The peer's protocol range does not overlap",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`upgrade`"
+    },
+    {
+      "category": "STATE",
+      "code": "peer_unreachable",
+      "messageKey": "error.state.peer_unreachable",
+      "meaning": "The peer did not answer",
+      "retryAdvice": "`AFTER_TIME` with `DID_NOT_HAPPEN`; with `UNKNOWN`, `RECONCILE` reading `PeerService.ListPeers` (`AddPeerAddress`) or `SAME_COMMAND` (`BeginPairing`: idempotent by `command_id`, its pairing ID only in the lost reply)",
+      "effect": "`DID_NOT_HAPPEN` or `UNKNOWN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        },
+        {
+          "effect": "UNKNOWN",
+          "retry": "RECONCILE",
+          "reconciliationOperation": "arcforges.node.v1.PeerService/ListPeers"
+        },
+        {
+          "effect": "UNKNOWN",
+          "retry": "SAME_COMMAND"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "peer_blocked",
+      "messageKey": "error.state.peer_blocked",
+      "meaning": "Pairing from this node identity is blocked or rate limited",
+      "retryAdvice": "`AFTER_TIME` (1 h)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "link_down",
+      "messageKey": "error.state.link_down",
+      "meaning": "(retired, [AD-0018](../decisions/AD-0018-native-platforms-without-wsl-integration.md)) The WSL guest link is not connected; never returned",
+      "retryAdvice": "`AFTER_TIME`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "update_in_progress",
+      "messageKey": "error.state.update_in_progress",
+      "meaning": "An update switch is running",
+      "retryAdvice": "`AFTER_TIME`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "managed_externally",
+      "messageKey": "error.state.managed_externally",
+      "meaning": "Updates are managed by a package manager",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "not_activated",
+      "messageKey": "error.state.not_activated",
+      "meaning": "The feature is deployed but not yet activated in production ([10](../architecture/10-cloud.md) \u00a78)",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = surface"
+    },
+    {
+      "category": "STATE",
+      "code": "not_signed_in",
+      "messageKey": "error.state.not_signed_in",
+      "meaning": "The node has no account link",
+      "retryAdvice": "`NEVER` (sign in)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "cloud_unreachable",
+      "messageKey": "error.state.cloud_unreachable",
+      "meaning": "The node could not reach the cloud",
+      "retryAdvice": "`AFTER_TIME` with `DID_NOT_HAPPEN`; with `UNKNOWN`, `RECONCILE` reading `UpdateService.GetUpdateStatus` (`CheckNow`) or `AccountService.GetAccountStatus` (`RefreshEntitlement`), or `SAME_COMMAND` (`BeginSignIn` and `CreatePhonePairing`: idempotent by `command_id`, their flow and pairing IDs only in the lost reply)",
+      "effect": "`DID_NOT_HAPPEN` or `UNKNOWN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        },
+        {
+          "effect": "UNKNOWN",
+          "retry": "RECONCILE",
+          "reconciliationOperation": "arcforges.node.v1.UpdateService/GetUpdateStatus"
+        },
+        {
+          "effect": "UNKNOWN",
+          "retry": "RECONCILE",
+          "reconciliationOperation": "arcforges.node.v1.AccountService/GetAccountStatus"
+        },
+        {
+          "effect": "UNKNOWN",
+          "retry": "SAME_COMMAND"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "STATE",
+      "code": "node_offline",
+      "messageKey": "error.state.node_offline",
+      "meaning": "A center-routed call names a live node of the caller's account that has no open channel to this center process, or the process does not hold the hub lease (AF-CTR-05 target; [AD-0021](../decisions/AD-0021-central-access-go-center.md) \u00a711 as amended, Plan decisions Q2 and PB-5). The call was not delivered, and the center never queues it",
+      "retryAdvice": "`AFTER_TIME` (`retry_at`: 5 s plus jitter)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "`state.resource` = `{kind: \"node\", id}` (the node the caller named), `state.state` = `node`, `state.reason` = `node_offline`"
+    },
+    {
+      "category": "STATE",
+      "code": "node_unreachable",
+      "messageKey": "error.state.node_unreachable",
+      "meaning": "A center-routed call has no verified result: the node's channel closed or was replaced, the call's deadline passed, or the node's result failed verification (AF-CTR-05 target; [AD-0021](../decisions/AD-0021-central-access-go-center.md) \u00a711 as amended, Plan decisions Q2 and PN-9)",
+      "retryAdvice": "`AFTER_TIME` with `DID_NOT_HAPPEN` (any routed method whose call was not yet delivered, and every routed read once delivered: `GetNodeTask`, `ListNodeTasks`, `WaitNodeTask`, `ReadNodeTaskOutput`); with `UNKNOWN`, `SAME_COMMAND` (`SubmitNodeTask` and `CancelNodeTask` once delivered: both are idempotent by `command_id` and the node's command deduplication replays the recorded outcome. No read answers the question, because the submitted task ID is only in the lost reply, a task's state does not say which command cancelled it, and a cancel of another caller's task may have answered `approval_required` with an approval ID that only the lost reply carries, while a routed caller cannot read approvals); with `UNKNOWN` and `state.reason` `replay_digest_differs`, `NEVER` (a resend would replay the same differing digest, so the client stops and reports a defect)",
+      "effect": "`DID_NOT_HAPPEN` or `UNKNOWN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        },
+        {
+          "effect": "UNKNOWN",
+          "retry": "SAME_COMMAND"
+        },
+        {
+          "effect": "UNKNOWN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.resource` = `{kind: \"node\", id}`, `state.state` = `node`, `state.reason` = `channel_closed`, `deadline_passed`, `result_unverifiable` or `replay_digest_differs` (a resent command whose replayed result digest differs from the routing record)"
+    },
+    {
+      "category": "STATE",
+      "code": "purchase_pending",
+      "messageKey": "error.state.purchase_pending",
+      "meaning": "A Play purchase is `PENDING` and not granted",
+      "retryAdvice": "`AFTER_TIME`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "RESOURCE",
+      "code": "queue_full",
+      "messageKey": "error.resource.queue_full",
+      "meaning": "The admission queue or offer capacity is full (policy limit)",
+      "retryAdvice": "`AFTER_TIME`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "`limit`"
+    },
+    {
+      "category": "RESOURCE",
+      "code": "disk_space",
+      "messageKey": "error.resource.disk_space",
+      "meaning": "The data volume is below the free-space guard",
+      "retryAdvice": "`AFTER_TIME`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "`limit`"
+    },
+    {
+      "category": "RESOURCE",
+      "code": "quota_exceeded",
+      "messageKey": "error.resource.quota_exceeded",
+      "meaning": "A hard quota is exceeded",
+      "retryAdvice": "`NEVER` (clean up or raise the quota)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`limit`. The center's per-account node count is the enrollment cap (`limit_name` `max_nodes_per_account` on `CompleteNodeSignIn` and `PollDeviceAuthorization`; Cloud #132, #134). AF-CTR-05 target (Plan decision Q21): no connected-node cap is added, so neither the node channel nor a routed call is refused with this code for a count of connected nodes, and the per-account controls of the channel and of routed calls are rates (`RESOURCE/rate_limited`). Each control value is center configuration whose default is an owner placeholder (H-07; illustrative only), never a plan limit (`ENTITLEMENT/plan_limit_reached`)"
+    },
+    {
+      "category": "RESOURCE",
+      "code": "enforcement_unavailable",
+      "messageKey": "error.resource.enforcement_unavailable",
+      "meaning": "The task requires enforcement the node cannot provide",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason` = capability"
+    },
+    {
+      "category": "RESOURCE",
+      "code": "rate_limited",
+      "messageKey": "error.resource.rate_limited",
+      "meaning": "A rate limit applies",
+      "retryAdvice": "`AFTER_TIME` (`retry_at`)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "`limit`. AF-CTR-05 target (Plan decision Q21, PN-5): the per-account controls of the node channel and of routed calls name `limit_name` `node_channel_upgrades_per_account` or `node_channel_upgrades_per_node` (the upgrade-rate bucket, refused before the upgrade), `routed_calls_per_account` (a bucket with a burst, sized for a CLI that follows output) or `routed_in_flight_per_account`; their defaults are owner placeholders as for `quota_exceeded`"
+    },
+    {
+      "category": "RESOURCE",
+      "code": "too_large",
+      "messageKey": "error.resource.too_large",
+      "meaning": "A payload, manifest, plan or transfer exceeds its bound",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`limit`"
+    },
+    {
+      "category": "RESOURCE",
+      "code": "kill_switch_active",
+      "messageKey": "error.resource.kill_switch_active",
+      "meaning": "A cloud kill switch disables the feature. No kill switch exists yet: the Go center does not produce this code (AF-CTR-04; `BeginNodeSignIn` and `StartDeviceAuthorization` annotate it)",
+      "retryAdvice": "`AFTER_TIME`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "`state.reason` = switch"
+    },
+    {
+      "category": "RESOURCE",
+      "code": "overloaded",
+      "messageKey": "error.resource.overloaded",
+      "meaning": "Temporary overload (the store unreachable, timed out or contended before `COMMIT`; the node command queue full), and the answer to a duplicate delivery that cannot be answered yet: a `CompletePasskeyRegistration` whose first execution still holds the flow attempt, or a receipt lookup that failed after the first delivery committed. The retry replays the stored receipt (`effect` describes this delivery, not the command; see above)",
+      "retryAdvice": "`AFTER_TIME` with jitter",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "EXECUTION",
+      "code": "adopt_not_permitted",
+      "messageKey": "error.execution.adopt_not_permitted",
+      "meaning": "The OS refused to place the process under management",
+      "retryAdvice": "`NEVER`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason`"
+    },
+    {
+      "category": "EXECUTION",
+      "code": "operation_failed",
+      "messageKey": "error.execution.operation_failed",
+      "meaning": "A node job or OS operation failed",
+      "retryAdvice": "Depends on `effect`",
+      "effect": "`HAPPENED` or `UNKNOWN`",
+      "pairs": [
+        {
+          "effect": "HAPPENED",
+          "retry": "AFTER_TIME"
+        },
+        {
+          "effect": "HAPPENED",
+          "retry": "SAME_COMMAND"
+        },
+        {
+          "effect": "UNKNOWN",
+          "retry": "SAME_COMMAND"
+        },
+        {
+          "effect": "UNKNOWN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "`state.reason`"
+    },
+    {
+      "category": "EXECUTION",
+      "code": "integration_write_failed",
+      "messageKey": "error.execution.integration_write_failed",
+      "meaning": "Writing a client configuration file failed; earlier files of the plan were restored",
+      "retryAdvice": "`SAME_COMMAND`",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "SAME_COMMAND"
+        }
+      ],
+      "details": "`state.reason` = path"
+    },
+    {
+      "category": "EXECUTION",
+      "code": "provider_error",
+      "messageKey": "error.execution.provider_error",
+      "meaning": "A provider API (Google Play, Paddle) failed",
+      "retryAdvice": "`RECONCILE`, reading `StoreBillingService.GetBillingStatus`",
+      "effect": "`UNKNOWN`",
+      "pairs": [
+        {
+          "effect": "UNKNOWN",
+          "retry": "RECONCILE",
+          "reconciliationOperation": "arcforges.fleet.v1.StoreBillingService/GetBillingStatus"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "INTERNAL",
+      "code": "internal",
+      "messageKey": "error.internal.internal",
+      "meaning": "Unexpected failure; the correlation ID is in the node or cloud log, and an unanswered `COMMIT` of the call's own effect write is reported here with `UNKNOWN`. For `PurgeTaskRecord`, a failed or busy post-commit WAL checkpoint reports `HAPPENED`; the logical purge is committed, and identical-command replay reattempts the checkpoint (node-store section 1, MR-14)",
+      "retryAdvice": "`NEVER` when the effect is `UNKNOWN`; `AFTER_TIME` once when it is `DID_NOT_HAPPEN` or `HAPPENED` (`SAME_COMMAND` for the checkpoint)",
+      "effect": "`UNKNOWN` unless known",
+      "pairs": [
+        {
+          "effect": "UNKNOWN",
+          "retry": "NEVER"
+        },
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "AFTER_TIME"
+        },
+        {
+          "effect": "HAPPENED",
+          "retry": "AFTER_TIME"
+        },
+        {
+          "effect": "HAPPENED",
+          "retry": "SAME_COMMAND"
+        }
+      ],
+      "details": "\u2014"
+    },
+    {
+      "category": "INTERNAL",
+      "code": "store_corrupt",
+      "messageKey": "error.internal.store_corrupt",
+      "meaning": "The node store failed its integrity check",
+      "retryAdvice": "`NEVER` (doctor; restore from backup)",
+      "effect": "`DID_NOT_HAPPEN`",
+      "pairs": [
+        {
+          "effect": "DID_NOT_HAPPEN",
+          "retry": "NEVER"
+        }
+      ],
+      "details": "\u2014"
+    }
+  ]
+}

@@ -86,6 +86,18 @@ func (r *Registry) Methods() []connect.Method {
 		registryMethod("WaitNodeTask", fleetv1connect.FleetServiceWaitNodeTaskProcedure, r.waitNodeTask),
 		registryMethod("ReadNodeTaskOutput", fleetv1connect.FleetServiceReadNodeTaskOutputProcedure, r.readNodeTaskOutput),
 		registryMethod("CancelNodeTask", fleetv1connect.FleetServiceCancelNodeTaskProcedure, r.cancelNodeTask),
+		registryMethod("ReadNodeFile", fleetv1connect.FleetServiceReadNodeFileProcedure, r.readNodeFile),
+		registryMethod("WriteNodeFile", fleetv1connect.FleetServiceWriteNodeFileProcedure, r.writeNodeFile),
+		registryMethod("EditNodeFile", fleetv1connect.FleetServiceEditNodeFileProcedure, r.editNodeFile),
+		registryMethod("SearchNodeFiles", fleetv1connect.FleetServiceSearchNodeFilesProcedure, r.searchNodeFiles),
+		registryMethod("ListNodeDirectory", fleetv1connect.FleetServiceListNodeDirectoryProcedure, r.listNodeDirectory),
+		registryMethod("PlanNodeRemoval", fleetv1connect.FleetServicePlanNodeRemovalProcedure, r.planNodeRemoval),
+		registryMethod("ExecuteNodeRemoval", fleetv1connect.FleetServiceExecuteNodeRemovalProcedure, r.executeNodeRemoval),
+		registryMethod("GetNodeFileOperation", fleetv1connect.FleetServiceGetNodeFileOperationProcedure, r.getNodeFileOperation),
+		registryMethod("RegisterNodeWorkspace", fleetv1connect.FleetServiceRegisterNodeWorkspaceProcedure, r.registerNodeWorkspace),
+		registryMethod("UnregisterNodeWorkspace", fleetv1connect.FleetServiceUnregisterNodeWorkspaceProcedure, r.unregisterNodeWorkspace),
+		registryMethod("ListNodeWorkspaces", fleetv1connect.FleetServiceListNodeWorkspacesProcedure, r.listNodeWorkspaces),
+		registryMethod("GetNodeWorkspace", fleetv1connect.FleetServiceGetNodeWorkspaceProcedure, r.getNodeWorkspace),
 	}
 }
 

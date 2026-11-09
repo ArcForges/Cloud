@@ -276,6 +276,18 @@ func Operations() []Operation {
 		{Path: fleetv1connect.FleetServiceCancelNodeTaskProcedure, ID: "fleet.cancelNodeTask", Risk: "R2", Session: true, RelayedScopes: []string{"node"},
 			MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.RemoteControl, Group: feature.GroupControl, Audit: AuditBeforeCall,
 			Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceReadNodeFileProcedure, ID: "fleet.readNodeFile", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceWriteNodeFileProcedure, ID: "fleet.writeNodeFile", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceEditNodeFileProcedure, ID: "fleet.editNodeFile", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceSearchNodeFilesProcedure, ID: "fleet.searchNodeFiles", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceListNodeDirectoryProcedure, ID: "fleet.listNodeDirectory", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServicePlanNodeRemovalProcedure, ID: "fleet.planNodeRemoval", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceExecuteNodeRemovalProcedure, ID: "fleet.executeNodeRemoval", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceGetNodeFileOperationProcedure, ID: "fleet.getNodeFileOperation", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceRegisterNodeWorkspaceProcedure, ID: "fleet.registerNodeWorkspace", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceUnregisterNodeWorkspaceProcedure, ID: "fleet.unregisterNodeWorkspace", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceListNodeWorkspacesProcedure, ID: "fleet.listNodeWorkspaces", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
+		{Path: fleetv1connect.FleetServiceGetNodeWorkspaceProcedure, ID: "fleet.getNodeWorkspace", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
 	}
 }
 
@@ -288,7 +300,7 @@ const ObjectNode = "node"
 // caller, so a node credential never reaches account, device, billing or security methods (Plan CTR5-CALL-02).
 func RelayedOperations() []string {
 	return []string{"fleet.listNodes", "fleet.getNode", "fleet.submitNodeTask", "fleet.getNodeTask", "fleet.listNodeTasks", "fleet.waitNodeTask",
-		"fleet.readNodeTaskOutput", "fleet.cancelNodeTask"}
+		"fleet.readNodeTaskOutput", "fleet.cancelNodeTask", "fleet.readNodeFile", "fleet.writeNodeFile", "fleet.editNodeFile", "fleet.searchNodeFiles", "fleet.listNodeDirectory", "fleet.planNodeRemoval", "fleet.executeNodeRemoval", "fleet.getNodeFileOperation", "fleet.registerNodeWorkspace", "fleet.unregisterNodeWorkspace", "fleet.listNodeWorkspaces", "fleet.getNodeWorkspace"}
 }
 
 // OperatorGrantClass is the operation ID and step-up class of the operator grant, a center-defined operation (the contract has no row

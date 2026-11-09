@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
@@ -22,8 +23,9 @@ const (
 	vectorsCommit       = "e67a6b089a7270ab771a97c27aeba92c5d3b0469"
 	vectorsFile         = "testdata/af-ctr-05-relay-vectors.json"
 	vectorsSHA256       = "8b6f1fb333a6aad96c32467b77148894ed0fce04d54fc9603c7b8c620fdec899"
-	catalogueFile       = "testdata/af-con-01-error-catalogue.json"
-	catalogueFileSHA256 = "2a5737b21ef8be586ece156d2c4780208d93eb9ea42b2885fbd3d2b5f97efa64"
+	catalogueFile       = "testdata/af-ctr-06-error-catalogue-450.json"
+	catalogueFileSHA256 = "7069a1a94eb99c6fb40fea16c17e1f2942510cdc8762ec2cc83622c1e543d412"
+	catalogueCohort     = "1.0.0-ci.450.1"
 )
 
 type hexBytes []byte
@@ -138,6 +140,37 @@ func TestTheVendoredFilesAreTheCohorts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if digest := sha256.Sum256(data); hex.EncodeToString(digest[:]) != catalogueFileSHA256 {
-		t.Fatalf("%s is not the vendored Contracts %s file", catalogueFile, vectorsCohort)
+		t.Fatalf("%s is not the vendored Contracts %s file", catalogueFile, catalogueCohort)
+	}
+}
+
+// Historical source evidence is retained rather than rewritten to match a later cohort.
+func TestCTR06HistoricalRefusalCatalogueRemainsByteExact(t *testing.T) {
+	data, err := os.ReadFile("testdata/af-con-01-error-catalogue.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	if hex.EncodeToString(sum[:]) != "2a5737b21ef8be586ece156d2c4780208d93eb9ea42b2885fbd3d2b5f97efa64" {
+		t.Fatal("historical catalogue changed")
+	}
+	var old struct {
+		Codes []struct{ Category, Code string }
+	}
+	if err := json.Unmarshal(data, &old); err != nil {
+		t.Fatal(err)
+	}
+	if len(old.Codes) != 67 || len(refusalCatalogue) != 70 {
+		t.Fatal("unexpected old/new catalogue closure")
+	}
+	for _, code := range old.Codes {
+		if !catalogued(strings.ToLower(code.Category) + "/" + code.Code) {
+			t.Fatal("historical refusal disappeared")
+		}
+	}
+	for _, key := range []string{"conflict/file_changed", "conflict/occurrence_mismatch", "state/file_access_denied"} {
+		if !catalogued(key) {
+			t.Fatal("missing published450 code", key)
+		}
 	}
 }

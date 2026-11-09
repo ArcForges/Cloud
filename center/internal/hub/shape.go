@@ -52,15 +52,28 @@ const (
 	MethodCancelNodeTask       = relayv1.RoutedMethod_ROUTED_METHOD_CANCEL_NODE_TASK
 	MethodListNodes            = relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODES
 	MethodGetNode              = relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE
-	maxCallMethod              = MethodCancelNodeTask
-	maxAssertionMethod         = MethodGetNode
+	maxCallMethod              = relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_WORKSPACE
+	maxAssertionMethod         = relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_WORKSPACE
 	approvalReconcileOperation = "arcforges.node.v1.ApprovalService/GetApproval"
 )
 
 // Mutation reports a routed method that names a command (SubmitNodeTask, CancelNodeTask): the only ones whose call carries a
 // command_id, and whose delivered call has an unknown effect once its result is lost.
 func Mutation(method relayv1.RoutedMethod) bool {
-	return method == MethodSubmitNodeTask || method == MethodCancelNodeTask
+	switch method {
+	case MethodSubmitNodeTask, MethodCancelNodeTask,
+		relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE,
+		relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL,
+		relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE, relayv1.RoutedMethod_ROUTED_METHOD_UNREGISTER_NODE_WORKSPACE:
+		return true
+	}
+	return false
+}
+
+// callMethod excludes the two registry-only assertion methods, including after the additive file range.
+func callMethod(method relayv1.RoutedMethod) bool {
+	return method >= MethodSubmitNodeTask && method <= MethodCancelNodeTask ||
+		method >= relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE && method <= maxCallMethod
 }
 
 var (
@@ -132,7 +145,7 @@ func validCallHeader(value *relayv1.CallHeader) bool {
 	if value.CommandId != nil && !validID(value.CommandId) {
 		return false
 	}
-	if value.Method == nil || *value.Method < MethodSubmitNodeTask || *value.Method > maxCallMethod || len(value.RequestSha256) != DigestBytes ||
+	if value.Method == nil || !callMethod(*value.Method) || len(value.RequestSha256) != DigestBytes ||
 		value.RequestSize == nil || *value.RequestSize < 1 || *value.RequestSize > MaxCallPayload {
 		return false
 	}
@@ -183,7 +196,7 @@ func validResultHeader(value *relayv1.ResultHeader) bool {
 	if value.CommandId != nil && !validID(value.CommandId) {
 		return false
 	}
-	if value.Method != nil && (*value.Method < MethodSubmitNodeTask || *value.Method > maxCallMethod) {
+	if value.Method != nil && !callMethod(*value.Method) {
 		return false
 	}
 	if (value.RequestSha256 != nil && len(value.RequestSha256) != DigestBytes) || (value.ResponseSha256 != nil && len(value.ResponseSha256) != DigestBytes) {
