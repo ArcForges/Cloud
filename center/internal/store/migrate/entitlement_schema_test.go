@@ -40,6 +40,7 @@ func schemasAndGrantsAt(version int) ([]string, []schema.Grant) {
 		case version < 7 && grant.Schema == "entitlement" && grant.Table == "definitions_current":
 		case version < 8 && grant.Schema == "fleet" && grant.Table == "hub_lease":
 		case version < 10 && grant.Schema == "fleet" && (grant.Table == "routed_call" || grant.Table == "refusal_code"):
+		case version < 11 && grant.Schema == "fleet" && (grant.Table == "routed_file_call" || grant.Table == "routed_command_id"):
 		default:
 			grants = append(grants, grant)
 		}
