@@ -206,7 +206,8 @@ anything is read, and the Container never wakes (`tests/worker/channel-upgrade.t
 The upgrade's own budget is 15 s, until the 101; the channel then lives as long as the connection, and the Durable Object, which
 proxies the socket, stays awake while it is open (the cost note in [center](center.md#hosted-deployment)). A channel's messages are at
 most 1 MiB (the center closes a larger one 4413), well under the platform's 32 MiB WebSocket message limit. Production: no `relay` in
-`FLAGSHIP_SURFACES` (pinned by `tests/worker/center-config.test.ts`); proof gains it only in AF-CTR-05 E3.
+`FLAGSHIP_SURFACES` (pinned by `tests/worker/center-config.test.ts`). AF-CTR-05 E3 prepares a protected proof target with `relay`;
+that target alone is not evidence of a successful hosted deployment or acceptance.
 
 ## FleetService rows (AF-CTR-05 part E2a)
 
@@ -216,7 +217,8 @@ with RequestMeta and a 4096-byte request bound, the contract's deadline as its b
 64 KiB, except ListNodes: 640 KiB (`routes.ListNodesReplyBytes`), which holds one reply of 1,000 nodes (the enrollment cap's upper bound,
 `config.MaxNodesPerAccountBound`) as large as the rules admit, about 615 KB with its frame (`TestTheListNodesReplyFitsItsBoundAtTheCap`).
 While `FLAGSHIP_SURFACES` does not name `nodes`, each is answered with the generated `STATE/not_activated` (`state.reason` `nodes`)
-before anything is read; production names none. Every other FleetService method has no row (`UNIMPLEMENTED` at the center).
+before anything is read; production names none. E2b adds the routed methods below; FleetService methods outside those and the registry
+remain unregistered (`UNIMPLEMENTED` at the center).
 
 Part E2b adds the six routed task methods ([routed calls](center-fleet.md#routed-calls)): SubmitNodeTask (a 256 KiB request bound) and
 GetNodeTask, ListNodeTasks, WaitNodeTask, ReadNodeTaskOutput and CancelNodeTask (8 KiB), each with a reply bound of 1 MiB

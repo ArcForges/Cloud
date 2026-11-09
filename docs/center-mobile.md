@@ -222,8 +222,9 @@ person is a seam there: the harness's browser decides on the pages); every refus
 
 ### H3 checklist (run by the coordinator after the merge, on proof, without a phone or an emulator)
 
-1. Production stays dark: its `center.surfaces` is `none`; proof's reads `identity,pages,operations,fleet,mobile,relay,nodes`; proof's
-   PostgreSQL gate is at version 6.
+1. For the original AF-CTR-04 H3 run, production stayed dark (`center.surfaces` `none`), proof read
+   `identity,pages,operations,fleet,mobile`, and its PostgreSQL gate was at version 6. A future run compares proof with the actual
+   candidate's deployment receipt and migration gate; the later E3 target adds `relay,nodes` but is not evidence of deployment.
 2. `curl` on proof: `/.well-known/assetlinks.json` answers 200, `application/json`, no redirect, the configured test statement byte
    for byte; `/app/callback` answers 200 with the fixed page and the security headers; production's apex is unchanged (whatever
    `arcforges-web` answers).

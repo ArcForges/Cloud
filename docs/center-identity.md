@@ -964,17 +964,17 @@ time rounded up to the second plus the limiter's 60-second period) before it is 
 `ARCFORGES_CENTER_CLIENT_IP_HEADER`; surfaces take effect only with `ARCFORGES_HELLO_RUNTIME=go`.
 
 Production carries `"FLAGSHIP_SURFACES": ""` (pinned by `tests/worker/center-config.test.ts`: production stays dark, no page is
-served there); the acceptance environment (`proof`) carries `identity,pages,operations,fleet,mobile,relay,nodes` and `ALLOWED_ORIGIN` = the origin of its public base
-URL. The `identity`, `pages`, `operations`, `fleet` and `mobile` surfaces exist (`mobile` in [center mobile](center-mobile.md)) (`operations` is described below, `fleet` in [center
+served there); the checked-in proof target carries `identity,pages,operations,fleet,mobile,relay,nodes` and `ALLOWED_ORIGIN` = the origin of its public base
+URL. AF-CTR-04's earlier proof deployment included the first five surfaces; the E3 target is not evidence of a hosted deployment. The `identity`, `pages`, `operations`, `fleet` and `mobile` surfaces exist (`mobile` in [center mobile](center-mobile.md)) (`operations` is described below, `fleet` in [center
 fleet](center-fleet.md#surface): enabled on the acceptance environment, its rows answer `state.reason = fleet` where it is off); AF-PLAT-01 owns the activation variable's other names, cron idling and kill switches. AF-PROD-01 enables identity in production only
 after AF-PLAT-01's retention sweeps exist ([PostgreSQL store](postgres-store.md#identity-and-device-af-ctr-03)).
 
 The operator grant has a third surface, `operations`: the interim page `/operations/grant` of the operator grant ([center
 entitlement](center-entitlement.md#the-operations-page)). It needs `identity` and `pages`, exists only in official-hosted mode, is
 never a default of either mode (a list that names it on a self-hosted center, or without the other two, refuses to start), and
-is enabled in one checked-in environment only: the acceptance environment (`proof`) carries `identity,pages,operations,fleet,mobile,relay,nodes` (with the
-development fixture catalogue) for the hosted proof of the grant, whose run is the [post-deploy
-checklist](center-entitlement.md#post-deploy-checklist) and whose script is the `--operator-grant` mode of [the
+is enabled in one checked-in environment only: the proof target carries `identity,pages,operations,fleet,mobile,relay,nodes` (with the
+development fixture catalogue). The target is not itself a deployed result. A hosted grant proof follows the [post-deploy
+checklist](center-entitlement.md#post-deploy-checklist) and uses the `--operator-grant` mode of [the
 acceptance](#proof-bootstrap-and-acceptance); production carries none, pinned by the same tests as before.
 
 ### Runbooks

@@ -205,6 +205,57 @@ func TestASubmitIsRoutedRecordedAndReplayedByTheNode(t *testing.T) {
 	}
 }
 
+// TestOfficialSubmitWithoutAGrantIsGatedBeforeRouting covers X13 through the actual Fleet method. The center, access gate and
+// PostgreSQL are real; the catalogue and proved step-up are synthetic. The account has no center.execute grant, and no node channel
+// is connected: the authorization gate must refuse before the offline handler can run or consume the proved challenge.
+func TestOfficialSubmitWithoutAGrantIsGatedBeforeRouting(t *testing.T) {
+	h := newHarness(t, settings{mode: config.OfficialHosted, plan: config.PlanDevelopmentFixtures, surfaces: "identity,pages,fleet,relay,nodes"})
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	issued := h.accountSession(user, session.ScopeAccount)
+	command := platform.NewID()
+	h.proveFor(issued, user, "fleet.submitNodeTask", node.node.ID)
+
+	// Make the setup explicit: one usable proved challenge for this caller/target and no account grant at all.
+	proved := func() int {
+		return h.count(`SELECT count(*) FROM identity.step_up_challenge
+			WHERE user_id = $1 AND session_id = $2 AND operation_id = 'fleet.submitNodeTask'
+			AND target_hash = decode($3, 'hex') AND state = 2 AND proved_at IS NOT NULL
+			AND consumed_at IS NULL AND expires_at > now()`, user, issued.SessionID, identity.TargetHash("fleet.submitNodeTask", user, node.node.ID))
+	}
+	if h.count("SELECT count(*) FROM entitlement.grant WHERE account_id = $1", user) != 0 || proved() != 1 {
+		t.Fatal("the no-grant account needs exactly one usable proved challenge")
+	}
+	authorized, gated := h.audits("access.authorized"), h.audits("access.gated")
+	routedRows := h.count("SELECT count(*) FROM fleet.routed_call")
+	routedAudit := h.count("SELECT count(*) FROM audit.audit_event WHERE event_type LIKE 'fleet.routed.%'")
+	consumed := h.count("SELECT count(*) FROM identity.step_up_challenge WHERE consumed_at IS NOT NULL")
+
+	failure := h.submit(issued.AccessToken, command, node.node.ID, submitPayload(t, command, "NO-GRANT")).GetError()
+	if errorKey(failure) != "ENTITLEMENT/feature_not_entitled" ||
+		failure.GetDetails().GetState().GetState() != "feature" || failure.GetDetails().GetState().GetReason() != "center.execute" ||
+		failure.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN ||
+		failure.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_NEVER {
+		t.Fatalf("the unentitled submit: %v", failure)
+	}
+	if h.audits("access.authorized") != authorized+1 || h.audits("access.gated") != gated+1 {
+		t.Fatalf("the submit audit: authorized %d, gated %d", h.audits("access.authorized")-authorized, h.audits("access.gated")-gated)
+	}
+	ordered := h.count(`SELECT count(*) FROM audit.audit_event a JOIN audit.audit_event g ON a.sequence < g.sequence
+		WHERE a.event_type = 'access.authorized' AND g.event_type = 'access.gated'
+		AND a.target_id = 'fleet.submitNodeTask' AND g.target_id = 'fleet.submitNodeTask' AND g.reason = 'no_entitlement'
+		AND a.actor_ref = $1 AND g.actor_ref = $1 AND convert_from(g.payload, 'UTF8')::jsonb ->> 'feature' = 'center.execute'`,
+		"account:"+user.String())
+	if ordered != 1 {
+		t.Fatalf("the submit did not audit authorization before the center.execute no-entitlement gate: %d ordered pairs", ordered)
+	}
+	if h.record(user, command) != nil || h.count("SELECT count(*) FROM fleet.routed_call") != routedRows ||
+		h.count("SELECT count(*) FROM audit.audit_event WHERE event_type LIKE 'fleet.routed.%'") != routedAudit ||
+		h.count("SELECT count(*) FROM identity.step_up_challenge WHERE consumed_at IS NOT NULL") != consumed || proved() != 1 {
+		t.Fatal("the gated submit reached routing or consumed its step-up challenge")
+	}
+}
+
 // TestAnOfflineNodeIsRefusedBeforeItsRecord (E2-5; decisions Q-8): a Submit for a live node without a channel here is STATE/node_offline
 // (DID_NOT_HAPPEN, AFTER_TIME): no routing record, no evidence consumed, one fleet.routed.refused row (reason node_offline, digests and
 // sizes only); a read for it is node_offline with no fleet.routed row at all.
