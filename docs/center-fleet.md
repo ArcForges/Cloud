@@ -14,8 +14,8 @@ connection, which AF-CTR-05 serves.
 ## Surface
 
 The methods and the six pages belong to the switchable surface `fleet`; the node channel is the surface `relay` ([node channel](#node-channel)). It needs `identity` and `pages` (a list without them refuses to
-start). Production `FLAGSHIP_SURFACES` stays `""` (AF-PROD-01 activates it); the acceptance environment (`proof`) carries
-`identity,pages,operations,fleet,mobile,relay,nodes` (the E3 checked-in target, retaining `mobile` from AF-CTR-04 part M; pinned by `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts`); a
+start). Production `FLAGSHIP_SURFACES` stays `""` (AF-PROD-01 activates it). The E3 checked-in proof target carries
+`identity,pages,operations,fleet,mobile,relay,nodes`, retaining `mobile` from AF-CTR-04 part M (pinned by `tests/worker/center-config.test.ts` and `tests/worker/proof-deploy.test.ts`); that target is not evidence of a hosted E3 deployment. A
 self-hosted center enables it by default together with `identity` and `pages`
 (`TestTheFleetSurfaceNeedsIdentityAndPagesAndIsInTheSelfHostedDefault`). With the surface off, every fleet method answers `STATE/not_activated`
 with `state.reason` `fleet`, from the Worker's generated reply before anything else is read, and from the center. Each method's Worker
@@ -134,7 +134,8 @@ AF-CTR-05 part E2b serves FleetService's six routed task methods on the `nodes` 
 amended by PB-1, PB-2, D0-B1, C-N1, C-N6, PN-1 and PN-6; the coordinator's decisions B-1..B-3, Q-1..Q-15 and section 4): SubmitNodeTask,
 GetNodeTask, ListNodeTasks, WaitNodeTask, ReadNodeTaskOutput and CancelNodeTask (`internal/fleetapi/routed.go`). EVIDENCE: REAL
 PostgreSQL, the REAL composed center and hub; MOCKED: the nodes (nodetest with software keys) and the step-up ceremony (its proved
-challenge is seeded); NOT PROVEN: a hosted run, the real node (N1, N2). Production keeps `nodes` off; proof enables it only after the protected E3 deployment succeeds.
+challenge is seeded). These E2b tests do not prove a real node or a hosted run; the later AF-CTR-05 X work exercises real local nodes,
+while signed hosted H5 remains separate. Production keeps `nodes` off; proof enables it only after the protected E3 deployment succeeds.
 
 **Rows.** Each method admits an account session, and a node credential only as the verified relay of its own node (the authorizer
 verifies the relay assertion, whose request digest is SHA-256 of the inner request bytes, before anything else). It addresses one of
@@ -660,7 +661,7 @@ The center delivers the public keys of `fleet.signing_key` with every sign-in an
 retired nor expired, including a registered successor whose `not_before` lies ahead, so a node holds it before the center signs with
 it (`platform.PublishedKeys`); a key whose retirement is scheduled ahead is published with that instant as its `not_after`. Until keys
 are registered the sets are empty. The relay process loads at most eight private bindings, but the published public sets have no
-corresponding eight-key limit. The E3 proof deployment supplies one selected ephemeral command key; production key custody remains
+corresponding eight-key limit. The prepared E3 proof procedure selects one ephemeral command key; preparation is not evidence of a hosted deployment. Production key custody remains
 owner-configured (Plan H-16).
 
 **Runbook.** With the migration role:
@@ -772,7 +773,8 @@ center, `GET <center>/fleet/v1/node` with the subprotocol `arcforges.relay.v1`, 
 with `frame_version` 1 and `frame_seq` per connection and direction (`center/internal/hub`). The center's `frame_seq` increases
 on each connection but may have gaps (a skipped abandoned call frame, a frame the send queue refused, the `RelayClose` written
 outside the queue), so a node must not check that it is contiguous. It is the switchable surface `relay`
-(it needs `identity` and `fleet`; in the self-hosted default; off in production until AF-PROD-01, and on proof only from AF-CTR-05 E3).
+(it needs `identity` and `fleet`; in the self-hosted default; off in production until AF-PROD-01). E3 prepares the protected proof
+target with `relay`, but preparation is not proof of a hosted deployment or acceptance.
 E1a built the channel; E1b adds the signed calls and results, the in-flight bounds, the relay nonces and the relay assertion's verifier
 (below, "Signed calls and results"); the routed API that uses them is E2's.
 
@@ -789,8 +791,9 @@ naming the binding and the kid; a center whose loaded keys match no valid row re
 default leaves `relay` out when no key is configured and logs why. `ChannelAccepted.signing_kids` lists the held keys valid at each
 acceptance, from the hub's live keyring (re-read at the hello itself; AF-CTR-05 E1b), never from a snapshot of the start, and is never
 sent empty: when no held key may sign, a proved hello closes 4500 `no_signing_key`. Its first kid is the key calls are signed with and
-the health document's `center.signingKid` (E1b), so the three always agree. The hosted Worker passes no key variable yet: proof gains its key with the surface in
-AF-CTR-05 E3 (Q11), production with AF-PROD-01 (H-16).
+the health document's `center.signingKid` (E1b), so the three always agree. The E3 protected proof procedure prepares a selected
+ephemeral key binding with the surface (Q11); a successful hosted deployment has not been established by that preparation. Production
+key custody and activation remain with AF-PROD-01 (H-16).
 
 **Admission, before the upgrade** (CTR5-HUB-02). The hosted Worker passes only the route's exact upgrade through
 ([cloud ingress](cloud-ingress.md#upgrade-route-af-ctr-05-part-e1a)); the center then checks, in this order, each refusal an HTTP answer
@@ -1100,9 +1103,10 @@ loopback receiver; it proves nothing about other browsers.
 1. **Production stays dark.** `curl -si https://arcforges.com/api/healthz`: `revision` the merge commit, `center.surfaces` `none`;
    `https://arcforges.com/api/connect` and `/api/activate` answer the Worker's plain 404; a fleet method answers `STATE/not_activated`
    with `state.reason` `fleet`.
-2. **Proof carries the surface.** `curl -si https://proof.arcforges.com/api/healthz`: `center.surfaces`
-   `identity,pages,operations,fleet,mobile,relay,nodes` after the E3 proof deployment (`mobile` was added by AF-CTR-04 part M), equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`; the migration gate shows
-   `arcforges_acceptance` at version 5 (6 since AF-CTR-04 part M).
+2. **Proof carries the surface.** Compare `curl -si https://proof.arcforges.com/api/healthz` with the actual candidate's
+   `center.configuredSurfaces` in `artifacts/proof-deployment.json` and its migration-gate receipt. The original H1 ran with
+   `identity,pages,operations,fleet` and schema version 5; AF-CTR-04 part M later added `mobile` and version 6. The E3
+   target adds `relay,nodes` and includes migrations through 0010, but that target is not evidence of deployment.
 3. **The pages' replies** (from the Linux host, a key of its own): `curl -si https://proof.arcforges.com/api/connect` and `/api/activate`:
    200, the seven security headers exactly, `Cache-Control: no-store, no-transform`, no `cloudflareinsights` and no `data-cf-beacon` in the
    body; `curl -si -X POST https://proof.arcforges.com/api/connect/review` without an `Origin`: 403;

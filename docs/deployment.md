@@ -167,10 +167,10 @@ AF-CTR-04 part M adds the `mobile` surface ([center mobile](center-mobile.md)) t
 non-shipping test statement (`testOnly`, the package `com.arcforges.prooftest` and the fingerprint of a throwaway self-signed
 certificate whose key was destroyed; never a real app identity), production none. `ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT` is a
 self-hosted center's own variable and is never passed. Production's routes are unchanged (`arcforges.com/api/*` only), so the apex
-rows exist only on proof's custom domain; the PostgreSQL gate of a deployment of this change expects version 6.
+rows exist only on proof's custom domain; the historical AF-CTR-04 part M deployment's PostgreSQL gate expected version 6. The later E3 candidate includes migrations through 0010.
 The Worker passes no other variable of this part: in particular `ARCFORGES_CENTER_DISABLED_FEATURES`, a self-hosted operator's limit
 that the hosted center refuses, is never handed over (`tests/worker/container-classes.test.ts`, PLT-18). The `operations` surface is
-enabled in the acceptance environment only: production keeps `FLAGSHIP_SURFACES` empty (and no catalogue), the acceptance environment
+enabled in the proof target only: production keeps `FLAGSHIP_SURFACES` empty (and no catalogue), the E3 target
 carries `identity,pages,operations,fleet,mobile,relay,nodes` with the development fixture catalogue (**MOCKED**, illustrative), and
 `tests/worker/center-config.test.ts` pins both. The proof owner, the bootstrap owner, counts as operator through
 `identity.bootstrap`, so no `arcforges-center admin grant-operator` (the migration role's path) and no migration-role credential is

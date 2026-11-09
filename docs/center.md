@@ -291,11 +291,12 @@ controls and audit, in that order and last ([the gate](center-entitlement.md#the
 
 ### Routed task control
 
-The operations that later tasks serve (AF-CTR-05 on; AF-CTR-04's node enrollment is essential and carries none) carry these keys. The
-table is `feature.OperationKeys`, and the operation table of `internal/access` is linked to it in code (AF-CTR-05 part E0): a row
+The node channel and routed task operations delivered by AF-CTR-05, and later MCP and push operations when implemented, carry
+these keys. AF-CTR-04's node enrollment is essential and carries none. The table is `feature.OperationKeys`, and the operation table of `internal/access` is linked to it in code (AF-CTR-05 part E0): a row
 that carries a `Feature` names its `Group`, and `access.CheckRow` refuses the row, and with it the composition, unless its key is the
 key this table names for that group; a row without a `Feature` names no group (`TestEveryFeatureRowCarriesTheKeyOfItsGroup`, with a
-table-driven negative over every group and key; the first served row that carries one is the node channel's, `fleet.nodeChannel`, AF-CTR-05 E1a). `TestTheCenterDocumentPrintsTheRoutedTaskControlTable`
+table-driven negative over every group and key; the first served row was the node channel's, `fleet.nodeChannel`, AF-CTR-05 E1a;
+E2b added the routed task rows). `TestTheCenterDocumentPrintsTheRoutedTaskControlTable`
 fails when this table and the code differ:
 
 | Key              | Group               | Gates                                               |
@@ -320,9 +321,9 @@ them says `plan_limit_reached`:
 | `channel_upgrades_per_account` | the gated node channel row (node connection) | `channelUpgradeAccount` (600 per hour), `channelUpgradeNode` (60 per hour) | `RESOURCE/rate_limited`, `retry_at` the window's end |
 
 There is no connected-node cap (AF-CTR-05 Q21): the enrollment cap (`maxNodesPerAccount`) governs how many nodes an account has.
-The node channel's row is the one gated row served (AF-CTR-05 E1a): `channel_upgrades_per_account` stands in front of it, so a
-composition whose controls leave the node connection group uncovered refuses to start (`TestAGatedRowWithoutAControlFailsComposition`,
-E0 review N-9).
+The node channel row (`fleet.nodeChannel`, E1a) and the six routed task rows (E2b) are served gated rows.
+`channel_upgrades_per_account` stands in front of the channel, and both routed controls stand in front of the routed groups. A
+composition whose controls leave a gated group uncovered refuses to start (`TestAGatedRowWithoutAControlFailsComposition`, E0 review N-9).
 The MCP and push rows (AF-CTR-07, AF-CLD-06) bring their own controls with them.
 
 ## Self-hosted mode

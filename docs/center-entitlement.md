@@ -7,8 +7,8 @@ sells nothing, charges nobody and activates nothing: the production catalogue is
 prices and limits (H-07).
 
 The commerce path (a purchase becomes grants and terms) is AF-CTR-09, the operator's own service is AF-OPS-01, and the gated
-operations themselves (node connection, task control, MCP, push) arrive with AF-CTR-05 and later: the first is the node channel's
-row `fleet.nodeChannel` (node connection, `center.nodes`, AF-CTR-05 E1a; [center fleet](center-fleet.md#node-channel)). AF-CTR-04's node
+operations include the node channel's `fleet.nodeChannel` row (`center.nodes`, AF-CTR-05 E1a) and six routed task rows (E2b: `center.execute`,
+`remote.view` and `remote.control`; [center fleet](center-fleet.md#routed-calls)). MCP and push remain later tasks. AF-CTR-04's node
 enrollment and its mobile native authorization are essential operations and serve no gated row (node enrollment: [center fleet](center-fleet.md),
 pinned by `TestFleetRowsCarryNoFeature`; the mobile authorization is a center-defined operation, and the center-defined and page
 operation types have no `Feature` field). FleetService's node registry (ListNodes, GetNode, RenameNode, RevokeNode; AF-CTR-05 E2a) is
@@ -129,7 +129,7 @@ AF-OPS-01's OperatorService can call it; the interim interface is [the operation
   derive from the history they read and commit under the revision fence, four attempts, no backoff (the same constant as the
   grant's; `TestAWriterThatNeverWinsTheRaceFailsClosedWithATypedError` counts the four attempts of `IssueGrant`). Ten concurrent
   `IssueGrant` calls for one account lose grants to `ConcurrentUpdate`. Nothing served calls `IssueGrant` or `RevokeGrant` yet;
-  `Refresh` is called by the gate's reader (`Service.Read`), which no served operation reaches until the first gated operation (AF-CTR-05), where two first gated
+  `Refresh` is called by the gate's reader (`Service.Read`), reached by the AF-CTR-05 channel and routed task operations. When two first gated
   calls of one account race through it: the loser reloads and returns the winner's snapshot, and only a call that loses on all four
   attempts is answered `RESOURCE/overloaded`. See "What waits" (AF-CTR-09).
 
@@ -147,8 +147,8 @@ The interim page is the `operations` surface: `GET /operations/grant` (the form)
 checked and normalized exactly as a grant would, nothing written, with the step-up target) and `POST /operations/grant/confirm`
 (the grant). The script of the pages proves the passkey step-up for the review's target before the confirmation form is submitted.
 The surface needs `identity` and `pages`, exists only in official-hosted mode and is never a default. Of the checked-in environments
-only the acceptance environment enables it (`proof` carries `identity,pages,operations,fleet,mobile,relay,nodes` and the development fixture catalogue,
-**MOCKED**, illustrative); production carries no surface and no catalogue, and `tests/worker/center-config.test.ts` and
+only the proof target enables it (`identity,pages,operations,fleet,mobile,relay,nodes` and the development fixture catalogue,
+**MOCKED**, illustrative). AF-CTR-04's earlier proof deployment included `identity,pages,operations,fleet,mobile`; E3's additional target surfaces are not proof of a hosted deployment; production carries no surface and no catalogue, and `tests/worker/center-config.test.ts` and
 `tests/worker/proof-deploy.test.ts` pin both. Where it is off, the Worker answers its plain 404 "Unknown API method." before anything is
 read, as for the pages surface (the center's own 404, where it did not compose the surface, carries the seven security headers); a signed-in account that is no operator (or whose account is not active) gets 403, audited as above. Every reply of the center's page handler carries the seven page security headers byte for byte, `Cache-Control: no-store,
 no-transform` included, and the Worker's page handler checks the surface of each route before anything else.
@@ -188,7 +188,7 @@ The gate's decision in official-hosted mode: no catalogue is `plan_configuration
 `plan_configuration_invalid`, a valid one the account's snapshot (`cap=` entries of the stored canonical text: granted, or the
 resolver's reason). The reasons are the closed vocabulary of [feature availability](center.md#center-mode-and-feature-availability).
 
-No gated operation is served before AF-CTR-05 (AF-CTR-04 serves none), so the gate is proved on test-only operations (F9): one per key behind the real
+AF-CTR-04 served no gated operation; F9 exercises the gate on test-only operations, one per key behind the real
 ingress pipeline, the real bearer verifier and a real PostgreSQL (`center/internal/access/gate_integration_test.go`), in every state
 of the plan configuration (none, invalid, fixtures without a grant, fixtures with a grant, a test-injected production-classified
 catalogue with and without a grant, a fixture under the production classification, the self-hosted default, a disabled key, the
@@ -277,7 +277,7 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
    `curl` shows it); `/api/operations/grant` and `/api/account/sign-in` answer the Worker's
    plain 404 "Unknown API method."; the migration gate applied `0003` to the production database (the gate's log shows it); no gated
    feature is reachable.
-2. **The acceptance database** (`arcforges_acceptance`) is migrated to version 3 with the pinned checksum above.
+2. **The acceptance database.** The original operations-page run used `arcforges_acceptance` at version 3 with the pinned checksum above; for a later run use the actual candidate's migration-gate receipt.
 3. **The surface is enabled on proof, by the change that rewrote this checklist.** The proof environment's `FLAGSHIP_SURFACES` is
    `identity,pages,operations` (`wrangler.json`; `identity,pages,operations,fleet` since AF-CTR-04 part E3; the plan catalogue of proof was already `development-fixtures`, six capabilities and two
    illustrative plans, **MOCKED**: no page shows a price). The pins that guard against enabling it by accident are
@@ -286,9 +286,9 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
    exact-row block 17 in `.gitleaks.toml`, the pin and the next-unreviewed-receipt negative control in
    `tests/worker/provenance.test.ts` and the entry of `eng/provenance/files.json`); changing it again takes the same set. **No
    `grant-operator` and no migration-role credential are needed:** the proof owner (the bootstrap owner) counts as operator through
-   `identity.bootstrap`, so `identity.operator` stays empty. After the proof dispatch, `curl -si https://proof.arcforges.com/api/healthz`
-   says `center.surfaces` is `identity,pages,operations,fleet,mobile,relay,nodes` (the E3 target; `mobile` was added by AF-CTR-04 part M), equal to `center.configuredSurfaces` of `artifacts/proof-deployment.json`
-   (which also records `planConfiguration` `development-fixtures`); a stale value after 90 seconds is diagnosed, not redeployed.
+   `identity.bootstrap`, so `identity.operator` stays empty. After an authorized proof dispatch, `curl -si https://proof.arcforges.com/api/healthz`
+   must report the actual deployed candidate's `center.configuredSurfaces` from `artifacts/proof-deployment.json`, which also records
+   `planConfiguration` `development-fixtures`. E3's target is `identity,pages,operations,fleet,mobile,relay,nodes`; that target alone does not prove deployment; a stale value after 90 seconds is diagnosed, not redeployed.
 4. **The page by `curl`**, before any browser: `curl -si https://proof.arcforges.com/api/operations/grant` is `303` to
    `/api/account/sign-in#return=%2Fapi%2Foperations%2Fgrant` with the seven page security headers (the Security headers paragraph of
    [center-identity.md](center-identity.md#account-pages-and-browser-sessions) lists them), `Cache-Control: no-store, no-transform`
@@ -343,13 +343,13 @@ diagnostic first, one request at a time and fewer than ten in a minute (the edge
 
 **What the run shows when it passes, and what it does not.**
 
-| Evidence                                                                                                                     | Label                                                                                                                                                                       |
-| ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Healthz `center.surfaces` of proof equals `proof-deployment.json`; production `none` and its routes 404                      | REAL (hosted)                                                                                                                                                               |
-| The `303` without a session, the `200` with the seven headers for the owner, the grant, the replay, the two step-up refusals | REAL hosted run; the authenticator is **MOCKED** (Chromium's virtual one), the catalogue is **MOCKED** (illustrative fixtures)                                              |
-| The `403` for an account that is no operator                                                                                 | **NOT evidenced hosted**; REAL in the Go integration tests (real PostgreSQL) and in the local rehearsal                                                                     |
-| The local rehearsal in official-hosted mode (below)                                                                          | REAL browser, center binary, PostgreSQL with verified TLS and the Worker's page code; MOCKED platform, authenticator and catalogue                                          |
-| A gated call after the grant                                                                                                 | does not exist before AF-CTR-05: only the grant and the entitlement version are visible (the audit rows are written, but no page shows them and the run does not read them) |
+| Evidence                                                                                                                     | Label                                                                                                                                                               |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Healthz `center.surfaces` of proof equals `proof-deployment.json`; production `none` and its routes 404                      | REAL (hosted)                                                                                                                                                       |
+| The `303` without a session, the `200` with the seven headers for the owner, the grant, the replay, the two step-up refusals | REAL hosted run; the authenticator is **MOCKED** (Chromium's virtual one), the catalogue is **MOCKED** (illustrative fixtures)                                      |
+| The `403` for an account that is no operator                                                                                 | **NOT evidenced hosted**; REAL in the Go integration tests (real PostgreSQL) and in the local rehearsal                                                             |
+| The local rehearsal in official-hosted mode (below)                                                                          | REAL browser, center binary, PostgreSQL with verified TLS and the Worker's page code; MOCKED platform, authenticator and catalogue                                  |
+| A gated call after the grant                                                                                                 | NOT observed in this historical operations-page run; AF-CTR-05 later added gated channel and routed task methods, whose hosted acceptance remains separate evidence |
 
 The 403 for an account that is no operator is NOT evidenced on the hosted environment: the acceptance environment has exactly one
 account, the bootstrap owner, who counts as operator, and the center creates accounts only through the one-shot bootstrap (nothing else in
@@ -360,7 +360,7 @@ live role get 403 on all three routes, nothing is written, one audit row each) a
 real ingress, cookie session and PostgreSQL, the passkey ceremony run by a virtual authenticator (MOCKED hardware) and the MOCKED fixture
 catalogue, and by the local rehearsal below, where the
 owner's `identity.bootstrap` row of a throwaway database was removed and the same real Chromium then got "This is not allowed." (403)
-from the page. Also not evidenced: the production behaviour of the page (dark by design), any gated call (AF-CTR-05), concurrency between
+from the page. Also not evidenced by that historical run: the production behaviour of the page (dark by design), a gated call after the grant, concurrency between
 operators (Go integration tests only), and a Windows Hello confirmation (AR-23 stays the owner's step).
 
 **The local rehearsal** (REAL browser, center binary, PostgreSQL and Worker router code; the Cloudflare platform is replaced by a
@@ -414,7 +414,7 @@ term, no `identity.operator` row, and the audit events `issued` once and `refuse
     rate, ready for E1 ([routed task control](center.md#routed-task-control)). Every number is a policy key whose default is an owner
     placeholder (H-07, illustrative), never a plan limit; there is no connected-node cap (Q21: the enrollment cap governs).
   - **The `OperationKeys` row check**: a row that carries a `Feature` names its group of `feature.OperationKeys` and must carry that
-    group's key (`access.CheckRow`); the set of gated rows is empty today, and a table-driven negative test refuses every wrong key.
+    group's key (`access.CheckRow`); E0 itself served no gated row, and a table-driven negative test refuses every wrong key. E1a and E2b subsequently added the rows listed below.
 - **AF-CTR-05 E1 and E2** serve the first gated rows on these prerequisites: E1a the node channel (`fleet.nodeChannel`, delivered,
   behind the upgrade-rate controls); E2b the routed task methods (delivered: submission `center.execute`, status and output
   `remote.view`, control `remote.control`, each behind both routed controls; [Routed calls](center-fleet.md#routed-calls)). E2a's node
