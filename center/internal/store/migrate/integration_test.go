@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
+	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/schema"
 )
 
@@ -429,16 +430,115 @@ func TestEveryTableHasAGrantDecision(t *testing.T) {
 }
 
 func TestTheRuntimeRoleMustNotBeTheMigrationRoleOrElevated(t *testing.T) {
+	ctx := context.Background()
 	url, name := pgtest.Database(t)
-	if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: name + "_owner"}); err == nil {
-		t.Fatal("the migration role was accepted as the runtime role")
+	build := centerBuild(t)
+	if len(build) < 11 || build[10].Name != "0011_fleet_routed_files.sql" {
+		t.Fatalf("expected the CTR06 migration at version 11: %v", build)
 	}
+	owner := pgtest.Connect(t, url)
+	if _, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: name + "_owner"}); err == nil || err.Error() != "the runtime role must not be the migration role" {
+		t.Fatalf("migration role was not specifically refused: %v", err)
+	}
+	var bootstrapped bool
+	if err := owner.QueryRow(ctx, "SELECT to_regclass('platform.schema_migration') IS NOT NULL").Scan(&bootstrapped); err != nil || bootstrapped {
+		t.Fatalf("migration-role refusal must precede bootstrap: exists=%v err=%v", bootstrapped, err)
+	}
+
+	// Check the existing role's actual attributes at schema 10, where the
+	// reconciliation path is reachable before CTR06's retirement gate. A
+	// full build with a pre-existing role must instead fail that gate first.
 	elevated := name + "_elevated"
-	if _, err := pgtest.Admin(t).Exec(context.Background(), "CREATE ROLE "+elevated+" NOLOGIN CREATEDB"); err != nil {
+	if _, err := pgtest.Admin(t).Exec(ctx, "CREATE ROLE "+pgx.Identifier{elevated}.Sanitize()+" NOLOGIN CREATEDB"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: elevated}); err == nil || !strings.Contains(err.Error(), "elevated") {
-		t.Fatalf("an elevated runtime role was accepted: %v", err)
+	schemas10, grants10 := schemasAndGrantsAt(10)
+	oldOptions := Options{Runner: "test", RuntimeRole: elevated, Schemas: schemas10, Grants: grants10}
+	if _, err := apply(t, url, build[:10], oldOptions); err == nil || !strings.Contains(err.Error(), "role "+elevated+" has an elevated attribute") {
+		t.Fatalf("elevated role was not specifically refused at schema 10: %v", err)
+	}
+	var createdb, receiptWrite, leaseWrite bool
+	if err := owner.QueryRow(ctx, `SELECT rolcreatedb,
+ has_table_privilege(oid,'fleet.routed_call','INSERT'), has_table_privilege(oid,'fleet.hub_lease','UPDATE')
+ FROM pg_roles WHERE rolname=$1`, elevated).Scan(&createdb, &receiptWrite, &leaseWrite); err != nil || !createdb || receiptWrite || leaseWrite {
+		t.Fatalf("elevated fixture or rolled-back grants: createdb=%v receipt=%v lease=%v err=%v", createdb, receiptWrite, leaseWrite, err)
+	}
+	if _, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: elevated}); !errors.Is(err, ErrCTR06RetirementUnproven) {
+		t.Fatalf("0011 accepted an existing role without retirement proof: %v", err)
+	}
+	var version int
+	var noFileTable bool
+	if err := owner.QueryRow(ctx, "SELECT max(version), to_regclass('fleet.routed_file_call') IS NULL FROM platform.schema_migration").Scan(&version, &noFileTable); err != nil || version != 10 || !noFileTable {
+		t.Fatalf("retirement refusal changed schema: version=%d noFileTable=%v err=%v", version, noFileTable, err)
+	}
+
+	// A distinct ordinary group succeeds on the same real schema-10 database;
+	// it is not a fabricated promotion proof for upgrading that database.
+	ordinary := name + "_runtime"
+	good, err := apply(t, url, build[:10], Options{Runner: "test", RuntimeRole: ordinary, Schemas: schemas10, Grants: grants10})
+	if err != nil || good.Version != 10 || good.Grants != "reconciled" {
+		t.Fatalf("ordinary schema-10 group: %+v %v", good, err)
+	}
+	if err := RequirePlainRole(ctx, owner, ordinary, false); err != nil {
+		t.Fatalf("ordinary schema-10 group was not plain: %v", err)
+	}
+	var ordinaryReceipt, ordinaryLease bool
+	if err := owner.QueryRow(ctx, `SELECT has_table_privilege($1,'fleet.routed_call','INSERT'),
+ has_table_privilege($1,'fleet.hub_lease','UPDATE')`, ordinary).Scan(&ordinaryReceipt, &ordinaryLease); err != nil || !ordinaryReceipt || !ordinaryLease {
+		t.Fatalf("ordinary schema-10 grants: receipt=%v lease=%v err=%v", ordinaryReceipt, ordinaryLease, err)
+	}
+	// Keep a real active old lease across the failed transaction. It is not
+	// evidence that the old writer has retired or that 0011 may proceed.
+	if _, err := owner.Exec(ctx, `INSERT INTO fleet.hub_lease(singleton,holder,fence,acquired_at,renewed_at,expires_at)
+VALUES(true,$1,7,clock_timestamp(),clock_timestamp(),clock_timestamp()+interval '1 hour')`, platform.NewID()); err != nil {
+		t.Fatal(err)
+	}
+	var leaseBefore, leaseAfter string
+	if err := owner.QueryRow(ctx, "SELECT to_jsonb(l)::text FROM fleet.hub_lease l WHERE singleton").Scan(&leaseBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: ordinary}); !errors.Is(err, ErrCTR06RetirementUnproven) {
+		t.Fatalf("ordinary existing group bypassed 0011 retirement: %v", err)
+	}
+	if err := owner.QueryRow(ctx, "SELECT max(version), to_regclass('fleet.routed_file_call') IS NULL FROM platform.schema_migration").Scan(&version, &noFileTable); err != nil || version != 10 || !noFileTable {
+		t.Fatalf("ordinary-group refusal changed schema: version=%d noFileTable=%v err=%v", version, noFileTable, err)
+	}
+	if err := owner.QueryRow(ctx, "SELECT to_jsonb(l)::text FROM fleet.hub_lease l WHERE singleton").Scan(&leaseAfter); err != nil || leaseAfter != leaseBefore {
+		t.Fatalf("retirement refusal changed the old lease: unchanged=%v err=%v", leaseAfter == leaseBefore, err)
+	}
+}
+
+func TestCTR06RuntimeFloorStillRejectsElevatedRole(t *testing.T) {
+	ctx := context.Background()
+	url, name := pgtest.Database(t)
+	build := centerBuild(t)
+	role := name + "_runtime"
+	result, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: role})
+	if err != nil || result.Version != 11 || result.Grants != "reconciled" {
+		t.Fatalf("fresh 0011 bootstrap: %+v %v", result, err)
+	}
+	owner := pgtest.Connect(t, url)
+	floor, err := InspectCTR06RuntimeFloor(ctx, owner)
+	if err != nil || floor != role {
+		t.Fatalf("fresh runtime floor: %q %v", floor, err)
+	}
+	if err := RequirePlainRole(ctx, owner, role, false); err != nil {
+		t.Fatalf("fresh runtime group was not plain: %v", err)
+	}
+	repeated, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: role})
+	if err != nil || repeated.Version != 11 || repeated.Grants != "reconciled" || len(repeated.Ran) != 0 {
+		t.Fatalf("plain group at the existing floor: %+v %v", repeated, err)
+	}
+	// Preserve the real bound role and floor, then make that exact role
+	// elevated. The current-schema reconciliation must still reject it.
+	if _, err := pgtest.Admin(t).Exec(ctx, "ALTER ROLE "+pgx.Identifier{role}.Sanitize()+" CREATEDB"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: role}); err == nil || !strings.Contains(err.Error(), "role "+role+" has an elevated attribute") {
+		t.Fatalf("elevated role was not specifically refused above the 0011 floor: %v", err)
+	}
+	if floor, err = InspectCTR06RuntimeFloor(ctx, owner); err != nil || floor != role {
+		t.Fatalf("refusal changed runtime floor: %q %v", floor, err)
 	}
 }
 
