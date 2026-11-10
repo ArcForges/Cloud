@@ -279,7 +279,7 @@ func (h *harness) grant(account platform.ID, features ...string) {
 		"', now() - interval '1 day', now() + interval '30 days', 'operator:cli', 'test operator')")
 	op := entitlement.NewOperator(h.center.Store, h.center.Entitlements, h.center.FeatureConfiguration.OperatorGrants, nil)
 	if _, err := op.Grant(context.Background(), entitlement.GrantCall{Caller: entitlement.OperatorCaller{UserID: operator, Scope: "account"}, CommandID: platform.NewID(),
-		Request: entitlement.OperatorRequest{Account: account.String(), Features: features, Reason: "the node channel's test", SourceRef: "ticket-1",
+		Request: entitlement.OperatorRequest{Account: account.String(), Features: features, Reason: "the node channel's test", SourceRef: "ticket-" + platform.NewID().String(),
 			ExpiresAt: entitlement.FromTime(time.Now().Add(10 * 24 * time.Hour))},
 		Consume: func(context.Context, pgx.Tx, [32]byte, time.Time) error { return nil }}); err != nil {
 		h.t.Fatal(err)

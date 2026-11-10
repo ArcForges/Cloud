@@ -74,6 +74,8 @@ type settings struct {
 	tune     func(*hub.Settings)
 	// maxConnections sets the center's request connection bound (the routed long-poll bound is half of it).
 	maxConnections string
+	clock          func() time.Time
+	replayWindow   time.Duration // tests only: exact replay-boundary control
 }
 
 // testSettings are short intervals for the tests.
@@ -111,6 +113,9 @@ func newHarness(t *testing.T, options settings) *harness {
 		// configuration is loaded as a self-hosted one and then made the hosted center's (as the pages' harness does).
 		cfg.Mode, cfg.Plan, cfg.DisabledFeatures = config.OfficialHosted, options.plan, nil
 	}
+	if options.replayWindow > 0 {
+		cfg.Identity.Policy.RoutedReplayWindow = options.replayWindow
+	}
 	// A throwaway command key per test (AF-CTR-05 E1a: the relay surface needs one whose private half is loaded).
 	key, kid := db.CommandKey("ARCFORGES_CENTER_KEY_TEST")
 	if err := cfg.ApplyCommandKeys([]config.CommandKey{key}); err != nil {
@@ -121,7 +126,7 @@ func newHarness(t *testing.T, options settings) *harness {
 		options.tune(&tuned)
 	}
 	h := &harness{t: t, db: db, policy: cfg.Identity.Policy, logs: &lockedBuffer{}}
-	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Hub: &tuned, Background: func(work func()) { work() }})
+	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Hub: &tuned, Clock: options.clock, Background: func(work func()) { work() }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,6 +225,26 @@ func (h *harness) connect(node *enrolled) *nodetest.Channel {
 	}
 	if _, err := channel.Accept(ctx); err != nil {
 		h.t.Fatalf("accept: %v", err)
+	}
+	h.t.Cleanup(func() { _ = channel.WS.CloseNow() })
+	return channel
+}
+
+// connectFiles uses a separate explicit fixture capability: ordinary old-node tests still advertise only routed.v1.
+func (h *harness) connectFiles(node *enrolled) *nodetest.Channel {
+	h.t.Helper()
+	channel, err := h.dial(node.access, nil)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	signature := node.node.SignMessage(channel.HelloMessage(publicBaseURL, node.node.ID, node.result.InstallationID), true)
+	if err := channel.SendHelloCapabilities(ctx, node.node.ID, node.result.InstallationID, signature, []string{"routed.v1", hub.FilesCapability}); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := channel.Accept(ctx); err != nil {
+		h.t.Fatal(err)
 	}
 	h.t.Cleanup(func() { _ = channel.WS.CloseNow() })
 	return channel

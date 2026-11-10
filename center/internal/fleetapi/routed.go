@@ -60,6 +60,7 @@ type RoutedCall struct {
 	Method          relayv1.RoutedMethod
 	Payload         []byte
 	Deadline        time.Duration
+	ReplayUntil     time.Time // exclusive deadline for a replay that may already have reached the node
 	WorkspaceID     *platform.ID
 	TargetAttemptID *platform.ID
 	TargetPath      *string
@@ -392,10 +393,10 @@ func rewrite(message []byte, edit func(protowire.Number, []byte) ([]byte, bool, 
 
 // handlerOutcome reads an EXECUTED mutation's response: whether it is the TaskService handler's own ArcError (its CATEGORY/code key and
 // effect), and a Submit value's task ID.
-func handlerOutcome(method relayv1.RoutedMethod, response []byte) (failed bool, key string, effect foundationv1.EffectCertainty, taskID *platform.ID, err error) {
+func handlerOutcome(method relayv1.RoutedMethod, response, request []byte) (failed bool, key string, effect foundationv1.EffectCertainty, taskID *platform.ID, err error) {
 	var failure *foundationv1.ArcError
 	if fileMethod(method) {
-		value, decodeErr := decodeFileResponse(method, response)
+		value, decodeErr := decodeFileResponse(method, response, request)
 		if decodeErr != nil {
 			return false, "", 0, nil, decodeErr
 		}
@@ -434,13 +435,22 @@ func refusalKey(category foundationv1.ErrorCategory, code string) string {
 }
 
 // answerOf is an attempt's answer as its settlement takes it.
-func answerOf(method relayv1.RoutedMethod, result RoutedResult, err error) fleet.RoutedAnswer {
+func answerOf(method relayv1.RoutedMethod, result RoutedResult, err error, requests ...[]byte) fleet.RoutedAnswer {
+	var request []byte
+	if len(requests) > 0 {
+		request = requests[0]
+	}
 	var refusal *arc.Refusal
 	if err != nil {
 		if !errors.As(err, &refusal) {
 			refusal = arc.Unavailable()
 		}
-		return fleet.RoutedAnswer{Effect: refusal.Effect, Refusal: refusalKey(refusal.Category, refusal.Code)}
+		key, detail := fileRefusalAudit(refusal)
+		if !fileMethod(method) {
+			key = refusalKey(refusal.Category, refusal.Code)
+			detail = ""
+		}
+		return fleet.RoutedAnswer{Effect: refusal.Effect, Refusal: key, RefusalReason: detail}
 	}
 	answer := fleet.RoutedAnswer{Verified: true, Outcome: int32(result.Outcome)}
 	if result.Outcome != relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED {
@@ -451,13 +461,13 @@ func answerOf(method relayv1.RoutedMethod, result RoutedResult, err error) fleet
 	}
 	answer.ResponseSHA256, answer.ResponseSize, answer.ExecutedAt = result.ResponseSHA256, len(result.Response), result.ExecutedAt
 	if fileMethod(method) {
-		if value, decodeErr := decodeFileResponse(method, result.Response); decodeErr == nil {
+		if value, decodeErr := decodeFileResponse(method, result.Response, request); decodeErr == nil {
 			answer.NodeAuditAvailable = value.GetAudit() != nil
 			answer.Observations = fileObservations(value.GetAudit())
 		}
 	}
 	answer.OutcomeSHA256, _ = OutcomeDigest(result.Response)
-	failed, key, effect, taskID, decodeErr := handlerOutcome(method, result.Response)
+	failed, key, effect, taskID, decodeErr := handlerOutcome(method, result.Response, request)
 	if decodeErr != nil {
 		// A response the node signed but that is no TaskService response: the effect is unknown.
 		answer.HandlerError, answer.Effect, answer.Refusal = true, foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN, "other/other"
@@ -475,6 +485,11 @@ func answerOf(method relayv1.RoutedMethod, result RoutedResult, err error) fleet
 // through its routing record. It answers the node's response bytes, or the refusal.
 func (r *Registry) routed(ctx context.Context, call *ingress.Call, message routedRequest, method relayv1.RoutedMethod) ([]byte, platform.ID, error) {
 	if err := checkMeta(message.GetMeta()); err != nil {
+		if fileMethod(method) {
+			if nodeID, ok := parseID(message.GetNodeId()); ok {
+				r.auditFileRefusal(call, nodeID, nil, method, message.GetRequest(), fileTargetForAudit(method, message.GetRequest()), nil, err)
+			}
+		}
 		return nil, platform.ID{}, err
 	}
 	nodeID, err := requiredNode(message.GetNodeId())
@@ -486,45 +501,61 @@ func (r *Registry) routed(ctx context.Context, call *ingress.Call, message route
 	if mutation {
 		id, ok := parseID(message.GetMeta().GetCommandId())
 		if !ok {
-			return nil, nodeID, arc.InvalidArgument("meta.command_id", "required")
+			err := arc.InvalidArgument("meta.command_id", "required")
+			if fileMethod(method) {
+				r.auditFileRefusal(call, nodeID, nil, method, message.GetRequest(), fileTargetForAudit(method, message.GetRequest()), nil, err)
+			}
+			return nil, nodeID, err
 		}
 		commandID = &id
 	}
 	if fileMethod(method) && !mutation && message.GetMeta().GetCommandId() != nil {
-		return nil, nodeID, arc.InvalidArgument("meta.command_id", "not_admitted")
-	}
-	payload := message.GetRequest()
-	checked, err := checkInner(method, payload, commandID)
-	if err != nil {
+		err := arc.InvalidArgument("meta.command_id", "not_admitted")
+		r.auditFileRefusal(call, nodeID, nil, method, message.GetRequest(), fileTargetForAudit(method, message.GetRequest()), nil, err)
 		return nil, nodeID, err
 	}
+	payload := message.GetRequest()
 	var stated *access.RelayClaim
 	if caller, assertion := message.GetCaller(), message.GetRelayAssertion(); caller != nil || assertion != nil {
 		if caller != nil && caller.GetKind() != fleetv1.CallerKind_CALLER_KIND_NODE_RELAY {
-			return nil, nodeID, arc.InvalidArgument("caller.kind", "not_admitted")
+			err := arc.InvalidArgument("caller.kind", "not_admitted")
+			if fileMethod(method) {
+				r.auditFileRefusal(call, nodeID, commandID, method, payload, inner{}, nil, err)
+			}
+			return nil, nodeID, err
 		}
 		digest := sha256.Sum256(payload)
 		relaying, _ := parseID(caller.GetRelayingNodeId())
 		stated = &access.RelayClaim{Assertion: assertion, Method: method, RequestSHA256: digest[:], TargetNodeID: &nodeID, CommandID: commandID,
 			CallerRelayingNodeID: relaying, CallerLocalOrigin: caller.GetLocalOrigin()}
 	}
+	checked, err := checkInner(method, payload, commandID)
+	if err != nil {
+		if fileMethod(method) {
+			var relay access.Relay
+			if call.Caller.Scope == "node" && stated != nil {
+				relay, _ = r.access.VerifyRelayedForAudit(ctx, call, stated)
+			}
+			r.auditFileRefusal(call, nodeID, commandID, method, payload, checked, relay, err)
+		}
+		return nil, nodeID, err
+	}
 	operation, relay, err := r.access.AuthorizeRelayed(ctx, call, r.nodeSubject(call, nodeID, false), stated)
 	if err != nil {
 		if mutation {
 			err = r.resendNotFound(ctx, call, nodeID, *commandID, method, err)
 		}
+		if fileMethod(method) {
+			r.auditFileRefusal(call, nodeID, commandID, method, payload, checked, relay, err)
+		}
 		return nil, nodeID, err
 	}
-	if method == relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE || method == relayv1.RoutedMethod_ROUTED_METHOD_UNREGISTER_NODE_WORKSPACE {
-		if relay != nil {
-			verified, ok := relay.(relayed)
-			if !ok || verified.LocalOrigin() != nodev1.Origin_ORIGIN_HUMAN || verified.RelayingNodeID() != nodeID {
-				return nil, nodeID, arc.PermissionDenied(operation.ID)
-			}
-		}
-	}
 	if r.routing == nil {
-		return nil, nodeID, arc.NodeOffline(nodeID[:], r.clock())
+		err := arc.NodeOffline(nodeID[:], r.clock())
+		if fileMethod(method) {
+			r.auditFileRefusal(call, nodeID, commandID, method, payload, checked, relay, err)
+		}
+		return nil, nodeID, err
 	}
 	userID, ok := textID(call.Caller.UserID)
 	if !ok {
@@ -636,18 +667,24 @@ func (r *Registry) routeMutation(ctx context.Context, call *ingress.Call, operat
 		CommandID: key.command, Method: int16(routedCall.Method), Caller: caller, Digest: digest, RequestSHA256: exact[:], Size: len(routedCall.Payload),
 		WorkspaceID: checked.workspaceID, TargetAttemptID: checked.targetAttemptID, TargetPath: routedCall.TargetPath,
 		Fence: fence, Window: g.limits.ReplayWindow, InFlight: func() bool { return g.inFlight(key) },
-		Online: func() bool { return routable && g.router.Connected(routedCall.TargetNodeID) }, Now: now}
+		Online: func() bool { return routable && g.router.Connected(routedCall.TargetNodeID) }, Now: now, Clock: r.clock}
 	slot := g.slot(key)
 	slot.Lock()
+	accept.Now = r.clock() // the striped command slot may have waited across the replay boundary
 	decision, err := fleet.AcceptRouted(ctx, r.db, accept)
 	if err != nil {
 		slot.Unlock()
 		if errors.Is(err, fleet.ErrRoutedOffline) {
 			r.observe("offline")
-			if auditErr := fleet.AuditRoutedOffline(ctx, r.db, accept); auditErr != nil {
+			auditCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			auditErr := fleet.AuditRoutedOffline(auditCtx, r.db, accept)
+			cancel()
+			if auditErr != nil {
 				r.logger.WarnContext(ctx, "a routed call to an offline node could not be audited", "correlationId", call.Correlation.CorrelationID,
 					"error", auditErr.Error())
 			}
+		} else if fileMethod(routedCall.Method) {
+			r.auditFileRefusal(call, routedCall.TargetNodeID, routedCall.CommandID, routedCall.Method, routedCall.Payload, checked, routedCall.Relay, err)
 		}
 		return nil, err
 	}
@@ -665,6 +702,7 @@ func (r *Registry) routeMutation(ctx context.Context, call *ingress.Call, operat
 		r.observe("joined")
 	} else {
 		r.observe("accepted")
+		routedCall.ReplayUntil = decision.ReplayUntil
 		go r.attempt(key, current, routedCall, decision, request(call), caller.Actor)
 	}
 	// Each caller waits within its own deadline; one that goes away ends only its own wait.
@@ -686,9 +724,9 @@ func (r *Registry) attempt(key routedKey, current *attempt, routedCall RoutedCal
 	ctx, cancel := context.WithTimeout(context.Background(), routedCall.Deadline+reserveForAnswer)
 	result, err := g.router.Route(ctx, routedCall)
 	cancel()
-	answer := answerOf(routedCall.Method, result, err)
+	answer := answerOf(routedCall.Method, result, err, routedCall.Payload)
 	if err == nil && fileMethod(routedCall.Method) && result.Outcome == relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED {
-		if _, decodeErr := decodeFileResponse(routedCall.Method, result.Response); decodeErr != nil {
+		if _, decodeErr := decodeFileResponse(routedCall.Method, result.Response, routedCall.Payload); decodeErr != nil {
 			err = arc.NodeUnreachable(routedCall.TargetNodeID[:], arc.UnreachableChannelClosed, true)
 		}
 	}
@@ -714,7 +752,12 @@ func (r *Registry) attempt(key routedKey, current *attempt, routedCall RoutedCal
 		// The record stays as the admission left it (ACCEPTED, or a final record's state): conservative (decisions B-1).
 		r.observe("settle_lost")
 	}
+	var replayRefusal *arc.Refusal
+	replayExpired := errors.As(err, &replayRefusal) && replayRefusal.Code == "invalid_state" && replayRefusal.State == "routed_call" && replayRefusal.Reason == "replay_window_passed"
 	switch {
+	case replayExpired:
+		// This attempt did not send a frame; the refusal states that an earlier attempt may have happened.
+		current.err = err
 	case (decision.Delivered || decision.Final) && answer.Verified && answer.HandlerError &&
 		answer.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_HAPPENED:
 		// The handler's error of a resend that did not say HAPPENED (a transient or pre-deduplication error, or an unknown effect; review B

@@ -28,6 +28,11 @@ import (
 // MaxCallDeadline is the longest a call may wait for its result: its deadline never passes its expiry, at most 300 s after issue.
 const MaxCallDeadline = CallWindowSeconds * time.Second
 
+// FilesCapability is announced only by nodes implementing the AF-CTR-06 methods
+// and their receipt schema. NodeHello's proof authenticates the connection, not
+// the capability field itself; the protected channel carries the declaration.
+const FilesCapability = "files.v1"
+
 // callExpiryMargin is how long a call stays valid at the node after the center stops waiting (CTR5-RTE-06: the call header's
 // expires_at is now + min(deadline + 30 s, 300 s)).
 const callExpiryMargin = 30 * time.Second
@@ -71,6 +76,8 @@ type Call struct {
 	Payload []byte
 	// Deadline is how long the center waits for the result (CTR5-RTE-06): more than zero, at most MaxCallDeadline.
 	Deadline time.Duration
+	// ReplayUntil is the exclusive receipt replay deadline, carried from the admission decision.
+	ReplayUntil time.Time
 }
 
 // callerOf is the call's verified caller; ok is false without exactly one of Session and a verified Relay.
@@ -114,7 +121,8 @@ type pending struct {
 	commandID     *platform.ID
 	requestSHA256 []byte
 	// expires is the call header's expires_at: the node may act on a delivered call until then, plus its 120 s skew.
-	expires time.Time
+	expires     time.Time
+	replayUntil time.Time // zero for a first/definitely undelivered attempt
 	// state is queued, delivered or abandoned, moved only by compare-and-swap under the connection's lock: the writer moves a queued
 	// call to delivered just before it writes the frame, and a deadline, a caller that went away or a close moves a queued call to
 	// abandoned, whose frame the writer then skips. So a call failed DID_NOT_HAPPEN is never written afterwards.
@@ -185,6 +193,15 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 	case c.userID != call.AccountID:
 		return Result{}, arc.NotFound("node", call.TargetNodeID[:])
 	}
+	if call.Method >= relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE {
+		c.mu.Lock()
+		supported := c.accepted && c.capabilities[FilesCapability]
+		c.mu.Unlock()
+		if !supported {
+			h.metrics.ObserveChannel("call", "capability_unavailable")
+			return Result{}, arc.InvalidState("node", "capability_unavailable")
+		}
+	}
 	if ctx.Err() != nil {
 		// The caller went away before anything was signed (review A N-4).
 		return Result{}, arc.NodeUnreachable(call.TargetNodeID[:], arc.UnreachableDeadline, false)
@@ -220,7 +237,7 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 		return Result{}, arc.Unavailable()
 	}
 	p := &pending{callID: callID, method: call.Method, commandID: call.CommandID, requestSHA256: digest[:], expires: timeOf(header.ExpiresAt),
-		done: make(chan outcome, 1)}
+		replayUntil: call.ReplayUntil, done: make(chan outcome, 1)}
 	switch c.addCall(p, now) {
 	case registerClosed:
 		h.metrics.ObserveChannel("call", "offline")
@@ -400,7 +417,17 @@ func (c *conn) forgetLocked(callID platform.ID) {
 func (c *conn) deliver(p *pending) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return !c.callsClosed && !c.closing.Load() && c.calls[p.callID] == p && p.state.CompareAndSwap(callQueued, callDelivered)
+	if c.callsClosed || c.closing.Load() || c.calls[p.callID] != p {
+		return false
+	}
+	if !p.replayUntil.IsZero() && !c.hub.clock().Before(p.replayUntil) {
+		if p.state.CompareAndSwap(callQueued, callAbandoned) {
+			delete(c.calls, p.callID)
+			p.finish(outcome{refusal: arc.InvalidState("routed_call", "replay_window_passed")})
+		}
+		return false
+	}
+	return p.state.CompareAndSwap(callQueued, callDelivered)
 }
 
 // dropCall removes a pending call. A queued call is abandoned (its frame is never written); a delivered one is kept as late when asked,

@@ -750,26 +750,39 @@ func (a *Authorizer) AuthorizeRelayed(ctx context.Context, call *ingress.Call, s
 	// refused, because nothing here would check it.
 	if operation.Object != "" || subject != nil {
 		if err := a.owned(ctx, call, operation, subject); err != nil {
-			return operation, nil, err
+			return operation, relay, err
 		}
 	}
 	// 3. Scope and risk.
 	principal, known := PrincipalOf(caller.Scope)
 	switch {
 	case !known:
-		return operation, nil, a.refuse(ctx, call, operation, "scope")
+		return operation, relay, a.refuse(ctx, call, operation, "scope")
 	case caller.AccountState == restrictedState && !operation.Restricted:
-		return operation, nil, a.refuse(ctx, call, operation, "restricted")
+		return operation, relay, a.refuse(ctx, call, operation, "restricted")
 	case operation.MobileLimited == Upgrade && operation.NeedsUpgrade(caller, false):
-		return operation, nil, arc.StepUpRequired()
+		return operation, relay, arc.StepUpRequired()
 	}
 	// 4. AGENT/HUMAN separation, and the exact scopes of an AGENT row. A verified node relay of a relayed row is the one AGENT caller
 	// a person's row admits; a person's session that names a relay is the wrong principal.
 	if principal != operation.principal() && !relayed || principal == Human && claim != nil {
-		return operation, nil, a.refuse(ctx, call, operation, "principal")
+		return operation, relay, a.refuse(ctx, call, operation, "principal")
 	}
 	if principal == Agent && !relayed && !slices.Contains(operation.Scopes, caller.Scope) {
-		return operation, nil, a.refuse(ctx, call, operation, "scope")
+		return operation, relay, a.refuse(ctx, call, operation, "scope")
+	}
+	// Workspace registration is fixed HUMAN-only. A node relay can establish
+	// HUMAN only on its own proved node; account authentication alone does not
+	// let a SCRIPT, AGENT or cross-node HUMAN pass the authorization stage.
+	if relayed && claim != nil && (claim.Method == relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE ||
+		claim.Method == relayv1.RoutedMethod_ROUTED_METHOD_UNREGISTER_NODE_WORKSPACE) {
+		verified, ok := relay.(interface {
+			RelayingNodeID() platform.ID
+			LocalOrigin() nodev1.Origin
+		})
+		if !ok || claim.TargetNodeID == nil || verified.LocalOrigin() != nodev1.Origin_ORIGIN_HUMAN || verified.RelayingNodeID() != *claim.TargetNodeID {
+			return operation, relay, a.refuse(ctx, call, operation, "principal")
+		}
 	}
 	// 5. Resource controls: every control that covers the row, before the audit and the gate.
 	for _, control := range a.controls {
@@ -777,23 +790,34 @@ func (a *Authorizer) AuthorizeRelayed(ctx context.Context, call *ingress.Call, s
 			continue
 		}
 		if err := control.Admit(ctx, call, operation); err != nil {
-			return operation, nil, err
+			return operation, relay, err
 		}
 	}
 	// 6. The audit that comes before the call; a failed append refuses it.
 	if operation.Audit == AuditBeforeCall {
 		if err := a.audit(ctx, call, operation, AuditAuthorized, "", map[string]any{"operation": operation.ID, "risk": operation.Risk, "feature": string(operation.Feature),
 			"scope": caller.Scope}); err != nil {
-			return operation, nil, err
+			return operation, relay, err
 		}
 	}
 	// 7. The gate.
 	if operation.Feature != "" {
 		if err := a.gated(ctx, call, operation); err != nil {
-			return operation, nil, err
+			return operation, relay, err
 		}
 	}
 	return operation, relay, nil
+}
+
+// VerifyRelayedForAudit authenticates a node relay for an already rejected
+// malformed request. It is never an authorization to route or use a subject.
+// As with the normal path it consumes the one-use assertion nonce.
+func (a *Authorizer) VerifyRelayedForAudit(ctx context.Context, call *ingress.Call, claim *RelayClaim) (Relay, error) {
+	operation, ok := a.lookup(call.Policy.FullName)
+	if !ok || !call.Caller.IsAuthenticated() || !slices.Contains(operation.RelayedScopes, call.Caller.Scope) {
+		return nil, arc.Unauthenticated()
+	}
+	return a.verifyRelay(ctx, call.Caller, claim)
 }
 
 // verifyRelay is stage 1b (decisions B-4: the authorizer verifies, no handler hands it a verdict): the composed verifier checks the

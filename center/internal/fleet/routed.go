@@ -121,6 +121,16 @@ type RoutedAccept struct {
 	InFlight func() bool
 	Online   func() bool
 	Now      time.Time
+	// Clock is sampled again after transaction/row-lock waits for a live replay fence.
+	// Existing callers can omit it when supplying a fixed Now in tests.
+	Clock func() time.Time
+}
+
+func (a RoutedAccept) now() time.Time {
+	if a.Clock != nil {
+		return a.Clock()
+	}
+	return a.Now
 }
 
 // RoutedDecision is what an admission decided: route a new attempt (Attempt), or join the attempt in flight (Join).
@@ -132,6 +142,8 @@ type RoutedDecision struct {
 	State     RoutedState
 	// OutcomeSHA256 is a final record's outcome digest, which the answer of a resend is compared with.
 	OutcomeSHA256 []byte
+	// ReplayUntil is set only for an attempt that can repeat a previously delivered command.
+	ReplayUntil time.Time
 }
 
 // ErrRoutedOffline marks a node_offline refusal of an admission (its error wraps the refusal): the routed API audits it once for a
@@ -263,6 +275,7 @@ func AcceptRouted(ctx context.Context, db *store.DB, accept RoutedAccept) (Route
 		if err != nil {
 			return err
 		}
+		accept.Now = accept.now()
 		if err := refuseResend(existing, accept, accept.InFlight()); err != nil {
 			return err
 		}
@@ -328,6 +341,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13
 			}
 			prior = locked
 			inFlight := accept.InFlight()
+			accept.Now = accept.now()
 			if err := refuseResend(locked, accept, inFlight); err != nil {
 				return err
 			}
@@ -347,6 +361,9 @@ WHERE account_id = $1 AND command_id = $2`, accept.AccountID, accept.CommandID, 
 					return err
 				}
 				decision = RoutedDecision{Attempt: locked.attempts + 1, Final: locked.final, State: state, Delivered: delivered, OutcomeSHA256: locked.outcome}
+				if delivered {
+					decision.ReplayUntil = locked.created.Add(accept.Window)
+				}
 			}
 		}
 		payload := caller.audit(map[string]any{"method": accept.Method, "nodeId": accept.NodeID.String(), "attempt": decision.Attempt,
@@ -396,9 +413,11 @@ func auditRouted(ctx context.Context, tx pgx.Tx, request Request, actor, eventTy
 // call, so the rows are bounded by that quota.
 func AuditRoutedOffline(ctx context.Context, db *store.DB, accept RoutedAccept) error {
 	return db.InTx(ctx, "audit a routed call to an offline node", store.TxOptions{Timeout: registryTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
-		return auditRouted(ctx, tx, accept.Request, accept.Caller.Actor, "fleet.routed.refused", "node_offline", accept.CommandID,
-			accept.Caller.audit(map[string]any{"method": accept.Method, "nodeId": accept.NodeID.String(), "requestSha256": hex.EncodeToString(accept.RequestSHA256),
-				"requestSize": accept.Size}), accept.Now)
+		payload := accept.Caller.audit(map[string]any{"method": accept.Method, "nodeId": accept.NodeID.String(), "requestSha256": hex.EncodeToString(accept.RequestSHA256), "requestSize": accept.Size})
+		if _, _, file := routedStorage(accept.Method); file {
+			addFileTarget(payload, accept.WorkspaceID, accept.TargetAttemptID, accept.TargetPath)
+		}
+		return auditRouted(ctx, tx, accept.Request, accept.Caller.Actor, "fleet.routed.refused", "node_offline", accept.CommandID, payload, accept.Now)
 	})
 }
 
@@ -411,8 +430,9 @@ type RoutedAnswer struct {
 	// handler's own error inside an EXECUTED response.
 	Effect foundationv1.EffectCertainty
 	// HandlerError is an EXECUTED response whose outcome is the handler's ArcError; Refusal the refusal's CATEGORY/code.
-	HandlerError bool
-	Refusal      string
+	HandlerError  bool
+	Refusal       string
+	RefusalReason string // closed non-sensitive reason, when meaningful for a file refusal
 	// TaskID is a SubmitNodeTask value's task ID.
 	TaskID             *platform.ID
 	ResponseSHA256     []byte
@@ -559,6 +579,9 @@ WHERE account_id = $1 AND command_id = $2`
 		}
 		if answer.Refusal != "" {
 			payload["refusal"] = RefusalCode(answer.Refusal)
+		}
+		if file && answer.RefusalReason != "" {
+			payload["refusalReason"] = answer.RefusalReason
 		}
 		if answer.ResponseSHA256 != nil {
 			payload["responseSha256"], payload["outcomeSha256"], payload["responseSize"] = hex.EncodeToString(answer.ResponseSHA256),

@@ -34,3 +34,24 @@ func (h *Hub) StallWrites(nodeID platform.ID) (release func()) {
 
 // CallsSent is how many call frames the hub queued (the metric "call sent").
 func (h *Hub) CallsSent() uint64 { return h.metrics.ChannelCount("call", "sent") }
+
+// StallWritesWithCallNotification coordinates a test with an actually queued
+// frame without polling the host or reading process internals.
+func (h *Hub) StallWritesWithCallNotification(nodeID platform.ID) (queued <-chan struct{}, release func()) {
+	h.mu.Lock()
+	c := h.nodes[nodeID]
+	h.mu.Unlock()
+	gate, notice := make(chan struct{}), make(chan struct{}, 1)
+	c.mu.Lock()
+	c.stall, c.queuedCall = gate, notice
+	c.mu.Unlock()
+	var once sync.Once
+	return notice, func() {
+		once.Do(func() {
+			c.mu.Lock()
+			c.stall, c.queuedCall = nil, nil
+			c.mu.Unlock()
+			close(gate)
+		})
+	}
+}

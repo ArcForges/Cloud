@@ -47,6 +47,7 @@ type RoutedReadAudit struct {
 	RequestSHA256                []byte
 	RequestSize                  int
 	Outcome                      string
+	Refusal, RefusalReason       string
 	NodeAuditAvailable           bool
 	Observations                 []RoutedObservation
 	Now                          time.Time
@@ -58,12 +59,48 @@ func AuditRoutedFileRead(ctx context.Context, db *store.DB, audit RoutedReadAudi
 			"requestSha256": hex.EncodeToString(audit.RequestSHA256), "requestSize": audit.RequestSize,
 			"nodeAuditAvailable": audit.NodeAuditAvailable, "observations": audit.Observations})
 		addFileTarget(payload, audit.WorkspaceID, audit.TargetAttemptID, audit.TargetPath)
+		if audit.Refusal != "" {
+			payload["refusal"] = audit.Refusal
+		}
+		if audit.RefusalReason != "" {
+			payload["refusalReason"] = audit.RefusalReason
+		}
 		data, err := json.Marshal(payload)
 		if err != nil {
 			return err
 		}
 		_, err = platform.AppendAudit(ctx, tx, platform.Event{EventID: platform.NewID(), OccurredAt: audit.Now, ActorRef: audit.Caller.Actor,
 			EventType: "fleet.file.read", Reason: audit.Outcome, CorrelationID: audit.Request.CorrelationID,
+			TargetKind: "node", TargetID: audit.NodeID.String(), Payload: data})
+		return err
+	})
+}
+
+// RoutedFileRefusalAudit records a verified actor's rejected file request with
+// target metadata only. It is independent of a mutation receipt.
+type RoutedFileRefusalAudit struct {
+	RoutedReadAudit
+	CommandID *platform.ID
+}
+
+func AuditRoutedFileRefusal(ctx context.Context, db *store.DB, audit RoutedFileRefusalAudit) error {
+	return db.InTx(ctx, "audit a refused routed file call", store.TxOptions{Timeout: registryTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
+		payload := audit.Caller.audit(map[string]any{"method": audit.Method, "nodeId": audit.NodeID.String(),
+			"requestSha256": hex.EncodeToString(audit.RequestSHA256), "requestSize": audit.RequestSize, "refusal": audit.Refusal,
+			"nodeAuditAvailable": false})
+		addFileTarget(payload, audit.WorkspaceID, audit.TargetAttemptID, audit.TargetPath)
+		if audit.Refusal != "" {
+			payload["refusal"] = audit.Refusal
+		}
+		if audit.RefusalReason != "" {
+			payload["refusalReason"] = audit.RefusalReason
+		}
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		_, err = platform.AppendAudit(ctx, tx, platform.Event{EventID: platform.NewID(), OccurredAt: audit.Now, ActorRef: audit.Caller.Actor,
+			EventType: "fleet.file.refused", Reason: "refused", CorrelationID: audit.Request.CorrelationID, CommandID: audit.CommandID,
 			TargetKind: "node", TargetID: audit.NodeID.String(), Payload: data})
 		return err
 	})

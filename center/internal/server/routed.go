@@ -21,7 +21,7 @@ func (r hubRouter) Connected(nodeID platform.ID) bool { return r.hub.Connected(n
 
 func (r hubRouter) Route(ctx context.Context, call fleetapi.RoutedCall) (fleetapi.RoutedResult, error) {
 	routed := hub.Call{AccountID: call.AccountID, TargetNodeID: call.TargetNodeID, CommandID: call.CommandID, Method: call.Method, Payload: call.Payload,
-		Deadline: call.Deadline}
+		Deadline: call.Deadline, ReplayUntil: call.ReplayUntil}
 	if call.Relay != nil {
 		verified, ok := call.Relay.(hub.VerifiedRelay)
 		if !ok || !verified.Verified() {

@@ -22,8 +22,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
+	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
+	"github.com/ArcForges/Cloud/center/internal/hub"
 	"github.com/ArcForges/Cloud/center/internal/nodetest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/session"
@@ -36,11 +38,11 @@ func TestCTR06TwelveFleetMethodsUseTheRealSignedRoutingAndReceipts(t *testing.T)
 	h := routedHarness(t)
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
-	channel := h.connect(node)
+	channel := h.connectFiles(node)
 	workspace := platform.NewID()
 	path := &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("bounded/path")}
 	issued := h.accountSession(user, session.ScopeAccount)
-	denial := arc.PermissionDenied("file.read").ArcError(correlation.Context{})
+	denial := arc.PermissionDenied("file.read").ArcError(correlation.New())
 	cases := []struct {
 		name, procedure, class string
 		method                 relayv1.RoutedMethod
@@ -249,7 +251,7 @@ func TestCTR06WriteReplaySharesTheOldCommandNamespace(t *testing.T) {
 	h := routedHarness(t)
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
-	channel := h.connect(node)
+	channel := h.connectFiles(node)
 	issued := h.accountSession(user, session.ScopeAccount)
 	command, workspace := platform.NewID(), platform.NewID()
 	data := []byte("PRIVATE-WRITE-BODY")
@@ -302,7 +304,7 @@ func TestCTR06LostFileSettlementIsSweptAndReplayWindowPrecedesPresence(t *testin
 	h := routedHarness(t)
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
-	channel := h.connect(node)
+	channel := h.connectFiles(node)
 	issued := h.accountSession(user, session.ScopeAccount)
 	command, workspace := platform.NewID(), platform.NewID()
 	data := []byte("bounded")
@@ -366,7 +368,7 @@ func TestCTR06ReadAuditsOnlyVerifiedDigestAndRejectsCorruptSignedBytes(t *testin
 	h := routedHarness(t)
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
-	channel := h.connect(node)
+	channel := h.connectFiles(node)
 	issued := h.accountSession(user, session.ScopeAccount)
 	workspace := platform.NewID()
 	data := []byte("PRIVATE-READ-CONTENT-MARKER")
@@ -411,7 +413,7 @@ func TestCTR06WorkspaceRegistrationRequiresVerifiedOwnNodeHuman(t *testing.T) {
 	h := routedHarness(t)
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
-	channel := h.connect(node)
+	channel := h.connectFiles(node)
 	var acceptedAssertion []byte
 	var acceptedPayload []byte
 	for _, origin := range []nodev1.Origin{nodev1.Origin_ORIGIN_SCRIPT, nodev1.Origin_ORIGIN_AGENT, nodev1.Origin_ORIGIN_HUMAN} {
@@ -436,7 +438,7 @@ func TestCTR06WorkspaceRegistrationRequiresVerifiedOwnNodeHuman(t *testing.T) {
 	if err := proto.Unmarshal(acceptedPayload, &inner); err != nil {
 		t.Fatal(err)
 	}
-	denial := arc.PermissionDenied("workspace.register").ArcError(correlation.Context{})
+	denial := arc.PermissionDenied("workspace.register").ArcError(correlation.New())
 	response := mustMarshal(t, &nodev1.WorkspaceServiceRegisterWorkspaceResponse{Outcome: &nodev1.WorkspaceServiceRegisterWorkspaceResponse_Error{Error: denial}})
 	calls := serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
 		return node.node.Executed(call, response), response, true
@@ -450,5 +452,343 @@ func TestCTR06WorkspaceRegistrationRequiresVerifiedOwnNodeHuman(t *testing.T) {
 	sent := <-calls
 	if !bytes.Equal(sent.Payload, acceptedPayload) {
 		t.Fatal("HUMAN forwarded payload differs")
+	}
+}
+
+// A node's declaration belongs to its currently authenticated connection, not
+// its installation or an earlier connection. A legacy node still serves tasks.
+func TestCTR06CapabilityIsScopedToVerifiedConnection(t *testing.T) {
+	h := routedHarness(t)
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	issued := h.accountSession(user, session.ScopeAccount)
+	workspace, task := platform.NewID(), platform.NewID()
+	readRequest := mustMarshal(t, &nodev1.FileServiceReadFileRequest{Path: &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("example.txt")}, Offset: proto.Uint64(0), Length: proto.Uint64(1)})
+	denial := arc.PermissionDenied("file.read").ArcError(correlation.New())
+	readResponse := mustMarshal(t, &nodev1.FileServiceReadFileResponse{Outcome: &nodev1.FileServiceReadFileResponse_Error{Error: denial}})
+	answer := func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
+		var header relayv1.CallHeader
+		if proto.Unmarshal(call.GetHeader().GetHeader(), &header) != nil {
+			t.Error("invalid call header")
+			return nil, nil, false
+		}
+		payload := readResponse
+		if header.GetMethod() == relayv1.RoutedMethod_ROUTED_METHOD_SUBMIT_NODE_TASK {
+			payload = submitResponse(t, task, "legacy")
+		}
+		return node.node.Executed(call, payload), payload, true
+	}
+	read := func() *fleetv1.FleetServiceReadNodeFileResponse {
+		reply := &fleetv1.FleetServiceReadNodeFileResponse{}
+		h.rpc(fleetv1connect.FleetServiceReadNodeFileProcedure, &fleetv1.FleetServiceReadNodeFileRequest{NodeId: idValue(node.node.ID), Request: readRequest}, issued.AccessToken, reply)
+		return reply
+	}
+	old := h.connect(node)
+	oldCalls := serve(t, node, old, answer)
+	command := platform.NewID()
+	h.proveFor(issued, user, "fleet.submitNodeTask", node.node.ID)
+	if reply := h.submit(issued.AccessToken, command, node.node.ID, submitPayload(t, command, "legacy")); reply.GetError() != nil {
+		t.Fatalf("legacy task: %v", reply.GetError())
+	}
+	<-oldCalls
+	if reply := read(); errorKey(reply.GetError()) != "STATE/invalid_state" || reply.GetError().GetDetails().GetState().GetReason() != "capability_unavailable" {
+		t.Fatalf("legacy file call: %v", reply)
+	}
+	select {
+	case frame := <-oldCalls:
+		t.Fatalf("legacy node received file frame: %v", frame)
+	default:
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.file.read' AND convert_from(payload,'UTF8') LIKE $1", "%example.txt%") != 1 {
+		t.Fatal("legacy refusal missing target audit")
+	}
+	current := h.connectFiles(node)
+	currentCalls := serve(t, node, current, answer)
+	if reply := read(); reply.GetError() != nil || !bytes.Equal(reply.GetValue().GetResponse(), readResponse) {
+		t.Fatalf("new capability: %v", reply)
+	}
+	if sent := <-currentCalls; sent == nil {
+		t.Fatal("new node received no file frame")
+	}
+	again := h.connect(node)
+	againCalls := serve(t, node, again, answer)
+	if reply := read(); errorKey(reply.GetError()) != "STATE/invalid_state" {
+		t.Fatalf("old capability reused after reconnect: %v", reply)
+	}
+	select {
+	case frame := <-againCalls:
+		t.Fatalf("old reconnect received file frame: %v", frame)
+	default:
+	}
+}
+
+// A retry admitted just before the boundary is held in the real connection's
+// write queue. The injected clock advances to the boundary before the writer
+// continues; no second call frame or effect may occur.
+func TestCTR06ReplayFenceRecheckedAfterQueuedWriterWait(t *testing.T) {
+	var offset atomic.Int64
+	clock := func() time.Time { return time.Now().UTC().Add(time.Duration(offset.Load())) }
+	window := 10 * time.Second // test-only configuration, not a change to product limits
+	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
+		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	channel := h.connectFiles(node)
+	issued := h.accountSession(user, session.ScopeAccount)
+	command, workspace := platform.NewID(), platform.NewID()
+	data := []byte("replay-test")
+	sum := sha256.Sum256(data)
+	response := mustMarshal(t, &nodev1.FileServiceWriteFileResponse{Outcome: &nodev1.FileServiceWriteFileResponse_Value{Value: &nodev1.FileServiceWriteFileValue{
+		Result: &nodev1.FileMutationResult{CommandId: idValue(command), SizeBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}},
+		Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES.Enum(),
+			SizeBytes: proto.Uint64(uint64(len(data))), DigestInputBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}}})
+	calls := serve(t, node, channel, deduplicating(node, func(*relayv1.ChannelCall) []byte { return response }))
+	payload := mustMarshal(t, &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+		Path: &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("fence.txt")}, Data: data,
+		Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}})
+	send := func() *fleetv1.FleetServiceWriteNodeFileResponse {
+		h.proveFor(issued, user, "fleet.writeNodeFile", node.node.ID)
+		reply := &fleetv1.FleetServiceWriteNodeFileResponse{}
+		h.rpc(fleetv1connect.FleetServiceWriteNodeFileProcedure, &fleetv1.FleetServiceWriteNodeFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+			NodeId: idValue(node.node.ID), Request: payload}, issued.AccessToken, reply)
+		return reply
+	}
+	if reply := send(); reply.GetError() != nil {
+		t.Fatalf("first delivery: %v", reply.GetError())
+	}
+	<-calls
+	var created time.Time
+	if err := h.db.Migration.QueryRow(context.Background(), "SELECT created_at FROM fleet.routed_file_call WHERE account_id=$1 AND command_id=$2", user, command).Scan(&created); err != nil {
+		t.Fatal(err)
+	}
+	offset.Store(int64(created.Add(window - 5*time.Second).Sub(time.Now())))
+	queued, release := h.center.Hub.StallWritesWithCallNotification(node.node.ID)
+	defer release()
+	replies := make(chan *fleetv1.FleetServiceWriteNodeFileResponse, 1)
+	go func() { replies <- send() }()
+	select {
+	case <-queued:
+	case early := <-replies:
+		t.Fatalf("retry returned before it was queued: %v", early)
+	case <-time.After(5 * time.Second):
+		t.Fatal("retry never entered the channel queue")
+	}
+	offset.Store(int64(created.Add(window + time.Second).Sub(time.Now())))
+	release()
+	select {
+	case reply := <-replies:
+		if errorKey(reply.GetError()) != "STATE/invalid_state" || reply.GetError().GetDetails().GetState().GetReason() != "replay_window_passed" ||
+			reply.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
+			t.Fatalf("late retry: %v", reply)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("late retry did not finish")
+	}
+	select {
+	case sent := <-calls:
+		t.Fatalf("late retry reached the node: %v", sent)
+	default:
+	}
+	record, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, command, 10)
+	if err != nil || record == nil || record.State != fleet.RoutedSucceeded || !record.Final || record.Attempts != 2 {
+		t.Fatalf("prior receipt changed: %+v %v", record, err)
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'path'='fence.txt' AND convert_from(payload,'UTF8')::jsonb->>'refusalReason'='replay_window_passed'", command) != 1 {
+		t.Fatal("late replay refusal lacks target and closed reason audit")
+	}
+}
+
+// The center and receipt store are real; the node handler is a software-key
+// fixture. A valid signed success is the positive control for a signed but
+// request-mismatched result, which must remain uncertain in PostgreSQL.
+func TestCTR06SignedMutationResultBindsCommandAndReceipt(t *testing.T) {
+	h := routedHarness(t)
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	channel := h.connectFiles(node)
+	issued := h.accountSession(user, session.ScopeAccount)
+	good, bad, workspace := platform.NewID(), platform.NewID(), platform.NewID()
+	data := []byte("signed-success-test")
+	sum := sha256.Sum256(data)
+	calls := serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
+		var header relayv1.CallHeader
+		if proto.Unmarshal(call.GetHeader().GetHeader(), &header) != nil {
+			t.Error("bad header")
+			return nil, nil, false
+		}
+		resultID := header.GetCommandId()
+		if bytes.Equal(resultID.GetValue(), bad[:]) {
+			resultID = idValue(platform.NewID())
+		}
+		body := mustMarshal(t, &nodev1.FileServiceWriteFileResponse{Outcome: &nodev1.FileServiceWriteFileResponse_Value{Value: &nodev1.FileServiceWriteFileValue{
+			Result: &nodev1.FileMutationResult{CommandId: resultID, SizeBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}},
+			Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES.Enum(),
+				SizeBytes: proto.Uint64(uint64(len(data))), DigestInputBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}}})
+		return node.node.Executed(call, body), body, true
+	})
+	send := func(command platform.ID) *fleetv1.FleetServiceWriteNodeFileResponse {
+		payload := mustMarshal(t, &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)}, Path: &nodev1.FilePath{
+			WorkspaceId: idValue(workspace), Path: proto.String("signed.txt")}, Data: data, Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}})
+		h.proveFor(issued, user, "fleet.writeNodeFile", node.node.ID)
+		reply := &fleetv1.FleetServiceWriteNodeFileResponse{}
+		h.rpc(fleetv1connect.FleetServiceWriteNodeFileProcedure, &fleetv1.FleetServiceWriteNodeFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+			NodeId: idValue(node.node.ID), Request: payload}, issued.AccessToken, reply)
+		return reply
+	}
+	if reply := send(good); reply.GetError() != nil || len(reply.GetValue().GetResponse()) == 0 {
+		t.Fatalf("valid signed response: %v", reply)
+	}
+	<-calls
+	goodRecord, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, good, 10)
+	if err != nil || goodRecord == nil || goodRecord.State != fleet.RoutedSucceeded || !goodRecord.Final || !goodRecord.Delivered {
+		t.Fatalf("success receipt: %+v %v", goodRecord, err)
+	}
+	if reply := send(bad); errorKey(reply.GetError()) != "STATE/node_unreachable" || reply.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN ||
+		reply.GetError().GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND {
+		t.Fatalf("malformed signed response: %v", reply)
+	}
+	<-calls
+	badRecord, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, bad, 10)
+	if err != nil || badRecord == nil || badRecord.State != fleet.RoutedUnknown || badRecord.Final || !badRecord.Delivered {
+		t.Fatalf("uncertain receipt: %+v %v", badRecord, err)
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND convert_from(payload,'UTF8')::jsonb->>'state'='unknown' AND command_id=$1", bad) != 1 {
+		t.Fatal("unknown outcome missing from audit")
+	}
+}
+
+func TestCTR06RelayedHumanAuthorizationPrecedesOfficialEntitlement(t *testing.T) {
+	h := newHarness(t, settings{mode: config.OfficialHosted, plan: config.PlanDevelopmentFixtures, surfaces: "identity,pages,fleet,relay,nodes"})
+	user := h.db.Account(1)
+	h.grant(user, "center.nodes")
+	node := h.enrollIn(user)
+	channel := h.connectFiles(node)
+	// Obtain each nonce before the one background reader starts; a WebSocket
+	// connection permits only one concurrent reader.
+	nonces := [][]byte{nonceOf(t, channel), nonceOf(t, channel), nonceOf(t, channel)}
+	calls := serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
+		denial := arc.PermissionDenied("workspace.register").ArcError(correlation.New())
+		body := mustMarshal(t, &nodev1.WorkspaceServiceRegisterWorkspaceResponse{Outcome: &nodev1.WorkspaceServiceRegisterWorkspaceResponse_Error{Error: denial}})
+		return node.node.Executed(call, body), body, true
+	})
+	send := func(origin nodev1.Origin, nonce []byte) *fleetv1.FleetServiceRegisterNodeWorkspaceResponse {
+		command := platform.NewID()
+		payload := mustMarshal(t, &nodev1.WorkspaceServiceRegisterWorkspaceRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)}, Path: proto.String("/srv/owned-test")})
+		digest := sha256.Sum256(payload)
+		assertion := mustMarshal(t, node.node.Assertion(publicBaseURL, nodetest.Relay{InstallationID: node.result.InstallationID, LocalOrigin: origin, LocalSession: platform.NewID(),
+			Method: relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE, RequestSHA256: digest[:], Target: &node.node.ID, Command: &command, Nonce: nonce}))
+		reply := &fleetv1.FleetServiceRegisterNodeWorkspaceResponse{}
+		h.rpc(fleetv1connect.FleetServiceRegisterNodeWorkspaceProcedure, &fleetv1.FleetServiceRegisterNodeWorkspaceRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+			NodeId: idValue(node.node.ID), Caller: relayedCaller(node, origin), RelayAssertion: assertion, Request: payload}, node.access, reply)
+		return reply
+	}
+	authorized, gated, refused := h.audits("access.authorized"), h.audits("access.gated"), h.audits("fleet.file.refused")
+	if reply := send(nodev1.Origin_ORIGIN_SCRIPT, nonces[0]); errorKey(reply.GetError()) != "AUTHORIZATION/permission_denied" {
+		t.Fatalf("script: %v", reply)
+	}
+	if h.audits("access.authorized") != authorized || h.audits("access.gated") != gated || h.audits("fleet.file.refused") != refused+1 {
+		t.Fatal("SCRIPT reached gate or lacked file target audit")
+	}
+	if reply := send(nodev1.Origin_ORIGIN_HUMAN, nonces[1]); errorKey(reply.GetError()) != "ENTITLEMENT/feature_not_entitled" {
+		t.Fatalf("unentitled human: %v", reply)
+	}
+	if h.audits("access.authorized") != authorized+1 || h.audits("access.gated") != gated+1 || h.audits("fleet.file.refused") != refused+2 {
+		t.Fatal("authorized HUMAN did not reach audited entitlement gate")
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.file.refused' AND convert_from(payload,'UTF8')::jsonb->>'path'='/srv/owned-test'") != 2 {
+		t.Fatal("refusals omitted path")
+	}
+	select {
+	case frame := <-calls:
+		t.Fatalf("unentitled calls reached target: %v", frame)
+	default:
+	}
+	h.grant(user, "center.execute")
+	if reply := send(nodev1.Origin_ORIGIN_HUMAN, nonces[2]); reply.GetError() != nil {
+		t.Fatalf("entitled own-node human: %v", reply.GetError())
+	}
+	if frame := <-calls; frame == nil {
+		t.Fatal("entitled human did not reach target")
+	}
+}
+
+func TestCTR06MalformedAndOfflineRefusalsAuditVerifiedTargets(t *testing.T) {
+	h := routedHarness(t)
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	channel := h.connectFiles(node)
+	issued := h.accountSession(user, session.ScopeAccount)
+	workspace := platform.NewID()
+	malformed := mustMarshal(t, &nodev1.FileServiceReadFileRequest{Path: &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("audit.txt")},
+		Offset: proto.Uint64(0), Length: proto.Uint64(0)})
+	read := func(caller *fleetv1.RoutedCaller, assertion []byte, bearer string) *fleetv1.FleetServiceReadNodeFileResponse {
+		reply := &fleetv1.FleetServiceReadNodeFileResponse{}
+		h.rpc(fleetv1connect.FleetServiceReadNodeFileProcedure, &fleetv1.FleetServiceReadNodeFileRequest{NodeId: idValue(node.node.ID), Caller: caller, RelayAssertion: assertion, Request: malformed}, bearer, reply)
+		return reply
+	}
+	if reply := read(nil, nil, issued.AccessToken); errorKey(reply.GetError()) != "VALIDATION/invalid_argument" {
+		t.Fatalf("account malformed request: %v", reply)
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.file.refused' AND actor_ref=$1 AND convert_from(payload,'UTF8')::jsonb->>'path'='audit.txt'", "account:"+user.String()) != 1 {
+		t.Fatal("malformed account request lacked target audit")
+	}
+	// Outer-meta refusals must retain the bounded target for a verified account.
+	badMeta := &fleetv1.FleetServiceReadNodeFileResponse{}
+	h.rpc(fleetv1connect.FleetServiceReadNodeFileProcedure, &fleetv1.FleetServiceReadNodeFileRequest{Meta: &foundationv1.RequestMeta{WorkspaceId: idValue(workspace)}, NodeId: idValue(node.node.ID), Request: malformed}, issued.AccessToken, badMeta)
+	if errorKey(badMeta.GetError()) != "VALIDATION/invalid_argument" {
+		t.Fatalf("bad outer metadata: %v", badMeta)
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.file.refused' AND actor_ref=$1 AND convert_from(payload,'UTF8')::jsonb->>'path'='audit.txt'", "account:"+user.String()) != 2 {
+		t.Fatal("outer metadata refusal lacked target audit")
+	}
+
+	// A connected node, but no step-up evidence, proves this refusal occurs
+	// at admission and does not send a channel call or create a receipt.
+	stepCommand := platform.NewID()
+	stepPayload := mustMarshal(t, &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(stepCommand)}, Path: &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("step-up.txt")}, Data: []byte("x"), Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}})
+	stepReply := &fleetv1.FleetServiceWriteNodeFileResponse{}
+	h.rpc(fleetv1connect.FleetServiceWriteNodeFileProcedure, &fleetv1.FleetServiceWriteNodeFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(stepCommand)}, NodeId: idValue(node.node.ID), Request: stepPayload}, issued.AccessToken, stepReply)
+	if errorKey(stepReply.GetError()) != "AUTHENTICATION/step_up_required" {
+		t.Fatalf("unproved write: %v", stepReply.GetError())
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.file.refused' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'path'='step-up.txt' AND convert_from(payload,'UTF8')::jsonb->>'refusal'='authentication/step_up_required'", stepCommand) != 1 {
+		t.Fatal("step-up refusal lacked target audit")
+	}
+	if h.count("SELECT count(*) FROM fleet.routed_file_call WHERE account_id=$1 AND command_id=$2", user, stepCommand) != 0 {
+		t.Fatal("unproved write created routing receipt")
+	}
+
+	before := h.audits("fleet.file.refused")
+	if reply := read(relayedCaller(node, nodev1.Origin_ORIGIN_AGENT), []byte{1, 2, 3}, node.access); errorKey(reply.GetError()) != "VALIDATION/invalid_argument" {
+		t.Fatalf("unverified relay: %v", reply)
+	}
+	if h.audits("fleet.file.refused") != before {
+		t.Fatal("unverified relay attributed to an actor")
+	}
+	digest := sha256.Sum256(malformed)
+	assertion := mustMarshal(t, node.node.Assertion(publicBaseURL, nodetest.Relay{InstallationID: node.result.InstallationID, LocalOrigin: nodev1.Origin_ORIGIN_AGENT,
+		LocalSession: platform.NewID(), Method: relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE, RequestSHA256: digest[:], Target: &node.node.ID, Nonce: nonceOf(t, channel)}))
+	if reply := read(relayedCaller(node, nodev1.Origin_ORIGIN_AGENT), assertion, node.access); errorKey(reply.GetError()) != "VALIDATION/invalid_argument" {
+		t.Fatalf("verified malformed relay: %v", reply)
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.file.refused' AND actor_ref=$1 AND convert_from(payload,'UTF8')::jsonb->>'path'='audit.txt'", "node:"+node.result.InstallationID.String()) != 1 {
+		t.Fatal("verified relay refusal lacked target audit")
+	}
+	// A different enrolled but offline node is owned by the same synthetic account.
+	offline := h.enrollIn(user)
+	command := platform.NewID()
+	body := []byte("PRIVATE-OFFLINE-BODY-MARKER")
+	write := mustMarshal(t, &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)}, Path: &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("offline.txt")},
+		Data: body, Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}})
+	reply := &fleetv1.FleetServiceWriteNodeFileResponse{}
+	h.rpc(fleetv1connect.FleetServiceWriteNodeFileProcedure, &fleetv1.FleetServiceWriteNodeFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)}, NodeId: idValue(offline.node.ID), Request: write}, issued.AccessToken, reply)
+	if errorKey(reply.GetError()) != "STATE/node_offline" {
+		t.Fatalf("offline write: %v", reply)
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.refused' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'path'='offline.txt' AND convert_from(payload,'UTF8')::jsonb->>'workspaceId'=$2", command, workspace.String()) != 1 {
+		t.Fatal("offline mutation lacked target audit")
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE convert_from(payload,'UTF8') LIKE '%PRIVATE-OFFLINE-BODY-MARKER%'") != 0 {
+		t.Fatal("body leaked into audit")
 	}
 }

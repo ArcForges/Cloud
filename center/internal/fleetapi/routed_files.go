@@ -19,6 +19,7 @@ import (
 	relayv1 "github.com/ArcForges/Contracts/go/arcforges/relay/v1"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/identity"
@@ -53,6 +54,7 @@ type nodeFileRequest interface {
 }
 type nodeFileResponse interface {
 	proto.Message
+	GetMeta() *foundationv1.ResponseMeta
 	GetError() *foundationv1.ArcError
 	GetAudit() *nodev1.FileAuditMetadata
 }
@@ -116,11 +118,63 @@ func newFileResponse(method relayv1.RoutedMethod) nodeFileResponse {
 	return nil
 }
 
+// Recover only bounded target metadata for a refusal audit. It is never an
+// authorization decision and an asserted relay is not attributed without proof.
+func fileTargetForAudit(method relayv1.RoutedMethod, payload []byte) inner {
+	result := inner{method: method, deadline: routes.RoutedDeadline}
+	if len(payload) == 0 || len(payload) > maxFileRequest {
+		return result
+	}
+	v := newFileRequest(method)
+	if v == nil || proto.Unmarshal(payload, v) != nil {
+		return result
+	}
+	var path *nodev1.FilePath
+	switch x := v.(type) {
+	case *nodev1.FileServiceReadFileRequest:
+		path = x.Path
+	case *nodev1.FileServiceWriteFileRequest:
+		path = x.Path
+	case *nodev1.FileServiceEditFileRequest:
+		path = x.Path
+	case *nodev1.FileServiceSearchFilesRequest:
+		path = x.Path
+	case *nodev1.FileServiceListDirectoryRequest:
+		path = x.Path
+	case *nodev1.FileServicePlanRemovalRequest:
+		path = x.GetWorkspacePath()
+		if id, ok := parseID(x.GetAttemptId()); ok {
+			result.targetAttemptID = &id
+		}
+	case *nodev1.WorkspaceServiceRegisterWorkspaceRequest:
+		if x.Path != nil && len(x.GetPath()) <= 4096 && utf8.ValidString(x.GetPath()) && !strings.ContainsRune(x.GetPath(), 0) {
+			result.path, result.pathKnown = x.GetPath(), true
+		}
+	case *nodev1.WorkspaceServiceUnregisterWorkspaceRequest:
+		if id, ok := parseID(x.WorkspaceId); ok {
+			result.workspaceID = &id
+		}
+	case *nodev1.WorkspaceServiceGetWorkspaceRequest:
+		if id, ok := parseID(x.WorkspaceId); ok {
+			result.workspaceID = &id
+		}
+	}
+	if path != nil {
+		if id, ok := parseID(path.WorkspaceId); ok {
+			result.workspaceID = &id
+		}
+		if path.Path != nil && len(path.GetPath()) <= 4096 && utf8.ValidString(path.GetPath()) && !strings.ContainsRune(path.GetPath(), 0) {
+			result.path, result.pathKnown = path.GetPath(), true
+		}
+	}
+	return result
+}
+
 // checkFileInner checks the portable wire shape. The target alone decides native
 // absolute-path syntax, root identity, permission, filesystem state and all effects.
 func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platform.ID) (inner, error) {
-	result := inner{method: method, deadline: routes.RoutedDeadline}
-	bad := func(field, rule string) (inner, error) { return inner{}, arc.InvalidArgument("request."+field, rule) }
+	result := fileTargetForAudit(method, payload)
+	bad := func(field, rule string) (inner, error) { return result, arc.InvalidArgument("request."+field, rule) }
 	if len(payload) < 1 || len(payload) > maxFileRequest {
 		return bad("payload", "length")
 	}
@@ -278,7 +332,7 @@ func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platfo
 
 // decodeFileResponse accepts only the published outcome and bounded signed metadata.
 // Unknown protobuf fields are never copied into audit payloads.
-func decodeFileResponse(method relayv1.RoutedMethod, payload []byte) (nodeFileResponse, error) {
+func decodeFileResponse(method relayv1.RoutedMethod, payload, request []byte) (nodeFileResponse, error) {
 	value := newFileResponse(method)
 	if value == nil || len(payload) < 1 || len(payload) > 1_040_384 || proto.Unmarshal(payload, value) != nil {
 		return nil, errors.New("malformed node file response")
@@ -296,7 +350,7 @@ func decodeFileResponse(method relayv1.RoutedMethod, payload []byte) (nodeFileRe
 	for _, observation := range audit.GetObservations() {
 		if observation == nil || observation.Kind == nil || observation.GetKind() < 1 || observation.GetKind() > 7 || kinds[observation.GetKind()] ||
 			observation.SizeBytes == nil || observation.DigestInputBytes == nil || len(observation.Sha256) != 32 ||
-			observation.GetItemCount() > 10_001 {
+			observation.GetItemCount() > 10_001 || !validFileObservation(method, observation) {
 			return nil, errors.New("malformed node audit")
 		}
 		kinds[observation.GetKind()] = true
@@ -360,6 +414,9 @@ func decodeFileResponse(method relayv1.RoutedMethod, payload []byte) (nodeFileRe
 				}
 			}
 		}
+	}
+	if err := validateFileResult(method, request, value); err != nil {
+		return nil, err
 	}
 	return value, nil
 }
@@ -523,7 +580,7 @@ func (r *Registry) routeFileRead(ctx context.Context, call *ingress.Call, routed
 		WorkspaceID: routed.WorkspaceID, TargetAttemptID: routed.TargetAttemptID, TargetPath: routed.TargetPath,
 		RequestSHA256: exact[:], RequestSize: len(routed.Payload), Outcome: "unavailable", Now: r.clock()}
 	if err == nil && result.Outcome == relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED {
-		value, decodeErr := decodeFileResponse(routed.Method, result.Response)
+		value, decodeErr := decodeFileResponse(routed.Method, result.Response, routed.Payload)
 		if decodeErr != nil {
 			err = arc.NodeUnreachable(routed.TargetNodeID[:], arc.UnreachableChannelClosed, false)
 		} else {
@@ -537,6 +594,12 @@ func (r *Registry) routeFileRead(ctx context.Context, call *ingress.Call, routed
 	} else if err == nil {
 		err = refusalOf(result)
 		audit.Outcome = "refused"
+	}
+	if err != nil {
+		audit.Refusal, audit.RefusalReason = fileRefusalAudit(err)
+		if audit.RefusalReason == "capability_unavailable" {
+			audit.Outcome = "refused"
+		}
 	}
 	// Independent bounded context lets a canceled client leave its audit without
 	// extending the original read or silently dropping that metadata.
@@ -553,4 +616,65 @@ func (r *Registry) routeFileRead(ctx context.Context, call *ingress.Call, routed
 		return nil, err
 	}
 	return result.Response, nil
+}
+
+// Persist only catalogue keys and closed reasons, never arbitrary node text.
+func fileRefusalAudit(failure error) (string, string) {
+	key, detail := "other/other", ""
+	var refusal *arc.Refusal
+	if errors.As(failure, &refusal) {
+		key = refusalKey(refusal.Category, refusal.Code)
+		if refusal.Code == "invalid_state" && (refusal.Reason == "replay_window_passed" || refusal.Reason == "capability_unavailable") {
+			detail = refusal.Reason
+		}
+	}
+	if fleet.RefusalCode(key) == fleet.RefusalOther {
+		key = "other/other"
+	}
+	return key, detail
+}
+
+// auditFileRefusal uses only an authenticated account session or an already
+// verified relay. Never attribute a merely claimed relay identity to an actor.
+func (r *Registry) auditFileRefusal(call *ingress.Call, nodeID platform.ID, commandID *platform.ID, method relayv1.RoutedMethod,
+	payload []byte, checked inner, relay access.Relay, failure error) {
+	if !call.Caller.IsAuthenticated() {
+		return
+	}
+	var caller fleet.RoutedCaller
+	if relay != nil {
+		verified, ok := relay.(relayed)
+		if !ok || !verified.Verified() {
+			return
+		}
+		caller = fleet.RoutedCaller{Kind: fleet.RoutedCallerRelay, RelayingNodeID: verified.RelayingNodeID(), LocalOrigin: int16(verified.LocalOrigin()),
+			LocalSessionID: verified.LocalSessionID(), Actor: "node:" + verified.RelayingInstallationID().String()}
+	} else {
+		if call.Caller.Scope != "account" && call.Caller.Scope != "mobile.limited" {
+			return
+		}
+		account, ok := textID(call.Caller.UserID)
+		if !ok {
+			return
+		}
+		sessionID, ok := textID(call.Caller.SessionID)
+		if !ok {
+			return
+		}
+		caller = fleet.RoutedCaller{Kind: fleet.RoutedCallerSession, SessionID: sessionID, Actor: identity.Actor(account)}
+	}
+	refusal, refusalReason := fileRefusalAudit(failure)
+	hash := sha256.Sum256(payload)
+	var path *string
+	if checked.pathKnown {
+		path = &checked.path
+	}
+	audit := fleet.RoutedFileRefusalAudit{RoutedReadAudit: fleet.RoutedReadAudit{Request: request(call), Caller: caller, NodeID: nodeID,
+		Method: int16(method), WorkspaceID: checked.workspaceID, TargetAttemptID: checked.targetAttemptID, TargetPath: path,
+		RequestSHA256: hash[:], RequestSize: len(payload), Now: r.clock(), Refusal: refusal, RefusalReason: refusalReason}, CommandID: commandID}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := fleet.AuditRoutedFileRefusal(ctx, r.db, audit); err != nil {
+		r.logger.Warn("a refused routed file call could not be audited", "correlationId", call.Correlation.CorrelationID, "error", err.Error())
+	}
 }

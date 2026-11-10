@@ -59,9 +59,10 @@ type conn struct {
 	helloDeadline time.Time // the nonce is void from this instant on
 	proved        bool      // the hello's proof held in time: the hello deadline no longer applies
 	accepted      bool
-	recorded      bool     // the accept's presence write succeeded: the close records the node offline
-	tokenDigest   [32]byte // the SHA-256 of the access token the connection is bound to
-	refreshes     int      // the TokenRefresh frames the connection sent
+	capabilities  map[string]bool // only claims from this connection's proved NodeHello
+	recorded      bool            // the accept's presence write succeeded: the close records the node offline
+	tokenDigest   [32]byte        // the SHA-256 of the access token the connection is bound to
+	refreshes     int             // the TokenRefresh frames the connection sent
 	lastRefresh   time.Time
 	accessExpires time.Time
 	lastInbound   time.Time
@@ -80,6 +81,7 @@ type conn struct {
 	queue chan outbound
 	// stall holds the writer after it took a frame until it is closed (tests only: a stalled writer; nil in a running center).
 	stall       chan struct{}
+	queuedCall  chan struct{} // test-only notification that a call entered the write queue
 	queuedBytes atomic.Int64
 	closing     atomic.Bool
 	lapsing     atomic.Bool // the lapse close is claimed: it is audited once
@@ -272,6 +274,10 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 	}
 	c.mu.Lock()
 	c.proved = true
+	c.capabilities = make(map[string]bool, len(claimed.Capabilities))
+	for _, capability := range claimed.Capabilities {
+		c.capabilities[capability] = true
+	}
 	c.mu.Unlock()
 	ctx, cancel := context.WithTimeout(c.ctx, presenceTimeout)
 	defer cancel()
@@ -591,7 +597,19 @@ func (c *conn) sendCall(p *pending, encode func(seq uint64) ([]byte, error)) err
 	if err != nil {
 		return err
 	}
-	return c.enqueue(outbound{data: data, call: p})
+	err = c.enqueue(outbound{data: data, call: p})
+	if err == nil {
+		c.mu.Lock()
+		queued := c.queuedCall
+		c.mu.Unlock()
+		if queued != nil {
+			select {
+			case queued <- struct{}{}:
+			default:
+			}
+		}
+	}
+	return err
 }
 
 // enqueue puts a frame in the bounded send queue (CTR5-HUB-10): at most SendQueueFrames frames and SendQueueBytes bytes.

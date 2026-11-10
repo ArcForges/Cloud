@@ -87,8 +87,9 @@ func TestCTR06SignedAuditMetadataIsBoundedAndOutcomeDigested(t *testing.T) {
 		Data: data, Offset: proto.Uint64(0), NextOffset: proto.Uint64(3), Eof: proto.Bool(true), Sha256: sum[:], FileSize: proto.Uint64(3)}},
 		Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_READ_BYTES.Enum(),
 			SizeBytes: proto.Uint64(3), DigestInputBytes: proto.Uint64(3), Sha256: sum[:]}}}}
+	request := marshal(t, &nodev1.FileServiceReadFileRequest{Path: &nodev1.FilePath{WorkspaceId: pid(platform.NewID()), Path: proto.String("a.txt")}, Offset: proto.Uint64(0), Length: proto.Uint64(3)})
 	first := marshal(t, value)
-	if _, err := decodeFileResponse(method, first); err != nil {
+	if _, err := decodeFileResponse(method, first, request); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := OutcomeDigest(first)
@@ -98,11 +99,11 @@ func TestCTR06SignedAuditMetadataIsBoundedAndOutcomeDigested(t *testing.T) {
 		t.Fatal("signed audit digest omitted from replay comparison")
 	}
 	value.Audit.Observations = append(value.Audit.Observations, value.Audit.Observations[0])
-	if _, err := decodeFileResponse(method, marshal(t, value)); err == nil {
+	if _, err := decodeFileResponse(method, marshal(t, value), request); err == nil {
 		t.Fatal("duplicate audit kind accepted")
 	}
 	value.Outcome = nil
-	if _, err := decodeFileResponse(method, marshal(t, value)); err == nil {
+	if _, err := decodeFileResponse(method, marshal(t, value), request); err == nil {
 		t.Fatal("missing outcome accepted")
 	}
 }
