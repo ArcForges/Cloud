@@ -288,12 +288,16 @@ func hubDeadline(deadline time.Duration) time.Duration {
 
 // recordDigest is a routed mutation's record digest (Q-4; decisions B-3): SHA-256 over the method, the node, the caller class (an
 // account session's user, or a relay's relaying node and local origin) and RequestDigestInput of the inner request bytes (its meta's
-// correlation ID left out). The session and the local session are recorded, not digested, so a resend from a refreshed session or a new
-// local process of the same origin converges.
+// correlation ID left out) for historical tasks. File methods bind exact transmitted bytes, including correlation ID,
+// and a relay local session; only byte-identical retries represent the same file operation.
 func recordDigest(method relayv1.RoutedMethod, nodeID platform.ID, caller fleet.RoutedCaller, userID platform.ID, payload []byte) ([]byte, error) {
-	digested, err := platform.RequestDigestInput(payload)
-	if err != nil {
-		return nil, arc.InvalidArgument("request", "malformed")
+	digested := payload
+	if !fileMethod(method) {
+		var err error
+		digested, err = platform.RequestDigestInput(payload)
+		if err != nil {
+			return nil, arc.InvalidArgument("request", "malformed")
+		}
 	}
 	hash := sha256.New()
 	var header [2]byte

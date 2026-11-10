@@ -121,7 +121,7 @@ func newFileResponse(method relayv1.RoutedMethod) nodeFileResponse {
 // Recover only bounded target metadata for a refusal audit. It is never an
 // authorization decision and an asserted relay is not attributed without proof.
 func fileTargetForAudit(method relayv1.RoutedMethod, payload []byte) inner {
-	result := inner{method: method, deadline: routes.RoutedDeadline}
+	result := inner{method: method, deadline: routes.RoutedFileDeadline}
 	if len(payload) == 0 || len(payload) > maxFileRequest {
 		return result
 	}

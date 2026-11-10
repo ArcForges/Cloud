@@ -35,6 +35,7 @@ const RoutedReplyBytes = 1_048_576
 // ReadNodeTaskOutput 10 s, or wait_ms + 10 s, at most 30 s. A route's budget is the longest its method may take.
 const (
 	RoutedDeadline           = 10 * time.Second
+	RoutedFileDeadline       = 15 * time.Second
 	RoutedWaitDeadline       = 55 * time.Second
 	RoutedReadOutputDeadline = 30 * time.Second
 )
@@ -90,7 +91,7 @@ func nodesBudget(path string) Budget {
 		fleetv1connect.FleetServiceCancelNodeTaskProcedure:
 		deadline, reply = int(RoutedDeadline.Milliseconds()), RoutedReplyBytes
 	case fleetv1connect.FleetServiceReadNodeFileProcedure, fleetv1connect.FleetServiceWriteNodeFileProcedure, fleetv1connect.FleetServiceEditNodeFileProcedure, fleetv1connect.FleetServiceSearchNodeFilesProcedure, fleetv1connect.FleetServiceListNodeDirectoryProcedure, fleetv1connect.FleetServicePlanNodeRemovalProcedure, fleetv1connect.FleetServiceExecuteNodeRemovalProcedure, fleetv1connect.FleetServiceGetNodeFileOperationProcedure, fleetv1connect.FleetServiceRegisterNodeWorkspaceProcedure, fleetv1connect.FleetServiceUnregisterNodeWorkspaceProcedure, fleetv1connect.FleetServiceListNodeWorkspacesProcedure, fleetv1connect.FleetServiceGetNodeWorkspaceProcedure:
-		deadline, reply = int(RoutedDeadline.Milliseconds()), RoutedReplyBytes
+		deadline, reply = int(RoutedFileDeadline.Milliseconds()), RoutedReplyBytes
 	case fleetv1connect.FleetServiceWaitNodeTaskProcedure:
 		deadline, reply = int(RoutedWaitDeadline.Milliseconds()), RoutedReplyBytes
 	case fleetv1connect.FleetServiceReadNodeTaskOutputProcedure:

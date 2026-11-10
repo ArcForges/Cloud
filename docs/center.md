@@ -589,7 +589,8 @@ Admissions, joins, replay-window fencing, conservative lost-settlement handling 
 epoch sweeps cover both receipt tables. No request/response body is stored in a receipt.
 
 Each new request admits at most 245,760 inner bytes. The outer ingress remains bounded at
-262,144 bytes, replies at 1 MiB including framing, and the operation deadline at ten seconds.
+262,144 bytes, replies at 1 MiB including framing, and the Fleet operation deadline at fifteen seconds.
+The routed node gets up to fourteen seconds including transport and settlement reserve; its file operation retains its published ten-second deadline.
 The official center generator produces the Worker table from these route declarations;
 unrelated methods retain their existing bounds.
 

@@ -146,8 +146,8 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
     [...surfaceNames],
     ["identity", "pages", "operations", "fleet", "mobile", "relay", "nodes"],
   );
-  // AF-CTR-05 E2a and E2b: FleetService's node registry and its routed task methods are the nodes surface's, and no other
-  // FleetService method has a row.
+  // FleetService's node registry, routed task methods and twelve AF-CTR-06 file/workspace methods are the nodes surface's;
+  // no other FleetService method has a row.
   assert.deepEqual(
     surfaceRoutes
       .filter((route) => route.path.startsWith("/arcforges.fleet.v1.FleetService/"))
@@ -163,6 +163,18 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
       "WaitNodeTask",
       "ReadNodeTaskOutput",
       "CancelNodeTask",
+      "ReadNodeFile",
+      "WriteNodeFile",
+      "EditNodeFile",
+      "SearchNodeFiles",
+      "ListNodeDirectory",
+      "PlanNodeRemoval",
+      "ExecuteNodeRemoval",
+      "GetNodeFileOperation",
+      "RegisterNodeWorkspace",
+      "UnregisterNodeWorkspace",
+      "ListNodeWorkspaces",
+      "GetNodeWorkspace",
     ].map((name) => `/arcforges.fleet.v1.FleetService/${name} nodes`),
   );
   assert.equal(surfaceTable.size, surfaceRoutes.length);

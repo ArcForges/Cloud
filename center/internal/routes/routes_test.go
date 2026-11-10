@@ -121,7 +121,7 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 				// The routed task methods (E2b): 10 s, Wait 55 s, ReadOutput 30 s; a node response of up to 1 MiB plus its frame.
 				deadline, reply = 10_000, RoutedReplyBytes
 			case "/arcforges.fleet.v1.FleetService/ReadNodeFile", "/arcforges.fleet.v1.FleetService/WriteNodeFile", "/arcforges.fleet.v1.FleetService/EditNodeFile", "/arcforges.fleet.v1.FleetService/SearchNodeFiles", "/arcforges.fleet.v1.FleetService/ListNodeDirectory", "/arcforges.fleet.v1.FleetService/PlanNodeRemoval", "/arcforges.fleet.v1.FleetService/ExecuteNodeRemoval", "/arcforges.fleet.v1.FleetService/GetNodeFileOperation", "/arcforges.fleet.v1.FleetService/RegisterNodeWorkspace", "/arcforges.fleet.v1.FleetService/UnregisterNodeWorkspace", "/arcforges.fleet.v1.FleetService/ListNodeWorkspaces", "/arcforges.fleet.v1.FleetService/GetNodeWorkspace":
-				deadline, reply = 10_000, RoutedReplyBytes
+				deadline, reply = 15_000, RoutedReplyBytes
 			case "/arcforges.fleet.v1.FleetService/WaitNodeTask":
 				deadline, reply = 55_000, RoutedReplyBytes
 			case "/arcforges.fleet.v1.FleetService/ReadNodeTaskOutput":

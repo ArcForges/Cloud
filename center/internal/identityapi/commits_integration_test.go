@@ -282,6 +282,8 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		// the answer and the boot sweep the hub's take-over; the offline refusal's audit is auxiliary (it records a refusal only).
 		"admit a routed call": effect, "settle a routed call": effect, "sweep the routing records of a previous hub": effect,
 		"audit a routed call to an offline node": auxiliary, "read a routing record": read,
+		// AF-CTR-06: these transactions append refusal/read audit metadata only.
+		"audit a routed file read": auxiliary, "audit a refused routed file call": auxiliary,
 	}
 	found := map[string]string{}
 	for _, directory := range []string{".", "../identity", "../access", "../ratelimit", "../session", "../device", "../pages", "../entitlement", "../fleet",
