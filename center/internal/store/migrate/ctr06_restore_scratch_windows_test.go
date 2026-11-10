@@ -270,13 +270,16 @@ func ctr06WindowsMappingChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	view, err := windows.MapViewOfFile(mapping, windows.FILE_MAP_WRITE, 0, 0, 0)
-	_ = windows.CloseHandle(file) // the real writable view survives without a file handle
+	closeErr := windows.CloseHandle(file) // the real writable view survives without a file handle
 	if err != nil {
 		_ = windows.CloseHandle(mapping)
 		t.Fatal(err)
 	}
 	defer windows.CloseHandle(mapping)
 	defer windows.UnmapViewOfFile(view)
+	if closeErr != nil {
+		t.Fatalf("source file handle was not closed: %v", closeErr)
+	}
 	if err := os.WriteFile(os.Getenv("CTR06_MAPPING_READY"), []byte("ready"), 0o600); err != nil {
 		t.Fatal(err)
 	}
