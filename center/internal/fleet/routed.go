@@ -321,14 +321,12 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13
 		}
 		tag, err := tx.Exec(ctx, query, args...)
 		if err != nil {
-			// The private trigger enforces this even for an older writer.
-			// No PostgreSQL message escapes this definite rollback.
-			sanitized := store.Sanitize("reserve a routed command", err)
-			var conflict *store.Error
-			if errors.As(sanitized, &conflict) && conflict.SQLState == "23505" && conflict.Constraint == "routed_command_id_namespace" {
+			// Preserve the bridge's exact cross-namespace conflict mapping. Other
+			// errors retain the existing sanitized rollback semantics.
+			if routedNamespaceConflict(err) {
 				return arc.CommandIDReused()
 			}
-			return sanitized
+			return store.Sanitize("reserve a routed command", err)
 		}
 		var prior *routedRow
 		if tag.RowsAffected() == 1 {
@@ -394,6 +392,14 @@ WHERE account_id = $1 AND command_id = $2`, accept.AccountID, accept.CommandID, 
 		return RoutedDecision{}, store.Sanitize("admit a routed call", err)
 	}
 	return decision, nil
+}
+
+// routedNamespaceConflict recognizes only the future migration's named
+// unique-violation constraint; it does not change unrelated constraint errors.
+func routedNamespaceConflict(err error) bool {
+	var failure *store.Error
+	return errors.As(store.Sanitize("reserve a routed command", err), &failure) &&
+		failure.SQLState == "23505" && failure.Constraint == "routed_command_id_namespace"
 }
 
 // auditRouted appends a routed call's audit event in the caller's transaction: closed codes, digests, sizes and IDs only (PN-6).
