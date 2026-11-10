@@ -181,6 +181,9 @@ func windowsRestrictedScratchAccess(sd *windows.SECURITY_DESCRIPTOR, path string
 	return nil
 }
 
+const ctr06MappedOriginal = "synthetic-original-backup"
+const ctr06MappedReplacement = "modified--original-backup"
+
 func TestCTR06WindowsBackupPrivateCopyAgainstMappedSource(t *testing.T) {
 	if os.Getenv("CTR06_MAPPING_CHILD") == "1" {
 		ctr06WindowsMappingChild(t)
@@ -188,7 +191,10 @@ func TestCTR06WindowsBackupPrivateCopyAgainstMappedSource(t *testing.T) {
 	}
 	fixtures := t.TempDir()
 	source, ready, proceed := filepath.Join(fixtures, "source"), filepath.Join(fixtures, "ready"), filepath.Join(fixtures, "proceed")
-	original := []byte("synthetic-original-backup")
+	original := []byte(ctr06MappedOriginal)
+	if len(original) != len(ctr06MappedReplacement) || len(original) == 0 {
+		t.Fatal("mapped test replacement must have the original length")
+	}
 	if err := os.WriteFile(source, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -244,8 +250,8 @@ func TestCTR06WindowsBackupPrivateCopyAgainstMappedSource(t *testing.T) {
 		t.Fatalf("the protected copy changed after source mapping write: %v", err)
 	}
 	changed, err := os.ReadFile(source)
-	if err != nil || string(changed) == string(original) {
-		t.Fatalf("the source mapping did not actually change the source: %v", err)
+	if err != nil || string(changed) != ctr06MappedReplacement {
+		t.Fatalf("the source does not contain the exact mapping write: %v", err)
 	}
 }
 
@@ -284,8 +290,16 @@ func ctr06WindowsMappingChild(t *testing.T) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	data := unsafe.Slice((*byte)(unsafe.Pointer(view)), len("synthetic-original-backup"))
-	copy(data, []byte("modified--original-backup"))
+	data := []byte(ctr06MappedReplacement)
+	var written uintptr
+	if err := windows.WriteProcessMemory(windows.CurrentProcess(), view, &data[0], uintptr(len(data)), &written); err != nil || written != uintptr(len(data)) {
+		t.Fatalf("mapped write failed or was incomplete: written=%d err=%v", written, err)
+	}
+	observed := make([]byte, len(data))
+	var read uintptr
+	if err := windows.ReadProcessMemory(windows.CurrentProcess(), view, &observed[0], uintptr(len(observed)), &read); err != nil || read != uintptr(len(observed)) || string(observed) != string(data) {
+		t.Fatalf("mapped write could not be read back exactly: read=%d err=%v", read, err)
+	}
 	if err := windows.FlushViewOfFile(view, uintptr(len(data))); err != nil {
 		t.Fatal(err)
 	}
