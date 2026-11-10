@@ -81,6 +81,8 @@ test("CTR06 provider predicate requires exact version, secret binding, DO and co
     image,
   });
   const foreignImage = `registry.cloudflare.com/${account}/arcforges-cloud@sha256:${"f".repeat(64)}`;
+  const otherBinding = snapshot.workerVersion.resources.bindings[1];
+  assert.ok(otherBinding, "fixture must contain a non-container binding");
   const cases = [
     {
       ...snapshot,
@@ -102,7 +104,7 @@ test("CTR06 provider predicate requires exact version, secret binding, DO and co
       ...snapshot,
       workerVersion: {
         id: version,
-        resources: { bindings: [snapshot.workerVersion.resources.bindings[1]!] },
+        resources: { bindings: [otherBinding] },
       },
     },
     {

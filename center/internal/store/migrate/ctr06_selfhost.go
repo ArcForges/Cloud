@@ -208,7 +208,7 @@ func runLocalBridge(ctx context.Context, conn *pgx.Conn, bridge *localBridgeExec
 			<-done
 		}
 	}()
-	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{Proxy: nil},
+	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	defer client.CloseIdleConnections()
 	deadline := time.Now().Add(15 * time.Second)

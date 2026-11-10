@@ -89,7 +89,7 @@ export function bridgeAudience(c: BridgeContext): string {
     c.containerApplication,
     c.registryImage,
   ];
-  return "urn:arcforges:ctr06:" + createHash("sha256").update(fields.join("\n")).digest("hex");
+  return `urn:arcforges:ctr06:${createHash("sha256").update(fields.join("\n")).digest("hex")}`;
 }
 
 type Binding = { name?: unknown; type?: unknown; class_name?: unknown; namespace_id?: unknown };
@@ -401,7 +401,8 @@ export async function verifyLiveBridge(
     (application) => application.durable_objects?.namespace_id === namespace,
   );
   assert.equal(selected.length, 1, "container namespace is absent or ambiguous");
-  const application = selected[0]!;
+  const application = selected[0];
+  assert(application, "provider returned no selected application");
   const applicationId = String(application.id ?? "");
   assert.match(applicationId, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u);
   const detail = await get(`/containers/applications/${applicationId}`);
