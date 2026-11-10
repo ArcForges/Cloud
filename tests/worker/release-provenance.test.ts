@@ -7,7 +7,9 @@ import { before, test } from "node:test";
 import { auditProvenance, hash, object, parseDocument } from "../../tooling/provenance.ts";
 import {
   legalBundle,
+  releaseProfile,
   stageImageNotices,
+  verifyBridgeAsset,
   verifyImageFiles,
   verifyReleaseFiles,
   verifyWorker,
@@ -45,6 +47,29 @@ test("real locked Wrangler output matches the approved exact Worker closure", ()
   );
   assert(result.outputInputs.length > 0 && Object.keys(result.inputs).length > 0);
 });
+test("the active profile binds both bridge assets and refuses substituted bytes", () => {
+  const { profile } = releaseProfile(root);
+  for (const platform of ["linux", "windows"] as const) {
+    assert.equal(
+      profile.bridgeAssets.assets[platform].name,
+      `arcforges-ctr06-bridge-8e5-${platform}-amd64.zip`,
+    );
+    assert.throws(() => verifyBridgeAsset(root, platform, Buffer.from("not the bridge asset")));
+    const fixture = process.env[`ARCFORGES_TEST_CTR06_${platform.toUpperCase()}_BUNDLE`];
+    if (fixture) {
+      const real = readFileSync(fixture);
+      assert.equal(
+        verifyBridgeAsset(root, platform, real).sha256,
+        profile.bridgeAssets.assets[platform].sha256,
+      );
+      const changed = Buffer.from(real);
+      const offset = Math.floor(changed.length / 2);
+      changed.writeUInt8(changed.readUInt8(offset) ^ 1, offset);
+      assert.throws(() => verifyBridgeAsset(root, platform, changed));
+    }
+  }
+});
+
 test("reject changed Worker bytes independently of any supplied outer hash", () => {
   const changed = Buffer.concat([worker, Buffer.from("\nexport const injected = true;\n")]);
   assert.notEqual(hash(changed), hash(worker));

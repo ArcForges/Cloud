@@ -4,6 +4,7 @@ package hub
 
 import (
 	"sync"
+	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
@@ -50,6 +51,27 @@ func (h *Hub) StallWritesWithCallNotification(nodeID platform.ID) (queued <-chan
 		once.Do(func() {
 			c.mu.Lock()
 			c.stall, c.queuedCall = nil, nil
+			c.mu.Unlock()
+			close(gate)
+		})
+	}
+}
+
+// StallAfterDelivery coordinates the gap between the delivered transition and
+// the socket write; it tests only the center's observable send fence.
+func (h *Hub) StallAfterDelivery(nodeID platform.ID) (delivered <-chan time.Time, release func()) {
+	h.mu.Lock()
+	c := h.nodes[nodeID]
+	h.mu.Unlock()
+	gate, notice := make(chan struct{}), make(chan time.Time, 1)
+	c.mu.Lock()
+	c.afterDeliverGate, c.afterDeliverNotice = gate, notice
+	c.mu.Unlock()
+	var once sync.Once
+	return notice, func() {
+		once.Do(func() {
+			c.mu.Lock()
+			c.afterDeliverGate, c.afterDeliverNotice = nil, nil
 			c.mu.Unlock()
 			close(gate)
 		})

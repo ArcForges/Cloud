@@ -122,7 +122,7 @@ func newFileResponse(method relayv1.RoutedMethod) nodeFileResponse {
 // authorization decision and an asserted relay is not attributed without proof.
 func fileTargetForAudit(method relayv1.RoutedMethod, payload []byte) inner {
 	result := inner{method: method, deadline: routes.RoutedFileDeadline}
-	if len(payload) == 0 || len(payload) > maxFileRequest {
+	if len(payload) == 0 || len(payload) > 262_144 {
 		return result
 	}
 	v := newFileRequest(method)
@@ -175,7 +175,13 @@ func fileTargetForAudit(method relayv1.RoutedMethod, payload []byte) inner {
 func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platform.ID) (inner, error) {
 	result := fileTargetForAudit(method, payload)
 	bad := func(field, rule string) (inner, error) { return result, arc.InvalidArgument("request."+field, rule) }
-	if len(payload) < 1 || len(payload) > maxFileRequest {
+	tooLarge := func(name string, maximum int64) (inner, error) {
+		return result, &arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE, Code: "too_large", Limit: &arc.Limit{Name: name, Maximum: maximum}}
+	}
+	// The ingress admits at most 262,144 bytes including the outer frame. A
+	// decoded resource bound is classified before the smaller inner-envelope
+	// limit; an oversized malformed or impossible outer frame is never decoded.
+	if len(payload) < 1 || len(payload) > 262_144 {
 		return bad("payload", "length")
 	}
 	value := newFileRequest(method)
@@ -197,29 +203,35 @@ func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platfo
 		}
 		return ok
 	}
-	checkPath := func(path *nodev1.FilePath, empty bool) bool {
-		if path == nil || path.Path == nil || len(path.GetPath()) > 4096 || !utf8.ValidString(path.GetPath()) ||
-			strings.ContainsRune(path.GetPath(), 0) || (!empty && path.GetPath() == "") || !setWorkspace(path.GetWorkspaceId()) {
-			return false
+	checkPath := func(path *nodev1.FilePath, empty bool, field string) error {
+		if path == nil || path.Path == nil || !utf8.ValidString(path.GetPath()) || strings.ContainsRune(path.GetPath(), 0) ||
+			(!empty && path.GetPath() == "") || !setWorkspace(path.GetWorkspaceId()) {
+			return arc.InvalidArgument("request."+field, "required")
+		}
+		if len(path.GetPath()) > 4096 {
+			return &arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE, Code: "too_large", Limit: &arc.Limit{Name: "path_bytes", Maximum: 4096}}
 		}
 		result.path = path.GetPath()
 		result.pathKnown = true
-		return true
+		return nil
 	}
 	switch v := value.(type) {
 	case *nodev1.FileServiceReadFileRequest:
-		if !checkPath(v.Path, false) {
-			return bad("path", "required")
+		if err := checkPath(v.Path, false, "path"); err != nil {
+			return result, err
 		}
 		if v.Offset == nil || v.Length == nil || v.GetLength() < 1 {
 			return bad("length", "minimum")
 		}
 	case *nodev1.FileServiceWriteFileRequest:
-		if !checkPath(v.Path, false) {
-			return bad("path", "required")
+		if err := checkPath(v.Path, false, "path"); err != nil {
+			return result, err
 		}
-		if v.Data == nil || len(v.Data) > 196_608 {
-			return bad("data", "length")
+		if v.Data == nil {
+			return bad("data", "required")
+		}
+		if len(v.Data) > 196_608 {
+			return tooLarge("file_write_bytes", 196_608)
 		}
 		switch precondition := v.Precondition.(type) {
 		case *nodev1.FileServiceWriteFileRequest_ExpectedSha256:
@@ -234,11 +246,14 @@ func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platfo
 			return bad("precondition", "required")
 		}
 	case *nodev1.FileServiceEditFileRequest:
-		if !checkPath(v.Path, false) {
-			return bad("path", "required")
+		if err := checkPath(v.Path, false, "path"); err != nil {
+			return result, err
 		}
-		if v.OldText == nil || len(v.GetOldText()) < 1 || len(v.GetOldText()) > 65_536 || v.NewText == nil || len(v.GetNewText()) > 65_536 {
+		if v.OldText == nil || len(v.GetOldText()) < 1 || v.NewText == nil {
 			return bad("text", "length")
+		}
+		if len(v.GetOldText()) > 65_536 || len(v.GetNewText()) > 65_536 {
+			return tooLarge("file_edit_text_bytes", 65_536)
 		}
 		if v.ExpectedOccurrences == nil || v.GetExpectedOccurrences() < 1 || v.GetExpectedOccurrences() > 1000 {
 			return bad("expected_occurrences", "range")
@@ -247,8 +262,8 @@ func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platfo
 			return bad("expected_sha256", "length")
 		}
 	case *nodev1.FileServiceSearchFilesRequest:
-		if !checkPath(v.Path, true) {
-			return bad("path", "required")
+		if err := checkPath(v.Path, true, "path"); err != nil {
+			return result, err
 		}
 		if v.Pattern == nil || len(v.GetPattern()) < 1 || len(v.GetPattern()) > 1024 {
 			return bad("pattern", "length")
@@ -263,8 +278,8 @@ func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platfo
 			return bad("max_scan_bytes", "range")
 		}
 	case *nodev1.FileServiceListDirectoryRequest:
-		if !checkPath(v.Path, true) {
-			return bad("path", "required")
+		if err := checkPath(v.Path, true, "path"); err != nil {
+			return result, err
 		}
 		if v.PageSize != nil && (v.GetPageSize() < 1 || v.GetPageSize() > 128) {
 			return bad("page_size", "range")
@@ -275,8 +290,8 @@ func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platfo
 	case *nodev1.FileServicePlanRemovalRequest:
 		switch target := v.Target.(type) {
 		case *nodev1.FileServicePlanRemovalRequest_WorkspacePath:
-			if !checkPath(target.WorkspacePath, false) {
-				return bad("workspace_path", "required")
+			if err := checkPath(target.WorkspacePath, false, "workspace_path"); err != nil {
+				return result, err
 			}
 		case *nodev1.FileServicePlanRemovalRequest_AttemptId:
 			id, ok := parseID(target.AttemptId)
@@ -299,8 +314,11 @@ func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platfo
 			return bad("operation_command_id", "required")
 		}
 	case *nodev1.WorkspaceServiceRegisterWorkspaceRequest:
-		if v.Path == nil || len(v.GetPath()) < 1 || len(v.GetPath()) > 4096 || strings.ContainsRune(v.GetPath(), 0) {
+		if v.Path == nil || len(v.GetPath()) < 1 || !utf8.ValidString(v.GetPath()) || strings.ContainsRune(v.GetPath(), 0) {
 			return bad("path", "length")
+		}
+		if len(v.GetPath()) > 4096 {
+			return tooLarge("workspace_root_path_bytes", 4096)
 		}
 		result.path = v.GetPath()
 		result.pathKnown = true
@@ -326,6 +344,9 @@ func checkFileInner(method relayv1.RoutedMethod, payload []byte, command *platfo
 		if !setWorkspace(v.WorkspaceId) {
 			return bad("workspace_id", "required")
 		}
+	}
+	if len(payload) > maxFileRequest {
+		return bad("payload", "length")
 	}
 	return result, nil
 }
@@ -562,6 +583,12 @@ func fileObservations(audit *nodev1.FileAuditMetadata) []fleet.RoutedObservation
 	return observations
 }
 
+func sameFileTarget(a, b fleet.FileTarget) bool {
+	equalID := func(x, y *platform.ID) bool { return x == nil && y == nil || x != nil && y != nil && *x == *y }
+	equalPath := func(x, y *string) bool { return x == nil && y == nil || x != nil && y != nil && *x == *y }
+	return equalID(a.WorkspaceID, b.WorkspaceID) && equalID(a.AttemptID, b.AttemptID) && equalPath(a.Path, b.Path)
+}
+
 // routeFileRead audits the verified signed observations as node-supplied evidence;
 // lost/invalid replies explicitly say that these observations are unavailable.
 func (r *Registry) routeFileRead(ctx context.Context, call *ingress.Call, routed RoutedCall) ([]byte, error) {
@@ -576,7 +603,7 @@ func (r *Registry) routeFileRead(ctx context.Context, call *ingress.Call, routed
 	}
 	result, err := r.routing.router.Route(ctx, routed)
 	exact := sha256.Sum256(routed.Payload)
-	audit := fleet.RoutedReadAudit{Request: request(call), Caller: caller, NodeID: routed.TargetNodeID, Method: int16(routed.Method),
+	audit := fleet.RoutedReadAudit{Request: request(call), Caller: caller, AccountID: routed.AccountID, NodeID: routed.TargetNodeID, Method: int16(routed.Method),
 		WorkspaceID: routed.WorkspaceID, TargetAttemptID: routed.TargetAttemptID, TargetPath: routed.TargetPath,
 		RequestSHA256: exact[:], RequestSize: len(routed.Payload), Outcome: "unavailable", Now: r.clock()}
 	if err == nil && result.Outcome == relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED {
@@ -589,6 +616,36 @@ func (r *Registry) routeFileRead(ctx context.Context, call *ingress.Call, routed
 			audit.Outcome = "succeeded"
 			if value.GetError() != nil {
 				audit.Outcome = "refused"
+			} else if operation, ok := value.(*nodev1.FileServiceGetFileOperationResponse); ok {
+				// The signed status binds its returned target to the requested operation.
+				var request nodev1.FileServiceGetFileOperationRequest
+				_ = proto.Unmarshal(routed.Payload, &request) // decodeFileResponse already checked it
+				op := operation.GetValue().GetOperation()
+				var observed fleet.FileTarget
+				switch target := op.Target.(type) {
+				case *nodev1.FileOperation_WorkspacePath:
+					id, _ := parseID(target.WorkspacePath.WorkspaceId)
+					path := target.WorkspacePath.GetPath()
+					observed.WorkspaceID, observed.Path = &id, &path
+				case *nodev1.FileOperation_AttemptId:
+					id, _ := parseID(target.AttemptId)
+					observed.AttemptID = &id
+				}
+				known := fleet.FileTarget{WorkspaceID: routed.WorkspaceID, AttemptID: routed.TargetAttemptID, Path: routed.TargetPath}
+				id, _ := parseID(request.OperationCommandId)
+				// A node signature authenticates the response, not the caller's
+				// ownership. Bind it to the caller's original durable mutation and
+				// its raw inner-wire SHA-256 (not the domain-separated record digest).
+				receipt, receiptErr := fleet.LookupFileOperationReceipt(ctx, r.db, routed.AccountID, routed.TargetNodeID, caller, id)
+				if receiptErr != nil || receipt == nil || !bytes.Equal(receipt.RequestSHA256, op.RequestSha256) ||
+					operationMethod(op.GetKind()) != relayv1.RoutedMethod(receipt.Method) ||
+					((known.WorkspaceID != nil || known.AttemptID != nil) && !sameFileTarget(known, observed)) {
+					err = arc.NodeUnreachable(routed.TargetNodeID[:], arc.UnreachableChannelClosed, false)
+					audit.Outcome, audit.NodeAuditAvailable, audit.Observations = "unavailable", false, nil
+				} else {
+					audit.WorkspaceID, audit.TargetAttemptID, audit.TargetPath = observed.WorkspaceID, observed.AttemptID, observed.Path
+					audit.OperationTargetID = &id
+				}
 			}
 		}
 	} else if err == nil {
@@ -634,35 +691,134 @@ func fileRefusalAudit(failure error) (string, string) {
 	return key, detail
 }
 
+// auditEarlyFileRefusal authenticates a node assertion solely to attribute an
+// already rejected outer frame. No verification result authorizes routing. A
+// malformed outer command is not trusted: the bounded, signed assertion's own
+// command is checked against its signature, method, target and payload digest.
+func (r *Registry) auditEarlyFileRefusal(ctx context.Context, call *ingress.Call, message routedRequest, method relayv1.RoutedMethod, failure error) {
+	nodeID, ok := parseID(message.GetNodeId())
+	if !ok {
+		return
+	}
+	var relay access.Relay
+	var signedCommand *platform.ID
+	if call.Caller.Scope == "node" {
+		caller, raw := message.GetCaller(), message.GetRelayAssertion()
+		if caller == nil || caller.GetKind() != fleetv1.CallerKind_CALLER_KIND_NODE_RELAY || len(raw) == 0 || len(raw) > 512 {
+			return
+		}
+		var assertion relayv1.RelayAssertion
+		if proto.Unmarshal(raw, &assertion) != nil {
+			return
+		}
+		if assertion.CommandId != nil {
+			id, valid := parseID(assertion.CommandId)
+			if !valid {
+				return
+			}
+			signedCommand = &id
+		}
+		relaying, _ := parseID(caller.GetRelayingNodeId())
+		digest := sha256.Sum256(message.GetRequest())
+		claim := &access.RelayClaim{Assertion: raw, Method: method, RequestSHA256: digest[:], TargetNodeID: &nodeID, CommandID: signedCommand,
+			CallerRelayingNodeID: relaying, CallerLocalOrigin: caller.GetLocalOrigin()}
+		var err error
+		relay, err = r.access.VerifyRelayedForAudit(ctx, call, claim)
+		if err != nil {
+			return
+		}
+	}
+	var command *platform.ID
+	if id, valid := parseID(message.GetMeta().GetCommandId()); valid && (relay == nil || signedCommand != nil && id == *signedCommand) {
+		command = &id
+	}
+	r.auditFileRefusal(call, nodeID, command, method, message.GetRequest(), fileTargetForAudit(method, message.GetRequest()), relay, failure)
+}
+
+// fileAuditCaller derives a target-lookup key only from authenticated evidence.
+func fileAuditCaller(call *ingress.Call, relay access.Relay) (fleet.RoutedCaller, platform.ID, bool) {
+	if !call.Caller.IsAuthenticated() {
+		return fleet.RoutedCaller{}, platform.ID{}, false
+	}
+	account, ok := textID(call.Caller.UserID)
+	if !ok {
+		return fleet.RoutedCaller{}, platform.ID{}, false
+	}
+	if relay != nil {
+		verified, ok := relay.(relayed)
+		if !ok || !verified.Verified() || call.Caller.Scope != "node" {
+			return fleet.RoutedCaller{}, platform.ID{}, false
+		}
+		return fleet.RoutedCaller{Kind: fleet.RoutedCallerRelay, RelayingNodeID: verified.RelayingNodeID(), LocalOrigin: int16(verified.LocalOrigin()),
+			LocalSessionID: verified.LocalSessionID(), Actor: "node:" + verified.RelayingInstallationID().String()}, account, true
+	}
+	if call.Caller.Scope != "account" && call.Caller.Scope != "mobile.limited" {
+		return fleet.RoutedCaller{}, platform.ID{}, false
+	}
+	sessionID, ok := textID(call.Caller.SessionID)
+	if !ok {
+		return fleet.RoutedCaller{}, platform.ID{}, false
+	}
+	return fleet.RoutedCaller{Kind: fleet.RoutedCallerSession, SessionID: sessionID, Actor: identity.Actor(account)}, account, true
+}
+
+// resolveFileTarget consults only a previously bound account/node/caller key;
+// foreign or unknown identifiers yield no metadata, never a guessed path.
+func (r *Registry) resolveFileTarget(ctx context.Context, call *ingress.Call, nodeID platform.ID, method relayv1.RoutedMethod,
+	payload []byte, checked inner, relay access.Relay) (inner, error) {
+	if method != relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL && method != relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_FILE_OPERATION {
+		return checked, nil
+	}
+	if len(payload) == 0 || len(payload) > 262_144 {
+		return checked, nil
+	}
+	value := newFileRequest(method)
+	if value == nil || proto.Unmarshal(payload, value) != nil {
+		return checked, nil
+	}
+	var id platform.ID
+	var ok bool
+	var kind fleet.FileTargetKind
+	switch v := value.(type) {
+	case *nodev1.FileServiceExecuteRemovalRequest:
+		id, ok = parseID(v.PlanId)
+		kind = fleet.FileTargetPlan
+	case *nodev1.FileServiceGetFileOperationRequest:
+		id, ok = parseID(v.OperationCommandId)
+		kind = fleet.FileTargetOperation
+	}
+	caller, account, verified := fileAuditCaller(call, relay)
+	if !ok || !verified {
+		return checked, nil
+	}
+	target, err := fleet.LookupFileTarget(ctx, r.db, account, nodeID, caller, kind, id)
+	if err != nil || target == nil {
+		return checked, err
+	}
+	checked.workspaceID, checked.targetAttemptID = target.WorkspaceID, target.AttemptID
+	if target.Path != nil {
+		checked.path, checked.pathKnown = *target.Path, true
+	}
+	return checked, nil
+}
+
 // auditFileRefusal uses only an authenticated account session or an already
 // verified relay. Never attribute a merely claimed relay identity to an actor.
 func (r *Registry) auditFileRefusal(call *ingress.Call, nodeID platform.ID, commandID *platform.ID, method relayv1.RoutedMethod,
 	payload []byte, checked inner, relay access.Relay, failure error) {
-	if !call.Caller.IsAuthenticated() {
+	caller, _, ok := fileAuditCaller(call, relay)
+	if !ok {
 		return
 	}
-	var caller fleet.RoutedCaller
-	if relay != nil {
-		verified, ok := relay.(relayed)
-		if !ok || !verified.Verified() {
-			return
-		}
-		caller = fleet.RoutedCaller{Kind: fleet.RoutedCallerRelay, RelayingNodeID: verified.RelayingNodeID(), LocalOrigin: int16(verified.LocalOrigin()),
-			LocalSessionID: verified.LocalSessionID(), Actor: "node:" + verified.RelayingInstallationID().String()}
+	lookupCtx, lookupCancel := context.WithTimeout(context.Background(), time.Second)
+	resolved, err := r.resolveFileTarget(lookupCtx, call, nodeID, method, payload, checked, relay)
+	lookupCancel()
+	if err == nil {
+		checked = resolved
 	} else {
-		if call.Caller.Scope != "account" && call.Caller.Scope != "mobile.limited" {
-			return
-		}
-		account, ok := textID(call.Caller.UserID)
-		if !ok {
-			return
-		}
-		sessionID, ok := textID(call.Caller.SessionID)
-		if !ok {
-			return
-		}
-		caller = fleet.RoutedCaller{Kind: fleet.RoutedCallerSession, SessionID: sessionID, Actor: identity.Actor(account)}
+		r.logger.Warn("a refused file target could not be resolved", "error", err.Error())
 	}
+
 	refusal, refusalReason := fileRefusalAudit(failure)
 	hash := sha256.Sum256(payload)
 	var path *string

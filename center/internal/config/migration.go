@@ -13,12 +13,14 @@ import (
 // The environment variables of `arcforges-center migrate` and `arcforges-center admin`. They are read only by those commands,
 // never by serve: the running center has only the runtime role's pooled URL.
 const (
-	EnvMigrationDatabaseURL = "ARCFORGES_CENTER_MIGRATION_DATABASE_URL"
-	EnvDatabaseName         = "ARCFORGES_CENTER_DATABASE_NAME"
-	EnvRuntimeRole          = "ARCFORGES_CENTER_RUNTIME_ROLE"
-	EnvRuntimeSecretFile    = "ARCFORGES_CENTER_RUNTIME_SECRET_FILE"
-	EnvRuntimePooledHost    = "ARCFORGES_CENTER_RUNTIME_POOLED_HOST"
-	EnvMigrationLockTimeout = "ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT"
+	EnvMigrationDatabaseURL  = "ARCFORGES_CENTER_MIGRATION_DATABASE_URL"
+	EnvDatabaseName          = "ARCFORGES_CENTER_DATABASE_NAME"
+	EnvRuntimeRole           = "ARCFORGES_CENTER_RUNTIME_ROLE"
+	EnvRuntimeSecretFile     = "ARCFORGES_CENTER_RUNTIME_SECRET_FILE"
+	EnvRuntimePooledHost     = "ARCFORGES_CENTER_RUNTIME_POOLED_HOST"
+	EnvMigrationLockTimeout  = "ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT"
+	EnvCTR06ProofFile        = "ARCFORGES_CENTER_CTR06_PROOF_FILE"
+	EnvCTR06BridgeExecutable = "ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE"
 )
 
 // DefaultRuntimeRole is the runtime group role when none is configured.
@@ -42,6 +44,10 @@ type Migration struct {
 	RuntimeRole string
 	// SecretFile is where `admin rotate-runtime-credential` writes the runtime URL (a new file, mode 0600).
 	SecretFile string
+	// CTR06ProofFile is the private, short-lived protected promotion envelope.
+	CTR06ProofFile string
+	// CTR06BridgeExecutable names the verified native bridge executable for an existing self-hosted schema-10 upgrade.
+	CTR06BridgeExecutable string
 	// PooledHost is host[:port] of the pooled endpoint; empty derives it (the Neon -pooler host, or the direct host).
 	PooledHost  string
 	LockTimeout time.Duration
@@ -101,6 +107,14 @@ func LoadMigration(lookup func(string) (string, bool)) (Migration, error) {
 	}
 	if config.SecretFile = get(EnvRuntimeSecretFile); config.SecretFile != "" && !filepath.IsAbs(config.SecretFile) {
 		return Migration{}, invalid("%s must be an absolute path", EnvRuntimeSecretFile)
+	}
+	if config.CTR06ProofFile = get(EnvCTR06ProofFile); config.CTR06ProofFile != "" && !filepath.IsAbs(config.CTR06ProofFile) {
+		return Migration{}, invalid("%s must be an absolute path", EnvCTR06ProofFile)
+	}
+	if config.CTR06BridgeExecutable = get(EnvCTR06BridgeExecutable); config.CTR06BridgeExecutable != "" {
+		if config.Mode != SelfHosted || !filepath.IsAbs(config.CTR06BridgeExecutable) || config.CTR06ProofFile != "" {
+			return Migration{}, invalid("%s requires self-hosted mode, an absolute path and no hosted proof", EnvCTR06BridgeExecutable)
+		}
 	}
 	if config.PooledHost = get(EnvRuntimePooledHost); config.PooledHost != "" && !hostPort.MatchString(config.PooledHost) {
 		return Migration{}, invalid("%s must be host or host:port", EnvRuntimePooledHost)

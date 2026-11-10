@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/ArcForges/Cloud/center/internal/bridgeproof"
 	"github.com/ArcForges/Cloud/center/internal/schema"
 )
 
@@ -194,16 +195,17 @@ type Result struct {
 	TestedMajor              int  `json:"testedMajor"`
 	ServerMajorMatchesTested bool `json:"serverMajorMatchesTested"`
 	// Logging is recorded with every run (the deployment's evidence).
-	Logging      Logging   `json:"logging"`
-	RuntimeRole  string    `json:"runtimeRole,omitempty"`
-	State        string    `json:"state"`
-	Version      int       `json:"version"`
-	BuildVersion int       `json:"buildVersion"`
-	Applied      []Applied `json:"applied"`
-	Pending      []string  `json:"pending"`
-	Ran          []Step    `json:"ran,omitempty"`
-	Problems     []string  `json:"problems,omitempty"`
-	Grants       string    `json:"grants,omitempty"`
+	Logging           Logging   `json:"logging"`
+	RuntimeRole       string    `json:"runtimeRole,omitempty"`
+	RuntimeRoleExists *bool     `json:"runtimeRoleExists,omitempty"`
+	State             string    `json:"state"`
+	Version           int       `json:"version"`
+	BuildVersion      int       `json:"buildVersion"`
+	Applied           []Applied `json:"applied"`
+	Pending           []string  `json:"pending"`
+	Ran               []Step    `json:"ran,omitempty"`
+	Problems          []string  `json:"problems,omitempty"`
+	Grants            string    `json:"grants,omitempty"`
 }
 
 // Logging is what the server records of statements, as the migration role's session sees it. Unset modules read as
@@ -308,6 +310,11 @@ func Inspect(ctx context.Context, conn *pgx.Conn, build []Migration) (Result, er
 		return result, Sanitize("read platform.schema_migration", err)
 	}
 	result.describe(build, applied, exists)
+	if result.Version >= 11 {
+		if result.RuntimeRole, err = InspectCTR06RuntimeFloor(ctx, conn); err != nil {
+			return result, err
+		}
+	}
 	return result, nil
 }
 
@@ -338,7 +345,12 @@ type Options struct {
 	// Runner names the build that applies the migrations (its revision); it is recorded with every applied migration.
 	Runner string
 	// RuntimeRole is the runtime group role whose grants are reconciled after the migrations; empty skips the reconciliation.
-	RuntimeRole      string
+	RuntimeRole string
+	// BridgeProof is obtained only by verifying the protected publisher's OIDC token.
+	BridgeProof *bridgeproof.Verified
+	// localBridge is created only inside the self-hosted manager after it has
+	// issued fresh roles and run and stopped the exact verified bridge.
+	localBridge      *localBridgeAdmission
 	LockTimeout      time.Duration
 	StatementTimeout time.Duration
 	LockWait         time.Duration
@@ -525,14 +537,27 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 		if _, err := tx.Exec(ctx, settings); err != nil {
 			return err
 		}
+		if migration.Version == 11 && migration.Name == "0011_fleet_routed_files.sql" {
+			if err := guardCTR06Schema(ctx, tx, conn, options.RuntimeRole, options.Runner, options.BridgeProof, options.localBridge); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, migration.SQL); err != nil {
 			return err
+		}
+		if migration.Version == 11 && migration.Name == "0011_fleet_routed_files.sql" {
+			if err := recordCTR06Floor(ctx, tx, options.RuntimeRole, options.BridgeProof, options.localBridge); err != nil {
+				return err
+			}
 		}
 		_, err := tx.Exec(ctx, "INSERT INTO platform.schema_migration (version, name, sha256, duration_ms, runner) VALUES ($1, $2, $3, $4, $5)",
 			migration.Version, migration.Name, migration.SHA256, time.Since(started).Milliseconds(), runnerName(options.Runner))
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, ErrCTR06RetirementUnproven) {
+			return Step{}, err
+		}
 		failure := &Failure{Version: migration.Version, Name: migration.Name, SQLState: "unknown", Message: "the migration did not complete"}
 		var pgError *pgconn.PgError
 		if errors.As(err, &pgError) {

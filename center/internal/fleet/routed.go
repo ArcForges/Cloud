@@ -10,6 +10,7 @@ import (
 	"time"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
+	relayv1 "github.com/ArcForges/Contracts/go/arcforges/relay/v1"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
@@ -142,6 +143,9 @@ type RoutedDecision struct {
 	State     RoutedState
 	// OutcomeSHA256 is a final record's outcome digest, which the answer of a resend is compared with.
 	OutcomeSHA256 []byte
+	// CreatedAt is the original durable file receipt creation instant. It is carried to the
+	// signer so clock rollback cannot make a first file effect predate its receipt.
+	CreatedAt time.Time
 	// ReplayUntil is set only for an attempt that can repeat a previously delivered command.
 	ReplayUntil time.Time
 }
@@ -315,9 +319,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13
 			accept.Digest, accept.Size, accept.Now}
 		if file {
 			query = `INSERT INTO fleet.routed_file_call (account_id, command_id, node_enrollment_id, node_id, method, caller_kind, session_id,
-    relaying_node_id, local_origin, local_session_id, request_digest, request_size, state, delivered, attempts, created_at, updated_at, workspace_id, target_attempt_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13, $14, $15) ON CONFLICT (account_id, command_id) DO NOTHING`
-			args = append(args, accept.WorkspaceID, accept.TargetAttemptID)
+    relaying_node_id, local_origin, local_session_id, request_digest, request_size, state, delivered, attempts, created_at, updated_at, workspace_id, target_attempt_id, request_sha256)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13, $14, $15, $16) ON CONFLICT (account_id, command_id) DO NOTHING`
+			args = append(args, accept.WorkspaceID, accept.TargetAttemptID, accept.RequestSHA256)
 		}
 		tag, err := tx.Exec(ctx, query, args...)
 		if err != nil {
@@ -331,6 +335,12 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, false, 1, $13, $13
 		var prior *routedRow
 		if tag.RowsAffected() == 1 {
 			decision = RoutedDecision{Attempt: 1, State: RoutedAccepted}
+			if file {
+				// Read the stored value: PostgreSQL timestamps have microsecond precision.
+				if err := tx.QueryRow(ctx, `SELECT created_at FROM fleet.routed_file_call WHERE account_id=$1 AND command_id=$2`, accept.AccountID, accept.CommandID).Scan(&decision.CreatedAt); err != nil {
+					return err
+				}
+			}
 		} else {
 			locked, err := scanRouted(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+table+` WHERE account_id = $1 AND command_id = $2 FOR UPDATE`,
 				accept.AccountID, accept.CommandID))
@@ -359,8 +369,21 @@ WHERE account_id = $1 AND command_id = $2`, accept.AccountID, accept.CommandID, 
 					return err
 				}
 				decision = RoutedDecision{Attempt: locked.attempts + 1, Final: locked.final, State: state, Delivered: delivered, OutcomeSHA256: locked.outcome}
+				if file {
+					decision.CreatedAt = locked.created
+				}
 				if delivered {
 					decision.ReplayUntil = locked.created.Add(accept.Window)
+				}
+			}
+		}
+		if file && !decision.Join && (accept.Method == int16(relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE) ||
+			accept.Method == int16(relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE) || accept.Method == int16(relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL)) {
+			target := FileTarget{WorkspaceID: accept.WorkspaceID, AttemptID: accept.TargetAttemptID, Path: accept.TargetPath}
+			if validTarget(target) {
+				if err := SaveFileTarget(ctx, tx, FileTargetBinding{AccountID: accept.AccountID, NodeID: accept.NodeID, EnrollmentID: enrollment,
+					LookupID: accept.CommandID, Caller: caller, Kind: FileTargetOperation, Target: target, Now: accept.Now}); err != nil {
+					return err
 				}
 			}
 		}
@@ -441,6 +464,7 @@ type RoutedAnswer struct {
 	RefusalReason string // closed non-sensitive reason, when meaningful for a file refusal
 	// TaskID is a SubmitNodeTask value's task ID.
 	TaskID             *platform.ID
+	PlanID             *platform.ID // only a validated, node-signed successful plan
 	ResponseSHA256     []byte
 	OutcomeSHA256      []byte
 	ResponseSize       int
@@ -464,6 +488,7 @@ type RoutedSettle struct {
 	NodeID          platform.ID
 	Attempt         int
 	Actor           string
+	Caller          RoutedCaller
 	Answer          RoutedAnswer
 	WorkspaceID     *platform.ID
 	TargetAttemptID *platform.ID
@@ -575,6 +600,18 @@ WHERE account_id = $1 AND command_id = $2`
 				return err
 			}
 			result.State = state
+		}
+		if file && settle.Method == int16(relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL) && answer.Verified &&
+			answer.Outcome == int32(relayv1.RoutedOutcome_ROUTED_OUTCOME_EXECUTED) && !answer.HandlerError && answer.PlanID != nil && result.State == RoutedSucceeded {
+			var enrollment platform.ID
+			if err := tx.QueryRow(ctx, `SELECT node_enrollment_id FROM fleet.routed_file_call WHERE account_id=$1 AND command_id=$2`, settle.AccountID, settle.CommandID).Scan(&enrollment); err != nil {
+				return err
+			}
+			target := FileTarget{WorkspaceID: settle.WorkspaceID, AttemptID: settle.TargetAttemptID, Path: settle.TargetPath}
+			if err := SaveFileTarget(ctx, tx, FileTargetBinding{AccountID: settle.AccountID, NodeID: settle.NodeID, EnrollmentID: enrollment,
+				LookupID: *answer.PlanID, Caller: settle.Caller, Kind: FileTargetPlan, Target: target, Now: settle.Now}); err != nil {
+				return err
+			}
 		}
 		payload := map[string]any{"method": settle.Method, "nodeId": settle.NodeID.String(), "attempt": settle.Attempt, "state": result.State.String(),
 			"verified": answer.Verified, "outcome": answer.Outcome, "effect": answer.Effect.String()}

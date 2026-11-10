@@ -149,6 +149,9 @@ func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, err
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrate.LockKey); err != nil {
 			return migrate.Sanitize("take the migration lock", err)
 		}
+		if err := migrate.RequireCTR06RuntimeFloor(ctx, tx, options.Group); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx, "SELECT current_database(), current_setting('server_version_num')::int").Scan(&rotation.Database, &rotation.ServerVersionNum); err != nil {
 			return migrate.Sanitize("identify the database", err)
 		}
@@ -284,6 +287,9 @@ func Confirm(ctx context.Context, conn *pgx.Conn, group, slot string) (Confirmat
 	err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrate.LockKey); err != nil {
 			return migrate.Sanitize("take the migration lock", err)
+		}
+		if err := migrate.RequireCTR06RuntimeFloor(ctx, tx, group); err != nil {
+			return err
 		}
 		if err := tx.QueryRow(ctx, "SELECT current_database()").Scan(&confirmation.Database); err != nil {
 			return migrate.Sanitize("identify the database", err)

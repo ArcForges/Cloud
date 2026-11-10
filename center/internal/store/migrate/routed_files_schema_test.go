@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -20,7 +21,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
-const migration0011SHA256 = "ecc0de1fcb39b08462a0d0bb3d72b7df09693a7eae9f180c4baef9d4b1dde8e3"
+const migration0011SHA256 = "4b921fb9e139f305eab20473fd228b27d87db6f727af091f532b2db31a3ee775"
 
 type namespaceFixture struct {
 	account, enrollment, node, session platform.ID
@@ -65,6 +66,10 @@ func insertNamespace(ctx context.Context, q namespaceWriter, f namespaceFixture,
 (account_id, command_id, node_enrollment_id, node_id, method, caller_kind, session_id, request_digest, request_size,
  state, delivered, attempts, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, 1, false, 1, now(), now())`
+	if file {
+		statement = strings.Replace(statement, "request_digest, request_size,", "request_digest, request_size, request_sha256,", 1)
+		statement = strings.Replace(statement, "$7, $8, 1, false", "$7, $8, $7, 1, false", 1)
+	}
 	if ignore {
 		statement += " ON CONFLICT (account_id, command_id) DO NOTHING"
 	}
@@ -78,6 +83,32 @@ func requireNamespaceCode(t *testing.T, err error, code, constraint string) {
 	if !errors.As(err, &pgError) || pgError.Code != code || constraint != "" && pgError.ConstraintName != constraint {
 		t.Fatalf("wanted SQLSTATE %s constraint %s, got %v", code, constraint, store.Sanitize("namespace assertion", err))
 	}
+}
+
+// Build a role graph with real OIDC verification; only the external JWKS
+// transport is substituted by ctr06SignedProof. It is the bridge generation,
+// so later old-server SQL never regains the retired legacy credentials.
+func schemaTestBridge(t *testing.T, ctx context.Context, owner *pgx.Conn, url, name string, build []Migration) (string, Options) {
+	t.Helper()
+	legacy := name + "_runtime"
+	roles, err := PrepareCTR06Roles(ctx, owner, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemas10, grants10 := schemasAndGrantsAt(10)
+	if _, err := apply(t, url, build[:10], Options{RuntimeRole: roles.BridgeRole, Schemas: schemas10, Grants: grants10}); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"ALTER ROLE " + pgx.Identifier{roles.BridgeLogin}.Sanitize() + " LOGIN",
+		"GRANT " + pgx.Identifier{roles.BridgeRole}.Sanitize() + " TO " + pgx.Identifier{roles.BridgeLogin}.Sanitize(),
+	} {
+		if _, err := owner.Exec(ctx, statement); err != nil {
+			t.Fatal(store.Sanitize("prepare schema bridge", err))
+		}
+	}
+	proof, binding := ctr06SignedProof(t, owner, legacy, roles.BridgeRole, roles.BridgeLogin, roles.Nonce)
+	return roles.BridgeRole, Options{Runner: binding.WorkflowRevision, RuntimeRole: roles.BridgeRole, BridgeProof: proof}
 }
 
 func TestMigration0011SharedCommandNamespace(t *testing.T) {
@@ -119,7 +150,7 @@ func TestMigration0011SharedCommandNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := Options{Runner: "test", RuntimeRole: name + "_runtime"}
+	bridgeRole, options := schemaTestBridge(t, ctx, owner, url, name, build)
 	if _, err = apply(t, url, broken, options); err == nil {
 		t.Fatal("failed migration was accepted")
 	}
@@ -139,7 +170,7 @@ func TestMigration0011SharedCommandNamespace(t *testing.T) {
 	}
 
 	login, password := name+"_namespace_login", pgtest.Secret()
-	if _, err = owner.Exec(ctx, "CREATE ROLE "+pgx.Identifier{login}.Sanitize()+" LOGIN PASSWORD '"+password+"' IN ROLE "+pgx.Identifier{name + "_runtime"}.Sanitize()); err != nil {
+	if _, err = owner.Exec(ctx, "CREATE ROLE "+pgx.Identifier{login}.Sanitize()+" LOGIN PASSWORD '"+password+"' IN ROLE "+pgx.Identifier{bridgeRole}.Sanitize()); err != nil {
 		t.Fatal(store.Sanitize("create isolated runtime login", err))
 	}
 	runtimeURL := pgtest.WithUser(t, url, login, password)
@@ -171,7 +202,7 @@ func TestMigration0011SharedCommandNamespace(t *testing.T) {
 
 	// Reconcile the previous release's exact privilege set: new tables become
 	// unreadable, but old INSERTs must still pass the migration-owned trigger.
-	if err = reconcile(ctx, owner, Options{RuntimeRole: name + "_runtime", Schemas: schemas10, Grants: grants10}); err != nil {
+	if err = reconcile(ctx, owner, Options{RuntimeRole: bridgeRole, Schemas: schemas10, Grants: grants10}); err != nil {
 		t.Fatal(err)
 	}
 	var canReadRegistry bool
@@ -182,7 +213,7 @@ func TestMigration0011SharedCommandNamespace(t *testing.T) {
 	if err = insertNamespace(ctx, runtime, f, platform.NewID(), false, 1, 10, false); err != nil {
 		t.Fatal(store.Sanitize("old runtime writes with old grants", err))
 	}
-	if err = reconcile(ctx, owner, Options{RuntimeRole: name + "_runtime", Schemas: schema.Schemas, Grants: schema.RuntimeGrants}); err != nil {
+	if err = reconcile(ctx, owner, Options{RuntimeRole: bridgeRole, Schemas: schema.Schemas, Grants: schema.RuntimeGrants}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,6 +300,7 @@ func TestMigration0011WaitsForAnOldWriterAndBackfillsItsCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	observer := pgtest.Connect(t, url)
+	_, bridgeOptions := schemaTestBridge(t, ctx, observer, url, name, build)
 	f := seedNamespaceFixture(t, observer)
 	oldConnection := pgtest.Connect(t, url)
 	oldWriter, err := oldConnection.Begin(ctx)
@@ -287,7 +319,7 @@ func TestMigration0011WaitsForAnOldWriterAndBackfillsItsCommit(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, failure := Apply(ctx, migration, build, Options{Runner: "test", RuntimeRole: name + "_runtime"})
+		result, failure := Apply(ctx, migration, build, bridgeOptions)
 		done <- outcome{result, failure}
 	}()
 	ticker := time.NewTicker(10 * time.Millisecond)

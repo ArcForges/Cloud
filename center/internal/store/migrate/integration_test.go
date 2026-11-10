@@ -305,7 +305,7 @@ func TestTheRuntimeRoleHasExactlyItsGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	login, password := group+"_a", pgtest.Secret()
-	if _, err := migration.Exec(ctx, "CREATE ROLE "+login+" LOGIN PASSWORD '"+password+"' IN ROLE "+group); err != nil {
+	if _, err := migration.Exec(ctx, "ALTER ROLE "+login+" LOGIN PASSWORD '"+password+"'; GRANT "+group+" TO "+login); err != nil {
 		t.Fatal(err)
 	}
 	runtime := pgtest.Connect(t, pgtest.WithUser(t, url, login, password))
@@ -376,7 +376,7 @@ func TestTheRuntimeRoleConnectsOnlyToItsOwnDatabase(t *testing.T) {
 			}
 		}
 		login, password := group+"_a", pgtest.Secret()
-		if _, err := pgtest.Connect(t, url).Exec(ctx, "CREATE ROLE "+login+" LOGIN PASSWORD '"+password+"' IN ROLE "+group); err != nil {
+		if _, err := pgtest.Connect(t, url).Exec(ctx, "ALTER ROLE "+login+" LOGIN PASSWORD '"+password+"'; GRANT "+group+" TO "+login); err != nil {
 			t.Fatal(err)
 		}
 		centers[index] = center{url: url, login: login, password: password}

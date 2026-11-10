@@ -25,6 +25,9 @@ import (
 func reconcile(ctx context.Context, conn *pgx.Conn, options Options) error {
 	role := options.RuntimeRole
 	err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if err := RequireCTR06RuntimeFloor(ctx, tx, role); err != nil {
+			return err
+		}
 		quoted := pgx.Identifier{role}.Sanitize()
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", role).Scan(&exists); err != nil {

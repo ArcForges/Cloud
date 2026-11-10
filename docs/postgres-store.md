@@ -697,8 +697,14 @@ The protected main-push deployment (`.github/workflows/ci.yml`, job `deploy`, Gi
    - The Container passes `ARCFORGES_CENTER_DATABASE_URL` to the Go center, which then reads the Hello greeting through the runtime
      role (`helloBackend` `postgresql-runtime`). The Hello's own Neon credential reaches only the C# host.
 
-A deployment that fails before step 3 changes nothing that the running revision uses. A migration is additive (expand) while the
-previous revision may still run.
+For an existing schema-10 database, the protected PostgreSQL step first verifies the published 615.1 bridge carrier and promotes
+that bridge with a fresh runtime generation. The provider's uploaded version, complete 100% rollout and sealed image must agree;
+an OIDC proof binds that protected workflow and the database/role identities. The migration owner then drains receipt and lease
+writes, removes every older writer's relevant privileges, expires the old lease and applies 0011 in one transaction. A published
+bridge, a slot record or a password rotation alone is not retirement evidence. This bridge promotion changes the running revision
+before step 3; if a later operation fails, inspect the provider and database floor before retrying. Only the 615.1 bridge server or a
+newer server may be used for rollback, with the current protected admin and promotion tools and the recorded runtime generation;
+an old privileged CLI must not rotate or regrant the retired roles.
 
 **Required secret.** `NEON_DATABASE_URL_DIRECT` is the direct (not `-pooler`) URL of the Neon owner role (the migration role),
 with `sslmode=require` or `verify-full` and `channel_binding=require`, in the GitHub `cloudflare` environment. Without it the
@@ -781,6 +787,36 @@ ARCFORGES_CENTER_RUNTIME_SECRET_FILE=/run/center/runtime.json arcforges-center a
 
 A plaintext connection (`sslmode=disable`) is accepted only for a loopback host in self-hosted mode. Every other connection
 needs `sslmode=require` or `verify-full` (upgraded to `verify-full`) and `channel_binding=require`.
+
+### Upgrading an existing schema-10 database
+
+The ordinary commands above bootstrap a fresh database. An existing schema-10 database also needs the exact native bridge
+executable. The first Cloud release containing these assets provides
+`arcforges-ctr06-bridge-8e5-linux-amd64.zip` and `arcforges-ctr06-bridge-8e5-windows-amd64.zip`. Each archive has its sealed
+manifest, corresponding 8e5 source, dependency inventory and licences. The Linux executable is the released 615.1 OCI member,
+SHA-256 `028223a3dcbcbd6d7724558de02409e1e8874d876049f03fed38f47998773ba4`. The Windows executable is a separate native build
+from reviewed source 8e5, SHA-256 `646338cd9bcfe0fcd0411abbf4fb036fc739b4a586d739c8a9fe58d9ff654f46`; it is not an OCI
+release member. Both use Contracts 437.1. No local Go, Git or Docker installation is needed. Other OS/architecture pairs refuse
+this existing-database upgrade until an independently verified native bridge is available.
+
+Point `ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE` at the absolute path to the extracted executable for the `migrate apply`
+invocation. The current migrator checks the executable and controls the bridge child itself; the path is not a proof or bypass.
+It issues a temporary role and credential only for that child, verifies a real database-backed ready response, stops the child and
+checks its actual PostgreSQL login OID has no surviving backend. Under the 0011 locks it retires the old and temporary writers,
+expires the old lease, archives the old credential records and creates a separate final runtime group and its reserved slots.
+The database owner and superusers, and the OS account running the migrator, are trusted. An unexplained writer, role path,
+remaining backend or changed executable refuses the transaction. A pooler that retains the temporary backend also causes refusal.
+
+The successful `migrate apply` JSON names the new `runtimeRole`. Set the existing
+`ARCFORGES_CENTER_RUNTIME_ROLE` to that value for subsequent current `migrate` and `admin` calls, then use the normal
+`admin rotate-runtime-credential` and `admin confirm-runtime-credential` sequence to give the current server its new URL.
+Remove `ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE` after the one migration call. The bridge child has stopped when the
+migration returns; it is not a running replacement service.
+
+A hard interruption can leave an unconfirmed temporary role or child. A later run refuses an unexplained writer instead of
+adopting a public role comment or changing an unknown account. Preserve the evidence and investigate the failed process and
+database role graph before retrying. For application rollback, run the bridge server with a credential from the final runtime
+group and retain the current admin tools; do not run the older bridge's privileged CLI to regrant or rotate the retired group.
 
 ## Connection budgets
 

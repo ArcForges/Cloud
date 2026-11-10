@@ -30,6 +30,7 @@ CREATE TABLE fleet.routed_file_call (
     local_origin       smallint,
     local_session_id   uuid,
     request_digest     bytea       NOT NULL,
+    request_sha256     bytea       NOT NULL,
     request_size       integer     NOT NULL,
     state              smallint    NOT NULL,
     delivered          boolean     NOT NULL DEFAULT false,
@@ -54,7 +55,7 @@ CREATE TABLE fleet.routed_file_call (
     CONSTRAINT routed_file_call_caller CHECK (
         (caller_kind = 1 AND session_id IS NOT NULL AND relaying_node_id IS NULL AND local_origin IS NULL AND local_session_id IS NULL) OR
         (caller_kind = 2 AND session_id IS NULL AND relaying_node_id IS NOT NULL AND local_origin BETWEEN 1 AND 3 AND local_session_id IS NOT NULL)),
-    CONSTRAINT routed_file_call_request CHECK (octet_length(request_digest) = 32 AND request_size BETWEEN 1 AND 245760),
+    CONSTRAINT routed_file_call_request CHECK (octet_length(request_digest) = 32 AND octet_length(request_sha256) = 32 AND request_size BETWEEN 1 AND 245760),
     CONSTRAINT routed_file_call_state CHECK (state IN (1, 3, 4, 5, 6, 7, 8)),
     CONSTRAINT routed_file_call_attempts CHECK (attempts >= 1),
     CONSTRAINT routed_file_call_digests CHECK ((response_sha256 IS NULL OR octet_length(response_sha256) = 32) AND
@@ -82,8 +83,10 @@ BEGIN
        NEW.node_enrollment_id IS DISTINCT FROM OLD.node_enrollment_id OR NEW.node_id IS DISTINCT FROM OLD.node_id OR
        NEW.workspace_id IS DISTINCT FROM OLD.workspace_id OR NEW.target_attempt_id IS DISTINCT FROM OLD.target_attempt_id OR
        NEW.method IS DISTINCT FROM OLD.method OR NEW.caller_kind IS DISTINCT FROM OLD.caller_kind OR
-       NEW.relaying_node_id IS DISTINCT FROM OLD.relaying_node_id OR NEW.local_origin IS DISTINCT FROM OLD.local_origin OR
-       NEW.request_digest IS DISTINCT FROM OLD.request_digest OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+       NEW.session_id IS DISTINCT FROM OLD.session_id OR NEW.relaying_node_id IS DISTINCT FROM OLD.relaying_node_id OR
+       NEW.local_origin IS DISTINCT FROM OLD.local_origin OR NEW.local_session_id IS DISTINCT FROM OLD.local_session_id OR
+       NEW.request_digest IS DISTINCT FROM OLD.request_digest OR NEW.request_sha256 IS DISTINCT FROM OLD.request_sha256 OR
+       NEW.created_at IS DISTINCT FROM OLD.created_at THEN
         RAISE EXCEPTION 'a routing record keeps its identity' USING ERRCODE = 'integrity_constraint_violation';
     END IF;
     IF OLD.delivered AND NOT NEW.delivered OR NEW.attempts < OLD.attempts THEN
@@ -165,3 +168,66 @@ CREATE TRIGGER routed_call_command_id BEFORE INSERT ON fleet.routed_call
     FOR EACH ROW EXECUTE FUNCTION fleet.reserve_routed_command_id();
 CREATE TRIGGER routed_file_call_command_id BEFORE INSERT ON fleet.routed_file_call
     FOR EACH ROW EXECUTE FUNCTION fleet.reserve_routed_command_id();
+
+-- Caller-bound, content-free target associations. A plan identifier is admitted
+-- only from a verified signed plan result; an operation association is bound to
+-- its admission or a verified signed status of an already bound receipt. Rows
+-- never change at runtime; UNKNOWN operation associations remain through human
+-- acknowledgment, even if a future retention sweep is introduced.
+CREATE TABLE fleet.routed_file_target (
+    account_id         uuid        NOT NULL REFERENCES identity.user (user_id),
+    node_enrollment_id uuid        NOT NULL REFERENCES fleet.node (enrollment_id),
+    node_id            uuid        NOT NULL,
+    caller_hash        bytea       NOT NULL CHECK (octet_length(caller_hash) = 32),
+    target_kind        smallint    NOT NULL CHECK (target_kind IN (1, 2)),
+    lookup_id          uuid        NOT NULL,
+    workspace_id       uuid,
+    target_attempt_id  uuid,
+    target_path        text,
+    created_at         timestamptz NOT NULL,
+    PRIMARY KEY (account_id, node_id, caller_hash, target_kind, lookup_id),
+    CONSTRAINT routed_file_target_shape CHECK (
+        (workspace_id IS NOT NULL AND target_attempt_id IS NULL AND target_path IS NOT NULL AND octet_length(target_path) BETWEEN 1 AND 4096) OR
+        (workspace_id IS NULL AND target_attempt_id IS NOT NULL AND target_path IS NULL))
+);
+CREATE INDEX routed_file_target_enrollment ON fleet.routed_file_target (node_enrollment_id);
+CREATE FUNCTION fleet.routed_file_target_fixed() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'a file target association is immutable' USING ERRCODE = 'integrity_constraint_violation';
+END;
+$$;
+CREATE TRIGGER routed_file_target_fixed BEFORE UPDATE OR DELETE ON fleet.routed_file_target
+    FOR EACH ROW EXECUTE FUNCTION fleet.routed_file_target_fixed();
+
+-- The migration owner alone records the credential-generation floor. This is
+-- created in the same transaction as the bridge fence, never supplied by an
+-- operator flag; ordinary runtime roles cannot read or change it.
+CREATE TABLE platform.ctr06_runtime_floor (
+    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    database_oid oid NOT NULL,
+    owner_oid oid NOT NULL,
+    runtime_role name NOT NULL,
+    runtime_role_oid oid NOT NULL,
+    legacy_role name,
+    legacy_role_oid oid,
+    bridge_revision text,
+    bridge_image_id text,
+    promotion_digest text,
+    established_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    CHECK ((legacy_role IS NULL) = (legacy_role_oid IS NULL)),
+    CHECK ((bridge_revision IS NULL) = (promotion_digest IS NULL)),
+    CHECK (promotion_digest IS NULL OR promotion_digest ~ '^[0-9a-f]{64}$')
+);
+REVOKE ALL ON platform.ctr06_runtime_floor FROM PUBLIC;
+
+-- Preserve the two old rotation records when the bridge generation is
+-- adopted; this table is accessible only to the migration owner.
+CREATE TABLE platform.ctr06_legacy_runtime_credential (
+    slot text NOT NULL,
+    login_role text NOT NULL,
+    rotated_at timestamptz NOT NULL,
+    rotated_by text NOT NULL,
+    promoted_at timestamptz,
+    preserved_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+REVOKE ALL ON platform.ctr06_legacy_runtime_credential FROM PUBLIC;

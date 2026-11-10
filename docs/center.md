@@ -107,7 +107,8 @@ variable and never repeats its value.
 
 The `migrate` and `admin` commands read their own variables (`ARCFORGES_CENTER_MIGRATION_DATABASE_URL`, the migration role's
 direct URL; `ARCFORGES_CENTER_DATABASE_NAME`; `ARCFORGES_CENTER_RUNTIME_ROLE`; `ARCFORGES_CENTER_RUNTIME_SECRET_FILE`;
-`ARCFORGES_CENTER_RUNTIME_POOLED_HOST`; `ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT`); `serve` never reads them
+`ARCFORGES_CENTER_RUNTIME_POOLED_HOST`; `ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT`; and, for an existing self-hosted
+schema-10 upgrade, `ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE`); `serve` never reads them
 ([PostgreSQL store](postgres-store.md)); `admin register-signing-key`, `retire-signing-key` and `revoke-device` are the fleet's
 ([center fleet](center-fleet.md#the-centers-signing-keys)). No URL of the official deployment is compiled
 into a code path: `TestNoOfficialEndpointIsCompiledIn` fails if one appears, and health and every URL the center issues derive

@@ -107,9 +107,10 @@ var RuntimeGrants = []Grant{
 	// AF-CTR-06 (0011): a separate receipt for file/workspace mutations and a shared account/command namespace.
 	// Only the migration-owned trigger may reserve a namespace; even an older runtime writer must pass it.
 	{"fleet", "routed_file_call", []Privilege{Select, Insert, Update}},
+	{"fleet", "routed_file_target", []Privilege{Select, Insert}},
 	{"fleet", "routed_command_id", []Privilege{Select}},
 }
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted
 // above or listed here; a test refuses a table with neither decision.
-var MigrationOnly = []string{"platform.runtime_credential"}
+var MigrationOnly = []string{"platform.runtime_credential", "platform.ctr06_runtime_floor", "platform.ctr06_legacy_runtime_credential"}

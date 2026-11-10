@@ -14,15 +14,18 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ArcForges/Cloud/center/internal/bridgeproof"
 	"github.com/ArcForges/Cloud/center/internal/buildinfo"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
@@ -48,6 +51,7 @@ commands:
                                    promoted one) and write the runtime URL to ARCFORGES_CENTER_RUNTIME_SECRET_FILE
   admin confirm-runtime-credential --slot a|b
                                    record that the deployment carrying the slot's credential was promoted
+  admin prepare-ctr06-bridge       issue a distinct schema-10 bridge credential into the private runtime secret file
   admin revoke-sessions --account <uuid> | --all
                                    revoke every unrevoked session of one account, or of every account, whatever its scope
                                    (audited as identity.sessions.revoked_by_operator); prints the counts per scope
@@ -153,7 +157,7 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 		if sub == "grant-operator" || sub == "revoke-operator" {
 			return operatorRole(sub, role, lookup, stdout, stderr)
 		}
-		if sub != "ensure-database" && sub != "rotate-runtime-credential" && sub != "confirm-runtime-credential" {
+		if sub != "ensure-database" && sub != "rotate-runtime-credential" && sub != "confirm-runtime-credential" && sub != "prepare-ctr06-bridge" {
 			_, _ = fmt.Fprint(stderr, usage)
 			return exitUsage
 		}
@@ -354,9 +358,38 @@ func migration(sub string, lookup func(string) (string, bool), stdout, stderr io
 	defer func() { _ = conn.Close(context.Background()) }()
 	var result migrate.Result
 	if sub == "apply" {
-		result, err = migrate.Apply(ctx, conn, build, migrate.Options{Runner: revision(), RuntimeRole: cfg.RuntimeRole, LockTimeout: cfg.LockTimeout, Logger: logger})
+		var proof *bridgeproof.Verified
+		if cfg.CTR06ProofFile != "" {
+			proof, err = readCTR06Proof(ctx, cfg.CTR06ProofFile)
+			if err != nil {
+				logger.Error("the protected bridge proof could not be verified")
+				return exitFailure
+			}
+		}
+		options := migrate.Options{Runner: revision(), RuntimeRole: cfg.RuntimeRole, LockTimeout: cfg.LockTimeout, Logger: logger, BridgeProof: proof}
+		if cfg.CTR06BridgeExecutable != "" {
+			directHost := net.JoinHostPort(conn.Config().Host, strconv.Itoa(int(conn.Config().Port)))
+			result, err = migrate.ApplySelfHostedCTR06(ctx, conn, build, options, cfg.CTR06BridgeExecutable,
+				func(ctx context.Context, roles migrate.PreparedBridgeRoles) (string, error) {
+					prepared, e := provision.CompleteIssuedCTR06Bridge(ctx, conn, build, provision.Options{
+						Group: cfg.RuntimeRole, DirectURL: cfg.URL, PooledHost: directHost, Runner: revision(),
+					}, roles)
+					if e != nil {
+						return "", e
+					}
+					return prepared.RuntimeURL, nil
+				})
+		} else {
+			result, err = migrate.Apply(ctx, conn, build, options)
+		}
 	} else {
 		result, err = migrate.Inspect(ctx, conn, build)
+		if err == nil && result.Version == 10 {
+			var exists bool
+			if err = conn.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$1)", cfg.RuntimeRole).Scan(&exists); err == nil {
+				result.RuntimeRoleExists = &exists
+			}
+		}
 	}
 	_ = json.NewEncoder(stdout).Encode(result)
 	if sub != "apply" && result.ServerVersionNum != 0 && !result.ServerMajorMatchesTested {
@@ -441,6 +474,24 @@ func admin(sub, slot string, lookup func(string) (string, bool), stdout, stderr 
 		return exitFailure
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
+	if sub == "prepare-ctr06-bridge" {
+		build, loadErr := migrate.Load(schema.Migrations())
+		if loadErr != nil {
+			logger.Error("the build's migrations are invalid")
+			return exitFailure
+		}
+		prepared, prepareErr := provision.PrepareCTR06Bridge(ctx, conn, build, provision.Options{Group: cfg.RuntimeRole, DirectURL: cfg.URL, PooledHost: cfg.PooledHost, Runner: revision()})
+		if prepareErr != nil {
+			logger.Error("the bridge credential could not be prepared", "error", prepareErr.Error())
+			return exitFailure
+		}
+		if err = writeSecret(cfg.SecretFile, map[string]string{config.EnvDatabaseURL: prepared.RuntimeURL}); err != nil {
+			logger.Error("the bridge runtime secret file could not be written")
+			return exitFailure
+		}
+		_ = json.NewEncoder(stdout).Encode(prepared)
+		return exitOK
+	}
 	rotation, err := provision.Rotate(ctx, conn, provision.Options{Group: cfg.RuntimeRole, DirectURL: cfg.URL, PooledHost: cfg.PooledHost, Runner: revision(),
 		LiveSlot: slot})
 	if err != nil {

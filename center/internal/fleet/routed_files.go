@@ -40,7 +40,8 @@ func addFileTarget(payload map[string]any, workspace, attempt *platform.ID, path
 type RoutedReadAudit struct {
 	Request                      Request
 	Caller                       RoutedCaller
-	NodeID                       platform.ID
+	AccountID, NodeID            platform.ID
+	OperationTargetID            *platform.ID
 	Method                       int16
 	WorkspaceID, TargetAttemptID *platform.ID
 	TargetPath                   *string
@@ -55,6 +56,17 @@ type RoutedReadAudit struct {
 
 func AuditRoutedFileRead(ctx context.Context, db *store.DB, audit RoutedReadAudit) error {
 	return db.InTx(ctx, "audit a routed file read", store.TxOptions{Timeout: registryTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
+		if audit.OperationTargetID != nil {
+			var enrollment platform.ID
+			if err := tx.QueryRow(ctx, `SELECT enrollment_id FROM fleet.node WHERE node_id=$1 AND user_id=$2 AND revoked_at IS NULL FOR SHARE`, audit.NodeID, audit.AccountID).Scan(&enrollment); err != nil {
+				return store.Sanitize("find an operation target node", err)
+			}
+			target := FileTarget{WorkspaceID: audit.WorkspaceID, AttemptID: audit.TargetAttemptID, Path: audit.TargetPath}
+			if err := SaveFileTarget(ctx, tx, FileTargetBinding{AccountID: audit.AccountID, NodeID: audit.NodeID, EnrollmentID: enrollment, LookupID: *audit.OperationTargetID,
+				Caller: audit.Caller, Kind: FileTargetOperation, Target: target, Now: audit.Now}); err != nil {
+				return err
+			}
+		}
 		payload := audit.Caller.audit(map[string]any{"method": audit.Method, "nodeId": audit.NodeID.String(),
 			"requestSha256": hex.EncodeToString(audit.RequestSHA256), "requestSize": audit.RequestSize,
 			"nodeAuditAvailable": audit.NodeAuditAvailable, "observations": audit.Observations})

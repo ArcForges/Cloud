@@ -128,26 +128,133 @@ func validFileError(e *foundationv1.ArcError) bool {
 	return true
 }
 
+// Each catalogue row that names a detail must carry it. These reasons are
+// fixed machine values, never paths, file content or arbitrary OS messages.
+func validFileCatalogueDetails(key string, e *foundationv1.ArcError) bool {
+	state := e.GetDetails().GetState()
+	switch key {
+	case "validation/invalid_argument":
+		return state != nil && strings.Contains(state.GetReason(), ": ")
+	case "validation/path_not_found", "authorization/permission_denied", "authorization/approval_required",
+		"state/invalid_state", "state/in_use", "resource/enforcement_unavailable":
+		return state != nil
+	case "state/not_found":
+		return state != nil && state.Resource != nil
+	case "resource/too_large":
+		limit := e.GetDetails().GetLimit()
+		return limit != nil && limit.Maximum != nil && validDecimal(limit.Maximum) && !strings.HasPrefix(limit.Maximum.GetValue(), "-")
+	case "conflict/file_changed":
+		return state != nil && state.GetState() == "file" && validFileMismatchReason(state.GetReason())
+	case "conflict/occurrence_mismatch":
+		return state != nil && state.GetState() == "file" && state.GetReason() == "occurrence_mismatch"
+	case "state/file_access_denied":
+		return state != nil && state.GetState() == "file" && validFileAccessReason(state.GetReason())
+	case "execution/operation_failed":
+		if state == nil || state.GetState() != "file" {
+			return false
+		}
+		return e.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN || state.GetReason() == "file_outcome_unknown"
+	default:
+		return true
+	}
+}
+
+// The accepted mismatch names cover the current registered-root/path guards and
+// the file precondition, object, parent and planned-tree checks. Both sides of
+// the wire must use this closed set; unrecognized free-form reasons are refused.
+func validFileMismatchReason(reason string) bool {
+	switch reason {
+	case "workspace_root_changed", "workspace_path_conflict", "workspace_identity_conflict", "workspace_registration_changed",
+		"legacy_snapshot_changed", "file_identity_changed", "directory_identity_changed", "directory_changed", "root_changed",
+		"file_changed_while_reading", "hash_mismatch", "expected_absent_conflict", "parent_identity_changed", "planned_tree_changed":
+		return true
+	default:
+		return false
+	}
+}
+
+func validFileAccessReason(reason string) bool {
+	switch reason {
+	case "file_access_denied", "file_hard_link", "file_metadata_unavailable", "canonical_path_unavailable", "case_semantics_unavailable",
+		"directory_entry_invalid", "directory_enumeration_failed", "directory_enumeration_unavailable", "file_guard_unavailable",
+		"identity_filesystem_unavailable", "identity_handle_unavailable", "identity_unavailable", "identity_unavailable_or_reparse",
+		"mount_crossing", "path_enforcement_unavailable", "path_link_or_special", "procfs_unavailable", "root_not_supported":
+		return true
+	default:
+		return false
+	}
+}
+
+func validUnknownFileOperationError(e *foundationv1.ArcError) bool {
+	return validFileError(e) && e.GetCategory() == foundationv1.ErrorCategory_ERROR_CATEGORY_EXECUTION &&
+		e.GetCode() == "operation_failed" && e.GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN &&
+		e.GetRetry().GetMode() == foundationv1.RetryMode_RETRY_MODE_NEVER && validFileCatalogueDetails("execution/operation_failed", e)
+}
+
+func operationMethod(kind nodev1.FileOperationKind) relayv1.RoutedMethod {
+	switch kind {
+	case nodev1.FileOperationKind_FILE_OPERATION_KIND_WRITE:
+		return relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE
+	case nodev1.FileOperationKind_FILE_OPERATION_KIND_EDIT:
+		return relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE
+	case nodev1.FileOperationKind_FILE_OPERATION_KIND_REMOVAL:
+		return relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL
+	default:
+		return relayv1.RoutedMethod_ROUTED_METHOD_UNSPECIFIED
+	}
+}
+
 // File errors are catalogue outcomes, not an arbitrary signed category/effect.
 // A malformed combination cannot finalize a routing receipt.
 func validFileErrorForMethod(method relayv1.RoutedMethod, e *foundationv1.ArcError) bool {
 	key := strings.ToLower(strings.TrimPrefix(e.GetCategory().String(), "ERROR_CATEGORY_")) + "/" + e.GetCode()
+	// Six native-checking file/workspace methods' file_changed entries depend
+	// on a bounded Design erratum under review; this WIP must not ship until approved.
 	allowed := map[relayv1.RoutedMethod]string{
-		relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE:            " validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied ",
+		relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE:            " validation/path_not_found validation/invalid_argument conflict/file_changed resource/too_large state/file_access_denied authorization/permission_denied ",
 		relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE:           " validation/path_not_found validation/invalid_argument conflict/file_changed conflict/command_id_reused resource/too_large resource/enforcement_unavailable state/file_access_denied state/invalid_state authorization/permission_denied authorization/approval_required execution/operation_failed ",
 		relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE:            " validation/path_not_found validation/invalid_argument conflict/file_changed conflict/occurrence_mismatch conflict/command_id_reused resource/too_large resource/enforcement_unavailable state/file_access_denied state/invalid_state authorization/permission_denied authorization/approval_required execution/operation_failed ",
-		relayv1.RoutedMethod_ROUTED_METHOD_SEARCH_NODE_FILES:         " validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied ",
-		relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODE_DIRECTORY:       " validation/invalid_cursor validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied ",
-		relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL:         " validation/path_not_found validation/invalid_argument state/not_found state/in_use conflict/command_id_reused resource/too_large state/file_access_denied authorization/permission_denied ",
+		relayv1.RoutedMethod_ROUTED_METHOD_SEARCH_NODE_FILES:         " conflict/file_changed validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied ",
+		relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODE_DIRECTORY:       " conflict/file_changed validation/invalid_cursor validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied ",
+		relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL:         " conflict/file_changed validation/path_not_found validation/invalid_argument state/not_found state/in_use conflict/command_id_reused resource/too_large state/file_access_denied authorization/permission_denied ",
 		relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL:      " validation/invalid_argument state/not_found conflict/digest_mismatch conflict/file_changed conflict/command_id_reused state/in_use resource/too_large resource/enforcement_unavailable state/expired state/invalid_state authorization/permission_denied authorization/approval_required state/file_access_denied execution/operation_failed ",
 		relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_FILE_OPERATION:   " validation/invalid_argument state/not_found authorization/permission_denied ",
-		relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE:   " validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied conflict/command_id_reused ",
+		relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE:   " conflict/file_changed validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied conflict/command_id_reused ",
 		relayv1.RoutedMethod_ROUTED_METHOD_UNREGISTER_NODE_WORKSPACE: " state/not_found state/in_use validation/invalid_argument authorization/permission_denied conflict/command_id_reused ",
 		relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODE_WORKSPACES:      " validation/invalid_cursor validation/invalid_argument authorization/permission_denied ",
-		relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_WORKSPACE:        " state/not_found validation/invalid_argument state/file_access_denied authorization/permission_denied ",
+		relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_WORKSPACE:        " conflict/file_changed state/not_found validation/invalid_argument state/file_access_denied authorization/permission_denied ",
 	}
 	if !strings.Contains(allowed[method], " "+key+" ") && key != "internal/internal" && key != "internal/store_corrupt" && key != "resource/overloaded" {
 		return false
+	}
+	if !validFileCatalogueDetails(key, e) {
+		return false
+	}
+	if key == "conflict/file_changed" {
+		reason := e.GetDetails().GetState().GetReason()
+		switch reason {
+		case "hash_mismatch":
+			if method != relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE && method != relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE {
+				return false
+			}
+		case "expected_absent_conflict":
+			if method != relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE {
+				return false
+			}
+		case "planned_tree_changed":
+			if method != relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL {
+				return false
+			}
+		}
+	}
+	// Native exclusion guards are mandatory for these effects. Failure to establish
+	// one is RESOURCE/enforcement_unavailable, not a generic access refusal.
+	if key == "state/file_access_denied" && (method == relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE ||
+		method == relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE || method == relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL) {
+		reason := e.GetDetails().GetState().GetReason()
+		if reason == "file_guard_unavailable" || reason == "path_enforcement_unavailable" {
+			return false
+		}
 	}
 	mode, effect := e.GetRetry().GetMode(), e.GetEffect()
 	if !fileMutation(method) && effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
@@ -398,6 +505,28 @@ func validateFileResult(method relayv1.RoutedMethod, request []byte, response no
 		if !validFileError(failure) || !validFileErrorForMethod(method, failure) {
 			return bad()
 		}
+		if method == relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE && failure.GetCode() == "file_changed" {
+			q := v.(*nodev1.FileServiceWriteFileRequest)
+			switch failure.GetDetails().GetState().GetReason() {
+			case "hash_mismatch":
+				if _, ok := q.Precondition.(*nodev1.FileServiceWriteFileRequest_ExpectedSha256); !ok {
+					return bad()
+				}
+			case "expected_absent_conflict":
+				p, ok := q.Precondition.(*nodev1.FileServiceWriteFileRequest_ExpectedAbsent)
+				if !ok || !p.ExpectedAbsent {
+					return bad()
+				}
+			}
+		}
+		if method == relayv1.RoutedMethod_ROUTED_METHOD_SEARCH_NODE_FILES && failure.GetCode() == "invalid_argument" &&
+			failure.GetDetails().GetState().GetReason() == "pattern: regex_scalar_boundary" {
+			q := v.(*nodev1.FileServiceSearchFilesRequest)
+			o := observation(response.GetAudit(), nodev1.FileAuditKind_FILE_AUDIT_KIND_SEARCH_TRANSCRIPT)
+			if q.GetMode() != nodev1.FileSearchMode_FILE_SEARCH_MODE_REGEX || o == nil || o.GetSizeBytes() == 0 {
+				return bad()
+			}
+		}
 		return nil
 	}
 	audit := response.GetAudit()
@@ -407,7 +536,7 @@ func validateFileResult(method relayv1.RoutedMethod, request []byte, response no
 		x := r.GetValue()
 		if x == nil || q.Offset == nil || q.Length == nil || x.GetOffset() != q.GetOffset() || uint64(len(x.GetData())) > min(q.GetLength(), uint64(65536)) ||
 			(x.GetOffset() >= x.GetFileSize() && (len(x.GetData()) != 0 || !x.GetEof())) ||
-			(x.GetOffset() < x.GetFileSize() && (x.GetNextOffset() > x.GetFileSize() || x.GetEof() != (x.GetNextOffset() == x.GetFileSize()))) {
+			(x.GetOffset() < x.GetFileSize() && (len(x.GetData()) == 0 || x.GetNextOffset() > x.GetFileSize() || x.GetEof() != (x.GetNextOffset() == x.GetFileSize()))) {
 			return bad()
 		}
 	case *nodev1.FileServiceWriteFileResponse:
@@ -547,7 +676,7 @@ func validateFileResult(method relayv1.RoutedMethod, request []byte, response no
 				return bad()
 			}
 		case nodev1.FileOperationState_FILE_OPERATION_STATE_UNKNOWN:
-			if x.GetError() == nil || !validFileError(x.GetError()) || x.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN || x.GetHeld() == x.GetAcknowledged() {
+			if !validUnknownFileOperationError(x.GetError()) || x.GetHeld() == x.GetAcknowledged() {
 				return bad()
 			}
 		case nodev1.FileOperationState_FILE_OPERATION_STATE_COMPLETED:
@@ -555,7 +684,7 @@ func validateFileResult(method relayv1.RoutedMethod, request []byte, response no
 				return bad()
 			}
 			if x.GetError() != nil {
-				if !validFileError(x.GetError()) || x.GetError().GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN {
+				if !validFileError(x.GetError()) || !validFileErrorForMethod(operationMethod(x.GetKind()), x.GetError()) || x.GetError().GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN {
 					return bad()
 				}
 			} else if x.GetKind() == nodev1.FileOperationKind_FILE_OPERATION_KIND_REMOVAL {

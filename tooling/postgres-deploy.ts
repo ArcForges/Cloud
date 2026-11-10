@@ -131,7 +131,7 @@ export const unknownSlotStatus = 4;
 export class SlotNeverRotated extends Error {}
 
 /** Runs the sealed executable with the variables in the docker CLI's environment and returns its JSON output. */
-async function center(
+export async function center(
   image: string,
   variables: Record<string, string>,
   command: string[],
@@ -297,7 +297,23 @@ export async function migrateTarget(target: PostgresTarget): Promise<GateRecord>
       const ensured = await center(candidate.image, variables, ["admin", "ensure-database"]);
       record.databaseCreated = ensured.created === true;
     }
-    recordMigration(record, await center(candidate.image, variables, ["migrate"]));
+    const status = await center(candidate.image, variables, ["migrate", "status"]);
+    if (status.state === "refused")
+      throw new Error("The database history differs from this candidate.");
+    if (status.version === 10 && status.runtimeRoleExists === true) {
+      const { promoteCTR06Bridge } = await import("./ctr06-publisher.ts");
+      recordMigration(record, await promoteCTR06Bridge(target, candidate.image, variables));
+    } else {
+      if (typeof status.version === "number" && status.version >= 11) {
+        assert(
+          typeof status.runtimeRole === "string" &&
+            /^[a-z][a-z0-9_]{2,40}$/u.test(status.runtimeRole),
+          "The runtime generation floor is unavailable.",
+        );
+        variables.ARCFORGES_CENTER_RUNTIME_ROLE = status.runtimeRole;
+      }
+      recordMigration(record, await center(candidate.image, variables, ["migrate"]));
+    }
   } finally {
     await writeJson(gateFile(target), record);
   }
@@ -338,6 +354,8 @@ export interface CredentialOptions {
   liveSlots?: () => Promise<LiveSlots>;
   /** Where the decisions are logged; the default is the job log. */
   log?: (line: string) => void;
+  /** The owner-only recorded generation floor, discovered by the sealed migrator. */
+  runtimeRole?: string;
 }
 
 export type Slot = "a" | "b";
@@ -438,6 +456,7 @@ export function confirmationFailure(
   slot: string,
   attempts: number,
   reason: string,
+  runtimeRole?: string,
 ): string {
   const settings = postgresTargets[target];
   const database =
@@ -447,7 +466,7 @@ export function confirmationFailure(
   return [
     `The ${target} Worker version is deployed with the runtime credential of slot ${slot}, but recording that promotion failed after ${attempts} attempts (${reason}).`,
     `The runtime credential record is now behind the live revision. The next deployment reads the live version's slot from Cloudflare and records it before rotating; only if Cloudflare cannot be read then would it rotate slot ${slot}, which the live revision uses, and that revision's new database connections would fail until the next deployment is promoted.`,
-    `Recover before the next deployment: run \`arcforges-center admin confirm-runtime-credential --slot ${slot}\` with the owner's direct URL in ARCFORGES_CENTER_MIGRATION_DATABASE_URL, ARCFORGES_CENTER_MODE=official-hosted, ARCFORGES_CENTER_RUNTIME_ROLE=${settings.runtimeRole}${database}, or, as the owner in the Neon SQL editor of that database, \`UPDATE platform.runtime_credential SET promoted_at = now() WHERE slot = '${slot}' AND promoted_at IS NULL\` (docs/postgres-store.md).`,
+    `Recover before the next deployment: run \`arcforges-center admin confirm-runtime-credential --slot ${slot}\` with the owner's direct URL in ARCFORGES_CENTER_MIGRATION_DATABASE_URL, ARCFORGES_CENTER_MODE=official-hosted, ARCFORGES_CENTER_RUNTIME_ROLE=${runtimeRole ?? settings.runtimeRole}${database}, or, as the owner in the Neon SQL editor of that database, \`UPDATE platform.runtime_credential SET promoted_at = now() WHERE slot = '${slot}' AND promoted_at IS NULL\` (docs/postgres-store.md).`,
   ].join(" ");
 }
 
@@ -466,6 +485,8 @@ export async function confirmRuntimeCredential(
   const attempts = options.confirmAttempts ?? 3;
   const delay = options.confirmDelayMs ?? 5000;
   const variables = centerVariables(target, options.environment ?? process.env);
+  if (options.runtimeRole !== undefined)
+    variables.ARCFORGES_CENTER_RUNTIME_ROLE = options.runtimeRole;
   let reason = "";
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
@@ -483,7 +504,7 @@ export async function confirmRuntimeCredential(
       if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delay * attempt));
     }
   }
-  throw new Error(confirmationFailure(target, slot, attempts, reason));
+  throw new Error(confirmationFailure(target, slot, attempts, reason, options.runtimeRole));
 }
 
 /**
@@ -526,6 +547,8 @@ export async function withRuntimeCredential(
     rotate.push("--live-slot", choice.slot);
   }
   const variables = centerVariables(target, options.environment ?? process.env);
+  if (options.runtimeRole !== undefined)
+    variables.ARCFORGES_CENTER_RUNTIME_ROLE = options.runtimeRole;
   const directory = await mkdtemp(path.join(os.tmpdir(), "arcforges-runtime-"));
   let rotation: Record<string, unknown>;
   try {
@@ -555,7 +578,9 @@ export async function withRuntimeCredential(
   } catch (error) {
     if (!(error instanceof SlotNeverRotated)) throw error;
     // The slot was rotated moments ago: the database changed under the deployment.
-    throw new Error(confirmationFailure(target, String(rotation.slot), 1, error.message));
+    throw new Error(
+      confirmationFailure(target, String(rotation.slot), 1, error.message, options.runtimeRole),
+    );
   }
   return { ...rotation, promotedAt: confirmation.promotedAt };
 }

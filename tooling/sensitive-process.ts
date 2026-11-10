@@ -75,7 +75,7 @@ export async function runSensitive(
   command: string,
   args: readonly string[],
   environment: NodeJS.ProcessEnv,
-  output: "json" | "discard",
+  output: "json" | "discard" | "worker-version",
   options: SensitiveDeadline = {},
 ): Promise<unknown> {
   const deadlineMs = options.deadlineMs ?? 180_000;
@@ -185,7 +185,16 @@ export async function runSensitive(
         return;
       }
       try {
-        finish(undefined, JSON.parse(Buffer.concat(chunks).toString("utf8").trim()));
+        const text = Buffer.concat(chunks).toString("utf8");
+        if (output === "worker-version") {
+          const matches = [
+            ...text.matchAll(
+              /^Current Version ID:\s*([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\s*$/gmu,
+            ),
+          ];
+          if (matches.length !== 1) throw new Error("unrecognized version response");
+          finish(undefined, matches[0]?.[1]);
+        } else finish(undefined, JSON.parse(text.trim()));
       } catch {
         finish(new SensitiveProcessError(stage, null));
       }

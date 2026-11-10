@@ -16,6 +16,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/routes"
 )
 
 // Signed calls and results (AF-CTR-05 part E1b; Plan CTR5-SIG-01..04, CTR5-HUB-08 and -10, PN-6; Contracts relay.proto CallHeader,
@@ -76,6 +77,8 @@ type Call struct {
 	Payload []byte
 	// Deadline is how long the center waits for the result (CTR5-RTE-06): more than zero, at most MaxCallDeadline.
 	Deadline time.Duration
+	// ReceiptCreatedAt is the original persisted receipt time, required for file mutations.
+	ReceiptCreatedAt time.Time
 	// ReplayUntil is the exclusive receipt replay deadline, carried from the admission decision.
 	ReplayUntil time.Time
 }
@@ -206,6 +209,17 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 		// The caller went away before anything was signed (review A N-4).
 		return Result{}, arc.NodeUnreachable(call.TargetNodeID[:], arc.UnreachableDeadline, false)
 	}
+	// Sample immediately before building the signed header; never re-sign with a later
+	// time after waiting for the writer. The stored receipt binds even the first attempt.
+	now = h.clock()
+	if fileCall(call.Method) && Mutation(call.Method) {
+		if call.ReceiptCreatedAt.IsZero() || now.Before(call.ReceiptCreatedAt) {
+			return Result{}, arc.Unavailable()
+		}
+		if !call.ReplayUntil.IsZero() && !now.Before(call.ReplayUntil) {
+			return Result{}, arc.InvalidState("routed_call", "replay_window_passed")
+		}
+	}
 	kid, key, ok := h.signingKey(now)
 	if !ok {
 		// No held key may sign at this instant: none is valid (an expired key never signs), or the keyring is stale, so a key retired
@@ -325,6 +339,7 @@ func (h *Hub) InFlight() int {
 func validCall(call Call) bool {
 	zero := platform.ID{}
 	if call.AccountID == zero || call.TargetNodeID == zero || !callMethod(call.Method) ||
+		(fileCall(call.Method) && call.Deadline > routes.RoutedFileDeadline) ||
 		(call.CommandID != nil) != Mutation(call.Method) || (call.CommandID != nil && *call.CommandID == zero) || len(call.Payload) < 1 ||
 		len(call.Payload) > MaxCallPayload || call.Deadline <= 0 || call.Deadline > MaxCallDeadline {
 		return false
@@ -333,11 +348,24 @@ func validCall(call Call) bool {
 	return ok
 }
 
+func fileCall(method relayv1.RoutedMethod) bool {
+	return method >= relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE && method <= maxCallMethod
+}
+
 // callHeader is a call's CallHeader (CTR5-SIG-01): issued now, its deadline now + Deadline, its expiry now + min(Deadline + 30 s,
 // 300 s), the caller as verified, center_url_sha256 the center's canonical public base URL.
 func callHeader(call Call, verified caller, callID platform.ID, kid, centerURL string, requestSHA256 []byte, now time.Time) *relayv1.CallHeader {
 	audience := sha256.Sum256([]byte(centerURL))
 	expires := min(call.Deadline+callExpiryMargin, MaxCallDeadline)
+	expiresAt := now.Add(expires)
+	if fileCall(call.Method) && !call.ReplayUntil.IsZero() {
+		// The immutable signed expiry remains anchored to the admission fence.
+		// It is not recalculated if the queued writer resumes after a pause.
+		latest := call.ReplayUntil.Add(routes.RoutedFileDeadline + callExpiryMargin)
+		if latest.Before(expiresAt) {
+			expiresAt = latest
+		}
+	}
 	signed := &nodev1.CenterCaller{Kind: verified.kind.Enum(), AccountId: idValue(call.AccountID)}
 	switch verified.kind {
 	case nodev1.CenterCallerKind_CENTER_CALLER_KIND_ACCOUNT_SESSION:
@@ -348,7 +376,7 @@ func callHeader(call Call, verified caller, callID platform.ID, kid, centerURL s
 	}
 	header := &relayv1.CallHeader{CallId: idValue(callID), Kid: proto.String(kid), CenterUrlSha256: audience[:], AccountId: idValue(call.AccountID),
 		TargetNodeId: idValue(call.TargetNodeID), Caller: signed, Method: call.Method.Enum(), RequestSha256: requestSHA256,
-		RequestSize: proto.Uint32(uint32(len(call.Payload))), IssuedAt: instant(now), ExpiresAt: instant(now.Add(expires)),
+		RequestSize: proto.Uint32(uint32(len(call.Payload))), IssuedAt: instant(now), ExpiresAt: instant(expiresAt),
 		Deadline: instant(now.Add(call.Deadline))}
 	if call.CommandID != nil {
 		header.CommandId = idValue(*call.CommandID)

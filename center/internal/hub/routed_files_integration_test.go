@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -262,9 +263,10 @@ func TestCTR06WriteReplaySharesTheOldCommandNamespace(t *testing.T) {
 		Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES.Enum(),
 			SizeBytes: proto.Uint64(uint64(len(data))), Sha256: digest[:], DigestInputBytes: proto.Uint64(uint64(len(data)))}}}})
 	calls := serve(t, node, channel, deduplicating(node, func(*relayv1.ChannelCall) []byte { return response }))
-	payload := mustMarshal(t, &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+	inner := &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command), CorrelationId: idValue(platform.NewID())},
 		Path: &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("result.txt")}, Data: data,
-		Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}})
+		Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}}
+	payload := mustMarshal(t, inner)
 	send := func() *fleetv1.FleetServiceWriteNodeFileResponse {
 		h.proveFor(issued, user, "fleet.writeNodeFile", node.node.ID)
 		reply := &fleetv1.FleetServiceWriteNodeFileResponse{}
@@ -277,6 +279,21 @@ func TestCTR06WriteReplaySharesTheOldCommandNamespace(t *testing.T) {
 			t.Fatalf("write/replay: %v", reply)
 		}
 		<-calls
+	}
+	// Exact retransmitted bytes may replay, but changing only the inner
+	// correlation ID changes the signed file request and must conflict.
+	changed := proto.Clone(inner).(*nodev1.FileServiceWriteFileRequest)
+	changed.Meta.CorrelationId = idValue(platform.NewID())
+	conflict := &fleetv1.FleetServiceWriteNodeFileResponse{}
+	h.rpc(fleetv1connect.FleetServiceWriteNodeFileProcedure, &fleetv1.FleetServiceWriteNodeFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+		NodeId: idValue(node.node.ID), Request: mustMarshal(t, changed)}, issued.AccessToken, conflict)
+	if errorKey(conflict.GetError()) != "CONFLICT/command_id_reused" {
+		t.Fatalf("changed transmitted bytes: %v", conflict.GetError())
+	}
+	select {
+	case sent := <-calls:
+		t.Fatalf("changed request reached node: %v", sent)
+	default:
 	}
 	record, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, command, 10)
 	if err != nil || record == nil || record.State != fleet.RoutedSucceeded || !record.Final || record.Attempts != 2 {
@@ -812,5 +829,229 @@ func TestCTR06MalformedAndOfflineRefusalsAuditVerifiedTargets(t *testing.T) {
 	}
 	if h.count("SELECT count(*) FROM audit.audit_event WHERE convert_from(payload,'UTF8') LIKE '%PRIVATE-OFFLINE-BODY-MARKER%'") != 0 {
 		t.Fatal("body leaked into audit")
+	}
+}
+
+// The signature is fixed before this post-delivery pause. Only the center's
+// observable fence is asserted; this is not a Node deduplication proof.
+func TestCTR06ReplayFenceRecheckedAfterDeliveredBeforeWrite(t *testing.T) {
+	var offset atomic.Int64
+	clock := func() time.Time { return time.Now().UTC().Add(time.Duration(offset.Load())) }
+	window := 10 * time.Second // test-only configuration, not a change to product limits
+	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
+		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	channel := h.connectFiles(node)
+	issued := h.accountSession(user, session.ScopeAccount)
+	command, workspace := platform.NewID(), platform.NewID()
+	data := []byte("replay-test")
+	sum := sha256.Sum256(data)
+	response := mustMarshal(t, &nodev1.FileServiceWriteFileResponse{Outcome: &nodev1.FileServiceWriteFileResponse_Value{Value: &nodev1.FileServiceWriteFileValue{
+		Result: &nodev1.FileMutationResult{CommandId: idValue(command), SizeBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}},
+		Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES.Enum(),
+			SizeBytes: proto.Uint64(uint64(len(data))), DigestInputBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}}})
+	calls := serve(t, node, channel, deduplicating(node, func(*relayv1.ChannelCall) []byte { return response }))
+	payload := mustMarshal(t, &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+		Path: &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("fence.txt")}, Data: data,
+		Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}})
+	send := func() *fleetv1.FleetServiceWriteNodeFileResponse {
+		h.proveFor(issued, user, "fleet.writeNodeFile", node.node.ID)
+		reply := &fleetv1.FleetServiceWriteNodeFileResponse{}
+		h.rpc(fleetv1connect.FleetServiceWriteNodeFileProcedure, &fleetv1.FleetServiceWriteNodeFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+			NodeId: idValue(node.node.ID), Request: payload}, issued.AccessToken, reply)
+		return reply
+	}
+	if reply := send(); reply.GetError() != nil {
+		t.Fatalf("first delivery: %v", reply.GetError())
+	}
+	<-calls
+	var created time.Time
+	if err := h.db.Migration.QueryRow(context.Background(), "SELECT created_at FROM fleet.routed_file_call WHERE account_id=$1 AND command_id=$2", user, command).Scan(&created); err != nil {
+		t.Fatal(err)
+	}
+	offset.Store(int64(time.Until(created.Add(window - 5*time.Second))))
+	delivered, release := h.center.Hub.StallAfterDelivery(node.node.ID)
+	defer release()
+	replies := make(chan *fleetv1.FleetServiceWriteNodeFileResponse, 1)
+	go func() { replies <- send() }()
+	select {
+	case expiry := <-delivered:
+		if expiry.After(created.Add(window+45*time.Second)) || !expiry.After(created.Add(window)) {
+			t.Fatalf("fixed signed expiry %v is outside the receipt-derived bound", expiry)
+		}
+	case early := <-replies:
+		t.Fatalf("retry returned before its delivered transition: %v", early)
+	case <-time.After(5 * time.Second):
+		t.Fatal("retry never entered delivered-before-write pause")
+	}
+	offset.Store(int64(time.Until(created.Add(window + time.Second))))
+	release()
+	select {
+	case reply := <-replies:
+		if errorKey(reply.GetError()) != "STATE/invalid_state" || reply.GetError().GetDetails().GetState().GetReason() != "replay_window_passed" ||
+			reply.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
+			t.Fatalf("late retry: %v", reply)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("late retry did not finish")
+	}
+	select {
+	case sent := <-calls:
+		t.Fatalf("late retry reached the node: %v", sent)
+	default:
+	}
+	record, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, command, 10)
+	if err != nil || record == nil || record.State != fleet.RoutedSucceeded || !record.Final || record.Attempts != 2 {
+		t.Fatalf("prior receipt changed: %+v %v", record, err)
+	}
+	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'path'='fence.txt' AND convert_from(payload,'UTF8')::jsonb->>'refusalReason'='replay_window_passed'", command) != 1 {
+		t.Fatal("late replay refusal lacks target and closed reason audit")
+	}
+}
+
+// Near-boundary positive control: no early refusal, and the actual signed header
+// is bounded by the original receipt time, not a post-wait renewal.
+func TestCTR06ReplaySucceedsInsideWindowWithFixedSignedExpiry(t *testing.T) {
+	var offset atomic.Int64
+	clock := func() time.Time { return time.Now().UTC().Add(time.Duration(offset.Load())) }
+	window := 10 * time.Second // test-only configuration, not a change to product limits
+	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
+		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	channel := h.connectFiles(node)
+	issued := h.accountSession(user, session.ScopeAccount)
+	command, workspace := platform.NewID(), platform.NewID()
+	data := []byte("replay-test")
+	sum := sha256.Sum256(data)
+	response := mustMarshal(t, &nodev1.FileServiceWriteFileResponse{Outcome: &nodev1.FileServiceWriteFileResponse_Value{Value: &nodev1.FileServiceWriteFileValue{
+		Result: &nodev1.FileMutationResult{CommandId: idValue(command), SizeBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}},
+		Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES.Enum(),
+			SizeBytes: proto.Uint64(uint64(len(data))), DigestInputBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}}})
+	calls := serve(t, node, channel, deduplicating(node, func(*relayv1.ChannelCall) []byte { return response }))
+	payload := mustMarshal(t, &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+		Path: &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("fence.txt")}, Data: data,
+		Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}})
+	send := func() *fleetv1.FleetServiceWriteNodeFileResponse {
+		h.proveFor(issued, user, "fleet.writeNodeFile", node.node.ID)
+		reply := &fleetv1.FleetServiceWriteNodeFileResponse{}
+		h.rpc(fleetv1connect.FleetServiceWriteNodeFileProcedure, &fleetv1.FleetServiceWriteNodeFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+			NodeId: idValue(node.node.ID), Request: payload}, issued.AccessToken, reply)
+		return reply
+	}
+	if reply := send(); reply.GetError() != nil {
+		t.Fatalf("first delivery: %v", reply.GetError())
+	}
+	<-calls
+	var created time.Time
+	if err := h.db.Migration.QueryRow(context.Background(), "SELECT created_at FROM fleet.routed_file_call WHERE account_id=$1 AND command_id=$2", user, command).Scan(&created); err != nil {
+		t.Fatal(err)
+	}
+	offset.Store(int64(time.Until(created.Add(window - 3*time.Second))))
+	if reply := send(); reply.GetError() != nil {
+		t.Fatalf("inside-window retry: %v", reply.GetError())
+	}
+	header := headerOf(t, <-calls)
+	issuedAt := time.Unix(header.GetIssuedAt().GetUnixSeconds(), int64(header.GetIssuedAt().GetNanos())).UTC()
+	expiresAt := time.Unix(header.GetExpiresAt().GetUnixSeconds(), int64(header.GetExpiresAt().GetNanos())).UTC()
+	if issuedAt.Before(created) || !issuedAt.Before(created.Add(window)) || expiresAt.After(issuedAt.Add(45*time.Second)) ||
+		expiresAt.After(created.Add(window+45*time.Second)) {
+		t.Fatalf("signed time outside receipt bound: created=%v issued=%v expires=%v", created, issuedAt, expiresAt)
+	}
+	record, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, command, 10)
+	if err != nil || record == nil || record.State != fleet.RoutedSucceeded || !record.Final || record.Attempts != 2 {
+		t.Fatalf("positive retry receipt: %+v %v", record, err)
+	}
+}
+
+// Use an aged test receipt to exercise the real center admission immediately
+// inside both production bounds without moving the process clock or waiting a day.
+func TestCTR06ReplayNearDefaultAndMaximumWindow(t *testing.T) {
+	for _, scenario := range []struct {
+		name   string
+		window time.Duration
+	}{
+		{"default", 23 * time.Hour}, {"maximum", 23*time.Hour + 52*time.Minute},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+
+			var offset atomic.Int64
+			clock := func() time.Time { return time.Now().UTC().Add(time.Duration(offset.Load())) }
+			window := scenario.window
+			h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
+				tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
+			user := h.db.Account(1)
+			node := h.enrollIn(user)
+			channel := h.connectFiles(node)
+			issued := h.accountSession(user, session.ScopeAccount)
+			command, workspace := platform.NewID(), platform.NewID()
+			data := []byte("replay-test")
+			sum := sha256.Sum256(data)
+			response := mustMarshal(t, &nodev1.FileServiceWriteFileResponse{Outcome: &nodev1.FileServiceWriteFileResponse_Value{Value: &nodev1.FileServiceWriteFileValue{
+				Result: &nodev1.FileMutationResult{CommandId: idValue(command), SizeBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}},
+				Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES.Enum(),
+					SizeBytes: proto.Uint64(uint64(len(data))), DigestInputBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}}})
+			calls := serve(t, node, channel, deduplicating(node, func(*relayv1.ChannelCall) []byte { return response }))
+			payload := mustMarshal(t, &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+				Path: &nodev1.FilePath{WorkspaceId: idValue(workspace), Path: proto.String("fence.txt")}, Data: data,
+				Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}})
+			send := func() *fleetv1.FleetServiceWriteNodeFileResponse {
+				h.proveFor(issued, user, "fleet.writeNodeFile", node.node.ID)
+				reply := &fleetv1.FleetServiceWriteNodeFileResponse{}
+				h.rpc(fleetv1connect.FleetServiceWriteNodeFileProcedure, &fleetv1.FleetServiceWriteNodeFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+					NodeId: idValue(node.node.ID), Request: payload}, issued.AccessToken, reply)
+				return reply
+			}
+			// Seed a stranded ACCEPTED receipt at its original aged creation time.
+			// No trigger is disabled and no persisted identity is rewritten. The
+			// synthetic prior effect is not asserted; the following retry is real.
+			aged := time.Now().UTC().Add(-window + 5*time.Second)
+			method := relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE
+			var digestHeader [2]byte
+			digest := sha256.New()
+			digest.Write([]byte("ArcForges routed-file-record v1\n"))
+			binary.BigEndian.PutUint16(digestHeader[:], uint16(method))
+			digest.Write(digestHeader[:])
+			digest.Write(node.node.ID[:])
+			binary.BigEndian.PutUint16(digestHeader[:], uint16(fleet.RoutedCallerSession))
+			digest.Write(digestHeader[:])
+			digest.Write(user[:])
+			digest.Write(payload)
+			exact := sha256.Sum256(payload)
+			fence, live := h.center.Hub.Routable()
+			if !live {
+				t.Fatal("hub is not routable")
+			}
+			_, err := fleet.AcceptRouted(context.Background(), h.db.Runtime, fleet.RoutedAccept{AccountID: user, NodeID: node.node.ID,
+				CommandID: command, Method: int16(method), Caller: fleet.RoutedCaller{Kind: fleet.RoutedCallerSession, SessionID: issued.SessionID, Actor: "account:" + user.String()},
+				Digest: digest.Sum(nil), RequestSHA256: exact[:], Size: len(payload), WorkspaceID: &workspace, Fence: fence, Window: window, Now: aged,
+				InFlight: func() bool { return false }, Online: func() bool { return true }})
+			if err != nil {
+				t.Fatalf("seed stranded receipt: %v", err)
+			}
+			var created time.Time
+			if err := h.db.Migration.QueryRow(context.Background(), "SELECT created_at FROM fleet.routed_file_call WHERE account_id=$1 AND command_id=$2", user, command).Scan(&created); err != nil {
+				t.Fatal(err)
+			}
+			if reply := send(); reply.GetError() != nil {
+				t.Fatalf("inside configured window: %v", reply.GetError())
+			}
+			header := headerOf(t, <-calls)
+			issuedAt := time.Unix(header.GetIssuedAt().GetUnixSeconds(), int64(header.GetIssuedAt().GetNanos())).UTC()
+			expiresAt := time.Unix(header.GetExpiresAt().GetUnixSeconds(), int64(header.GetExpiresAt().GetNanos())).UTC()
+			if issuedAt.Before(created) || !issuedAt.Before(created.Add(window)) || expiresAt.After(issuedAt.Add(45*time.Second)) || expiresAt.After(created.Add(window+45*time.Second)) {
+				t.Fatalf("signed bounds created=%v issued=%v expires=%v", created, issuedAt, expiresAt)
+			}
+			offset.Store(int64(time.Until(created.Add(window + time.Second))))
+			if reply := send(); errorKey(reply.GetError()) != "STATE/invalid_state" || reply.GetError().GetDetails().GetState().GetReason() != "replay_window_passed" {
+				t.Fatalf("past configured window: %v", reply.GetError())
+			}
+			select {
+			case frame := <-calls:
+				t.Fatalf("past-window retry sent: %v", frame)
+			default:
+			}
+		})
 	}
 }

@@ -6,12 +6,14 @@ build that `deploy` ships; main pushes no longer re-validate it), each on the ho
 two native machines (eng/verify.py; AGENTS.md):
 - lane `win` (Windows, in <main checkout>/.worktree/_verify): `source (windows-latest)`: npm ci, the locked restore and
   Release build of Cloud.slnx, the Go center's controls (`win-center`: python eng/center.py check, without the race detector
-  and fuzzing because the Windows host has no cgo; docs/engineering-controls.md), and the evaluated licence report.
+  and fuzzing because the Windows host has no cgo; docs/engineering-controls.md), the native 8e5 self-hosted bridge
+  build and asset seal against the active release profile, and the evaluated licence report.
 - lane `linux` (Linux, in ~/.cache/arcforges-verify/Cloud): `clone-identity`, `fresh-intermediates` (see
   FRESH_INTERMEDIATES), then `source (ubuntu-latest)`: npm ci,
   `npm run check`, `npm run check:dotnet`, the Go center's controls (`linux-center`: python eng/center.py check with the race
   detector, the fuzz targets, govulncheck and the image target) and the evaluated licence report; the dependency audit of
   `quality`; then
+  the 615.1 self-hosted bridge carrier extraction and asset seal against the active release profile; then
   `candidate` (`npm run candidate`: the Linux Native AOT image in the Linux host's Docker, both Worker bundles, the sealed tool and the
   manifest, verified). Everything that runs dotnet or npm in the clone is in this lane: concurrent restores or builds of
   shared projects in one checkout would race. `linux-center` runs in its own lane `center` beside it (Go and Docker only).
@@ -40,6 +42,9 @@ Differences from the hosted jobs:
   globally installed newer npm earlier on PATH fails the repository's engine-strict pin.
 - The secret scan covers the commits since the merge base, not the full history: history before it is main, scanned
   when its own PRs were verified.
+- The bridge asset checks use each native host and a new temporary directory. Linux reuses a previously verified carrier from the
+  documented workspace or `ARCFORGES_CTR06_BRIDGE_CARRIER` (an absolute non-secret path); otherwise it retrieves the fixed
+  durable release once and checks its digest. Windows compiles the archived 8e5 source with the host's existing pinned Go.
 - Added to the hosted jobs: `worker-provenance` (`npm run test:artifact`: the verifier's own tests on the real locked Wrangler output against the release profile's approved Worker closure; the hosted candidate job runs the verifier itself on the real bundle, so only these tests and the early feedback are leg-only).
 - Not reproduced: GitHub dependency review (a GitHub service; external PRs keep it; the locked restores with NuGet audit
   and `npm audit` cover vulnerable packages locally) and CodeQL (external PRs, dispatch and the weekly schedule).
@@ -167,12 +172,18 @@ STEPS = [
     win("win-build", ["dotnet", "build", "Cloud.slnx", "-c", "Release", "--no-restore"], 900),
     # The Go center (AF-CTR-02): build, gofmt, vet, staticcheck, unit and protocol tests, drift, govulncheck and the native build.
     win("win-center", ["python", "eng/center.py", "check"], 900),
+    # The exact 8e5 bridge is compiled on Windows and its complete asset is
+    # sealed and checked against this commit's active release profile.
+    win("win-ctr06-bridge-asset", ["python", "eng/verification/ctr06_native_bridge_check.py"], 600),
     win("win-licence-evaluated", ["node", "tooling/project.ts", "licence-evaluated"], 600),
     # ci.yml source (ubuntu-latest), the dependency audit of quality, then candidate
     linux("clone-identity", "set -e; git config remote.origin.url https://github.com/ArcForges/Cloud.git; "
         "git checkout -q -B arcforges-verify {sha}; git update-ref refs/remotes/origin/main {base}", 60),
     linux("fresh-intermediates", FRESH_INTERMEDIATES, 60),
     linux("npm-ci", "npm ci --ignore-scripts", 300),
+    # Reuse this host's pinned 615.1 carrier when available; otherwise fetch
+    # that one durable carrier, verify it and seal the Linux asset.
+    linux("linux-ctr06-bridge-asset", "python eng/verification/ctr06_native_bridge_check.py", 600),
     linux("npm-audit", "npm audit --audit-level=high && npm audit --audit-level=high --prefix eng/verification/browser", 300),
     linux("check", "npm run check", 1200),
     linux("check-dotnet", "npm run check:dotnet", 1200),

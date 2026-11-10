@@ -246,7 +246,7 @@ func TestARotationCorrectsANonInheritingMembership(t *testing.T) {
 	}
 	login := group + "_a"
 	for _, statement := range []string{
-		"CREATE ROLE " + login + " LOGIN",
+		"ALTER ROLE " + login + " LOGIN",
 		"GRANT " + group + " TO " + login + " WITH INHERIT FALSE",
 	} {
 		if _, err := conn.Exec(ctx, statement); err != nil {
