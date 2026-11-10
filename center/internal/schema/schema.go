@@ -113,4 +113,4 @@ var RuntimeGrants = []Grant{
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted
 // above or listed here; a test refuses a table with neither decision.
-var MigrationOnly = []string{"platform.runtime_credential", "platform.ctr06_runtime_floor", "platform.ctr06_legacy_runtime_credential"}
+var MigrationOnly = []string{"platform.runtime_credential", "platform.ctr06_runtime_floor", "platform.ctr06_restore_admission", "platform.ctr06_legacy_runtime_credential"}

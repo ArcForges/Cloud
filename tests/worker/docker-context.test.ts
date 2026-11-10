@@ -63,11 +63,25 @@ test("every source project of the image is admitted to the Docker context by exp
  */
 function centerFolders(directory: string): { folder: string; files: string[] }[] {
   const entries = readdirSync(path.join(root, directory), { withFileTypes: true });
+  const embeddedNames = new Set(
+    entries
+      .filter(
+        (entry) => entry.isFile() && entry.name.endsWith(".go") && !entry.name.endsWith("_test.go"),
+      )
+      .flatMap((entry) =>
+        [
+          ...readFileSync(path.join(root, directory, entry.name), "utf8").matchAll(
+            /^\/\/go:embed ([^\s*?\[\]]+)$/gmu,
+          ),
+        ].map((match) => match[1]),
+      ),
+  );
   const files = entries
     .filter(
       (entry) =>
         entry.isFile() &&
-        ((entry.name.endsWith(".go") && !entry.name.endsWith("_test.go")) ||
+        ((entry.name.endsWith(".txt") && embeddedNames.has(entry.name)) ||
+          (entry.name.endsWith(".go") && !entry.name.endsWith("_test.go")) ||
           entry.name.endsWith(".sql") ||
           entry.name.endsWith(".gohtml") ||
           (directory.endsWith("/static") && /\.(?:js|css)$/u.test(entry.name)) ||
@@ -221,6 +235,9 @@ test("the matcher of the Docker context follows the rules the file states", () =
     ["center/internal/entitlement/operator_test.go", false],
     ["center/internal/entitlement/testdata/csharp-resolver-vectors.json", false],
     ["center/internal/schema/migrations/0003_entitlement.sql", true],
+    ["center/internal/store/migrate/ctr06_schema10_inventory.txt", true],
+    ["center/internal/store/migrate/ctr06_schema11_inventory.txt", true],
+    ["center/internal/store/migrate/unreviewed.txt", false],
     ["center/internal/pages/templates/operations-review.gohtml", true],
     ["center/internal/pages/templates/notes.md", false],
     ["center/internal/feature/fixtures/development.json", true],

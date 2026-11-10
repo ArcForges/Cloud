@@ -69,6 +69,17 @@ func ApplySelfHostedCTR06(ctx context.Context, conn *pgx.Conn, build []Migration
 		return result, err
 	}
 	defer bridge.close()
+	return applySelfHostedCTR06(ctx, conn, build, options, bridge, prepare)
+}
+
+// applySelfHostedCTR06 accepts only a held, verified executable opened by the
+// current manager. Legacy restore uses the very same object for pre-0011
+// administration and the actual temporary bridge service.
+func applySelfHostedCTR06(ctx context.Context, conn *pgx.Conn, build []Migration, options Options, bridge *localBridgeExecutable, prepare CTR06LocalCredential) (result Result, finalErr error) {
+	if bridge == nil || prepare == nil || options.BridgeProof != nil {
+		return result, ErrCTR06RetirementUnproven
+	}
+	options.defaults()
 	if len(build) < 11 || build[9].Name != "0010_fleet_routed_call.sql" || build[10].Name != "0011_fleet_routed_files.sql" {
 		return result, ErrCTR06RetirementUnproven
 	}
@@ -84,7 +95,7 @@ func ApplySelfHostedCTR06(ctx context.Context, conn *pgx.Conn, build []Migration
 	if len(compared.Pending) != 0 || len(compared.Problems) != 0 {
 		return result, ErrCTR06RetirementUnproven
 	}
-	roles, err := PrepareCTR06Roles(ctx, conn, options.RuntimeRole)
+	roles, err := prepareCTR06Roles(ctx, conn, options.RuntimeRole, options.localRestore)
 	if err != nil {
 		return result, err
 	}
@@ -98,7 +109,17 @@ func ApplySelfHostedCTR06(ctx context.Context, conn *pgx.Conn, build []Migration
 			}
 		}
 	}()
-	runtimeURL, err := prepare(ctx, roles)
+	prepareContext := ctx
+	var restoreGrant *ctr06RestoreBridgeGrant
+	if options.localRestore != nil {
+		restoreGrant = &ctr06RestoreBridgeGrant{restore: options.localRestore, roles: roles, active: true}
+		defer func() { restoreGrant.active = false }()
+		prepareContext = context.WithValue(ctx, ctr06RestoreBridgeGrantKey{}, restoreGrant)
+	}
+	runtimeURL, err := prepare(prepareContext, roles)
+	if restoreGrant != nil {
+		restoreGrant.active = false
+	}
 	if err != nil {
 		return result, err
 	}
@@ -125,15 +146,15 @@ func ApplySelfHostedCTR06(ctx context.Context, conn *pgx.Conn, build []Migration
 	finalRole := roles.BridgeRole[:marker] + "_n06_" + roles.BridgeRole[marker+len("_c06_"):]
 	binding := bridgeproof.Context{
 		DatabaseHost: strings.ToLower(conn.Config().Host), DatabasePort: conn.Config().Port,
-		DatabaseName: roles.DatabaseName, DatabaseOID: roles.DatabaseOID, OwnerOID: roles.OwnerOID,
+		DatabaseName: roles.DatabaseName, ClusterSystemIdentifier: roles.ClusterSystemIdentifier, DatabaseOID: roles.DatabaseOID, OwnerOID: roles.OwnerOID,
 		LegacyRole: roles.LegacyRole, LegacyRoleOID: roles.LegacyRoleOID,
 		BridgeRole: roles.BridgeRole, BridgeRoleOID: roles.BridgeRoleOID,
 		BridgeLogin: roles.BridgeLogin, BridgeLoginOID: roles.BridgeLoginOID, Nonce: roles.Nonce,
 		WorkflowRevision: options.Runner,
 	}
 	public := strings.Join([]string{
-		"ArcForges CTR06 local bridge v1", runtime.GOOS, runtime.GOARCH, bridge.digest,
-		binding.DatabaseHost, strconv.Itoa(int(binding.DatabasePort)), binding.DatabaseName,
+		"ArcForges CTR06 local bridge v2", runtime.GOOS, runtime.GOARCH, bridge.digest,
+		binding.DatabaseHost, strconv.Itoa(int(binding.DatabasePort)), binding.DatabaseName, binding.ClusterSystemIdentifier,
 		strconv.FormatUint(uint64(binding.DatabaseOID), 10), strconv.FormatUint(uint64(binding.OwnerOID), 10),
 		binding.LegacyRole, strconv.FormatUint(uint64(binding.LegacyRoleOID), 10),
 		binding.BridgeRole, strconv.FormatUint(uint64(binding.BridgeRoleOID), 10),

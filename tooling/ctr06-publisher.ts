@@ -130,6 +130,7 @@ function privateUser(): string | undefined {
 
 type Prepared = {
   databaseName: string;
+  clusterSystemIdentifier: string;
   databaseOid: number;
   ownerOid: number;
   legacyRole: string;
@@ -414,6 +415,7 @@ export async function promoteCTR06Bridge(
         databaseHost: direct.hostname.toLowerCase(),
         databasePort: Number(direct.port || "5432"),
         databaseName: prepared.databaseName,
+        clusterSystemIdentifier: prepared.clusterSystemIdentifier,
         databaseOid: prepared.databaseOid,
         ownerOid: prepared.ownerOid,
         legacyRole: prepared.legacyRole,

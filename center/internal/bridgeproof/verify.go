@@ -34,6 +34,7 @@ const (
 
 var (
 	ErrUntrusted  = errors.New("the protected bridge promotion proof is invalid")
+	clusterID     = regexp.MustCompile(`^-?[1-9][0-9]{0,19}$`)
 	hex40         = regexp.MustCompile(`^[a-f0-9]{40}$`)
 	hex64         = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	host          = regexp.MustCompile(`^[a-z0-9.-]{1,253}$`)
@@ -47,32 +48,33 @@ var (
 // PostgreSQL OIDs are re-read from the actual database inside the migration
 // transaction. A single exact encoding is used as the GitHub OIDC audience.
 type Context struct {
-	Environment          string `json:"environment"`
-	DatabaseHost         string `json:"databaseHost"`
-	DatabasePort         uint16 `json:"databasePort"`
-	DatabaseName         string `json:"databaseName"`
-	DatabaseOID          uint32 `json:"databaseOid"`
-	OwnerOID             uint32 `json:"ownerOid"`
-	LegacyRole           string `json:"legacyRole"`
-	LegacyRoleOID        uint32 `json:"legacyRoleOid"`
-	BridgeRole           string `json:"bridgeRole"`
-	BridgeRoleOID        uint32 `json:"bridgeRoleOid"`
-	BridgeLogin          string `json:"bridgeLogin"`
-	BridgeLoginOID       uint32 `json:"bridgeLoginOid"`
-	Nonce                string `json:"nonce"`
-	WorkflowRevision     string `json:"workflowRevision"`
-	CloudAccount         string `json:"cloudAccount"`
-	WorkerName           string `json:"workerName"`
-	WorkerVersion        string `json:"workerVersion"`
-	ContainerApplication string `json:"containerApplication"`
-	RegistryImage        string `json:"registryImage"`
+	Environment             string `json:"environment"`
+	DatabaseHost            string `json:"databaseHost"`
+	DatabasePort            uint16 `json:"databasePort"`
+	DatabaseName            string `json:"databaseName"`
+	ClusterSystemIdentifier string `json:"clusterSystemIdentifier"`
+	DatabaseOID             uint32 `json:"databaseOid"`
+	OwnerOID                uint32 `json:"ownerOid"`
+	LegacyRole              string `json:"legacyRole"`
+	LegacyRoleOID           uint32 `json:"legacyRoleOid"`
+	BridgeRole              string `json:"bridgeRole"`
+	BridgeRoleOID           uint32 `json:"bridgeRoleOid"`
+	BridgeLogin             string `json:"bridgeLogin"`
+	BridgeLoginOID          uint32 `json:"bridgeLoginOid"`
+	Nonce                   string `json:"nonce"`
+	WorkflowRevision        string `json:"workflowRevision"`
+	CloudAccount            string `json:"cloudAccount"`
+	WorkerName              string `json:"workerName"`
+	WorkerVersion           string `json:"workerVersion"`
+	ContainerApplication    string `json:"containerApplication"`
+	RegistryImage           string `json:"registryImage"`
 }
 
 // Audience validates and hashes the exact context and immutable bridge identity.
 func (c Context) Audience() (string, error) {
 	if (c.Environment != "production" && c.Environment != "acceptance") ||
 		!host.MatchString(c.DatabaseHost) || c.DatabasePort == 0 || !name.MatchString(c.DatabaseName) ||
-		c.DatabaseOID == 0 || c.OwnerOID == 0 || !name.MatchString(c.LegacyRole) || c.LegacyRoleOID == 0 ||
+		!clusterID.MatchString(c.ClusterSystemIdentifier) || c.DatabaseOID == 0 || c.OwnerOID == 0 || !name.MatchString(c.LegacyRole) || c.LegacyRoleOID == 0 ||
 		!name.MatchString(c.BridgeRole) || c.BridgeRoleOID == 0 || c.BridgeRole == c.LegacyRole ||
 		!name.MatchString(c.BridgeLogin) || c.BridgeLoginOID == 0 || c.BridgeLogin == c.BridgeRole ||
 		!hex64.MatchString(c.Nonce) || !hex40.MatchString(c.WorkflowRevision) ||
@@ -90,8 +92,8 @@ func (c Context) Audience() (string, error) {
 		return "", ErrUntrusted
 	}
 	fields := []string{
-		"ArcForges CTR06 protected promotion v1", c.Environment, c.DatabaseHost, strconv.Itoa(int(c.DatabasePort)),
-		c.DatabaseName, strconv.FormatUint(uint64(c.DatabaseOID), 10), strconv.FormatUint(uint64(c.OwnerOID), 10),
+		"ArcForges CTR06 protected promotion v2", c.Environment, c.DatabaseHost, strconv.Itoa(int(c.DatabasePort)),
+		c.DatabaseName, c.ClusterSystemIdentifier, strconv.FormatUint(uint64(c.DatabaseOID), 10), strconv.FormatUint(uint64(c.OwnerOID), 10),
 		c.LegacyRole, strconv.FormatUint(uint64(c.LegacyRoleOID), 10), c.BridgeRole, strconv.FormatUint(uint64(c.BridgeRoleOID), 10),
 		c.BridgeLogin, strconv.FormatUint(uint64(c.BridgeLoginOID), 10), c.Nonce, c.WorkflowRevision,
 		BridgeRevision, BridgeImageID, BridgeReleaseSHA256, c.CloudAccount, c.WorkerName, c.WorkerVersion,

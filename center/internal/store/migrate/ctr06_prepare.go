@@ -14,16 +14,17 @@ import (
 
 // PreparedBridgeRoles is public issuance metadata, not promotion evidence.
 type PreparedBridgeRoles struct {
-	DatabaseName   string `json:"databaseName"`
-	DatabaseOID    uint32 `json:"databaseOid"`
-	OwnerOID       uint32 `json:"ownerOid"`
-	LegacyRole     string `json:"legacyRole"`
-	LegacyRoleOID  uint32 `json:"legacyRoleOid"`
-	BridgeRole     string `json:"bridgeRole"`
-	BridgeRoleOID  uint32 `json:"bridgeRoleOid"`
-	BridgeLogin    string `json:"bridgeLogin"`
-	BridgeLoginOID uint32 `json:"bridgeLoginOid"`
-	Nonce          string `json:"nonce"`
+	DatabaseName            string `json:"databaseName"`
+	ClusterSystemIdentifier string `json:"clusterSystemIdentifier"`
+	DatabaseOID             uint32 `json:"databaseOid"`
+	OwnerOID                uint32 `json:"ownerOid"`
+	LegacyRole              string `json:"legacyRole"`
+	LegacyRoleOID           uint32 `json:"legacyRoleOid"`
+	BridgeRole              string `json:"bridgeRole"`
+	BridgeRoleOID           uint32 `json:"bridgeRoleOid"`
+	BridgeLogin             string `json:"bridgeLogin"`
+	BridgeLoginOID          uint32 `json:"bridgeLoginOid"`
+	Nonce                   string `json:"nonce"`
 }
 
 func bridgeRoleMarker(database, owner, legacy, group, login uint32, nonce string) string {
@@ -35,6 +36,18 @@ func bridgeRoleMarker(database, owner, legacy, group, login uint32, nonce string
 // annotation is neither promotion proof nor authority to take over an
 // abandoned role on a later invocation.
 func PrepareCTR06Roles(ctx context.Context, conn *pgx.Conn, legacy string) (PreparedBridgeRoles, error) {
+	return prepareCTR06Roles(ctx, conn, legacy, nil)
+}
+
+func prepareCTR06Roles(ctx context.Context, conn *pgx.Conn, legacy string, recovery *restoreCapability) (PreparedBridgeRoles, error) {
+	if recovery == nil {
+		var database string
+		if err := conn.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil || RequireOrdinaryDatabase(ctx, conn, database) != nil {
+			return PreparedBridgeRoles{}, ErrCTR06RetirementUnproven
+		}
+	} else if !recovery.active || recovery.conn != conn || requireCTR06RestoreIsolation(ctx, conn) != nil {
+		return PreparedBridgeRoles{}, ErrCTR06RetirementUnproven
+	}
 	if err := ValidRoleName(legacy); err != nil {
 		return PreparedBridgeRoles{}, err
 	}
@@ -50,9 +63,9 @@ func PrepareCTR06Roles(ctx context.Context, conn *pgx.Conn, legacy string) (Prep
 	result.BridgeLogin = result.BridgeRole + "_a"
 	err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
 		var actor uint32
-		if err := tx.QueryRow(ctx, `SELECT d.datname,d.oid,d.datdba,(SELECT oid FROM pg_roles WHERE rolname=current_user),
+		if err := tx.QueryRow(ctx, `SELECT d.datname,(SELECT system_identifier::text FROM pg_catalog.pg_control_system()),d.oid,d.datdba,(SELECT oid FROM pg_roles WHERE rolname=current_user),
 (SELECT oid FROM pg_roles WHERE rolname=$1) FROM pg_database d WHERE d.datname=current_database()`, legacy).
-			Scan(&result.DatabaseName, &result.DatabaseOID, &result.OwnerOID, &actor, &result.LegacyRoleOID); err != nil || actor != result.OwnerOID {
+			Scan(&result.DatabaseName, &result.ClusterSystemIdentifier, &result.DatabaseOID, &result.OwnerOID, &actor, &result.LegacyRoleOID); err != nil || actor != result.OwnerOID {
 			return errors.New("the database or legacy role is not owned by the migration role")
 		}
 		if err := RequirePlainRole(ctx, tx, legacy, false); err != nil {
@@ -89,8 +102,9 @@ func ConfirmPreparedCTR06Roles(ctx context.Context, tx pgx.Tx, roles PreparedBri
 	var ok bool
 	err := tx.QueryRow(ctx, `SELECT
  (SELECT description FROM pg_shdescription WHERE classoid='pg_authid'::regclass AND objoid=$1::oid)=$3 AND
- (SELECT description FROM pg_shdescription WHERE classoid='pg_authid'::regclass AND objoid=$2::oid)=$3`,
-		roles.BridgeRoleOID, roles.BridgeLoginOID, marker).Scan(&ok)
+ (SELECT description FROM pg_shdescription WHERE classoid='pg_authid'::regclass AND objoid=$2::oid)=$3 AND
+ (SELECT system_identifier::text FROM pg_catalog.pg_control_system())=$4`,
+		roles.BridgeRoleOID, roles.BridgeLoginOID, marker, roles.ClusterSystemIdentifier).Scan(&ok)
 	if err != nil || !ok {
 		return fmt.Errorf("%w: bridge role issuance metadata differs", ErrCTR06RetirementUnproven)
 	}

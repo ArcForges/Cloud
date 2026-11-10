@@ -204,6 +204,7 @@ CREATE TRIGGER routed_file_target_fixed BEFORE UPDATE OR DELETE ON fleet.routed_
 -- operator flag; ordinary runtime roles cannot read or change it.
 CREATE TABLE platform.ctr06_runtime_floor (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    cluster_system_identifier text NOT NULL CHECK (cluster_system_identifier ~ '^-?[0-9]+$'),
     database_oid oid NOT NULL,
     owner_oid oid NOT NULL,
     runtime_role name NOT NULL,
@@ -219,6 +220,33 @@ CREATE TABLE platform.ctr06_runtime_floor (
     CHECK (promotion_digest IS NULL OR promotion_digest ~ '^[0-9a-f]{64}$')
 );
 REVOKE ALL ON platform.ctr06_runtime_floor FROM PUBLIC;
+
+-- Every floor has an owner-only admission written in the same 0011
+-- transaction. Restore admission begins PENDING; ordinary initialization has
+-- its own explicit READY record. Source readiness is never a target proof.
+CREATE TABLE platform.ctr06_restore_admission (
+    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    kind text NOT NULL CHECK (kind IN ('fresh', 'restore')),
+    state text NOT NULL CHECK (state IN ('PENDING', 'READY')),
+    cluster_system_identifier text NOT NULL CHECK (cluster_system_identifier ~ '^-?[0-9]+$'),
+    database_oid oid NOT NULL,
+    owner_oid oid NOT NULL,
+    runtime_role_oid oid NOT NULL,
+    archive_sha256 text,
+    metadata_sha256 text,
+    capability_sha256 text,
+    receipt_sha256 text,
+    established_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    CHECK (
+      (kind = 'fresh' AND state = 'READY' AND archive_sha256 IS NULL AND metadata_sha256 IS NULL AND capability_sha256 IS NULL AND receipt_sha256 IS NULL)
+      OR
+      (kind = 'restore' AND archive_sha256 IS NOT NULL AND metadata_sha256 IS NOT NULL AND capability_sha256 IS NOT NULL
+       AND archive_sha256 ~ '^[0-9a-f]{64}$' AND metadata_sha256 ~ '^[0-9a-f]{64}$'
+       AND capability_sha256 ~ '^[0-9a-f]{64}$' AND
+       ((state = 'PENDING' AND receipt_sha256 IS NULL) OR (state = 'READY' AND receipt_sha256 IS NOT NULL AND receipt_sha256 ~ '^[0-9a-f]{64}$')))
+    )
+);
+REVOKE ALL ON platform.ctr06_restore_admission FROM PUBLIC;
 
 -- Preserve the two old rotation records when the bridge generation is
 -- adopted; this table is accessible only to the migration owner.

@@ -59,13 +59,16 @@ func TestRestoreDrill(t *testing.T) {
 		if err != nil || outcome.Replayed {
 			t.Fatalf("seed: %+v %v", outcome, err)
 		}
-	case "verify":
+	case "verify", "replay":
 		// The restored receipt answers the replay without running the command.
 		outcome, err := Execute(ctx, db, cmd, store.TxOptions{}, func(context.Context, pgx.Tx) ([]byte, error) {
 			return nil, errors.New("the restored command ran again")
 		})
 		if err != nil || !outcome.Replayed || !bytes.Equal(outcome.Result, []byte("drill reply")) {
 			t.Fatalf("receipt replay: %+v %v", outcome, err)
+		}
+		if phase == "replay" {
+			return // does not publish, claim a job or append an audit event
 		}
 		// The restored outbox message is published.
 		sink := &recorder{}

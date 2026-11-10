@@ -15,6 +15,7 @@ export interface BridgeContext {
   databaseHost: string;
   databasePort: number;
   databaseName: string;
+  clusterSystemIdentifier: string;
   databaseOid: number;
   ownerOid: number;
   legacyRole: string;
@@ -39,6 +40,7 @@ export function bridgeAudience(c: BridgeContext): string {
   assert(Number.isInteger(c.databasePort) && c.databasePort > 0 && c.databasePort <= 65535);
   for (const name of [c.databaseName, c.legacyRole, c.bridgeRole, c.bridgeLogin, c.workerName])
     assert.match(name, /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/u);
+  assert.match(c.clusterSystemIdentifier, /^-?[1-9][0-9]{0,19}$/u);
   for (const oid of [c.databaseOid, c.ownerOid, c.legacyRoleOid, c.bridgeRoleOid, c.bridgeLoginOid])
     assert(Number.isInteger(oid) && oid > 0 && oid <= 4294967295);
   assert.notEqual(c.bridgeRole, c.legacyRole);
@@ -65,11 +67,12 @@ export function bridgeAudience(c: BridgeContext): string {
     "registry manifest differs from the sealed bridge",
   );
   const fields = [
-    "ArcForges CTR06 protected promotion v1",
+    "ArcForges CTR06 protected promotion v2",
     c.environment,
     c.databaseHost,
     String(c.databasePort),
     c.databaseName,
+    c.clusterSystemIdentifier,
     String(c.databaseOid),
     String(c.ownerOid),
     c.legacyRole,

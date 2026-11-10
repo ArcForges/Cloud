@@ -1,0 +1,315 @@
+CONSTRAINT audit audit_event audit_event_event_id
+CONSTRAINT audit audit_event audit_event_pkey
+CONSTRAINT audit chain_head chain_head_pkey
+CONSTRAINT device device device_owner
+CONSTRAINT device device device_pkey
+CONSTRAINT device installation installation_device_product
+CONSTRAINT device installation installation_of_device
+CONSTRAINT device installation installation_pkey
+CONSTRAINT entitlement account_status_fact account_status_fact_pkey
+CONSTRAINT entitlement definitions_activation definitions_activation_pkey
+CONSTRAINT entitlement definitions_current definitions_current_pkey
+CONSTRAINT entitlement feature_release feature_release_pkey
+CONSTRAINT entitlement grant grant_of_account
+CONSTRAINT entitlement grant grant_pkey
+CONSTRAINT entitlement revision revision_pkey
+CONSTRAINT entitlement revocation revocation_pkey
+CONSTRAINT entitlement service_term service_term_of_account
+CONSTRAINT entitlement service_term service_term_pkey
+CONSTRAINT entitlement service_term_action service_term_action_pkey
+CONSTRAINT entitlement snapshot snapshot_pkey
+CONSTRAINT fleet device_authorization device_authorization_device_code
+CONSTRAINT fleet device_authorization device_authorization_pkey
+CONSTRAINT fleet hub_lease hub_lease_pkey
+CONSTRAINT fleet node node_installation_once
+CONSTRAINT fleet node node_pkey
+CONSTRAINT fleet node_sign_in node_sign_in_pkey
+CONSTRAINT fleet refusal_code refusal_code_pkey
+CONSTRAINT fleet refusal_code refusal_code_unique
+CONSTRAINT fleet routed_call routed_call_pkey
+CONSTRAINT fleet routed_command_id routed_command_id_pkey
+CONSTRAINT fleet routed_file_call routed_file_call_pkey
+CONSTRAINT fleet routed_file_target routed_file_target_pkey
+CONSTRAINT fleet signing_key signing_key_pkey
+CONSTRAINT identity auth_flow auth_flow_pkey
+CONSTRAINT identity auth_identity auth_identity_pkey
+CONSTRAINT identity auth_identity auth_identity_provider_subject
+CONSTRAINT identity bootstrap bootstrap_pkey
+CONSTRAINT identity mobile_authorization mobile_authorization_pkey
+CONSTRAINT identity operator operator_pkey
+CONSTRAINT identity session session_pkey
+CONSTRAINT identity spent_refresh spent_refresh_family_generation
+CONSTRAINT identity spent_refresh spent_refresh_pkey
+CONSTRAINT identity step_up_challenge step_up_challenge_pkey
+CONSTRAINT identity user user_passkey_user_handle
+CONSTRAINT identity user user_pkey
+CONSTRAINT platform command_receipt command_receipt_pkey
+CONSTRAINT platform ctr06_restore_admission ctr06_restore_admission_pkey
+CONSTRAINT platform ctr06_runtime_floor ctr06_runtime_floor_pkey
+CONSTRAINT platform inbox inbox_pkey
+CONSTRAINT platform job_lease job_lease_pkey
+CONSTRAINT platform outbox outbox_dedup_key
+CONSTRAINT platform outbox outbox_pkey
+CONSTRAINT platform outbox outbox_sequence
+CONSTRAINT platform rate_limit rate_limit_pkey
+CONSTRAINT platform runtime_credential runtime_credential_login_role
+CONSTRAINT platform runtime_credential runtime_credential_pkey
+CONSTRAINT platform schema_migration schema_migration_name
+CONSTRAINT platform schema_migration schema_migration_pkey
+FK CONSTRAINT device device device_user
+FK CONSTRAINT device installation installation_device
+FK CONSTRAINT entitlement account_status_fact account_status_fact_account
+FK CONSTRAINT entitlement definitions_activation definitions_activation_account
+FK CONSTRAINT entitlement grant grant_account
+FK CONSTRAINT entitlement revision revision_account
+FK CONSTRAINT entitlement revocation revocation_account
+FK CONSTRAINT entitlement revocation revocation_grant
+FK CONSTRAINT entitlement service_term service_term_account
+FK CONSTRAINT entitlement service_term_action service_term_action_account
+FK CONSTRAINT entitlement service_term_action service_term_action_replacement
+FK CONSTRAINT entitlement service_term_action service_term_action_term
+FK CONSTRAINT entitlement snapshot snapshot_account
+FK CONSTRAINT fleet device_authorization device_authorization_approver_session
+FK CONSTRAINT fleet device_authorization device_authorization_enrollment
+FK CONSTRAINT fleet device_authorization device_authorization_session
+FK CONSTRAINT fleet device_authorization device_authorization_user
+FK CONSTRAINT fleet device_authorization device_authorization_viewer
+FK CONSTRAINT fleet node node_device
+FK CONSTRAINT fleet node node_installation
+FK CONSTRAINT fleet node_sign_in node_sign_in_approver_session
+FK CONSTRAINT fleet node_sign_in node_sign_in_enrollment
+FK CONSTRAINT fleet node_sign_in node_sign_in_session
+FK CONSTRAINT fleet node_sign_in node_sign_in_user
+FK CONSTRAINT fleet node_sign_in node_sign_in_viewer
+FK CONSTRAINT fleet routed_call routed_call_account
+FK CONSTRAINT fleet routed_call routed_call_node
+FK CONSTRAINT fleet routed_call routed_call_refusal
+FK CONSTRAINT fleet routed_command_id routed_command_id_account
+FK CONSTRAINT fleet routed_file_call routed_file_call_account
+FK CONSTRAINT fleet routed_file_call routed_file_call_node
+FK CONSTRAINT fleet routed_file_call routed_file_call_refusal
+FK CONSTRAINT fleet routed_file_target routed_file_target_account_id_fkey
+FK CONSTRAINT fleet routed_file_target routed_file_target_node_enrollment_id_fkey
+FK CONSTRAINT identity auth_flow auth_flow_session
+FK CONSTRAINT identity auth_flow auth_flow_user
+FK CONSTRAINT identity auth_identity auth_identity_user
+FK CONSTRAINT identity bootstrap bootstrap_user
+FK CONSTRAINT identity mobile_authorization mobile_authorization_approver_session
+FK CONSTRAINT identity mobile_authorization mobile_authorization_session
+FK CONSTRAINT identity mobile_authorization mobile_authorization_user
+FK CONSTRAINT identity mobile_authorization mobile_authorization_viewer
+FK CONSTRAINT identity operator operator_user
+FK CONSTRAINT identity session session_device
+FK CONSTRAINT identity session session_installation
+FK CONSTRAINT identity session session_owner
+FK CONSTRAINT identity spent_refresh spent_refresh_session
+FK CONSTRAINT identity step_up_challenge step_up_challenge_session
+FK CONSTRAINT identity step_up_challenge step_up_challenge_user
+FUNCTION audit refuse_change()
+FUNCTION entitlement definitions_current_once()
+FUNCTION entitlement refuse_change()
+FUNCTION entitlement revision_advances()
+FUNCTION fleet hub_lease_fenced()
+FUNCTION fleet refusal_code_fixed()
+FUNCTION fleet refuse_final_authorization_change()
+FUNCTION fleet refuse_final_sign_in_change()
+FUNCTION fleet reserve_routed_command_id()
+FUNCTION fleet routed_call_guarded()
+FUNCTION fleet routed_command_id_fixed()
+FUNCTION fleet routed_file_call_guarded()
+FUNCTION fleet routed_file_target_fixed()
+FUNCTION identity operator_only_revokes()
+FUNCTION identity refuse_consumed_flow_change()
+FUNCTION identity refuse_final_mobile_authorization_change()
+INDEX audit audit_event_actor
+INDEX audit audit_event_correlation
+INDEX device device_user
+INDEX device installation_device
+INDEX device installation_live_web_claim
+INDEX device installation_public_key
+INDEX entitlement account_status_fact_account
+INDEX entitlement account_status_fact_source_ref
+INDEX entitlement grant_account
+INDEX entitlement grant_source_ref_once
+INDEX entitlement revocation_account
+INDEX entitlement revocation_grant
+INDEX entitlement service_term_action_account
+INDEX entitlement service_term_action_replacement
+INDEX entitlement service_term_action_source_ref
+INDEX entitlement service_term_action_term
+INDEX entitlement service_term_period
+INDEX fleet device_authorization_approver_session
+INDEX fleet device_authorization_enrollment
+INDEX fleet device_authorization_expires_at
+INDEX fleet device_authorization_live_user_code
+INDEX fleet device_authorization_pending_node
+INDEX fleet device_authorization_session
+INDEX fleet device_authorization_user
+INDEX fleet device_authorization_user_code
+INDEX fleet device_authorization_viewer
+INDEX fleet node_device_id
+INDEX fleet node_live_node_id
+INDEX fleet node_sign_in_approver_session
+INDEX fleet node_sign_in_enrollment
+INDEX fleet node_sign_in_expires_at
+INDEX fleet node_sign_in_pending_node
+INDEX fleet node_sign_in_session
+INDEX fleet node_sign_in_user
+INDEX fleet node_sign_in_viewer
+INDEX fleet node_user
+INDEX fleet routed_call_account_created
+INDEX fleet routed_call_node_created
+INDEX fleet routed_call_open
+INDEX fleet routed_call_refusal_code
+INDEX fleet routed_file_call_account_created
+INDEX fleet routed_file_call_node_created
+INDEX fleet routed_file_call_open
+INDEX fleet routed_file_call_refusal_code
+INDEX fleet routed_file_target_enrollment
+INDEX fleet signing_key_purpose_validity
+INDEX identity auth_flow_expires_at
+INDEX identity auth_flow_session
+INDEX identity auth_flow_user
+INDEX identity auth_identity_user
+INDEX identity mobile_authorization_approver_session
+INDEX identity mobile_authorization_expires_at
+INDEX identity mobile_authorization_session
+INDEX identity mobile_authorization_user
+INDEX identity mobile_authorization_viewer
+INDEX identity operator_user
+INDEX identity session_access_token_hash
+INDEX identity session_browser_handle_hash
+INDEX identity session_by_user
+INDEX identity session_device
+INDEX identity session_expires_at
+INDEX identity session_family
+INDEX identity session_installation
+INDEX identity session_refresh_token_hash
+INDEX identity spent_refresh_family_expires_at
+INDEX identity spent_refresh_session
+INDEX identity step_up_challenge_expires_at
+INDEX identity step_up_challenge_session
+INDEX identity step_up_challenge_user
+INDEX platform command_receipt_expires_at
+INDEX platform inbox_expires_at
+INDEX platform job_lease_claim
+INDEX platform outbox_aggregate
+INDEX platform outbox_pending
+INDEX platform rate_limit_window_start
+SCHEMA - audit
+SCHEMA - device
+SCHEMA - entitlement
+SCHEMA - fleet
+SCHEMA - identity
+SCHEMA - platform
+SEQUENCE SET platform outbox_sequence_seq
+SEQUENCE platform outbox_sequence_seq
+TABLE DATA audit audit_event
+TABLE DATA audit chain_head
+TABLE DATA device device
+TABLE DATA device installation
+TABLE DATA entitlement account_status_fact
+TABLE DATA entitlement definitions_activation
+TABLE DATA entitlement definitions_current
+TABLE DATA entitlement feature_release
+TABLE DATA entitlement grant
+TABLE DATA entitlement revision
+TABLE DATA entitlement revocation
+TABLE DATA entitlement service_term
+TABLE DATA entitlement service_term_action
+TABLE DATA entitlement snapshot
+TABLE DATA fleet device_authorization
+TABLE DATA fleet hub_lease
+TABLE DATA fleet node
+TABLE DATA fleet node_sign_in
+TABLE DATA fleet refusal_code
+TABLE DATA fleet routed_call
+TABLE DATA fleet routed_command_id
+TABLE DATA fleet routed_file_call
+TABLE DATA fleet routed_file_target
+TABLE DATA fleet signing_key
+TABLE DATA identity auth_flow
+TABLE DATA identity auth_identity
+TABLE DATA identity bootstrap
+TABLE DATA identity mobile_authorization
+TABLE DATA identity operator
+TABLE DATA identity session
+TABLE DATA identity spent_refresh
+TABLE DATA identity step_up_challenge
+TABLE DATA identity user
+TABLE DATA platform command_receipt
+TABLE DATA platform ctr06_legacy_runtime_credential
+TABLE DATA platform ctr06_restore_admission
+TABLE DATA platform ctr06_runtime_floor
+TABLE DATA platform inbox
+TABLE DATA platform job_lease
+TABLE DATA platform outbox
+TABLE DATA platform rate_limit
+TABLE DATA platform runtime_credential
+TABLE DATA platform schema_migration
+TABLE audit audit_event
+TABLE audit chain_head
+TABLE device device
+TABLE device installation
+TABLE entitlement account_status_fact
+TABLE entitlement definitions_activation
+TABLE entitlement definitions_current
+TABLE entitlement feature_release
+TABLE entitlement grant
+TABLE entitlement revision
+TABLE entitlement revocation
+TABLE entitlement service_term
+TABLE entitlement service_term_action
+TABLE entitlement snapshot
+TABLE fleet device_authorization
+TABLE fleet hub_lease
+TABLE fleet node
+TABLE fleet node_sign_in
+TABLE fleet refusal_code
+TABLE fleet routed_call
+TABLE fleet routed_command_id
+TABLE fleet routed_file_call
+TABLE fleet routed_file_target
+TABLE fleet signing_key
+TABLE identity auth_flow
+TABLE identity auth_identity
+TABLE identity bootstrap
+TABLE identity mobile_authorization
+TABLE identity operator
+TABLE identity session
+TABLE identity spent_refresh
+TABLE identity step_up_challenge
+TABLE identity user
+TABLE platform command_receipt
+TABLE platform ctr06_legacy_runtime_credential
+TABLE platform ctr06_restore_admission
+TABLE platform ctr06_runtime_floor
+TABLE platform inbox
+TABLE platform job_lease
+TABLE platform outbox
+TABLE platform rate_limit
+TABLE platform runtime_credential
+TABLE platform schema_migration
+TRIGGER audit audit_event audit_event_append_only
+TRIGGER entitlement account_status_fact account_status_fact_append_only
+TRIGGER entitlement definitions_activation definitions_activation_append_only
+TRIGGER entitlement definitions_current definitions_current_once
+TRIGGER entitlement feature_release feature_release_append_only
+TRIGGER entitlement grant grant_append_only
+TRIGGER entitlement revision revision_advances
+TRIGGER entitlement revocation revocation_append_only
+TRIGGER entitlement service_term service_term_append_only
+TRIGGER entitlement service_term_action service_term_action_append_only
+TRIGGER fleet device_authorization device_authorization_final
+TRIGGER fleet hub_lease hub_lease_fenced
+TRIGGER fleet node_sign_in node_sign_in_final
+TRIGGER fleet refusal_code refusal_code_fixed
+TRIGGER fleet routed_call routed_call_command_id
+TRIGGER fleet routed_call routed_call_guarded
+TRIGGER fleet routed_command_id routed_command_id_fixed
+TRIGGER fleet routed_file_call routed_file_call_command_id
+TRIGGER fleet routed_file_call routed_file_call_guarded
+TRIGGER fleet routed_file_target routed_file_target_fixed
+TRIGGER identity auth_flow auth_flow_consumed_is_final
+TRIGGER identity mobile_authorization mobile_authorization_final
+TRIGGER identity operator operator_only_revokes

@@ -126,6 +126,8 @@
 !center/internal/*/*.go
 !center/internal/store/migrate/
 !center/internal/store/migrate/*.go
+!center/internal/store/migrate/ctr06_schema10_inventory.txt
+!center/internal/store/migrate/ctr06_schema11_inventory.txt
 !center/internal/identity/passkey/
 !center/internal/identity/passkey/*.go
 !center/internal/identity/passkey/virtual/

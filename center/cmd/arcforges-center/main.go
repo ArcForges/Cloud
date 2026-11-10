@@ -46,6 +46,12 @@ commands:
   migrate [apply|status|plan]      apply the PostgreSQL migrations (apply, the default), or report them without changing
                                    anything; configured by ARCFORGES_CENTER_MIGRATION_DATABASE_URL (docs/postgres-store.md)
   admin ensure-database            create the center's database if it does not exist
+  admin backup-logical --archive <new path> --metadata <new path>
+                                   capture a checked full 0011 backup and its trusted snapshot metadata
+  admin restore-logical-backup --archive <path> --sha256 <digest> --metadata <path> --metadata-sha256 <digest>
+                                   restore a supported trusted backup to an explicitly named new, isolated database
+  admin restore-legacy-logical-backup --archive <path> --sha256 <digest> --provenance <path> --provenance-sha256 <digest>
+                                   restore a provenance-attested schema-10 full backup through the verified local bridge
   admin rotate-runtime-credential [--live-slot a|b]
                                    set a new runtime credential on the slot that is not the live one (named, or else the last
                                    promoted one) and write the runtime URL to ARCFORGES_CENTER_RUNTIME_SECRET_FILE
@@ -108,6 +114,15 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	slot := ""
 	var target revokeTarget
 	var role operatorFlags
+	if command == "admin" && sub == "restore-logical-backup" {
+		return restoreCommand(arguments[2:], lookup, stdout, stderr)
+	}
+	if command == "admin" && sub == "backup-logical" {
+		return backupCommand(arguments[2:], lookup, stdout, stderr)
+	}
+	if command == "admin" && sub == "restore-legacy-logical-backup" {
+		return legacyRestoreCommand(arguments[2:], lookup, stdout, stderr)
+	}
 	if command == "admin" && (sub == "register-signing-key" || sub == "inspect-signing-key" || sub == "retire-signing-key" || sub == "revoke-device") {
 		return fleetAdmin(sub, arguments[2:], lookup, stdout, stderr)
 	}
@@ -240,6 +255,9 @@ func revokeSessions(target revokeTarget, lookup func(string) (string, bool), std
 	}
 	var counts map[string]int64
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if err := migrate.RequireOrdinaryDatabase(ctx, tx, cfg.Database); err != nil {
+			return err
+		}
 		var err error
 		if counts, err = session.RevokeByOperator(ctx, tx, target.account, now); err != nil {
 			return err

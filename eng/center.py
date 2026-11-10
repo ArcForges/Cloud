@@ -260,13 +260,83 @@ def drill_phase(phase: str, runtime_url: str) -> None:
         raise SystemExit(f"[center] the restore drill's {phase} phase did not run")
 
 
+def restore_drill_tool(directory: Path, server: Postgres, name: str) -> Path:
+    """Use the pinned container's real tool; this wrapper transports stdin and the private TOC file."""
+    tool = directory / name
+    wrapper = f"""#!/usr/bin/env python3
+import os, subprocess, sys
+name = {server.name!r}
+program = {name!r}
+args = []
+for item in sys.argv[1:]:
+    if item.startswith('--use-list='):
+        subprocess.run(['docker', 'cp', item[len('--use-list='):], name + ':/tmp/ctr06-restore-list'], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        item = '--use-list=/tmp/ctr06-restore-list'
+    args.append(item)
+env = os.environ.copy()
+env['PGHOST'], env['PGPORT'] = '127.0.0.1', '5432'
+command = ['docker', 'exec', '-i']
+for key in ('PGHOST', 'PGPORT', 'PGUSER', 'PGPASSWORD', 'PGDATABASE', 'PGSSLMODE', 'PGCHANNELBINDING', 'PGSSLROOTCERT', 'PGCONNECT_TIMEOUT'):
+    if key in env:
+        command.extend(['-e', key])
+command.extend([name, program, *args])
+os.execvpe('docker', command, env)
+"""
+    tool.write_text(wrapper, encoding="utf-8")
+    tool.chmod(0o700)
+    return tool
+
+
+def backup_drill_source(executable: Path, server: Postgres, owner_password: str, runtime_role: str,
+                        dump: Path, metadata: Path) -> dict[str, object]:
+    """Use the product's checked exported-snapshot full capture on the synthetic-only source."""
+    with tempfile.TemporaryDirectory() as directory:
+        tool_dir = Path(directory)
+        restore_drill_tool(tool_dir, server, "pg_dump")
+        restore_drill_tool(tool_dir, server, "pg_restore")
+        env = {key: value for key, value in os.environ.items() if not key.startswith(("ARCFORGES_", "NEON_"))}
+        env.update({"ARCFORGES_CENTER_MODE": "self-hosted", "ARCFORGES_CENTER_RUNTIME_ROLE": runtime_role,
+                    "ARCFORGES_CENTER_MIGRATION_DATABASE_URL": server.url("drill_owner", owner_password, "drill"),
+                    "PATH": directory + os.pathsep + os.environ.get("PATH", "")})
+        result = subprocess.run([str(executable), "admin", "backup-logical", "--archive", str(dump.resolve()),
+                                 "--metadata", str(metadata.resolve())],
+                                env=env, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            raise SystemExit(f"[center] the checked synthetic backup failed in the restore drill ({result.returncode})")
+        return json.loads(result.stdout)
+
+
+def restore_drill_backup(executable: Path, server: Postgres, owner_password: str, runtime_role: str,
+                         dump: Path, metadata: Path) -> dict[str, object]:
+    """Run the product restore manager with the actual pg_restore from the pinned test container."""
+    with tempfile.TemporaryDirectory() as directory:
+        restore_drill_tool(Path(directory), server, "pg_restore")
+        env = {key: value for key, value in os.environ.items() if not key.startswith(("ARCFORGES_", "NEON_"))}
+        env.update({"ARCFORGES_CENTER_MODE": "self-hosted", "ARCFORGES_CENTER_RUNTIME_ROLE": runtime_role,
+                    "ARCFORGES_CENTER_DATABASE_NAME": "drill",
+                    "ARCFORGES_CENTER_MIGRATION_DATABASE_URL": server.url("drill_owner", owner_password, "postgres"),
+                    "PATH": directory + os.pathsep + os.environ.get("PATH", "")})
+        result = subprocess.run([str(executable), "admin", "restore-logical-backup", "--archive", str(dump.resolve()),
+                                 "--sha256", hashlib.sha256(dump.read_bytes()).hexdigest(),
+                                 "--metadata", str(metadata.resolve()), "--metadata-sha256", hashlib.sha256(metadata.read_bytes()).hexdigest()],
+                                env=env, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            raise SystemExit(f"[center] the protected logical restore failed in the restore drill ({result.returncode})")
+        return json.loads(result.stdout)
+
+
 def drill(executable: Path) -> dict[str, object]:
     """The logical-backup restore drill (docs/postgres-store.md): migrate and seed a database with the native executable and
     the runtime credential, dump it with pg_dump, restore it into a second, isolated server, migrate, rotate and confirm there
     (the restored promotion record steers the rotation to the other slot) and run the verify phase (receipt replay, outbox
     publication, job lease, audit chain) against the restored database."""
-    dump = ARTIFACTS / "drill" / "center.dump"
-    dump.parent.mkdir(parents=True, exist_ok=True)
+    drill_root = ARTIFACTS / "drill"
+    drill_root.mkdir(parents=True, exist_ok=True)
+    # Do not overwrite an earlier drill's evidence on a later invocation.
+    drill_dir = Path(tempfile.mkdtemp(prefix="capture-", dir=drill_root))
+    dump = drill_dir / "center.dump"
+    metadata = drill_dir / "center.metadata.json"
     owner_password = secrets.token_hex(24)
     setup = [f"CREATE ROLE drill_owner LOGIN CREATEROLE CREATEDB PASSWORD '{owner_password}'", "CREATE DATABASE drill OWNER drill_owner"]
     with Postgres("drill-source") as source, Postgres("drill-restore") as target:
@@ -277,26 +347,24 @@ def drill(executable: Path) -> dict[str, object]:
             raise SystemExit("[center] the drill database did not migrate")
         seed_url, seed_slot = rotate(executable, source, owner_password, "drill_runtime")
         drill_phase("seed", seed_url)
-        with dump.open("wb") as output:
-            dumped = subprocess.run(["docker", "exec", source.name, "pg_dump", "-U", "postgres", "--format=custom", "-d", "drill"],
-                                    stdout=output, stderr=subprocess.PIPE)
-        if dumped.returncode != 0:
-            raise SystemExit("[center] pg_dump failed in the restore drill")
-        for statement in setup:
-            target.sql(statement)
-        with dump.open("rb") as source_file:
-            restored = subprocess.run(["docker", "exec", "-i", target.name, "pg_restore", "-U", "postgres", "--no-owner", "--no-acl",
-                                       "--role=drill_owner", "--exit-on-error", "-d", "drill"], stdin=source_file, stderr=subprocess.PIPE)
-        if restored.returncode != 0:
-            raise SystemExit("[center] pg_restore failed in the restore drill")
-        status = center_command(executable, target, owner_password, "drill_runtime", "migrate", "status")
+        captured = backup_drill_source(executable, source, owner_password, "drill_runtime", dump, metadata)
+        if captured.get("archiveSha256") != hashlib.sha256(dump.read_bytes()).hexdigest() or captured.get("metadataSha256") != hashlib.sha256(metadata.read_bytes()).hexdigest():
+            raise SystemExit("[center] the synthetic backup metadata does not bind its archive")
+        # The product manager creates the new target with connections closed, bootstraps its own fresh floor and restores
+        # every source object except that protected floor. The source archive stays intact with its original floor history.
+        target.sql(setup[0])
+        restored_role = "drill_runtime"
+        receipt = restore_drill_backup(executable, target, owner_password, restored_role, dump, metadata)
+        if receipt.get("database") != "drill" or receipt.get("runtimeRole") != restored_role or receipt.get("sourceBackupSha256") != hashlib.sha256(dump.read_bytes()).hexdigest():
+            raise SystemExit("[center] the restore receipt does not bind the selected backup and target")
+        status = center_command(executable, target, owner_password, restored_role, "migrate", "status")
         if status["state"] != "current" or status["pending"]:
             raise SystemExit("[center] the restored database does not match the build's migrations")
-        reconciled = center_command(executable, target, owner_password, "drill_runtime", "migrate")
+        reconciled = center_command(executable, target, owner_password, restored_role, "migrate")
         if reconciled["state"] != "current" or reconciled.get("ran") or reconciled.get("grants") != "reconciled":
             raise SystemExit("[center] the restored database did not reconcile its runtime grants")
         # The restored record says slot a is promoted (the live revision's), so the restored database rotates slot b.
-        verify_url, verify_slot = rotate(executable, target, owner_password, "drill_runtime")
+        verify_url, verify_slot = rotate(executable, target, owner_password, restored_role)
         if (seed_slot, verify_slot) != ("a", "b"):
             raise SystemExit(f"[center] the restore drill rotated slots {seed_slot} and {verify_slot}, expected a and b")
         drill_phase("verify", verify_url)

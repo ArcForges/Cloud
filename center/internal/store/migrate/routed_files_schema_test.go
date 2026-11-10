@@ -21,7 +21,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
-const migration0011SHA256 = "4b921fb9e139f305eab20473fd228b27d87db6f727af091f532b2db31a3ee775"
+const migration0011SHA256 = "d02522fdab31a8a3b60d4dfd0bcb86dc065bdc801b4f8e3af5eb2b8b5f807968"
 
 type namespaceFixture struct {
 	account, enrollment, node, session platform.ID

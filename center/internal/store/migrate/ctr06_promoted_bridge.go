@@ -33,12 +33,13 @@ func guardBoundBridge(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, b bridgepr
 	}
 	var databaseOID, ownerOID, actorOID, legacyOID, groupOID, loginOID uint32
 	var err error
-	var database string
+	var database, cluster string
 	err = tx.QueryRow(ctx, `SELECT d.oid,d.datdba,(SELECT oid FROM pg_roles WHERE rolname=current_user),d.datname,
+ (SELECT system_identifier::text FROM pg_catalog.pg_control_system()),
  (SELECT oid FROM pg_roles WHERE rolname=$1),(SELECT oid FROM pg_roles WHERE rolname=$2),(SELECT oid FROM pg_roles WHERE rolname=$3)
 FROM pg_database d WHERE d.datname=current_database()`, b.LegacyRole, b.BridgeRole, b.BridgeLogin).
-		Scan(&databaseOID, &ownerOID, &actorOID, &database, &legacyOID, &groupOID, &loginOID)
-	if err != nil || database != b.DatabaseName || databaseOID != b.DatabaseOID || ownerOID != b.OwnerOID ||
+		Scan(&databaseOID, &ownerOID, &actorOID, &database, &cluster, &legacyOID, &groupOID, &loginOID)
+	if err != nil || database != b.DatabaseName || cluster != b.ClusterSystemIdentifier || databaseOID != b.DatabaseOID || ownerOID != b.OwnerOID ||
 		actorOID != ownerOID || legacyOID != b.LegacyRoleOID || groupOID != b.BridgeRoleOID || loginOID != b.BridgeLoginOID {
 		return fmt.Errorf("%w: database identity", ErrCTR06RetirementUnproven)
 	}
@@ -80,7 +81,7 @@ FROM pg_database d WHERE d.datname=current_database()`, b.LegacyRole, b.BridgeRo
 	}
 	// Role metadata identifies the issuance for retries; it is not promotion
 	// evidence, which must already have passed the protected OIDC verification.
-	prepared := PreparedBridgeRoles{DatabaseOID: databaseOID, OwnerOID: ownerOID, LegacyRoleOID: legacyOID,
+	prepared := PreparedBridgeRoles{ClusterSystemIdentifier: cluster, DatabaseOID: databaseOID, OwnerOID: ownerOID, LegacyRoleOID: legacyOID,
 		BridgeRoleOID: groupOID, BridgeLoginOID: loginOID, Nonce: b.Nonce}
 	if err := ConfirmPreparedCTR06Roles(ctx, tx, prepared); err != nil {
 		return err
@@ -197,11 +198,11 @@ WHERE p.prosecdef AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema')
 
 // recordCTR06Floor executes after the 0011 DDL, inside the same transaction as
 // the lock, revocation and lease handoff; a failure rolls back all of them.
-func recordCTR06Floor(ctx context.Context, tx pgx.Tx, runtimeRole string, proof *bridgeproof.Verified, local *localBridgeAdmission) error {
+func recordCTR06Floor(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, runtimeRole string, proof *bridgeproof.Verified, local *localBridgeAdmission, recovery *restoreCapability) error {
 	if runtimeRole == "" {
-		// Internal schema-only callers grant no runtime privileges. The empty
-		// floor then forbids any later runtime reconciliation.
-		return nil
+		// Canonical 0011 must never commit without the final floor and its
+		// atomic admission, including for schema-only callers.
+		return ErrCTR06RetirementUnproven
 	}
 	var legacyRole any
 	var legacyOID any
@@ -232,6 +233,9 @@ SELECT slot,login_role,rotated_at,rotated_by,promoted_at FROM platform.runtime_c
 SELECT slot,login_role,rotated_at,rotated_by,promoted_at FROM platform.runtime_credential`); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, "DELETE FROM platform.runtime_credential"); err != nil {
+			return err
+		}
 		slot := strings.TrimPrefix(b.BridgeLogin, b.BridgeRole+"_")
 		if slot != "a" && slot != "b" {
 			return ErrCTR06RetirementUnproven
@@ -245,9 +249,9 @@ rotated_by=excluded.rotated_by,promoted_at=excluded.promoted_at`, slot, b.Bridge
 			return err
 		}
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO platform.ctr06_runtime_floor(singleton,database_oid,owner_oid,runtime_role,runtime_role_oid,
+	_, err := tx.Exec(ctx, `INSERT INTO platform.ctr06_runtime_floor(singleton,cluster_system_identifier,database_oid,owner_oid,runtime_role,runtime_role_oid,
 legacy_role,legacy_role_oid,bridge_revision,bridge_image_id,promotion_digest)
-SELECT true,d.oid,d.datdba,r.rolname,r.oid,$2,$3,$4,$5,$6
+SELECT true,(SELECT system_identifier::text FROM pg_catalog.pg_control_system()),d.oid,d.datdba,r.rolname,r.oid,$2,$3,$4,$5,$6
 FROM pg_database d CROSS JOIN pg_roles r WHERE d.datname=current_database() AND r.rolname=$1 AND d.datdba=(SELECT oid FROM pg_roles WHERE rolname=current_user)`,
 		runtimeRole, legacyRole, legacyOID, revision, image, digest)
 	if err != nil {
@@ -257,45 +261,43 @@ FROM pg_database d CROSS JOIN pg_roles r WHERE d.datname=current_database() AND 
 	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM platform.ctr06_runtime_floor WHERE singleton)").Scan(&inserted); err != nil || !inserted {
 		return ErrCTR06RetirementUnproven
 	}
-	return nil
+	return recordCTR06Admission(ctx, tx, conn, runtimeRole, recovery)
 }
 
 // RequireCTR06RuntimeFloor prevents current privileged tools from regranting
 // or rotating an older runtime role after the 0011 privilege fence.
 func RequireCTR06RuntimeFloor(ctx context.Context, tx pgx.Tx, runtimeRole string) error {
-	var exists bool
-	if err := tx.QueryRow(ctx, "SELECT to_regclass('platform.ctr06_runtime_floor') IS NOT NULL").Scan(&exists); err != nil {
-		return err
+	var database string
+	if err := tx.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil || RequireOrdinaryDatabase(ctx, tx, database) != nil {
+		return ErrCTR06RetirementUnproven
 	}
-	if !exists {
-		return nil // Schema 10: the bridge generation is prepared before 0011.
+	var floor, admission, migrationTable bool
+	if err := tx.QueryRow(ctx, `SELECT to_regclass('platform.ctr06_runtime_floor') IS NOT NULL,
+ to_regclass('platform.ctr06_restore_admission') IS NOT NULL,
+ to_regclass('platform.schema_migration') IS NOT NULL`).Scan(&floor, &admission, &migrationTable); err != nil {
+		return ErrCTR06RetirementUnproven
 	}
-	var valid bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS (
-SELECT 1 FROM platform.ctr06_runtime_floor f JOIN pg_database d ON d.datname=current_database()
-JOIN pg_roles r ON r.rolname=$1 AND r.oid=f.runtime_role_oid
-WHERE f.singleton AND f.database_oid=d.oid AND f.owner_oid=d.datdba AND f.runtime_role=r.rolname
-AND d.datdba=(SELECT oid FROM pg_roles WHERE rolname=current_user))`, runtimeRole).Scan(&valid)
-	if err != nil || !valid {
-		return fmt.Errorf("%w: runtime role is below the recorded generation floor", ErrCTR06RetirementUnproven)
+	if !floor && !admission {
+		if migrationTable {
+			var later bool
+			if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM platform.schema_migration WHERE version>=11)").Scan(&later); err != nil || later {
+				return ErrCTR06RetirementUnproven
+			}
+		}
+		return nil // Only a genuine pre-0011 schema may omit both objects.
+	}
+	if !floor || !admission {
+		return ErrCTR06RetirementUnproven
+	}
+	if _, _, err := readyCTR06Admission(ctx, tx, runtimeRole); err != nil {
+		return fmt.Errorf("%w: runtime floor or restore admission is not ready", ErrCTR06RetirementUnproven)
 	}
 	return nil
 }
 
 // InspectCTR06RuntimeFloor reads the public role identity for the protected
-// deployer's next rotation; it never returns a credential or OIDC token.
+// deployer's next rotation. Missing or pending admission is not trusted current.
 func InspectCTR06RuntimeFloor(ctx context.Context, conn *pgx.Conn) (string, error) {
-	var exists bool
-	if err := conn.QueryRow(ctx, "SELECT to_regclass('platform.ctr06_runtime_floor') IS NOT NULL").Scan(&exists); err != nil || !exists {
-		return "", err
-	}
-	var role string
-	err := conn.QueryRow(ctx, `SELECT f.runtime_role FROM platform.ctr06_runtime_floor f
-JOIN pg_database d ON d.datname=current_database() AND d.oid=f.database_oid AND d.datdba=f.owner_oid
-JOIN pg_roles r ON r.oid=f.runtime_role_oid AND r.rolname=f.runtime_role
-WHERE f.singleton AND d.datdba=(SELECT oid FROM pg_roles WHERE rolname=current_user)`).Scan(&role)
-	if err != nil {
-		return "", ErrCTR06RetirementUnproven
-	}
-	return role, nil
+	role, _, err := readyCTR06Admission(ctx, conn, "")
+	return role, err
 }

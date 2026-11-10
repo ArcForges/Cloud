@@ -15,6 +15,7 @@ test("CTR06 audience binds the database, release, generation and provider", () =
     databaseHost: "ep-test.example.neon.tech",
     databasePort: 5432,
     databaseName: "center",
+    clusterSystemIdentifier: "1234567890123456789",
     databaseOid: 123,
     ownerOid: 124,
     legacyRole: "center_runtime",
@@ -33,10 +34,15 @@ test("CTR06 audience binds the database, release, generation and provider", () =
   };
   assert.equal(
     bridgeAudience(value),
-    "urn:arcforges:ctr06:e0fc4ad2317891a32c7e8cecfbcb772ac26560afa5df7992d60df1cfed4aeedc",
+    "urn:arcforges:ctr06:04a42f713b8e467ec3c4f3ee85325940393bc9e343bb5c0b4a8aaf25061bcd0b",
   );
   assert.notEqual(bridgeAudience({ ...value, nonce: "f".repeat(64) }), bridgeAudience(value));
   assert.notEqual(bridgeAudience({ ...value, databaseOid: 124 }), bridgeAudience(value));
+  assert.notEqual(
+    bridgeAudience({ ...value, clusterSystemIdentifier: "9876543210987654321" }),
+    bridgeAudience(value),
+  );
+  assert.throws(() => bridgeAudience({ ...value, clusterSystemIdentifier: "" }));
   assert.notEqual(
     bridgeAudience({ ...value, workerVersion: "00000000-0000-4000-8000-000000000003" }),
     bridgeAudience(value),

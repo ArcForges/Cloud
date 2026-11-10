@@ -47,12 +47,18 @@ func EnsureDatabase(ctx context.Context, conn *pgx.Conn, name string) (bool, err
 		return false, migrate.Sanitize("look up the database", err)
 	}
 	if exists {
+		if err := migrate.RequireOrdinaryDatabase(ctx, conn, name); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 	_, err := conn.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize())
 	var pgError *pgconn.PgError
 	if errors.As(err, &pgError) && pgError.Code == "42P04" {
-		return false, nil // created concurrently
+		if err := migrate.RequireOrdinaryDatabase(ctx, conn, name); err != nil {
+			return false, err
+		}
+		return false, nil // created concurrently and checked
 	}
 	if err != nil {
 		return false, migrate.Sanitize("create the database", err)
@@ -173,7 +179,7 @@ func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, err
 		if err := migrate.RequirePlainRole(ctx, tx, options.Group, false); err != nil {
 			return err
 		}
-		slot, err := nextSlot(ctx, tx)
+		slot, err := nextSlot(ctx, tx, options.Group)
 		if err != nil {
 			return err
 		}
@@ -234,21 +240,51 @@ RETURNING to_char(rotated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
 	return rotation, nil
 }
 
-// nextSlot is the slot other than the most recently promoted one, or a when no slot was promoted yet. A slot rotated by a
-// deployment that was never promoted is rotated again; the most recently promoted slot, which the running revision uses, never.
-func nextSlot(ctx context.Context, tx pgx.Tx) (string, error) {
-	var live string
-	err := tx.QueryRow(ctx, "SELECT slot FROM platform.runtime_credential WHERE promoted_at IS NOT NULL ORDER BY promoted_at DESC, slot LIMIT 1").Scan(&live)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return "a", nil
-	case err != nil:
+// nextSlot accepts only history for the checked target group. A missing row
+// and an unconfirmed row are not promotions. Read errors, foreign records or
+// equally recent promotions are never interpreted as an empty history.
+func nextSlot(ctx context.Context, tx pgx.Tx, group string) (string, error) {
+	var readable bool
+	err := tx.QueryRow(ctx, `SELECT c.relkind='r' AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity
+ AND c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)
+ FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+ WHERE n.nspname='platform' AND c.relname='runtime_credential'`).Scan(&readable)
+	if err != nil || !readable {
+		return "", errors.New("runtime credential history is unavailable or cannot be read completely")
+	}
+	rows, err := tx.Query(ctx, "SELECT slot,login_role,promoted_at FROM platform.runtime_credential ORDER BY slot FOR UPDATE")
+	if err != nil {
 		return "", migrate.Sanitize("read the runtime credentials", err)
-	case live == "a":
-		return "b", nil
-	default:
+	}
+	defer rows.Close()
+	var live string
+	var newest time.Time
+	for rows.Next() {
+		var slot, login string
+		var promoted *time.Time
+		if err := rows.Scan(&slot, &login, &promoted); err != nil {
+			return "", migrate.Sanitize("read the runtime credentials", err)
+		}
+		if (slot != "a" && slot != "b") || login != group+"_"+slot {
+			return "", errors.New("runtime credential history does not match the checked generation")
+		}
+		if promoted == nil {
+			continue
+		}
+		if live != "" && promoted.Equal(newest) {
+			return "", errors.New("runtime credential promotion history is ambiguous")
+		}
+		if live == "" || promoted.After(newest) {
+			newest, live = *promoted, slot
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", migrate.Sanitize("read the runtime credentials", err)
+	}
+	if live == "" {
 		return "a", nil
 	}
+	return other(live), nil
 }
 
 func other(slot string) string {

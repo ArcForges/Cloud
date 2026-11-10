@@ -23,6 +23,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/store"
+	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
 
 // operatorFlags is what `admin grant-operator` and `admin revoke-operator` read: the account, and for a grant the reason and the
@@ -100,6 +101,9 @@ func operatorRole(sub string, flags operatorFlags, lookup func(string) (string, 
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	document := map[string]any{"account": flags.account.String()}
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if err := migrate.RequireOrdinaryDatabase(ctx, tx, cfg.Database); err != nil {
+			return err
+		}
 		if sub == "grant-operator" {
 			role, err := entitlement.GrantOperatorRole(ctx, tx, flags.account, flags.days, flags.reason, now)
 			if err == nil {

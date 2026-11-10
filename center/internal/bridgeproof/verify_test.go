@@ -38,7 +38,7 @@ func TestProtectedBridgeOIDCAuthenticatesTheEntireBinding(t *testing.T) {
 	now := time.Unix(1800000000, 0)
 	binding := Context{
 		Environment: "production", DatabaseHost: "ep-test.example.neon.tech", DatabasePort: 5432,
-		DatabaseName: "center", DatabaseOID: 123, OwnerOID: 124, LegacyRole: "center_runtime", LegacyRoleOID: 125,
+		DatabaseName: "center", ClusterSystemIdentifier: "1234567890123456789", DatabaseOID: 123, OwnerOID: 124, LegacyRole: "center_runtime", LegacyRoleOID: 125,
 		BridgeRole: "center_ctr06", BridgeRoleOID: 126, BridgeLogin: "center_ctr06_a", BridgeLoginOID: 127,
 		Nonce: strings.Repeat("a", 64), WorkflowRevision: strings.Repeat("b", 40),
 		CloudAccount: strings.Repeat("c", 32), WorkerName: "arcforges-cloud",
@@ -49,7 +49,7 @@ func TestProtectedBridgeOIDCAuthenticatesTheEntireBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if aud != "urn:arcforges:ctr06:e0fc4ad2317891a32c7e8cecfbcb772ac26560afa5df7992d60df1cfed4aeedc" {
+	if aud != "urn:arcforges:ctr06:04a42f713b8e467ec3c4f3ee85325940393bc9e343bb5c0b4a8aaf25061bcd0b" {
 		t.Fatal("audience differs from the protected publisher fixture")
 	}
 	base := map[string]any{
@@ -79,6 +79,7 @@ func TestProtectedBridgeOIDCAuthenticatesTheEntireBinding(t *testing.T) {
 		t.Fatalf("authentic bound proof refused: %v", err)
 	}
 	for name, mutate := range map[string]func(*Context){
+		"other cluster":          func(c *Context) { c.ClusterSystemIdentifier = "9876543210987654321" },
 		"other database OID":     func(c *Context) { c.DatabaseOID++ },
 		"other owner OID":        func(c *Context) { c.OwnerOID++ },
 		"other endpoint":         func(c *Context) { c.DatabaseHost = "other.example" },
