@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -377,7 +378,13 @@ renewed_at=clock_timestamp(),expires_at=clock_timestamp()+interval '1 minute' WH
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	node := exec.Command("node", "--experimental-test-module-mocks", "--test", filepath.Join("tests", "worker", "ctr06-publisher-integration.test.ts"))
+	// The explicit local script runs only with the private Go driver below;
+	// ordinary npm test and CI do not start the PG/provider component test.
+	npm := "npm"
+	if runtime.GOOS == "windows" {
+		npm = "npm.cmd"
+	}
+	node := exec.Command(npm, "run", "test:ctr06:publisher:driver")
 	node.Dir = filepath.Join("..", "..", "..")
 	node.Env = append(os.Environ(), "CTR06_TEST_DRIVER_URL="+server.URL, "CTR06_TEST_DRIVER_TOKEN="+auth,
 		"CTR06_TEST_BRIDGE_ARCHIVE="+archive, "CTR06_TEST_DATABASE_URL="+url, "CTR06_TEST_LEGACY_ROLE="+legacy)
