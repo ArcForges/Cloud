@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "a04b44b7ec52fb12c5884f1ccf6f5985b20e34e8",
+  "sourceCommit": "eae8e64f2c24142e75e9b62d3de36b78a7059dee",
   "manifests": ["package.json"],
   "inputs": {
     ".github/workflows/ci.yml": "9942870cd4ff1332993b8385ed24da1f4cd7a4c8176e196568b2d180f84811c6",
@@ -20,6 +20,7 @@
     "center/tools/go.sum": "6394a2049a55c360f2fc72d96588570ece75a3b1350fad580da4070d53b0ae2f",
     "eng/center.py": "8cab56a49721772c10a6ad17082544ea33f5833e2b168e687d8f05fa317c5a2b",
     "eng/policy/dependency-reviews/af-ctr-05-r18.json": "12fa9ed36b93cacde2c5070bb5fe67c1a1707272211a7c06a77b69b59e709adf",
+    "eng/policy/dependency-reviews/af-ctr-06-r1.json": "96af506a92d01d91dda095d56a8eda98fde23fb8f8ece93164e3f95f7af52195",
     "eng/provenance/artifact-profiles/cloud-release-r100.json": "7495f5517a593e3b76142fd7d1022b4d29bd948f5c57ec3965168c382186a6df",
     "eng/provenance/artifact-profiles/cloud-release-r101.json": "1a86902e58ded1513b953d067e0acb3a73117252e474963c3dc931a4dc06df5f",
     "eng/provenance/artifact-profiles/cloud-release-r102.json": "5d68665d1531d7f9bd70ec833ee93d16af94e5c6733e784a2b64d0bf4d8b9178",
@@ -29,6 +30,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r106.json": "4611b78ebac0d1b39b056cec1182b9f4fc7fb8fe12c61af59545e31f55ad6e1c",
     "eng/provenance/artifact-profiles/cloud-release-r107.json": "c8a14243822a8de4ae93f57cc992267eb8741baad5e5047aa45cba9fdf8a77a0",
     "eng/provenance/artifact-profiles/cloud-release-r108.json": "73d7a906dae001fd021001a2bb0601ad13b24d643acaa6e4ed76ff4be789f9f0",
+    "eng/provenance/artifact-profiles/cloud-release-r109.json": "98136415bbd827baf3249617de7a38fd829f616fef2fcc6c5d1d76966bda5be3",
     "eng/provenance/artifact-profiles/cloud-release-r45.json": "d0fec3a81b20cd236eb713de3a3857f19f1c219175ac51c60aa62344f12084b6",
     "eng/provenance/artifact-profiles/cloud-release-r52.json": "f5d2c7d64f08eedad77ba64979458a47548d1678e0ca493947179da74ce20fc6",
     "eng/provenance/artifact-profiles/cloud-release-r53.json": "760b5e025bcc5de22c0270e882211dd65ecb97e77ef75adad0959b4f10863862",
@@ -126,6 +128,7 @@
     "eng/provenance/records/center-runtime-r52.json": "2e4d3dcd279046cb06a72fb7b891277401ae2cfa7b3175fa95b695ef61a1a6e4",
     "eng/provenance/records/center-runtime-r53.json": "b52a26d5a405e111ec4fbc3df9fd8f03f3061d3f111ad16d4df96f0f29c3e507",
     "eng/provenance/records/center-runtime-r54.json": "3a61d56df598054efe390f1d67500e4c212c3ad388c945e4870927bb40571570",
+    "eng/provenance/records/center-runtime-r55.json": "0de8f9caf7c9ea7b7cd37b5633d32ef485a4c908f84bb9a85bbeab8d1c6bdb57",
     "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
     "eng/provenance/records/center-runtime-r7.json": "28fc61a1cab132c0302eb884a3b1756f2d52908849277bdf5b57581ac8ec8e48",
     "eng/provenance/records/center-runtime-r8.json": "e3850d04a0f707a8b775d9c7fe4fa477487e18fb2d011f3e7f26c3f9b9427486",
@@ -179,6 +182,7 @@
     "eng/provenance/records/center-worker-r52.json": "a8c76d4b2fd99a729577f2f40af898479b817f92cbc327440a58770ae5cab4be",
     "eng/provenance/records/center-worker-r53.json": "c8c70452211b10be623ec1b99adc4da63e659f0fc6206d7c21ca8bb5c3a7b05d",
     "eng/provenance/records/center-worker-r54.json": "687700dae7f22eb7e9545530189f5c310e65254af12c242dd6b1040c6d91777e",
+    "eng/provenance/records/center-worker-r55.json": "d2e7d7ae810e6eb528ca9bf627620c78b3564c85635a4b7dd72be82a571d139d",
     "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
     "eng/provenance/records/center-worker-r7.json": "bd62fdf8cdc4a5f4138bdec6a95752b8dcd6c73cde2f0390192efd1c1b560997",
     "eng/provenance/records/center-worker-r8.json": "e5d77c80a5e0e9eea509c71a25dba9dd9961a82ac36e74091d26d121ee52ffdc",
@@ -287,9 +291,9 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "OpenAI Codex coordinator author source/dependency/licence assessment; independent PR review pending",
-    "date": "2026-11-09",
-    "rationale": "AF-CTR-06 author admission assessment at exact Cloud source a04b44b7ec52fb12c5884f1ccf6f5985b20e34e8; independent PR/source/licence review and full native Windows/Linux gates remain required. The Go Contracts pin is actual published450.1 at producer de3dba76266e89654be9b4d29d097d525a281c6a; native Go origin/checksum/license/NOTICE and23-module closure were verified, with22other module coordinates unchanged. npm/NuGet locks, container bases, toolchains and legal bytes remain unchanged; fresh locked npm restore audited0 vulnerabilities. New expand-only PostgreSQL0011 and12 file/workspace Fleet routes use existing runtime modules. Actual isolatedPG18/race/center/signature tests and bounded wire/metadata privacy controls passed; test node handlers/software keys/step-up are substitutes, not actual native File API E2E. Current Worker profile108 is based on an actual official generator/Wrangler dry-run,27exact inputs and160884byte bundleSHA2e71d18e92e802a4acc29f51500aee067701609226b21e1d17028e938632e1b2; runtime413source inputs include2newGo files and0011. Successorrecords54 bind the source; Go legalr5 and exact licensed public error-fixture record retain full obligations. Old admitted records and historical67-code fixture are untouched. This author admission is not a final image/full-profile/deployment or task acceptance claim.",
+    "reviewer": "OpenAI Codex author source/dependency/licence assessment; independent PR review pending",
+    "date": "2026-11-10",
+    "rationale": "AF-CTR-06 author dependency and source assessment for eae8e64f2c24142e75e9b62d3de36b78a7059dee; independent PR review and full native host gates remain pending. No Go, npm or NuGet dependency, toolchain, container pin or legal byte changed. The new first-party file validates signed nested file/workspace results and exact request bindings; existing source changes preserve authenticated per-connection capability gating, fixed authorization ordering, truthful refusal audits and delivery-time replay fences. Isolated PostgreSQL 18 and Go race author tests exercised real routing, signatures, receipts and audits using synthetic node handlers, software keys and step-up fixtures; these are not native-node filesystem or owner approval acceptance. Profile cloud-release-r109 binds the updated 414-file image input closure and retains the existing Worker bytes and dependency identities. Runtime and Worker successor records supersede r54 without changing historical records. The reviewed narrow secret-scan exceptions cover only two already-public record-digest lines in each exact immutable review receipt; negative controls remain. No source, deployment, or external status claim is made.",
     "inputs": {
       ".github/workflows/ci.yml": "9942870cd4ff1332993b8385ed24da1f4cd7a4c8176e196568b2d180f84811c6",
       ".node-version": "73fb1b615e2043a933be1c0895cde4358036acc28d785692509b822aa53c761f",
@@ -307,6 +311,7 @@
       "center/tools/go.sum": "6394a2049a55c360f2fc72d96588570ece75a3b1350fad580da4070d53b0ae2f",
       "eng/center.py": "8cab56a49721772c10a6ad17082544ea33f5833e2b168e687d8f05fa317c5a2b",
       "eng/policy/dependency-reviews/af-ctr-05-r18.json": "12fa9ed36b93cacde2c5070bb5fe67c1a1707272211a7c06a77b69b59e709adf",
+      "eng/policy/dependency-reviews/af-ctr-06-r1.json": "96af506a92d01d91dda095d56a8eda98fde23fb8f8ece93164e3f95f7af52195",
       "eng/provenance/artifact-profiles/cloud-release-r100.json": "7495f5517a593e3b76142fd7d1022b4d29bd948f5c57ec3965168c382186a6df",
       "eng/provenance/artifact-profiles/cloud-release-r101.json": "1a86902e58ded1513b953d067e0acb3a73117252e474963c3dc931a4dc06df5f",
       "eng/provenance/artifact-profiles/cloud-release-r102.json": "5d68665d1531d7f9bd70ec833ee93d16af94e5c6733e784a2b64d0bf4d8b9178",
@@ -316,6 +321,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r106.json": "4611b78ebac0d1b39b056cec1182b9f4fc7fb8fe12c61af59545e31f55ad6e1c",
       "eng/provenance/artifact-profiles/cloud-release-r107.json": "c8a14243822a8de4ae93f57cc992267eb8741baad5e5047aa45cba9fdf8a77a0",
       "eng/provenance/artifact-profiles/cloud-release-r108.json": "73d7a906dae001fd021001a2bb0601ad13b24d643acaa6e4ed76ff4be789f9f0",
+      "eng/provenance/artifact-profiles/cloud-release-r109.json": "98136415bbd827baf3249617de7a38fd829f616fef2fcc6c5d1d76966bda5be3",
       "eng/provenance/artifact-profiles/cloud-release-r45.json": "d0fec3a81b20cd236eb713de3a3857f19f1c219175ac51c60aa62344f12084b6",
       "eng/provenance/artifact-profiles/cloud-release-r52.json": "f5d2c7d64f08eedad77ba64979458a47548d1678e0ca493947179da74ce20fc6",
       "eng/provenance/artifact-profiles/cloud-release-r53.json": "760b5e025bcc5de22c0270e882211dd65ecb97e77ef75adad0959b4f10863862",
@@ -413,6 +419,7 @@
       "eng/provenance/records/center-runtime-r52.json": "2e4d3dcd279046cb06a72fb7b891277401ae2cfa7b3175fa95b695ef61a1a6e4",
       "eng/provenance/records/center-runtime-r53.json": "b52a26d5a405e111ec4fbc3df9fd8f03f3061d3f111ad16d4df96f0f29c3e507",
       "eng/provenance/records/center-runtime-r54.json": "3a61d56df598054efe390f1d67500e4c212c3ad388c945e4870927bb40571570",
+      "eng/provenance/records/center-runtime-r55.json": "0de8f9caf7c9ea7b7cd37b5633d32ef485a4c908f84bb9a85bbeab8d1c6bdb57",
       "eng/provenance/records/center-runtime-r6.json": "a157f78a99e9be1ee2948e6aa404023640ddc11da27e8526b1e899839435848c",
       "eng/provenance/records/center-runtime-r7.json": "28fc61a1cab132c0302eb884a3b1756f2d52908849277bdf5b57581ac8ec8e48",
       "eng/provenance/records/center-runtime-r8.json": "e3850d04a0f707a8b775d9c7fe4fa477487e18fb2d011f3e7f26c3f9b9427486",
@@ -466,6 +473,7 @@
       "eng/provenance/records/center-worker-r52.json": "a8c76d4b2fd99a729577f2f40af898479b817f92cbc327440a58770ae5cab4be",
       "eng/provenance/records/center-worker-r53.json": "c8c70452211b10be623ec1b99adc4da63e659f0fc6206d7c21ca8bb5c3a7b05d",
       "eng/provenance/records/center-worker-r54.json": "687700dae7f22eb7e9545530189f5c310e65254af12c242dd6b1040c6d91777e",
+      "eng/provenance/records/center-worker-r55.json": "d2e7d7ae810e6eb528ca9bf627620c78b3564c85635a4b7dd72be82a571d139d",
       "eng/provenance/records/center-worker-r6.json": "ddd210b51b90ac7403bc2f2e48695a8a9a13f21b749d81931d5cc91dd6427557",
       "eng/provenance/records/center-worker-r7.json": "bd62fdf8cdc4a5f4138bdec6a95752b8dcd6c73cde2f0390192efd1c1b560997",
       "eng/provenance/records/center-worker-r8.json": "e5d77c80a5e0e9eea509c71a25dba9dd9961a82ac36e74091d26d121ee52ffdc",
@@ -581,11 +589,11 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "AF-CTR-06 author admission assessment at exact Cloud source a04b44b7ec52fb12c5884f1ccf6f5985b20e34e8; independent PR/source/licence review and full native Windows/Linux gates remain required. The Go Contracts pin is actual published450.1 at producer de3dba76266e89654be9b4d29d097d525a281c6a; native Go origin/checksum/license/NOTICE and23-module closure were verified, with22other module coordinates unchanged. npm/NuGet locks, container bases, toolchains and legal bytes remain unchanged; fresh locked npm restore audited0 vulnerabilities. New expand-only PostgreSQL0011 and12 file/workspace Fleet routes use existing runtime modules. Actual isolatedPG18/race/center/signature tests and bounded wire/metadata privacy controls passed; test node handlers/software keys/step-up are substitutes, not actual native File API E2E. Current Worker profile108 is based on an actual official generator/Wrangler dry-run,27exact inputs and160884byte bundleSHA2e71d18e92e802a4acc29f51500aee067701609226b21e1d17028e938632e1b2; runtime413source inputs include2newGo files and0011. Successorrecords54 bind the source; Go legalr5 and exact licensed public error-fixture record retain full obligations. Old admitted records and historical67-code fixture are untouched. This author admission is not a final image/full-profile/deployment or task acceptance claim.",
+    "runtimeAssessment": "AF-CTR-06 author dependency and source assessment for eae8e64f2c24142e75e9b62d3de36b78a7059dee; independent PR review and full native host gates remain pending. No Go, npm or NuGet dependency, toolchain, container pin or legal byte changed. The new first-party file validates signed nested file/workspace results and exact request bindings; existing source changes preserve authenticated per-connection capability gating, fixed authorization ordering, truthful refusal audits and delivery-time replay fences. Isolated PostgreSQL 18 and Go race author tests exercised real routing, signatures, receipts and audits using synthetic node handlers, software keys and step-up fixtures; these are not native-node filesystem or owner approval acceptance. Profile cloud-release-r109 binds the updated 414-file image input closure and retains the existing Worker bytes and dependency identities. Runtime and Worker successor records supersede r54 without changing historical records. The reviewed narrow secret-scan exceptions cover only two already-public record-digest lines in each exact immutable review receipt; negative controls remain. No source, deployment, or external status claim is made.",
     "maintenance": "Every input bound by this receipt is named in its inputs map. A later change to any of them needs a new immutable successor receipt that chains from the active one, and the policy input and its review are re-bound together. Committed receipts are never edited or reused.",
-    "previous": "eng/policy/dependency-reviews/af-ctr-05-r18.json",
+    "previous": "eng/policy/dependency-reviews/af-ctr-06-r1.json",
     "immutableHistory": "Admitted review records are retained in Git history. A dependency change requires a new reviewed source commit and updated input-bound rationale; never amend an already accepted provenance record.",
-    "reviewedOn": "2026-11-09",
+    "reviewedOn": "2026-11-10",
     "decision": "approved"
   },
   "closure": {
@@ -1369,7 +1377,7 @@
   },
   "registry": "https://registry.npmjs.org/",
   "channel": "foundation-candidate",
-  "artifactRecords": ["center-runtime-r54", "center-worker-r54"],
+  "artifactRecords": ["center-runtime-r55", "center-worker-r55"],
   "native": {
     "mode": "existing-artifact-closure-only",
     "evidence": [
@@ -1383,7 +1391,7 @@
     "unenv": "2.0.0-rc.24",
     "youch": "4.1.0-beta.10"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-06-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/af-ctr-06-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
