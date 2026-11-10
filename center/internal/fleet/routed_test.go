@@ -3,7 +3,12 @@
 package fleet
 
 import (
+	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/ArcForges/Cloud/center/internal/store"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 )
@@ -68,5 +73,30 @@ func TestComparableReplayRequiresARecordedOutcome(t *testing.T) {
 		if got := test.answer.ComparableReplay(); got != test.comparable {
 			t.Errorf("%s: comparable = %v, want %v", test.name, got, test.comparable)
 		}
+	}
+}
+
+// The bridge only changes the named cross-namespace violation. In particular,
+// unrelated unique constraints, cancellation and unanswered commits retain
+// the original store behavior.
+func TestFutureRoutedNamespaceConflictIsNarrow(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"exact", &pgconn.PgError{Code: "23505", ConstraintName: "routed_command_id_namespace"}, true},
+		{"wrapped exact", fmt.Errorf("wrapped: %w", &pgconn.PgError{Code: "23505", ConstraintName: "routed_command_id_namespace"}), true},
+		{"different constraint", &pgconn.PgError{Code: "23505", ConstraintName: "different_unique"}, false},
+		{"different SQLSTATE", &pgconn.PgError{Code: "23503", ConstraintName: "routed_command_id_namespace"}, false},
+		{"unanswered commit", store.ErrCommitUnknown, false},
+		{"unrelated", errors.New("unrelated"), false},
+		{"nil", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := routedNamespaceConflict(tc.err); got != tc.want {
+				t.Fatalf("mapped = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

@@ -165,6 +165,12 @@ H-07).
 **Reads** are routed with no record and no `fleet.routed.*` audit row (Q-10): `access.authorized` is their audit, `node_offline` a
 metric.
 
+**AF-CTR-06 migration prerequisite.** This compatibility bridge maps only PostgreSQL's unique violation for the future
+`routed_command_id_namespace` constraint to `CONFLICT/command_id_reused`. With the current schema it changes no routing decision.
+Before a later file-receipt migration is applied, every center replica that may write routed task receipts must run this bridge or a
+successor; stop all older binaries first. After that migration, a supported rollback returns only to the bridge or a successor, never
+to an older binary that would misreport a cross-namespace conflict. The migration and new file methods are not enabled by this bridge.
+
 **The routing record** (`fleet.routed_call`, migration 0010) is the receipt of Submit and Cancel (PN-6), keyed by the account and the
 command ID. It holds digests, sizes, the task ID, the states and their instants, never a request or response byte, a specification,
 an argument, a working directory, an environment or output (`TestTheStoreHoldsNoRoutedPayload`). The center stores no request bytes
