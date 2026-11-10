@@ -89,3 +89,13 @@ establish completed business features or commercial readiness.
 ## WP02.04 support identity
 
 `cloud-release-r5` and successors `cloud-runtime-notices-r6` / `cloud-worker-bundle-r5` retain every predecessor. They bind the reviewed source commit, embedded version inputs and exact Worker build-header change. Its expected bundle was derived from the retained r4 bundle plus that single reviewed assignment before regeneration; full byte equality was then verified. `arcnotes-build-identity-r1` records the resolver/catalog/test/PE-inspection adaptation under the same AGPL boundary. Full corresponding source and original terms remain in the distributed legal bundle. Compiled assembly identity and legal checks remain; runtime identity/RPC comparisons are optional local diagnostics, not CI gates.
+
+## AF-CTR-06 compatibility bridge history
+
+The bridge's active `cloud-release-r110` profile and `center-runtime-r56` /
+`center-worker-r56` records bind the bridge source and its actual image and Worker
+inputs. Records r54/r55 and profiles r108/r109 are retained byte-for-byte from the
+unmerged file-routing candidate as inactive historical evidence, so the immutable
+record chain stays linear across the prerequisite bridge and the later task. Those
+historical records do not mean the bridge contains file routing, migration 0011 or
+the later Contracts dependency, and do not establish that any candidate was shipped.
