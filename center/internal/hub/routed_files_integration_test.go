@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"strings"
 	"sync/atomic"
@@ -610,6 +611,7 @@ func TestCTR06SignedMutationResultBindsCommandAndReceipt(t *testing.T) {
 	good, bad, workspace := platform.NewID(), platform.NewID(), platform.NewID()
 	data := []byte("signed-success-test")
 	sum := sha256.Sum256(data)
+	answers := make(chan []byte, 2)
 	calls := serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
 		var header relayv1.CallHeader
 		if proto.Unmarshal(call.GetHeader().GetHeader(), &header) != nil {
@@ -624,6 +626,7 @@ func TestCTR06SignedMutationResultBindsCommandAndReceipt(t *testing.T) {
 			Result: &nodev1.FileMutationResult{CommandId: resultID, SizeBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}},
 			Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES.Enum(),
 				SizeBytes: proto.Uint64(uint64(len(data))), DigestInputBytes: proto.Uint64(uint64(len(data))), Sha256: sum[:]}}}})
+		answers <- append([]byte(nil), body...)
 		return node.node.Executed(call, body), body, true
 	})
 	send := func(command platform.ID) *fleetv1.FleetServiceWriteNodeFileResponse {
@@ -635,26 +638,45 @@ func TestCTR06SignedMutationResultBindsCommandAndReceipt(t *testing.T) {
 			NodeId: idValue(node.node.ID), Request: payload}, issued.AccessToken, reply)
 		return reply
 	}
-	if reply := send(good); reply.GetError() != nil || len(reply.GetValue().GetResponse()) == 0 {
-		t.Fatalf("valid signed response: %v", reply)
+	goodReply := send(good)
+	goodBody := <-answers
+	if goodReply.GetError() != nil || !bytes.Equal(goodReply.GetValue().GetResponse(), goodBody) {
+		t.Fatalf("valid signed response: %v", goodReply)
 	}
 	<-calls
 	goodRecord, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, good, 10)
 	if err != nil || goodRecord == nil || goodRecord.State != fleet.RoutedSucceeded || !goodRecord.Final || !goodRecord.Delivered {
 		t.Fatalf("success receipt: %+v %v", goodRecord, err)
 	}
+	verifyStoredDigest := func(command platform.ID, body []byte, expectedState string, observed bool) {
+		t.Helper()
+		// The test response has no ResponseMeta or error, so its wire bytes are
+		// also its normalized outcome bytes. Compute both independently here.
+		expected := sha256.Sum256(body)
+		var responseHash, outcomeHash []byte
+		var responseSize int
+		if err := h.db.Migration.QueryRow(context.Background(), "SELECT response_sha256, outcome_sha256, response_size FROM fleet.routed_file_call WHERE account_id=$1 AND command_id=$2", user, command).Scan(&responseHash, &outcomeHash, &responseSize); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(responseHash, expected[:]) || !bytes.Equal(outcomeHash, expected[:]) || responseSize != len(body) {
+			t.Fatal("receipt digests or size did not bind the signed bytes")
+		}
+		if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'state'=$2 AND convert_from(payload,'UTF8')::jsonb->>'responseSha256'=$3 AND convert_from(payload,'UTF8')::jsonb->>'outcomeSha256'=$3 AND convert_from(payload,'UTF8')::jsonb->>'nodeAuditAvailable'=$4", command, expectedState, hex.EncodeToString(expected[:]), fmt.Sprint(observed)) != 1 {
+			t.Fatal("receipt and audit outcome/digests disagree")
+		}
+	}
+	verifyStoredDigest(good, goodBody, "succeeded", true)
 	if reply := send(bad); errorKey(reply.GetError()) != "STATE/node_unreachable" || reply.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN ||
 		reply.GetError().GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND {
 		t.Fatalf("malformed signed response: %v", reply)
 	}
+	badBody := <-answers
 	<-calls
 	badRecord, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, bad, 10)
 	if err != nil || badRecord == nil || badRecord.State != fleet.RoutedUnknown || badRecord.Final || !badRecord.Delivered {
 		t.Fatalf("uncertain receipt: %+v %v", badRecord, err)
 	}
-	if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND convert_from(payload,'UTF8')::jsonb->>'state'='unknown' AND command_id=$1", bad) != 1 {
-		t.Fatal("unknown outcome missing from audit")
-	}
+	verifyStoredDigest(bad, badBody, "unknown", false)
 }
 
 func TestCTR06RelayedHumanAuthorizationPrecedesOfficialEntitlement(t *testing.T) {
