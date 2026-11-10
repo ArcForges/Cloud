@@ -562,7 +562,7 @@ func TestCTR06ReplayFenceRecheckedAfterQueuedWriterWait(t *testing.T) {
 	if err := h.db.Migration.QueryRow(context.Background(), "SELECT created_at FROM fleet.routed_file_call WHERE account_id=$1 AND command_id=$2", user, command).Scan(&created); err != nil {
 		t.Fatal(err)
 	}
-	offset.Store(int64(created.Add(window - 5*time.Second).Sub(time.Now())))
+	offset.Store(int64(time.Until(created.Add(window - 5*time.Second))))
 	queued, release := h.center.Hub.StallWritesWithCallNotification(node.node.ID)
 	defer release()
 	replies := make(chan *fleetv1.FleetServiceWriteNodeFileResponse, 1)
@@ -574,7 +574,7 @@ func TestCTR06ReplayFenceRecheckedAfterQueuedWriterWait(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("retry never entered the channel queue")
 	}
-	offset.Store(int64(created.Add(window + time.Second).Sub(time.Now())))
+	offset.Store(int64(time.Until(created.Add(window + time.Second))))
 	release()
 	select {
 	case reply := <-replies:
