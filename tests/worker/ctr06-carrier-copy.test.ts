@@ -1,27 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { copyStagedBridgeCarrier, withOwnedCleanup } from "../../tooling/ctr06-publisher.ts";
+import { scratchDirectory } from "./support/scratch.ts";
 
-test("staged bridge carrier is reused only as a new private file", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "ctr06-carrier-copy-"));
+test("staged bridge carrier is reused only as a new private file", async (t) => {
+  const dir = scratchDirectory("ctr06-carrier-copy-", t);
   const source = path.join(dir, "source");
   const target = path.join(dir, "target");
-  try {
-    assert.equal(await copyStagedBridgeCarrier(source, target), false);
-    await writeFile(source, "fixture");
-    assert.equal(await copyStagedBridgeCarrier(source, target), true);
-    assert.equal(await readFile(target, "utf8"), "fixture");
-    await assert.rejects(copyStagedBridgeCarrier(source, target));
-    assert.equal(await readFile(target, "utf8"), "fixture");
-  } finally {
-    await unlink(source).catch(() => undefined);
-    await unlink(target).catch(() => undefined);
-    await rmdir(dir);
-  }
+  assert.equal(await copyStagedBridgeCarrier(source, target), false);
+  await writeFile(source, "fixture");
+  assert.equal(await copyStagedBridgeCarrier(source, target), true);
+  assert.equal(await readFile(target, "utf8"), "fixture");
+  await assert.rejects(copyStagedBridgeCarrier(source, target));
+  assert.equal(await readFile(target, "utf8"), "fixture");
 });
 
 test("promotion and cleanup failures remain independently visible", async () => {

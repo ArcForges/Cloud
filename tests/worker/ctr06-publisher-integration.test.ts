@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Run only from the isolated PG18 Go test driver. The module mocks below
 // replace owner-only provider transports; the driver runs real Go/PG/crypto.
+// From center/, with isolated PG18 and ARCFORGES_TEST_POSTGRES_REQUIRED=1,
+// set ARCFORGES_TEST_POSTGRES_URL, CTR06_TEST_BRIDGE_BIN,
+// CTR06_TEST_BRIDGE_ARCHIVE, and CTR06_TEST_OUTPUT_DIR; then run:
+// go test -race -count=1 -timeout=3m ./cmd/arcforges-center -run '^TestCTR06ProtectedPublisherIntegration$'
+// The driver starts this test with a private loopback URL and token; invoking
+// the named npm script without that driver refuses instead of silently skipping.
 import assert from "node:assert/strict";
 import { copyFile, mkdir, rmdir, unlink } from "node:fs/promises";
 import path from "node:path";
@@ -8,9 +14,7 @@ import { mock, test } from "node:test";
 
 test(
   "CTR06 publisher uses real issuance, actual bridge service, cryptographic proof and real PostgreSQL migration",
-  {
-    skip: process.env.CTR06_TEST_DRIVER_URL === undefined,
-  },
+  {},
   async () => {
     const driver = process.env.CTR06_TEST_DRIVER_URL;
     const authorization = process.env.CTR06_TEST_DRIVER_TOKEN;
@@ -18,11 +22,9 @@ test(
     const database = process.env.CTR06_TEST_DATABASE_URL;
     const legacyRole = process.env.CTR06_TEST_LEGACY_ROLE;
     assert(
-      typeof driver === "string" &&
-        typeof authorization === "string" &&
-        typeof archive === "string",
+      driver && authorization && archive && database && legacyRole,
+      "requires the isolated PostgreSQL Go test driver; see this test's invocation comment",
     );
-    assert(typeof database === "string" && typeof legacyRole === "string");
     const stageCarrier = process.env.CTR06_TEST_STAGE_CARRIER === "1";
     const stagedDirectory = path.resolve("artifacts", "ctr06-linux");
     const stagedCarrier = path.join(stagedDirectory, "cloud-0.1.0-ci.615.1.tar.gz");

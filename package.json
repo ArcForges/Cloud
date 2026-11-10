@@ -52,7 +52,8 @@
     "test:d1:entitlement:local": "node eng/verification/d1-entitlement-local.ts",
     "test:d1:identity:local": "node eng/verification/d1-identity-local.ts",
     "test:dependencies": "node --test tooling/dependency-policy.test.ts",
-    "test:bridge-assets": "python -m unittest discover -s eng/verification -p test_ctr06_bridge_assets.py"
+    "test:bridge-assets": "python -m unittest discover -s eng/verification -p test_ctr06_bridge_assets.py",
+    "test:ctr06:publisher:driver": "node --experimental-test-module-mocks --test tests/worker/ctr06-publisher-integration.test.ts"
   },
   "dependencies": {
     "@arcforges/ai-internal": "1.0.0-ci.287.1",
