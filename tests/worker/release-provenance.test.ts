@@ -94,6 +94,12 @@ test("security bridge producer admission has an exact input set and independent 
       delete object(security.producerInputs)["tooling/ctr06-security-bridge-producer.ts"];
     },
     (security: Record<string, unknown>) => {
+      delete object(security.producerInputs)["tooling/ctr06-bootstrap-broker.ts"];
+    },
+    (security: Record<string, unknown>) => {
+      object(security.producerInputs)["tooling/ctr06-bootstrap-gate.ts"] = "a".repeat(64);
+    },
+    (security: Record<string, unknown>) => {
       object(security.producerInputs)["tooling/unreviewed.ts"] = "a".repeat(64);
     },
     (security: Record<string, unknown>) => {
