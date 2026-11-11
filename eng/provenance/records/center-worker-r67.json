@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "id": "center-worker-r67",
+  "kind": "generated",
+  "sourceRepository": "https://github.com/ArcForges/Cloud",
+  "sourceCommit": "1d63dc7bbd71a1a98167150473ccd437cf4f76e8",
+  "sourcePaths": [
+    "worker/ai/internal/envelope.ts",
+    "worker/ai/internal/handler.ts",
+    "worker/ai/internal/outbound.ts",
+    "worker/foundation/cloud-container.ts",
+    "worker/foundation/proof-command-key.ts",
+    "worker/index.ts",
+    "worker/ingress/applink.ts",
+    "worker/ingress/correlation.ts",
+    "worker/ingress/edge-caller.ts",
+    "worker/ingress/edge-limit.ts",
+    "worker/ingress/errors.ts",
+    "worker/ingress/frames.ts",
+    "worker/ingress/io.ts",
+    "worker/ingress/native.ts",
+    "worker/ingress/pages.ts",
+    "worker/ingress/pipeline.ts",
+    "worker/ingress/routes.ts",
+    "worker/ingress/upgrade.ts",
+    "worker/private/encoding.ts",
+    "worker/readiness/container.ts",
+    "worker/router.ts",
+    "worker/tables/center-tables.generated.ts",
+    "worker/tables/cloud-tables.generated.ts"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+      }
+    ],
+    "scope": "Current Worker bundle includes reviewed Cloudflare Containers, an esbuild helper under MIT and the Apache-2.0 generated @arcforges/ai-internal validators alongside AGPL-owned routing, storage-plan, signing, object and queue code. Exact locks, all source inputs, closed output membership and full legal texts are required. Browser/client UI is not introduced.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. @arcforges/ai-internal generated validators: Copyright ArcForges contributors, Apache-2.0 (published Contracts NOTICE retained in third-party/Contracts.NOTICE.txt). Complete respective terms accompany the actual Worker bundle."
+  ],
+  "targets": [],
+  "artifactTargets": [
+    {
+      "project": "package.json",
+      "package": "arcforges-cloud-worker",
+      "kind": "worker-bundle",
+      "profile": "eng/provenance/artifact-profiles/cloud-release-r121.json",
+      "sha256": "4889372de31a69fddc63c0ee4b703bce4152aa7668bd430057162b876ab52dc2"
+    }
+  ],
+  "disposition": "Rewrite",
+  "verification": {
+    "kind": "regeneration",
+    "command": "Restore the locked npm dependencies and build the Worker using wrangler deploy --dry-run --containers-rollout none. Verify the actual bundle bytes, inputs, output membership, packages and complete legal texts against the reviewed profile; promote only the sealed candidate.",
+    "expected": "Declared Worker build inputs (the bundle input closure, with the packages named in the profile) and the complete MIT/AGPL legal texts match the reviewed profile cloud-release-r121; the bundle bytes equal the profile worker.sha256. The sealed candidate preserves the inspected Worker identity.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. @arcforges/ai-internal generated validators: Copyright ArcForges contributors, Apache-2.0 (published Contracts NOTICE retained in third-party/Contracts.NOTICE.txt). Complete respective terms accompany the actual Worker bundle.",
+    "files": [
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Current Worker bundle includes reviewed Cloudflare Containers, an esbuild helper under MIT and the Apache-2.0 generated @arcforges/ai-internal validators alongside AGPL-owned routing, storage-plan, signing, object and queue code. Exact locks, all source inputs, closed output membership and full legal texts are required. Browser/client UI is not introduced."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": {
+    "generators": [
+      {
+        "repository": "https://github.com/cloudflare/workers-sdk",
+        "commit": "d866c0922b8973b38aac0eddf1fdd86a3ac0c7bd",
+        "paths": [
+          "packages/wrangler/src/deployment-bundle/bundle.ts"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE-MIT",
+            "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+            "finding": "Wrangler 4.143.1 retains the MIT grant (LICENSE-MIT hash unchanged at the release commit); packages/wrangler/src/deployment-bundle/bundle.ts is byte-identical to the Wrangler 4.135.0 release and the real Worker bundle bytes are unchanged. Wrangler remains a build tool, not bundled Worker code."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/evanw/esbuild",
+        "commit": "bb9db84c02433fbe37b3509f53f9f3e3cc48725e",
+        "paths": [
+          "internal/runtime/runtime.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.md",
+            "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
+            "finding": "Only the actual generated __defProp/__name helper is inserted; its MIT licence accompanies the Worker."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/microsoft/TypeScript",
+        "commit": "050880ce59e30b356b686bd3144efe24f875ebc8",
+        "paths": [
+          "src/compiler/transformers/ts.ts"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE.txt",
+            "sha256": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47",
+            "finding": "Upstream exact lock selects 6.0.3. Independent transpilation reproduced all four Containers JavaScript files byte-for-byte; compiler implementation is not bundled."
+          }
+        ]
+      }
+    ],
+    "inputs": [
+      {
+        "repository": "https://github.com/ArcForges/Cloud",
+        "commit": "1d63dc7bbd71a1a98167150473ccd437cf4f76e8",
+        "paths": [
+          "worker/ai/internal/envelope.ts",
+          "worker/ai/internal/handler.ts",
+          "worker/ai/internal/outbound.ts",
+          "worker/foundation/cloud-container.ts",
+          "worker/foundation/proof-command-key.ts",
+          "worker/index.ts",
+          "worker/ingress/applink.ts",
+          "worker/ingress/correlation.ts",
+          "worker/ingress/edge-caller.ts",
+          "worker/ingress/edge-limit.ts",
+          "worker/ingress/errors.ts",
+          "worker/ingress/frames.ts",
+          "worker/ingress/io.ts",
+          "worker/ingress/native.ts",
+          "worker/ingress/pages.ts",
+          "worker/ingress/pipeline.ts",
+          "worker/ingress/routes.ts",
+          "worker/ingress/upgrade.ts",
+          "worker/private/encoding.ts",
+          "worker/readiness/container.ts",
+          "worker/router.ts",
+          "worker/tables/center-tables.generated.ts",
+          "worker/tables/cloud-tables.generated.ts"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Current authored Cloud inputs; exact source bytes and immutable dependency identities are bound by the profile."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/cloudflare/containers",
+        "commit": "298169f4aaba82e7b712458b7c6b14fc3e40ad78",
+        "paths": [
+          "src/lib/helpers.ts",
+          "src/lib/container.ts",
+          "src/lib/utils.ts",
+          "src/index.ts"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE-MIT",
+            "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+            "finding": "Exact source files and generated npm package bytes reviewed; no subordinate licence override; MIT alternative selected, full copyright/terms retained."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/ArcForges/Contracts",
+        "commit": "ca45f36cccbdd31380f76b8f6cdecc958fdcb430",
+        "paths": [
+          "internal/storage-http/v1/schema.json",
+          "src/internal/ts/ai-internal/package.json"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+            "finding": "The published @arcforges/ai-internal 1.0.0-ci.287.1 package is Apache-2.0 generated TypeScript from the CON.15 D1 ExecutePlan schema; its exact bytes are bound by the lock integrity and the profile input hashes."
+          }
+        ]
+      }
+    ],
+    "command": "Restore the locked npm dependencies and build the Worker using wrangler deploy --dry-run --containers-rollout none. Preserve the existing independently reviewed Containers inputs, Worker bundle identity, closed output membership and full MIT/AGPL legal texts. No runtime execution or public artifact download is required.",
+    "outputSpdx": "AGPL-3.0-only"
+  },
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "OpenAI Codex author source/licence assessment; independent PR review pending",
+    "reviewedOn": "2026-11-11",
+    "decision": "approved",
+    "baselineCommit": "1d63dc7bbd71a1a98167150473ccd437cf4f76e8",
+    "reconciliation": false,
+    "rationale": "AF-CTR-06 author source and licence assessment at fdb963a43ab5aad2808a74d2cbb7f947a082dbae; independent PR review and fetched-head native full gates remain pending. The current center adds bound PostgreSQL cluster lineage, protected source backup metadata, complete versioned archive inventory and isolated same-invocation recovery with atomic floor and quarantine admission. Its schema-10 route accepts supported delivered 601.1 or 615.1 source provenance and uses the verified 615.1 bridge, while 0011 recovery retains the target floor and guards interruption, credential selection and pending work. Linux real PG18, cryptographic, archive, child interruption and isolated synthetic runtime checks were exercised; provider/issuer transport and external recorder are controlled substitutes and do not establish hosted promotion or delivery. Windows native file, ACL and child tests ran on a checked composite worktree; its full PostgreSQL client/restore route and physical power-loss directory durability remain unproven. The Docker context admits only the two exact embedded inventories; profile r113 binds the changed image and all newly carried inputs, with unchanged Worker and platform bridge assets. The Linux bridge is from the released 615.1 OCI carrier and the Windows bridge is a separately built reviewed 8e5 source, both preserving Contracts 437.1 legal closure; current runtime uses published Contracts 450.1. Existing Go x/sys was already admitted and changes from indirect to direct without a version or module closure change. r59 extends r58 and r8 extends r7; historical records remain immutable. This is author assessment, not independent approval, full acceptance or a release. The following exact scan-control source commit 5715653848fb4cb95c513d4f0602e2218dfd7b6f adds only the two already reviewed public legal-record digests in the exact r8 and r9 receipt paths to the existing per-file generic-api-key false-positive pins; its tests retain positive and negative controls. The complete commit range remains scanned with the same pinned gitleaks rules and redaction. Source commits 8a8a8de2490ccd42981d1222d13d45fb1c3fdb44 and 91606c2a314ce12e522275d51fa3f7519d136895 fix the actual Windows go vet unsafe-pointer diagnostic in the mapped-source test by using the existing pinned x/sys process-memory APIs for a real writable mapping and by checking the source file handle closed successfully before the test write. The test verifies a complete write/readback, exact source mutation and unchanged private copy. Native Windows vet and the targeted test passed on the fetched 6a78 base with the byte-matched final test overlay; those checks are not a later fetched-head full profile or independent review. This test-only input and the exact r10 public legal-digest scan pin with positive/negative controls do not alter Worker, image or bridge asset inputs, so existing runtime r59 and release r113 are retained; no dependency version or published record changes. This is author assessment only; Windows PostgreSQL recovery, hosted promotion and overall acceptance remain unproven. At source commit 5c5b5b64d8982a770e640ce36b429276446f24cf the synthetic Linux restore drill creates a unique owner-private system temporary directory for its checked backup and metadata, records their paths and hashes, and leaves them available for investigation. The real product output guard still checks every ancestor and object and refuses unsafe paths; neither host permissions nor production backup logic changes. The preceding formal 80bb failure was faithfully reproduced with the exact Go binary on the verification cache path, and a separate real Go guard diagnostic established the non-sticky group-writable ancestor refusal. An affected real two-PostgreSQL drill on the changed source completed all eleven stages; the external recorder is mocked and no hosted delivery or native Node file operation is asserted. Profile r114 and both r60 provenance records are append-only successors because eng/center.py is a declared image input; unchanged Worker and bridge asset inputs remain exact. This is author evidence, not independent review or fetched-head full verification. At source commit 43374f37411146f0d3ed1be76cd3f4da41f52d31 the center binds signed search match intervals to reported scan bounds and the literal pattern byte length, and binds too-large errors to method-specific actual limits and request data that the center can observe. Zero-length regex matches in empty files remain valid; existing file sizes and removal-tree size remain node observations. Direct Go race tests and real PostgreSQL-backed center routing with a synthetic software-key node cover positive and negative cases; they do not claim native Node filesystem or final host validation. Profile r115 and both r61 provenance records are append-only successors because file_response_validation.go is a declared image input; Worker and bridge asset inputs remain exact. The receipt also records the new tests and exact public legal-digest scan pins. This is author evidence, not an independent review or fetched-head full verification. At source commit 0557b8fdd81ec1e9a4b8902a2ba353c2fff5e686 the center preserves a valid node-observed existing-file limit even when the caller requested absence, because that request does not establish actual filesystem state. A too-large edit result is accepted only when the exact replacement can grow; the center does not infer the original size or count. Go race and PostgreSQL-backed signed-route tests cover both cases with synthetic node keys. The prior r115 and r61 records and r12 receipt remain immutable; the new r116/r62/r13 chain binds the corrected source and exact r13 public legal-digest scan pins. This is author evidence, not fetched-head formal verification, independent review or native Node filesystem acceptance. At source commit 1d9742e150953a63a618eec4d9c88664fdbde9b7 the center keeps published 450.1 limit names open while preserving each canonical name and checking method, actual maximum and genuinely observable request or caller-bound target facts. Embedded completed-operation errors use the original operation kind and retain unknown request content as unknown. Canonical decimal and foundation shape are checked; actual 450.1 Node .NET validation accepts a trailing-zero decimal that the merged design rejects, a recorded SDK_CONFORMANCE_GAP not fixed here. Signed software-node, PostgreSQL receipt and audit tests are author component evidence, not native Node filesystem acceptance. The prior r116, r62 and r13 records remain immutable; this r117/r63/r14 chain binds the new source and exact r14 public legal-digest scan pins. Formal fetched-head host validation and independent review remain required. At source commit 563e0c18bebf21d7c2fab8334810df8bb07b4270 the current center and source/CodeQL builds move from Go 1.27.3 to the official Go 1.27.4 security patch, addressing GO-2026-6859. The official source tag and Linux/Windows archive digests are pinned; Go's licence bytes are unchanged. The two 8e5 bridge asset jobs and the released bridge source, Go 1.27.3 identity, Contracts 437.1 and sealed asset hashes are retained. Native profiles may choose the current and historical native Go executables independently by validated absolute process-local paths; the fingerprint and center use the same current executable even after a Linux login profile, without changing global settings. Linux author component checks cover the selectors, native version and target, locked tidy, vet, selected Go tests, staticcheck and govulncheck. The latter found zero called-symbol and zero imported-package vulnerabilities, with one required-module vulnerability reported as not called. Windows author checks used a hash-matched WIP composite for the selector and actual native compiler, not a fetched-head full run. No Go modules, lock sums, Worker bytes, database migrations or released bridge assets change. The source commit adds only exact r16 pins for two pre-existing public legal-record digests, with positive and negative controls. This is author assessment; dual native full verification, independent review and delivery remain pending. At source commit 18b1fb412f2807e4ecdbdbbeb91a25bbbfcd6df1 this release profile separately admits the fixed 8e5 security-bridge bootstrap producer and its exact input closure, while retaining the 615.1 historical carrier and asset identities. Its Go 1.27.4 native builds and official archive inputs are distinct from the historical Go 1.27.3 bridge; the actual 8e5 Go Contracts 437.1, C#/Worker 287.1 and Validation 205.1 locks and full legal closure remain their original identities. The producer binds real protected workflow/main/run identity separately from the fixed business source and independently rechecks the closed components and carrier. No successor publication digest is asserted before publication. Phase 1 statically disables ordinary and proof deployments; the external effective-permission authority has no authenticated configured source and the production gate fails closed before any write-token job. Author tests use real native build and carrier components with explicitly synthetic run/artifact transport and a test-only mock external authority graph; they do not prove real permissions, publication, delivery or native full verification. Independent review, both fetched-head native full statuses and the later reviewed phase 2 are still required. At source commit 628126ccb5d7702097530b5b7a0c14c376e78862 this successor binds the precise Git ignore for the CPython cache generated by importing eng/center.py. The provenance audit continues to enumerate tracked and untracked nonignored files; a real Python-created cache, a fresh checkout, undeclared source and force-tracked bytecode are tested independently. The image, Worker, historical bridge and security producer input hashes, package versions and their boundaries are unchanged. This repair is not publication, external authority proof, deployment or AF-CTR-06 delivery; native fetched-head statuses and independent review remain required. At source commit 1d63dc7bbd71a1a98167150473ccd437cf4f76e8 the historic old-schema writer test calls the isolated internal migration mechanics only after the public entry refuses the same signed historical proof without a database connection. The actual PostgreSQL writer transaction, observed lock wait and committed receipt backfill remain asserted; this is historical component evidence, not a current bridge upgrade acceptance. The image, Worker, historical bridge and security producer input hashes, package versions and their boundaries are unchanged. This repair is not publication, external authority proof, deployment or AF-CTR-06 delivery; native fetched-head statuses and independent review remain required."
+  },
+  "supersedes": "center-worker-r66"
+}
