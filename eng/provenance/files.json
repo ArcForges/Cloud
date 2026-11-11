@@ -757,6 +757,7 @@
     "eng/policy/dependency-reviews/af-ctr-06-bridge-r1.json",
     "eng/policy/dependency-reviews/af-ctr-06-r1.json",
     "eng/policy/dependency-reviews/af-ctr-06-r10.json",
+    "eng/policy/dependency-reviews/af-ctr-06-r11.json",
     "eng/policy/dependency-reviews/af-ctr-06-r2.json",
     "eng/policy/dependency-reviews/af-ctr-06-r3.json",
     "eng/policy/dependency-reviews/af-ctr-06-r4.json",
@@ -849,6 +850,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r111.json",
     "eng/provenance/artifact-profiles/cloud-release-r112.json",
     "eng/provenance/artifact-profiles/cloud-release-r113.json",
+    "eng/provenance/artifact-profiles/cloud-release-r114.json",
     "eng/provenance/artifact-profiles/cloud-release-r12.json",
     "eng/provenance/artifact-profiles/cloud-release-r13.json",
     "eng/provenance/artifact-profiles/cloud-release-r14.json",
@@ -1003,6 +1005,7 @@
     "eng/provenance/records/center-runtime-r58.json",
     "eng/provenance/records/center-runtime-r59.json",
     "eng/provenance/records/center-runtime-r6.json",
+    "eng/provenance/records/center-runtime-r60.json",
     "eng/provenance/records/center-runtime-r7.json",
     "eng/provenance/records/center-runtime-r8.json",
     "eng/provenance/records/center-runtime-r9.json",
@@ -1061,6 +1064,7 @@
     "eng/provenance/records/center-worker-r58.json",
     "eng/provenance/records/center-worker-r59.json",
     "eng/provenance/records/center-worker-r6.json",
+    "eng/provenance/records/center-worker-r60.json",
     "eng/provenance/records/center-worker-r7.json",
     "eng/provenance/records/center-worker-r8.json",
     "eng/provenance/records/center-worker-r9.json",
@@ -1957,5 +1961,5 @@
     "third-party/Protobuf.LICENSE.txt": "protobuf-bsd-legal-r1",
     "third-party/Puddle.LICENSE.txt": "go-puddle-legal-r1"
   },
-  "artifacts": ["center-runtime-r59", "center-worker-r59"]
+  "artifacts": ["center-runtime-r60", "center-worker-r60"]
 }
