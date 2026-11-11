@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Xunit;
 
@@ -21,6 +23,31 @@ public sealed class HarnessRepositoryTests
         Assert.Empty(result.Remaining);
         Assert.Equal(27, HarnessArchitecture.Rules.Count);
         Assert.True(sources.Keys.Count(name => name != HarnessArchitecture.NamingReport) > 50);
+    }
+
+    // The register admits three old-source imports only while this whole loader is the reviewed file.
+    // A file-scoped register row alone would otherwise cover another computed import in the same file.
+    private static bool IsPinnedSecurityBridgeLegalLoader(string source)
+    {
+        var normalized = source.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var actual = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
+        if (actual != "92662cf125726beb5d132859fd9ae180fd98167160bbf5ea359847f654a8eb3b") return false;
+        var computed = PolicyLexer.ModuleReferences(PolicyLexer.Tokenize(normalized)).Where(reference => reference.Specifier is null).ToArray();
+        return computed.Length == 3 && computed.All(reference => reference.Form == ModuleForm.Dynamic);
+    }
+
+    [Fact]
+    public void TheSecurityBridgeLegalLoaderAdmitsOnlyTheReviewedHistoricalImports()
+    {
+        var source = File.ReadAllText(Path.Combine(Root, "tooling/ctr06-security-bridge-legal.ts"));
+        Assert.True(IsPinnedSecurityBridgeLegalLoader(source));
+        Assert.Contains("verifyTrackedBridgeSource(sourceDirectory);", source, StringComparison.Ordinal);
+        foreach (var name in new[] { "tooling/provenance.ts", "tooling/release-provenance.ts", "tooling/licence-boundary.ts" })
+            Assert.Contains("path.join(sourceDirectory, \"" + name + "\")", source, StringComparison.Ordinal);
+
+        Assert.False(IsPinnedSecurityBridgeLegalLoader(source + "\nawait import(unreviewedPath);\n"));
+        Assert.False(IsPinnedSecurityBridgeLegalLoader(source.Replace("tooling/provenance.ts", "tooling/unreviewed.ts", StringComparison.Ordinal)));
+        Assert.False(IsPinnedSecurityBridgeLegalLoader(source.Replace("verifyTrackedBridgeSource(sourceDirectory);", "", StringComparison.Ordinal)));
     }
 
     [Fact]

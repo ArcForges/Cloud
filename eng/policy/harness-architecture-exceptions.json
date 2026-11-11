@@ -310,6 +310,16 @@
       "reason": "AF-CTR-05 E3: the proof Worker validates the selected command-key secret binding before forwarding its secret to the center; the Go registration command also validates that binding against the proof key ID. This proof-only naming shape has no admitted generated shared definition yet. Replace the Worker literal and this row with an admitted shared generated definition before expiry; the row does not admit other rule/file/symbol tuples or expose secret values.",
       "created": "2026-11-08",
       "expires": "2027-03-31"
+    },
+    {
+      "id": "AFCTR06-EX-1",
+      "rule": "layer-escape",
+      "file": "tooling/ctr06-security-bridge-legal.ts",
+      "detail": "Computed dynamic specifier needs explicit admission",
+      "owner": "Cloud / AF-CTR-06",
+      "reason": "The security bridge producer and sealer must run the historical provenance, release-provenance and licence-boundary validators from the private checkout of fixed Cloud commit 8e5f6e26aa97b123d9f60b91f780364a094e74cd, tree 4a315ea6b47d96c3262e8111fcc26ad1957097f2. Before these three imports the loader checks that checkout HEAD, tree and tracked/untracked Git status. The architecture test pins the entire reviewed loader file and exactly three computed imports; any additional or redirected import or removal of the source check fails that pin and requires renewed review. This does not admit another file or Worker release code.",
+      "created": "2026-11-11",
+      "expires": "2027-03-31"
     }
   ]
 }
