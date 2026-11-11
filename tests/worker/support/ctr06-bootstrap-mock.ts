@@ -13,9 +13,14 @@ import { bridgeSource } from "../../../tooling/ctr06-security-bridge-source.ts";
 import {
   sourceObservationMessage,
   sourceEnforcementMessage,
+  inspectSourceEvidence,
   type LeaseSource,
   type AuthorityLease,
 } from "../../../tooling/ctr06-bootstrap-policy.ts";
+import {
+  requireFreshWindow,
+  verifyCollectorIdentityWithKeys,
+} from "../../../tooling/ctr06-bootstrap-oidc.ts";
 import { verifyAuthenticatedHistoryWithKey } from "../../../tooling/ctr06-bootstrap-reconcile.ts";
 import type {
   ApprovedBootstrap,
@@ -437,6 +442,8 @@ export class SyntheticAuthority implements BrokerPorts {
   privateAbsent = false;
   publicReads = 0;
   currentFence = "fence1";
+  effectProfile: Parameters<typeof acceptFencedEffect>[1] = testProfile;
+  effectObserver?: (phase: "issue" | "use", authorization: EffectAuthorization) => void;
   #prior: { payload: Buffer; token: string } | undefined;
   async reviewedApproval() {
     this.calls.push("reviewed");
@@ -590,8 +597,9 @@ export class SyntheticAuthority implements BrokerPorts {
   }
   async issue(request: AttemptTarget, issueId: string, authorization: EffectAuthorization) {
     this.calls.push("issue");
-    return acceptFencedEffect(this, testProfile, approval, request, authorization, () => {
+    return acceptFencedEffect(this, this.effectProfile, approval, request, authorization, () => {
       assert.equal(authorization.phase, "issue");
+      this.effectObserver?.("issue", authorization);
       const secret = Buffer.from("PRIVATE-CAPABILITY-FIXTURE");
       this.entries.set(issueId, {
         credential: "active",
@@ -614,8 +622,9 @@ export class SyntheticAuthority implements BrokerPorts {
     verifiedArtifact: Buffer,
   ) {
     this.calls.push("publish");
-    return acceptFencedEffect(this, testProfile, approval, request, authorization, () => {
+    return acceptFencedEffect(this, this.effectProfile, approval, request, authorization, () => {
       assert.equal(authorization.phase, "use");
+      this.effectObserver?.("use", authorization);
       const entry = this.entries.get(issueId);
       assert(entry);
       assert.equal(entry.credential, "active");
@@ -777,4 +786,199 @@ export class SyntheticAuthority implements BrokerPorts {
       ).assets;
     throw new Error("unexpected synthetic public release read");
   }
+}
+
+/** Synthetic external port instrumentation. No production helper or validation function is replaced. */
+export function instrumentInternalLease(
+  mock: SyntheticAuthority,
+  phase: "issue" | "use",
+  crossSourceExpiry: boolean,
+) {
+  mock.sourceAgeSeconds = 119;
+  mock.sourceAgePhase = phase;
+  const trace: {
+    authorization?: EffectAuthorization;
+    helperEntryAt: number;
+    leaseStartAt: number;
+    leaseFinishAt: number;
+    effectAt: number;
+    entryDigest: string;
+    startDigest: string;
+    finishDigest: string;
+    effectDigest: string;
+    helperStackObserved: boolean;
+    leaseCalls: number;
+    portReturned: boolean;
+    portThrew: boolean;
+    alignmentWaitMs: number;
+    internalWaitMs: number;
+  } = {
+    helperEntryAt: 0,
+    leaseStartAt: 0,
+    leaseFinishAt: 0,
+    effectAt: 0,
+    entryDigest: "",
+    startDigest: "",
+    finishDigest: "",
+    effectDigest: "",
+    helperStackObserved: false,
+    leaseCalls: 0,
+    portReturned: false,
+    portThrew: false,
+    alignmentWaitMs: 0,
+    internalWaitMs: 0,
+  };
+  let insideHelper = false;
+  const digest = (authorization: EffectAuthorization) =>
+    createHash("sha256").update(authorization.proof.payload).digest("hex");
+  const originalLease = mock.verifyLease.bind(mock);
+  mock.verifyLease = async (...args) => {
+    if (!insideHelper || !trace.authorization) return originalLease(...args);
+    trace.leaseCalls++;
+    trace.leaseStartAt = Date.now();
+    trace.startDigest = digest(trace.authorization);
+    const stack = new Error().stack ?? "";
+    trace.helperStackObserved =
+      stack.includes("acceptFencedEffect") && stack.includes("validateObservation");
+    const timing = mock.lastTiming[phase];
+    if (crossSourceExpiry && timing) {
+      trace.internalWaitMs = Math.min(
+        3000,
+        Math.max(0, (timing.collectedAt + 121) * 1000 + 50 - Date.now()),
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, trace.internalWaitMs));
+    }
+    try {
+      await originalLease(...args);
+      trace.portReturned = true;
+      trace.leaseFinishAt = Date.now();
+      trace.finishDigest = digest(trace.authorization);
+    } catch (error) {
+      trace.portThrew = true;
+      throw error;
+    }
+  };
+  const enter = async <T>(authorization: EffectAuthorization, action: () => Promise<T>) => {
+    const timing = mock.lastTiming[phase];
+    if (timing) {
+      trace.alignmentWaitMs = Math.min(
+        3000,
+        Math.max(0, (timing.collectedAt + 120) * 1000 + 30 - Date.now()),
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, trace.alignmentWaitMs));
+    }
+    trace.authorization = authorization;
+    trace.entryDigest = digest(authorization);
+    trace.helperEntryAt = Date.now();
+    insideHelper = true;
+    try {
+      return await action();
+    } finally {
+      insideHelper = false;
+    }
+  };
+  if (phase === "issue") {
+    const original = mock.issue.bind(mock);
+    mock.issue = async (...args) => enter(args[2], () => original(...args));
+  } else {
+    const original = mock.publish.bind(mock);
+    mock.publish = async (...args) => enter(args[3], () => original(...args));
+  }
+  mock.effectObserver = (effectPhase, authorization) => {
+    if (effectPhase === phase) {
+      trace.effectAt = Date.now();
+      trace.effectDigest = digest(authorization);
+    }
+  };
+  return trace;
+}
+
+/** Assert observations after the real helper returns; the timed external port does not throw. */
+export function checkInternalLease(
+  trace: ReturnType<typeof instrumentInternalLease>,
+  mock: SyntheticAuthority,
+  request: AttemptTarget,
+  phase: "issue" | "use",
+  crossed: boolean,
+) {
+  const authorization = trace.authorization;
+  assert(authorization, "Target effect did not enter the independent helper");
+  assert.equal(trace.leaseCalls, 1, "Expected exactly one lease call inside the target helper");
+  assert(trace.helperStackObserved, "The observed lease call was not inside acceptFencedEffect");
+  assert(trace.portReturned && !trace.portThrew, "The external lease port did not return normally");
+  const payload = JSON.parse(authorization.proof.payload.toString("utf8")) as {
+    phase: string;
+    challenge: string;
+    targetDigest: string;
+    lease: unknown;
+    sources: { collectedAt: number }[];
+  };
+  assert.equal(payload.phase, phase);
+  assert.equal(payload.challenge, authorization.challenge);
+  assert.equal(payload.targetDigest, brokerTargetDigest(request));
+  assert(Array.isArray(payload.sources) && payload.sources.length === sourceProfiles.length);
+  const collectedAt = payload.sources[0]?.collectedAt;
+  assert(
+    typeof collectedAt === "number" && payload.sources.every((x) => x.collectedAt === collectedAt),
+  );
+  const entryAt = Math.floor(trace.helperEntryAt / 1000);
+  const beforeAt = Math.floor(trace.leaseStartAt / 1000);
+  const afterAt = Math.floor(trace.leaseFinishAt / 1000);
+  assert.equal(entryAt - collectedAt, 120, "Helper entry must see source age 120");
+  assert.equal(beforeAt - collectedAt, 120, "Helper lease entry must see source age 120");
+  const window = verifyCollectorIdentityWithKeys(
+    authorization.proof.payload,
+    authorization.proof.token,
+    testProfile.collector,
+    beforeAt,
+    testProfile.softwareJwks,
+  );
+  assert.deepEqual(window, authorization.window);
+  requireFreshWindow(window, afterAt);
+  assert(authorization.lease.start <= afterAt && afterAt < authorization.lease.end);
+  const holder = `${request.run}:${request.attempt}`;
+  assert.deepEqual(
+    inspectSourceEvidence(payload.lease, payload.sources, entryAt, holder, sourceProfiles),
+    authorization.lease,
+  );
+  assert.deepEqual(
+    inspectSourceEvidence(payload.lease, payload.sources, beforeAt, holder, sourceProfiles),
+    authorization.lease,
+  );
+  if (crossed) {
+    assert(
+      trace.internalWaitMs > 0 && trace.leaseFinishAt > trace.leaseStartAt,
+      "No internal wait occurred",
+    );
+    assert(afterAt - collectedAt > 120, "Source did not age across the internal lease wait");
+    assert.throws(
+      () => inspectSourceEvidence(payload.lease, payload.sources, afterAt, holder, sourceProfiles),
+      /stale/,
+    );
+    assert.equal(trace.effectAt, 0, "The stale proof reached an effect");
+  } else {
+    assert.equal(afterAt - collectedAt, 120);
+    assert.equal(Math.floor(trace.effectAt / 1000) - collectedAt, 120);
+    assert.equal(trace.effectDigest, authorization.digest);
+  }
+  assert.equal(trace.entryDigest, authorization.digest);
+  assert.equal(trace.startDigest, authorization.digest);
+  assert.equal(trace.finishDigest, authorization.digest);
+  return {
+    phase,
+    crossed,
+    helperEntrySourceAge: entryAt - collectedAt,
+    leaseStartSourceAge: beforeAt - collectedAt,
+    leaseFinishSourceAge: afterAt - collectedAt,
+    effectSourceAge: trace.effectAt ? Math.floor(trace.effectAt / 1000) - collectedAt : null,
+    proofDigest: authorization.digest,
+    jwtRemaining: window.expiresAt - afterAt,
+    leaseRemaining: authorization.lease.end - afterAt,
+    internalWaitMs: trace.internalWaitMs,
+    internalElapsedMs: trace.leaseFinishAt - trace.leaseStartAt,
+    helperStackObserved: trace.helperStackObserved,
+    leasePortReturnedNormally: trace.portReturned && !trace.portThrew,
+    effectOccurred: trace.effectAt !== 0,
+    targetEffectPresent: phase === "issue" ? mock.entries.size > 0 : mock.actual !== undefined,
+  };
 }

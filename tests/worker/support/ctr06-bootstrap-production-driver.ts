@@ -21,8 +21,16 @@ mock.module(new URL("../../../tooling/ctr06-bootstrap-profile.ts", import.meta.u
 });
 const { runProductionBroker } = await import("../../../tooling/ctr06-bootstrap-broker.ts");
 const { BootstrapJournal } = await import("../../../tooling/ctr06-bootstrap-journal.ts");
-const { SyntheticAuthority, approval, githubFixture, sourceProfiles, target, testProfile } =
-  await import("./ctr06-bootstrap-mock.ts");
+const {
+  SyntheticAuthority,
+  approval,
+  githubFixture,
+  sourceProfiles,
+  target,
+  testProfile,
+  instrumentInternalLease,
+  checkInternalLease,
+} = await import("./ctr06-bootstrap-mock.ts");
 
 test("production kind uses real decisions for success, safe-empty, conflict and expiry", async (t) => {
   const originalFetch = globalThis.fetch;
@@ -327,6 +335,43 @@ test("production kind uses real decisions for success, safe-empty, conflict and 
       );
       journal.close();
     }
+    for (const phase of ["issue", "use"] as const)
+      for (const crossed of [false, true]) {
+        external = new SyntheticAuthority();
+        // Exercise the same real helper using production-kind identity verification too; only
+        // unavailable HTTPS/JWKS and provider ports are substituted by this isolated driver.
+        external.effectProfile = reviewedProfile as typeof external.effectProfile;
+        current = target();
+        delayPhase = "";
+        delayed = false;
+        const journal = new BootstrapJournal(
+          scratchDirectory("ctr06-production-kind-helper-lease-age-", t),
+        );
+        const trace = instrumentInternalLease(external, phase, crossed);
+        if (crossed) {
+          await assert.rejects(
+            runProductionBroker(journal, current),
+            /^Error: Bootstrap broker refused; reconcile any uncertain outcome$/,
+          );
+          assert.equal(external.actual, undefined);
+          if (phase === "issue") assert.equal(external.entries.size, 0);
+          else
+            for (const entry of external.entries.values()) {
+              assert.notEqual(entry.operation, "published");
+              assert.notEqual(entry.credential, "active");
+            }
+        } else {
+          assert.equal((await runProductionBroker(journal, current)).tag, current.release);
+        }
+        console.log(
+          JSON.stringify({
+            kind: "github-oidc",
+            effectVerifierProfile: external.effectProfile.kind,
+            ...checkInternalLease(trace, external, current, phase, crossed),
+          }),
+        );
+        journal.close();
+      }
     assert.equal(approval.merge, current.producer);
   } finally {
     globalThis.fetch = originalFetch;

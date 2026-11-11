@@ -16,6 +16,8 @@ import {
   approval,
   prepareSyntheticGate,
   SyntheticAuthority,
+  instrumentInternalLease,
+  checkInternalLease,
   target,
   testProfile,
 } from "./support/ctr06-bootstrap-mock.ts";
@@ -567,6 +569,42 @@ if (process.platform === "linux") {
       console.log(JSON.stringify({ phase, sourceAgeAtBoundary: observedAge, effect: "accepted" }));
       journal.close();
     }
+  });
+
+  test("independent issuer and publisher reject source expiry inside the helper lease await", async (t) => {
+    for (const phase of ["issue", "use"] as const)
+      for (const crossed of [false, true]) {
+        const root = scratchDirectory("ctr06-helper-lease-age-", t);
+        const journal = new BootstrapJournal(root);
+        const mock = new SyntheticAuthority();
+        const request = target();
+        const trace = instrumentInternalLease(mock, phase, crossed);
+        if (crossed) {
+          await assert.rejects(
+            runIsolatedBroker(journal, request, testProfile, mock),
+            /^Error: Bootstrap broker refused; reconcile any uncertain outcome$/,
+          );
+          assert.equal(mock.actual, undefined);
+          if (phase === "issue") assert.equal(mock.entries.size, 0);
+          else
+            for (const entry of mock.entries.values()) {
+              assert.notEqual(entry.operation, "published");
+              assert.notEqual(entry.credential, "active");
+            }
+        } else {
+          assert.equal(
+            (await runIsolatedBroker(journal, request, testProfile, mock)).tag,
+            request.release,
+          );
+        }
+        console.log(
+          JSON.stringify({
+            kind: "isolated-test",
+            ...checkInternalLease(trace, mock, request, phase, crossed),
+          }),
+        );
+        journal.close();
+      }
   });
 
   test("issuer and publisher independently reject altered authenticated windows, source fences and stale workers", async (t) => {
