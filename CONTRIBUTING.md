@@ -25,6 +25,14 @@ roles); without it they skip. A schema change is a new file in `center/internal/
 in `center/internal/schema`; applied migrations are never edited. After a change to the center's registrations run
 `python eng/center.py generate`; after a Go dependency change update `center/dependencies.json` and its review receipt.
 
+The full native profile also reconstructs the reviewed 8e5 bridge with its historical Go 1.27.3 identity. When the
+current center's pinned Go is installed elsewhere, set process-local `ARCFORGES_CENTER_GO` to the absolute path of its
+native executable: the tool fingerprint and center check use that same file, and the check verifies its version and
+Linux or Windows amd64 target. This selection takes effect after the Linux login profile. When the historical compiler
+is installed elsewhere, set process-local `ARCFORGES_CTR06_BRIDGE_GO` to the absolute path of the existing native Go
+1.27.3 executable; only the bridge check uses it and verifies its version and target. Without either variable its
+corresponding step uses PATH as before. The original bridge source, executable and sealed asset hashes remain fixed.
+
 Every pull request is verified after the push on the owner's two verification hosts, a Windows leg on native Windows and a Linux leg on native Linux, which run these checks and the candidate build and report the commit statuses `arcforges/windows` and `arcforges/linux` that `main` requires (see [AGENTS.md](AGENTS.md), Verification after the push); external pull requests also run the full hosted CI and need no local hook. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). The pre-commit hook checks only the staged whitespace and the `gofmt -s` formatting of staged Go files; install it with `python eng/verify.py install`. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
 
 Update central NuGet versions and regenerate the per-project locks with `dotnet restore Cloud.slnx --force-evaluate`; use `npm install --ignore-scripts` for npm lock changes. Do not hand-edit lock dependency graphs or disable locked mode. The Cloud host explicitly lists Windows/Linux x64 restore targets so its lock is portable between development and production builds.

@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "goVersion": "go1.27.3",
+  "goVersion": "go1.27.4",
   "inputs": {
-    "go.mod": "8330db700dbfd2335edc9796021841c28cd724bd2690fc8ccff24e896722c25d",
+    "go.mod": "51758be30370bd6058ba1f1effcd4a6d9478cd4d43a89ca45435bc8104eb0a25",
     "go.sum": "1118c70b11799baeec2dcaae3bb8af9450d9bcaae988f527ca40ec463767992d",
-    "toolchain.json": "ad46e23c3a42ecc48b5f2383e6039aeffb11d9723bafac038fc6c648b7bd5a51",
-    "tools/go.mod": "1abc5df8e2b367cff0d4de646d089c62eb89ade03538ae799450a096a86d600b",
+    "toolchain.json": "21fdf09e75223ee537a1b43fd5e264c440d9f1d5f9eec4ee4e3b34abfcb79c4a",
+    "tools/go.mod": "6f86f22681c89b60d96ea2df241b8855d44f39b0bcd6910863578911a2933fc1",
     "tools/go.sum": "6394a2049a55c360f2fc72d96588570ece75a3b1350fad580da4070d53b0ae2f"
   },
   "runtimeModules": [

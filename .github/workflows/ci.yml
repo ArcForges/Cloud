@@ -91,7 +91,7 @@ jobs:
           dotnet build Cloud.slnx -c Release --no-restore
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
           cache-dependency-path: |
             center/go.sum
             center/tools/go.sum
@@ -203,7 +203,7 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: matrix.language == 'go'
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
           cache-dependency-path: center/go.sum
       - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:

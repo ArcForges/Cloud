@@ -44,14 +44,49 @@ Differences from the hosted jobs:
   when its own PRs were verified.
 - The bridge asset checks use each native host and a new temporary directory. Linux reuses a previously verified carrier from the
   documented workspace or `ARCFORGES_CTR06_BRIDGE_CARRIER` (an absolute non-secret path); otherwise it retrieves the fixed
-  durable release once and checks its digest. Windows compiles the archived 8e5 source with the host's existing pinned Go.
+  durable release once and checks its digest. Windows compiles the archived 8e5 source with the host's existing Go 1.27.3.
+  `ARCFORGES_CTR06_BRIDGE_GO` may name that absolute executable path for the bridge step only. For the center, optional
+  `ARCFORGES_CENTER_GO` names the absolute native pinned Go executable; the fingerprint and center step use the same
+  captured choice after any login profile, with the actual version and native target checked. Without either variable
+  the corresponding step retains its existing PATH selection.
 - Added to the hosted jobs: `worker-provenance` (`npm run test:artifact`: the verifier's own tests on the real locked Wrangler output against the release profile's approved Worker closure; the hosted candidate job runs the verifier itself on the real bundle, so only these tests and the early feedback are leg-only).
 - Not reproduced: GitHub dependency review (a GitHub service; external PRs keep it; the locked restores with NuGet audit
   and `npm audit` cover vulnerable packages locally) and CodeQL (external PRs, dispatch and the weekly schedule).
 Every change runs the full profile: the forbidden-term scan, Prettier and the provenance inventory read Markdown too.
 """
 
+import os
+from pathlib import Path
+import shlex
+
 REPOSITORY = "Cloud"
+
+
+def selected_center_go() -> str | None:
+    """An optional native center compiler, fixed before any Linux login profile runs."""
+    value = os.environ.get("ARCFORGES_CENTER_GO")
+    if value is None:
+        return None
+    path = Path(value)
+    expected_name = "go.exe" if os.name == "nt" else "go"
+    actual_name = path.name.lower() if os.name == "nt" else path.name
+    if not path.is_absolute() or actual_name != expected_name:
+        raise ValueError("ARCFORGES_CENTER_GO must name an existing absolute native Go executable")
+    try:
+        path = path.resolve(strict=True)
+    except OSError as error:
+        raise ValueError("ARCFORGES_CENTER_GO must name an existing absolute native Go executable") from error
+    actual_name = path.name.lower() if os.name == "nt" else path.name
+    if not path.is_file() or actual_name != expected_name or os.pathsep in str(path.parent):
+        raise ValueError("ARCFORGES_CENTER_GO must name an existing absolute native Go executable")
+    return str(path)
+
+
+_CENTER_GO = selected_center_go()
+# The fingerprint and the center step receive the same captured executable, even if a login profile rewrites PATH.
+# A child-local environment also prevents a different GOROOT or automatic toolchain download from changing the probe.
+_GO_PROBE = ("import os, subprocess, sys; e=dict(os.environ, GOTOOLCHAIN='local'); e.pop('GOROOT', None); "
+             "sys.exit(subprocess.call([sys.argv[1], 'version'], env=e))")
 
 # The npm bundled with the Node that `node` selects (Windows; see above).
 _BUNDLED_NPM = ("require('path').join(require('path').dirname(process.execPath), 'node_modules', 'npm', "
@@ -63,14 +98,15 @@ FINGERPRINT = {
         "dotnet-sdks": ["dotnet", "--list-sdks"],
         "dotnet-runtimes": ["dotnet", "--list-runtimes"],
         "node": ["node", "--version"],
-        "go": ["go", "version"],
+        "go": (["python", "-c", _GO_PROBE, _CENTER_GO] if _CENTER_GO is not None else ["go", "version"]),
         "npm": ["node", "-p", "require(" + _BUNDLED_NPM.replace("'bin', 'npm-cli.js'", "'package.json'") + ").version"],
     },
     "linux": {
         "dotnet-sdks": "dotnet --list-sdks | tr '\\n' ' '",
         "dotnet-runtimes": "dotnet --list-runtimes | tr '\\n' ' '",
         "node": "node --version",
-        "go": "go version",
+        "go": (f"python -c {shlex.quote(_GO_PROBE)} {shlex.quote(_CENTER_GO)}"
+               if _CENTER_GO is not None else "go version"),
         "npm": "npm --version",
         "python": "python --version",
         "docker": "docker version --format '{{.Server.Version}}'",
@@ -157,11 +193,22 @@ def pwsh(script: str) -> list[str]:
             "$ErrorActionPreference = 'Stop'; " + script + "; exit $LASTEXITCODE"]
 
 
-def win(step_id: str, cmd: list[str], timeout: int, **options) -> Step:
-    return Step(step_id, "win", cmd, timeout=timeout, env=ENV, **options)
+def win(step_id: str, cmd: list[str], timeout: int, *, center_go: bool = False, **options) -> Step:
+    env = dict(ENV)
+    if center_go and _CENTER_GO is not None:
+        env["ARCFORGES_CENTER_GO"] = _CENTER_GO
+        env["PATH"] = str(Path(_CENTER_GO).parent) + os.pathsep + os.environ.get("PATH", "")
+        env["GOROOT"] = ""
+        env["GOTOOLCHAIN"] = "local"
+    return Step(step_id, "win", cmd, timeout=timeout, env=env, **options)
 
 
-def linux(step_id: str, cmd: str, timeout: int, **options) -> Step:
+def linux(step_id: str, cmd: str, timeout: int, *, center_go: bool = False, **options) -> Step:
+    if center_go and _CENTER_GO is not None:
+        # This runs after eng/verify.py's login shell and before center.py's child processes.
+        cmd = (f"export ARCFORGES_CENTER_GO={shlex.quote(_CENTER_GO)}; "
+               f"export PATH={shlex.quote(str(Path(_CENTER_GO).parent))}:\"$PATH\"; "
+               "unset GOROOT; export GOTOOLCHAIN=local; " + cmd)
     return Step(step_id, "linux", cmd, timeout=timeout, env=ENV, **options)
 
 
@@ -171,7 +218,7 @@ STEPS = [
     win("win-restore", ["dotnet", "restore", "Cloud.slnx", "--locked-mode"], 600),
     win("win-build", ["dotnet", "build", "Cloud.slnx", "-c", "Release", "--no-restore"], 900),
     # The Go center (AF-CTR-02): build, gofmt, vet, staticcheck, unit and protocol tests, drift, govulncheck and the native build.
-    win("win-center", ["python", "eng/center.py", "check"], 900),
+    win("win-center", ["python", "eng/center.py", "check"], 900, center_go=True),
     # The exact 8e5 bridge is compiled on Windows and its complete asset is
     # sealed and checked against this commit's active release profile.
     win("win-ctr06-bridge-asset", ["python", "eng/verification/ctr06_native_bridge_check.py"], 600),
@@ -195,7 +242,7 @@ STEPS = [
     # Its own lane: center.py runs only Go and Docker (its own
     # PostgreSQL container, govulncheck, the image target), never npm or dotnet, and reads nothing the other Linux steps write, so it
     # cannot race the restores and builds of the `linux` lane; fresh-intermediates touches only C# obj directories.
-    linux("linux-center", "python eng/center.py check", 900, lane="center"),
+    linux("linux-center", "python eng/center.py check", 900, lane="center", center_go=True),
     linux("licence-evaluated", "node tooling/project.ts licence-evaluated", 300),
     linux("candidate", CANDIDATE, 900),
     # the whitespace check and quality's secret scan over the commits since the merge base; actionlint when a workflow changed

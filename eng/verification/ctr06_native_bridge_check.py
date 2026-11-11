@@ -27,6 +27,36 @@ CARRIER_NAME = "cloud-0.1.0-ci.615.1.tar.gz"
 CARRIER_URL = ("https://github.com/ArcForges/Cloud/releases/download/"
                "cloud-0.1.0-ci.615.1/" + CARRIER_NAME)
 CARRIER_LIMIT = 128 * 1024 * 1024
+BRIDGE_GO_ENV = "ARCFORGES_CTR06_BRIDGE_GO"
+
+
+def bridge_environment(**extra: str) -> dict[str, str]:
+    # The historical compiler is chosen only for this subprocess. Do not pass
+    # the selector or a newer GOROOT into it, or change the parent's PATH.
+    env = dict(os.environ)
+    env.pop(BRIDGE_GO_ENV, None)
+    env.pop("ARCFORGES_CENTER_GO", None)
+    env.pop("GOROOT", None)
+    env.update({"GOTOOLCHAIN": "local", "GOWORK": "off", **extra})
+    return env
+
+
+def checked_bridge_go(host: str, cwd: Path, env: dict[str, str]) -> str:
+    if host not in ("windows", "linux"):
+        raise ValueError("unsupported bridge compiler host")
+    selected = os.environ.get(BRIDGE_GO_ENV)
+    if selected is None:
+        executable = "go"
+    else:
+        path = Path(selected)
+        if not path.is_absolute() or not path.is_file():
+            raise ValueError("the selected bridge Go executable must be an existing absolute file")
+        executable = str(path)
+    version = subprocess.check_output([executable, "version"], cwd=cwd, env=env, text=True).strip()
+    target = subprocess.check_output([executable, "env", "GOOS", "GOARCH"], cwd=cwd, env=env, text=True).splitlines()
+    if version != f"go version go1.27.3 {host}/amd64" or target != [host, "amd64"]:
+        raise ValueError(f"the {host} bridge needs native Go 1.27.3 amd64")
+    return executable
 
 
 def run(argv, cwd=ROOT, env=None):
@@ -69,15 +99,11 @@ def unpack_center(archive: Path, destination: Path) -> Path:
 def native_windows(source_archive: Path, directory: Path) -> Path:
     center = unpack_center(source_archive, directory / "source")
     binary = directory / "arcforges-center.exe"
-    env = {**os.environ, "CGO_ENABLED": "0", "GOTOOLCHAIN": "local", "GOWORK": "off",
-           "GOFLAGS": "-mod=readonly", "GOTELEMETRY": "off"}
-    version = subprocess.check_output(["go", "version"], cwd=center, env=env, text=True).strip()
-    host = subprocess.check_output(["go", "env", "GOOS", "GOARCH"], cwd=center, env=env, text=True).splitlines()
-    if version != "go version go1.27.3 windows/amd64" or host != ["windows", "amd64"]:
-        raise ValueError("the Windows bridge needs native Go 1.27.3 amd64")
+    env = bridge_environment(CGO_ENABLED="0", GOFLAGS="-mod=readonly", GOTELEMETRY="off")
+    go = checked_bridge_go("windows", center, env)
     link = ("-buildid= -X=github.com/ArcForges/Cloud/center/internal/buildinfo.sourceCommit=" +
             bundle.REVISION + " -X=github.com/ArcForges/Cloud/center/internal/buildinfo.sourceDirty=false")
-    run(["go", "build", "-trimpath", "-buildvcs=false", "-ldflags", link, "-o", str(binary),
+    run([go, "build", "-trimpath", "-buildvcs=false", "-ldflags", link, "-o", str(binary),
          "./cmd/arcforges-center"], cwd=center, env=env)
     identity = json.loads(subprocess.check_output([str(binary), "version"], cwd=center, env=env, text=True))
     if identity.get("build", {}).get("sourceCommit") != bundle.REVISION or identity.get("build", {}).get("dirty") is not False:
@@ -114,11 +140,8 @@ def find_or_download_carrier(directory: Path) -> Path:
 def native_linux(directory: Path) -> Path:
     if platform.machine() not in ("x86_64", "amd64"):
         raise ValueError("no reviewed native Linux bridge exists for this architecture")
-    env = {**os.environ, "GOTOOLCHAIN": "local", "GOWORK": "off"}
-    version = subprocess.check_output(["go", "version"], cwd=ROOT, env=env, text=True).strip()
-    host = subprocess.check_output(["go", "env", "GOOS", "GOARCH"], cwd=ROOT, env=env, text=True).splitlines()
-    if version != "go version go1.27.3 linux/amd64" or host != ["linux", "amd64"]:
-        raise ValueError("the Linux bridge verifier needs native Go 1.27.3 amd64")
+    env = bridge_environment()
+    checked_bridge_go("linux", ROOT, env)
     carrier = find_or_download_carrier(directory)
     extracted = directory / "carrier"
     extracted.mkdir(mode=0o700)

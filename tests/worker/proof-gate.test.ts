@@ -751,6 +751,36 @@ function jobsOf(text: string): Map<string, string> {
 
 const jobs = jobsOf(workflow);
 
+function assertGoVersions(selectedJobs: Map<string, string>): void {
+  for (const [job, version] of [
+    ["source", "1.27.4"],
+    ["codeql", "1.27.4"],
+    ["ctr06-bridge-linux-asset", "1.27.3"],
+    ["ctr06-bridge-windows-asset", "1.27.3"],
+  ] as const) {
+    const body = selectedJobs.get(job) ?? "";
+    const pins = [...body.matchAll(/^ {10}go-version: "([^"]+)"$/gmu)].map((match) => match[1]);
+    assert.deepEqual(pins, [version], `${job}: wrong Go toolchain`);
+  }
+}
+
+test("current Go security patch and historical bridge compilers stay distinct", () => {
+  assertGoVersions(jobs);
+  for (const [job, before, after] of [
+    ["source", "1.27.4", "1.27.3"],
+    ["codeql", "1.27.4", "1.27.3"],
+    ["ctr06-bridge-linux-asset", "1.27.3", "1.27.4"],
+    ["ctr06-bridge-windows-asset", "1.27.3", "1.27.4"],
+  ] as const) {
+    const changed = new Map(jobs);
+    const body = changed.get(job) ?? "";
+    const pin = `go-version: "${before}"`;
+    assert.ok(body.includes(pin), `${job}: mutation target absent`);
+    changed.set(job, body.replace(pin, `go-version: "${after}"`));
+    assert.throws(() => assertGoVersions(changed), `${job}: changed pin must be rejected`);
+  }
+});
+
 function condition(body: string): string | null {
   const folded = /^ {4}if: >-\n((?: {6}.*\n)+)/mu.exec(body);
   if (folded?.[1])
