@@ -290,7 +290,7 @@ func TestMigration0011SharedCommandNamespace(t *testing.T) {
 	requireNamespaceCode(t, insertNamespace(ctx, restarted, f, fresh, false, 1, 10, false), "23505", "routed_command_id_namespace")
 }
 
-func TestMigration0011WaitsForAnOldWriterAndBackfillsItsCommit(t *testing.T) {
+func TestHistoricalMigration0011WaitsForAnOldWriterAndBackfillsItsCommit(t *testing.T) {
 	build := centerBuild(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -301,6 +301,10 @@ func TestMigration0011WaitsForAnOldWriterAndBackfillsItsCommit(t *testing.T) {
 	}
 	observer := pgtest.Connect(t, url)
 	_, bridgeOptions := schemaTestBridge(t, ctx, observer, url, name, build)
+	refused, refusal := Apply(ctx, nil, build, bridgeOptions)
+	if refused.State != StateRefused || !errors.Is(refusal, ErrCTR06SecurityBridgeUnbound) {
+		t.Fatalf("public old-proof entry did not refuse before connection: %+v %v", refused, refusal)
+	}
 	f := seedNamespaceFixture(t, observer)
 	oldConnection := pgtest.Connect(t, url)
 	oldWriter, err := oldConnection.Begin(ctx)
@@ -318,8 +322,9 @@ func TestMigration0011WaitsForAnOldWriterAndBackfillsItsCommit(t *testing.T) {
 		err    error
 	}
 	done := make(chan outcome, 1)
+	// Isolated historical proof mechanics only: the current public entry above refuses this proof.
 	go func() {
-		result, failure := Apply(ctx, migration, build, bridgeOptions)
+		result, failure := applyMigrations(ctx, migration, build, bridgeOptions)
 		done <- outcome{result, failure}
 	}()
 	ticker := time.NewTicker(10 * time.Millisecond)
