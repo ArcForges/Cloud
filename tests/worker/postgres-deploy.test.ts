@@ -5,8 +5,8 @@
 // role, the runtime credential's slot is confirmed only after a successful promotion, and the production resources are refused
 // outside AF-PROD-01.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -16,6 +16,7 @@ import {
   centerVariables,
   directUrlSecret,
   dockerArguments,
+  migrateTarget,
   CenterExit,
   checkHelloCredential,
   postgresTargets,
@@ -588,7 +589,108 @@ test("a restore that left the record without the live slot is handled like a new
   assert(lines.some((line) => /record has no row for the live version's slot b/u.test(line)));
 });
 
-// Execute the real CLI as the entry module. The preloader substitutes only the
+test("phase 1 refuses deployment before loading a candidate or handing out credentials", async () => {
+  for (const target of ["production", "acceptance"] as const)
+    await assert.rejects(
+      () => migrateTarget(target),
+      /security bridge successor is not yet bound/u,
+    );
+});
+
+test("the actual deployment CLI refuses before candidate, child or gate-file effects", async (t) => {
+  const directory = scratchDirectory("ctr06-phase1-deploy-", t);
+  const repository = path.resolve(import.meta.dirname, "../..");
+  const preload = path.join(directory, "preload.mjs");
+  await writeFile(
+    preload,
+    `
+import { mock } from "node:test";
+import { writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+const source = process.env.CTR06_GATE_SOURCE;
+const scratch = process.env.CTR06_GATE_SCRATCH;
+const child = await import("node:child_process");
+mock.module("node:child_process", { namedExports: { ...child, spawn: () => {
+  writeFileSync(path.join(scratch, "child-touched"), "unexpected"); throw new Error("unexpected child");
+} } });
+const project = pathToFileURL(path.join(source, "tooling/project.ts")).href;
+mock.module(project, { namedExports: { verifyCandidate: async () => {
+  writeFileSync(path.join(scratch, "candidate-touched"), "unexpected"); throw new Error("unexpected candidate");
+} } });
+`,
+  );
+  for (const target of ["production", "acceptance"]) {
+    const env: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      WINDIR: process.env.WINDIR,
+      HOME: directory,
+      TMP: directory,
+      TEMP: directory,
+      CTR06_GATE_SOURCE: repository,
+      CTR06_GATE_SCRATCH: directory,
+      GITHUB_ACTIONS: "true",
+      GITHUB_REPOSITORY: "ArcForges/Cloud",
+      GITHUB_REF: "refs/heads/main",
+      NEON_DATABASE_URL_DIRECT: "postgresql://owner:synthetic-private@127.0.0.1/fixture",
+    };
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--experimental-test-module-mocks",
+        "--import",
+        preload,
+        path.join(repository, "tooling/postgres-deploy.ts"),
+        "migrate",
+        "--target",
+        target,
+      ],
+      { cwd: directory, env, encoding: "utf8", timeout: 15000, windowsHide: true },
+    );
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /security bridge successor is not yet bound/u);
+    assert.doesNotMatch(result.stderr, /synthetic-private|unsettled top-level await/u);
+    assert.equal(existsSync(path.join(directory, "candidate-touched")), false);
+    assert.equal(existsSync(path.join(directory, "child-touched")), false);
+    assert.equal(existsSync(path.join(directory, "artifacts")), false);
+  }
+});
+
+// Preserve the earlier cycle/timeout tests against the exact pre-phase-1
+// commit, in an isolated source fixture. They are historical evidence, not a
+// current phase-1 deployment or promotion path.
+let historicalCycle: string | undefined;
+function historicalCycleSource(repository: string): string {
+  if (historicalCycle) return historicalCycle;
+  const directory = scratchDirectory("ctr06-historical-cycle-");
+  const commit = "ffc5b481badbfc0108a1673c8aa24e122404eb13";
+  for (const file of [
+    "package.json",
+    "tooling/postgres-deploy.ts",
+    "tooling/process.ts",
+    "tooling/project.ts",
+    "tooling/ctr06-publisher.ts",
+    "tooling/ctr06-bridge.ts",
+    "tooling/neon-runtime.ts",
+    "tooling/sensitive-process.ts",
+    "eng/verification/proof-deploy.ts",
+    "worker/foundation/proof-command-key.ts",
+  ]) {
+    const bytes = execFileSync("git", ["show", `${commit}:${file}`], {
+      cwd: repository,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const destination = path.join(directory, file);
+    mkdirSync(path.dirname(destination), { recursive: true });
+    writeFileSync(destination, bytes);
+  }
+  historicalCycle = directory;
+  return directory;
+}
+
+// Execute the historical CLI as the entry module. The preloader substitutes only the
 // candidate identity and external process/provider transports; it does not
 // replace the schema-10 import of the actual publisher in the cycle cases.
 for (const scenario of [
@@ -603,9 +705,10 @@ for (const scenario of [
   { name: "fresh pending migration", mode: "fresh", target: "production", exit: 0 },
   { name: "migration child nonzero", mode: "migrate-fail", target: "production", exit: 1 },
 ] as const) {
-  test(`the PostgreSQL CLI awaits ${scenario.name} and records its gate`, async (t) => {
+  test(`the historical PostgreSQL CLI awaits ${scenario.name} and records its gate`, async (t) => {
     const directory = scratchDirectory("ctr06-deploy-cycle-", t);
     const repository = path.resolve(import.meta.dirname, "../..");
+    const historical = historicalCycleSource(repository);
     const preload = path.join(directory, "preload.mjs");
     const docker = path.join(directory, "docker.mjs");
     await writeFile(
@@ -678,7 +781,7 @@ console.error("unexpected synthetic docker call"); process.exit(42);
       HOME: directory,
       TMP: directory,
       TEMP: directory,
-      CTR06_CYCLE_WORKTREE: repository,
+      CTR06_CYCLE_WORKTREE: historical,
       CTR06_CYCLE_SCRATCH: directory,
       CTR06_CYCLE_MODE: scenario.mode,
       GITHUB_ACTIONS: "true",
@@ -701,7 +804,7 @@ console.error("unexpected synthetic docker call"); process.exit(42);
         "--experimental-test-module-mocks",
         "--import",
         preload,
-        path.join(repository, "tooling", "postgres-deploy.ts"),
+        path.join(historical, "tooling", "postgres-deploy.ts"),
         "migrate",
         "--target",
         scenario.target,

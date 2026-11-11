@@ -25,7 +25,16 @@ type BridgePreparation struct {
 // database. It grants precisely the pre-0011 runtime privileges and probes the
 // new login through direct and pooled connections. It does not attest or
 // record provider promotion and does not alter either old rotation slot.
-func PrepareCTR06Bridge(ctx context.Context, conn *pgx.Conn, build []migrate.Migration, options Options) (result BridgePreparation, finalErr error) {
+func PrepareCTR06Bridge(ctx context.Context, conn *pgx.Conn, build []migrate.Migration, options Options) (BridgePreparation, error) {
+	if err := migrate.RequireCTR06SecurityBridge(); err != nil {
+		return BridgePreparation{}, err
+	}
+	return prepareCTR06BridgeHistorical(ctx, conn, build, options)
+}
+
+// prepareCTR06BridgeHistorical retains the old mechanics for isolated tests;
+// the exported credential-issuance entry is closed until a successor is bound.
+func prepareCTR06BridgeHistorical(ctx context.Context, conn *pgx.Conn, build []migrate.Migration, options Options) (result BridgePreparation, finalErr error) {
 	if len(build) < 11 || build[9].Name != "0010_fleet_routed_call.sql" || build[10].Name != "0011_fleet_routed_files.sql" {
 		return BridgePreparation{}, errors.New("the sealed candidate does not contain the expected bridge and file migrations")
 	}
@@ -80,6 +89,9 @@ func PrepareCTR06Bridge(ctx context.Context, conn *pgx.Conn, build []migrate.Mig
 // authorization: the migrator still verifies the actual bridge process and
 // the database/role graph before entering 0011.
 func CompleteIssuedCTR06Bridge(ctx context.Context, conn *pgx.Conn, build []migrate.Migration, options Options, roles migrate.PreparedBridgeRoles) (BridgePreparation, error) {
+	if err := migrate.RequireCTR06SecurityBridge(); err != nil {
+		return BridgePreparation{}, err
+	}
 	if options.ConnectionLimit <= 0 {
 		options.ConnectionLimit = DefaultConnectionLimit
 	}

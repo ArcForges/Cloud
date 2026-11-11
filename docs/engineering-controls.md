@@ -11,6 +11,13 @@ which code), the entry point that runs it, the stage where it runs and the evide
   proof deployment dispatch validates nothing again: it is gated on the host legs, [deployment](deployment.md#the-proof-deployment-gate));
 - **release**: the `candidate` the Linux leg and the main push build, and the guarded `deploy` that promotes it unchanged.
 
+During the AF-CTR-06 security-bridge bootstrap, the ordinary main-push release and proof deployment are disabled as described in
+[deployment](deployment.md). Native full verification additionally runs the security-bridge producer locally on each host with a
+synthetic event, without publication or authority claims. `ARCFORGES_CTR06_SECURITY_GO_ARCHIVE` selects that host's existing
+absolute Go 1.27.4 archive; the producer verifies its fixed digest and the installed compiler. The current center uses
+`ARCFORGES_CENTER_GO`, while `ARCFORGES_CTR06_BRIDGE_GO` selects Go 1.27.3 only for historical bridge reproduction. No selector
+changes the system installation. Actual external publication authority is unconfigured and remains **NOT PROVEN**.
+
 `python eng/center.py check` is the single entry point of the Go controls on both legs and in hosted CI; on success it writes
 `artifacts/center/checks.json` with the controls it ran and the executable's SHA-256.
 

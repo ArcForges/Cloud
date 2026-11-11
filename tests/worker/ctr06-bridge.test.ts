@@ -231,9 +231,24 @@ test("CTR06 live provider verification follows every cursor and rejects a late o
   );
 });
 
-test("CTR06 bridge refuses a missing center runner before any provider work", async () => {
-  await assert.rejects(
-    () => promoteCTR06Bridge("production", "image", {}, undefined as unknown as CenterRunner),
-    /sealed center runner is unavailable/u,
+test("phase 1 refuses the historical bridge before provider work or credential delivery", async () => {
+  let called = false;
+  const center: CenterRunner = async () => {
+    called = true;
+    throw new Error("unexpected center");
+  };
+  const variables = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("unexpected credential access");
+      },
+    },
   );
+  for (const target of ["production", "acceptance"] as const)
+    await assert.rejects(
+      () => promoteCTR06Bridge(target, "image", variables, center),
+      /security bridge successor is not yet bound/u,
+    );
+  assert.equal(called, false);
 });

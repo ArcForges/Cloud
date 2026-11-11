@@ -28,6 +28,11 @@ func apply(t *testing.T, url string, build []Migration, options Options) (Result
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	conn := pgtest.Connect(t, url)
+	if options.BridgeProof != nil {
+		// Exercise the old signed-promotion mechanics only in this isolated
+		// historical fixture. The public Apply entry refuses the old proof.
+		return applyMigrations(ctx, conn, build, options)
+	}
 	return Apply(ctx, conn, build, options)
 }
 

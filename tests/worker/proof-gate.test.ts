@@ -372,6 +372,30 @@ test("1d: the candidate is the artifact of the successful main-push run of the s
   }, /digest/u);
 });
 
+test("a security bridge run or artifact cannot be mistaken for an ordinary candidate", () => {
+  refused((r) => {
+    const listing = field(r[key.jobs]);
+    const jobs = listing.jobs as Mutable[];
+    const candidate = jobs.find((job) => job.name === "Native AOT image and Worker build");
+    assert.ok(candidate);
+    candidate.conclusion = "skipped";
+    jobs.push({
+      ...candidate,
+      name: "Publish the single security bridge bootstrap",
+      conclusion: "success",
+    });
+    listing.total_count = jobs.length;
+  }, /The candidate job of run 41866820816 did not succeed \(skipped\)/u);
+  for (const label of ["linux", "windows", "sealed"]) {
+    refused((r) => {
+      const artifacts = field(r[key.artifacts]).artifacts as Mutable[];
+      const candidate = artifacts.find((entry) => entry.name === candidateArtifactName(runId, 1));
+      assert.ok(candidate);
+      candidate.name = `ctr06-security-${label}-${runId}-1`;
+    }, /holds no artifact cloud-candidate-41866820816-1/u);
+  }
+});
+
 test("any API failure fails the gate", () => {
   const { calls } = api();
   evaluateGate(api().get, merge);
@@ -485,9 +509,13 @@ function fetchWith(
     options.responses?.(r);
   });
   let extracted = false;
+  let downloaded = false;
   const ports: FetchPorts = {
     get,
-    download: (_id, file) => writeFileSync(file, options.bytes ?? bytes),
+    download: (_id, file) => {
+      downloaded = true;
+      writeFileSync(file, options.bytes ?? bytes);
+    },
     entries: () => options.entries ?? Object.keys(archive),
     extract: (_file, target) => {
       extracted = true;
@@ -498,7 +526,7 @@ function fetchWith(
     head: () => ({ sha: merge, tree: options.headTree ?? tree }),
   };
   const run = () => fetchCandidate(ports, { ...input, artifactDigest: digest }, directory);
-  return { run, directory, extracted: () => extracted };
+  return { run, directory, extracted: () => extracted, downloaded: () => downloaded };
 }
 
 test("the deploy job fetches the gated artifact, checks its digest and its sealed manifest, and unpacks it", (t) => {
@@ -509,6 +537,19 @@ test("the deploy job fetches the gated artifact, checks its digest and its seale
   assert.ok(
     !existsSync(path.join(fetch.directory, "artifacts", "cloud-candidate-41866820816-1.zip")),
   );
+});
+
+test("the fetch refuses a bridge artifact before downloading or extracting it", (t) => {
+  for (const label of ["linux", "windows", "sealed"]) {
+    const fetch = fetchWith(t, sealed(), {
+      responses: (r) => {
+        field(r[key.artifact]).name = `ctr06-security-${label}-${runId}-1`;
+      },
+    });
+    assert.throws(fetch.run, /the artifact is not cloud-candidate-41866820816-1/u);
+    assert.equal(fetch.downloaded(), false);
+    assert.equal(fetch.extracted(), false);
+  }
 });
 
 test("the fetch refuses another digest, a changed artifact, a non-flat archive and a wrong checkout", (t) => {
@@ -757,6 +798,9 @@ function assertGoVersions(selectedJobs: Map<string, string>): void {
     ["codeql", "1.27.4"],
     ["ctr06-bridge-linux-asset", "1.27.3"],
     ["ctr06-bridge-windows-asset", "1.27.3"],
+    ["ctr06-security-bridge-linux", "1.27.4"],
+    ["ctr06-security-bridge-windows", "1.27.4"],
+    ["ctr06-security-bridge-seal", "1.27.4"],
   ] as const) {
     const body = selectedJobs.get(job) ?? "";
     const pins = [...body.matchAll(/^ {10}go-version: "([^"]+)"$/gmu)].map((match) => match[1]);
@@ -846,6 +890,8 @@ function evaluate(
       return value;
     }
     if (token.startsWith("'")) return token.slice(1, -1);
+    if (token === "true") return true;
+    if (token === "false") return false;
     if (token.endsWith("()")) return status(token.slice(0, -2));
     return lookup(token);
   };
@@ -945,40 +991,24 @@ const ran = (scenario: Scenario) => [...running(scenario).keys()].sort();
 const main = "refs/heads/main";
 const validation = ["candidate", "codeql", "quality", "source", "verify"];
 
-test("the proof deployment dispatch runs only the gate, the access job and the deployment: no hosted validation, no candidate", () => {
-  assert.deepEqual(ran({ event: "workflow_dispatch", ref: main, proof: "deploy" }), [
-    "deploy-proof",
-    "proof-access",
-    "proof-gate",
-  ]);
-  // The deployment needs the gate: a failed gate (or access job) deploys nothing.
-  assert.deepEqual(
-    ran({ event: "workflow_dispatch", ref: main, proof: "deploy", failing: ["proof-gate"] }),
-    ["proof-access", "proof-gate"],
-  );
-  assert.deepEqual(
-    ran({ event: "workflow_dispatch", ref: main, proof: "deploy", failing: ["proof-access"] }),
-    ["proof-access", "proof-gate"],
-  );
-  for (const job of ["proof-gate", "proof-access"]) {
-    assert.equal(
-      running({ event: "workflow_dispatch", ref: main, proof: "deploy", skipped: [job] }).has(
-        "deploy-proof",
-      ),
-      false,
-    );
+test("phase 1 proof deployment dispatch cannot provision or deploy before phase 2", () => {
+  const base: Scenario = { event: "workflow_dispatch", ref: main, proof: "deploy" };
+  assert.deepEqual(ran(base), ["proof-gate"]);
+  for (const scenario of [
+    { ...base, failing: ["proof-gate"] },
+    { ...base, skipped: ["proof-gate"] },
+    { ...base, cancelled: true },
+  ]) {
+    const result = running(scenario);
+    assert.equal(result.has("proof-access"), false);
+    assert.equal(result.has("deploy-proof"), false);
+    assert.equal(result.has("candidate"), false);
   }
-  assert.equal(
-    running({ event: "workflow_dispatch", ref: main, proof: "deploy", cancelled: true }).has(
-      "deploy-proof",
-    ),
-    false,
-  );
   const deploy = jobs.get("deploy-proof") ?? "";
-  assert.ok(needsOf(deploy).includes("proof-gate"), "deploy-proof needs the gate");
+  assert.ok(needsOf(deploy).includes("proof-gate"));
+  assert.match(condition(deploy) ?? "", /^false &&/u);
   assert.match(condition(deploy) ?? "", /&& needs\.proof-gate\.result == 'success'/u);
-  // Off main nothing of the proof environment runs, and the full hosted validation runs exactly as before the gate: a dispatch
-  // can never put a skipped (passing) Verify on a branch head.
+  assert.match(condition(jobs.get("proof-access") ?? "") ?? "", /inputs\.proof != 'deploy'/u);
   assert.deepEqual(
     ran({ event: "workflow_dispatch", ref: "refs/heads/task/x", proof: "deploy" }),
     validation,
@@ -986,19 +1016,19 @@ test("the proof deployment dispatch runs only the gate, the access job and the d
 });
 
 test("every other event keeps its jobs: main push delivery, PR validation, schedule security, other dispatches", () => {
+  // The evaluator models a successful gate for the complete graph. The actual gate
+  // is unconfigured and always fails; its real shell entry is tested separately.
   assert.deepEqual(ran({ event: "push", ref: main }), [
-    "candidate",
-    "ctr06-bridge-assets-state",
-    "ctr06-bridge-linux-asset",
-    "ctr06-bridge-windows-asset",
-    "deploy",
+    "ctr06-security-bridge-authority",
+    "ctr06-security-bridge-linux",
+    "ctr06-security-bridge-publish",
+    "ctr06-security-bridge-seal",
+    "ctr06-security-bridge-windows",
   ]);
-  assert.deepEqual(ran({ event: "push", ref: main, failing: ["candidate"] }), [
-    "candidate",
-    "ctr06-bridge-assets-state",
-    "ctr06-bridge-linux-asset",
-    "ctr06-bridge-windows-asset",
-  ]);
+  assert.deepEqual(
+    ran({ event: "push", ref: main, failing: ["ctr06-security-bridge-authority"] }),
+    ["ctr06-security-bridge-authority"],
+  );
   assert.deepEqual(
     ran({ event: "pull_request", ref: "refs/pull/1/merge", author: "dependabot[bot]" }),
     [...validation.slice(0, 2), "dependency-review", ...validation.slice(2)],
@@ -1015,6 +1045,184 @@ test("every other event keeps its jobs: main push delivery, PR validation, sched
       "proof-access",
       ...validation.slice(2),
     ]);
+});
+
+// The phase-1 event graph is deliberately build/publish-only and fails closed
+// before any publication token while external authority is unproven.
+function assertBootstrapIsolation(selectedJobs: Map<string, string>): void {
+  const authority = "ctr06-security-bridge-authority";
+  const linux = "ctr06-security-bridge-linux";
+  const windows = "ctr06-security-bridge-windows";
+  const seal = "ctr06-security-bridge-seal";
+  const publish = "ctr06-security-bridge-publish";
+  assert.match(
+    condition(selectedJobs.get("candidate") ?? "") ?? "",
+    /^github\.event_name != 'push' &&/u,
+  );
+  assert.equal(
+    condition(selectedJobs.get("ctr06-bridge-assets-state") ?? ""),
+    "github.event_name == 'push' && github.event_name != 'push'",
+  );
+  assert.match(condition(selectedJobs.get("deploy") ?? "") ?? "", /^false &&/u);
+  assert.match(
+    condition(selectedJobs.get("proof-access") ?? "") ?? "",
+    /inputs\.proof != 'deploy'/u,
+  );
+  assert.match(condition(selectedJobs.get("deploy-proof") ?? "") ?? "", /^false &&/u);
+  const gate = selectedJobs.get(authority) ?? "";
+  assert.match(gate, /^ {4}permissions: \{\}$/mu);
+  assert.match(gate, /^ {10}exit 1$/mu);
+  assert.doesNotMatch(gate, /uses:|secrets\.|environment:|id-token:|CLOUDFLARE|NEON/u);
+  const specs: [string, string[], string][] = [
+    [linux, [authority], "read"],
+    [windows, [authority], "read"],
+    [seal, [authority, linux, windows], "read"],
+    [publish, [authority, seal], "write"],
+  ];
+  for (const [name, dependencies, permission] of specs) {
+    const body = selectedJobs.get(name) ?? "";
+    assert.deepEqual(needsOf(body), dependencies);
+    assert.match(
+      body,
+      new RegExp(`^ {4}permissions:\n {6}contents: ${permission}\n {4}(?!  )`, "mu"),
+    );
+    assert.doesNotMatch(
+      body,
+      /secrets\.|environment:|id-token:|CLOUDFLARE|NEON|continue-on-error/u,
+    );
+    const expression = condition(body) ?? "";
+    assert.match(
+      expression,
+      /!cancelled\(\) && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/u,
+    );
+    for (const dependency of dependencies)
+      assert.ok(
+        expression.includes(`needs.${dependency}.result == 'success'`),
+        `${name} must require ${dependency}`,
+      );
+  }
+  for (const name of [linux, windows, seal]) {
+    const body = selectedJobs.get(name) ?? "";
+    const locked = body.indexOf("run: npm ci --ignore-scripts");
+    const producer = body.indexOf(
+      name === seal
+        ? "node tooling/ctr06-security-bridge-seal.ts"
+        : "node tooling/ctr06-security-bridge-producer.ts",
+    );
+    assert.ok(
+      locked >= 0 && producer > locked,
+      `${name} must restore locked producer dependencies first`,
+    );
+  }
+  const sealBody = selectedJobs.get(seal) ?? "";
+  assert.match(
+    sealBody,
+    /artifact-ids: \$\{\{ needs\.ctr06-security-bridge-linux\.outputs\.artifact-id \}\}/u,
+  );
+  assert.match(
+    sealBody,
+    /artifact-ids: \$\{\{ needs\.ctr06-security-bridge-windows\.outputs\.artifact-id \}\}/u,
+  );
+  assert.match(
+    selectedJobs.get(publish) ?? "",
+    /artifact-ids: \$\{\{ needs\.ctr06-security-bridge-seal\.outputs\.artifact-id \}\}/u,
+  );
+  assert.match(selectedJobs.get(publish) ?? "", /cancel-in-progress: false/u);
+  for (const [job, expected] of [
+    ["ctr06-security-bridge-linux", "ctr06-security-linux-"],
+    ["ctr06-security-bridge-windows", "ctr06-security-windows-"],
+    [seal, "ctr06-security-sealed-"],
+  ] as const)
+    assert.ok((selectedJobs.get(job) ?? "").includes(`name: ${expected}`));
+  const scenarios: Scenario[] = [
+    { event: "push", ref: main },
+    ...[authority, linux, windows, seal, publish].flatMap((name) => [
+      { event: "push", ref: main, failing: [name] },
+      { event: "push", ref: main, skipped: [name] },
+    ]),
+    { event: "push", ref: main, cancelled: true },
+  ];
+  for (const scenario of scenarios) {
+    const result = running(scenario, selectedJobs);
+    for (const name of [
+      "candidate",
+      "ctr06-bridge-assets-state",
+      "ctr06-bridge-linux-asset",
+      "ctr06-bridge-windows-asset",
+      "deploy",
+      "proof-access",
+      "proof-gate",
+      "deploy-proof",
+    ])
+      assert.equal(result.has(name), false, `${name} must not run on the bootstrap push`);
+    if (
+      scenario.failing?.includes(authority) ||
+      scenario.skipped?.includes(authority) ||
+      scenario.cancelled
+    )
+      for (const name of [linux, windows, seal, publish]) assert.equal(result.has(name), false);
+    if (
+      scenario.failing?.includes(linux) ||
+      scenario.skipped?.includes(linux) ||
+      scenario.failing?.includes(windows) ||
+      scenario.skipped?.includes(windows)
+    )
+      for (const name of [seal, publish]) assert.equal(result.has(name), false);
+    if (scenario.failing?.includes(seal) || scenario.skipped?.includes(seal))
+      assert.equal(result.has(publish), false);
+  }
+  const proof = running({ event: "workflow_dispatch", ref: main, proof: "deploy" }, selectedJobs);
+  assert.equal(proof.has("proof-access"), false);
+  assert.equal(proof.has("deploy-proof"), false);
+}
+
+test("phase 1 event isolation rejects bypasses and preserves exact dependencies", () => {
+  assertBootstrapIsolation(jobs);
+  for (const [job, before, after] of [
+    ["ctr06-security-bridge-authority", "exit 1", "exit 0"],
+    ["ctr06-security-bridge-authority", "permissions: {}", "permissions: { contents: write }"],
+    [
+      "ctr06-security-bridge-linux",
+      "needs.ctr06-security-bridge-authority.result == 'success'",
+      "true",
+    ],
+    ["ctr06-security-bridge-linux", "run: npm ci --ignore-scripts", "run: echo no-locked-restore"],
+    ["ctr06-security-bridge-windows", "contents: read", "contents: read\n      id-token: write"],
+    [
+      "ctr06-security-bridge-seal",
+      "needs.ctr06-security-bridge-windows.result == 'success'",
+      "true",
+    ],
+    [
+      "ctr06-security-bridge-publish",
+      "needs.ctr06-security-bridge-authority.result == 'success'",
+      "true",
+    ],
+    [
+      "ctr06-security-bridge-publish",
+      "needs.ctr06-security-bridge-seal.outputs.artifact-id",
+      "github.run_id",
+    ],
+    ["ctr06-security-bridge-seal", "name: ctr06-security-sealed-", "name: cloud-candidate-"],
+    ["candidate", "github.event_name != 'push' && ", ""],
+    [
+      "ctr06-bridge-assets-state",
+      "if: github.event_name == 'push' && github.event_name != 'push'",
+      "if: true",
+    ],
+    ["deploy", "false && !cancelled()", "!cancelled()"],
+    ["proof-access", " && inputs.proof != 'deploy'", ""],
+    ["deploy-proof", "false && !cancelled()", "!cancelled()"],
+  ] as const) {
+    const altered = new Map(jobs);
+    const body = altered.get(job) ?? "";
+    assert.ok(body.includes(before), `${job}: mutation target absent`);
+    altered.set(job, body.replace(before, after));
+    assert.throws(
+      () => assertBootstrapIsolation(altered),
+      `${job}: unsafe mutation must be rejected`,
+    );
+  }
 });
 
 // The main-push gate is checked as a truth table, including the skipped jobs
@@ -1066,7 +1274,23 @@ function assertBridgeDelivery(selectedJobs: Map<string, string>): void {
 }
 
 function assertBridgeWorkflow(selectedJobs: Map<string, string>): void {
-  assertBridgeDelivery(selectedJobs);
+  // Retain the full old delivery gate mutation checks on its dormant template.
+  // This does not describe the active phase-1 main-push event.
+  const dormant = new Map(selectedJobs);
+  for (const [job, before, after] of [
+    ["candidate", "github.event_name != 'push' && ", ""],
+    [
+      "ctr06-bridge-assets-state",
+      "if: github.event_name == 'push' && github.event_name != 'push'",
+      "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+    ],
+    ["deploy", "false && !cancelled()", "!cancelled()"],
+  ] as const) {
+    const body = dormant.get(job) ?? "";
+    assert(body.includes(before), `missing phase-1 guard: ${job}`);
+    dormant.set(job, body.replace(before, after));
+  }
+  assertBridgeDelivery(dormant);
   const permissions = (body: string) => {
     const value = /^ {4}permissions:\n((?: {6}.*\n)+)/mu.exec(body)?.[1];
     assert.ok(value, "job permissions are explicit");
@@ -1256,7 +1480,7 @@ test("the main-push path and the reviewed proof deployment steps remain pinned",
   assert.match(deploy, /artifacts\/proof-key-registration\.json/u);
   assert.deepEqual(pins, {
     candidate: "e9304d0b4ed9b27272acf3bf654ee7271e924a214e243212930321b6699a8b00",
-    deploy: "5139ce33dabcc90b5f92efcd01aaaa610edc075f6e22ff4d601d5a51f1e0efae",
+    deploy: "5c24cd113b6560786cef1b9ff48f1ebcb0ef9edcdfd52378def561d02caf1cef",
     proofSteps: "20efb69cf61403398f2b612ee7bfe925a3d2bf3b6b876e8e323c37e1f2cb298c",
   });
 });

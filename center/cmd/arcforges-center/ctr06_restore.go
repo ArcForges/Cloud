@@ -106,6 +106,10 @@ func backupCommand(args []string, lookup func(string) (string, bool), stdout, st
 }
 
 func legacyRestoreCommand(args []string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
+	if err := migrate.RequireCTR06SecurityBridge(); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return exitFailure
+	}
 	allowed := map[string]bool{"--archive": true, "--sha256": true, "--provenance": true, "--provenance-sha256": true}
 	if len(args) != len(allowed)*2 {
 		_, _ = fmt.Fprintln(stderr, "legacy restore requires --archive <path> --sha256 <digest> --provenance <path> --provenance-sha256 <digest>")

@@ -3,24 +3,165 @@
 """Offline checks for release metadata and sealed bridge assets."""
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import shlex
+import tarfile
+import zipfile
 import subprocess
 import tempfile
 import types
 import unittest
+import warnings
 from unittest import mock
 
 import ctr06_bridge_asset_state as state
 import ctr06_bridge_bundle as bundle
 import ctr06_native_bridge_check as native
+import ctr06_security_bridge_compiler as security_compiler
+import ctr06_security_bridge_driver as security_driver
+import ctr06_security_bridge_native_check as security_native
 
 
 def asset(platform, digest=None):
     return {"name": bundle.ASSETS[platform], "state": "uploaded",
             "digest": "sha256:" + (digest or bundle.ASSET_SHA256[platform])}
+
+
+class SecurityBridgeCompilerTest(unittest.TestCase):
+    @staticmethod
+    def sample(root, kind):
+        folder = root / "go"
+        (folder / "bin").mkdir(parents=True)
+        (folder / "bin" / "go").write_bytes(b"verified compiler")
+        (folder / "VERSION").write_bytes(b"go1.27.4")
+        archive = root / ("sample.tar.gz" if kind == "linux" else "sample.zip")
+        if kind == "linux":
+            with tarfile.open(archive, "w:gz") as writer:
+                writer.add(folder, arcname="go")
+        else:
+            with zipfile.ZipFile(archive, "w") as writer:
+                writer.write(folder / "bin" / "go", "go/bin/go")
+                writer.write(folder / "VERSION", "go/VERSION")
+        return folder, archive
+
+    def test_complete_distribution_and_tampering_are_checked(self):
+        for kind in ("linux", "windows"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                folder, archive = self.sample(Path(tmp), kind)
+                self.assertEqual(security_compiler.compare_distribution(folder, archive, kind), 2)
+                compiler = folder / "bin" / "go"
+                compiler.write_bytes(b"changed compiler!")
+                with self.assertRaises(ValueError):
+                    security_compiler.compare_distribution(folder, archive, kind)
+                compiler.write_bytes(b"verified compiler")
+                (folder / "extra").write_text("unclassified")
+                with self.assertRaises(ValueError):
+                    security_compiler.compare_distribution(folder, archive, kind)
+                (folder / "extra").unlink()
+                (folder / "unexpected-dir").mkdir()
+                with self.assertRaises(ValueError):
+                    security_compiler.compare_distribution(folder, archive, kind)
+
+    def test_bad_member_names_duplicates_and_wrong_archive_fail(self):
+        for name in ("../go/a", "go/../outside", "/go/a", "go/a\\b", "go/C:evil"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                security_compiler.safe_name(name)
+        with tempfile.TemporaryDirectory() as tmp:
+            folder, archive = self.sample(Path(tmp), "windows")
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="Duplicate name:")
+                with zipfile.ZipFile(archive, "a") as writer:
+                    writer.writestr("go/VERSION", b"duplicate")
+            with self.assertRaises(ValueError):
+                security_compiler.compare_distribution(folder, archive, "windows")
+            with self.assertRaises(ValueError):
+                security_compiler.verify_compiler(archive, folder, "windows" if os.name == "nt" else "linux")
+
+
+class SecurityBridgeCarrierTest(unittest.TestCase):
+    def test_closed_carrier_checks_real_archive_bytes_and_metadata(self):
+        members = {"manifest.json": b"manifest", "linux/a": b"linux", "windows/b": b"windows"}
+        expected = {name: {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+                    for name, data in members.items()}
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "carrier.tar.gz"
+            def make(change=None):
+                with tarfile.open(archive, "w:gz") as writer:
+                    for name in (".", "linux", "windows"):
+                        info = tarfile.TarInfo(name)
+                        info.type = tarfile.DIRTYPE
+                        info.mode = 0o755
+                        info.mtime = info.uid = info.gid = 0
+                        writer.addfile(info)
+                    for name, original in members.items():
+                        data = b"changed" if change == "content" and name == "linux/a" else original
+                        info = tarfile.TarInfo(name)
+                        info.size = len(data)
+                        info.mode = 0o600 if change == "mode" and name == "linux/a" else 0o644
+                        info.mtime = 1 if change == "time" and name == "linux/a" else 0
+                        info.uid = 1 if change == "owner" and name == "linux/a" else 0
+                        info.gid = 0
+                        if change == "missing" and name == "linux/a":
+                            continue
+                        writer.addfile(info, io.BytesIO(data))
+                        if change == "duplicate" and name == "linux/a":
+                            writer.addfile(info, io.BytesIO(data))
+                    if change == "extra":
+                        info = tarfile.TarInfo("linux/extra")
+                        info.size = 1
+                        info.mode = 0o644
+                        info.mtime = info.uid = info.gid = 0
+                        writer.addfile(info, io.BytesIO(b"x"))
+            make()
+            self.assertEqual(security_driver.verify_carrier(archive, expected)["members"], len(members))
+            for change in ("content", "mode", "time", "owner", "missing", "duplicate", "extra"):
+                with self.subTest(change=change):
+                    make(change)
+                    with self.assertRaises(ValueError):
+                        security_driver.verify_carrier(archive, expected)
+
+
+class SecurityBridgeNativeSelectionTest(unittest.TestCase):
+    def test_archive_selection_and_child_environment_fail_closed(self):
+        with tempfile.TemporaryDirectory(prefix="security archive ") as tmp:
+            archive = Path(tmp) / "go archive.zip"
+            archive.write_bytes(b"synthetic input")
+            self.assertEqual(security_native.selected_file(str(archive), "archive"), archive.resolve())
+            for value in (None, "", "relative", str(Path(tmp)), str(Path(tmp) / "missing")):
+                with self.subTest(value=value), self.assertRaises((ValueError, OSError)):
+                    security_native.selected_file(value, "archive")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": "local-cache", "ARCFORGES_CTR06_BRIDGE_GO": "old", "GH_TOKEN": "private",
+                                               "NEON_DATABASE_URL": "private", "CLOUDFLARE_API_TOKEN": "private"}):
+                child = security_native.environment()
+                self.assertEqual(child["LOCALAPPDATA"], "local-cache")
+                for key in ("ARCFORGES_CTR06_BRIDGE_GO", "GH_TOKEN", "NEON_DATABASE_URL", "CLOUDFLARE_API_TOKEN"):
+                    self.assertNotIn(key, child)
+
+    def test_host_steps_capture_the_absolute_archive(self):
+        with tempfile.TemporaryDirectory(prefix="security archive ") as tmp:
+            archive = Path(tmp) / "official archive"
+            archive.write_bytes(b"synthetic input")
+            with mock.patch.dict(os.environ, {"ARCFORGES_CTR06_SECURITY_GO_ARCHIVE": str(archive)}, clear=False):
+                table = load_verify_steps()
+                self.assertEqual(table["_SECURITY_GO_ARCHIVE"], str(archive.resolve()))
+                win = next(step for step in table["STEPS"] if step.id == "win-ctr06-security-bridge")
+                self.assertEqual(win.env["ARCFORGES_CTR06_SECURITY_GO_ARCHIVE"], str(archive.resolve()))
+                linux = next(step for step in table["STEPS"] if step.id == "linux-ctr06-security-bridge")
+                self.assertIn(shlex.quote(str(archive.resolve())), linux.cmd)
+                if os.name != "nt":
+                    code = "import os; print(os.environ.get('ARCFORGES_CTR06_SECURITY_GO_ARCHIVE'))"
+                    command = linux.cmd.replace("python eng/verification/ctr06_security_bridge_native_check.py",
+                                                f"python -c {shlex.quote(code)}")
+                    profile = f"export ARCFORGES_CTR06_SECURITY_GO_ARCHIVE=decoy; {command}"
+                    result = subprocess.run(["bash", "-lc", profile], check=True, text=True, capture_output=True)
+                    self.assertEqual(result.stdout.strip(), str(archive.resolve()))
+            for value in ("", "relative", str(Path(tmp)), str(Path(tmp) / "missing")):
+                with self.subTest(value=value), mock.patch.dict(os.environ, {"ARCFORGES_CTR06_SECURITY_GO_ARCHIVE": value}):
+                    with self.assertRaises(ValueError):
+                        load_verify_steps()
 
 
 class BridgeGoSelectionTest(unittest.TestCase):

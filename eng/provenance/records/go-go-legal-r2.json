@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "go-go-legal-r2",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/golang/go",
+  "sourceCommit": "7b2881024c95a11ddb86663a616340aa3a88b67f",
+  "sourcePaths": [
+    "LICENSE"
+  ],
+  "licence": {
+    "spdx": "BSD-3-Clause",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+        "finding": "Complete licence byte-matched to the official Go 1.27.4 source commit and both verified official platform archives."
+      }
+    ],
+    "scope": "Go 1.27.4 runtime and standard library: Copyright 2009 The Go Authors, BSD-3-Clause. Complete terms are retained; historical Go 1.27.3 bridge provenance remains in its original source and immutable records.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "Go 1.27.4 runtime and standard library: Copyright 2009 The Go Authors, BSD-3-Clause. Complete terms are retained; historical Go 1.27.3 bridge provenance remains in its original source and immutable records."
+  ],
+  "targets": [
+    {
+      "path": "third-party/Go.LICENSE.txt",
+      "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare LICENSE at source commit 7b2881024c95a11ddb86663a616340aa3a88b67f and the pinned Go 1.27.4 platform archives with the target bytes; run the owning provenance and candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Go 1.27.4 runtime and standard library: Copyright 2009 The Go Authors, BSD-3-Clause. Complete terms are retained; historical Go 1.27.3 bridge provenance remains in its original source and immutable records.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/Go.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Go 1.27.4 runtime and standard library: Copyright 2009 The Go Authors, BSD-3-Clause. Complete terms are retained; historical Go 1.27.3 bridge provenance remains in its original source and immutable records."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Codex, maintainer-authorized source and dependency review; PR review is recorded separately",
+    "reviewedOn": "2026-11-11",
+    "decision": "approved",
+    "rationale": "Go 1.27.4 runtime and standard library: Copyright 2009 The Go Authors, BSD-3-Clause. Complete terms are retained; historical Go 1.27.3 bridge provenance remains in its original source and immutable records.",
+    "baselineCommit": "ffc5b481badbfc0108a1673c8aa24e122404eb13",
+    "reconciliation": false
+  },
+  "supersedes": "go-go-legal-r1"
+}

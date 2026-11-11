@@ -15,6 +15,7 @@ import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { requireSecurityBridgeSuccessor } from "./ctr06-security-bridge-gate.ts";
 import { readJson, root, run, writeJson } from "./process.ts";
 
 export type PostgresTarget = "production" | "acceptance";
@@ -284,6 +285,8 @@ export async function loadCandidateImage(candidate: {
 
 /** The gated PostgreSQL step: ensure the database (acceptance), migrate, and record the gate. */
 export async function migrateTarget(target: PostgresTarget): Promise<GateRecord> {
+  // Phase 1 cannot inspect schema 10 by handing out credentials or opening a connection.
+  requireSecurityBridgeSuccessor();
   const { verifyCandidate } = await import("./project.ts");
   const candidate = await verifyCandidate();
   assert.equal(candidate.dirty, false, "Uncommitted local builds cannot deploy.");

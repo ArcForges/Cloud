@@ -100,7 +100,7 @@ FROM pg_database d WHERE datname=current_database()`, legacy, group, login).Scan
 	return verified, binding
 }
 
-func TestCTR06PromotedBridgeRetiresExistingRoleAndHandsOffLease(t *testing.T) {
+func TestCTR06HistoricalPromotedBridgeRetiresExistingRoleAndHandsOffLease(t *testing.T) {
 	ctx := context.Background()
 	url, name, owner, build := legacyGateFixture(t)
 	legacy := name + "_runtime"
@@ -144,6 +144,12 @@ VALUES(true,$1,1,clock_timestamp(),clock_timestamp(),clock_timestamp()+interval 
 		t.Fatal(err)
 	}
 	proof, binding := ctr06SignedProof(t, owner, legacy, group, bridgeLogin, roles.Nonce)
+	// A genuinely verified old proof must be refused by the public phase-1
+	// entry even before a database connection can be used. The helper below
+	// exercises the historical mechanics only inside this isolated fixture.
+	if _, err := Apply(ctx, nil, build, Options{Runner: binding.WorkflowRevision, RuntimeRole: group, BridgeProof: proof}); !errors.Is(err, ErrCTR06SecurityBridgeUnbound) {
+		t.Fatalf("old signed proof was not refused before connection: %v", err)
+	}
 	result, err := apply(t, url, build, Options{Runner: binding.WorkflowRevision, RuntimeRole: group, BridgeProof: proof})
 	if err != nil || result.Version != 11 {
 		t.Fatalf("promoted 0011: %+v %v", result, err)

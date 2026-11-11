@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestCTR06PreparationIssuesNewLeastPrivilegeCredentialWithoutChangingOldSlots(t *testing.T) {
+func TestCTR06HistoricalPreparationIssuesNewLeastPrivilegeCredentialWithoutChangingOldSlots(t *testing.T) {
 	ctx := context.Background()
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
@@ -41,7 +41,7 @@ func TestCTR06PreparationIssuesNewLeastPrivilegeCredentialWithoutChangingOldSlot
 	if _, err := Confirm(ctx, owner, legacy, old.Slot); err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := PrepareCTR06Bridge(ctx, owner, build, Options{Group: legacy, DirectURL: url, Runner: "test"})
+	prepared, err := prepareCTR06BridgeHistorical(ctx, owner, build, Options{Group: legacy, DirectURL: url, Runner: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestCTR06PreparationIssuesNewLeastPrivilegeCredentialWithoutChangingOldSlot
 	}
 }
 
-func TestCTR06PreparationWithdrawsOnlyRolesCreatedInThatFailedCall(t *testing.T) {
+func TestCTR06HistoricalPreparationWithdrawsOnlyRolesCreatedInThatFailedCall(t *testing.T) {
 	ctx := context.Background()
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
@@ -102,7 +102,7 @@ func TestCTR06PreparationWithdrawsOnlyRolesCreatedInThatFailedCall(t *testing.T)
 	previous := newPassword
 	newPassword = func() (string, error) { return "", errors.New("injected failure after role grant") }
 	defer func() { newPassword = previous }()
-	if _, err := PrepareCTR06Bridge(ctx, owner, build, Options{Group: legacy, DirectURL: url, Runner: "test"}); err == nil {
+	if _, err := prepareCTR06BridgeHistorical(ctx, owner, build, Options{Group: legacy, DirectURL: url, Runner: "test"}); err == nil {
 		t.Fatal("injected preparation failure was accepted")
 	}
 	var unrelated, bad int
@@ -112,5 +112,15 @@ func TestCTR06PreparationWithdrawsOnlyRolesCreatedInThatFailedCall(t *testing.T)
   (rolcanlogin OR has_table_privilege(oid,'fleet.routed_call','INSERT') OR has_table_privilege(oid,'fleet.hub_lease','UPDATE')))`,
 		other, name+"_c06_%").Scan(&unrelated, &bad); err != nil || unrelated != 1 || bad != 0 {
 		t.Fatalf("same-call withdrawal touched another role or left a writer: unrelated=%d failed=%d err=%v", unrelated, bad, err)
+	}
+}
+
+func TestCTR06Phase1CredentialEntriesRefuseBeforeConnection(t *testing.T) {
+	ctx := context.Background()
+	if _, err := PrepareCTR06Bridge(ctx, nil, nil, Options{}); !errors.Is(err, migrate.ErrCTR06SecurityBridgeUnbound) {
+		t.Fatalf("prepare did not refuse before using a connection: %v", err)
+	}
+	if _, err := CompleteIssuedCTR06Bridge(ctx, nil, nil, Options{}, migrate.PreparedBridgeRoles{}); !errors.Is(err, migrate.ErrCTR06SecurityBridgeUnbound) {
+		t.Fatalf("completion did not refuse before using a connection: %v", err)
 	}
 }

@@ -353,6 +353,14 @@ func connect(ctx context.Context, value string) (*pgx.Conn, error) {
 }
 
 func migration(sub string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
+	if sub == "apply" {
+		bridge, _ := lookup(config.EnvCTR06BridgeExecutable)
+		proof, _ := lookup(config.EnvCTR06ProofFile)
+		if bridge != "" || proof != "" {
+			_, _ = fmt.Fprintln(stderr, migrate.ErrCTR06SecurityBridgeUnbound)
+			return exitFailure
+		}
+	}
 	logger := observe.NewLogger(stderr, slog.LevelInfo).With("command", "migrate "+sub)
 	cfg, err := config.LoadMigration(lookup)
 	if err != nil {
@@ -428,6 +436,10 @@ func migration(sub string, lookup func(string) (string, bool), stdout, stderr io
 }
 
 func admin(sub, slot string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
+	if sub == "prepare-ctr06-bridge" {
+		_, _ = fmt.Fprintln(stderr, migrate.ErrCTR06SecurityBridgeUnbound)
+		return exitFailure
+	}
 	logger := observe.NewLogger(stderr, slog.LevelInfo).With("command", "admin "+sub)
 	cfg, err := config.LoadMigration(lookup)
 	if err != nil {
