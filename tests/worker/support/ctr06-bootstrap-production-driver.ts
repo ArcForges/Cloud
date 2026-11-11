@@ -2,7 +2,12 @@
 // This separate process substitutes only unavailable authority configuration and HTTPS transports.
 // The production-kind broker entry, parsers, RSA verification, journal and decisions remain real.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mock, test } from "node:test";
+import {
+  requireFreshWindow,
+  verifyCollectorIdentityWithKeys,
+} from "../../../tooling/ctr06-bootstrap-oidc.ts";
 import { scratchDirectory } from "./scratch.ts";
 
 let reviewedProfile: unknown;
@@ -26,6 +31,13 @@ test("production kind uses real decisions for success, safe-empty, conflict and 
   let delayPhase = "";
   let delayMs = 1250;
   let delayed = false;
+  let waitForAuthenticatedExpiry = false;
+  let expiry: {
+    window?: ReturnType<typeof verifyCollectorIdentityWithKeys>;
+    proof?: { payload: Buffer; token: string };
+    digest: string;
+    reachedAt: number;
+  } = { digest: "", reachedAt: -1 };
   let publicReads = 0;
   reviewedProfile = {
     kind: "github-oidc",
@@ -39,7 +51,17 @@ test("production kind uses real decisions for success, safe-empty, conflict and 
     if (url === "https://token.actions.githubusercontent.com/.well-known/jwks") {
       if (!delayed && delayPhase && external.phase === delayPhase) {
         delayed = true;
-        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        if (waitForAuthenticatedExpiry) {
+          const window = expiry.window;
+          assert(window, "Target proof must be authenticated before its JWKS wait");
+          const remaining = window.expiresAt * 1000 - Date.now();
+          assert(remaining > 0 && remaining <= 5000, "Target proof must be fresh at JWKS entry");
+          expiry.reachedAt = Math.floor(Date.now() / 1000);
+          await new Promise<void>((resolve) => setTimeout(resolve, remaining + 50));
+          assert(Math.floor(Date.now() / 1000) >= window.expiresAt);
+        } else {
+          await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        }
       }
       return new Response(testProfile.softwareJwks.toString("utf8"));
     }
@@ -110,21 +132,75 @@ test("production kind uses real decisions for success, safe-empty, conflict and 
       assert.equal(external.calls.filter((value) => value === "issue").length, 1);
       journal.close();
     }
-    for (const phase of ["issue", "use"]) {
+    for (const phase of ["issue", "use"] as const) {
       external = new SyntheticAuthority();
-      external.tokenLifetimeSeconds = 1;
       current = target();
       delayPhase = phase;
       delayed = false;
+      waitForAuthenticatedExpiry = true;
+      expiry = { digest: "", reachedAt: -1 };
+      const observe = external.observe.bind(external);
+      external.observe = async (...args) => {
+        // Keep all preceding non-target proofs valid while reaching the intended target phase.
+        external.tokenLifetimeSeconds = args[1] === phase ? 5 : 60;
+        const proof = await observe(...args);
+        if (args[1] === phase) {
+          expiry.proof = proof;
+          expiry.digest = createHash("sha256").update(proof.payload).digest("hex");
+          expiry.window = verifyCollectorIdentityWithKeys(
+            proof.payload,
+            proof.token,
+            testProfile.collector,
+            Math.floor(Date.now() / 1000),
+            testProfile.softwareJwks,
+          );
+        }
+        return proof;
+      };
       const journal = new BootstrapJournal(scratchDirectory("ctr06-production-kind-expiry-", t));
-      await assert.rejects(runProductionBroker(journal, current));
-      assert.equal(delayed, true);
+      await assert.rejects(
+        runProductionBroker(journal, current),
+        /^Error: Bootstrap broker refused; reconcile any uncertain outcome$/,
+      );
+      assert.equal(delayed, true, `${phase}: target JWKS boundary not reached`);
+      const checkedProof = expiry.proof;
+      const checkedWindow = expiry.window;
+      assert(checkedProof && checkedWindow, `${phase}: no authenticated target proof`);
+      const now = Math.floor(Date.now() / 1000);
+      const timing = external.lastTiming[phase];
+      assert(timing && now < timing.leaseEnd && now - timing.collectedAt <= 120);
+      assert(expiry.reachedAt < checkedWindow.expiresAt && now >= checkedWindow.expiresAt);
+      assert.equal(createHash("sha256").update(checkedProof.payload).digest("hex"), expiry.digest);
+      assert.throws(() => requireFreshWindow(checkedWindow, now), /not fresh/);
+      assert.throws(() =>
+        verifyCollectorIdentityWithKeys(
+          checkedProof.payload,
+          checkedProof.token,
+          testProfile.collector,
+          now,
+          testProfile.softwareJwks,
+        ),
+      );
       assert.equal(external.actual, undefined);
       if (phase === "issue") assert.equal(external.entries.size, 0);
       else
         for (const entry of external.entries.values()) assert.notEqual(entry.credential, "active");
+      console.log(
+        JSON.stringify({
+          kind: "github-oidc",
+          phase,
+          stage: "keys",
+          reachedAt: expiry.reachedAt,
+          authenticatedExpiry: checkedWindow.expiresAt,
+          refusedAt: now,
+          sourceAgeAtRefusal: now - timing.collectedAt,
+          leaseRemaining: timing.leaseEnd - now,
+          rejection: "sanitized-broker-refusal-after-authenticated-expiry",
+        }),
+      );
       journal.close();
     }
+    waitForAuthenticatedExpiry = false;
     for (const phase of ["issue", "use"] as const)
       for (const stage of ["keys", "coverage", "lease", "journal", "boundary"] as const) {
         external = new SyntheticAuthority();

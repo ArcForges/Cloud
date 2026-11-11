@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { verifyCollectorIdentityWithKeys } from "../../tooling/ctr06-bootstrap-oidc.ts";
+import {
+  requireFreshWindow,
+  verifyCollectorIdentityWithKeys,
+} from "../../tooling/ctr06-bootstrap-oidc.ts";
 import path from "node:path";
 import { test } from "node:test";
 import { runIsolatedBroker } from "../../tooling/ctr06-bootstrap-broker.ts";
@@ -296,18 +299,57 @@ if (process.platform === "linux") {
   });
 
   test("actual time after delayed keys, coverage, lease, journal and boundary blocks expired issue/use proofs", async (t) => {
-    const sleep = () => new Promise<void>((resolve) => setTimeout(resolve, 1250));
     for (const phase of ["issue", "use"] as const)
       for (const stage of ["keys", "coverage", "lease", "journal", "boundary"] as const) {
         const root = scratchDirectory("ctr06-expiry-", t);
         const journal = new BootstrapJournal(root);
         const mock = new SyntheticAuthority();
-        mock.tokenLifetimeSeconds = 1;
         let delayed = false;
+        let reachedAt = -1;
+        let proof: { payload: Buffer; token: string } | undefined;
+        let payloadDigest = "";
+        let window: ReturnType<typeof verifyCollectorIdentityWithKeys> | undefined;
+        const observe = mock.observe.bind(mock);
+        mock.observe = async (...args) => {
+          // A non-target phase must not expire before the intended phase is reached.
+          mock.tokenLifetimeSeconds = args[1] === phase ? 5 : 60;
+          const observed = await observe(...args);
+          if (args[1] === phase) {
+            proof = observed;
+            payloadDigest = createHash("sha256").update(observed.payload).digest("hex");
+            window = verifyCollectorIdentityWithKeys(
+              observed.payload,
+              observed.token,
+              testProfile.collector,
+              Math.floor(Date.now() / 1000),
+              testProfile.softwareJwks,
+            );
+          }
+          return observed;
+        };
+        const beginWait = () => {
+          assert(window, `${phase}:${stage}: target proof was not authenticated`);
+          const remaining = window.expiresAt * 1000 - Date.now();
+          assert(
+            remaining > 0 && remaining <= 5000,
+            `${phase}:${stage}: target not fresh at entry`,
+          );
+          delayed = true;
+          reachedAt = Math.floor(Date.now() / 1000);
+          return remaining + 50;
+        };
+        const finishWait = () => {
+          assert(window);
+          assert(
+            Math.floor(Date.now() / 1000) >= window.expiresAt,
+            `${phase}:${stage}: not expired`,
+          );
+        };
         const delay = async () => {
           if (!delayed && mock.phase === phase) {
-            delayed = true;
-            await sleep();
+            const ms = beginWait();
+            await new Promise<void>((resolve) => setTimeout(resolve, ms));
+            finishWait();
           }
         };
         const profile = { ...testProfile, beforeKeys: stage === "keys" ? delay : undefined };
@@ -333,8 +375,9 @@ if (process.platform === "linux") {
               !delayed &&
               event.kind === (phase === "issue" ? "issue_intent" : "publish_intent")
             ) {
-              delayed = true;
-              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1250);
+              const ms = beginWait();
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+              finishWait();
             }
             return result;
           };
@@ -355,12 +398,49 @@ if (process.platform === "linux") {
         }
         await assert.rejects(
           runIsolatedBroker(journal, target(), profile, mock),
+          /^Error: Bootstrap broker refused; reconcile any uncertain outcome$/,
           `${phase}:${stage}`,
         );
-        assert.equal(delayed, true, `${phase}:${stage}`);
+        assert.equal(delayed, true, `${phase}:${stage}: target boundary not reached`);
+        assert(proof && window, `${phase}:${stage}: no authenticated target proof`);
+        const checkedProof = proof;
+        const checkedWindow = window;
+        const now = Math.floor(Date.now() / 1000);
+        const timing = mock.lastTiming[phase];
+        assert(timing && now < timing.leaseEnd && now - timing.collectedAt <= 120);
+        assert(reachedAt < checkedWindow.expiresAt && now >= checkedWindow.expiresAt);
+        assert.equal(
+          createHash("sha256").update(checkedProof.payload).digest("hex"),
+          payloadDigest,
+        );
+        assert.throws(() => requireFreshWindow(checkedWindow, now), /not fresh/);
+        assert.throws(() =>
+          verifyCollectorIdentityWithKeys(
+            checkedProof.payload,
+            checkedProof.token,
+            testProfile.collector,
+            now,
+            testProfile.softwareJwks,
+          ),
+        );
+        if (stage === "boundary")
+          assert(mock.calls.includes(phase === "issue" ? "issue" : "publish"));
         assert.equal(mock.actual, undefined, `${phase}:${stage}`);
         if (phase === "issue") assert.equal(mock.entries.size, 0, `${phase}:${stage}`);
         else for (const entry of mock.entries.values()) assert.notEqual(entry.credential, "active");
+        console.log(
+          JSON.stringify({
+            phase,
+            stage,
+            reachedAt,
+            authenticatedExpiry: window.expiresAt,
+            refusedAt: now,
+            sourceAgeAtRefusal: now - timing.collectedAt,
+            leaseRemaining: timing.leaseEnd - now,
+            effectBoundaryInvoked: stage === "boundary",
+            rejection: "sanitized-broker-refusal-after-authenticated-expiry",
+          }),
+        );
         journal.close();
       }
   });
