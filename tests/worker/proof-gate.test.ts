@@ -1070,14 +1070,16 @@ function assertBootstrapIsolation(selectedJobs: Map<string, string>): void {
   );
   assert.match(condition(selectedJobs.get("deploy-proof") ?? "") ?? "", /^false &&/u);
   const gate = selectedJobs.get(authority) ?? "";
-  assert.match(gate, /^ {4}permissions: \{\}$/mu);
-  assert.match(gate, /^ {10}exit 1$/mu);
-  assert.doesNotMatch(gate, /uses:|secrets\.|environment:|id-token:|CLOUDFLARE|NEON/u);
+  assert.match(gate, /^ {4}permissions:\n {6}contents: read\n {4}outputs:/mu);
+  assert.match(gate, /gate-digest: \$\{\{ steps\.gate\.outputs\.gate-digest \}\}/u);
+  assert.match(gate, /gate-challenge: \$\{\{ steps\.gate\.outputs\.gate-challenge \}\}/u);
+  assert.match(gate, /^ {8}run: node tooling\/ctr06-bootstrap-entry\.ts authority$/mu);
+  assert.doesNotMatch(gate, /secrets\.|environment:|id-token:|CLOUDFLARE|NEON|continue-on-error/u);
   const specs: [string, string[], string][] = [
     [linux, [authority], "read"],
     [windows, [authority], "read"],
     [seal, [authority, linux, windows], "read"],
-    [publish, [authority, seal], "write"],
+    [publish, [authority, seal], "read"],
   ];
   for (const [name, dependencies, permission] of specs) {
     const body = selectedJobs.get(name) ?? "";
@@ -1128,6 +1130,22 @@ function assertBootstrapIsolation(selectedJobs: Map<string, string>): void {
     /artifact-ids: \$\{\{ needs\.ctr06-security-bridge-seal\.outputs\.artifact-id \}\}/u,
   );
   assert.match(selectedJobs.get(publish) ?? "", /cancel-in-progress: false/u);
+  assert.match(
+    selectedJobs.get(publish) ?? "",
+    /node tooling\/ctr06-bootstrap-entry\.ts publication/u,
+  );
+  assert.match(
+    selectedJobs.get(publish) ?? "",
+    /ARCFORGES_CTR06_GATE_DIGEST: \$\{\{ needs\.ctr06-security-bridge-authority\.outputs\.gate-digest \}\}/u,
+  );
+  assert.match(
+    selectedJobs.get(publish) ?? "",
+    /ARCFORGES_CTR06_GATE_CHALLENGE: \$\{\{ needs\.ctr06-security-bridge-authority\.outputs\.gate-challenge \}\}/u,
+  );
+  assert.doesNotMatch(
+    selectedJobs.get(publish) ?? "",
+    /GH_TOKEN|gh release create|id-token:|contents: write/u,
+  );
   for (const [job, expected] of [
     ["ctr06-security-bridge-linux", "ctr06-security-linux-"],
     ["ctr06-security-bridge-windows", "ctr06-security-windows-"],
@@ -1179,8 +1197,18 @@ function assertBootstrapIsolation(selectedJobs: Map<string, string>): void {
 test("phase 1 event isolation rejects bypasses and preserves exact dependencies", () => {
   assertBootstrapIsolation(jobs);
   for (const [job, before, after] of [
-    ["ctr06-security-bridge-authority", "exit 1", "exit 0"],
-    ["ctr06-security-bridge-authority", "permissions: {}", "permissions: { contents: write }"],
+    [
+      "ctr06-security-bridge-authority",
+      "node tooling/ctr06-bootstrap-entry.ts authority",
+      "echo skip",
+    ],
+    ["ctr06-security-bridge-authority", "contents: read", "contents: write"],
+    ["ctr06-security-bridge-authority", "steps.gate.outputs.gate-digest", "github.run_id"],
+    [
+      "ctr06-security-bridge-publish",
+      "needs.ctr06-security-bridge-authority.outputs.gate-challenge",
+      "github.run_id",
+    ],
     [
       "ctr06-security-bridge-linux",
       "needs.ctr06-security-bridge-authority.result == 'success'",
@@ -1188,6 +1216,13 @@ test("phase 1 event isolation rejects bypasses and preserves exact dependencies"
     ],
     ["ctr06-security-bridge-linux", "run: npm ci --ignore-scripts", "run: echo no-locked-restore"],
     ["ctr06-security-bridge-windows", "contents: read", "contents: read\n      id-token: write"],
+    [
+      "ctr06-security-bridge-publish",
+      "node tooling/ctr06-bootstrap-entry.ts publication",
+      "gh release create",
+    ],
+    ["ctr06-security-bridge-publish", "contents: read", "contents: write"],
+
     [
       "ctr06-security-bridge-seal",
       "needs.ctr06-security-bridge-windows.result == 'success'",

@@ -298,16 +298,25 @@ jobs:
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # There is no configured authenticated owner/provider evidence source or trust anchor.
-    # This job declares no GitHub token permissions or OIDC and invokes no checkout/action.
-    # Effective external identity and delegation paths remain unproven.
-    # Test-only mock graphs and user-supplied inputs cannot unlock the production gate.
-    permissions: {}
+    # The source has no reviewed live collector/broker profile; the entry refuses until one exists.
+    # The job has no write or OIDC token and cannot adopt mock or caller-supplied authority.
+    permissions:
+      contents: read
+    outputs:
+      gate-digest: ${{ steps.gate.outputs.gate-digest }}
+      gate-challenge: ${{ steps.gate.outputs.gate-challenge }}
     steps:
-      - name: Refuse unproven authority
-        run: |
-          echo 'Security bridge authority: NOT PROVEN (no authenticated permission evidence source configured)' >&2
-          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - id: gate
+        name: Evaluate the actual bootstrap authority profile
+        run: node tooling/ctr06-bootstrap-entry.ts authority
 
   ctr06-security-bridge-linux:
     name: Construct security bridge (Linux)
@@ -468,23 +477,28 @@ jobs:
       && needs.ctr06-security-bridge-seal.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Issuance belongs to the independent broker, never to a bootstrap job token.
     permissions:
-      contents: write
+      contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           artifact-ids: ${{ needs.ctr06-security-bridge-seal.outputs.artifact-id }}
           path: ${{ runner.temp }}/ctr06-sealed
-      - name: Publish verified build-only carrier
+      - name: Request broker publication of the verified carrier
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          node -e 'const fs=require("fs"),p=process.argv[1],r=JSON.parse(fs.readFileSync(p+"/bootstrap-receipt.json")); if(r.schema!=="arcforges.ctr06-security-bridge-bootstrap.v1" || r.producer.commit!==process.env.GITHUB_SHA || r.producer.runId!==process.env.GITHUB_RUN_ID || r.producer.runAttempt!==Number(process.env.GITHUB_RUN_ATTEMPT) || r.version!==`0.1.0-ci.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT}` || r.carrier.name!==`arcforges-ctr06-security-bridge-${r.version}.tar.gz`) process.exit(1); const h=require("crypto").createHash("sha256").update(fs.readFileSync(p+"/"+r.carrier.name)).digest("hex"); if(h!==r.carrier.sha256) process.exit(1);' "$RUNNER_TEMP/ctr06-sealed"
-          existing=$(gh api --paginate --slurp 'repos/ArcForges/Cloud/releases?per_page=100' --jq '[.[][] | select(.tag_name | startswith("ctr06-security-bridge-cloud-"))] | length')
-          test "$existing" = 0
-          version="0.1.0-ci.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          gh release create "ctr06-security-bridge-cloud-${version}" "$RUNNER_TEMP/ctr06-sealed/arcforges-ctr06-security-bridge-${version}.tar.gz" "$RUNNER_TEMP/ctr06-sealed/bootstrap-receipt.json" --repo ArcForges/Cloud --target "$GITHUB_SHA" --title "CTR06 security bridge ${version}" --prerelease
+          ARCFORGES_CTR06_SEALED_ARTIFACT_ID: ${{ needs.ctr06-security-bridge-seal.outputs.artifact-id }}
+          ARCFORGES_CTR06_GATE_DIGEST: ${{ needs.ctr06-security-bridge-authority.outputs.gate-digest }}
+          ARCFORGES_CTR06_GATE_CHALLENGE: ${{ needs.ctr06-security-bridge-authority.outputs.gate-challenge }}
+        run: node tooling/ctr06-bootstrap-entry.ts publication "$RUNNER_TEMP/ctr06-sealed"
 
   ctr06-bridge-assets-state:
     name: Check immutable self-hosted bridge assets

@@ -8,6 +8,30 @@
 > to run it during phase 1. A later reviewed phase 2 must bind the real published successor and restore the applicable gates
 > before migration, promotion, rollback or deployment; publication alone is not task delivery.
 
+## Security-bridge authority integration
+
+The versioned `arcforges.ctr06.bootstrap-authority.v1` integration is currently **disabled**. No reviewed collector host,
+provider-specific authority inventory, enforced change-control lease, credential issuer or publication broker is configured in
+Cloud source. There is no environment variable, JSON document, test key or URL an operator can supply to make this version publish.
+The bootstrap jobs have no `contents:write` or `id-token:write` permission and the read-only entry refuses without a reviewed profile.
+The Linux broker state-machine and isolated software-key tests do not establish real provider authority or publication eligibility.
+
+A future reviewed integration must bind the fixed GitHub issuer and its authenticated JWKS to an exact collector repository,
+workflow and source, and must provide authenticated, complete source-specific coverage for all credentials and delegated paths,
+including package restore and broker identities. Its independent enforcement must actually prevent relevant authority changes
+until issuer-observed revocation or expiry and termination of every in-flight operation. Owner/provider administrators can connect
+only the reviewed source profile to their actual read-only evidence and control mechanisms; they must not put credentials in the
+bootstrap job, repository, logs or evidence artifacts. Missing coverage, a stale or unverifiable lease, an uncertain prior issuer or
+publication result, and unavailable authoritative readback remain **NOT PROVEN**. The current profile contains no live adapter and
+must not be merged to consume the one authorized bootstrap on the strength of mock tests.
+
+The broker keeps one durable authorization and per-attempt target, validates the original gate separately from the fresh issuance
+proof and lease, and compares the public GitHub ZIP digest with the actual downloaded bytes before inspecting the bounded, two-file
+ZIP32 carrier and receipt. Unsupported archive features are refused. Public GitHub release metadata and tag objects can confirm an
+existing visible release, but a public 404 cannot prove that no draft, private release or in-flight publication exists. The broker's
+private durable journal currently supports Linux only; Windows still validates its native parser and cryptographic code. The old
+615.1 bridge is historical evidence, not a currently authorized execution or rollback server.
+
 ## One-time setup
 
 The user already has the paid Workers plan. Use the same account that owns `arcforges.com` and `arcforges-web`. This repository creates `arcforges-cloud`, its Container binding, managed image registry entries and the route `arcforges.com/api/*`. It must not replace Web's apex Custom Domain or DNS record.

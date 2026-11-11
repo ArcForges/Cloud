@@ -98,6 +98,10 @@ test("the production authority gate remains unreachable by mock claims or caller
     {},
     { ARCFORGES_SECURITY_BRIDGE_AUTHORIZED: "true" },
     { ARCFORGES_SECURITY_BRIDGE_PROOF: JSON.stringify(fixture()) },
+    {
+      ARCFORGES_SECURITY_BRIDGE_URL: "https://invalid.example",
+      ARCFORGES_SECURITY_BRIDGE_KEY: "synthetic",
+    },
   ]) {
     const workflow = readFileSync(
       new URL("../../.github/workflows/ci.yml", import.meta.url),
@@ -106,16 +110,8 @@ test("the production authority gate remains unreachable by mock claims or caller
     const job = workflow
       .split("  ctr06-security-bridge-authority:\n")[1]
       ?.split("\n  ctr06-security-bridge-linux:")[0];
-    assert(job);
-    const block = / {6}- name: Refuse unproven authority\n {8}run: \|\n((?: {10}.*\n)+)/u.exec(
-      job,
-    )?.[1];
-    assert(block);
-    const script = block
-      .split("\n")
-      .map((line) => line.slice(10))
-      .join("\n");
-    const result = spawnSync("bash", ["-c", script], {
+    assert.match(job ?? "", /node tooling\/ctr06-bootstrap-entry\.ts authority/u);
+    const result = spawnSync(process.execPath, ["tooling/ctr06-bootstrap-entry.ts", "authority"], {
       cwd: new URL("../..", import.meta.url),
       env: { ...process.env, ...env },
       encoding: "utf8",
